@@ -1,33 +1,33 @@
-# FLAC-Serv IRC DCCore Daemon ??
+# FLAC-Serv IRC DCCore Daemon ğŸš€
 
-En extremt snabb, stabil och skräddarsydd IRC DCC-fildelningsmotor (OmenServe-arkitektur) byggd i Python 3.10 för Undernet. Scriptet är optimerat för Proxmox LXC-containrar och levererar fildelningsnotiser, avancerad databasstatistik samt realtidsövervakning med mIRC-färger i absolut guldstandard.
+En extremt snabb, stabil och skrÃ¤ddarsydd IRC DCC-fildelningsmotor (OmenServe-arkitektur) byggd i Python 3.10 fÃ¶r Undernet. Scriptet Ã¤r optimerat fÃ¶r Proxmox LXC-containrar och levererar fildelningsnotiser, avancerad databasstatistik samt realtidsÃ¶vervakning med mIRC-fÃ¤rger i absolut guldstandard.
 
-## ? Nyckelfunktioner
+## âœ¨ Nyckelfunktioner
 
-- **? VIP Express-kö:** Isolerad högprioriterad kö (`vip_queue`) som skjuter ut privata kö-kontroller (`@flac-serv-que`) och sök-headers på under 1 millisekund, helt opåverkad av vanliga flood-skydd eller kanalreklam.
-- **?? Smart Frysbox & Realtime-väckning:** Om en användare med filer i kön råkar göra `PART` eller tappar nätverket (`QUIT`), fryses kön automatiskt i en bakgrundstråd under 5 minuter. Om användaren gör `JOIN` tinar kön upp direkt på 0ms och fortsätter skicka.
-- **?? Centralt mIRC Block-tema:** Fullständigt temasatt via `announce.py` med tunga färgblock (Turkos/Mörkröd) och kritvita bakgrundsplattor, kliniskt rensad från färgspill och klientspecifika cache-rutor.
-- **?? 7-Kolonns Avancerad Databas:** Skottsäker live-statistik (`stats.txt`) som mäter totalt skickade filer/bytes, gårdagens och dagens aktivitet samt synkade listdatum i realtid med tvingad disk-flush (`fsync`).
-- **??? Dedikerad VIP Debug-kanal:** Helautomatisk nätverkssluss som strömmar tidstämplade och färgkodade CLI-loggar (`[SENT]`, `[PART]`, `[QUIT]`, `[JOIN]`) live till kanalen `#flac-debug` via VIP-expressen.
+- **âš¡ VIP Express-kÃ¶:** Isolerad hÃ¶gprioriterad kÃ¶ (`vip_queue`) som skjuter ut privata kÃ¶-kontroller (`@bot-name-que`) och sÃ¶k-headers pÃ¥ under 1 millisekund, helt opÃ¥verkad av vanliga flood-skydd eller kanalreklam.
+- **â„ï¸ Smart Frysbox & Realtime-vÃ¤ckning:** Om en anvÃ¤ndare med filer i kÃ¶n rÃ¥kar gÃ¶ra `PART` eller tappar nÃ¤tverket (`QUIT`), fryses kÃ¶n automatiskt i en bakgrundstrÃ¥d under 5 minuter. Om anvÃ¤ndaren gÃ¶r `JOIN` tinar kÃ¶n upp direkt pÃ¥ 0ms och fortsÃ¤tter skicka.
+- **ğŸ¨ Centralt mIRC Block-tema:** FullstÃ¤ndigt temasatt via `announce.py` med tunga fÃ¤rgblock (Turkos/MÃ¶rkrÃ¶d) och kritvita bakgrundsplattor, kliniskt rensad frÃ¥n fÃ¤rgspill och klientspecifika cache-rutor.
+- **ğŸ“Š 7-Kolonns Avancerad Databas:** SkottsÃ¤ker live-statistik (`stats.txt`) som mÃ¤ter totalt skickade filer/bytes, gÃ¥rdagens och dagens aktivitet samt synkade listdatum i realtid med tvingad disk-flush (`fsync`).
+- **ğŸ› ï¸ Dedikerad VIP Debug-kanal:** Helautomatisk nÃ¤tverkssluss som strÃ¶mmar tidstÃ¤mplade och fÃ¤rgkodade CLI-loggar (`[SENT]`, `[PART]`, `[QUIT]`, `[JOIN]`) live till kanalen `#flac-debug` via VIP-expressen.
 
-## ?? Filstruktur
+## ğŸ“ Filstruktur
 
-- `oserve.py` — Centrala motorn, trådhanteraren och flood-skyddsköerna.
-- `irc.py` — Dedikerad nätverksmodul, asynkron loop och kedjad kommandotolk.
-- `dcc.py` — DCC-handskakningar, socket-sändare och smarta frysbox-timers.
-- `announce.py` — Centrala mIRC-temat, kanalannonseringar och VIP-debugmotorn.
-- `commands.py` — Användarkommandon (`que`, `remove`) isolerade från nätverksloopen.
-- `stats_mgr.py` — Dum datamodul för storleks- och hastighetsberäkningar.
-- `db.py` — I/O-gränssnitt för databasen med tvingat skrivskydd vid filslut.
-- `config.py` — Central konfigurationsfil för nätverk, slots, timers och färgkoder.
+- `oserve.py` â€” Centrala motorn, trÃ¥dhanteraren och flood-skyddskÃ¶erna.
+- `irc.py` â€” Dedikerad nÃ¤tverksmodul, asynkron loop och kedjad kommandotolk.
+- `dcc.py` â€” DCC-handskakningar, socket-sÃ¤ndare och smarta frysbox-timers.
+- `announce.py` â€” Centrala mIRC-temat, kanalannonseringar och VIP-debugmotorn.
+- `commands.py` â€” AnvÃ¤ndarkommandon (`que`, `remove`) isolerade frÃ¥n nÃ¤tverksloopen.
+- `stats_mgr.py` â€” Dum datamodul fÃ¶r storleks- och hastighetsberÃ¤kningar.
+- `db.py` â€” I/O-grÃ¤nssnitt fÃ¶r databasen med tvingat skrivskydd vid filslut.
+- `config.py` â€” Central konfigurationsfil fÃ¶r nÃ¤tverk, slots, timers och fÃ¤rgkoder.
 
-## ?? Installation & Uppstart
+## ğŸš€ Installation & Uppstart
 
-### Förutsättningar
-Scriptet är utvecklat och testat för **Python 3.10** i en Linuxmiljö (t.ex. Debian/Ubuntu LXC i Proxmox).
+### FÃ¶rutsÃ¤ttningar
+Scriptet Ã¤r utvecklat och testat fÃ¶r **Python 3.10** i en LinuxmiljÃ¶ (t.ex. Debian/Ubuntu LXC i Proxmox).
 
 ### Starta Daemonen
-För att starta om boten helt rent, rensa dolda cache-filer och tvinga fram en ny inläsning av kodändringar i RAM-minnet, kör du:
+FÃ¶r att starta om boten helt rent, rensa dolda cache-filer och tvinga fram en ny inlÃ¤sning av kodÃ¤ndringar i RAM-minnet, kÃ¶r du:
 ```bash
 pkill -f oserve.py && rm -rf __pycache__ */__pycache__ && python3 oserve.py
 ```
