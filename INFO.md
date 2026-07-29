@@ -6,7 +6,7 @@ Här loggas alla versionsförändringar, optimeringar och buggfixar som gjorts u
 
 ## 🟥 v1.3.0-BETA (2026-07-28) - "The Debug & Theme Sync Update"
 ### 🚀 Nya funktioner
-- **🛠️ VIP Debug-kanal (`#flac-debug`):** Byggt en helautomatisk nätverkssluss som skickar tidstämplade och färgkodade CLI-loggar direkt live in i mIRC.
+- **🛠️ VIP Debug-kanal:** Byggt en helautomatisk nätverkssluss som skickar tidstämplade och färgkodade CLI-loggar direkt live in i mIRC.
 - **🏎️ Express-logg via VIP:** Kopplat om funktionen `send_debug` till att använda `is_vip=True` så att systemloggarna skjuts ut på 0ms utan att störa den vanliga kön.
 - **🏷️ Kategori-taggar för Debug:** Skapat dynamiska och färgkodade etiketter till vänster i loggen: `[SENT]` (Grön), `[PART]` (Röd), `[QUIT]` (Lila) och `[JOIN]` (Turkos) inramade av solida färgstolpar.
 
