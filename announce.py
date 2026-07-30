@@ -335,9 +335,15 @@ def send_debug(msg_text, category="INFO"):
         tag_str = f"{config.C_PURPLE}[QUIT]{R}{BG_TEXT_BOX}"
     elif category.upper() == "JOIN":
         tag_str = f"{config.C_CYAN}[JOIN]{R}{BG_TEXT_BOX}"
+    elif category.upper() == "BAN":
+        # NYTT: Stensnygg röd block-etikett för PERMANENTA bans!
+        tag_str = f"{config.C_RED}[HARDBAN]{R}{BG_TEXT_BOX}"
+    elif category.upper() == "TBAN":
+        # NYTT: Stensnygg lila block-etikett för TEMPORÄRA dags-bans!
+        tag_str = f"{config.C_PURPLE}[TEMPBAN]{R}{BG_TEXT_BOX}"
     else:
         tag_str = f"{config.C_GREY}[INFO]{R}{BG_TEXT_BOX}"
-        
+  
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {B}Category{B}: {tag_str} "
     
     # 3. TEXT-blocket (Rensat från gamla krockande färgkoder för en spikrak lina)

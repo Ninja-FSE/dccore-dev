@@ -322,6 +322,14 @@ def irc_loop():
                         elif msg.lower() == "!rehash":
                             threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), daemon=True).start()
                         # ---------------------------------------------------------------------
+                        # ---------------------------------------------------------------------
+                        # NYTT: !BAN OCH !UNBAN (Styr din permanenta hard_bans.txt live!)
+                        # ---------------------------------------------------------------------
+                        elif msg.startswith("!ban "):
+                            threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), daemon=True).start()
+                        elif msg.startswith("!unban "):
+                            threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
+                        # ---------------------------------------------------------------------
                         elif msg.startswith(f"!{config.NICKNAME} "):
                             parts = msg.split(" ", 1)
                             if len(parts) > 1:

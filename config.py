@@ -11,6 +11,9 @@ ADMIN_NICK = "FLAC"
 # Filserver-inställningar (Peka på din Proxmox bind-mount)
 FILE_DIRECTORY = "/mnt/nfs-musik"
 LOCAL_LIST_DIR= "./lists"
+HARD_BANS_FILE = "./data/hard_bans.txt"
+BANS_FILE = "./data/bans.txt"
+STATS_FILE= "./data/stats.txt"
 
 # Det dynamiska namnet uppdateras automatiskt i list.py med dagens datum
 LIST_BASE_NAME = "FLAC-Serv"
@@ -64,8 +67,7 @@ failed_transfers = {}
 banned_users = {}
 user_requests = {}
 muted_until = {}
-BANS_FILE = "./data/bans.txt"
-STATS_FILE= "./data/stats.txt"
+
 
 # Initiera den globala fildelningskön för DCC-överföringar
 dcc_queue = {}

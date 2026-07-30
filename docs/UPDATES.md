@@ -4,6 +4,15 @@ Här loggas alla versionsförändringar, optimeringar och buggfixar som gjorts u
 
 ---
 
+## 🟦 v1.4.2-BETA (2026-07-30) - "The Hard Ban & Admin Category Update"
+### 🚀 Nya funktioner
+- **🛡️ Permanent Wildcard-skydd (`hard_bans.txt`):** Skapat ett isolerat säkerhetslager för fasta spambot-mönster (t.ex. `lidx_*`) djupt inbäddat i undermappen `data/`. Denna fil är helt fredad från systemets helautomatiska midnatts-rensning av vanliga flood-spärrar.
+- **🛠️ Live Admin-kommandon (`!ban` / `!unban`):** Monterat två nya administrationsverktyg i `commands.py` som låter dig skriva till och städa i din permanenta ban-fil direkt inifrån mIRC via din asynkrona socket-send, helt utan behov av CLI-access eller manuell `!rehash`.
+- **🎨 Dedikerade Säkerhets-färgblock:** Utökat färgblocks-motorn i `announce.py` med två helt egna, solida mIRC-etiketter: Mörkröd **`[HARDBAN]`** för permanenta wildcards och Lila **`[TEMPBAN]`** för rörliga dags-bans, vilket skapar total linjär struktur på den kritvita debug-linjen.
+- **🧭 Absolut Trådsynk & Sökvägslås:** Integrerat `os.path.normpath` och absoluta sökvägar baserat på botens hjärta (`BASE_DIR`) för att garantera att de trådade fil-kommandona alltid hittar djupt in i din `data/`-mapp, samt stensäkrat lowercase-formatering (`.lower()`) genom hela kedjan för att stänga alla case-sensitive kryphål för spambottar.
+
+---
+
 ## 🟦 v1.4.1-BETA (2026-07-30) - "The Intelligent Wildcard Search Update"
 ### 🚀 Nya funktioner
 - **🔍 Dynamisk Wildcard-sökning (`@find`):** Skrivit om sökfunktionen `execute_search` i `list.py` till en asynkron ord-för-ord-skanning. Motorn splittar nu upp söksträngen i enskilda ord och rensar bort lösa bindestreck. Sökningen är helt oberoende av ordning och kräver bara att alla ord existerar på raden för att ge en träff (t.ex. matchar både `metallica red alert` och `red alert metallica`).

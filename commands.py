@@ -198,6 +198,87 @@ def handle_rehash_request(user, target_chan):
         print(f"[REHASH CRITICAL ERROR] Det gick inte att live-ladda om filerna: {e}")
         announce.send_debug(f"Rehash FAILED (Notices Resumed for safety): {e}", category="INFO")
 
+def handle_hard_ban_request(user, target_chan, msg_text):
+    """Lägger till ett permanent wildcard-mönster i hard_bans.txt direkt via mIRC!"""
+    import config
+    import announce
+    import os
+    
+    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
+    if user.lower() != allowed_admin and user.lower() != "flac":
+        print(f"[SECURITY] Obehörig användare {user} försökte köra !ban.")
+        return
 
+    parts = msg_text.split(" ", 1)
+    if len(parts) < 2:
+        announce.send_debug("Syntax error! Använd: !ban <mönster*>", category="INFO")
+        return
+        
+    pattern = parts[1].strip().lower()
+    if not pattern:
+        return
+        
+    filename = os.path.normpath(config.HARD_BANS_FILE)
+    
+    # Läs in befintliga bans för att undvika dubbletter
+    existing_bans = []
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            existing_bans = [line.strip().lower() for line in f if line.strip()]
+            
+    if pattern not in existing_bans:
+        # Skriv till filen och tvinga ner det på disken direkt
+        with open(filename, "a", encoding="utf-8") as f:
+            f.write(f"{pattern}\n")
+            
+        announce.send_debug(f"Added permanent wildcard to hard_bans.txt: {config.C_BOLD}{pattern}{config.C_RESET}", category="BAN")
+        print(f"[HARD BAN] {user} lade till permanent mönster: {pattern}")
+    else:
+        announce.send_debug(f"Pattern {pattern} is already banned permanently.", category="INFO")
 
+def handle_hard_unban_request(user, target_chan, msg_text):
+    """Tar bort ett permanent wildcard-mönster ur hard_bans.txt direkt via mIRC!"""
+    import config
+    import announce
+    import os
+    
+    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
+    if user.lower() != allowed_admin and user.lower() != "flac":
+        return
 
+    parts = msg_text.split(" ", 1)
+    if len(parts) < 2:
+        announce.send_debug("Syntax error! Använd: !unban <mönster*>", category="INFO")
+        return
+        
+    pattern = parts[1].strip().lower()
+    if not pattern:
+        return
+        
+    filename = os.path.normpath(config.HARD_BANS_FILE)
+    if not os.path.exists(filename):
+        announce.send_debug("The permanent hard_bans.txt file is empty.", category="INFO")
+        return
+        
+    # Läs in alla rader och filtrera bort just det mönster du vill häva
+    lines_to_keep = []
+    found = False
+    
+    with open(filename, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip().lower() == pattern:
+                found = True
+            else:
+                if line.strip():
+                    lines_to_keep.append(line.strip())
+                    
+    if found:
+        # Skriv tillbaka de sparade raderna till filen
+        with open(filename, "w", encoding="utf-8") as f:
+            for line in lines_to_keep:
+                f.write(f"{line}\n")
+                
+        announce.send_debug(f"Removed permanent wildcard from hard_bans.txt: {config.C_BOLD}{pattern}{config.C_RESET}", category="BAN")
+        print(f"[HARD UNBAN] {user} hävde permanent mönster: {pattern}")
+    else:
+        announce.send_debug(f"Pattern {pattern} was not found in hard_bans.txt.", category="INFO")
