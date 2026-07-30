@@ -3,6 +3,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Ignorera allt innehåll i lists/
+lists/*
+
+# Men ignorera INTE .gitkeep-filen i lists/
+!lists/.gitkeep
+
+
 # C extensions
 *.so
 
