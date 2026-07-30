@@ -164,7 +164,7 @@ def execute_search(irc_sock, user, search_term, channel):
 
 
 def send_list_trigger_info(irc_sock, user):
-    msg = f"{config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} Trigger: {config.C_RED}@{config.NICKNAME}{config.C_RESET} | Type @find <search_term> to search!\r\n"
+    msg = f"List trigger(s): {config.C_RED}@{config.NICKNAME}{config.C_RESET} {config.SCRIPT_VERSION}{config.C_RESET}\r\n"
     oserve.queue_message(user, f"NOTICE {user} :{msg}")
 
 def send_file_list(irc_sock, user, channel):
@@ -172,11 +172,11 @@ def send_file_list(irc_sock, user, channel):
     current_zip_path = find_latest_zip()
     
     if not current_zip_path or not os.path.exists(current_zip_path):
-        oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}Error{config.C_RESET}: ZIP file missing.\r\n")
+        oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}Error{config.C_RESET}: ZIP file missing. {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n")
         return
         
     zip_filename = os.path.basename(current_zip_path)
-    msg = f"{config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} Preparing full list ({zip_filename}) for {user}...\r\n"
+    msg = f"Preparing full list ({zip_filename}) for {user}... {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n"
     oserve.queue_message(user, msg)
     
     # Nu skickas 'channel' med till DCC-motorn i stället för 'user'
