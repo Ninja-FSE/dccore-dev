@@ -4,6 +4,17 @@ Här loggas alla versionsförändringar, optimeringar och buggfixar som gjorts u
 
 ---
 
+## 🟦 v1.4.3-BETA (2026-07-30) - "The Clean Config & Security Sync Update"
+### 🚀 Nya funktioner
+- **🧼 100% Import-Fri `config.py`:** Sanerat och städat ur hela din centrala konfigurationsfil från all funktionell källkod, dolda `import os`-satser samt dynamiska `BASE_DIR`-beräkningar. Alla sökvägar (till `stats.txt`, `bans.txt` och `hard_bans.txt`) är nu helt normaliserade, rena och kraschsäkra textsträngar.
+- **🛡️ Live Anti-Flood & Mute-Spårning:** Integrerat din asynkrona VIP-motor `announce.send_debug` djupt inuti flood-skyddet `is_flooding` i `security.py`. Boten strömmar nu färgkodade, lila **`[TEMPBAN]`**-notiser live till mIRC på 0ms så fort en användare rör sig för snabbt, rensar deras fildelningskö och loggar om de uppgraderas till en hård dags-ban fram till midnatt.
+- **🚨 Centraliserat Säkerhetsgränssnitt:** Uppgraderat användarkontrollen `check_user_status` i `security.py` med din blixtsnabba socket-send. Systemet dundrar nu upp mörkröda **`[HARDBAN]`**-notiser i din dolda `#flac-debug`-kanal i samma mikrosekund som en spambot som matchar dina permanenta wildcards försöker hamra på sökkommandona.
+
+### 🐛 Buggfixar & Optimeringar
+- **⛓️ Trådsäker Fil-Normalisering:** Justerat filhanteringen inuti administratörsverktygen i `commands.py` (`!ban` och `!unban`) till att läsa direkt från din rena config-sträng, vilket eliminerade ett dolt `NameError` vid boot och ser till att trådarna alltid hittar spikrakt in i din undermapp `data/`.
+
+---
+
 ## 🟦 v1.4.2-BETA (2026-07-30) - "The Hard Ban & Admin Category Update"
 ### 🚀 Nya funktioner
 - **🛡️ Permanent Wildcard-skydd (`hard_bans.txt`):** Skapat ett isolerat säkerhetslager för fasta spambot-mönster (t.ex. `lidx_*`) djupt inbäddat i undermappen `data/`. Denna fil är helt fredad från systemets helautomatiska midnatts-rensning av vanliga flood-spärrar.

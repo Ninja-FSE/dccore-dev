@@ -90,7 +90,6 @@ def handle_ping_request(irc_sock, user, target_chan):
     except Exception as e:
         print(f"[PING ERROR] Kunde inte skicka PING-paket: {e}")
 
-
 def handle_pong_response(category="INFO"):
     """Fångar serverns svar, räknar ut latens i sekunder med 3 decimaler och skickar VIP-debug!"""
     import time
@@ -218,7 +217,7 @@ def handle_hard_ban_request(user, target_chan, msg_text):
     if not pattern:
         return
         
-    filename = os.path.normpath(config.HARD_BANS_FILE)
+    filename = config.HARD_BANS_FILE
     
     # Läs in befintliga bans för att undvika dubbletter
     existing_bans = []
@@ -255,7 +254,7 @@ def handle_hard_unban_request(user, target_chan, msg_text):
     if not pattern:
         return
         
-    filename = os.path.normpath(config.HARD_BANS_FILE)
+    filename = config.HARD_BANS_FILE
     if not os.path.exists(filename):
         announce.send_debug("The permanent hard_bans.txt file is empty.", category="INFO")
         return
