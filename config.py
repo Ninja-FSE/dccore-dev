@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------
 # 1. SYSTEM- OCH GLOBALA MOTORINSTÄLLNINGAR
 # ---------------------------------------------------------------------
-DEBUG_MODE     = True
+DEBUG_MODE     = False
 SCRIPT_VERSION = "DCCore v1.4.3-BETA"
 LIST_BASE_NAME = "FLAC-Serv"
 
