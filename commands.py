@@ -281,3 +281,84 @@ def handle_hard_unban_request(user, target_chan, msg_text):
         print(f"[HARD UNBAN] {user} hävde permanent mönster: {pattern}")
     else:
         announce.send_debug(f"Pattern {pattern} was not found in hard_bans.txt.", category="INFO")
+
+def handle_list_update_request(user, target_chan):
+    """Kör update_list.py, väntar in processen och plockar filantalet blixtsnabbt från första raden i listfilen!"""
+    import subprocess
+    import sys
+    import os
+    import re
+    import config
+    import announce
+    
+    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
+    if user.lower() != allowed_admin and user.lower() != "flac":
+        print(f"[SECURITY] Obehörig användare {user} försökte köra !update.")
+        return
+
+    # Inre hjälpfunktion som läser ENBART rad 1 i din listfil för att plocka ut antalet på 0ms
+    def get_count_from_list():
+        list_mod = sys.modules.get('list')
+        if list_mod and hasattr(list_mod, 'find_latest_list'):
+            list_path = list_mod.find_latest_list()
+            if list_path and os.path.exists(list_path):
+                try:
+                    with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
+                        # Vi läser BARA den första raden och stänger filen direkt = 0% belasning!
+                        first_line = f.readline().strip()
+                        
+                        # Vi letar efter mönstret "List of X Files" via regex
+                        match = re.search(r"List of\s+([\d,.]+)\s+Files", first_line, re.IGNORECASE)
+                        if match:
+                            raw_num = match.group(1).replace(",", "").replace(".", "")
+                            if raw_num.isdigit():
+                                return int(raw_num)
+                except Exception as e:
+                    print(f"[LIST READ ERROR] Kunde inte läsa rad 1: {e}")
+        return 0
+
+    # 1. Hämta de gamla sanna filsiffrorna från rad 1
+    old_count = get_count_from_list()
+    announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive...", category="INFO")
+    
+    try:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(base_path, "update_list.py")
+        
+        if not os.path.exists(script_path):
+            announce.send_debug(f"Critical Error: Could not find update_list.py", category="PART")
+            return
+            
+        # 2. TRÅDAD RUN (Väntar in processen ordentligt = INGA ZOMBIES/DEFUNCT!)
+        process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=90.0)
+        
+        if process.returncode == 0:
+            # 3. HÄMTA DET NYA FILANTALET FRÅN RAD 1 IGEN
+            new_count = get_count_from_list()
+            
+            # Räkna ut den sanna, exakta skillnaden helt matematiskt
+            added_files = new_count - old_count
+            if added_files < 0: 
+                added_files = 0
+            
+            # 4. BEKRÄFTELSE VIA VIP-EXPRESSEN
+            announce.send_debug(
+                f"List update successfully completed! MasterList now contains {new_count:,} files. "
+                f"Added {added_files:,} new file(s) since last index.", 
+                category="JOIN"
+            )
+        else:
+            error_msg = process.stderr.strip() if process.stderr else "Unknown script error"
+            announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="PART")
+            
+    except subprocess.TimeoutExpired:
+        announce.send_debug("List update FAILED: Script execution timed out after 90 seconds.", category="PART")
+    except Exception as e:
+        print(f"[UPDATE ERROR] Det gick inte att köra listuppdateringen: {e}")
+        announce.send_debug(f"List update FAILED critical error: {e}", category="PART")
+
+
+
+
+
+

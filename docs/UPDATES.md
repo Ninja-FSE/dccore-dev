@@ -4,6 +4,18 @@ Här loggas alla versionsförändringar, optimeringar och buggfixar som gjorts u
 
 ---
 
+## 🟦 v1.4.4-BETA (2026-07-30) - "The External Indexer & Micro-Read Update"
+### 🚀 Nya funktioner
+- **🎛️ Helautomatisk Listuppdatering (`!update`):** Byggt ett avancerat administrationsverktyg i `commands.py` som exekverar ditt externa skript `update_list.py` i en stängd bakgrundstråd via `subprocess.run`. Detta gör att du kan indexera om hela din NFS-musikdisk live direkt inifrån mIRC utan Proxmox CLI-access.
+- **⚡ Blixtsnabb Mikro-Read Optimering:** Skapat en högpresterande beräkningsmotor (`get_count_from_list`) som enbart läser den absolut första raden ur din gigantiska masterlista (`f.readline()`). Den använder ett strikt regex-mönster (`List of X Files`) för att suga ut det sanna filantalet på 0ms helt utan att belasta disk-I/O eller CPU.
+- **🧮 Matematisk Realtids-skanning:** Boten sparar och jämför nu dina exakta filsiffror live före och efter skript-exekveringen, vilket gör att den stolt kan annonsera exakt hur många nya flac-låtar som har lagts till sedan din förra sökning.
+
+### 🐛 Buggfixar & Optimeringar
+- **🧟 Eliminering av Zombie-processer:** Genom att migrera från asynkron `Popen` till synkroniserad tråd-hantering via `subprocess.run` garanteras det nu att Linux-kärnan städar bort barn-processen omedelbart vid slutförd skanning, vilket lämnar din `ps aux`-lista 100 % ren från fula `defunct`-rader.
+- **🧬 Cirkulär Namnkonflikts-säkring:** Isolerat system-importen av `list` lokalt inuti funktionen via Pythons levande modulstruktur (`sys.modules.get('list')`), vilket helt eliminerade en tyst krasch orsakad av att Python blandade ihop din fil `list.py` med det inbyggda array-objektet `list`.
+
+---
+
 ## 🟦 v1.4.3-BETA (2026-07-30) - "The Clean Config & Security Sync Update"
 ### 🚀 Nya funktioner
 - **🧼 100% Import-Fri `config.py`:** Sanerat och städat ur hela din centrala konfigurationsfil från all funktionell källkod, dolda `import os`-satser samt dynamiska `BASE_DIR`-beräkningar. Alla sökvägar (till `stats.txt`, `bans.txt` och `hard_bans.txt`) är nu helt normaliserade, rena och kraschsäkra textsträngar.

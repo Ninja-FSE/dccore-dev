@@ -330,6 +330,11 @@ def irc_loop():
                         elif msg.startswith("!unban "):
                             threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
                         # ---------------------------------------------------------------------
+                        # NYTT: !UPDATE-KOMMANDO (Kör externt skript och räknar nya filer live!)
+                        # ---------------------------------------------------------------------
+                        elif msg.lower() == "!update":
+                            threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), daemon=True).start()
+                        # ---------------------------------------------------------------------
                         elif msg.startswith(f"!{config.NICKNAME} "):
                             parts = msg.split(" ", 1)
                             if len(parts) > 1:
