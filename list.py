@@ -70,7 +70,7 @@ def get_file_count_date_size_and_raw_bytes():
         return 0, "Error", "0B", 0
 
 def execute_search(irc_sock, user, search_term, channel):
-    """Söker i listfilen, räknar ALLA träffar men skickar max från config - Stenhårt låssäkrad!"""
+    """Söker i listfilen med dynamiska wildcards - ALLA ord måste finnas på raden (oberoende av ordning)!"""
     import config, announce, os, sys
     
     # Om en sökning redan pågår, avbryt direkt för att skydda systemet
@@ -87,7 +87,6 @@ def execute_search(irc_sock, user, search_term, channel):
     # Sätt flaggan direkt vid start
     config.search_inprogress = True
     
-    # Hela sökningen körs nu inuti ett try/finally-block för att förhindra dolda deadlocks!
     try:
         current_list_path = find_latest_list()
         if not current_list_path or not os.path.exists(current_list_path):
@@ -97,18 +96,34 @@ def execute_search(irc_sock, user, search_term, channel):
             return
 
         print(f"[NEW SEARCH] {user} in {channel} searched for '{search_term}'")
+        
+        # ---------------------------------------------------------------------
+        # DYNAMISK WILDCARD-PREPARERING
+        # Vi splittar sökningen till en lista med enskilda ord i lowercase,
+        # och rensar bort eventuella tomma tecken eller lösa bindestreck.
+        # ---------------------------------------------------------------------
+        search_words = [w.strip().lower() for w in search_term.replace("-", " ").split() if w.strip()]
+        
         matches = []
         total_matches = 0
         
         with open(current_list_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 line_strip = line.strip()
+                line_lower = line_strip.lower()
                 
                 # Säkerhetsfilter: Hoppa över mapprobrik-avskiljare och headers
                 if line_strip.startswith("=====") or line_strip.upper().startswith("D:\\MUSIC\\") or line_strip.startswith("List of "):
                     continue
-                    
-                if search_term.lower() in line_strip.lower():
+                
+                # INTELLIGENT MATCHNING: Vi antar att raden är en träff tills motsatsen bevisats
+                is_match = True
+                for word in search_words:
+                    if word not in line_lower:
+                        is_match = False
+                        break # Ett ord saknades, hoppa till nästa rad direkt!
+                
+                if is_match and search_words: # Alla sökord fanns på raden!
                     total_matches += 1
                     
                     # Spara bara filen om vi inte har nått maxgränsen från config än
@@ -126,7 +141,6 @@ def execute_search(irc_sock, user, search_term, channel):
             # Skicka filraderna (max 5) till användaren i privat PM med ditt nya tema
             oserve = sys.modules.get('oserve')
             if oserve:
-                # Defininera färgblocken och den vita text-boxen för sökresultaten:
                 BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
                 BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
                 BG_TEXT_BOX   = "\x0301,00" # Svart text på VIT bakgrund
@@ -134,12 +148,10 @@ def execute_search(irc_sock, user, search_term, channel):
                 
                 for match in matches: 
                     # Kläder in sökresultatet i en perfekt vit ruta inramad av dina stolpar!
-                    block_match = f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {match} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
+                    block_match = f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {match}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
                     result_msg = f"PRIVMSG {user} :{block_match}\r\n"
                     oserve.queue_message(user, result_msg)
         else:
-
-            # NYTT: Boten förblir helt tyst på IRC, men loggar 0 träffar i din konsol!
             print(f"[SEARCH RESULT] 0 Match(es) found for {user} in {channel} on '{search_term}'")
                 
     except Exception as e:
@@ -149,6 +161,7 @@ def execute_search(irc_sock, user, search_term, channel):
         # Frigör sökflaggan på 0ms så nästa person kan söka direkt
         config.search_inprogress = False
         print(f"[SEARCH-FINISHED] Sökningen för {user} avslutades och låset frigjordes snyggt.")
+
 
 def send_list_trigger_info(irc_sock, user):
     msg = f"{config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} Trigger: {config.C_RED}@{config.NICKNAME}{config.C_RESET} | Type @find <search_term> to search!\r\n"

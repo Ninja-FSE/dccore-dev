@@ -14,7 +14,7 @@ LOCAL_LIST_DIR= "./lists"
 
 # Det dynamiska namnet uppdateras automatiskt i list.py med dagens datum
 LIST_BASE_NAME = "FLAC-Serv"
-SCRIPT_VERSION = "DCCore v1.3.5-BETA"
+SCRIPT_VERSION = "DCCore v1.4.1-BETA"
 # Announce-inställningar
 ANNOUNCE_INTERVAL = 300     # Hur ofta boten gör reklam i kanalen (i sekunder)
 
