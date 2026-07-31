@@ -4,6 +4,11 @@ Här loggas alla versionsförändringar, optimeringar och buggfixar som gjorts u
 
 ---
 
+## 🟦 v1.4.5-BETA (2026-07-31) - "The Multi-Character Regex Sanitizer Update"
+### 🚀 Nya funktioner
+- **🧹 Universell Sök-Sanering (`@find`):** Integrerat en kraftfull regex-tvätt via `re.sub(r'[-*_.]', ' ', search_term)` inuti sökfunktionen i `list.py`. Boten översätter nu omedelbart alla mIRC-stjärnor (`*`), understreck (`_`), punkter (`.`) och bindestreck (`-`) till rena mellanslag innan sökorden splittas. Detta eliminerar problemet med missade träffar när användare söker med råa specialtecken (t.ex. `metallica*red*alert`).
+
+---
 ## 🟦 v1.4.4-BETA (2026-07-30) - "The External Indexer & Micro-Read Update"
 ### 🚀 Nya funktioner
 - **🎛️ Helautomatisk Listuppdatering (`!update`):** Byggt ett avancerat administrationsverktyg i `commands.py` som exekverar ditt externa skript `update_list.py` i en stängd bakgrundstråd via `subprocess.run`. Detta gör att du kan indexera om hela din NFS-musikdisk live direkt inifrån mIRC utan Proxmox CLI-access.

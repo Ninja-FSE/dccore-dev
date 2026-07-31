@@ -98,11 +98,14 @@ def execute_search(irc_sock, user, search_term, channel):
         print(f"[NEW SEARCH] {user} in {channel} searched for '{search_term}'")
         
         # ---------------------------------------------------------------------
-        # DYNAMISK WILDCARD-PREPARERING
-        # Vi splittar sökningen till en lista med enskilda ord i lowercase,
-        # och rensar bort eventuella tomma tecken eller lösa bindestreck.
+        # DYNAMISK WILDCARD-PREPARERING WITH REGEX SANITIZATION
+        # Ersätter alla bindestreck, stjärnor, understreck och punkter med 
+        # vanliga mellanslag i ett svep innan orden splittas.
         # ---------------------------------------------------------------------
-        search_words = [w.strip().lower() for w in search_term.replace("-", " ").split() if w.strip()]
+        import re
+        clean_term = re.sub(r'[-*_.]', ' ', search_term)
+        search_words = [w.strip().lower() for w in clean_term.split() if w.strip()]
+
         
         matches = []
         total_matches = 0

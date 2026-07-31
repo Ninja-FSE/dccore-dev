@@ -326,7 +326,7 @@ def handle_list_update_request(user, target_chan):
         script_path = os.path.join(base_path, "update_list.py")
         
         if not os.path.exists(script_path):
-            announce.send_debug(f"Critical Error: Could not find update_list.py", category="PART")
+            announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
             return
             
         # 2. TRÅDAD RUN (Väntar in processen ordentligt = INGA ZOMBIES/DEFUNCT!)
@@ -345,17 +345,17 @@ def handle_list_update_request(user, target_chan):
             announce.send_debug(
                 f"List update successfully completed! MasterList now contains {new_count:,} files. "
                 f"Added {added_files:,} new file(s) since last index.", 
-                category="JOIN"
+                category="INFO"
             )
         else:
             error_msg = process.stderr.strip() if process.stderr else "Unknown script error"
-            announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="PART")
+            announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
             
     except subprocess.TimeoutExpired:
-        announce.send_debug("List update FAILED: Script execution timed out after 90 seconds.", category="PART")
+        announce.send_debug("List update FAILED: Script execution timed out after 90 seconds.", category="INFO")
     except Exception as e:
         print(f"[UPDATE ERROR] Det gick inte att köra listuppdateringen: {e}")
-        announce.send_debug(f"List update FAILED critical error: {e}", category="PART")
+        announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")
 
 
 
