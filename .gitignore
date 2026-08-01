@@ -5,10 +5,11 @@ __pycache__/
 
 # Ignorera allt innehåll i lists/
 lists/*
+data/*
 
 # Men ignorera INTE .gitkeep-filen i lists/
 !lists/.gitkeep
-
+!data/.gitkeep
 
 # C extensions
 *.so
