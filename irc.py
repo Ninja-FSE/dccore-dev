@@ -173,7 +173,7 @@ def irc_loop():
                             else:
                                 print("[ANNOUNCE] Reklamtråden lever redan sedan innan. Återaktiverade den beklagliga klockan.")
                             
-                            print(f"[INFO] FLAC-Serv is now FULLY ACTIVE across all channels!")                          
+                            print(f"[INFO] {config.SCRIPT_VERSION} is now FULLY ACTIVE across all channels!")                          
                         threading.Thread(target=delayed_activate, daemon=True).start()
 
                         

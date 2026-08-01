@@ -47,7 +47,7 @@ def queue_message(user, message, is_vip=False):
 
 
 if __name__ == "__main__":
-    print("--- FLAC-Serv Python Modul-utgåva startar ---")
+    print(f"--- {config.SCRIPT_VERSION} is starting up ---")
     if not os.path.exists(config.FILE_DIRECTORY):
         print(f"[CRITICAL] Saknar mapp: {config.FILE_DIRECTORY}")
         sys.exit(1)

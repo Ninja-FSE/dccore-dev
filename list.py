@@ -23,7 +23,7 @@ def find_latest_list():
     return os.path.join(config.LOCAL_LIST_DIR, files[0])
 
 def find_latest_zip():
-    """Hittar den senaste .zip-filen för när någon skriver @FLAC-Serv"""
+    """Hittar den senaste .zip-filen för när någon skriver botens nickname"""
     if not os.path.exists(config.LOCAL_LIST_DIR):
         return None
     files = [f for f in os.listdir(config.LOCAL_LIST_DIR) if f.startswith(config.LIST_BASE_NAME) and f.endswith(".zip")]

@@ -1,4 +1,4 @@
-# db.py - Central databashantering för FLAC-Serv
+# db.py - Central databashantering för DCCore
 import os
 import time
 import datetime
