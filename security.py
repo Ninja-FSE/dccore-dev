@@ -42,7 +42,7 @@ def check_user_status(user):
                         
                         # NYTT: Skickar en blixtsnabb färgkodad VIP-notis till #flac-debug via din råa socket!
                         announce.send_debug(
-                            f"Blocked malicious command from {user} -> Matchic pattern: {pattern} in {filename}", 
+                            f"Access denied for banned user {user} (matched pattern '{pattern}').", 
                             category=category_tag
                         )
                         return False

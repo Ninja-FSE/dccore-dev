@@ -165,7 +165,6 @@ def execute_search(irc_sock, user, search_term, channel):
         config.search_inprogress = False
         print(f"[SEARCH-FINISHED] Sökningen för {user} avslutades och låset frigjordes snyggt.")
 
-
 def send_list_trigger_info(irc_sock, user):
     msg = f"List trigger(s): {config.C_RED}@{config.NICKNAME}{config.C_RESET} {config.SCRIPT_VERSION}{config.C_RESET}\r\n"
     oserve.queue_message(user, f"NOTICE {user} :{msg}")
