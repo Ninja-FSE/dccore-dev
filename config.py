@@ -86,6 +86,7 @@ C_ITALIC       = "\x1D"     # Kursiv
 # ---------------------------------------------------------------------
 search_inprogress = False    # Sök-lås (True om en genomsökning körs)
 failed_transfers  = {}       # Räknare för misslyckade överföringar per användare
+channel_users     = {}       # Aktiva användare i kanaler
 banned_users      = {}       # Aktiva spärrade användare i RAM
 user_requests     = {}       # Tidsstämplar för användares kommandon (Anti-flood)
 muted_until       = {}       # Timers för tillfälligt tystade användare

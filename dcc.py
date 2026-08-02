@@ -39,11 +39,14 @@ def get_public_ip_long():
     return 0
 
 def check_queue_and_send(irc_sock, completed_user):
-    """Kollar köer i realtid med bevarad disksynk - Tinar upp och skickar direkt vid JOIN!"""
+    """Kollar köer i realtid baserat på lokalt RAM-minne - Tinar upp och skickar direkt vid JOIN!"""
     user_key = completed_user.lower()
     oserve = sys.modules.get('oserve')
     import db
     import config
+    import announce
+    import time
+    import threading
     
     with queue_lock:
         # --- AUTOMATISK RENSNING AV GAMLA FRYSTA KÖER (Äldre än 5 min / 300s) ---
@@ -67,29 +70,28 @@ def check_queue_and_send(irc_sock, completed_user):
                 # Om användaren fortfarande är flaggad som fryst, hoppa över den för tillfället
                 pass
             else:
-                # RÄTTAD TILLBAKA TILL ORIGINAL: Tjuvkika enbart med [0] så att filen inte raderas i förtid!
+                # Tjuvkika enbart med [0] så att filen inte raderas i förtid!
                 next_file = config.dcc_queue[user_key][0]
                 target_chan = next_file.get('channel', config.CHANNEL.split(',')[0])
                 
-                # --- STARTA AKTIV KANAL-KONTROLL ---
-                config.whois_status[user_key] = None
-                try:
-                    irc_sock.send(f"WHO {target_chan}\r\n".encode())
-                except:
-                    return
-                    
-                # Vänta i max 2.5 sekunder på att servern ska skicka hela kanallistan
-                start_wait = time.time()
-                while config.whois_status.get(user_key) is None and (time.time() - start_wait) < 2.5:
-                    time.sleep(0.1)
-                    
+                # ---------------------------------------------------------------------
+                # STRÖMLINJEFORMAD KANALSKANNING: Söker direkt i botens levande RAM-minne!
+                # ---------------------------------------------------------------------
+                user_is_actively_in_channel = False
+                c_chan = target_chan.lower()
+                
+                # Vi kollar om botens lokala RAM-lista innehåller användarens nick just nu (0ms!)
+                if hasattr(config, 'channel_users') and c_chan in config.channel_users:
+                    if user_key in config.channel_users[c_chan]:
+                        user_is_actively_in_channel = True
+
                 # BESLUTSFATTANDE: Befinner sig användaren fysiskt inuti kanalen?
-                if config.whois_status.get(user_key) is True:
-                    # Användaren är verifierad live! FÖRST NU plockar vi ur filen och sparar till disken
+                if user_is_actively_in_channel is True:
+                    # Användaren är verifierad live via RAM! Plockar ur filen och skickar direkt.
                     config.dcc_queue[user_key].pop(0)
                     db.save_dcc_queue()
                     
-                    print(f"[DCC QUEUE] Verified in channel {target_chan}! Next file for {completed_user}: {next_file['file']}")
+                    print(f"[DCC QUEUE] Verified live in RAM for {target_chan}! Next file for {completed_user}: {next_file['file']}")
                     config.active_transfers.append({"user": completed_user, "file": next_file['file'], "bytes_sent": 0})
                     if oserve:
                         oserve.active_downloads = len(config.active_transfers)
@@ -98,11 +100,46 @@ def check_queue_and_send(irc_sock, completed_user):
                     threading.Thread(target=start_dcc_send, args=(irc_sock, completed_user, next_file['path'], next_file['file'], next_file['channel']), daemon=True).start()
                     return
                 else:
-                    # SMART LOKAL TIMER-SLUSS: Sätt tidsstämpel och starta en dedikerad 5-minutersklocka!
+                    # Användaren har FAKTISKT lämnat kanalen (eller stängt mIRC). 
+                    # Vi sätter tidsstämpel och startar en dedikerad 5-minutersklocka!
                     config.frozen_queues[user_key] = time.time()
-                    print(f"[DCC REACTIVE FREEZE] {completed_user} har lämnat {target_chan}! Startar en dedikerad 5-minuters timer...")
+                    print(f"[DCC REACTIVE FREEZE] {completed_user} har lämnat {target_chan} på riktigt! Startar timer...")
                     
-                    # (Den gamla överflödiga announce.send_debug-raden är nu helt raderad härifrån!)
+                    # Loggar till #flac-debug med din snygga lila QUIT-etikett
+                    announce.send_debug(
+                        f"DCC reactive freeze triggered for {completed_user} in {target_chan}. Initiating 5-minute cooldown timer.", 
+                        category="QUIT"
+                    )
+                    
+                    def user_queue_timer(sock, target_user, original_chan):
+                        # Sov i exakt 5 minuter (300 sekunder) i en helt egen tråd
+                        time.sleep(300)
+                        t_key = target_user.lower()
+                        
+                        # Kolla om användaren fortfarande ligger kvar i frysboxen (Om han tinats upp är t_key borta!)
+                        if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
+                            with queue_lock:
+                                if t_key in config.dcc_queue:
+                                    del config.dcc_queue[t_key]
+                                    import db
+                                    db.save_dcc_queue() # Spika städningen till hårddisken direkt!
+                                del config.frozen_queues[t_key]
+                            print(f"[DCC TIMER EXPIRED] {target_user} kom inte tillbaka till {original_chan}. Kö raderad.")
+                            
+                            # Loggar till #flac-debug med din mörkröda PART-etikett när tiden gått ut!
+                            announce.send_debug(
+                                f"Timer expired for {target_user} in {original_chan}. Personal queue has been erased from disk layout.", 
+                                category="PART"
+                            )
+                        else:
+                            # Om han tinades upp under de 5 minuterna, skriver vi bara en tyst rad i Proxmox CLI
+                            print(f"[DCC TIMER CANCELLED] Timern för {target_user} avbröts eftersom användaren klev in i kanalen i tid.")
+                            
+                    # Startar den fristående timern i bakgrunden för just denna användare
+                    threading.Thread(target=user_queue_timer, args=(irc_sock, completed_user, target_chan), daemon=True).start()
+                    
+                    # Gå vidare direkt och släpp in nästa person i kön under tiden!
+                    user_key = ""
                     
                     def user_queue_timer(sock, target_user, original_chan):
                         # Sov i exakt 5 minuter (300 sekunder) i en helt egen tråd
