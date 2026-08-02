@@ -379,3 +379,32 @@ def start_announce_thread():
     import threading
     threading.Thread(target=announce_worker, daemon=True).start()
     print("[ANNOUNCE] Reklam- och debug-klockan startades live i bakgrunden.")
+
+def send_pack_error_notice(irc_sock, user):
+    """Skickar en privat NOTICE till användaren i exakt samma lyxiga färgblocks-tema vid root-spärr!"""
+    import config
+    import sys
+    
+    # Vi hämtar dina exakta färgkoder från din befintliga struktur
+    BG_RED_BLOCK  = "\x0304,05" 
+    BG_CYAN_BLOCK = "\x0310,10" 
+    BG_TEXT_BOX   = "\x0301,00" 
+    B = "\x02"                  
+    
+    # Vi bygger meddelandet i din officiella ram
+    msg = (
+        f"NOTICE {user} :"
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} DCC-PACK: {B}Access Denied{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Error: {B}Artist root folders cannot be requested. Please select a specific album sub-folder.{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
+    )
+    
+    try:
+        # Vi slussar ut den direkt på 0ms via oserve-motorn om den är laddad
+        oserve = sys.modules.get('oserve')
+        if oserve:
+            oserve.queue_message(user, msg, is_vip=True)
+        else:
+            irc_sock.send(msg.encode())
+    except Exception as e:
+        print(f"[DCC NOTICE ERROR] Kunde inte slussa färgblocks-felmeddelande: {e}")

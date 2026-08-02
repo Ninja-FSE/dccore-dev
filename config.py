@@ -22,6 +22,7 @@ DEBUG_CHANNEL = "#flac-serv"
 # 3. FILSYSTEM, SÖKVÄGAR OCH TEXTDATABASER
 # ---------------------------------------------------------------------
 FILE_DIRECTORY = "/mnt/nfs-musik"
+TMP_ZIP_DIR = "./data/tmp_zips"
 LOCAL_LIST_DIR = "./lists"
 
 # Säkra, normaliserade sökvägar direkt in i din data/ undermapp

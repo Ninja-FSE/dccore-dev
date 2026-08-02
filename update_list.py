@@ -1,4 +1,4 @@
-# update_list.py - Renodlad OmenServe-layout (Enbart filnamn på raderna)
+# update_list.py - Renodlad OmenServe-layout med dubbla listor (Del 1 av 2)
 import os
 import sys
 import datetime
@@ -21,7 +21,7 @@ def format_total_size(bytes_size):
     return f"{bytes_size:.1f}PiB"
 
 def generate_master_list():
-    """Skannar musikmappen, rensar gamla filer först och bygger listan med mapprobrik-layout"""
+    """Skannar musikmappen, rensar gamla filer först och bygger båda listorna samtidigt"""
     if not os.path.exists(config.LOCAL_LIST_DIR):
         os.makedirs(config.LOCAL_LIST_DIR)
 
@@ -29,8 +29,12 @@ def generate_master_list():
     txt_filename = f"{config.LIST_BASE_NAME}-{today}.txt"
     zip_filename = f"{config.LIST_BASE_NAME}-{today}.zip"
     
+    # NYTT FILNAMN: Den renodlade album- och mapplistan för !rar
+    rar_filename = f"{config.LIST_BASE_NAME}-RAR-{today}.txt"
+    
     txt_path = os.path.join(config.LOCAL_LIST_DIR, txt_filename)
     zip_path = os.path.join(config.LOCAL_LIST_DIR, zip_filename)
+    rar_path = os.path.join(config.LOCAL_LIST_DIR, rar_filename)
     
     SIZE_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-size.txt")
     RAWBYTES_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-rawbytes.txt")
@@ -40,6 +44,7 @@ def generate_master_list():
     print(f"[LIST-CLEAN] Rensar gamla listor från {config.LOCAL_LIST_DIR}...")
     removed_count = 0
     for item in os.listdir(config.LOCAL_LIST_DIR):
+        # NYTT: Ser till att även gamla -RAR-listor städas bort automatiskt vid ny körning
         if item.startswith(config.LIST_BASE_NAME) and (item.endswith(".txt") or item.endswith(".zip")):
             try:
                 os.remove(os.path.join(config.LOCAL_LIST_DIR, item))
@@ -86,28 +91,52 @@ def generate_master_list():
     day = datetime.datetime.now().day
     suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
     date_header_str = datetime.datetime.now().strftime(f"{day}{suffix} %b %Y")
-
     try:
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(f"List of {total_files_count:,} Files ({formatted_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n\n")
+        # NYTT: Vi öppnar BÅDE den vanliga textlistan och din nya RAR-lista samtidigt!
+        with open(txt_path, "w", encoding="utf-8") as f, \
+             open(rar_path, "w", encoding="utf-8") as f_rar:
+                 
+            f.write(f"List of {total_files_count:,} Files ({formatted_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n")
             f.write(f"To request a file, copy/paste to the channel... !{config.NICKNAME} FILENAME eg. !{config.NICKNAME} Songname.flac\n\n\n")
+
+            # Skriv en snygg och professionell header högst upp i din nya RAR-albumlista
+            f_rar.write(f"List of Entire Album Folders (!rar) for !{config.NICKNAME} generated on {date_header_str}\n")
+            f_rar.write(f"To request an entire album, copy/paste the line... eg. !{config.NICKNAME} !rar D:\\MUSIC\\Album\\\n")
+            f_rar.write("="*90 + "\n\n")
 
             current_folder = None
             
+            # Förhandstitta och räkna ihop mappstatistik (Spår + Storlek) för RAR-listan
+            folder_stats = {}
+            for folder, filename, bytes_size in all_files_data:
+                if folder not in folder_stats:
+                    folder_stats[folder] = {"count": 0, "bytes": 0}
+                folder_stats[folder]["count"] += 1
+                folder_stats[folder]["bytes"] += bytes_size
+
             for folder, filename, bytes_size in all_files_data:
                 if folder != current_folder:
                     current_folder = folder
                     display_folder = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
+                    
+                    # 1. SKRIV METADATA TILL DEN VANLIGA LISTAN (Helt intakt precis som förut!)
                     f.write(f"\n=====================================================\n")
                     f.write(f"{display_folder}\n")
                     f.write(f"=====================================================\n")
+                    
+                    # 2. SKRIV TILL DIN NYA RAR-LISTA: Format: !NICK !rar Sökväg\ [Tracks - Storlek]
+                    if folder:  # Skippa att skriva ut en rå tom rot-mapp till rar-listan
+                        f_stats = folder_stats[folder]
+                        friendly_dir_size = format_size_human(f_stats["bytes"])
+                        f_rar.write(f"!{config.NICKNAME} !rar {display_folder} [{f_stats['count']} Tracks - {friendly_dir_size}]\n")
                 
                 single_file_size = format_size_human(bytes_size)
                 
-                # GENOMBROTT: Vi skriver BARA ut det rena filnamnet på raden! Inga undermappar här!
+                # Skriv ut det rena filnamnet i den vanliga listan (Helt intakt!)
                 f.write(f"!{config.NICKNAME} {filename}  ::INFO:: {single_file_size}\n")
                     
         print(f"[LIST-GEN] Textlista skapad utan problem: {txt_path}")
+        print(f"[LIST-GEN] RAR-albumlista skapad utan problem: {rar_path}")
         
         with open(SIZE_FILE_PATH, "w", encoding="utf-8") as sf:
             sf.write(formatted_size)
@@ -116,11 +145,20 @@ def generate_master_list():
             rbf.write(str(total_bytes))
             
         if os.path.exists(txt_path) and os.path.getsize(txt_path) > 0:
-            print(f"[LIST-GEN] Packar ner listan i zip-arkiv...")
+            print(f"[LIST-GEN] Packar ner BÅDA textlistorna i master-zip-arkivet...")
+            
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(txt_path, arcname=txt_filename)
-            print(f"[LIST-GEN] Zip-arkiv skapat utan fel: {zip_path}")
+                # 1. RÄTTAD: Helt ren os.path.getsize utan dubbelstavning!
+                zipf.write(txt_path, arcname=os.path.basename(txt_path))
+                
+                # 2. RÄTTAD: Samma här, spikrak os.path.getsize!
+                if os.path.exists(rar_path) and os.path.getsize(rar_path) > 0:
+                    zipf.write(rar_path, arcname=os.path.basename(rar_path))
+                    print(f"[LIST-GEN] Inkluderade äkta RAR-albumlista i zip-arkivet.")
+                    
+            print(f"[LIST-GEN] Dubbelpackat Zip-arkiv skapat utan fel: {zip_path}")
             return True
+
         else:
             return False
             

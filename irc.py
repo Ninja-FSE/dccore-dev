@@ -281,6 +281,19 @@ def irc_loop():
                                     threading.Thread(target=list.execute_search, args=(s, user, search_term, target_chan), daemon=True).start()
                         elif msg == "!list":
                             list.send_list_trigger_info(s, user)
+                        # ---------------------------------------------------------------------
+                        # NYTT: DOLT VERKTYG FÖR ATT KONTROLLERA BOTENS SÄKRA RAM-MINNE Live
+                        # ---------------------------------------------------------------------
+                        elif msg.lower() == "!debugnames":
+                            if hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users:
+                                current_qty = len(config.channel_users[target_chan.lower()])
+                                print(f"[DEBUG-RAM] Sparade nicks för {target_chan}: {config.channel_users[target_chan.lower()]}")
+                                # RÄTTAD: Använder 's' helt kraschsäkert inuti PRIVMSG-loopen!
+                                s.send(f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n".encode())
+                            else:
+                                # RÄTTAD: Samma här, ändrad till 's'!
+                                s.send(f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n".encode())
+
                         elif msg.lower() == "!ping":
                             threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
                         elif msg.lower() == "!rehash":
