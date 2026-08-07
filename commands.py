@@ -290,31 +290,36 @@ def handle_list_update_request(user, target_chan):
     import re
     import config
     import announce
+    import glob
     
     allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
     if user.lower() != allowed_admin and user.lower() != "flac":
         print(f"[SECURITY] Obehörig användare {user} försökte köra !update.")
         return
 
-    # Inre hjälpfunktion som läser ENBART rad 1 i din listfil för att plocka ut antalet på 0ms
+    # Inre hjälpfunktion som läser ENBART rad 1 i din RIKTIGA masterlista (0% belastning!)
     def get_count_from_list():
-        list_mod = sys.modules.get('list')
-        if list_mod and hasattr(list_mod, 'find_latest_list'):
-            list_path = list_mod.find_latest_list()
-            if list_path and os.path.exists(list_path):
-                try:
+        try:
+            # Hitta alla textfiler som matchar botens namn i mappen
+            all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.NICKNAME}-*.txt")))
+            
+            # SÄKERHETSSPÄRR: Rensa bort din nya RAR-lista så vi STRICT läser den sanna masterlistan!
+            true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
+            
+            if true_master_lists:
+                list_path = true_master_lists[-1] # Välj den absolut senaste sanna masterlistan
+                if os.path.exists(list_path):
                     with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
-                        # Vi läser BARA den första raden och stänger filen direkt = 0% belasning!
                         first_line = f.readline().strip()
                         
-                        # Vi letar efter mönstret "List of X Files" via regex
+                        # Letar efter mönstret "List of X Files" via regex
                         match = re.search(r"List of\s+([\d,.]+)\s+Files", first_line, re.IGNORECASE)
                         if match:
                             raw_num = match.group(1).replace(",", "").replace(".", "")
                             if raw_num.isdigit():
                                 return int(raw_num)
-                except Exception as e:
-                    print(f"[LIST READ ERROR] Kunde inte läsa rad 1: {e}")
+        except Exception as e:
+            print(f"[LIST READ ERROR] Kunde inte läsa rad 1: {e}")
         return 0
 
     # 1. Hämta de gamla sanna filsiffrorna från rad 1
@@ -356,6 +361,7 @@ def handle_list_update_request(user, target_chan):
     except Exception as e:
         print(f"[UPDATE ERROR] Det gick inte att köra listuppdateringen: {e}")
         announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")
+
 
 
 
