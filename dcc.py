@@ -122,7 +122,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     if not os.path.exists(config.TMP_ZIP_DIR):
                         os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
                         
-                    announce.send_debug(f"Packing folder for {completed_user}: {config.C_BOLD}{rar_filename}{config.C_RESET} into RAR archive...", category="INFO")
+                    #announce.send_debug(f"Packing folder for {completed_user}: {config.C_BOLD}{rar_filename}{config.C_RESET} into RAR archive...", category="INFO")
                     print(f"[LINJÄR RAR] Startar packning av: {true_source_dir} -> {target_rar_path}")
 
                     
@@ -149,7 +149,7 @@ def check_queue_and_send(irc_sock, completed_user):
                         if oserve: oserve.active_downloads = len(config.active_transfers)
                         
                         announce.send_dcc_sending_notice(completed_user, rar_filename)
-                        announce.send_debug(f"RAR pack successfully completed! Starting DCC transfer for {completed_user}.", category="JOIN")
+                        #announce.send_debug(f"RAR pack successfully completed! Starting DCC transfer for {completed_user}.", category="JOIN")
                         
                         start_dcc_send(sock, completed_user, target_rar_path, rar_filename, target_chan, next_file)
                     else:
@@ -324,10 +324,14 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 
                 user_pos = len(config.dcc_queue[user_key])
                 print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
-                announce_mod.send_dcc_queue_notice(user, folder_name, user_pos)
                 
+                # 🧼 SLIMMAD STARTRAD: Skickar en (1) enda ren rad till din debug-kanal direkt!
+                announce_mod.send_debug(f"{user} requested \"{clean_folder_name}\". Starting rar and sending when done.", category="INFO")
+                
+                announce_mod.send_dcc_queue_notice(user, folder_name, user_pos)
                 threading.Thread(target=check_queue_and_send, args=(irc_sock, user), daemon=True).start()
             return
+
         # --- FIX 1: Hämta index [0] ur listan INNAN .strip() körs! ---
         if " ::INFO::" in requested_file:
             parts = requested_file.split(" ::INFO::", 1)
@@ -448,7 +452,6 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         print(f"[DCC ERROR] {e}")
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
-
 
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     """Sköter nätverksportarna, dolda CTCP och strömmar byten över nätverket med bevarad tidtagning"""

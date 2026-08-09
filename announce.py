@@ -109,8 +109,8 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
         oserve.queue_message("channel_announce", msg)
     print(f"[ANNOUNCE] Sent block transfer complete notice to {channel} for {user} ({speed_str})")
 
-    # RÄTTAD: Taggar nu detta som ett SENT-meddelande för grön markering!
-    send_debug(f"File: {config.C_BOLD}{file_name}{B} sent to {config.C_BOLD}{user}{B} in {channel} ({config.C_BOLD}{speed_str}{B})", category="SENT")
+    # 🧼 ULTRA-SLIMMAD SLUTRAD: Skickar exakt "Sent: rls to USER [Hastighet]"
+    send_debug(f"Sent: {file_name} to {user} [{human_speed}]", category="SENT")
 
 def send_dcc_sending_notice(user, file_name):
     """Skickar en matchande privat NOTICE till användaren när överföringen startar eller köas!"""
@@ -299,12 +299,24 @@ def send_dcc_error(user, error_type):
     if oserve:
         oserve.queue_message(user, msg)
 
-def send_dcc_queue_notice(user, file_name, user_pos):
-    """Skickar en städad notice när en fil läggs till i användarens personliga kö (Utan gansögon)"""
+def send_dcc_queue_notice(user, file_name, position):
+    """Skickar köplatser till användaren privat, perfekt inramad i ditt lyxiga färgtema!"""
+    import sys
     oserve = sys.modules.get('oserve')
-    msg = f"NOTICE {user} :{config.C_BOLD}Added{config.C_RESET} {file_name} to your personal queue at position {config.C_RED}#{user_pos}{config.C_RESET} of {config.MAX_USER_QUEUE}.\r\n"
     if oserve:
-        oserve.queue_message(user, msg)
+        # Dina exakta mIRC-färgblock och stolpar
+        BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
+        BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
+        BG_TEXT_BOX   = "\x0301,00" # Svart text på VIT bakgrund
+        R = "\x0f"                  # Total nollställning
+        
+        # Vi bygger meddelandet i din exakta färgblocks-stil!
+        text_content = f"Added {file_name} to your personal queue at position #{position} of 100."
+        block_msg = f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {text_content}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
+        
+        result_msg = f"NOTICE {user} :{block_msg}\r\n"
+        oserve.queue_message(user, result_msg)
+
 
 def send_debug(msg_text, category="INFO"):
     """Skickar en färgblocks-designad loggrad live till #flac-debug via en RÅ socket-send på 0ms!"""
