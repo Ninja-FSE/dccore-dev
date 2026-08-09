@@ -52,7 +52,6 @@ def check_user_status(user):
             
     return True # Användaren är grön och fri att använda boten!
 
-
 def is_flooding(user):
     """Skyddar boten mot flood, rensar kön vid ban, bannar till midnatt och loggar allt till #flac-debug!"""
     import time

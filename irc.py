@@ -20,19 +20,6 @@ import security
 # Flagga för att hålla koll på om kanaler är joinade
 bot_joined_channel = False
 
-def send_ctcp_version_reply(irc_sock, target_user):
-    """Svarar live i din #flac-debug-kanal i stället för privat för att helt bypassa Undernets botskydd!"""
-    import sys
-    version_str = getattr(config, 'SCRIPT_VERSION', 'DCCore v1.4.5-BETA')
-    full_reply = f"PRIVMSG {config.DEBUG_CHANNEL} :[CTCP VERSION] Requested by {target_user} -> Bot Version: {version_str} by FLAC (OmenServe Architecture)\r\n"
-    try:
-        oserve = sys.modules.get('oserve')
-        if oserve:
-            oserve.queue_message(config.DEBUG_CHANNEL, full_reply, is_vip=True)
-            print(f"[CTCP] Version-notis skickad säkert till {config.DEBUG_CHANNEL}.")
-    except Exception as e:
-        print(f"[CTCP ERROR] Misslyckades att slussa meddelande: {e}")
-
 def irc_loop():
     """Hanterar anslutningen, PING/PONG och alla inkommande PRIVMSG från Undernet"""
     global bot_joined_channel
