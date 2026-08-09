@@ -69,11 +69,29 @@ def get_file_count_date_size_and_raw_bytes():
         print(f"[ERROR] Kunde inte läsa exakt filstatistik: {e}")
         return 0, "Error", "0B", 0
 
+# list.py - Slimmad sökmodul för OmenServe (Del 1 av 2)
+import os
+import glob
+import re
+import sys
+import config
+import announce
+
+def find_latest_list():
+    """Hittar den absolut senaste normala textlistan i lists-mappen"""
+    try:
+        all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.NICKNAME}-*.txt")))
+        # Sortera strikt bort din RAR-lista från sökningen så vi bara skannar masterlistan
+        true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
+        if true_master_lists:
+            return true_master_lists[-1]
+    except Exception as e:
+        print(f"[SEARCH ERROR] Kunde inte hitta senaste listan: {e}")
+    return None
+
 def execute_search(irc_sock, user, search_term, channel):
-    """Söker i listfilen med dynamiska wildcards - ALLA ord måste finnas på raden (oberoende av ordning)!"""
-    import config, announce, os, sys
-    
-    # Om en sökning redan pågår, avbryt direkt för att skydda systemet
+    """Söker i listfilen - Kopierar och skickar raderna spikrakt precis som de står!"""
+    # Skydda systemet mot dubbelsökningar
     if getattr(config, 'search_inprogress', False):
         print(f"[SEARCH BLOCK] Ignorerade sökning från {user} eftersom en annan skanning pågår.")
         return
@@ -84,7 +102,6 @@ def execute_search(irc_sock, user, search_term, channel):
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}Error{config.C_RESET}: Search term must be at least 3 characters long.\r\n")
         return
 
-    # Sätt flaggan direkt vid start
     config.search_inprogress = True
     
     try:
@@ -97,51 +114,49 @@ def execute_search(irc_sock, user, search_term, channel):
 
         print(f"[NEW SEARCH] {user} in {channel} searched for '{search_term}'")
         
-        # ---------------------------------------------------------------------
-        # DYNAMISK WILDCARD-PREPARERING WITH REGEX SANITIZATION
-        # Ersätter alla bindestreck, stjärnor, understreck och punkter med 
-        # vanliga mellanslag i ett svep innan orden splittas.
-        # ---------------------------------------------------------------------
-        import re
-        clean_term = re.sub(r'[-*_.]', ' ', search_term)
+        # Tvätta bort dolda mIRC-färgkoder och kontrolltecken från sökorden
+        raw_clean = search_term.replace('\x02', '').replace('\x1f', '').replace('\x0f', '')
+        raw_clean = re.sub(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?', '', raw_clean)
+        
+        # Dela upp sökorden
+        clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
         search_words = [w.strip().lower() for w in clean_term.split() if w.strip()]
-
         
         matches = []
         total_matches = 0
-        
-        with open(current_list_path, "r", encoding="utf-8", errors="ignore") as f:
+        # ---------------------------------------------------------------------
+        # DIREKT-KOPIERANDE SKANNING (0% Omformatering - Skickar filraden rå!)
+        # ---------------------------------------------------------------------
+        with open(current_list_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
-                line_strip = line.strip()
-                line_lower = line_strip.lower()
+                # Ta bort dolda noll-bytes och rensa radslut
+                line_strip = line.replace('\x00', '').strip()
                 
-                # Säkerhetsfilter: Hoppa över mapprobrik-avskiljare och headers
-                if line_strip.startswith("=====") or line_strip.upper().startswith("D:\\MUSIC\\") or line_strip.startswith("List of "):
+                # SÄKERHETSFILTER: Släpp ENBART fram sanna fildelningsrader som börjar med utropstecken
+                if not line_strip or not line_strip.startswith("!"):
                     continue
                 
-                # INTELLIGENT MATCHNING: Vi antar att raden är en träff tills motsatsen bevisats
+                line_lower = line_strip.lower()
+                
+                # Kontrollera om ALLA sökord finns på den aktuella raden
                 is_match = True
                 for word in search_words:
                     if word not in line_lower:
                         is_match = False
-                        break # Ett ord saknades, hoppa till nästa rad direkt!
+                        break
                 
-                if is_match and search_words: # Alla sökord fanns på raden!
+                if is_match and search_words:
                     total_matches += 1
                     
-                    # Spara bara filen om vi inte har nått maxgränsen från config än
+                    # Spara raden exakt som den står på disken upp till din max-gräns
                     max_results = getattr(config, 'MAX_SEARCH_RESULTS', 5)
                     if len(matches) < max_results:
-                        if line_strip.startswith(f"!{config.NICKNAME} "):
-                            matches.append(line_strip)
-                        else:
-                            matches.append(f"!{config.NICKNAME} {line_strip}")
+                        matches.append(line_strip)
 
         if matches:
-            # Skickar din VIP-header direkt i privat PM
+            # Skicka din officiella sök-header privat till mIRC
             announce.send_search_result_header(user, search_term, total_matches, channel)
             
-            # Skicka filraderna (max 5) till användaren i privat PM med ditt nya tema
             oserve = sys.modules.get('oserve')
             if oserve:
                 BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
@@ -150,7 +165,7 @@ def execute_search(irc_sock, user, search_term, channel):
                 R = "\x0f"                  # Total nollställning
                 
                 for match in matches: 
-                    # Kläder in sökresultatet i en perfekt vit ruta inramad av dina stolpar!
+                    # Klä raden i din snygga färgblocks-ram och skicka den rått till användaren
                     block_match = f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {match}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
                     result_msg = f"PRIVMSG {user} :{block_match}\r\n"
                     oserve.queue_message(user, result_msg)
@@ -161,7 +176,7 @@ def execute_search(irc_sock, user, search_term, channel):
         print(f"[SEARCH CRITICAL ERROR] Sökningen kraschade under filskanning: {e}")
         
     finally:
-        # Frigör sökflaggan på 0ms så nästa person kan söka direkt
+        # Släpp sökspärren så nästa användare kan söka direkt
         config.search_inprogress = False
         print(f"[SEARCH-FINISHED] Sökningen för {user} avslutades och låset frigjordes snyggt.")
 

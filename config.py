@@ -93,6 +93,7 @@ user_requests     = {}       # Tidsstämplar för användares kommandon (Anti-fl
 muted_until       = {}       # Timers för tillfälligt tystade användare
 whois_status      = {}       # Online-status via WHO-svar (True = Online)
 frozen_queues     = {}       # Sparade tidsstämplar för användare i frysboxen
+rar_inprogress = False
 
 # Centrala könätverk strukturer
 dcc_queue         = {}       # Centrala fildelningskön (användarnamn: [filer])

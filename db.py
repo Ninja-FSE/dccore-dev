@@ -81,12 +81,34 @@ def check_and_rotate_day():
     return stats
 
 def update_stats_on_complete(file_size):
-    """Räknar upp Total och Today på disken när en filöverföring är klar"""
+    """Räknar upp Total och Today på disken när en filöverföring är klar (Typ-säkrad)"""
     stats = check_and_rotate_day()
+    
+    # --- STENHÅRD TYP-REPARATION MOD MOT DB-ERROR ---
+    clean_size = 0
+    try:
+        # Om file_size råkar komma in som en lista, plocka ut första elementet
+        if isinstance(file_size, list):
+            if len(file_size) > 0:
+                file_size = file_size[0]
+            else:
+                file_size = 0
+                
+        # Om det är en dictionary, leta efter kända fältnamn för storlek
+        if isinstance(file_size, dict):
+            file_size = file_size.get('bytes', file_size.get('size', 0))
+            
+        # Tvinga fram ett rent heltal via float-omväg ifall det är en textsträng med decimaler
+        clean_size = int(float(str(file_size).strip()))
+    except Exception as type_err:
+        print(f"[DB WARNING] Kunde inte tolka filstorlek '{file_size}' automatisk fallback till 0: {type_err}")
+        clean_size = 0
+    # ---------------------------------------------------------------------
+
     stats[0] += 1          # Totala filer +1
-    stats[1] += file_size  # Totala bytes +storlek
+    stats[1] += clean_size # Totala bytes +storlek (Helt säkrad siffra)
     stats[4] += 1          # Dagens filer +1
-    stats[5] += file_size  # Dagens bytes +storlek
+    stats[5] += clean_size # Dagens bytes +storlek
     save_advanced_stats(stats)
 
 def get_speed_record():
@@ -112,18 +134,29 @@ def save_speed_record(new_record):
         print(f"[DB ERROR] Kunde inte spara hastighetsrekord: {e}")
 
 def save_dcc_queue():
-    """Sparar hela den globala DCC-kön permanent till hårddisken i JSON-format"""
+    """Sparar DCC-kön till disken och raderar tomma användare (Tvingar fram {} vid tom kö!)"""
     import json
-    import os
     import config
-    os.makedirs("./data", exist_ok=True)
-    file_path = "./data/dcc_queue.txt"
+    
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            # json.dump sparar hela din kö-struktur spikrakt till textfilen
-            json.dump(config.dcc_queue, f, ensure_ascii=False, indent=4)
+        # Vi dammsuger bort tomma användare direkt ur minnesstrukturen
+        for user_key in list(config.dcc_queue.keys()):
+            if user_key in config.dcc_queue:
+                if not config.dcc_queue[user_key] or len(config.dcc_queue[user_key]) == 0:
+                    del config.dcc_queue[user_key]
+                    
+        for k in list(config.dcc_queue.keys()):
+            if config.dcc_queue[k] == [] or config.dcc_queue[k] == None:
+                del config.dcc_queue[k]
+                    
+        # Skriv den kliniskt rena JSON-strukturen direkt till disken
+        with open("data/dcc_queue.txt", "w", encoding="utf-8") as f:
+            json.dump(config.dcc_queue, f, indent=4)
+            
+        print("[DB-QUEUE] Kö-strukturen sparades och disksanerades framgångsrikt.")
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte spara DCC-kön till hårddisken: {e}")
+        print(f"[DB-QUEUE ERROR] Kunde inte spara data/dcc_queue.txt: {e}")
+
 
 def load_dcc_queue():
     """Laddar in den sparade DCC-kön från hårddisken vid boot"""

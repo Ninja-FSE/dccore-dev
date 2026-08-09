@@ -113,18 +113,56 @@ def handle_pong_response(category="INFO"):
         config.ping_start_time = None
 
 def handle_rehash_request(user, target_chan):
-    """Laddar om botens moduler, nollställer timern och synkar kanaler live (Både JOIN och PART)!"""
+    """Laddar om moduler live helt i RAM-minnet UTAN att smutsa ner eller läsa från hårddisken!"""
     import importlib
     import sys
     import config
     import announce
+    import copy
     
     allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
     if user.lower() != allowed_admin and user.lower() != "flac":
         print(f"[REHASH SECURITY] Ignorerade rehash-försök från obehörig användare: {user}")
         return
 
-    # 1. SPARA GAMLA KANALER INNAN RELOAD (För att kunna jämföra PART-behov)
+    # =====================================================================
+    # 1. ULTIMAT RAM-BACKUP: Spara ALLT live-data i tillfälliga variabler
+    # =====================================================================
+    # A. Backup på användarlistor (NAMES)
+    ram_backup_users = {}
+    if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+        ram_backup_users = copy.deepcopy(config.channel_users)
+        print(f"[REHASH RAM] Tog backup på användarlistor för {len(ram_backup_users)} kanaler.")
+
+    # B. Backup på aktiva DCC slots
+    ram_backup_slots = 0
+    ram_user_slots = {}
+    for mod_name in ['dcc', 'config', 'oserve']:
+        mod = sys.modules.get(mod_name)
+        if mod:
+            for attr in ['active_downloads', 'current_sends', 'total_sends']:
+                if hasattr(mod, attr) and getattr(mod, attr) > 0:
+                    ram_backup_slots = getattr(mod, attr)
+            for attr in ['user_slots', 'active_users', 'current_user_slots']:
+                if hasattr(mod, attr) and isinstance(getattr(mod, attr), dict):
+                    raw_slots = getattr(mod, attr)
+                    ram_user_slots = {k.lower(): v for k, v in raw_slots.items()}
+
+    # C. Backup på KÖN (Behåll original-objekten i RAM utan disk-mellanlandning)
+    ram_backup_queue = {}
+    for mod_name in ['dcc', 'config', 'oserve', 'queue_mgr', 'list']:
+        mod = sys.modules.get(mod_name)
+        if mod:
+            for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
+                if hasattr(mod, attr) and isinstance(getattr(mod, attr), dict):
+                    raw_q = getattr(mod, attr)
+                    # Spara bara användare som faktiskt har äkta låtar kvar i kön
+                    ram_backup_queue = {k.lower(): v for k, v in raw_q.items() if v and len(v) > 0}
+
+    if ram_backup_queue:
+        print(f"[REHASH RAM] Säkrat {len(ram_backup_queue)} aktiva fildelningsköer live i RAM-minnet.")
+
+    # Spara undan gamla kanaler för JOIN/PART-jämförelsen
     old_chans = [c.strip().lower() for c in config.CHANNEL.split(",") if c.strip()]
 
     # PAUSA REKLAM TEMPORÄRT
@@ -132,64 +170,107 @@ def handle_rehash_request(user, target_chan):
     announce.send_debug(f"Rehash triggered by {user} from {target_chan}. PAUSING NOTICES & ADVERTISEMENT...", category="INFO")
     
     try:
-        # 2. REHASH: Definiera och ladda om alla centrala moduler live i minnet
+        # 2. REHASH: Ladda om alla centrala moduler live i minnet
         modules_to_reload = ['config', 'list', 'dcc', 'announce', 'security', 'db', 'stats_mgr']
         for mod_name in modules_to_reload:
             if mod_name in sys.modules:
                 importlib.reload(sys.modules[mod_name])
                 
-        # Läs om sig själv
         if 'commands' in sys.modules:
             importlib.reload(sys.modules['commands'])
             
         print(f"[REHASH SUCCESS] Alla Python-moduler har blivit live-uppdaterade i RAM av {user}!")
         
-        # Läs in den nyladdade configen och meddelandemodulen
+        # Läs in den nyladdade configen
         import config
         import announce
         announce.is_ready = True
         
+        # =====================================================================
+        # 3. ÅTERSTÄLL FRÅN RAM: Skriv tillbaka all data till de nya modulerna
+        # =====================================================================
+        # Återställ användare
+        config.channel_users = ram_backup_users if ram_backup_users else {}
+        print(f"[REHASH RAM] Återställde framgångsrikt {len(config.channel_users)} kanallistor i nya RAM.")
+
+        # Återställ slots
+        for mod_name in ['dcc', 'config', 'oserve']:
+            mod = sys.modules.get(mod_name)
+            if mod:
+                if ram_backup_slots > 0:
+                    for attr in ['active_downloads', 'current_sends', 'total_sends']:
+                        if hasattr(mod, attr): setattr(mod, attr, ram_backup_slots)
+                if ram_user_slots:
+                    for attr in ['user_slots', 'active_users', 'current_user_slots']:
+                        if hasattr(mod, attr):
+                            combined_slots = {k.lower(): v for k, v in ram_user_slots.items()}
+                            for k, v in ram_user_slots.items(): combined_slots[k.upper()] = v
+                            setattr(mod, attr, combined_slots)
+
+        # Återställ kön (Tryck tillbaka de exakta, rena objekten spikrakt)
+        if ram_backup_queue:
+            combined_queue = {}
+            for k, v in ram_backup_queue.items():
+                combined_queue[k.lower()] = v
+                combined_queue[k.upper()] = v
+                
+            for mod_name in ['dcc', 'config', 'oserve', 'queue_mgr', 'list']:
+                mod = sys.modules.get(mod_name)
+                if mod:
+                    for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
+                        if hasattr(mod, attr):
+                            setattr(mod, attr, combined_queue)
+            print(f"[REHASH RAM] Aktiv fildelningskö återställd spikrakt i minnet!")
+
+        # Nollställ textköerna (send_queue) till tomma dicts så de inte krockar med text
+        for mod_name in ['queue_mgr', 'config', 'oserve', 'irc']:
+            mod = sys.modules.get(mod_name)
+            if mod:
+                for attr in ['send_queue', 'msg_queue', 'out_queue']:
+                    if hasattr(mod, attr): setattr(mod, attr, {})
+        print(f"[REHASH RAM] Textutmatningsköerna (send_queue) har nollställts i RAM.")
+
         # Återställ din reklam-timer så den väntar 5 nya minuter
         if hasattr(announce, 'last_announce_time'):
             import time
             announce.last_announce_time = time.time()
             
         # ---------------------------------------------------------------------
-        # 3. HELAUTOMATISK KANAL-SYNK (JOIN NYA / PART BORTTAGNA)
+        # 4. HELAUTOMATISK KANAL-SYNK (JOIN NYA / PART BORTTAGNA)
         # ---------------------------------------------------------------------
         oserve = sys.modules.get('oserve')
         irc_sock = getattr(oserve, 'irc_connection', None)
         
         if irc_sock:
-            # Skapa listor över dina NYA önskade kanaler från din nyladdade config.py
             new_chans = [c.strip().lower() for c in config.CHANNEL.split(",") if c.strip()]
             
-            # --- A. DETEKTERA OCH SKICKA JOIN FÖR NYA KANALER ---
             for chan in new_chans:
                 if chan not in old_chans:
                     irc_sock.send(f"JOIN {chan}\r\n".encode())
-                    # Skickar en snygg färgkodad [JOIN]-tagg till din #flac-debug
                     announce.send_debug(f"Joining channel {chan} due to new configuration layout!", category="JOIN")
-                    print(f"[REHASH SYNC] Joined new channel: {chan}")
+                    if chan.lower() not in config.channel_users:
+                        config.channel_users[chan.lower()] = set()
             
-            # --- B. DETEKTERA OCH SKICKA PART FÖR BORTTAGNA KANALER ---
             for chan in old_chans:
                 if chan not in new_chans:
-                    # Se till att vi aldrig lämnar din dolda debug-kanal av misstag
                     debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-debug').lower()
                     if chan != debug_chan:
                         irc_sock.send(f"PART {chan} :Removed from DDCore\r\n".encode())
-                        # Skickar en snygg färgkodad [PART]-tagg till din #flac-debug
                         announce.send_debug(f"Parting channel {chan} due to new configuration layout!", category="PART")
-                        print(f"[REHASH SYNC] Parted from removed channel: {chan}")
-                        
+                        if chan.lower() in config.channel_users:
+                            del config.channel_users[chan.lower()]
+            
+            print("[REHASH SYNK] Skickar en bakgrunds-NAMES för att hålla listorna helt färska...")
+            for chan in new_chans:
+                irc_sock.send(f"NAMES {chan}\r\n".encode())
+                
             print(f"[REHASH SYNC] Channel sync completed successfully.")
         else:
             print("[REHASH WARNING] Kunde inte synka kanaler eftersom rå socket saknades i minnet.")
         # ---------------------------------------------------------------------
         
-        # 4. BEKRÄFTELSE: Skickar VIP-notisen till #flac-debug
-        announce.send_debug(f"Rehash completed! ADVERTISEMENT RESUMED (Timer reset to 5 minutes).", category="INFO")
+        # 5. BEKRÄFTELSE
+        announce.send_debug(f"Rehash completed! RAM-Memory preserved seamlessly without disk-paging.", category="INFO")
         
     except Exception as e:
         import announce
@@ -334,11 +415,20 @@ def handle_list_update_request(user, target_chan):
             announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
             return
             
-        # 2. TRÅDAD RUN (Väntar in processen ordentligt = INGA ZOMBIES/DEFUNCT!)
-        process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=90.0)
+        # 2. TRÅDAD RUN (Väntar in processen helt utan stumma tidsgränser)
+        process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=None)
         
         if process.returncode == 0:
-            # 3. HÄMTA DET NYA FILANTALET FRÅN RAD 1 IGEN
+            # ---------------------------------------------------------------------
+            # STENHÅRD NFS- och DISKSYNKRONISERING: Vänta 2 sekunder efter stängning!
+            # Detta ger din NAS och nätverksbufferten tid att flusha filerna rent på disken.
+            # ---------------------------------------------------------------------
+            print(f"[UPDATE-SYNCH] Skriptet klart. Väntar 2.0s på disksynk inför filavläsning...")
+            import time
+            time.sleep(2.0)
+            # ---------------------------------------------------------------------
+            
+            # 3. HÄMTA DET NYA FILANTALET FRÅN RAD 1 (Nu helt krock-säkrat!)
             new_count = get_count_from_list()
             
             # Räkna ut den sanna, exakta skillnaden helt matematiskt
@@ -348,10 +438,11 @@ def handle_list_update_request(user, target_chan):
             
             # 4. BEKRÄFTELSE VIA VIP-EXPRESSEN
             announce.send_debug(
-                f"List update successfully completed! MasterList now contains {new_count:,} files. "
+                f"List update successfully completed! MasterList now contains {config.C_BOLD}{new_count:,}{config.C_RESET} files. "
                 f"Added {added_files:,} new file(s) since last index.", 
                 category="INFO"
             )
+
         else:
             error_msg = process.stderr.strip() if process.stderr else "Unknown script error"
             announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
