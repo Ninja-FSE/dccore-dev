@@ -21,6 +21,7 @@ DEBUG_CHANNEL = "#flac-serv"
 # ---------------------------------------------------------------------
 # 3. FILSYSTEM, SÖKVÄGAR OCH TEXTDATABASER
 # ---------------------------------------------------------------------
+PAUSE_ON_UPDATE = True  # 🛡️ GLOBAL UNDERHÅLLSVÄXEL: Om denna är True, så pausar boten ALL fildelning och sökning under !update
 FILE_DIRECTORY = "/mnt/nfs-musik"
 TMP_ZIP_DIR = "./data/tmp_zips"
 LOCAL_LIST_DIR = "./lists"

@@ -246,16 +246,29 @@ def check_queue_and_send(irc_sock, completed_user):
 
 def handle_download_request(irc_sock, user, requested_file, target_chan):
     """Triggas när någon begär en fil eller en hel mapp via !rar (Helt kraschsäkrad mot .mp3/.flac list-fel)"""
+    # ---------------------------------------------------------------------
+    # 🛡️ GLOBAL UNDERHÅLLSSPÄRR: (Kliniskt ren utan dolda lokal-import krockar!)
+    # ---------------------------------------------------------------------
+    if getattr(config, 'PAUSE_ON_UPDATE', False) is True and getattr(config, 'search_inprogress', False) is True:
+        oserve = sys.modules.get('oserve')
+        if oserve:
+            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: MasterList is currently rebuilding. File requests temporarily paused. Please wait 1-2 minutes.\r\n")
+        print(f"[MAINTENANCE BLOCK] Nekade fildelningsbegäran (.mp3/.flac/.rar) från {user} pga pågående !update.")
+        return
+    # ---------------------------------------------------------------------
+
     oserve = sys.modules.get('oserve')
     try:
         user_key = str(user).lower().strip()
         if oserve:
             oserve.active_downloads = len(config.active_transfers)
         print(f"[DCC] {user} requested: {requested_file}")
-        
+
+        # HÄR UNDER FORTSÄTTER DIN ORDINARIE KOD SPIKRAKT:
         # ---------------------------------------------------------------------
         # ASYNKRON MAPP-PACKNING (!rar Sluss med stenhård ROOT- och NFS-säkring)
         # ---------------------------------------------------------------------
+
         if requested_file.lower().startswith("!rar "):
             import announce as announce_mod
             

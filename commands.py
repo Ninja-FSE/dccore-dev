@@ -372,11 +372,26 @@ def handle_list_update_request(user, target_chan):
     import config
     import announce
     import glob
+    import threading
+    import time
     
     allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
     if user.lower() != allowed_admin and user.lower() != "flac":
         print(f"[SECURITY] Obehörig användare {user} försökte köra !update.")
         return
+
+    # 🛡️ DYNAMISK UNDERHÅLLSLÅSNING: Vi slår enbart på det globala RAM-låset om växeln är True i config!
+    if getattr(config, 'PAUSE_ON_UPDATE', False) is True:
+        if getattr(config, 'search_inprogress', False) is True:
+            announce.send_debug(f"List update request from {user} denied: Another system scan is already running.", category="INFO")
+            return
+        config.search_inprogress = True
+        print(f"[MAINTENANCE START] {user} aktiverade !update. Botens sök- och fildelningssystem är nu PAUSAT!")
+        announce.send_debug(f"System maintenance initiated by {user}. MasterList is rebuilding, file requests temporarily paused...", category="INFO")
+    else:
+        print(f"[UPDATE START] {user} aktiverade !update. Paus-växeln är False, fildelningen rullar på under tiden.")
+        announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive...", category="INFO")
+
 
     # Inre hjälpfunktion som läser ENBART rad 1 i din RIKTIGA masterlista (0% belastning!)
     def get_count_from_list():
@@ -405,53 +420,60 @@ def handle_list_update_request(user, target_chan):
 
     # 1. Hämta de gamla sanna filsiffrorna från rad 1
     old_count = get_count_from_list()
-    announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive...", category="INFO")
-    
-    try:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(base_path, "update_list.py")
-        
-        if not os.path.exists(script_path):
-            announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
-            return
+    announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive, bot paused...", category="INFO")
+    def async_list_updater():
+        try:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            script_path = os.path.join(base_path, "update_list.py")
             
-        # 2. TRÅDAD RUN (Väntar in processen helt utan stumma tidsgränser)
-        process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=None)
-        
-        if process.returncode == 0:
-            # ---------------------------------------------------------------------
-            # STENHÅRD NFS- och DISKSYNKRONISERING: Vänta 2 sekunder efter stängning!
-            # Detta ger din NAS och nätverksbufferten tid att flusha filerna rent på disken.
-            # ---------------------------------------------------------------------
-            print(f"[UPDATE-SYNCH] Skriptet klart. Väntar 2.0s på disksynk inför filavläsning...")
-            import time
-            time.sleep(2.0)
-            # ---------------------------------------------------------------------
+            if not os.path.exists(script_path):
+                announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
+                return
+                
+            # 2. TRÅDAD RUN (Väntar in processen helt utan stumma tidsgränser)
+            process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=None)
             
-            # 3. HÄMTA DET NYA FILANTALET FRÅN RAD 1 (Nu helt krock-säkrat!)
-            new_count = get_count_from_list()
-            
-            # Räkna ut den sanna, exakta skillnaden helt matematiskt
-            added_files = new_count - old_count
-            if added_files < 0: 
-                added_files = 0
-            
-            # 4. BEKRÄFTELSE VIA VIP-EXPRESSEN
-            announce.send_debug(
-                f"List update successfully completed! MasterList now contains {config.C_BOLD}{new_count:,}{config.C_RESET} files. "
-                f"Added {added_files:,} new file(s) since last index.", 
-                category="INFO"
-            )
+            if process.returncode == 0:
+                # ---------------------------------------------------------------------
+                # STENHÅRD NFS- och DISKSYNKRONISERING: Vänta 2 sekunder efter stängning!
+                # Detta ger din NAS och nätverksbufferten tid att flusha filerna rent på disken.
+                # ---------------------------------------------------------------------
+                print(f"[UPDATE-SYNCH] Skriptet klart. Väntar 2.0s på disksynk inför filavläsning...")
+                time.sleep(2.0)
+                # ---------------------------------------------------------------------
+                
+                # 3. HÄMTA DET NYA FILANTALET FRÅN RAD 1 (Nu helt krock-säkrat!)
+                new_count = get_count_from_list()
+                
+                # Räkna ut den sanna, exakta skillnaden helt matematiskt
+                added_files = new_count - old_count
+                if added_files < 0: 
+                    added_files = 0
+                
+                # 4. BEKRÄFTELSE VIA VIP-EXPRESSEN
+                announce.send_debug(
+                    f"List update successfully completed! MasterList now contains {config.C_BOLD}{new_count:,}{config.C_RESET} files. "
+                    f"Added {added_files:,} new file(s) since last index.", 
+                    category="INFO"
+                )
 
-        else:
-            error_msg = process.stderr.strip() if process.stderr else "Unknown script error"
-            announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
-            
-    except subprocess.TimeoutExpired:
-        announce.send_debug("List update FAILED: Script execution timed out after 90 seconds.", category="INFO")
-    except Exception as e:
-        print(f"[UPDATE ERROR] Det gick inte att köra listuppdateringen: {e}")
-        announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")
+            else:
+                error_msg = process.stderr.strip() if process.stderr else "Unknown script error"
+                announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
+                
+        except subprocess.TimeoutExpired:
+            announce.send_debug("List update FAILED: Script execution timed out after 90 seconds.", category="INFO")
+        except Exception as e:
+            print(f"[UPDATE ERROR] Det gick inte att köra listuppdateringen: {e}")
+            announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")
+        finally:
+            # 🔓 ÅTERSTÄLL AUTOMATISKT: Släpp upp det globala paus-låset till False igen!
+            config.search_inprogress = False
+            print("[MAINTENANCE END] Botens fildelning och sökfunktioner har återstartats automatiskt.")
+
+    # Starta bakgrundstråden linjärt
+    threading.Thread(target=async_list_updater, daemon=True).start()
+
 
 
 

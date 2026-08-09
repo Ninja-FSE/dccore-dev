@@ -91,6 +91,14 @@ def find_latest_list():
 
 def execute_search(irc_sock, user, search_term, channel):
     """Söker i listfilen - Kopierar och skickar raderna spikrakt precis som de står!"""
+        # 🛡️ GLOBAL UNDERHÅLLSSPÄRR: Blockera sökningen om växeln är aktiv i config och uppdatering pågår!
+    if getattr(config, 'PAUSE_ON_UPDATE', False) is True and getattr(config, 'search_inprogress', False) is True:
+        oserve = sys.modules.get('oserve')
+        if oserve:
+            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Search engine is temporarily paused during MasterList rebuild. Please wait a moment.\r\n")
+        print(f"[MAINTENANCE BLOCK] Nekade sökning (@find) från {user} pga pågående !update.")
+        return
+
     # Skydda systemet mot dubbelsökningar
     if getattr(config, 'search_inprogress', False):
         print(f"[SEARCH BLOCK] Ignorerade sökning från {user} eftersom en annan skanning pågår.")

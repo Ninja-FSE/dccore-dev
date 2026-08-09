@@ -63,6 +63,7 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     import db
     import stats_mgr
     import time
+    import config
     oserve = sys.modules.get('oserve')
     
     # Hämta live-mätare från databasen och statistikmotorn
@@ -109,8 +110,12 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
         oserve.queue_message("channel_announce", msg)
     print(f"[ANNOUNCE] Sent block transfer complete notice to {channel} for {user} ({speed_str})")
 
-    # 🧼 ULTRA-SLIMMAD SLUTRAD: Skickar exakt "Sent: rls to USER [Hastighet]"
-    send_debug(f"Sent: {file_name} to {user} [{human_speed}]", category="SENT")
+    # 🧼 RÄTTAD OCH ULTRA-SLIMMAD SLUTRAD: Använder din levande 'speed_str' helt kraschsäkert!
+    try:
+        safe_file = str(file_name)
+        send_debug(f"Sent: \"{safe_file}\" to {user} [{speed_str}]", category="INFO")
+    except Exception as debug_err:
+        print(f"[DEBUG-SENT ERROR] Kunde inte skicka slutnotis till debug-kanal: {debug_err}")
 
 def send_dcc_sending_notice(user, file_name):
     """Skickar en matchande privat NOTICE till användaren när överföringen startar eller köas!"""
