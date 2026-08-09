@@ -110,10 +110,10 @@ def check_queue_and_send(irc_sock, completed_user):
                     import announce
                     true_source_dir = next_file['path']
                     
-                    # RÄTTAD: Vi hämtar det färdiga namnet (med artist) direkt ur kön!
+                    # Vi plockar det färdiga, rena albumnamnet direkt ur kön!
                     raw_filename = next_file['file']
                     
-                    # REGEX-TVÄTT: Rensar bort eventuella dubbla .rar-ändelser live på 0ms!
+                    # Regex-tvätt som ser till att det blir exakt EN .rar-ändelse
                     clean_name = re.sub(r'(?:\.rar)+$', '', raw_filename, flags=re.IGNORECASE)
                     rar_filename = f"{clean_name}.rar"
                     
@@ -264,18 +264,24 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             oserve.active_downloads = len(config.active_transfers)
         print(f"[DCC] {user} requested: {requested_file}")
 
-        # HÄR UNDER FORTSÄTTER DIN ORDINARIE KOD SPIKRAKT:
         # ---------------------------------------------------------------------
         # ASYNKRON MAPP-PACKNING (!rar Sluss med stenhård ROOT- och NFS-säkring)
         # ---------------------------------------------------------------------
-
         if requested_file.lower().startswith("!rar "):
             import announce as announce_mod
             
             raw_win_path = requested_file[5:].strip()
+            
+            # Vi klipper bort eventuella gamla rester om någon klistrar in en gammal rad
+            if "::INFO::" in raw_win_path:
+                raw_win_path = raw_win_path.split("::INFO::")[0].strip()
+                
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
             
+            # Ta bort eventuella dubbla snedstreck i slutet innan vi mappar mot Linux-disken
             clean_win_path = win_path.replace("\\", "/").replace("D:/", "").replace("d:/", "")
+
+
             if clean_win_path.upper().startswith("MUSIC/"):
                 clean_win_path = clean_win_path[6:]
                 
@@ -308,24 +314,18 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     config.dcc_queue[user_key] = []
 
                 # ---------------------------------------------------------------------
-                # MASTER-SYNKERAD ARTIST-DETEKTOR (Spikas direkt vid begäran!)
+                # ÅTERSTÄLLD ALBUM-NAMNGIVARE (AutoQ-kompatibel med sparade parenteser!)
                 # ---------------------------------------------------------------------
-                full_sub_path = os.path.relpath(true_source_dir, config.FILE_DIRECTORY)
-                path_parts = [p for p in full_sub_path.replace("\\", "/").split("/") if p]
-                
-                artist_name = "Unknown_Artist"
-                if len(path_parts) > 0:
-                    raw_artist = path_parts[0]
-                    artist_name = re.sub(r'[^\w\-_\. ]', '', raw_artist).replace(" ", "_")
-                
                 folder_name = os.path.basename(true_source_dir.rstrip("/"))
-                clean_folder_name = re.sub(r'[^\w\-_\. ]', '', folder_name).replace(" ", "_")
                 
-                # Vi bygger det fullständiga, scen-verifierade namnet på en mikrosekund!
-                master_rar_filename = f"{artist_name}_-_{clean_folder_name}.rar"
+                # RÄTTAD: Tillåter parenteser ( och ) samt vanliga binde-streck så att AutoQ.mrc kan matcha filnamnet!
+                clean_folder_name = re.sub(r'[^\w\-_\. \(\)]', '', folder_name).replace(" ", "_")
+                
+                master_rar_filename = f"{clean_folder_name}.rar"
+
 
                 config.dcc_queue[user_key].append({
-                    "file": master_rar_filename, # SPARAD: Nu ligger det korrekta namnet spikat i dcc_queue.txt!
+                    "file": master_rar_filename, # SPARAD: Nu ligger det rena namnet spikat i dcc_queue.txt!
                     "path": true_source_dir,
                     "channel": target_chan,
                     "user_raw": user,
@@ -338,12 +338,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 user_pos = len(config.dcc_queue[user_key])
                 print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
                 
-                # 🧼 SLIMMAD STARTRAD: Skickar en (1) enda ren rad till din debug-kanal direkt!
+                # 🧼 SLIMMAD STARTRAD: Bevarad till 100%! Skickar en (1) enda ren rad till din debug-kanal direkt!
                 announce_mod.send_debug(f"{user} requested \"{clean_folder_name}\". Starting rar and sending when done.", category="INFO")
                 
                 announce_mod.send_dcc_queue_notice(user, folder_name, user_pos)
                 threading.Thread(target=check_queue_and_send, args=(irc_sock, user), daemon=True).start()
             return
+
 
         # --- FIX 1: Hämta index [0] ur listan INNAN .strip() körs! ---
         if " ::INFO::" in requested_file:

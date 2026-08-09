@@ -5,6 +5,7 @@ import datetime
 import zipfile
 import time
 import config
+import zipfile
 
 def format_size_human(bytes_size):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -115,7 +116,10 @@ def generate_master_list():
             for folder, filename, bytes_size in all_files_data:
                 if folder != current_folder:
                     current_folder = folder
-                    display_folder = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
+                    
+                    # 🛡️ RÄTTAD OCH AUTOQ-SÄKRAD: Vi ersätter alla Linux-snedstreck med Windows-backslashes live!
+                    raw_folder_str = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
+                    display_folder = raw_folder_str.replace("/", "\\")
                     
                     # 1. SKRIV METADATA TILL DEN VANLIGA LISTAN (Helt intakt precis som förut!)
                     f.write(f"\n=====================================================\n")
@@ -124,14 +128,14 @@ def generate_master_list():
                     
                     # 2. SKRIV TILL DIN NYA RAR-LISTA
                     if folder:  # Skippa tom rot-mapp
-                        f_stats = folder_stats[folder]
-                        friendly_dir_size = format_size_human(f_stats["bytes"])
-                        f_rar.write(f"!{config.NICKNAME} !rar {display_folder} [{f_stats['count']} Tracks - {friendly_dir_size}]\n")
+                        # 🧼 ULTRA-REN STANDARD FÖR AUTOQ: Inga Tracks eller parenteser på slutet. Sökvägen slutar på \
+                        f_rar.write(f"!{config.NICKNAME} !rar {display_folder}\n")
                 
                 single_file_size = format_size_human(bytes_size)
                 
                 # Skriv ut det rena filnamnet i den vanliga listan (Helt intakt!)
                 f.write(f"!{config.NICKNAME} {filename}  ::INFO:: {single_file_size}\n")
+
                     
         print(f"[LIST-GEN] Textlista skapad utan problem: {txt_path}")
         print(f"[LIST-GEN] RAR-albumlista skapad utan problem: {rar_path}")
