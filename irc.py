@@ -66,7 +66,7 @@ def irc_loop():
             continue
             
         # 🔑 SKICKA AUTENTISERING DIREKT (Utrotar frysningen vid reconnect!)
-        s.send(f"USER flacserv 0 * :flacserv bot\r\n".encode())
+        s.send(f"USER dccore 0 * :dccore bot\r\n".encode())
         s.send(f"NICK {config.NICKNAME}\r\n".encode())
         print("[INFO] NICK och USER skickat! Startar nätverksläsaren...")
         

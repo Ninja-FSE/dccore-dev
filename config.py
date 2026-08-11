@@ -6,14 +6,14 @@
 # ---------------------------------------------------------------------
 DEBUG_MODE     = False
 SCRIPT_VERSION = "DCCore v1.5.0-BETA"
-LIST_BASE_NAME = "FLAC-Serv"
+LIST_BASE_NAME = "DCCore"
 
 # ---------------------------------------------------------------------
 # 2. IRC NÄTVERKS- OCH KANALINSTÄLLNINGAR
 # ---------------------------------------------------------------------
 SERVER        = "irc.undernet.org"
 PORT          = 6667
-NICKNAME      = "FLAC-Serv"
+NICKNAME      = "DCCore"
 ADMIN_NICK    = "FLAC"
 CHANNEL       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
 DEBUG_CHANNEL = "#flac-serv"

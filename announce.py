@@ -183,8 +183,24 @@ def announce_worker():
                     
                     oserve = sys.modules.get('oserve')
                     active_dl = oserve.active_downloads if oserve else 0
-                    speed_bytes = oserve.current_speed_bytes if oserve else 0
                     fails_count = oserve.send_fails_count if oserve else 0
+                    
+                    # 📊 DYNAMISK LIVE-HASTIGHETS-MÄTARE (Räknar ut linans sanna fart i exakt denna millisekund!)
+                    speed_bytes = 0
+                    with config.queue_lock if hasattr(config, 'queue_lock') else threading.Lock():
+                        for tx in config.active_transfers:
+                            # Om sändningen har pågått i mer än 0ms, räkna ut dess live-fart
+                            if tx.get('bytes_sent', 0) > 0 and hasattr(config, 'active_transfers'):
+                                # Vi kikar i DCC-trådens sanna RAM-statistik
+                                speed_bytes += tx['bytes_sent']
+                                
+                    # Om det faktiskt skickas data just nu, slår vi ut totalen mot den totala körtiden
+                    # För att få ett rappt och levande snitt, hämtar vi formateringen via stats_mgr
+                    if speed_bytes > 0:
+                        # Vi omvandlar totalen till en snygg mIRC-sträng live via din statistikmotor!
+                        speed_str = stats_mgr.format_speed(speed_bytes)
+                    else:
+                        speed_str = "0k/s"
                     
                     free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)
                     queue_status = "NOW" if active_dl < config.MAX_DCC_SLOTS else "0"
@@ -194,11 +210,6 @@ def announce_worker():
                     total_sent_str, yesterday_str, today_str = get_formatted_stats_strings()
                     slots_str = f"{free_slots}/{config.MAX_DCC_SLOTS}"
                     
-                    if oserve and hasattr(oserve, 'format_speed'):
-                        speed_str = oserve.format_speed(speed_bytes)
-                    else:
-                        speed_str = "0k/s"
-                        
                     # Hämtar och formaterar ditt sparade rekord live från databasen
                     import db
                     raw_record = db.get_speed_record()
@@ -224,7 +235,7 @@ def announce_worker():
                         # Queued-lådan
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {queued_str} "
                         # Speed / Record-lådan
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: ({speed_str}) / Record: {record_str} "
+                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {speed_str} / Record: {record_str} "
                         # Total Sent-lådan
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {total_sent_str} "
                         # Search & Version-avslut
