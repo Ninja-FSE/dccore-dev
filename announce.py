@@ -260,7 +260,7 @@ def announce_worker():
                     raw_stats_bytes = stats_mgr.get_total_sent_bytes()
                     sent_mbs = int(raw_stats_bytes / 1024 / 1024)
                     
-                    ctcp_payload = f"SLOTS {config.MAX_DCC_SLOTS} {free_slots} {queue_status} {queued_count} 999 {int(speed_bytes)} {file_count} {raw_bytes} {fails_count} {sent_mbs} {raw_stats_bytes} {config.SCRIPT_VERSION}"
+                    ctcp_payload = f"SLOTS {config.MAX_DCC_SLOTS} {free_slots} {queue_status} {queued_count} 999 {int(speed_bytes_per_sec)} {file_count} {raw_bytes} {fails_count} {sent_mbs} {raw_stats_bytes} {config.SCRIPT_VERSION}"
                     ctcp_msg = f"PRIVMSG {chan} :\x01{ctcp_payload}\x01\r\n"
                     if oserve:
                         oserve.queue_message("channel_announce", ctcp_msg)
