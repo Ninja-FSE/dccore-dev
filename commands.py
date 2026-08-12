@@ -186,7 +186,7 @@ def handle_rehash_request(user, target_chan):
         import announce
         announce.is_ready = True
         
-        # =====================================================================
+         # =====================================================================
         # 3. ÅTERSTÄLL FRÅN RAM: Skriv tillbaka all data till de nya modulerna
         # =====================================================================
         # Återställ användare
@@ -207,12 +207,11 @@ def handle_rehash_request(user, target_chan):
                             for k, v in ram_user_slots.items(): combined_slots[k.upper()] = v
                             setattr(mod, attr, combined_slots)
 
-        # Återställ kön (Tryck tillbaka de exakta, rena objekten spikrakt)
+        # Återställ kön (Tryck tillbaka de exakta, rena objekten STRICT på små bokstäver)
         if ram_backup_queue:
             combined_queue = {}
             for k, v in ram_backup_queue.items():
                 combined_queue[k.lower()] = v
-                combined_queue[k.upper()] = v
                 
             for mod_name in ['dcc', 'config', 'oserve', 'queue_mgr', 'list']:
                 mod = sys.modules.get(mod_name)
@@ -220,7 +219,8 @@ def handle_rehash_request(user, target_chan):
                     for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
                         if hasattr(mod, attr):
                             setattr(mod, attr, combined_queue)
-            print(f"[REHASH RAM] Aktiv fildelningskö återställd spikrakt i minnet!")
+            print(f"[REHASH RAM] Aktiv fildelningskö återställd spikrakt i minnet på små bokstäver!")
+
 
         # Nollställ textköerna (send_queue) till tomma dicts så de inte krockar med text
         for mod_name in ['queue_mgr', 'config', 'oserve', 'irc']:
@@ -272,11 +272,26 @@ def handle_rehash_request(user, target_chan):
         # 5. BEKRÄFTELSE
         announce.send_debug(f"Rehash completed! RAM-Memory preserved seamlessly without disk-paging.", category="INFO")
         
+        # ---------------------------------------------------------------------
+        # 🔥 🔥 🔥 NY KÖ-VÄCKARE (Sparkar igång den fastfrusna kön live på 0ms!)
+        # ---------------------------------------------------------------------
+        if irc_sock:
+            import dcc
+            import threading
+            print("[REHASH-WAKE] Släpper fram köade användare i lediga slots parallellt...")
+            threading.Thread(
+                target=dcc.check_queue_and_send, 
+                args=(irc_sock, "system_next_trigger_fallback"), 
+                daemon=True
+            ).start()
+        # ---------------------------------------------------------------------
+        
     except Exception as e:
         import announce
         announce.is_ready = True
         print(f"[REHASH CRITICAL ERROR] Det gick inte att live-ladda om filerna: {e}")
         announce.send_debug(f"Rehash FAILED (Notices Resumed for safety): {e}", category="INFO")
+
 
 def handle_hard_ban_request(user, target_chan, msg_text):
     """Lägger till ett permanent wildcard-mönster i hard_bans.txt direkt via mIRC!"""

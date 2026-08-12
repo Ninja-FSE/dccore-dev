@@ -185,22 +185,30 @@ def announce_worker():
                     active_dl = oserve.active_downloads if oserve else 0
                     fails_count = oserve.send_fails_count if oserve else 0
                     
-                    # 📊 DYNAMISK LIVE-HASTIGHETS-MÄTARE (Räknar ut linans sanna fart i exakt denna millisekund!)
-                    speed_bytes = 0
+                    # 📊 DYNAMISK LIVE-HASTIGHETS-MÄTARE (Räknar ut sanna bytes per sekund!)
+                    speed_bytes_per_sec = 0
+                    import time
                     with config.queue_lock if hasattr(config, 'queue_lock') else threading.Lock():
                         for tx in config.active_transfers:
-                            # Om sändningen har pågått i mer än 0ms, räkna ut dess live-fart
-                            if tx.get('bytes_sent', 0) > 0 and hasattr(config, 'active_transfers'):
-                                # Vi kikar i DCC-trådens sanna RAM-statistik
-                                speed_bytes += tx['bytes_sent']
+                            # Vi hämtar starttiden och antalet skickade bytes för den aktiva slotten
+                            b_sent = tx.get('bytes_sent', 0)
+                            s_time = tx.get('start_time', time.time())
+                            duration = time.time() - s_time
+                            
+                            # Säkra att vi inte delar med noll
+                            if duration <= 0:
+                                duration = 0.1
                                 
-                    # Om det faktiskt skickas data just nu, slår vi ut totalen mot den totala körtiden
-                    # För att få ett rappt och levande snitt, hämtar vi formateringen via stats_mgr
-                    if speed_bytes > 0:
-                        # Vi omvandlar totalen till en snygg mIRC-sträng live via din statistikmotor!
-                        speed_str = stats_mgr.format_speed(speed_bytes)
+                            if b_sent > 0:
+                                # Vi plussar ihop den sanna live-hastigheten per sekund för denna slot
+                                speed_bytes_per_sec += int(b_sent / duration)
+                                
+                    # Vi formaterar den sanna totalhastigheten live via din statistikmotor!
+                    if speed_bytes_per_sec > 0:
+                        speed_str = stats_mgr.format_speed(speed_bytes_per_sec)
                     else:
                         speed_str = "0k/s"
+
                     
                     free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)
                     queue_status = "NOW" if active_dl < config.MAX_DCC_SLOTS else "0"

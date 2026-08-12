@@ -101,10 +101,10 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 config.rar_inprogress = True
 
-                with queue_lock:
-                    if user_key in config.dcc_queue and config.dcc_queue[user_key]:
-                        config.dcc_queue[user_key].pop(0)
-                        db.save_dcc_queue()
+                #with queue_lock:
+                #    if user_key in config.dcc_queue and config.dcc_queue[user_key]:
+                #        config.dcc_queue[user_key].pop(0)
+                #        db.save_dcc_queue()
 
                 def inline_rar_packer(sock):
                     import announce
@@ -163,10 +163,10 @@ def check_queue_and_send(irc_sock, completed_user):
                 return
             # ---------------------------------------------------------------------
             # Vanlig fildelning (om det var en färdig ljudfil)
-            with queue_lock:
-                if user_key in config.dcc_queue and config.dcc_queue[user_key]:
-                    config.dcc_queue[user_key].pop(0)
-                    db.save_dcc_queue()
+            #with queue_lock:
+            #    if user_key in config.dcc_queue and config.dcc_queue[user_key]:
+            #        config.dcc_queue[user_key].pop(0)
+            #        db.save_dcc_queue()
             
             f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
             f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
@@ -202,7 +202,9 @@ def check_queue_and_send(irc_sock, completed_user):
                     
             threading.Thread(target=user_queue_timer, args=(irc_sock, completed_user, target_chan), daemon=True).start()
             user_key = ""
-    # B) Global köhantering för nästa person i kön
+     # =====================================================================
+    # B) Global köhantering för nästa person i kön (Helsäkrad för 3 slots!)
+    # =====================================================================
     if oserve:
         oserve.active_downloads = len(config.active_transfers)
         
@@ -210,39 +212,68 @@ def check_queue_and_send(irc_sock, completed_user):
         with queue_lock:
             for waiting_user, user_files in list(config.dcc_queue.items()):
                 w_key = waiting_user.lower()
-                if w_key in config.frozen_queues or not user_files:
+                
+                # Om användaren inte har några filer i listan eller är fryst, gå vidare
+                if not user_files or len(user_files) == 0 or w_key in config.frozen_queues:
                     continue
                     
-                g_next = user_files
-                real_username = g_next.get('user_raw', waiting_user) if isinstance(g_next, dict) else waiting_user
+                # 🛡️ RÄTTAD: Vi plockar ut det FÖRSTA enskilda objektet ur listan så att .get() fungerar!
+                g_next = user_files[0]
+                if not isinstance(g_next, dict):
+                    continue
+                    
+                real_username = g_next.get('user_raw', waiting_user)
                 w_key = real_username.lower()
                 
-                g_chan = g_next.get('channel', config.CHANNEL.split(',')) if isinstance(g_next, dict) else config.CHANNEL.split(',')
-                g_name = g_next['file'] if isinstance(g_next, dict) else os.path.basename(str(g_next))
-                g_path = g_next['path'] if isinstance(g_next, dict) else str(g_next)
+                # Säkra upp kanalen, filnamnet och sökvägen från det sanna JSON-objektet
+                g_chan = g_next.get('channel', config.CHANNEL.split(','))
+                g_name = g_next.get('file', '')
+                g_path = g_next.get('path', '')
                 
+                # ---------------------------------------------------------------------
+                # TYP-SÄKRAD KANALSLUSS (Hanterar både textsträngar och listor!)
+                # ---------------------------------------------------------------------
                 user_is_globally_active = False
-                n_chan = g_chan.lower() if isinstance(g_chan, str) else g_chan.lower()
-                if hasattr(config, 'channel_users') and n_chan in config.channel_users:
-                    lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
-                    if w_key in lowered_glob_users:
-                        user_is_globally_active = True
+                if isinstance(g_chan, str):
+                    channels_to_check = [g_chan]
+                elif isinstance(g_chan, list):
+                    channels_to_check = g_chan
+                else:
+                    channels_to_check = config.CHANNEL.split(',')
+
+                if hasattr(config, 'channel_users'):
+                    for single_chan in channels_to_check:
+                        n_chan = str(single_chan).strip().lower()
+                        if n_chan in config.channel_users:
+                            lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
+                            if w_key in lowered_glob_users:
+                                user_is_globally_active = True
+                                break
+                # ---------------------------------------------------------------------
                         
                 if user_is_globally_active is True:
-                    if isinstance(g_next, dict) and g_next.get('is_unpacked_rar_folder') is True:
+                    # Om det är en virtuell mappladdning som väntar på packning, väck packaren!
+                    if g_next.get('is_unpacked_rar_folder') is True:
+                        print(f"[DCC QUEUE] Väckte virtuell mappladdning live för {real_username} i {g_chan}!")
+                        # Vi sätter igång din linjära packare i en separat tråd så loopen inte låser
                         threading.Thread(target=check_queue_and_send, args=(irc_sock, real_username), daemon=True).start()
                         break
                         
-                    user_files.pop(0)
-                    db.save_dcc_queue()
+                    # Om det var en vanlig singelfil (.mp3/.flac) som stod i kön, poppa och sänd direkt!
+                    #user_files.pop(0)
+                    #import db
+                    #db.save_dcc_queue()
                     
                     print(f"[DCC QUEUE] New user {real_username} verified live in RAM for {g_chan}. Got slot.")
                     config.active_transfers.append({"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name})
                     if oserve: oserve.active_downloads = len(config.active_transfers)
                     
+                    import announce
                     announce.send_dcc_sending_notice(real_username, g_name)
                     threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
                     break
+
+
 
 def handle_download_request(irc_sock, user, requested_file, target_chan):
     """Triggas när någon begär en fil eller en hel mapp via !rar (Helt kraschsäkrad mot .mp3/.flac list-fel)"""
@@ -593,14 +624,25 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try: dcc_sock.close()
         except: pass
         
+        # 🛡️ SÄKRAD KÖ-RENSNING: Vi raderar filen ur dcc_queue.txt FÖRST NÄR sändningen är helt avslutad!
+        # Om botten kraschar eller dör mitt i, så ligger raden kvar helt orörd på disken!
+        try:
+            u_key = user.lower()
+            with queue_lock:
+                if u_key in config.dcc_queue and len(config.dcc_queue[u_key]) > 0:
+                    config.dcc_queue[u_key].pop(0)
+            import db
+            db.save_dcc_queue()
+            print(f"[DCC CLEANUP] Raden för {user} har poppats och rensats från disken efter avslutad sändning.")
+        except Exception as pop_err:
+            print(f"[DCC CLEANUP ERROR] Kunde inte poppa raden: {pop_err}")
+
         config.rar_inprogress = False
         
         # NYTT: Vi låser upp användarens nick ur RAM-minnet i samma millisekund som sändningen avslutas!
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
 
-        
-        config.rar_inprogress = False
         
         # ---------------------------------------------------------------------
         # INTELLIGENT RAR-CACHE & SÄNDNINGSLÅS (Totalsäkrad för 3 slots parallellt!)
