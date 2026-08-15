@@ -53,7 +53,7 @@ DCC_PORT_END       = 55010
 # 6. ANTI-FLOOD OCH AUTOMATISKT SÄKERHETSSKYDD
 # ---------------------------------------------------------------------
 MAX_REQUESTS     = 10       # Max antal kommandon (sök/fil) per tidsfönster
-REQUEST_WINDOW   = 10       # Storlek på det rullande tidsfönstret (i sekunder)
+REQUEST_WINDOW   = 5       # Storlek på det rullande tidsfönstret (i sekunder)
 MUTE_TIME        = 30       # Paustid i sekunder för varning vid första flood-överskridelsen
 MAX_SEND_FAILS   = 3        # Automatiskt ban efter x antal misslyckade sändningar
 

@@ -41,11 +41,11 @@ def check_user_status(user):
                         print(f"[SECURITY BLOCK] Ignorerade meddelande från {user} (Matchade mönster i {filename}: {pattern})")
                         
                         # NYTT: Skickar en blixtsnabb färgkodad VIP-notis till #flac-debug via din råa socket!
-                        announce.send_debug(
-                            f"Access denied for banned user {user} (matched pattern '{pattern}').", 
-                            category=category_tag
-                        )
-                        return False
+                        #announce.send_debug(
+                        #    f"Access denied for banned user {user} (matched pattern '{pattern}').", 
+                        #    category=category_tag
+                        #)
+                        #return False
                         
         except Exception as e:
             print(f"[SECURITY ERROR] Kunde inte läsa filen {filename}: {e}")

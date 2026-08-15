@@ -194,6 +194,12 @@ def send_list_trigger_info(irc_sock, user):
 
 def send_file_list(irc_sock, user, channel):
     """Hittar den befintliga .zip-listan och startar DCC SEND med rätt kanalspårning!"""
+    # 🛡️ UNDERHÅLLS-STATUS LIVE: Om listuppdatering pågår, ge ett intelligent svar istället för felmeddelande!
+    if getattr(config, 'update_inprogress', False) is True:
+        msg = f"NOTICE {user} :{config.C_BOLD}System Notice{config.C_RESET}: Master list is currently rebuilding. Please wait a few minutes and try again. \r\n"
+        oserve.queue_message(user, msg)
+        return
+
     current_zip_path = find_latest_zip()
     
     if not current_zip_path or not os.path.exists(current_zip_path):
@@ -206,4 +212,5 @@ def send_file_list(irc_sock, user, channel):
     
     # Nu skickas 'channel' med till DCC-motorn i stället för 'user'
     dcc.handle_download_request(irc_sock, user, zip_filename, channel)
+
 

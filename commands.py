@@ -491,10 +491,17 @@ def handle_list_update_request(user, target_chan):
         finally:
             # 🔓 ÅTERSTÄLL AUTOMATISKT: Släpp upp det globala paus-låset till False igen!
             config.search_inprogress = False
+            
+            # 🧼 SLÄCK UNDERHÅLLS-FLAGGAN: Nu vet list.py att listan är klar och öppnar zip-slussen live!
+            config.update_inprogress = False
             print("[MAINTENANCE END] Botens fildelning och sökfunktioner har återstartats automatiskt.")
+
+    # 🛡️ TÄND UNDERHÅLLS-FLAGGAN: Nu vet hela botten på under 0ms att en uppdatering startar live!
+    config.update_inprogress = True
 
     # Starta bakgrundstråden linjärt
     threading.Thread(target=async_list_updater, daemon=True).start()
+
 
 
 
