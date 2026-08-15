@@ -2,6 +2,32 @@
 
 Här loggas alla versionsförändringar, optimeringar och buggfixar som gjorts under tidens gång i DCCore-projektet.
 
+## 🟦 v1.9.0-RC1 (2026-08-15) - "The Gold & Audio Handshake Release"
+### 🚀 Nya funktioner
+- **🛡️ Apostrof-räddare i Packaren (`Single Quote Filter`):** Implementerat en intelligent teckenbevarare inuti `inline_rar_packer` i `dcc.py` via `os.path.basename`. Om källmappen på din NFS-disk innehåller en apostrof (`'`), tvingas tecknet med live in i det färdiga `.rar`-filnamnet (t.ex. `A_Winter's_Tale_(1995).rar`). Detta förhindrar att tecknet tvättas bort till fula understreck, vilket säkrar 100% träffsäkerhet i din AutoQ!
+- **💽 Separerad Multidisc-tvätt (`update_list.py`):** Optimerat listgeneratorn till att göra skillnad på dina textlistor. Den vanliga textlistan (`.txt`) visar fullständiga undermappar som `\Digital Media 1\` och `\CD2\` för att bevara låtstrukturen, medan din albumlista (`-RAR-.txt`) tvättas kirurgiskt under filskrivningen. Alla multidisc-ändelser klipps bort så att hela boxen listas på en (1) enda ren rad (t.ex. `Mission Underground (2026)\`).
+- **🗜️ Helautomatiskt Box-pack:** När en multidisc-huvudrad requestas via `!rar`, suger din `dcc.py`-sändningsmotor med sig samtliga undermappar helautomatiskt in i ett och samma `.rar`-arkiv på din containers SSD-cache.
+- **⚙️ Helautomatisk Kallstart & Auto-Wake:** Monterat en trådsäkrad tändningsrad i slutet av uppstartskedjan i `oserve.py`. Så fort boten har stabiliserats (5 sekunder efter kanalinträde), scannas `dcc_queue.txt` helautomatiskt och startar fildelningsslussen direkt utan krav på manuella kommandon.
+
+### 🐛 Buggfixar & Optimeringar
+- **🧬 Helsäkrat Singel-Trådat Dubbelpostningsskydd:** Flyttat all kritisk slutlogik, disksanering, kö-poppning och kanalreklam spikrakt in i ett helisolerat `finally:`-block i `dcc.py`. Detta garanterar att kanalannonseringen körs **en (1) enda, perfekt gång** per sändning och utplånar dolda spöktrådar.
+- **🏎️ 100% DCC Complete i mIRC:** Återställde den tidstestade 1.5 sekunders andningspausen i slutet av sändningen. Detta ger mIRC-klienten exakt rätt tidsfönster att flusha nätverksbufferten, vilket garanterar **Success/Complete** istället för felaktiga `incomplete`-flaggor på snabba Bahnhof-linor.
+- **🌈 Skiftlägesoberoende AutoQ-Bypass:** Totalrenoverat kanalkontrollsystem som är 100% blint för stora och små bokstäver (t.ex. `abueio` vs `AbueIo`). System-triggers (`system_next_trigger_fallback`) slår nu vidöppet för bypass-slussarna så att kön aldrig fryser fast i tystnad vid uppstart eller omladdning.
+- **🧼 Sanerad DB-räknare:** Statistikblocket har rensats från lokala `import db`-krockar som tidigare orsakade `UnboundLocalError`. Terminalutskriften har städats från råa array-listor till en superren guldstandard: `[DB COUNTER] Statistik uppdaterad live på disken! (Skickade filer: Xst)`.
+- **🎛️ Lås-rensande Rehash (`!rehash`):** `!rehash`-motorn i `commands.py` har uppgraderats till och hämtar nätverkssocketen direkt via den levande instansen i `sys.modules`. Den nollställer och spolar ur alla gamla frusna packarlås (`config.rar_inprogress = False`) och användar-lås ur RAM-minnet på under 0 ms.
+- **📊 Kalibrerad Kanalreklam:** Slots-klockan i `announce.py` har kalibrerats så att den delar totalhastigheten på antalet aktiva nedladdningar. Detta ger ett helt verklighetstroget live-snitt per slot och utplånar kosmiska "rymdhastigheter" (t.ex. 51 miljoner MB/s) från kanalen.
+
+---
+## 🟦 v1.5.0-BETA (2026-08-10) - "The RAM Dictionary Queue & Inline RAR Packer Update"
+### 🚀 Nya funktioner
+- **📦 Högpresterande RAM Dictionary-kö (`dcc_queue.txt`):** Totalrenoverat hela kösystemet från enkla textsträngar till en strukturerad JSON/Dictionary-matris lagrad direkt i RAM-minnet. Varje kö-objekt spårar nu sanna metadata i realtid (användarnamn, kanal, absolut sökväg, filtyp, samt flaggorna `is_unpacked_rar_folder` och `is_temporary_zip`).
+- **⚡ Isolerad Inline RAR-Packare (`inline_rar_packer`):** Implementerat en automatisk, trådsäkrad komprimeringsmotor djupt inbäddat i `dcc.py` via `subprocess.run(["rar", "a", ...])`. Boten känner omedelbart igen requestade album-mappar, skapar ett temporärt virtuellt `.rar`-arkiv direkt på din containers SSD-cache (`data/tmp_zips/`), och strömmar sedan paketet live över nätverket.
+- **🛡️ Skrivskyddad Musikdisk-säkring (`RO-Protection`):** Genom att tvinga RAR-motorn att arbeta via en dedikerad arbetsväxel (`-w`) riktad mot SSD-disken, garanteras det att din känsliga NFS-musikdisk lämnas 100 % i fred utan att boten någonsin försöker skriva temporärdata i dina skrivskyddade musikmappar.
+
+### 🐛 Buggfixar & Optimeringar
+- **🔒 Stenhårda RAM-lås mot Trådkrockar (`rar_inprogress`):** Introducerat de globala minneslåsen `config.rar_inprogress` och `config.user_processing_lock`. Detta sätter en linjär spärr i kön som gör att boten strikt packar och skickar en (1) virtuell mapp i taget, vilket utplånade tidigare CPU- och disk-skenor helt.
+- **🧹 Automatisk Disksanering (Cache Cleanup):** Byggt en intelligent rensningsfunktion i sändningsavslutet som kontrollerar om en temporär `.rar`-fil fortfarande behövs av en annan aktiv slot eller användarkö. Om filen är helt ledig, raderas den omedelbart från SSD-disken via `os.remove()` för att hålla lagringen kliniskt ren.
+
 ---
 
 ## 🟦 v1.4.5-BETA (2026-07-31) - "The Multi-Character Regex Sanitizer Update"
