@@ -5,7 +5,7 @@
 # 1. SYSTEM- OCH GLOBALA MOTORINSTÄLLNINGAR
 # ---------------------------------------------------------------------
 DEBUG_MODE     = False
-SCRIPT_VERSION = "DCCore v1.5.0-BETA"
+SCRIPT_VERSION = "DCCore v1.9.0-RC1"
 LIST_BASE_NAME = "DCCore"
 
 # ---------------------------------------------------------------------
