@@ -1,33 +1,41 @@
-# FLAC-Serv IRC DCCore Daemon ??
+# FLAC-Serv IRC DCCore Daemon ğŸš€
 
-En extremt snabb, stabil och skräddarsydd IRC DCC-fildelningsmotor (OmenServe-arkitektur) byggd i Python 3.10 för Undernet. Scriptet är optimerat för Proxmox LXC-containrar och levererar fildelningsnotiser, avancerad databasstatistik samt realtidsövervakning med mIRC-färger i absolut guldstandard.
+An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe architecture) built in Python 3.10 for any IRC Network. The script is fully optimized for Proxmox LXC containers, delivering file-sharing notifications, advanced database statistics, and real-time monitoring with mIRC colors at an absolute gold standard.
 
-## ? Nyckelfunktioner
+## âœ¨ Key Features
 
-- **? VIP Express-kö:** Isolerad högprioriterad kö (`vip_queue`) som skjuter ut privata kö-kontroller (`@flac-serv-que`) och sök-headers på under 1 millisekund, helt opåverkad av vanliga flood-skydd eller kanalreklam.
-- **?? Smart Frysbox & Realtime-väckning:** Om en användare med filer i kön råkar göra `PART` eller tappar nätverket (`QUIT`), fryses kön automatiskt i en bakgrundstråd under 5 minuter. Om användaren gör `JOIN` tinar kön upp direkt på 0ms och fortsätter skicka.
-- **?? Centralt mIRC Block-tema:** Fullständigt temasatt via `announce.py` med tunga färgblock (Turkos/Mörkröd) och kritvita bakgrundsplattor, kliniskt rensad från färgspill och klientspecifika cache-rutor.
-- **?? 7-Kolonns Avancerad Databas:** Skottsäker live-statistik (`stats.txt`) som mäter totalt skickade filer/bytes, gårdagens och dagens aktivitet samt synkade listdatum i realtid med tvingad disk-flush (`fsync`).
-- **??? Dedikerad VIP Debug-kanal:** Helautomatisk nätverkssluss som strömmar tidstämplade och färgkodade CLI-loggar (`[SENT]`, `[PART]`, `[QUIT]`, `[JOIN]`) live till kanalen `#flac-debug` via VIP-expressen.
+- **âš¡ VIP Express Queue:** An isolated, high-priority queue (`vip_queue`) that fires out private queue controls (`@flac-serv-que`) and search headers in under 1 millisecondâ€”completely unaffected by standard flood protection or channel advertisements.
+- **â„ï¸ Smart Freeze Box & Real-Time Wakeup:** If a user with files in the queue performs a `PART` or disconnects (`QUIT`), their queue is automatically frozen in a background thread for 5 minutes. If the user rejoins (`JOIN`), the queue thaws instantly (0ms) and resumes transmission.
+- **ğŸ¨ Central mIRC Block Theme:** Fully themed via `announce.py` featuring heavy color blocks (Teal/Dark Red) and crisp white background plates, clinically cleared of color bleeding and client-specific cache artifacts.
+- **ğŸ“Š Advanced 7-Column Database:** Bulletproof live statistics (`stats.txt`) tracking total sent files/bytes, yesterday's and today's activity, and synced list dates in real time with forced disk-flush (`fsync`) for local storage optimization.
+- **ğŸ› ï¸ Dedicated VIP Debug Channel:** A fully automated network gateway streaming timestamped and color-coded CLI logs (`[SENT]`, `[PART]`, `[QUIT]`, `[JOIN]`) live to the `#your-debug` channel via the VIP Express queue.
 
-## ?? Filstruktur
+## ğŸ“ File Structure
 
-- `oserve.py` — Centrala motorn, trådhanteraren och flood-skyddsköerna.
-- `irc.py` — Dedikerad nätverksmodul, asynkron loop och kedjad kommandotolk.
-- `dcc.py` — DCC-handskakningar, socket-sändare och smarta frysbox-timers.
-- `announce.py` — Centrala mIRC-temat, kanalannonseringar och VIP-debugmotorn.
-- `commands.py` — Användarkommandon (`que`, `remove`) isolerade från nätverksloopen.
-- `stats_mgr.py` — Dum datamodul för storleks- och hastighetsberäkningar.
-- `db.py` — I/O-gränssnitt för databasen med tvingat skrivskydd vid filslut.
-- `config.py` — Central konfigurationsfil för nätverk, slots, timers och färgkoder.
+- `oserve.py` â€” Core engine, thread manager, and flood-protection queues.
+- `irc.py` â€” Dedicated network module, asynchronous loop, and chained command parser.
+- `dcc.py` â€” DCC handshakes, socket transmitters, and smart freeze-box timers.
+- `announce.py` â€” Central mIRC theme, channel announcements, and the VIP debug engine.
+- `commands.py` â€” User commands (`que`, `remove`) isolated from the main network loop.
+- `stats_mgr.py` â€” Dumb data module managing file sizes and transfer speed calculations.
+- `db.py` â€” Database I/O interface featuring forced write-protection at EOF.
+- `config.py` â€” Central configuration file and runtime memory registry containing:
+  - Global Engine Settings (Debug flags, script versions, and list base names)
+  - IRC Network Settings (Servers, ports, nicknames, channels, and admin control tags)
+  - Filesystem & Storage Paths (Maintenance switches, storage directories, and database file paths)
+  - Channel Advertisement Clock (Interval timers for public automated broadcasts)
+  - Bandwidth & Queue Caps (Max DCC slot counts, user/global limits, and DCC port ranges)
+  - Anti-Flood & Security Shields (Request windows, warning thresholds, and auto-ban triggers)
+  - Native mIRC Formatting (IRC-standard control codes for colors, text weight, and styling)
+  - Global In-Memory RAM Arrays (Live trackers for active transfers, search-locks, and frozen background queues)
 
-## ?? Installation & Uppstart
+## âš™ï¸ Installation & Startup
 
-### Förutsättningar
-Scriptet är utvecklat och testat för **Python 3.10** i en Linuxmiljö (t.ex. Debian/Ubuntu LXC i Proxmox).
+### Prerequisites
+The script is developed and tested for **Python 3.10** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox).
 
-### Starta Daemonen
-För att starta om boten helt rent, rensa dolda cache-filer och tvinga fram en ny inläsning av kodändringar i RAM-minnet, kör du:
+### Starting the Daemon
+To perform a completely clean reboot of the bot, clear hidden cache files, and force a fresh reload of code modifications into RAM, execute:
 ```bash
 pkill -f oserve.py && rm -rf __pycache__ */__pycache__ && python3 oserve.py
 ```
