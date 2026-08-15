@@ -14,6 +14,7 @@ import irc        # Hanterar nätverksporten till Undernet
 import queue_mgr  # Hanterar flood-skyddskön (Round-Robin)
 import security   # Hanterar användarbans och mutening
 import stats_mgr  # Hanterar storlekar, hastighet och uptime
+import commands    # Hanterar alla kommandon som användare kan skriva
 
 # Kön för att hålla koll på unika användare (Flood Protection)
 config.send_queue = {}

@@ -23,6 +23,14 @@ def format_total_size(bytes_size):
 
 def generate_master_list():
     """Skannar musikmappen, rensar gamla filer först och bygger båda listorna samtidigt"""
+    import os
+    import sys
+    import time
+    import datetime
+    import zipfile
+    import re
+    import config
+
     if not os.path.exists(config.LOCAL_LIST_DIR):
         os.makedirs(config.LOCAL_LIST_DIR)
 
@@ -58,22 +66,23 @@ def generate_master_list():
     total_bytes = 0
 
     for root, dirs, files in os.walk(config.FILE_DIRECTORY):
+        # Spara alla sanna låtar under sin exakta och fullständiga disk-sökväg!
         for file in files:
-            full_file_path = os.path.join(root, file)
-            file_bytes = 0
-            try:
-                file_bytes = os.path.getsize(full_file_path)
-                total_bytes += file_bytes
-            except:
-                pass
-            
-            rel_dir = os.path.relpath(root, config.FILE_DIRECTORY)
-            if rel_dir == ".":
-                rel_dir = ""
-            all_files_data.append((rel_dir, file, file_bytes))
+            if file.lower().endswith(('.mp3', '.flac')):
+                full_file_path = os.path.join(root, file)
+                file_bytes = 0
+                try:
+                    file_bytes = os.path.getsize(full_file_path)
+                    total_bytes += file_bytes
+                except:
+                    pass
+                rel_dir = os.path.relpath(root, config.FILE_DIRECTORY)
+                if rel_dir == ".":
+                    rel_dir = ""
+                all_files_data.append((rel_dir, file, file_bytes))
 
-    # RÄTTAD: Sorterar nu exakt och spikrakt på mappnamn index 0 och filnamn index 1!
-    all_files_data.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+    # Sortera på sanna mappnamn och filnamn
+    all_files_data.sort(key=lambda x: (str(x[0]).lower(), str(x[1]).lower()))
 
     total_files_count = len(all_files_data)
     scan_end = time.time()
@@ -82,6 +91,14 @@ def generate_master_list():
         elapsed_seconds = 0.1
 
     files_per_second = int(total_files_count / elapsed_seconds)
+    def format_total_size(b):
+        for unit in ['B','KB','MB','GB','TB']:
+            if b < 1024.0: return f"{b:.2f}{unit}"
+            b /= 1024.0
+        return f"{b:.2f}PB"
+    def format_size_human(b):
+        return format_total_size(b)
+
     formatted_size = format_total_size(total_bytes)
     
     time_struct = time.gmtime(elapsed_seconds)
@@ -90,53 +107,54 @@ def generate_master_list():
     day = datetime.datetime.now().day
     suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
     date_header_str = datetime.datetime.now().strftime(f"{day}{suffix} %b %Y")
+    
     try:
-        # Vi öppnar BÅDE den vanliga textlistan och din nya RAR-lista samtidigt!
         with open(txt_path, "w", encoding="utf-8") as f, \
              open(rar_path, "w", encoding="utf-8") as f_rar:
                  
             f.write(f"List of {total_files_count:,} Files ({formatted_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n")
             f.write(f"To request a file, copy/paste to the channel... !{config.NICKNAME} FILENAME eg. !{config.NICKNAME} Songname.flac\n\n\n")
 
-            # Skriv en snygg header högst upp i din nya RAR-albumlista
             f_rar.write(f"List of Entire Album Folders (!rar) for !{config.NICKNAME} generated on {date_header_str}\n")
             f_rar.write(f"To request an entire album, copy/paste the line... eg. !{config.NICKNAME} !rar D:\\MUSIC\\Album\\\n")
             f_rar.write("="*90 + "\n\n")
 
             current_folder = None
-            
-            # Förhandstitta och räkna ihop mappstatistik (Spår + Storlek) för RAR-listan
-            folder_stats = {}
-            for folder, filename, bytes_size in all_files_data:
-                if folder not in folder_stats:
-                    folder_stats[folder] = {"count": 0, "bytes": 0}
-                folder_stats[folder]["count"] += 1
-                folder_stats[folder]["bytes"] += bytes_size
+            written_rar_folders = set() # Skyddar din !rar-lista från att få dubbelrader!
 
             for folder, filename, bytes_size in all_files_data:
                 if folder != current_folder:
                     current_folder = folder
                     
-                    # 🛡️ RÄTTAD OCH AUTOQ-SÄKRAD: Vi ersätter alla Linux-snedstreck med Windows-backslashes live!
+                    # 🛡️ NORMAL LISTUTSKRIFT: Skriver den fullständiga undermappen (t.ex. \Digital Media 1\) till textlistan!
                     raw_folder_str = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
                     display_folder = raw_folder_str.replace("/", "\\")
                     
-                    # 1. SKRIV METADATA TILL DEN VANLIGA LISTAN (Helt intakt precis som förut!)
                     f.write(f"\n=====================================================\n")
                     f.write(f"{display_folder}\n")
                     f.write(f"=====================================================\n")
                     
-                    # 2. SKRIV TILL DIN NYA RAR-LISTA
-                    if folder:  # Skippa tom rot-mapp
-                        # 🧼 ULTRA-REN STANDARD FÖR AUTOQ: Inga Tracks eller parenteser på slutet. Sökvägen slutar på \
-                        f_rar.write(f"!{config.NICKNAME} !rar {display_folder}\n")
-                
+                    # 🛡️ KIRURGISK RAR-TVÄTT: Tvättar bort multidisc-ändelser ENBART för !rar-albumlistan!
+                    if folder:
+                        rar_folder_clean = folder
+                        lowered_rar = rar_folder_clean.lower()
+                        for box_word in ['\\cd', '\\disc', '\\volume', '\\digital media', '\\media', '/cd', '/disc', '/volume', '/digital media', '/media']:
+                            if box_word in lowered_rar:
+                                idx = lowered_rar.find(box_word)
+                                if idx != -1:
+                                    rar_folder_clean = rar_folder_clean[:idx]
+                                break
+                                
+                        raw_rar_str = f"D:\\MUSIC\\{rar_folder_clean}\\"
+                        display_rar_folder = raw_rar_str.replace("/", "\\")
+                        
+                        # Skriv raden STRICT en gång per huvudalbum till .rar-textfilen!
+                        if display_rar_folder not in written_rar_folders:
+                            f_rar.write(f"!{config.NICKNAME} !rar {display_rar_folder}\n")
+                            written_rar_folders.add(display_rar_folder)
                 single_file_size = format_size_human(bytes_size)
-                
-                # Skriv ut det rena filnamnet i den vanliga listan (Helt intakt!)
                 f.write(f"!{config.NICKNAME} {filename}  ::INFO:: {single_file_size}\n")
 
-                    
         print(f"[LIST-GEN] Textlista skapad utan problem: {txt_path}")
         print(f"[LIST-GEN] RAR-albumlista skapad utan problem: {rar_path}")
         

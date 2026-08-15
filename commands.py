@@ -269,22 +269,29 @@ def handle_rehash_request(user, target_chan):
             print("[REHASH WARNING] Kunde inte synka kanaler eftersom rå socket saknades i minnet.")
         # ---------------------------------------------------------------------
         
-        # 5. BEKRÄFTELSE
+        # 5. BEKRÄFTELSE VIA VIP-EXPRESSEN
         announce.send_debug(f"Rehash completed! RAM-Memory preserved seamlessly without disk-paging.", category="INFO")
         
-        # ---------------------------------------------------------------------
-        # 🔥 🔥 🔥 NY KÖ-VÄCKARE (Sparkar igång den fastfrusna kön live på 0ms!)
-        # ---------------------------------------------------------------------
-        if irc_sock:
+        # 🔥 SLUSS-ÖPPNARE: Nollställer alla gamla hängda RAM-lås och rensar spök-spärrar vid rehash!
+        config.rar_inprogress = False
+        if hasattr(config, 'user_processing_lock'):
+            config.user_processing_lock = set()
+
+        # Hämta den sanna, levande nätverkssocketen direkt ur RAM-minnet
+        oserve_mod = sys.modules.get('oserve')
+        live_socket = getattr(oserve_mod, 'irc_connection', None) if oserve_mod else None
+        
+        if live_socket:
             import dcc
             import threading
-            print("[REHASH-WAKE] Släpper fram köade användare i lediga slots parallellt...")
+            print("[REHASH-WAKE] Släpper fram köade användare i lediga slots...")
             threading.Thread(
                 target=dcc.check_queue_and_send, 
-                args=(irc_sock, "system_next_trigger_fallback"), 
+                args=(live_socket, "system_next_trigger_fallback"), 
                 daemon=True
             ).start()
-        # ---------------------------------------------------------------------
+        else:
+            print("[REHASH ERROR] Kunde inte väcka kön helautomatiskt eftersom live_socket saknades i RAM.")
         
     except Exception as e:
         import announce

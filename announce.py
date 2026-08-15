@@ -203,11 +203,13 @@ def announce_worker():
                                 # Vi plussar ihop den sanna live-hastigheten per sekund för denna slot
                                 speed_bytes_per_sec += int(b_sent / duration)
                                 
-                    # Vi formaterar den sanna totalhastigheten live via din statistikmotor!
-                    if speed_bytes_per_sec > 0:
-                        speed_str = stats_mgr.format_speed(speed_bytes_per_sec)
+                    # 🛡️ FIXAD: Räknar ut ett sanna live-snitt och tvättar siffran till snygg mIRC-standard!
+                    if speed_bytes_per_sec > 0 and active_dl > 0:
+                        true_live_speed = int(speed_bytes_per_sec / active_dl)
+                        speed_str = stats_mgr.format_speed(true_live_speed)
                     else:
                         speed_str = "0k/s"
+
 
                     
                     free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)
