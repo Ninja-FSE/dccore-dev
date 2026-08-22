@@ -164,12 +164,29 @@ def get_formatted_stats_strings():
     return total_str, yesterday_str, today_str
 
 # Globala variabler for levande trafikstatistik (Mäts i realtid via dcc.py)
+# Global variabel som lagrar ID:t på den tråd som faktiskt har rätt att köra just nu
+current_worker_id = 0
+
 def announce_worker():
-    """Fristående tidstråd för OmenServe-reklam - Rensad från lagcheck!"""
-    print("[ANNOUNCE] Multi-channel announce worker started in announce.py.")
+    """Fristående tidstråd för OmenServe-reklam - 100% återanslutningssäker!"""
+    global current_worker_id
+    import time
+    import sys
+    import config
+    
+    # Skapa ett unikt ID för just denna trådstart baserat på nuvarande klockslag
+    my_worker_id = time.time()
+    current_worker_id = my_worker_id
+    
+    print(f"[ANNOUNCE] Multi-channel announce worker started (Thread ID: {my_worker_id}).")
     
     while True:
         try:
+            # 🛡️ TRÅDDÖDARE: Om en återanslutning har skapat en nyare tråd, stäng ner denna direkt!
+            if current_worker_id != my_worker_id:
+                print(f"[REKLAM-DÖD] Gamla spöktråden (ID: {my_worker_id}) stänger ner sig själv i tystnad.")
+                break
+                
             if is_ready:
                 channels_to_spam = config.CHANNEL.split(",")
                 for chan in channels_to_spam:
@@ -190,17 +207,14 @@ def announce_worker():
                     import time
                     with config.queue_lock if hasattr(config, 'queue_lock') else threading.Lock():
                         for tx in config.active_transfers:
-                            # Vi hämtar starttiden och antalet skickade bytes för den aktiva slotten
                             b_sent = tx.get('bytes_sent', 0)
                             s_time = tx.get('start_time', time.time())
                             duration = time.time() - s_time
                             
-                            # Säkra att vi inte delar med noll
                             if duration <= 0:
                                 duration = 0.1
                                 
                             if b_sent > 0:
-                                # Vi plussar ihop den sanna live-hastigheten per sekund för denna slot
                                 speed_bytes_per_sec += int(b_sent / duration)
                                 
                     # 🛡️ FIXAD: Räknar ut ett sanna live-snitt och tvättar siffran till snygg mIRC-standard!
@@ -210,8 +224,6 @@ def announce_worker():
                     else:
                         speed_str = "0k/s"
 
-
-                    
                     free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)
                     queue_status = "NOW" if active_dl < config.MAX_DCC_SLOTS else "0"
                     queued_count = dcc.get_total_queued_count()
@@ -220,45 +232,30 @@ def announce_worker():
                     total_sent_str, yesterday_str, today_str = get_formatted_stats_strings()
                     slots_str = f"{free_slots}/{config.MAX_DCC_SLOTS}"
                     
-                    # Hämtar och formaterar ditt sparade rekord live från databasen
                     import db
                     raw_record = db.get_speed_record()
                     record_str = stats_mgr.format_speed(raw_record) if raw_record > 0 else "0k/s"
 
-                    # 1. DIN NYA STÄDADE OCH SKARP-LAYOUTADE TEXTREKLAM!
-                    # ---------------------------------------------------------------------
-                    # ULTRA-LYXIG OMENSERVE-DESIGN (Direktkopia av färgblocks-layouten!)
-                    # ---------------------------------------------------------------------
-                    # Defininera färgblocken lokalt för perfekt skärpa:
-                    BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
-                    BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
-                    BG_TEXT_BOX   = "\x0301,00" # Svart text på VIT bakgrund
-                    R = "\x0f"                  # Total nollställning efter varje sektion
-                    B = "\x02"                  # Fetstil för live-siffror
-                    
+                    BG_RED_BLOCK  = "\x0304,05"
+                    BG_CYAN_BLOCK = "\x0310,10"
+                    BG_TEXT_BOX   = "\x0301,00"
+                    R = "\x0f"
+                    B = "\x02"
+
                     announce_msg = (
                         f"PRIVMSG {chan} :"
-                        # Start-blocken: Röd + Turkos
                         f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Type: {B}{config.C_GREEN}@{config.NICKNAME}{R}{BG_TEXT_BOX} For My List Of: {B}{config.C_RED}{formatted_count}{R}{BG_TEXT_BOX} Files ({total_size}) created {config.C_GREEN}{list_date} "
-                        # Slots-lådan
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {slots_str} "
-                        # Queued-lådan
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {queued_str} "
-                        # Speed / Record-lådan
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {speed_str} / Record: {record_str} "
-                        # Total Sent-lådan
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {total_sent_str} "
-                        # Search & Version-avslut
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {B}{config.C_GREEN}ON{R}{BG_TEXT_BOX} "
-                        # Slut-blocken
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {config.SCRIPT_VERSION} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
                     )
-                    # ---------------------------------------------------------------------
 
                     if oserve:
                         oserve.queue_message("channel_announce", announce_msg)
                     
-                    # 2. ÄKTA SLOTS-CTCP PAKETET
                     raw_stats_bytes = stats_mgr.get_total_sent_bytes()
                     sent_mbs = int(raw_stats_bytes / 1024 / 1024)
                     
@@ -269,14 +266,12 @@ def announce_worker():
                 
                 time.sleep(config.ANNOUNCE_INTERVAL)
             else:
-                # NYTT: Självdödande trådspärr vid netsplits!
-                # Om boten har varit frånkopplad i mer än 30 sekunder, stäng ner den 
-                # här gamla tråden helt så att den nya fräscha tråden kan ta över!
                 time.sleep(5)
                 
         except Exception as loop_error:
             print(f"[CRITICAL ANNOUNCE ERROR] Tråden stötte på ett fel: {loop_error}")
             time.sleep(10)
+
 
 def send_search_result_header(user, search_term, match_count, channel):
     """Skickar sök-headern i privat PM - Nu med både färgblock och din vita text-box!"""
@@ -392,20 +387,22 @@ def send_debug(msg_text, category="INFO"):
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {R}\r\n"
     
     # ---------------------------------------------------------------------
-    # ASYNKRON RÅ SOCKET-SLUSS: Skickar direkt till nätverkskortet på 0ms!
+    # ASYNKRON RÅ SOCKET-SLUSS: Stryper flödet till 0.5s per rad vid högtryck!
     # ---------------------------------------------------------------------
-    try:
-        oserve = sys.modules.get('oserve')
-        # Vi fiskar upp din levande nätverkssocket directly från irc.py loopen
-        irc_sock = getattr(oserve, 'irc_connection', None)
-        if irc_sock:
-            irc_sock.send(msg.encode("utf-8", errors="ignore"))
-        else:
-            # Snygg fallback om socketen inte hittas i minnet just då
-            if oserve:
-                oserve.queue_message(config.DEBUG_CHANNEL, msg, is_vip=True)
-    except Exception as e:
-        print(f"[DEBUG VIP SEND ERROR] Gick inte att trycka ut rå socket-data: {e}")
+    # Vi läser från låset vi allokerade i oserve.py
+    with config.debug_flood_lock:
+        try:
+            oserve = sys.modules.get('oserve')
+            irc_sock = getattr(oserve, 'irc_connection', None)
+            if irc_sock:
+                irc_sock.send(msg.encode("utf-8", errors="ignore"))
+                # 🏎️ ANDNINGSPAUS: Ger servern exakt 0.5 sekunder att andas, utplånar Excess Flood helt!
+                time.sleep(0.5)
+            else:
+                if oserve:
+                    oserve.queue_message(config.DEBUG_CHANNEL, msg, is_vip=True)
+        except Exception as e:
+            print(f"[DEBUG VIP SEND ERROR] Gick inte att trycka ut rå socket-data: {e}")
 
 # ---------------------------------------------------------------------
 # START-SLUSS FÖR REKLAMTRÅDEN: Anropas av irc.py vid lyckad boot!

@@ -23,12 +23,9 @@ bot_joined_channel = False
 def irc_loop():
     """Hanterar anslutningen, PING/PONG och alla inkommande PRIVMSG från Undernet"""
     global bot_joined_channel
-    import announce  # 🛡️ SÄKRAD: Importeras direkt här inuti funktionen så den ALLTID är definierad!
+    import announce
     oserve = sys.modules.get('oserve')
     
-    # ---------------------------------------------------------------------
-    # IP-KOLL via api.ipify.org (Körs EN GÅNG innan anslutning)
-    # ---------------------------------------------------------------------
     print("[IP CHECK] Hämtar din publika via ipify API...")
     try:
         req = urllib.request.Request(
@@ -40,36 +37,79 @@ def irc_loop():
     except Exception as e:
         print(f"[WARNING] Kunde inte nå ipify API ({e}). Fallback till 127.0.0.1")
         config.MY_IP_OR_DOCK = "127.0.0.1"
-    # ---------------------------------------------------------------------
     
+     # ---------------------------------------------------------------------
+    
+    # 🛡️ GLOBAL SPARING: Sätts HÄR först av allt så att variabeln ALLTID finns i RAM!
+    if not hasattr(config, 'ORIGINAL_NICK'):
+        config.ORIGINAL_NICK = getattr(config, 'NICKNAME', 'DCCore')
+
     # 🔄 AUTOMATISK ÅTERANSLUTNINGSLOOP (Säkrar att tråden ALDRIG dör vid split eller disconnect!)
     while True:
+        # Vi utgår ALLTID ifrån att försöka ta botens sanna original-nick vid varje anslutning
+        config.NICKNAME = config.ORIGINAL_NICK
+
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(15.0)
-        print(f"[CONNECT] Attempting to connect to {config.SERVER}:{config.PORT}...")
+        s.settimeout(70.0)
+        
+        print(f"[CONNECT] Attempting to connect to {config.SERVER}:{config.PORT} as {config.NICKNAME}...")
         
         try:
             s.connect((config.SERVER, config.PORT))
-            s.settimeout(90.0) 
             s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            
             if hasattr(socket, 'TCP_KEEPIDLE'):
-                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
-                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
-                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 5)
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10)
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 2)
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
                 
-            if oserve:
-                oserve.irc_connection = s
+            oserve_mod = sys.modules.get('oserve')
+            if oserve_mod:
+                oserve_mod.irc_connection = s
             print(f"[CONNECT] Connected to socket successfully!")
         except Exception as e:
             print(f"[ERROR] Connection failed: {e}. Återansluter om 10 sekunder...")
             time.sleep(10)
             continue
             
-        # 🔑 SKICKA AUTENTISERING DIREKT (Utrotar frysningen vid reconnect!)
-        s.send(f"USER dccore 0 * :dccore bot\r\n".encode())
-        s.send(f"NICK {config.NICKNAME}\r\n".encode())
-        print("[INFO] NICK och USER skickat! Startar nätverksläsaren...")
-        
+        # 🔑 SKICKA AUTENTISERING DIREKT (Serverstyrt NICK-val via sanna 433-returer!)
+        try:
+            s.send(f"NICK {config.NICKNAME}\r\n".encode())
+            
+            auth_buffer = ""
+            while True:
+                auth_data = s.recv(1024).decode("utf-8", errors="ignore")
+                if not auth_data:
+                    break
+                auth_buffer += auth_data
+                auth_lines = auth_buffer.split("\r\n")
+                auth_buffer = auth_lines.pop()
+                
+                for a_line in auth_lines:
+                    if " 433 " in a_line or "erroneous nickname" in a_line.lower():
+                        alt_nick = getattr(config, 'ALT_NICKNAME', f"{config.ORIGINAL_NICK}`")
+                        print(f"[SERVER 433] Nicket {config.NICKNAME} var upptaget! Växlar CURRENT_NICK till: {alt_nick}")
+                        s.send(f"NICK {alt_nick}\r\n".encode())
+                        config.NICKNAME = alt_nick
+                    
+                    if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
+                        ident_str = getattr(config, 'IDENT', 'dccore')
+                        real_str = getattr(config, 'REALNAME', 'dccore bot')
+                        s.send(f"USER {ident_str} 0 * :{real_str}\r\n".encode())
+                        break
+                else:
+                    continue
+                break
+                
+            print(f"[INFO] Handskakning klar! CURRENT_NICK spikat som: {config.NICKNAME}. Startar läsaren...")
+
+            s.settimeout(70.0)
+        except Exception as auth_err:
+            print(f"[ERROR] Fel under server-handskakningen: {auth_err}")
+            try: s.close()
+            except: pass
+            continue
+
         buffer = ""
         joined = False
         bot_joined_channel = False
@@ -78,7 +118,7 @@ def irc_loop():
         total_channels_to_join = len(config.CHANNEL.split(","))
         namespaces_received = 0
         last_recv_time = time.time()
-        # 📡 INRE MEDDELANDELOOP (Huvudläsaren för all datatrafik live)
+        
         while True:
             try:
                 if time.time() - last_recv_time > 45.0:
@@ -88,10 +128,29 @@ def irc_loop():
                         pass
                     last_recv_time = time.time()
 
-                data = s.recv(2048).decode("utf-8", errors="ignore")
+                try:
+                    data = s.recv(2048).decode("utf-8", errors="ignore")
+                except socket.timeout:
+                    print("[TIMEOUT] Ingen data mottagen på 70 sekunder (Undernet PING uteblev). Sliter av socketen!")
+                    try: s.close()
+                    except: pass
+                    break
+                except socket.error as net_err:
+                    print(f"[DISCONNECT FIX] Linux Keepalive upptäckte dött nätverk ({net_err}). Bryter för återanslutning!")
+                    try: s.close()
+                    except: pass
+                    break
+                except Exception as e:
+                    print(f"[IRC READ ERROR] Oväntat fel vid nätverksavläsning: {e}")
+                    try: s.close()
+                    except: pass
+                    break
+
                 if not data:
                     print("[DISCONNECT] Server closed connection. Breaking to reconnect motor...")
-                    break # Hoppar ut ur den inre loopen och återansluter direkt!
+                    try: s.close()
+                    except: pass
+                    break
                     
                 last_recv_time = time.time()
                 buffer += data
@@ -121,8 +180,30 @@ def irc_loop():
                         parts = line.split()
                         pong_code = parts[-1].strip()
                         s.send(f"PONG {pong_code}\r\n".encode())
-                    
-                    # FÖRDRÖJD KANAL-JOIN (Inklusive din dolda debug-kanal!)
+                    # 🛡️ LIVE 433-BACKUP: Fångar enbart upp OFFICIELLA server-krockar (Ignorerar kanalsnack!)
+                    if " 433 " in line or "erroneous nickname" in line.lower():
+                        # 🚫 SPÄRR: Om det är kanaltrafik (PRIVMSG) är det bara någon som snackar – IGNORERA!
+                        if " PRIVMSG " not in line and " NOTICE " not in line:
+                            main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+                            if str(config.NICKNAME).lower() == main_nick.lower():
+                                alt_nick = getattr(config, 'ALT_NICKNAME', f"{main_nick}`")
+                                print(f"[LIVE NICK COLLISION] Servern rapporterade en äkta krock för {main_nick}! Reservnick: {alt_nick}")
+                                s.send(f"NICK {alt_nick}\r\n".encode())
+                                config.NICKNAME = alt_nick
+
+                    # 🛡️ AUTOMATISKT ÅTERTAGANDE: Återta huvudnicket live i samma millisekund som din mIRC-klient stängs!
+                    if " QUIT " in line or " PART " in line:
+                        main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+                        if str(config.NICKNAME).lower() != main_nick.lower():
+                            if f":{main_nick.lower()}!" in line.lower():
+                                print(f"[NICK RECOVERY] Upptäckte att huvudnicket {main_nick} loggade ut! Återtar namnet live...")
+                                try:
+                                    s.send(f"NICK {main_nick}\r\n".encode())
+                                    config.NICKNAME = main_nick
+                                except Exception as recovery_err:
+                                    print(f"[NICK RECOVERY ERROR] Misslyckades att återta nick: {recovery_err}")
+
+
                     if not joined and ("001" in line or "376" in line):
                         joined = True
                         print(f"[INFO] Ansluten till servern! Väntar 5 sekunder på stabilisering innan JOIN...")
@@ -131,7 +212,7 @@ def irc_loop():
                             time.sleep(5)
                             try:
                                 socket_conn.send(f"JOIN {channels}\r\n".encode())
-                                debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-debug')
+                                debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-serv')
                                 socket_conn.send(f"JOIN {debug_chan}\r\n".encode())
                                 print(f"[JOIN] Gick med i huvudkanaler och debug-kanal: {debug_chan}")
                             except Exception as join_err:
@@ -139,13 +220,11 @@ def irc_loop():
                                 
                         threading.Thread(target=delayed_join, args=(s, config.CHANNEL), daemon=True).start()
 
-                    # 🛡️ RÄTTAD OCH ÖVERLAPPSSÄKRAD AKTIVERINGSSPÄRR:
                     if joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
                         namespaces_received += 1
                         print(f"[INFO] Received End of NAMES for channel ({namespaces_received}/{total_channels_to_join})")
                         
                         if namespaces_received >= total_channels_to_join:
-                            # Spika fast låset i RAM-minnet DIREKT på 0ms så nästa 366-rad blockeras!
                             config.activation_triggered = True
                             print(f"[INFO] All channels joined successfully! Waiting 5 seconds for settle...")
                             
@@ -153,6 +232,7 @@ def irc_loop():
                                 import sys
                                 import time
                                 import announce
+                                import threading
                                 
                                 time.sleep(5)
                                 config.bot_joined_channel = True
@@ -166,13 +246,41 @@ def irc_loop():
                                 if hasattr(announce, 'last_announce_time'):
                                     announce.last_announce_time = time.time()
                                     
-                                if not getattr(config, 'announce_thread_alive', False):
-                                    announce.start_announce_thread()
-                                    config.announce_thread_alive = True
-                                else:
-                                    print("[CONNECT FIX] Reklamtråden var redan aktiv, länkade om till den nya nätverkssocketen.")
+                                # 🛡️ AUTOMATISK LIVE-ÅTERTAGARSLUSS (Bevakar och återtar tronen efter netsplits!)
+                                def background_nick_monitor(sock_inst):
+                                    main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+                                    # Loopa och kolla läget var 10:e sekund i upp till 5 minuter efter JOIN
+                                    for _ in range(30):
+                                        if str(config.NICKNAME).lower() == main_nick.lower():
+                                            break # Vi kör redan på huvudnicket, stäng ner bevakningen!
+                                            
+                                        main_nick_active = False
+                                        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+                                            for chan_name, users_set in config.channel_users.items():
+                                                if main_nick.lower() in [u.lower() for u in users_set]:
+                                                    main_nick_active = True
+                                                    break
+                                                    
+                                        if not main_nick_active:
+                                            print(f"\n[NICK RECOVERY] Upptäckte att spöknicket {main_nick} har timeoutat! Byter nick...")
+                                            try:
+                                                sock_inst.send(f"NICK {main_nick}\r\n".encode())
+                                                config.NICKNAME = main_nick
+                                                break
+                                            except:
+                                                break
+                                        time.sleep(10)
+                                
+                                # Starta den uthålliga klockan asynkront i bakgrunden
+                                threading.Thread(target=background_nick_monitor, args=(s,), daemon=True).start()
+                                    
+                                print("[CONNECT FIX] Startar om kanalreklamen helautomatiskt...")
+                                threading.Thread(target=announce.announce_worker, daemon=True).start()
+                                config.announce_thread_alive = True
                                     
                             threading.Thread(target=delayed_activate, daemon=True).start()
+
+
 
                     nick_match = re.match(r"^:([^!]+)!.* NICK :(.+)$", line)
                     if nick_match:
@@ -187,10 +295,6 @@ def irc_loop():
                         if len(parts) > 7:
                             target_nick = parts[7].lower()
                             config.whois_status[target_nick] = True
-
-                    # =====================================================================
-                    # VÄCK KÖN VID JOIN & HELAUTOMATISK SYNC AV RAM-KANALLISTOR
-                    # =====================================================================
                     if " 353 " in line:
                         name_match = re.search(r" 353 [^#]+([#\w\-]+) :(.+)$", line)
                         if name_match:
@@ -214,10 +318,8 @@ def irc_loop():
                             if hasattr(config, 'frozen_queues') and j_key in config.frozen_queues:
                                 del config.frozen_queues[j_key]
                                 print(f"[DCC REALTIME VÄCKNING] {joined_user} klev in i {joined_chan} igen! Tinar upp kön.")
-                                
                                 files_in_q = len(config.dcc_queue.get(j_key, [])) if hasattr(config, 'dcc_queue') else 0
                                 announce.send_debug(f"User {config.C_BOLD}{joined_user}{config.C_RESET} returned to {joined_chan}, continuing queue of {config.C_BOLD}{files_in_q}{config.C_RESET} file(s)", category="JOIN")
-                                
                                 threading.Thread(target=dcc.check_queue_and_send, args=(s, joined_user), daemon=True).start()
                                 
                     elif " PART " in line:
@@ -235,7 +337,7 @@ def irc_loop():
                             for chan in config.channel_users:
                                 if q_user in config.channel_users[chan]:
                                     config.channel_users[chan].remove(q_user)
-                    # HUVUD-PRIVMSG TOLK: Hanterar sökningar och bot-kommandon
+
                     match = re.match(r"^:([^!]+)!.* PRIVMSG ([#\w\-]+) :(.+)$", line)
                     if match:
                         user = match.group(1)
@@ -256,7 +358,6 @@ def irc_loop():
                             import db
                             db.check_and_rotate_day()
                             
-                            # 1. CTCP-KOMMANDON
                             if msg.startswith("\x01") and msg.endswith("\x01"):
                                 ctcp_cmd = msg.strip("\x01").strip().upper()
                                 if ctcp_cmd == "QUE":
@@ -265,14 +366,14 @@ def irc_loop():
                                 elif ctcp_cmd == "REMOVE":
                                     threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
                                     continue
-                            
-                            # 2. VANLIGA TEXT- OCH KANALKOMMANDON
                             elif msg.lower() == f"@{config.NICKNAME.lower()}":
                                 threading.Thread(target=list.send_file_list, args=(s, user, target_chan)).start()
                             elif msg.lower() == f"@{config.NICKNAME.lower()}-que":
                                 threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
+                                continue
                             elif msg.lower() == f"@{config.NICKNAME.lower()}-remove":
                                 threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
+                                continue
                             elif msg.startswith("@find ") or msg.startswith("@locator "):
                                 parts = msg.split(" ", 1)
                                 if len(parts) > 1:
@@ -306,23 +407,21 @@ def irc_loop():
                         except Exception as cmd_err:
                             print(f"[ERROR] Fel vid hantering av botkommando från {user}: {cmd_err}")
 
-            except socket.timeout:
-                try:
-                    s.send(f"PING {config.NICKNAME}\r\n".encode())
-                    announce.send_debug("Network silent for 90s. Sent active Keep-Alive PING to Undernet Server.", category="INFO")
-                    last_recv_time = time.time()
-                except Exception as ping_err:
-                    try: s.close()
-                    except: pass
-                    break
-            except (socket.error, Exception) as loop_err:
-                print(f"[CRITICAL MAIN ERROR] Huvudloopen dippade: {loop_err}")
+            except Exception as inner_loop_err:
+                print(f"[IRC INTERNAL ERROR] Oväntat fel inuti meddelandeloopen: {inner_loop_err}")
+                try: s.close()
+                except: pass
                 break
 
         # 🧹 ÅTERSTÄLL ALLA FLAGOR INNAN NÄSTA VARV I WHILE TRUE DRAR IGÅNG ÅTERANSLUTNINGEN
         print("[CONNECT] Tappade anslutning. Återansluter till IRC Server om 10 sekunder...")
         config.bot_joined_channel = False
-        config.activation_triggered = False # NYTT: Nollställ spärren inför nästa reconnect!
+        
+        # 🛡️ FIXAD: Tömmer kanallistorna i RAM helt vid krasch så boten inte blockerar sitt eget nick nästa varv!
+        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+            config.channel_users.clear()
+            
+        config.activation_triggered = False
         oserve_mod = sys.modules.get('oserve')
         if oserve_mod:
             oserve_mod.bot_joined_channel = False
@@ -331,3 +430,4 @@ def irc_loop():
         if "channel_announce" in queue_mgr.config.send_queue:
             queue_mgr.config.send_queue["channel_announce"] = []
         time.sleep(10)
+

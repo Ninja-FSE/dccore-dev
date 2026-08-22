@@ -151,7 +151,12 @@ def check_queue_and_send(irc_sock, completed_user):
                     if not os.path.exists(config.TMP_ZIP_DIR):
                         os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
                         
+                    # 🧼 VARIABEL-TVÄTT: Klipper bort dolda radbrytningar (\n) från sökvägen på 0ms!
+                    if isinstance(true_source_dir, str):
+                        true_source_dir = true_source_dir.strip()
+
                     print(f"[LINJÄR RAR] Startar packning av: {true_source_dir} -> {target_rar_path}")
+
 
                     # 🛡️ SCEN-SÄKRAD OCH TOTAL-ISOLERAD ARGUMENT-SLUSS:
                     work_dir_switch = f"-w{os.path.abspath(config.TMP_ZIP_DIR)}"

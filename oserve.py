@@ -6,6 +6,15 @@ import os
 
 # Ladda alla botens specialiserade moduler
 import config
+
+# 🛡️ GLOBAL MINNES-ALLOKERING: Skapar låsen direkt i RAM vid uppstart!
+# Detta håller config.py 100% ren från funktionsanrop och imports.
+if not hasattr(config, 'queue_lock'):
+    config.queue_lock = threading.Lock()
+
+if not hasattr(config, 'debug_flood_lock'):
+    config.debug_flood_lock = threading.Lock()
+
 import list
 import dcc
 import db
