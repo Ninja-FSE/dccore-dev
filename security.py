@@ -5,52 +5,91 @@ import sys
 import config
 import db
 
+# Nickar vi redan har skickat en debug-notis om (en notis per nick och körning).
+# send_debug sover 0.5s under lås och anropas härifrån av IRC-läsartråden, så en
+# notis per BLOCKERAT MEDDELANDE skulle frysa nätverksloopen och slita anslutningen.
+_ban_notified = set()
+
+
 def check_user_status(user):
-    """Kollar användaren mot tillfälliga bans.txt och hard_bans.txt, samt loggar till #flac-debug!"""
+    """Kollar användaren mot tidsbegränsade bans (RAM) och hard_bans.txt.
+
+    Returnerar False om användaren ska ignoreras helt, annars True.
+    """
     import os
     import re
+    import time
     import config
     import announce
-    
+
     user_lower = user.lower()
-    
-    # Vi mappar filnamnen till deras respektive snygga färgblocks-kategorier
-    ban_config = [
-        {"file": "bans.txt", "category": "TBAN"},
-        {"file": config.HARD_BANS_FILE, "category": "BAN"}
-    ]
-    
-    for item in ban_config:
-        filename = item["file"]
-        category_tag = item["category"]
-        
-        if not os.path.exists(filename):
-            continue
-            
+
+    def _deny(reason, category):
+        """Loggar alltid till konsolen, men skickar ENBART en debug-notis per nick."""
+        print(f"[SECURITY BLOCK] Nekade {user}: {reason}")
+        if user_lower not in _ban_notified:
+            _ban_notified.add(user_lower)
+            try:
+                announce.send_debug(
+                    f"Access denied for {config.C_BOLD}{user}{config.C_RESET} ({reason}).",
+                    category=category
+                )
+            except Exception as notify_err:
+                print(f"[SECURITY ERROR] Kunde inte skicka ban-notis: {notify_err}")
+        return False
+
+    # ---------------------------------------------------------------------
+    # 1. TIDSBEGRÄNSADE BANS (dags-bans från flood-skyddet)
+    # Dessa lever i config.banned_users som {nick: utgångstid} och läses in från
+    # bans.txt vid boot. De är RADER MED TIDSSTÄMPEL, inte wildcard-mönster, och
+    # fick därför aldrig regex-matchas som den gamla koden gjorde.
+    # ---------------------------------------------------------------------
+    expire_ts = config.banned_users.get(user_lower)
+    if expire_ts is not None:
         try:
-            with open(filename, "r", encoding="utf-8", errors="ignore") as f:
+            expire_ts = float(expire_ts)
+        except (TypeError, ValueError):
+            expire_ts = 0.0
+
+        if time.time() < expire_ts:
+            until = time.strftime("%H:%M:%S", time.localtime(expire_ts))
+            return _deny(f"temporary ban active until {until}", "TBAN")
+
+        # Bannet har löpt ut - städa bort det ur RAM och av disken.
+        del config.banned_users[user_lower]
+        _ban_notified.discard(user_lower)
+        try:
+            import db
+            db.save_bans_to_file()
+        except Exception as save_err:
+            print(f"[SECURITY ERROR] Kunde inte spara utgånget ban: {save_err}")
+
+    # ---------------------------------------------------------------------
+    # 2. PERMANENTA WILDCARD-BANS (hard_bans.txt, ett mönster per rad)
+    # ---------------------------------------------------------------------
+    hard_file = getattr(config, "HARD_BANS_FILE", "./data/hard_bans.txt")
+    if os.path.exists(hard_file):
+        try:
+            with open(hard_file, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     pattern = line.strip().lower()
                     if not pattern or pattern.startswith("#"):
                         continue
-                    
-                    # INTELLIGENT WILDCARD-MATCHNING (Gör om * till .* live i RAM)
+
+                    # 🛡️ BREDD-SPÄRR: Ett mönster som bara består av stjärnor skulle
+                    # stänga ute hela kanalen. Hoppa över det och skrik i loggen.
+                    if not pattern.replace("*", ""):
+                        print(f"[SECURITY WARNING] Ignorerade alltför brett mönster i {hard_file}: {pattern!r}")
+                        continue
+
                     regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
                     if re.match(regex_pattern, user_lower):
-                        # BINGO! Spambotten matchade ett mönster. Slå till spärren live!
-                        print(f"[SECURITY BLOCK] Ignorerade meddelande från {user} (Matchade mönster i {filename}: {pattern})")
-                        
-                        # NYTT: Skickar en blixtsnabb färgkodad VIP-notis till #flac-debug via din råa socket!
-                        #announce.send_debug(
-                        #    f"Access denied for banned user {user} (matched pattern '{pattern}').", 
-                        #    category=category_tag
-                        #)
-                        #return False
-                        
+                        return _deny(f"matched banned pattern '{pattern}'", "BAN")
         except Exception as e:
-            print(f"[SECURITY ERROR] Kunde inte läsa filen {filename}: {e}")
-            
-    return True # Användaren är grön och fri att använda boten!
+            print(f"[SECURITY ERROR] Kunde inte läsa filen {hard_file}: {e}")
+
+    return True  # Användaren är grön och fri att använda boten!
+
 
 def is_flooding(user):
     """Skyddar boten mot flood, rensar kön vid ban, bannar till midnatt och loggar allt till #flac-debug!"""
