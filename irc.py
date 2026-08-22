@@ -304,6 +304,22 @@ def irc_loop():
                                 config.channel_users[chan] = set()
                             config.channel_users[chan].update(names)
 
+                            # -------------------------------------------------
+                            # 🛡️ RECONNECT-TINING (KRITISK KÖRÄDDARE):
+                            # Efter en reconnect kommer alla som redan står i kanalen tillbaka via
+                            # NAMES (353) och INTE via JOIN. Utan den här slussen låg deras köer kvar
+                            # frysta och raderades av 5-minuterstimern trots att de aldrig lämnat.
+                            # -------------------------------------------------
+                            thawed_users = [n for n in names if n in getattr(config, 'frozen_queues', {})]
+                            for frozen_user in thawed_users:
+                                del config.frozen_queues[frozen_user]
+                                files_in_q = len(config.dcc_queue.get(frozen_user, []))
+                                print(f"[DCC RECONNECT VÄCKNING] {frozen_user} stod kvar i {chan} vid NAMES-synk! Tinar upp {files_in_q} fil(er).")
+                                threading.Thread(target=dcc.check_queue_and_send, args=(s, frozen_user), daemon=True).start()
+
+                            if thawed_users:
+                                announce.send_debug(f"Reconnect sync in {chan}: thawed {config.C_BOLD}{len(thawed_users)}{config.C_RESET} queue(s) for users who never left.", category="JOIN")
+
                     elif " JOIN " in line and f":{config.NICKNAME}!" not in line:
                         join_match = re.search(r"^:([^!]+)!.* JOIN :?([#\w\-]+)", line)
                         if join_match:

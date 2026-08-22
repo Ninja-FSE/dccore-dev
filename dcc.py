@@ -25,6 +25,15 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
         matchpath = os.path.abspath(path)
     return matchpath.startswith(os.path.realpath(base_dir))
 
+def user_is_present_in_ram(user_key):
+    """Kollar om en användare finns kvar i NÅGON av botens live-kanallistor (353/JOIN-synkade)."""
+    u = str(user_key).lower()
+    for users_set in getattr(config, 'channel_users', {}).values():
+        for known_user in users_set:
+            if str(known_user).lower() == u:
+                return True
+    return False
+
 def get_total_queued_count():
     """Räknar ut det totala antalet filer som står i alla personliga köer just nu"""
     total = 0
@@ -60,20 +69,29 @@ def check_queue_and_send(irc_sock, completed_user):
     oserve = sys.modules.get('oserve')
     
     # 1. AUTOMATISK RENSNING AV GAMLA FRYSTA KÖER (Äldre än 5 min)
-    with queue_lock if 'queue_lock' in globals() else threading.Lock():
-        current_time = time.time()
-        for f_user, freeze_timestamp in list(config.frozen_queues.items()):
-            if (current_time - freeze_timestamp) > 300.0:
-                if f_user in config.dcc_queue:
-                    for f_obj in config.dcc_queue[f_user]:
-                        if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
-                            try: os.remove(f_obj['path'])
-                            except: pass
-                    del config.dcc_queue[f_user]
-                    db.save_dcc_queue()
-                if f_user in config.frozen_queues:
+    # 🛡️ NY NÄTVERKS-SLUSS: Svepet får ENBART köras när boten själv är fullt kanalsynkad.
+    # Under en reconnect är channel_users tom, och då raderade det gamla svepet köer för
+    # användare som aldrig hade lämnat kanalen.
+    if getattr(config, 'bot_joined_channel', False):
+        with queue_lock if 'queue_lock' in globals() else threading.Lock():
+            current_time = time.time()
+            for f_user, freeze_timestamp in list(config.frozen_queues.items()):
+                # ❄️ TINING: Användaren finns live i RAM igen – släpp frysen istället för att radera!
+                if user_is_present_in_ram(f_user):
                     del config.frozen_queues[f_user]
-                print(f"[DCC QUEUE_CLEAN] {f_user} rensad permanent pga timeout.")
+                    print(f"[DCC FREEZE-THAW] {f_user} är tillbaka i kanallistan. Kön räddad från rensning.")
+                    continue
+                if (current_time - freeze_timestamp) > 300.0:
+                    if f_user in config.dcc_queue:
+                        for f_obj in config.dcc_queue[f_user]:
+                            if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
+                                try: os.remove(f_obj['path'])
+                                except: pass
+                        del config.dcc_queue[f_user]
+                        db.save_dcc_queue()
+                    if f_user in config.frozen_queues:
+                        del config.frozen_queues[f_user]
+                    print(f"[DCC QUEUE_CLEAN] {f_user} rensad permanent pga timeout.")
 
     if user_key == "system_next_trigger_fallback":
         user_key = ""
@@ -212,14 +230,57 @@ def check_queue_and_send(irc_sock, completed_user):
                 threading.Thread(target=start_dcc_send, args=(irc_sock, completed_user, f_path, f_name, target_chan, next_file), daemon=True).start()
                 return
         else:
+            # -----------------------------------------------------------------
+            # 🛡️ NÄTVERKS-SLUSS: Frys ALDRIG en kö när boten själv är av nätet!
+            # Vid netsplit/reconnect är channel_users tom eller halvsynkad. Då VET vi inte
+            # om användaren har gått – vi låter kön ligga helt orörd tills NAMES-synken är klar.
+            # -----------------------------------------------------------------
+            if not getattr(config, 'bot_joined_channel', False) or not getattr(config, 'channel_users', None):
+                print(f"[DCC FREEZE-SKIP] Boten är inte kanalsynkad ännu. Behåller kön för {completed_user} orörd.")
+                return
+
+            # 🛡️ DUBBELTIMER-SPÄRR: En användare får ha exakt EN nedräkning åt gången.
+            if user_key in getattr(config, 'frozen_queues', {}):
+                print(f"[DCC FREEZE-HOLD] {completed_user} har redan en aktiv nedräkning. Startar ingen till.")
+                return
+
             with queue_lock if 'queue_lock' in globals() else threading.Lock():
                 config.frozen_queues[user_key] = time.time()
             print(f"[DCC REACTIVE FREEZE] {completed_user} har lämnat {target_chan} på riktigt! Startar timer...")
             announce_mod.send_debug(f"DCC reactive freeze triggered for {completed_user} in {target_chan}. Initiating 5-minute cooldown timer.", category="QUIT")
             
             def user_queue_timer(sock, target_user, original_chan):
-                time.sleep(300)
+                """🕒 VERIFIERANDE NEDRÄKNING (ersätter den blinda 300-sekunderssömnen).
+                Klockan pausas helt medan boten är frånkopplad – botens egen downtime får
+                ALDRIG räknas mot användarens kö – och nedräkningen avbryts direkt om
+                användaren dyker upp igen via JOIN eller NAMES-synk."""
                 t_key = target_user.lower()
+                elapsed = 0
+                
+                while elapsed < 300:
+                    time.sleep(10)
+                    
+                    # A) Någon annan har redan tinat upp kön (JOIN / NAMES / !rehash) – avbryt tyst.
+                    if t_key not in getattr(config, 'frozen_queues', {}):
+                        print(f"[DCC FREEZE-ABORT] {target_user} är redan upptinad. Nedräkningen avbryts, kön är räddad.")
+                        return
+                        
+                    # B) Boten är själv offline – frys klockan helt och räkna INTE upp elapsed.
+                    if not getattr(config, 'bot_joined_channel', False):
+                        print(f"[DCC FREEZE-PAUSE] Boten är av nätet. Pausar nedräkningen för {target_user} på {elapsed}s.")
+                        continue
+                        
+                    # C) Boten är online igen – verifiera mot den färska kanallistan i RAM.
+                    if user_is_present_in_ram(t_key):
+                        with queue_lock if 'queue_lock' in globals() else threading.Lock():
+                            config.frozen_queues.pop(t_key, None)
+                        print(f"[DCC FREEZE-ABORT] {target_user} hittades live i kanallistan. Kön behålls och väcks.")
+                        announce_mod.send_debug(f"Queue for {config.C_BOLD}{target_user}{config.C_RESET} preserved – user verified back in channel before timeout.", category="JOIN")
+                        threading.Thread(target=check_queue_and_send, args=(sock, target_user), daemon=True).start()
+                        return
+                        
+                    elapsed += 10
+                
                 if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
                     with queue_lock if 'queue_lock' in globals() else threading.Lock():
                         if t_key in config.dcc_queue:
