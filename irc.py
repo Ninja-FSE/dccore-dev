@@ -20,6 +20,21 @@ import security
 # Flagga för att hålla koll på om kanaler är joinade
 bot_joined_channel = False
 
+
+def _release_socket():
+    """Nollställer den delade nätverksreferensen så fort en socket har stängts.
+
+    queue_mgr-pumpen och announce.send_debug kollar båda `if current_sock:` innan de
+    skriver. Utan den här nollställningen pekade referensen kvar på en STÄNGD socket
+    under hela återanslutningen, så de vakterna var verkningslösa och varje skrivning
+    kastade OSError i onödan.
+    """
+    import sys
+    oserve_mod = sys.modules.get('oserve')
+    if oserve_mod:
+        oserve_mod.irc_connection = None
+
+
 def irc_loop():
     """Hanterar anslutningen, PING/PONG och alla inkommande PRIVMSG från Undernet"""
     global bot_joined_channel
@@ -103,11 +118,20 @@ def irc_loop():
                 
             print(f"[INFO] Handskakning klar! CURRENT_NICK spikat som: {config.NICKNAME}. Startar läsaren...")
 
-            s.settimeout(70.0)
+            # 🛡️ KORT RECV-TIMEOUT (se klock-logiken nedan): recv() släpper taget var
+            # 20:e sekund så att vi hinner sköta keepalive och tystnadsmätning själva.
+            # Den gamla 70-sekunderstimeouten rev ner FRISKA länkar under tysta perioder.
+            s.settimeout(20.0)
         except Exception as auth_err:
             print(f"[ERROR] Fel under server-handskakningen: {auth_err}")
             try: s.close()
             except: pass
+            _release_socket()
+            # 🛡️ BACKOFF: Utan paus här snurrade loopen så fort TCP hann koppla upp.
+            # Undernets anslutningsthrottle stänger länken direkt när man kommer för
+            # tätt, vilket gav tiotals försök per sekund och garanterade att vi förblev
+            # throttlade (eller blev K-linade) istället för att återhämta oss.
+            time.sleep(10)
             continue
 
         buffer = ""
@@ -118,38 +142,70 @@ def irc_loop():
         total_channels_to_join = len(config.CHANNEL.split(","))
         namespaces_received = 0
         last_recv_time = time.time()
-        
+
+        # ---------------------------------------------------------------------
+        # 🛡️ TVÅ SKILDA KLOCKOR (ersätter den gamla 45s-kontrollen + 70s-timeouten):
+        #
+        # Den gamla keepalive-kontrollen låg överst i loopen, men loopen stod blockerad
+        # i recv() i upp till 70 sekunder. recv() timeoutade alltså ALLTID före de 45
+        # sekunderna hann kontrolleras - keepalive-PING:en gick aldrig att nå, och en
+        # tyst kanal revs ner som om länken vore död. Boten återanslöt, joinade om sju
+        # kanaler, nollställde channel_users och startade om reklamtråden - om och om
+        # igen så länge kanalerna var tysta.
+        #
+        # Nu mäter vi tystnad separat från keepalive: recv() släpper var 20:e sekund,
+        # vi PING:ar servern efter 45s tystnad, och river bara ner länken om servern
+        # inte hörts av på SILENCE_LIMIT. Riktigt döda länkar fångas ändå av
+        # TCP_KEEPIDLE/INTVL/CNT ovan på ca 16 sekunder.
+        # ---------------------------------------------------------------------
+        SILENCE_LIMIT = 180.0    # först här anser vi länken död
+        KEEPALIVE_AFTER = 45.0   # så länge får det vara tyst innan vi PING:ar
+        last_ping_sent = 0.0
+
         while True:
             try:
-                if time.time() - last_recv_time > 45.0:
-                    try:
-                        s.send(b"PING :lagcheck\r\n")
-                    except:
-                        pass
-                    last_recv_time = time.time()
-
                 try:
                     data = s.recv(2048).decode("utf-8", errors="ignore")
                 except socket.timeout:
-                    print("[TIMEOUT] Ingen data mottagen på 70 sekunder (Undernet PING uteblev). Sliter av socketen!")
-                    try: s.close()
-                    except: pass
-                    break
+                    now = time.time()
+                    quiet_for = now - last_recv_time
+
+                    if quiet_for > SILENCE_LIMIT:
+                        print(f"[TIMEOUT] Servern har varit helt tyst i {int(quiet_for)}s. Bryter för återanslutning!")
+                        try: s.close()
+                        except: pass
+                        _release_socket()
+                        break
+
+                    if quiet_for > KEEPALIVE_AFTER and (now - last_ping_sent) > KEEPALIVE_AFTER:
+                        try:
+                            s.send(b"PING :lagcheck\r\n")
+                            last_ping_sent = now
+                        except Exception as ping_err:
+                            print(f"[TIMEOUT] Keepalive-PING gick inte fram ({ping_err}). Bryter för återanslutning!")
+                            try: s.close()
+                            except: pass
+                            _release_socket()
+                            break
+                    continue
                 except socket.error as net_err:
                     print(f"[DISCONNECT FIX] Linux Keepalive upptäckte dött nätverk ({net_err}). Bryter för återanslutning!")
                     try: s.close()
                     except: pass
+                    _release_socket()
                     break
                 except Exception as e:
                     print(f"[IRC READ ERROR] Oväntat fel vid nätverksavläsning: {e}")
                     try: s.close()
                     except: pass
+                    _release_socket()
                     break
 
                 if not data:
                     print("[DISCONNECT] Server closed connection. Breaking to reconnect motor...")
                     try: s.close()
                     except: pass
+                    _release_socket()
                     break
                     
                 last_recv_time = time.time()
@@ -427,6 +483,7 @@ def irc_loop():
                 print(f"[IRC INTERNAL ERROR] Oväntat fel inuti meddelandeloopen: {inner_loop_err}")
                 try: s.close()
                 except: pass
+                _release_socket()
                 break
 
         # 🧹 ÅTERSTÄLL ALLA FLAGOR INNAN NÄSTA VARV I WHILE TRUE DRAR IGÅNG ÅTERANSLUTNINGEN
@@ -441,6 +498,7 @@ def irc_loop():
         oserve_mod = sys.modules.get('oserve')
         if oserve_mod:
             oserve_mod.bot_joined_channel = False
+        _release_socket()
         announce.is_ready = False
         import queue_mgr
         if "channel_announce" in queue_mgr.config.send_queue:

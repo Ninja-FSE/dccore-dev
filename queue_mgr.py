@@ -13,12 +13,32 @@ def queue_worker():
     print("[QUEUE] Isolate-Priority flood protection worker started.")
 
     while True:
-        oserve_mod = sys.modules.get('oserve')
-        current_sock = None
-        if oserve_mod and hasattr(oserve_mod, 'irc_connection'):
-            current_sock = oserve_mod.irc_connection
-
         try:
+            # 🛡️ FIXAD: Socket-hämtningen låg tidigare UTANFÖR try-blocket. Allt som
+            # kan kasta ett undantag måste ligga innanför, annars kan pumpen dö tyst.
+            oserve_mod = sys.modules.get('oserve')
+            current_sock = None
+            if oserve_mod and hasattr(oserve_mod, 'irc_connection'):
+                current_sock = oserve_mod.irc_connection
+
+            # ---------------------------------------------------------------------
+            # 🛡️ KÖTAK: Medan boten är frånkopplad hinner ingenting skickas, och båda
+            # köerna växer obegränsat. Klipp de äldsta raderna så att RAM-minnet inte
+            # äts upp under en lång frånkoppling.
+            # ---------------------------------------------------------------------
+            max_vip = getattr(config, 'MAX_VIP_QUEUE', 200)
+            if hasattr(config, 'vip_queue') and len(config.vip_queue) > max_vip:
+                dropped = len(config.vip_queue) - max_vip
+                del config.vip_queue[:dropped]
+                print(f"[QUEUE CAP] Slängde {dropped} gamla VIP-rader (taket är {max_vip}).")
+
+            max_user = getattr(config, 'MAX_USER_SEND_QUEUE', 100)
+            for q_user in list(config.send_queue.keys()):
+                if len(config.send_queue.get(q_user, [])) > max_user:
+                    q_dropped = len(config.send_queue[q_user]) - max_user
+                    del config.send_queue[q_user][:q_dropped]
+                    print(f"[QUEUE CAP] Slängde {q_dropped} gamla rader för {q_user} (taket är {max_user}).")
+
             # ---------------------------------------------------------------------
             # ISOLERAD EXPRESSFIL (PRIO 1): Töm den fristående VIP-listan först!
             # ---------------------------------------------------------------------
@@ -30,9 +50,16 @@ def queue_worker():
                         if getattr(config, 'DEBUG_MODE', False):
                             print(f"[RAW OUT VIP] {msg.strip()}")
                 except socket.error as net_err:
-                    print(f"[QUEUE NET ERROR] Anslutningen är bruten ({net_err}). Rensar VIP.")
+                    # 🛡️ FIXAD: Här stod tidigare "break". Det bröt sig ur while True:,
+                    # tråden returnerade, och eftersom queue_worker startas EN gång i
+                    # oserve.py utan någon övervakare var botens enda utgående
+                    # meddelandepump död för resten av processens livstid. Boten
+                    # återanslöt och såg frisk ut i kanalen medan ingenting som gick
+                    # via queue_message någonsin skickades igen.
+                    print(f"[QUEUE NET ERROR] Anslutningen är bruten ({net_err}). Rensar VIP och väntar på ny socket.")
                     config.vip_queue = []
-                    break
+                    time.sleep(1.0)
+                    continue
 
                 time.sleep(config.MSG_DELAY)
                 continue # Gå direkt upp och kolla om det finns mer VIP-data
