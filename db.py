@@ -140,14 +140,10 @@ def save_dcc_queue():
     
     try:
         # Vi dammsuger bort tomma användare direkt ur minnesstrukturen
+        # 🛡️ FIXAD: Detta gjordes tidigare i två identiska loopar i rad (dödkod).
         for user_key in list(config.dcc_queue.keys()):
-            if user_key in config.dcc_queue:
-                if not config.dcc_queue[user_key] or len(config.dcc_queue[user_key]) == 0:
-                    del config.dcc_queue[user_key]
-                    
-        for k in list(config.dcc_queue.keys()):
-            if config.dcc_queue[k] == [] or config.dcc_queue[k] == None:
-                del config.dcc_queue[k]
+            if not config.dcc_queue[user_key]:
+                del config.dcc_queue[user_key]
                     
         # Skriv den kliniskt rena JSON-strukturen direkt till disken
         with open("data/dcc_queue.txt", "w", encoding="utf-8") as f:
