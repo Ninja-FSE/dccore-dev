@@ -139,8 +139,14 @@ def irc_loop():
         bot_joined_channel = False
         announce.is_ready = False
         
-        total_channels_to_join = len(config.CHANNEL.split(","))
-        namespaces_received = 0
+        # 🛡️ FIXAD (issue #9): Spårar VILKA kanaler som bekräftats via 366, inte bara
+        # ett löst antal. Den gamla koden räknade alla 366-rader den såg (inklusive
+        # debug-kanalens), så tröskeln kunde nås även om en riktig kanal aldrig
+        # svarade – och om två eller fler misslyckades nåddes tröskeln aldrig, vilket
+        # tystade ner ALL annonsering permanent utan minsta felmeddelande.
+        target_channels = set(c.strip().lower() for c in config.CHANNEL.split(",") if c.strip())
+        channels_confirmed = set()
+        ACTIVATION_TIMEOUT = 20.0  # sekunder efter JOIN innan vi ger upp på kvarvarande kanaler
         last_recv_time = time.time()
 
         # ---------------------------------------------------------------------
@@ -161,6 +167,80 @@ def irc_loop():
         SILENCE_LIMIT = 180.0    # först här anser vi länken död
         KEEPALIVE_AFTER = 45.0   # så länge får det vara tyst innan vi PING:ar
         last_ping_sent = 0.0
+
+        # 🛡️ HOISTAD (issue #9): delayed_activate ligger nu här, en gång, istället för
+        # nästlad inuti 366-hanteraren – så både den vanliga NAMES-vägen OCH
+        # timeout-vakthunden nedan kan trigga exakt samma aktiveringslogik.
+        def delayed_activate():
+            import sys
+            import time
+            import announce
+            import threading
+            
+            time.sleep(5)
+            config.bot_joined_channel = True
+            
+            oserve_mod = sys.modules.get('oserve')
+            if oserve_mod:
+                oserve_mod.bot_joined_channel = True
+                oserve_mod.irc_connection = s
+                
+            announce.is_ready = True
+            if hasattr(announce, 'last_announce_time'):
+                announce.last_announce_time = time.time()
+                
+            # 🛡️ AUTOMATISK LIVE-ÅTERTAGARSLUSS (Bevakar och återtar tronen efter netsplits!)
+            def background_nick_monitor(sock_inst):
+                main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+                # Loopa och kolla läget var 10:e sekund i upp till 5 minuter efter JOIN
+                for _ in range(30):
+                    if str(config.NICKNAME).lower() == main_nick.lower():
+                        break # Vi kör redan på huvudnicket, stäng ner bevakningen!
+                        
+                    main_nick_active = False
+                    if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+                        for chan_name, users_set in config.channel_users.items():
+                            if main_nick.lower() in [u.lower() for u in users_set]:
+                                main_nick_active = True
+                                break
+                                
+                    if not main_nick_active:
+                        print(f"\n[NICK RECOVERY] Upptäckte att spöknicket {main_nick} har timeoutat! Byter nick...")
+                        try:
+                            sock_inst.send(f"NICK {main_nick}\r\n".encode())
+                            config.NICKNAME = main_nick
+                            break
+                        except:
+                            break
+                    time.sleep(10)
+            
+            # Starta den uthålliga klockan asynkront i bakgrunden
+            threading.Thread(target=background_nick_monitor, args=(s,), daemon=True).start()
+                
+            print("[CONNECT FIX] Startar om kanalreklamen helautomatiskt...")
+            threading.Thread(target=announce.announce_worker, daemon=True).start()
+            config.announce_thread_alive = True
+
+        def activation_watchdog():
+            """🛡️ NY (issue #9): Tvingar fram aktivering efter en rimlig väntetid även om
+            vissa kanaler aldrig svarade på JOIN (bannlyst, kräver invite, felstavad etc).
+            Utan den här vakthunden kunde 2+ trasiga kanaler tysta ner ALL annonsering
+            permanent för hela anslutningens livstid, helt utan felmeddelande."""
+            time.sleep(ACTIVATION_TIMEOUT)
+            if joined and not getattr(config, 'activation_triggered', False):
+                missing = target_channels - channels_confirmed
+                config.activation_triggered = True
+                if missing:
+                    print(f"[WARNING] Aktiverar reklamen trots {len(missing)} obekräftad(e) kanal(er): {', '.join(missing)}")
+                    try:
+                        announce.send_debug(
+                            f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(missing)}",
+                            category="PART")
+                    except Exception as watchdog_debug_err:
+                        print(f"[WARNING] Kunde inte skicka watchdog-debugnotis: {watchdog_debug_err}")
+                else:
+                    print(f"[INFO] Watchdog: alla kanaler bekräftade precis i tid.")
+                threading.Thread(target=delayed_activate, daemon=True).start()
 
         while True:
             try:
@@ -271,69 +351,28 @@ def irc_loop():
                                 debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-serv')
                                 socket_conn.send(f"JOIN {debug_chan}\r\n".encode())
                                 print(f"[JOIN] Gick med i huvudkanaler och debug-kanal: {debug_chan}")
+                                # 🛡️ NY (issue #9): Starta vakthunden HÄR, direkt efter att JOIN
+                                # faktiskt skickats, så timeouten mäts från rätt tidpunkt.
+                                threading.Thread(target=activation_watchdog, daemon=True).start()
                             except Exception as join_err:
                                 print(f"[ERROR] Kunde inte skicka JOIN: {join_err}")
                                 
                         threading.Thread(target=delayed_join, args=(s, config.CHANNEL), daemon=True).start()
 
                     if joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
-                        namespaces_received += 1
-                        print(f"[INFO] Received End of NAMES for channel ({namespaces_received}/{total_channels_to_join})")
+                        # 🛡️ FIXAD (issue #9): Parsar VILKEN kanal 366-raden gäller istället för
+                        # att bara räkna förekomster. Aktiverar först när alla riktiga målkanaler
+                        # är bekräftade - debug-kanalens 366 kan inte längre maskera en trasig
+                        # huvudkanal.
+                        m366 = re.search(r" 366 \S+ ([#\w\-]+)", line)
+                        if m366:
+                            confirmed_chan = m366.group(1).lower()
+                            channels_confirmed.add(confirmed_chan)
+                            print(f"[INFO] Received End of NAMES for {confirmed_chan} ({len(channels_confirmed & target_channels)}/{len(target_channels)} målkanaler bekräftade)")
                         
-                        if namespaces_received >= total_channels_to_join:
+                        if target_channels.issubset(channels_confirmed):
                             config.activation_triggered = True
                             print(f"[INFO] All channels joined successfully! Waiting 5 seconds for settle...")
-                            
-                            def delayed_activate():
-                                import sys
-                                import time
-                                import announce
-                                import threading
-                                
-                                time.sleep(5)
-                                config.bot_joined_channel = True
-                                
-                                oserve_mod = sys.modules.get('oserve')
-                                if oserve_mod:
-                                    oserve_mod.bot_joined_channel = True
-                                    oserve_mod.irc_connection = s
-                                    
-                                announce.is_ready = True
-                                if hasattr(announce, 'last_announce_time'):
-                                    announce.last_announce_time = time.time()
-                                    
-                                # 🛡️ AUTOMATISK LIVE-ÅTERTAGARSLUSS (Bevakar och återtar tronen efter netsplits!)
-                                def background_nick_monitor(sock_inst):
-                                    main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                                    # Loopa och kolla läget var 10:e sekund i upp till 5 minuter efter JOIN
-                                    for _ in range(30):
-                                        if str(config.NICKNAME).lower() == main_nick.lower():
-                                            break # Vi kör redan på huvudnicket, stäng ner bevakningen!
-                                            
-                                        main_nick_active = False
-                                        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
-                                            for chan_name, users_set in config.channel_users.items():
-                                                if main_nick.lower() in [u.lower() for u in users_set]:
-                                                    main_nick_active = True
-                                                    break
-                                                    
-                                        if not main_nick_active:
-                                            print(f"\n[NICK RECOVERY] Upptäckte att spöknicket {main_nick} har timeoutat! Byter nick...")
-                                            try:
-                                                sock_inst.send(f"NICK {main_nick}\r\n".encode())
-                                                config.NICKNAME = main_nick
-                                                break
-                                            except:
-                                                break
-                                        time.sleep(10)
-                                
-                                # Starta den uthålliga klockan asynkront i bakgrunden
-                                threading.Thread(target=background_nick_monitor, args=(s,), daemon=True).start()
-                                    
-                                print("[CONNECT FIX] Startar om kanalreklamen helautomatiskt...")
-                                threading.Thread(target=announce.announce_worker, daemon=True).start()
-                                config.announce_thread_alive = True
-                                    
                             threading.Thread(target=delayed_activate, daemon=True).start()
 
 
@@ -504,4 +543,3 @@ def irc_loop():
         if "channel_announce" in queue_mgr.config.send_queue:
             queue_mgr.config.send_queue["channel_announce"] = []
         time.sleep(10)
-
