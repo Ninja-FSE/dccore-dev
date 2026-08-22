@@ -23,7 +23,13 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
         matchpath = os.path.realpath(path)
     else:
         matchpath = os.path.abspath(path)
-    return matchpath.startswith(os.path.realpath(base_dir))
+
+    base = os.path.realpath(base_dir)
+
+    # 🛡️ FIXAD: Jämför per katalogsteg istället för en rå startswith.
+    # Med enbart startswith skulle "/mnt/nfs-musik-backup" felaktigt godkännas
+    # som en del av "/mnt/nfs-musik", eftersom strängen råkar börja likadant.
+    return matchpath == base or matchpath.startswith(base + os.sep)
 
 def get_total_queued_count():
     """Räknar ut det totala antalet filer som står i alla personliga köer just nu"""
@@ -126,7 +132,26 @@ def check_queue_and_send(irc_sock, completed_user):
                 def inline_rar_packer(sock):
                     true_source_dir = next_file['path']
                     raw_filename = next_file['file']
-                    
+
+                    # 🛡️ ANDRA FÖRSVARSLINJEN: Köposter överlever omstarter via dcc_queue.txt,
+                    # så en förgiftad rad som köades INNAN traversal-spärren fanns skulle annars
+                    # fortfarande packas här. Verifiera sökvägen igen precis före rar-anropet.
+                    if not is_safe_path(config.FILE_DIRECTORY, true_source_dir):
+                        print(f"[SECURITY] Blockade förgiftad köpost för {completed_user}: {true_source_dir}")
+                        with queue_lock:
+                            if completed_user.lower() in config.dcc_queue:
+                                config.dcc_queue[completed_user.lower()] = [
+                                    e for e in config.dcc_queue[completed_user.lower()] if e is not next_file
+                                ]
+                        db.save_dcc_queue()
+                        config.rar_inprogress = False
+                        if hasattr(config, 'user_processing_lock'):
+                            config.user_processing_lock.discard(completed_user.lower())
+                        announce_mod.send_debug(
+                            f"Poisoned queue entry discarded for {config.C_BOLD}{completed_user}{config.C_RESET}: path outside the music root.",
+                            category="HARDBAN")
+                        return
+
                     # 1. Rensa bort eventuella gamla .rar-ändelser från strängen
                     clean_name = re.sub(r'(?:\.rar)+$', '', raw_filename, flags=re.IGNORECASE)
                     
@@ -339,7 +364,24 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 
             linux_sub_path = clean_win_path.strip("/")
             true_source_dir = os.path.normpath(os.path.join(config.FILE_DIRECTORY, linux_sub_path))
-            
+
+            # ---------------------------------------------------------------------
+            # 🛡️ TRAVERSAL-SPÄRR (KRITISK SÄKERHETSSLUSS):
+            # Utan den här kontrollen kunde vem som helst i kanalen skriva
+            # "!rar ../../root/.ssh" och få hela den katalogen packad och skickad
+            # till sig. os.path.normpath äter upp alla "..", och den gamla
+            # root-spärren nedan släppte igenom allt som innehöll ett snedstreck.
+            # Vi verifierar därför att den FÄRDIGA sökvägen fortfarande ligger
+            # innanför musikdisken innan något annat händer.
+            # ---------------------------------------------------------------------
+            if not is_safe_path(config.FILE_DIRECTORY, true_source_dir):
+                print(f"[SECURITY] Blockade traversal-försök från {user}: {raw_win_path!r} -> {true_source_dir}")
+                announce_mod.send_pack_error_notice(irc_sock, user)
+                announce_mod.send_debug(
+                    f"Path traversal denied for {config.C_BOLD}{user}{config.C_RESET}: request resolved outside the music root.",
+                    category="HARDBAN")
+                return
+
             if "/" not in linux_sub_path:
                 print(f"[SECURITY] Blockade root-mappspackning från {user}: {linux_sub_path}")
                 announce_mod.send_pack_error_notice(irc_sock, user)
