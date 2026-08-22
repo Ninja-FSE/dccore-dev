@@ -339,7 +339,13 @@ def check_queue_and_send(irc_sock, completed_user):
                 if not user_files or len(user_files) == 0 or w_key in config.frozen_queues:
                     continue
                     
-                g_next = user_files
+                # 🛡️ FIXAD (issue #4): user_files är LISTAN med användarens köade filer,
+                # inte en enskild fil. Utan [0] blev testet nedan alltid sant (en lista är
+                # aldrig en dict), så loopen hoppade över varenda väntande användare och
+                # hela sektion B var död kod. Följden: när en slot blev ledig fick ingen
+                # annan än den som just blivit klar någonsin ta över den.
+                # Rad 314 garanterar redan att listan inte är tom.
+                g_next = user_files[0]
                 if not isinstance(g_next, dict):
                     continue
                     
