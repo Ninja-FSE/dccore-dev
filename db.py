@@ -1,2 +1,172 @@
-IyBkYi5weSAtIENlbnRyYWwgZGF0YWJhc2hhbnRlcmluZyBmw7ZyIERDQ29yZQppbXBvcnQgb3MKaW1wb3J0IHRpbWUKaW1wb3J0IGRhdGV0aW1lCmltcG9ydCBjb25maWcKCiMgPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09LS0tLQojIFNFS1RJT04gMTogQkFOUy5UWFQgKEJhbm5seXN0YSBhbnbDpG5kYXJlKQojID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09LS0tLQoKZGVmIGxvYWRfYmFuc19mcm9tX2ZpbGUoKToKICAgICIiIkzDpHNlciBpbiBha3RpdmEgYmFucyBmcsOlbiBiYW5zLnR4dCB0aWxsIGRldCBnbG9iYWxhIG1pbm5ldCIiIgogICAgaWYgbm90IG9zLnBhdGguZXhpc3RzKGNvbmZpZy5CQU5TX0ZJTEUpOgogICAgICAgIHJldHVybgogICAgdHJ5OgogICAgICAgIHdpdGggb3Blbihjb25maWcuQkFOU19GSUxFLCAiciIpIGFzIGY6CiAgICAgICAgICAgIGZvciBsaW5lIGluIGY6CiAgICAgICAgICAgICAgICBsaW5lID0gbGluZS5zdHJpcCgpCiAgICAgICAgICAgICAgICBpZiAiICIgaW4gbGluZToKICAgICAgICAgICAgICAgICAgICB1c2VyX2tleSwgZXhwaXJlX3RzID0gbGluZS5zcGxpdCgiICIsIDEpCiAgICAgICAgICAgICAgICAgICAgY29uZmlnLmJhbm5lZF91c2Vyc1t1c2VyX2tleS5sb3dlcigpXSA9IGZsb2F0KGV4cGlyZV90cykKICAgICAgICBwcmludChmIltEQl0gTGFkZGFkZSBpbiBiYW5zIGZyw6VuIHtjb25maWcuQkFOU19GSUxFfSIpCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcHJpbnQoZiJbREIgRVJST1JdIEt1bmRlIGludGUgbMOkc2Ege2NvbmZpZy5CQU5TX0ZJTEV9OiB7ZX0iKQoKZGVmIHNhdmVfYmFuc190b19maWxlKCk6CiAgICAiIiJTa3JpdmVyIGFsbGEgYWt0aXZhIGJhbnMgZnLDpW4gbWlubmV0IHRpbGwgYmFucy50eHQiIiIKICAgIHRyeToKICAgICAgICB3aXRoIG9wZW4oY29uZmlnLkJBTlNfRklMRSwgInciKSBhcyBmOgogICAgICAgICAgICBmb3IgdXNlcl9rZXksIGV4cGlyZV90cyBpbiBjb25maWcuYmFubmVkX3VzZXJzLml0ZW1zKCk6CiAgICAgICAgICAgICAgICBmLndyaXRlKGYie3VzZXJfa2V5fSB7ZXhwaXJlX3RzfVxuIikKICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgICAgICBwcmludChmIltEQiBFUlJPUl0gS3VuZGUgaW50ZSBzcGFyYSB0aWxsIHtjb25maWcuQkFOU19GSUxFfToge2V9IikKCgojID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09LS0tLQojIFNFS1RJT04gMjogU1RBVFMuVFhUIChBdmFuY2VyYWQgT21lblNlcnZlLXN0YXRpc3Rpaykp
-CiMgPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09LS0tLQoKZGVmIGxvYWRfYWR2YW5jZWRfc3RhdHMoKToKICAgICIiIkzDpHNlciBzdGF0cy50eHQuIEZvcm1hdDogdG90YWxfZmlsZXMgdG90YWxfYnl0ZXMgeWVzdF9maWxlcyB5ZXN0X2J5dGVzIHRvZGF5X2ZpbGVzIHRvZGF5X2J5dGVzIGxhc3RfZGF0ZSIiIgogICAgU1RBVFNfRklMRSA9IGNvbmZpZy5TVEFUU19GSUxFCiAgICB0b2RheV9zdHIgPSBkYXRldGltZS5kYXRldGltZS5ub3coKS5zdHJmdGltZSgiJVktJW0tJWQiKQogICAgZGVmYXVsdF9zdGF0cyA9IFswLCAwLCAwLCAwLCAwLCAwLCB0b2RheV9zdHJdCiAgICAKICAgIGlmIG5vdCBvcy5wYXRoLmV4aXN0cyhTVEFUU19GSUxFKToKICAgICAgICByZXR1cm4gZGVmYXVsdF9zdGF0cwogICAgdHJ5OgogICAgICAgIHdpdGggb3BlbihTVEFUU19GSUxFLCAiciIpIGFzIGY6CiAgICAgICAgICAgIHBhcnRzID0gZi5yZWFkKCkuc3RyaXAoKS5zcGxpdCgpCiAgICAgICAgICAgIGlmIGxlbihwYXJ0cykgPT0gNzoKICAgICAgICAgICAgICAgIHJldHVybiBbaW50KHBhcnRzWzBdKSwgaW50KHBhcnRzWzFdKSwgaW50KHBhcnRzWzJdKSwgaW50KHBhcnRzWzNdKSwgaW50KHBhcnRzWzRdKSwgaW50KHBhcnRzWzVdKSwgcGFydHNbNl1dCiAgICAgICAgICAgIGVsaWYgbGVuKHBhcnRzKSA9PSAyOgogICAgICAgICAgICAgICAgcmV0dXJuIFtpbnQocGFydHNbMF0pLCBpbnQocGFydHNbMV0pLCAwLCAwLCAwLCAwLCB0b2RheV9zdHJdCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcHJpbnQoZiJbREIgRVJST1JdIEt1bmRlIGludGUgdG9sa2Egc3RhdHMudHh0LCBhbnbDpG5kZXIgc3RhbmRhcmQ6IHtlfSIpCiAgICByZXR1cm4gZGVmYXVsdF9zdGF0cwoKZGVmIHNhdmVfYWR2YW5jZWRfc3RhdHMoc3RhdHMpOgogICAgIiIiU2tyaXZlciBuZXIgNy1rb2xvbm5zcmFkZW4gdGlsbCBzdGF0cy50eHQiIiIKICAgIFNUQVRTX0ZJTEUgPSBjb25maWcuU1RBVFNfRklMRQogICAgdHJ5OgogICAgICAgIHdpdGggb3BlbihTVEFUU19GSUxFLCAidyIpIGFzIGY6CiAgICAgICAgICAgIGYud3JpdGUoZiJ7c3RhdHNbMF19IHtzdGF0c1sxXX0ge3N0YXRzWzJdfSB7c3RhdHNbM119IHtzdGF0c1s0XX0ge3N0YXRzWzVdfSB7c3RhdHNbNl19IikKICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgICAgICBwcmludChmIltEQiBFUlJPUl0gS3VuZGUgaW50ZSBzcGFyYSB0aWxsIHN0YXRzLnR4dDoge2V9IikKCmRlZiBjaGVja19hbmRfcm90YXRlX2RheSgpOgogICAgIiIiS29sbGFyIG1pZG5hdHRza2lmdGUgb2NoIHJvdGVyYXIgVG9kYXkgdGlsbCBZZXN0ZXJkYXkgYXV0b21hdGlza3QiIiIKICAgIHN0YXRzID0gbG9hZF9hZHZhbmNlZF9zdGF0cygpCiAgICB0b2RheV9zdHIgPSBkYXRldGltZS5kYXRldGltZS5ub3coKS5zdHJmdGltZSgiJVktJW0tJWQiKQogICAgCiAgICBpZiBzdGF0c1s2XSAhPSB0b2RheV9zdHI6CiAgICAgICAgcHJpbnQoZiJbREIgUk9UQVRFXSBOeSBkYWcgdXBwdMOkY2t0ICh7dG9kYXlfc3RyfSkuIEZseXR0YXIgc3RhdGlzdGlrIHRpbGwgaWfDpXIuIikKICAgICAgICBzdGF0c1syXSA9IHN0YXRzWzRdICAjIFllc3RlcmRheSBmaWxlcyA9IFRvZGF5IGZpbGVzCiAgICAgICAgc3RhdHNbM10gPSBzdGF0c1s1XSAgIyBZZXN0ZXJkYXkgYnl0ZXMgPSBUb2RheSBieXRlcwogICAgICAgIHN0YXRzWzRdID0gMCAgICAgICAgICMgTm9sbHN0w6RsbCBpZGFnLWZpbGVyCiAgICAgICAgc3RhdHNbNV0gPSAwICAgICAgICAgIyBOb2xsc3TDpGxsIGlkYWctYnl0ZXMKICAgICAgICBzdGF0c1s2XSA9IHRvZGF5X3N0cgogICAgICAgIHNhdmVfYWR2YW5jZWRfc3RhdHMoc3RhdHMpCiAgICByZXR1cm4gc3RhdHMKCmRlZiB1cGRhdGVfc3RhdHNfb25fY29tcGxldGUoZmlsZV9zaXplKToKICAgICIiIlLDpGtuYXIgdXBwIFRvdGFsIG9jaCBUb2RheSBww6UgZGlza2VuIG7DpHIgZW4gZmlsw7ZmZXJmw7ZyaW5nIMOkciBrbGFyIChUeXAtc8Oka3JhZCkiIiIKICAgIHN0YXRzID0gY2hlY2tfYW5kX3JvdGF0ZV9kYXkoKQogICAgCiAgICAjIC0tLSBTVEVOSMOFUkQgVFlQLVJFUEFSQVRJT04gTU9EIE1PVCBEQi1FUlJPUiAtLS0KICAgIGNsZWFuX3NpemUgPSAwCiAgICB0cnk6CiAgICAgICAgIyBPbSBmaWxlX3NpemUgcsOka2FyIGtvbW1hIGluIHNvbSBlbiBsaXN0YSwgcGxvY2thIHV0IGbDtnJzdGEgZWxlbWVudGV0CiAgICAgICAgaWYgaXNpbnN0YW5jZShmaWxlX3NpemUsIGxpc3QpOgogICAgICAgICAgICBpZiBsZW4oZmlsZV9zaXplKSA+IDA6CiAgICAgICAgICAgICAgICBmaWxlX3NpemUgPSBmaWxlX3NpemVbMF0KICAgICAgICAgICAgZWxzZToKICAgICAgICAgICAgICAgIGZpbGVfc2l6ZSA9IDAKICAgICAgICAgICAgICAgIAogICAgICAgICMgT20gZGV0IMOkciBlbiBkaWN0aW9uYXJ5LCBsZXRhIGVmdGVyIGvDpG5kYSBmw6RsdG5hbW4gZsO2ciBzdG9ybGVrCiAgICAgICAgaWYgaXNpbnN0YW5jZShmaWxlX3NpemUsIGRpY3QpOgogICAgICAgICAgICBmaWxlX3NpemUgPSBmaWxlX3NpemUuZ2V0KCdieXRlcycsIGZpbGVfc2l6ZS5nZXQoJ3NpemUnLCAwKSkKICAgICAgICAgICAgCiAgICAgICAgIyBUdmluZ2EgZnJhbSBldHQgcmVudCBoZWx0YWwgdmlhIGZsb2F0LW9tdsOkZyBpZmFsbCBkZXQgw6RyIGVuIHRleHRzdHLDpG5nIG1lZCBkZWNpbWFsZXIKICAgICAgICBjbGVhbl9zaXplID0gaW50KGZsb2F0KHN0cihmaWxlX3NpemUpLnN0cmlwKCkpKQogICAgZXhjZXB0IEV4Y2VwdGlvbiBhcyB0eXBlX2VycjoKICAgICAgICBwcmludChmIltEQiBXQVJOSU5HXSBLdW5kZSBpbnRlIHRvbGthIGZpbHN0b3JsZWsgJ3tmaWxlX3NpemV9JyBhdXRvbWF0aXNrIGZhbGxiYWNrIHRpbGwgMDoge3R5cGVfZXJyfSIpCiAgICAgICAgY2xlYW5fc2l6ZSA9IDAKICAgICMgLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQoKICAgIHN0YXRzWzBdICs9IDEgICAgICAgICAgIyBUb3RhbGEgZmlsZXIgKzEKICAgIHN0YXRzWzFdICs9IGNsZWFuX3NpemUgIyBUb3RhbGEgYnl0ZXMgK3N0b3JsZWsgKEhlbHQgc8Oka3JhZCBzaWZmcmEpCiAgICBzdGF0c1s0XSArPSAxICAgICAgICAgICMgRGFnZW5zIGZpbGVyICsxCiAgICBzdGF0c1s1XSArPSBjbGVhbl9zaXplICMgRGFnZW5zIGJ5dGVzICtzdG9ybGVrCiAgICBzYXZlX2FkdmFuY2VkX3N0YXRzKHN0YXRzKQoKZGVmIGdldF9zcGVlZF9yZWNvcmQoKToKICAgICIiIkjDpG10YXIgZGV0IHNwYXJhZGUgaGFzdGlnaGV0c3Jla29yZGV0IGkgYnl0ZXMvcyBmcsOlbiBow6VyZGRpc2tlbiIiIgogICAgaW1wb3J0IG9zCiAgICBmaWxlX3BhdGggPSAiLi9kYXRhL3NwZWVkX3JlY29yZC50eHQiCiAgICBpZiBub3Qgb3MucGF0aC5leGlzdHMoZmlsZV9wYXRoKToKICAgICAgICByZXR1cm4gMAogICAgdHJ5OgogICAgICAgIHdpdGggb3BlbihmaWxlX3BhdGgsICJyIikgYXMgZjoKICAgICAgICAgICAgcmV0dXJuIGludChmLnJlYWQoKS5zdHJpcCgpKQogICAgZXhjZXB0OgogICAgICAgIHJldHVybiAwCgpkZWYgc2F2ZV9zcGVlZF9yZWNvcmQobmV3X3JlY29yZCk6CiAgICAiIiJTcGFyYXIgZXR0IG55dHQgaGFzdGlnaGV0c3Jla29yZCB0aWxsIGjDpXJkZGlza2VuIiIiCiAgICBpbXBvcnQgb3MKICAgIG9zLm1ha2VkaXJzKCIuL2RhdGEiLCBleGlzdF9vaz1UcnVlKQogICAgdHJ5OgogICAgICAgIHdpdGggb3BlbigiLi9kYXRhL3NwZWVkX3JlY29yZC50eHQiLCAidyIpIGFzIGY6CiAgICAgICAgICAgIGYud3JpdGUoc3RyKGludChuZXdfcmVjb3JkKSkpCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcHJpbnQoZiJbREIgRVJST1JdIEt1bmRlIGludGUgc3BhcmEgaGFzdGlnaGV0c3Jla29yZDoge2V9IikKCmRlZiBzYXZlX2RjY19xdWV1ZSgpOgogICAgIiIiU3BhcmFyIERDQy1rw7ZuIHRpbGwgZGlza2VuIG9jaCByYWRlcmFyIHRvbW1hIGFudsOkbmRhcmUgKFR2aW5nYXIgZnJhbSB7fSB2aWQgdG9tIGvDtiEpIiIiCiAgICBpbXBvcnQganNvbgogICAgaW1wb3J0IGNvbmZpZwogICAgCiAgICB0cnk6CiAgICAgICAgIyBWaSBkYW1tc3VnZXIgYm9ydCB0b21tYSBhbnbDpG5kYXJlIGRpcmVrdCB1ciBtaW5uZXNzdHJ1a3R1cmVuCiAgICAgICAgIyDwn5uh77iPIEZJWEFEOiBEZXR0YSBnam9yZGVzIHRpZGlnYXJlIGkgdHbDpSBpZGVudGlza2EgbG9vcGFyIGkgcmFkIChkw7Zka29kKS4KICAgICAgICBmb3IgdXNlcl9rZXkgaW4gbGlzdChjb25maWcuZGNjX3F1ZXVlLmtleXMoKSk6CiAgICAgICAgICAgIGlmIG5vdCBjb25maWcuZGNjX3F1ZXVlW3VzZXJfa2V5XToKICAgICAgICAgICAgICAgIGRlbCBjb25maWcuZGNjX3F1ZXVlW3VzZXJfa2V5XQogICAgICAgICAgICAgICAgICAgIAogICAgICAgICMgU2tyaXYgZGVuIGtsaW5pc2t0IHJlbmEgSlNPTi1zdHJ1a3R1cmVuIGRpcmVrdCB0aWxsIGRpc2tlbgogICAgICAgIHdpdGggb3BlbigiZGF0YS9kY2NfcXVldWUudHh0IiwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBmOgogICAgICAgICAgICBqc29uLmR1bXAoY29uZmlnLmRjY19xdWV1ZSwgZiwgaW5kZW50PTQpCiAgICAgICAgICAgIAogICAgICAgIHByaW50KCJbREItUVVFVUVdIETDti1zdHJ1a3R1cmVuIHNwYXJhZGVzIG9jaCBkaXNrc2FuZXJhZGVzIGZyYW1nw6VuZ3NyaWt0LiIpCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcHJpbnQoZiJbREItUVVFVUUgRVJST1JdIEt1bmRlIGludGUgc3BhcmEgZGF0YS9kY2NfcXVldWUudHh0OiB7ZX0iKQoKCmRlZiBsb2FkX2RjY19xdWV1ZSgpOgogICAgIiIiTGFkZGFyIGluIGRlbiBzcGFyYWRlIERDQy1rw7ZuIGZyw6VuIGjDpXJkZGlza2VuIHZpZCBib290IiIiCiAgICBpbXBvcnQganNvbgogICAgaW1wb3J0IG9zCiAgICBpbXBvcnQgY29uZmlnCiAgICBmaWxlX3BhdGggPSAiLi9kYXRhL2RjY19xdWV1ZS50eHQiCiAgICBpZiBub3Qgb3MucGF0aC5leGlzdHMoZmlsZV9wYXRoKToKICAgICAgICBjb25maWcuZGNjX3F1ZXVlID0ge30KICAgICAgICByZXR1cm4KICAgIHRyeToKICAgICAgICB3aXRoIG9wZW4oZmlsZV9wYXRoLCAiciIsIGVuY29kaW5nPSJ1dGYtOCIpIGFzIGY6CiAgICAgICAgICAgIGNvbmZpZy5kY2NfcXVldWUgPSBqc29uLmxvYWQoZikKICAgICAgICBwcmludChmIltEQl0gTGFkZGFkZSBpbiBzcGFyYWRlIGvDtnBsYXRzZXIgZnLDpW4gaMOlcmRkaXNrZW4hIikKICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgICAgICBwcmludChmIltEQiBFUlJPUl0gS3VuZGUgaW50ZSBsw6RzYSBzcGFyYWQgRENDLWvDtiwgc3RhcnRhciB0b206IHtlfSIpCiAgICAgICAgY29uZmlnLmRjY19xdWV1ZSA9IHt9
+# db.py - Central databashantering för DCCore
+import os
+import time
+import datetime
+import config
+
+# =================================================================----
+# SEKTION 1: BANS.TXT (Bannlysta användare)
+# =================================================================----
+
+def load_bans_from_file():
+    """Läser in aktiva bans från bans.txt till det globala minnet"""
+    if not os.path.exists(config.BANS_FILE):
+        return
+    try:
+        with open(config.BANS_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if " " in line:
+                    user_key, expire_ts = line.split(" ", 1)
+                    config.banned_users[user_key.lower()] = float(expire_ts)
+        print(f"[DB] Laddade in bans från {config.BANS_FILE}")
+    except Exception as e:
+        print(f"[DB ERROR] Kunde inte läsa {config.BANS_FILE}: {e}")
+
+def save_bans_to_file():
+    """Skriver alla aktiva bans från minnet till bans.txt"""
+    try:
+        with open(config.BANS_FILE, "w") as f:
+            for user_key, expire_ts in config.banned_users.items():
+                f.write(f"{user_key} {expire_ts}\n")
+    except Exception as e:
+        print(f"[DB ERROR] Kunde inte spara till {config.BANS_FILE}: {e}")
+
+
+# =================================================================----
+# SEKTION 2: STATS.TXT (Avancerad OmenServe-statistik)
+# =================================================================----
+
+def load_advanced_stats():
+    """Läser stats.txt. Format: total_files total_bytes yest_files yest_bytes today_files today_bytes last_date"""
+    STATS_FILE = config.STATS_FILE
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    default_stats = [0, 0, 0, 0, 0, 0, today_str]
+    
+    if not os.path.exists(STATS_FILE):
+        return default_stats
+    try:
+        with open(STATS_FILE, "r") as f:
+            parts = f.read().strip().split()
+            if len(parts) == 7:
+                return [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5]), parts[6]]
+            elif len(parts) == 2:
+                return [int(parts[0]), int(parts[1]), 0, 0, 0, 0, today_str]
+    except Exception as e:
+        print(f"[DB ERROR] Kunde inte tolka stats.txt, använder standard: {e}")
+    return default_stats
+
+def save_advanced_stats(stats):
+    """Skriver ner 7-kolonnsraden till stats.txt"""
+    STATS_FILE = config.STATS_FILE
+    try:
+        with open(STATS_FILE, "w") as f:
+            f.write(f"{stats[0]} {stats[1]} {stats[2]} {stats[3]} {stats[4]} {stats[5]} {stats[6]}")
+    except Exception as e:
+        print(f"[DB ERROR] Kunde inte spara till stats.txt: {e}")
+
+def check_and_rotate_day():
+    """Kollar midnattsskifte och roterar Today till Yesterday automatiskt"""
+    stats = load_advanced_stats()
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    if stats[6] != today_str:
+        print(f"[DB ROTATE] Ny dag upptäckt ({today_str}). Flyttar statistik till igår.")
+        stats[2] = stats[4]  # Yesterday files = Today files
+        stats[3] = stats[5]  # Yesterday bytes = Today bytes
+        stats[4] = 0         # Nollställ idag-filer
+        stats[5] = 0         # Nollställ idag-bytes
+        stats[6] = today_str
+        save_advanced_stats(stats)
+    return stats
+
+def update_stats_on_complete(file_size):
+    """Räknar upp Total och Today på disken när en filöverföring är klar (Typ-säkrad)"""
+    stats = check_and_rotate_day()
+    
+    # --- STENHÅRD TYP-REPARATION MOD MOT DB-ERROR ---
+    clean_size = 0
+    try:
+        # Om file_size råkar komma in som en lista, plocka ut första elementet
+        if isinstance(file_size, list):
+            if len(file_size) > 0:
+                file_size = file_size[0]
+            else:
+                file_size = 0
+                
+        # Om det är en dictionary, leta efter kända fältnamn för storlek
+        if isinstance(file_size, dict):
+            file_size = file_size.get('bytes', file_size.get('size', 0))
+            
+        # Tvinga fram ett rent heltal via float-omväg ifall det är en textsträng med decimaler
+        clean_size = int(float(str(file_size).strip()))
+    except Exception as type_err:
+        print(f"[DB WARNING] Kunde inte tolka filstorlek '{file_size}' automatisk fallback till 0: {type_err}")
+        clean_size = 0
+    # ---------------------------------------------------------------------
+
+    stats[0] += 1          # Totala filer +1
+    stats[1] += clean_size # Totala bytes +storlek (Helt säkrad siffra)
+    stats[4] += 1          # Dagens filer +1
+    stats[5] += clean_size # Dagens bytes +storlek
+    save_advanced_stats(stats)
+
+def get_speed_record():
+    """Hämtar det sparade hastighetsrekordet i bytes/s från hårddisken"""
+    import os
+    file_path = "./data/speed_record.txt"
+    if not os.path.exists(file_path):
+        return 0
+    try:
+        with open(file_path, "r") as f:
+            return int(f.read().strip())
+    except:
+        return 0
+
+def save_speed_record(new_record):
+    """Sparar ett nytt hastighetsrekord till hårddisken"""
+    import os
+    os.makedirs("./data", exist_ok=True)
+    try:
+        with open("./data/speed_record.txt", "w") as f:
+            f.write(str(int(new_record)))
+    except Exception as e:
+        print(f"[DB ERROR] Kunde inte spara hastighetsrekord: {e}")
+
+def save_dcc_queue():
+    """Sparar DCC-kön till disken och raderar tomma användare (Tvingar fram {} vid tom kö!)"""
+    import json
+    import config
+    
+    try:
+        # Vi dammsuger bort tomma användare direkt ur minnesstrukturen
+        # 🛡️ FIXAD: Detta gjordes tidigare i två identiska loopar i rad (dödkod).
+        for user_key in list(config.dcc_queue.keys()):
+            if not config.dcc_queue[user_key]:
+                del config.dcc_queue[user_key]
+                    
+        # Skriv den kliniskt rena JSON-strukturen direkt till disken
+        with open("data/dcc_queue.txt", "w", encoding="utf-8") as f:
+            json.dump(config.dcc_queue, f, indent=4)
+            
+        print("[DB-QUEUE] Kö-strukturen sparades och disksanerades framgångsrikt.")
+    except Exception as e:
+        print(f"[DB-QUEUE ERROR] Kunde inte spara data/dcc_queue.txt: {e}")
+
+
+def load_dcc_queue():
+    """Laddar in den sparade DCC-kön från hårddisken vid boot"""
+    import json
+    import os
+    import config
+    file_path = "./data/dcc_queue.txt"
+    if not os.path.exists(file_path):
+        config.dcc_queue = {}
+        return
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            config.dcc_queue = json.load(f)
+        print(f"[DB] Laddade in sparade köplatser från hårddisken!")
+    except Exception as e:
+        print(f"[DB ERROR] Kunde inte läsa sparad DCC-kö, startar tom: {e}")
+        config.dcc_queue = {}
