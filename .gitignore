@@ -70,3 +70,6 @@ venv.bak/
 
 # macOS system files
 .DS_Store
+
+# Claude Code local config (machine-specific hooks, session data, cache)
+.claude/
