@@ -40,6 +40,99 @@ def user_is_present_in_ram(user_key):
                 return True
     return False
 
+def release_queue_entry(user, next_file, delivered, reason=""):
+    """Settle the queue row for a finished attempt. Returns True if the row was kept.
+
+    Removal is by IDENTITY, never by position. start_dcc_send's finally used to do
+    config.dcc_queue[u_key].pop(0), which removes whatever is first at that instant rather
+    than the entry actually sent. Two ways that lost files:
+
+      * The direct-send fast path builds a synthetic next_file never inserted into the
+        queue, so the row at position 0 on completion is by construction a DIFFERENT,
+        unsent file. It was deleted anyway.
+      * The queue can be appended to or promoted while a transfer runs.
+
+    Identity removal fixes both and needs no special case: a synthetic entry is not in the
+    list, so nothing is removed and the user's real queue is left intact.
+
+    A failed attempt no longer consumes the row, but it must not retry forever, so the
+    attempt count lives ON THE ROW as 'send_fails' and is capped at config.MAX_SEND_FAILS.
+    Keeping it on the row rather than in a side dict means its lifetime is exactly the
+    row's: it cannot leak, cannot collide between users or same-named files, and cannot be
+    inherited by a later request for the same filename.
+
+    Two kinds of row are deliberately NOT retryable, because retrying them can only fail:
+      * a consumed temporary archive - the cleanup step deletes the .rar it points at, so
+        every retry would abort immediately on file_size == 0 and emit a misleading error;
+      * a legacy non-dict row, which has nowhere to store a counter.
+    Both are settled on their first failure.
+    """
+    import config
+    import db
+
+    u_key = str(user).lower()
+
+    def _remove_by_identity():
+        rows = config.dcc_queue.get(u_key)
+        if not rows:
+            return 0
+        kept = [row for row in rows if row is not next_file]
+        removed = len(rows) - len(kept)
+        if removed:
+            config.dcc_queue[u_key] = kept
+        return removed
+
+    is_row = isinstance(next_file, dict)
+    consumed_temp = bool(is_row and next_file.get("is_temporary_zip")
+                         and not next_file.get("is_unpacked_rar_folder"))
+    retryable = is_row and not consumed_temp
+
+    retained = False
+    gave_up = False
+    budget = getattr(config, "MAX_SEND_FAILS", 3)
+
+    with queue_lock:
+        if delivered:
+            removed = _remove_by_identity()
+            outcome = "delivered, " + str(removed) + " row(s) removed"
+        elif not retryable:
+            removed = _remove_by_identity()
+            why = "temporary archive already consumed" if consumed_temp else "row is not retryable"
+            outcome = "failed (" + why + "), " + str(removed) + " row(s) removed"
+        else:
+            attempts = int(next_file.get("send_fails", 0)) + 1
+            next_file["send_fails"] = attempts
+            if attempts >= budget:
+                removed = _remove_by_identity()
+                gave_up = True
+                outcome = "failed " + str(attempts) + "/" + str(budget) + " - giving up, " + str(removed) + " row(s) removed"
+            else:
+                retained = True
+                outcome = "failed " + str(attempts) + "/" + str(budget) + " - kept for retry"
+
+    try:
+        db.save_dcc_queue()
+    except Exception as save_err:
+        print("[DCC QUEUE ERROR] Could not persist the queue: " + str(save_err))
+
+    if gave_up or (not delivered and not retained):
+        # Tell the user their file was dropped. Silently discarding it is how the old
+        # positional pop hid this class of failure in the first place.
+        try:
+            oserve_mod = sys.modules.get("oserve")
+            dropped = next_file.get("file", "your file") if is_row else str(next_file)
+            if oserve_mod:
+                oserve_mod.queue_message(
+                    user,
+                    "NOTICE " + str(user) + " :" + config.C_BOLD + "Error" + config.C_RESET +
+                    ": Could not send " + str(dropped) + " (" + str(reason) + "). Removed from your queue.\r\n")
+        except Exception as notify_err:
+            print("[DCC QUEUE] Could not notify " + str(user) + ": " + str(notify_err))
+
+    print("[DCC QUEUE] " + str(user) + ": " + outcome + ((" (" + reason + ")") if reason else "") + ".")
+    return retained
+
+
 def get_total_queued_count():
     """Räknar ut det totala antalet filer som står i alla personliga köer just nu"""
     total = 0
@@ -148,6 +241,36 @@ def check_queue_and_send(irc_sock, completed_user):
                     config.user_processing_lock.add(completed_user.lower())
 
                 def inline_rar_packer(sock):
+                    # This runs with config.rar_inprogress already True and the user held in
+                    # config.user_processing_lock. Both are PROCESS-WIDE interlocks, and
+                    # nothing here released them on an unexpected failure - subprocess.run
+                    # raising (rar missing, disk full, timeout), os.makedirs failing, or
+                    # getsize on a vanished archive would all leave rar_inprogress latched
+                    # True, silently disabling folder packing for every user until the
+                    # daemon was restarted. Not even !rehash cleared it.
+                    # handed_off: the body returns True once it has transferred ownership of
+                    # config.rar_inprogress / user_processing_lock to another thread. Releasing
+                    # them here in that case would un-serialise packing from sending - the very
+                    # thing the interlocks exist to guarantee - so the finally only releases
+                    # what this call still owns.
+                    handed_off = False
+                    try:
+                        handed_off = _inline_rar_packer_body(sock)
+                    except Exception as packer_err:
+                        print("[LINJAR RAR ERROR] Packing failed for " + str(completed_user) + ": " + str(packer_err))
+                        try:
+                            announce_mod.send_pack_error_notice(sock, completed_user)
+                        except Exception:
+                            pass
+                        release_queue_entry(completed_user, next_file, delivered=False,
+                                            reason="pack failed: " + str(packer_err))
+                    finally:
+                        if not handed_off:
+                            config.rar_inprogress = False
+                            if hasattr(config, 'user_processing_lock'):
+                                config.user_processing_lock.discard(completed_user.lower())
+
+                def _inline_rar_packer_body(sock):
                     true_source_dir = next_file['path']
                     raw_filename = next_file['file']
 
@@ -204,7 +327,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     # 🛡️ SCEN-SÄKRAD OCH TOTAL-ISOLERAD ARGUMENT-SLUSS:
                     work_dir_switch = f"-w{os.path.abspath(config.TMP_ZIP_DIR)}"
                     cmd = ["rar", "a", "-ep1", work_dir_switch, os.path.abspath(target_rar_path), os.path.abspath(true_source_dir)]
-                    process = subprocess.run(cmd, capture_output=True, text=True, timeout=None)
+                    # A timeout is essential: with timeout=None a hung rar blocks this
+                    # thread forever while config.rar_inprogress stays True, wedging folder
+                    # packing for EVERY user until the daemon is restarted.
+                    rar_timeout = getattr(config, 'RAR_TIMEOUT', 1800)
+                    process = subprocess.run(cmd, capture_output=True, text=True, timeout=rar_timeout)
                     
                     if process.returncode == 0 and os.path.exists(target_rar_path):
                         print(f"[LINJÄR RAR] Komprimering lyckades. Väntar 2.0s på disksynk...")
@@ -227,16 +354,21 @@ def check_queue_and_send(irc_sock, completed_user):
                             args=(sock, completed_user, target_rar_path, rar_filename, target_chan, next_file), 
                             daemon=True
                         ).start()
-                        return
+                        # Ownership of both interlocks now belongs to that send thread, which
+                        # releases them in its own finally. Pack and send stay serialised.
+                        return True
                     else:
-                        config.rar_inprogress = False
-                        if hasattr(config, 'user_processing_lock'):
-                            config.user_processing_lock.discard(completed_user.lower())
                         error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
-                        print(f"[LINJÄR RAR ERROR] {error_msg}")
+                        print(f"[LINJAR RAR ERROR] {error_msg}")
                         announce_mod.send_debug(f"Pack FAILED in queue slot for {completed_user}: {error_msg}", category="PART")
-                        check_queue_and_send(sock, completed_user)
-                        return
+                        # Charge the failure to the retry budget instead of recursing. The old
+                        # code cleared the interlocks and called check_queue_and_send inline,
+                        # which re-selected the SAME row and started another packer thread from
+                        # inside this one - unbudgeted, and the wrapper finally would then strip
+                        # the interlocks that new thread had just claimed.
+                        release_queue_entry(completed_user, next_file, delivered=False,
+                                            reason="rar exited " + str(process.returncode))
+                        return False
 
                 # 🚀 TÄNDNINGEN AKTIV: Denna ligger på exakt rätt nivå och väcker funktionen ovanför direkt!
                 threading.Thread(target=inline_rar_packer, args=(irc_sock,), daemon=True).start()
@@ -676,6 +808,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     ip_long = get_public_ip_long()
     start_time = time.time()
     bytes_sent = 0
+    # Only a send loop that ran to completion counts as delivered. A socket timeout, a
+    # refused connection or a half-finished stream must not consume the queue row.
+    transfer_completed = False
     
     if ip_long == 0 or file_size == 0:
         print(f"[DCC CRITICAL ABORT] Avbröt sändning för {user}. Path: {file_path} (Size: {file_size})")
@@ -693,6 +828,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
             config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
             
+        # This abort returns BEFORE the try/finally that settles the queue row, so without
+        # this call the same unreadable entry was re-selected every ~3 seconds forever,
+        # with no counter and no way out - a permanent hot loop injecting a NOTICE and a
+        # VIP notice on every pass. Charging it to the retry budget bounds it.
+        release_queue_entry(user, next_file, delivered=False,
+                            reason="file missing, empty, or public IP unknown")
+
         time.sleep(3.0)
         check_queue_and_send(irc_sock, user)
         return
@@ -715,10 +857,31 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except: pass
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
             config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
-        if isinstance(next_file, dict) and next_file.get('is_temporary_zip') is True and os.path.exists(file_path):
+
+        # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
+        # NOT charged to the retry budget - a busy spell must not discard good queued files.
+        # The interlocks are released so the user is not left wedged, and the row stays
+        # queued for the next completion trigger. Re-triggering here would spin: the ports
+        # are still full one instruction later.
+        # Only clear rar_inprogress if THIS send owns it - a plain audio file never did, and
+        # clearing a flag another user's pack is holding is how the interlock leaks.
+        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+            config.rar_inprogress = False
+        if hasattr(config, 'user_processing_lock'):
+            config.user_processing_lock.discard(user.lower())
+        if (isinstance(next_file, dict) and next_file.get('is_temporary_zip') is True
+                and not next_file.get('is_unpacked_rar_folder') and os.path.exists(file_path)):
             try: os.remove(file_path)
-            except: pass
-        check_queue_and_send(irc_sock, user)
+            except OSError: pass
+
+        # The row stays queued and is not charged a failure, but on an otherwise idle bot
+        # nothing else would ever wake it. One bounded delayed retry, no tight spin.
+        def delayed_port_retry():
+            time.sleep(45)
+            check_queue_and_send(irc_sock, user)
+        threading.Thread(target=delayed_port_retry, daemon=True).start()
+
+        print("[DCC PORTS] No free DCC port for " + str(user) + "; entry stays queued, retrying in 45s.")
         return
 
     dcc_sock.settimeout(30.0)
@@ -762,6 +925,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.total_sent_bytes += len(chunk)
                 
+        transfer_completed = True
         print(f"[DCC-SUCCESS] Filen skickades felfritt till {user}!")
         # 🕒 DIN BEPRÖVADE ORIGINAL-PAUS: Ger mIRC exakt 1.5 sekunder att stänga filen i lugn och ro!
         try: time.sleep(1.5)
@@ -822,7 +986,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # 2. TRYGGA KANALMEDDELANDET I ABSOLUT FÖRSTA HAND (Säkrar din lyxiga färgblocksreklam live!)
         try:
             import announce as announce_mod
-            announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, final_calc_speed)
+            # Only announce a transfer that actually completed. A failed attempt now keeps
+            # its queue row for retry, so announcing here would tell the channel "Sent" and
+            # re-offer the same file on every attempt.
+            if transfer_completed:
+                announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, final_calc_speed)
         except Exception as ann_chan_err:
             print(f"[ANNOUNCE KANAL ERROR] Kunde inte trycka ut färgblocksreklam till mIRC: {ann_chan_err}")
 
@@ -863,18 +1031,16 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except Exception as file_rm_err:
             print(f"[DCC CLEANUP ERROR] Kunde inte köra disksaneringen: {file_rm_err}")
         
-        # 5. SÄKRAD KÖ-RENSNING OCH AUTOQ POPPING UR TEXTFILEN
+        # 5. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
+        #    unconditional pop(0), which removed whatever was first at that instant rather
+        #    than the entry actually sent. See release_queue_entry.
+        row_retained = False
         try:
-            with queue_lock if 'queue_lock' in globals() else threading.Lock():
-                u_key = user.lower()
-                if u_key in config.dcc_queue and len(config.dcc_queue[u_key]) > 0:
-                    config.dcc_queue[u_key].pop(0)
-                    
-            import db
-            db.save_dcc_queue()
-            print(f"[DCC CLEANUP] Raden för {user} har poppats från dcc_queue.txt efter avslutad sändning.")
+            row_retained = release_queue_entry(
+                user, next_file, delivered=transfer_completed,
+                reason="transfer complete" if transfer_completed else "transfer did not complete")
         except Exception as pop_err:
-            print(f"[DCC CLEANUP ERROR] Kunde inte poppa raden ur textfilen: {pop_err}")
+            print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
 
         # 6. LÅS UPP RAM-MINNET OCH UTESLUT DUBBELTRÅDAR
         config.rar_inprogress = False
@@ -882,7 +1048,15 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             config.user_processing_lock.discard(user.lower())
 
         # 7. TRIGGER-VÄCKARE (Väcker kön automatiskt efter 3 sekunder på ett helt trådsäkrat sätt!)
+        # A retained row means the attempt FAILED and will be retried. Reusing the flat
+        # 3-second completion timer as the retry timer would hammer a broken entry three
+        # times in nine seconds, each pass emitting a NOTICE and a VIP notice while the VIP
+        # queue drains slower than that. Back off instead.
+        retry_delay = 3
+        if row_retained and isinstance(next_file, dict):
+            retry_delay = 15 * max(1, int(next_file.get('send_fails', 1)))
+
         def delayed_queue_trigger_fallback():
-            time.sleep(3)
+            time.sleep(retry_delay)
             check_queue_and_send(irc_sock, user)
         threading.Thread(target=delayed_queue_trigger_fallback, daemon=True).start()
