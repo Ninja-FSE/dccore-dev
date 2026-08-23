@@ -507,6 +507,8 @@ def irc_loop():
                                 threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), daemon=True).start()
                             elif msg.startswith("!unban "):
                                 threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
+                            elif msg.startswith("!clearqueue "):
+                                threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), daemon=True).start()
                             elif msg.lower() == "!update":
                                 threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), daemon=True).start()
                             elif msg.startswith(f"!{config.NICKNAME} "):
