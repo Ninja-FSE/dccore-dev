@@ -63,7 +63,8 @@ def get_bot_aliases():
     """
     aliases = []
     for candidate in (getattr(config, 'NICKNAME', None),
-                      getattr(config, 'ORIGINAL_NICK', None)):
+                      getattr(config, 'ORIGINAL_NICK', None),
+                      getattr(config, 'PREVIOUS_NICK', None)):
         if not candidate:
             continue
         low = str(candidate).strip().lower()

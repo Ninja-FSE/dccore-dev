@@ -275,6 +275,48 @@ def handle_rehash_request(user, target_chan):
     announce.is_ready = False
     announce.send_debug(f"Rehash triggered by {user} from {target_chan}. PAUSING NOTICES & ADVERTISEMENT...", category="INFO")
     
+    # =====================================================================
+    # 1b. RUNTIME STATE THAT MUST SURVIVE THE RELOAD
+    # =====================================================================
+    # importlib.reload re-executes a module body, so every name config.py assigns in its
+    # "GLOBALT LIVE-MINNE" section is reset to an empty container. The block above already
+    # rescues dcc_queue and channel_users; everything else in that section was being
+    # silently destroyed on every !rehash.
+    #
+    # NOT preserved, deliberately - these are cleared ON PURPOSE and that behaviour is kept:
+    #   send_queue          - blanked below so stale text cannot collide after the reload
+    #   rar_inprogress      - the documented "lock-clearing rehash" escape hatch for a
+    #   user_processing_lock  packer that wedged; !rehash is the only way to clear them
+    PRESERVE_RUNTIME = (
+        'active_transfers',   # losing this reports 0 active slots while transfers run,
+                              # so the bot admits work beyond MAX_DCC_SLOTS
+        'banned_users',       # every timed ban silently released
+        'frozen_queues',      # freeze timers lost, so departed users' queues never expire
+        'muted_until',        # flood mutes released
+        'whois_status',
+        'user_requests',      # flood history, so a flooder gets a clean slate
+        'failed_transfers',   # per-file retry counters
+    )
+    # vip_queue is deliberately NOT preserved, for the same reason send_queue is not: it is
+    # transient OUTPUT, not state. Restoring it would also replay lines addressed to channels
+    # this very handler is about to PART, which the server answers with 404.
+    preserved_runtime = {}
+    for _key in PRESERVE_RUNTIME:
+        if hasattr(config, _key):
+            preserved_runtime[_key] = getattr(config, _key)
+
+    # config.NICKNAME is BOTH a setting and runtime state: irc.py rebinds it to ALT_NICKNAME
+    # after a 433. Reloading config resets it to the file value, so a rehash while running as
+    # the alternate nick left the bot answering to a name the server no longer knew it by -
+    # every @trigger dead until the next reconnect.
+    live_nick = getattr(config, 'NICKNAME', None)
+    baseline_nick = getattr(config, 'ORIGINAL_NICK', None)
+
+    # announce.current_worker_id is the advert worker's generation token. Reload resets it to
+    # 0, the running worker sees the mismatch and retires itself, and nothing starts a new one
+    # until the next reconnect - so !rehash silently stopped all channel advertising.
+    live_worker_id = getattr(announce, 'current_worker_id', None)
+
     try:
         # 2. REHASH: Ladda om alla centrala moduler live i minnet
         modules_to_reload = ['config', 'list', 'dcc', 'announce', 'security', 'db', 'stats_mgr']
@@ -286,6 +328,74 @@ def handle_rehash_request(user, target_chan):
             importlib.reload(sys.modules['commands'])
             
         print(f"[REHASH SUCCESS] Alla Python-moduler har blivit live-uppdaterade i RAM av {user}!")
+
+        # Put the live state back before anything else runs against the fresh modules. The
+        # explicit dcc_queue / channel_users restores further down still run afterwards and
+        # win for those two keys, so this does not fight them.
+        #
+        # MERGE rather than overwrite. reload(config) rebinds each of these to a fresh empty
+        # container, so anything another thread wrote during the reload landed there and a
+        # blind setattr would discard it. The reload window is only the few milliseconds of
+        # eight module reloads, but a transfer finishing inside it is exactly the case that
+        # matters: its removal from active_transfers would be undone and the finished entry
+        # would come back as a phantom holding a DCC slot.
+        import config as _cfg
+        for _key, _value in preserved_runtime.items():
+            during_reload = getattr(_cfg, _key, None)
+            if isinstance(_value, dict) and isinstance(during_reload, dict) and during_reload:
+                merged = dict(_value)
+                merged.update(during_reload)      # window writes win
+                setattr(_cfg, _key, merged)
+            elif isinstance(_value, list) and isinstance(during_reload, list) and during_reload:
+                merged = list(_value)
+                for _row in during_reload:
+                    if _row not in merged:
+                        merged.append(_row)
+                setattr(_cfg, _key, merged)
+            else:
+                setattr(_cfg, _key, _value)
+
+        if preserved_runtime:
+            print(f"[REHASH RAM] Restored {len(preserved_runtime)} live runtime structures "
+                  f"({', '.join(sorted(preserved_runtime))}).")
+
+        # Name the restored slots explicitly. A phantom left by the window above is rare and
+        # self-clears the next time that nick is promoted, but an operator staring at "3/3
+        # slots busy" with nothing moving needs to be able to see whose they are.
+        if getattr(_cfg, 'active_transfers', None):
+            _holders = ', '.join(sorted({str(t.get('user', '?')) for t in _cfg.active_transfers}))
+            print(f"[REHASH RAM] {len(_cfg.active_transfers)} DCC slot(s) still held by: {_holders}")
+
+        # Nickname: if config.py's value is unchanged, the LIVE nick wins - it may be the 433
+        # fallback and the server knows us by it. If the admin edited NICKNAME in the file,
+        # adopt the new value and re-baseline ORIGINAL_NICK so the fallback logic follows it.
+        if baseline_nick and _cfg.NICKNAME == baseline_nick:
+            if live_nick and live_nick != _cfg.NICKNAME:
+                _cfg.NICKNAME = live_nick
+                print(f"[REHASH RAM] Kept the live nickname {live_nick!r} (alternate nick in use).")
+        else:
+            # The admin renamed the bot in config.py. Re-baseline so the rename survives the
+            # next reconnect (irc.py resets NICKNAME from ORIGINAL_NICK on every connect), but
+            # keep the OLD name addressable: the published master list was stamped with it
+            # (update_list.py writes "!<nick> <file>" lines), so without this every request
+            # pasted from a list users already downloaded would be dropped with no reply.
+            # irc.get_bot_aliases picks this up; config.py never assigns it, so like
+            # ORIGINAL_NICK it survives future reloads.
+            if baseline_nick:
+                _cfg.PREVIOUS_NICK = baseline_nick
+            _cfg.ORIGINAL_NICK = _cfg.NICKNAME
+            print(f"[REHASH RAM] config.py changed the nickname to {_cfg.NICKNAME!r}; "
+                  f"re-baselined, still answering to {baseline_nick!r}.")
+
+        import announce as _ann
+        # Only reinstate the token if nothing newer claimed it. A reconnect completing inside
+        # the reload window starts a fresh advert worker and stamps a higher id; restoring
+        # blindly would retire that new worker and leave the channels silent.
+        if live_worker_id and not getattr(_ann, 'current_worker_id', 0):
+            _ann.current_worker_id = live_worker_id
+            print("[REHASH RAM] Advert worker kept alive across the reload.")
+            print("[REHASH NOTE] announce_worker's own code is NOT re-entered by a rehash; "
+                  "restart the daemon to pick up changes to the advert loop itself.")
         
         # Läs in den nyladdade configen
         import config
