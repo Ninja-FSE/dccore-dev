@@ -68,6 +68,9 @@ def check_user_status(user):
     # 2. PERMANENTA WILDCARD-BANS (hard_bans.txt, ett mönster per rad)
     # ---------------------------------------------------------------------
     hard_file = getattr(config, "HARD_BANS_FILE", "./data/hard_bans.txt")
+    # Tracks whether the hard-ban list was actually READ. If the file is missing or the
+    # read raised, this stays False and we must not treat "no match" as "definitely clean".
+    hard_check_ok = False
     if os.path.exists(hard_file):
         try:
             with open(hard_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -85,8 +88,24 @@ def check_user_status(user):
                     regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
                     if re.match(regex_pattern, user_lower):
                         return _deny(f"matched banned pattern '{pattern}'", "BAN")
+            hard_check_ok = True
         except Exception as e:
             print(f"[SECURITY ERROR] Kunde inte läsa filen {hard_file}: {e}")
+
+    # This user was seen clean, so drop any stale "already notified" mark: a LATER ban on
+    # the same nick then notifies once more. Previously the mark was only cleared on the
+    # timed-ban expiry path, so after an !unban and a re-!ban the debug channel stayed
+    # silent and the admin never saw the pattern take effect.
+    #
+    # Only clear when the hard-ban list was genuinely read. The scan fails open - a missing
+    # file, or a read landing inside the truncate window of an !unban rewrite - and clearing
+    # on that path would re-arm the notice, costing another 0.5s read-thread stall the next
+    # time the same still-banned nick speaks.
+    #
+    # Note this does not otherwise prune the set: a nick is only removed if it speaks again
+    # while unbanned.
+    if hard_check_ok:
+        _ban_notified.discard(user_lower)
 
     return True  # Användaren är grön och fri att använda boten!
 
