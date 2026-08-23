@@ -3,6 +3,34 @@ import sys
 import config
 import db
 
+def is_admin(user):
+    """Return True if `user` may run admin commands.
+
+    Centralises a check that was duplicated across five handlers, so the eventual
+    hostmask-based gate is a change in one place instead of five.
+
+    Two deliberate changes from the copies this replaces:
+
+    * The hardcoded `or user.lower() == "flac"` fallback is gone. It made the literal nick
+      "flac" an admin regardless of what config.ADMIN_NICK was set to - an undocumented
+      second account nobody could turn off. It is a no-op today because ADMIN_NICK is
+      already "FLAC", so removing it changes nothing until that value is edited.
+    * ADMIN_NICK may now be a comma-separated list, so a second operator can be added
+      without reintroducing a hardcoded name.
+
+    KNOWN LIMITATION: this is still nick-based, and an Undernet nick is not owned without
+    services auth - anyone can take the nick while the real admin is offline and gain
+    every admin command, now including the destructive !clearqueue. Closing that properly
+    means matching ident@host, which irc.py does not currently capture: its PRIVMSG regex
+    keeps only the nick. That is a separate change to irc.py plus this file.
+    """
+    import config
+
+    raw = getattr(config, 'ADMIN_NICK', 'FLAC') or ''
+    allowed = {n.strip().lower() for n in str(raw).split(',') if n.strip()}
+    return str(user).lower() in allowed
+
+
 def handle_queue_check(s, user, target):
     """Räknar antal köade filer för en specifik användare och ger anpassade svar i VIP-kön!"""
     user_key = user.lower()
@@ -79,13 +107,13 @@ def handle_admin_clear_queue(user, target_chan, msg_text):
     en användare köra på sig själv via IRC; det här ger admin motsvarande makt över
     VEM SOM HELST, direkt via en enkel textrad, utan att behöva röra dcc_queue.txt på disken
     manuellt."""
+    import os
     import config
     import announce
     import db
     import dcc
 
-    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
-    if user.lower() != allowed_admin and user.lower() != "flac":
+    if not is_admin(user):
         print(f"[SECURITY] Obehörig användare {user} försökte köra !clearqueue.")
         return
 
@@ -103,6 +131,36 @@ def handle_admin_clear_queue(user, target_chan, msg_text):
     with dcc.queue_lock:
         if hasattr(config, 'dcc_queue') and target_key in config.dcc_queue:
             removed_count = len(config.dcc_queue[target_key])
+
+            # Delete any temporary .rar this queue owned before dropping the entries,
+            # matching what the freeze-timeout sweep already does (dcc.py:93 and :313).
+            # Without this the archives stay on the SSD cache forever, because the queue
+            # rows naming them are the only record that they exist.
+            for f_obj in config.dcc_queue[target_key]:
+                if not isinstance(f_obj, dict):
+                    continue
+                if f_obj.get('is_temporary_zip') is not True or f_obj.get('is_unpacked_rar_folder'):
+                    continue
+                temp_path = f_obj.get('path')
+                if not temp_path or not os.path.exists(temp_path):
+                    continue
+                # Never touch a file another user's queue still points at, and never one
+                # that is being streamed right now.
+                still_needed = any(
+                    isinstance(o, dict) and o.get('path') == temp_path
+                    for k, files in config.dcc_queue.items() if k != target_key
+                    for o in files
+                )
+                if not still_needed:
+                    still_needed = any(tx.get('file') == f_obj.get('file') for tx in config.active_transfers)
+                if still_needed:
+                    continue
+                try:
+                    os.remove(temp_path)
+                    print(f"[ADMIN CLEARQUEUE] Removed orphaned temp archive: {temp_path}")
+                except OSError as rm_err:
+                    print(f"[ADMIN CLEARQUEUE] Could not remove {temp_path}: {rm_err}")
+
             del config.dcc_queue[target_key]
             db.save_dcc_queue()
 
@@ -169,8 +227,7 @@ def handle_rehash_request(user, target_chan):
     import announce
     import copy
     
-    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
-    if user.lower() != allowed_admin and user.lower() != "flac":
+    if not is_admin(user):
         print(f"[REHASH SECURITY] Ignorerade rehash-försök från obehörig användare: {user}")
         return
 
@@ -355,8 +412,7 @@ def handle_hard_ban_request(user, target_chan, msg_text):
     import announce
     import os
     
-    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
-    if user.lower() != allowed_admin and user.lower() != "flac":
+    if not is_admin(user):
         print(f"[SECURITY] Obehörig användare {user} försökte köra !ban.")
         return
 
@@ -393,8 +449,7 @@ def handle_hard_unban_request(user, target_chan, msg_text):
     import announce
     import os
     
-    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
-    if user.lower() != allowed_admin and user.lower() != "flac":
+    if not is_admin(user):
         return
 
     parts = msg_text.split(" ", 1)
@@ -446,8 +501,7 @@ def handle_list_update_request(user, target_chan):
     import threading
     import time
     
-    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
-    if user.lower() != allowed_admin and user.lower() != "flac":
+    if not is_admin(user):
         print(f"[SECURITY] Obehörig användare {user} försökte köra !update.")
         return
 
@@ -468,7 +522,11 @@ def handle_list_update_request(user, target_chan):
     def get_count_from_list():
         try:
             # Hitta alla textfiler som matchar botens namn i mappen
-            all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.NICKNAME}-*.txt")))
+            # LIST_BASE_NAME, not NICKNAME: irc.py rebinds NICKNAME on a 433 fallback, and
+            # update_list.py names the files with LIST_BASE_NAME. Keyed off the live nick this
+            # counted 0 both before and after a rebuild, so !update reported "0 files, added 0"
+            # while the advert reported the real total. Matches list.find_latest_list().
+            all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.LIST_BASE_NAME}-*.txt")))
             
             # SÄKERHETSSPÄRR: Rensa bort din nya RAR-lista så vi STRICT läser den sanna masterlistan!
             true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
