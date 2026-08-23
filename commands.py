@@ -73,6 +73,55 @@ def handle_queue_remove(s, user, target):
         oserve.queue_message(user, msg)
     print(f"[COMMANDS] {user} removed their entire queue from the disk layout.")
 
+def handle_admin_clear_queue(user, target_chan, msg_text):
+    """🛡️ NY (issue #15): Tvångsrensar en ANNAN användares kö helt (spöknick, hängd post
+    efter en netsplit/reconnect, etc.) - enbart admin. handle_queue_remove ovan kan bara
+    en användare köra på sig själv via IRC; det här ger admin motsvarande makt över
+    VEM SOM HELST, direkt via en enkel textrad, utan att behöva röra dcc_queue.txt på disken
+    manuellt."""
+    import config
+    import announce
+    import db
+    import dcc
+
+    allowed_admin = getattr(config, 'ADMIN_NICK', 'FLAC').lower()
+    if user.lower() != allowed_admin and user.lower() != "flac":
+        print(f"[SECURITY] Obehörig användare {user} försökte köra !clearqueue.")
+        return
+
+    parts = msg_text.split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        announce.send_debug("Syntax error! Använd: !clearqueue <nick>", category="INFO")
+        return
+
+    target_nick = parts[1].strip()
+    target_key = target_nick.lower()
+
+    removed_count = 0
+    was_frozen = False
+
+    with dcc.queue_lock:
+        if hasattr(config, 'dcc_queue') and target_key in config.dcc_queue:
+            removed_count = len(config.dcc_queue[target_key])
+            del config.dcc_queue[target_key]
+            db.save_dcc_queue()
+
+        if hasattr(config, 'frozen_queues') and target_key in config.frozen_queues:
+            del config.frozen_queues[target_key]
+            was_frozen = True
+
+    if removed_count > 0 or was_frozen:
+        extra = " (var även fryst)" if was_frozen else ""
+        announce.send_debug(
+            f"Admin {config.C_BOLD}{user}{config.C_RESET} force-cleared queue for {config.C_BOLD}{target_nick}{config.C_RESET}: {config.C_BOLD}{removed_count}{config.C_RESET} file(s) removed{extra}.",
+            category="INFO")
+        print(f"[ADMIN CLEARQUEUE] {user} tvångsrensade {target_nick}s kö ({removed_count} filer, frozen={was_frozen}).")
+    else:
+        announce.send_debug(
+            f"Clearqueue: {config.C_BOLD}{target_nick}{config.C_RESET} had no queue or frozen entry to remove.",
+            category="INFO")
+        print(f"[ADMIN CLEARQUEUE] {user} försökte rensa {target_nick}, men ingen kö eller fryst post hittades.")
+
 def handle_ping_request(irc_sock, user, target_chan):
     """Startar tidtagaruret och skickar en unik latens-PING till IRC-servern"""
     import time
@@ -501,12 +550,3 @@ def handle_list_update_request(user, target_chan):
 
     # Starta bakgrundstråden linjärt
     threading.Thread(target=async_list_updater, daemon=True).start()
-
-
-
-
-
-
-
-
-
