@@ -329,33 +329,52 @@ def check_queue_and_send(irc_sock, completed_user):
         
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
+            # FIXED: re-check the slot count INSIDE the lock. The test above is already
+            # stale by the time we acquire, so two concurrent callers could both pass it
+            # and overshoot MAX_DCC_SLOTS.
+            if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
+                return
+
             for waiting_user, user_files in list(config.dcc_queue.items()):
-                w_key = waiting_user.lower()
-                
-                # 🛡️ GLOBAL DUBBEL-SPÄRR: Skippa om användaren redan håller på att packas eller skickas!
-                if hasattr(config, 'user_processing_lock') and w_key in config.user_processing_lock:
+                # Use the dcc_queue dict key for every lock/queue operation. The old code
+                # tested the guards with one key and then rebound w_key to the display
+                # name further down, so the guard and the claim could disagree.
+                queue_key = str(waiting_user).lower()
+
+                if hasattr(config, 'user_processing_lock') and queue_key in config.user_processing_lock:
                     continue
-                    
-                if not user_files or len(user_files) == 0 or w_key in config.frozen_queues:
+
+                if not user_files or len(user_files) == 0 or queue_key in config.frozen_queues:
                     continue
-                    
-                # 🛡️ FIXAD (issue #4): user_files är LISTAN med användarens köade filer,
-                # inte en enskild fil. Utan [0] blev testet nedan alltid sant (en lista är
-                # aldrig en dict), så loopen hoppade över varenda väntande användare och
-                # hela sektion B var död kod. Följden: när en slot blev ledig fick ingen
-                # annan än den som just blivit klar någonsin ta över den.
-                # Rad 314 garanterar redan att listan inte är tom.
+
+                # FIXED (issue #4): user_files is the LIST of this user's queued files, not a
+                # single file. Without [0] the isinstance test below was always true (a list is
+                # never a dict), so every waiting user was skipped and section B was dead code.
                 g_next = user_files[0]
                 if not isinstance(g_next, dict):
                     continue
-                    
+
+                # FIXED: section B had no admission control at all. It was dead code until the
+                # [0] fix above woke it up, and nothing had ever audited what it does when it
+                # actually runs. It never claimed the entry, so two overlapping triggers - the
+                # 3s fallback fires after EVERY transfer, plus the 353 and JOIN thaws - both
+                # promoted the same queue head. The user received two DCC offers for one file,
+                # two slots were burned on it, and then both finally blocks popped position 0:
+                # the first removed the file that was sent, the second removed the NEXT file,
+                # which had never been sent. Silent loss, persisted straight to dcc_queue.txt.
+                already_sending = any(
+                    str(tx.get('user', '')).lower() == queue_key
+                    for tx in config.active_transfers
+                )
+                if already_sending:
+                    continue
+
                 real_username = g_next.get('user_raw', waiting_user)
-                w_key = real_username.lower()
-                
+
                 g_chan = g_next.get('channel', config.CHANNEL.split(','))
                 g_name = g_next.get('file', '')
                 g_path = g_next.get('path', '')
-                
+
                 user_is_globally_active = False
                 if isinstance(g_chan, str):
                     channels_to_check = [g_chan]
@@ -369,23 +388,32 @@ def check_queue_and_send(irc_sock, completed_user):
                         n_chan = str(single_chan).strip().lower()
                         if n_chan in config.channel_users:
                             lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
-                            if w_key in lowered_glob_users:
+                            if queue_key in lowered_glob_users:
                                 user_is_globally_active = True
                                 break
-                        
+
                 if user_is_globally_active is True:
-                    # 🛡️ GLOBAL ELSE-ISOLERING: Om det är en mapp, låt den lokala tråden köra i fred, starta inte dubbelt!
                     if g_next.get('is_unpacked_rar_folder') is True:
-                        print(f"[DCC QUEUE] Globala kön upptäckte pågående mappladdning för {real_username}. Synkar lås...")
-                        break
-                    else:
-                        print(f"[DCC QUEUE] New user {real_username} verified live in RAM for {g_chan}. Got slot.")
-                        config.active_transfers.append({"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name})
-                        if oserve: oserve.active_downloads = len(config.active_transfers)
-                        
-                        announce_mod.send_dcc_sending_notice(real_username, g_name)
-                        threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
-                        break
+                        # FIXED: this was `break`, which abandoned the whole scan. One user
+                        # waiting on a RAR pack starved every other waiting user behind them
+                        # for as long as the pack took. Skip this user and keep looking.
+                        print(f"[DCC QUEUE] Folder pack already pending for {real_username}. Skipping to the next waiting user.")
+                        continue
+
+                    # CLAIM the user before releasing the lock, so a concurrent caller sees
+                    # them as busy. start_dcc_send's finally already discards this key on
+                    # every exit path, including the early aborts.
+                    if not hasattr(config, 'user_processing_lock'):
+                        config.user_processing_lock = set()
+                    config.user_processing_lock.add(queue_key)
+
+                    print(f"[DCC QUEUE] New user {real_username} verified live in RAM for {g_chan}. Got slot.")
+                    config.active_transfers.append({"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name})
+                    if oserve: oserve.active_downloads = len(config.active_transfers)
+
+                    announce_mod.send_dcc_sending_notice(real_username, g_name)
+                    threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
+                    break
 
 
 def handle_download_request(irc_sock, user, requested_file, target_chan):
