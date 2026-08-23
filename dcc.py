@@ -374,15 +374,46 @@ def check_queue_and_send(irc_sock, completed_user):
                 threading.Thread(target=inline_rar_packer, args=(irc_sock,), daemon=True).start()
                 return
 
-             # 🛡️ STENHÅRD ELSE-ISOLERING: Hit kliver den ENBART om det är en vanlig ljudfil (.mp3/.flac)!
+             # Plain audio file (.mp3/.flac), not a RAR folder pack.
             else:
-                f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
-                f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
-                
+                # FIXED (issue #27): section B already has admission control for this exact
+                # race (see the already_sending check below in section B), but section A's
+                # plain-file branch never got it. check_queue_and_send() can be invoked for
+                # the SAME user from multiple independent triggers close together - the 3s
+                # delayed_queue_trigger_fallback after every completed send, a JOIN/353
+                # thaw, and !rehash's system trigger - and the initial next_file read above
+                # only holds queue_lock for that one read, not for the channel-membership
+                # check and dispatch that follow. Two overlapping calls could both read the
+                # same queue head, both pass the channel check, and both start an
+                # independent start_dcc_send for the identical file to the identical user:
+                # one DCC handshake completes, the other times out or arrives as 0 bytes on
+                # the leech side. Claim the user atomically, inside the lock, before
+                # dispatching - start_dcc_send's finally already discards this key on every
+                # exit path.
+                with queue_lock:
+                    already_claimed = (
+                        hasattr(config, 'user_processing_lock')
+                        and completed_user.lower() in config.user_processing_lock
+                    ) or any(
+                        str(tx.get('user', '')).lower() == user_key
+                        for tx in config.active_transfers
+                    )
+
+                    if already_claimed:
+                        print(f"[DCC-BLOCK] {completed_user} is already claimed elsewhere; skipping duplicate dispatch.")
+                        return
+
+                    if not hasattr(config, 'user_processing_lock'):
+                        config.user_processing_lock = set()
+                    config.user_processing_lock.add(completed_user.lower())
+
+                    f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
+                    f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
+                    config.active_transfers.append({"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name})
+
                 print(f"[DCC QUEUE] Verified live in RAM for {target_chan}! Next file for {completed_user}: {f_name}")
-                config.active_transfers.append({"user": completed_user, "file": f_name, "bytes_sent": 0, "next_file_obj": f_name})
                 if oserve: oserve.active_downloads = len(config.active_transfers)
-                
+
                 announce_mod.send_dcc_sending_notice(completed_user, f_name)
                 threading.Thread(target=start_dcc_send, args=(irc_sock, completed_user, f_path, f_name, target_chan, next_file), daemon=True).start()
                 return
