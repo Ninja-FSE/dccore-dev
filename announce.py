@@ -4,6 +4,7 @@ import os
 import datetime
 import threading
 import sys
+import collections
 import config
 import list
 import dcc
@@ -11,6 +12,110 @@ import db
 import stats_mgr
 
 is_ready = False
+
+# IRC lines are capped at 512 bytes INCLUDING the CRLF, and the server prepends
+# ":nick!ident@host " when relaying to the channel - which counts against the same 512 for
+# every recipient. Worst case on Undernet: 1 + nick(12) + 1 + ident(10) + 1 + host(63) + 1
+# = 89 bytes of prefix, leaving 512 - 89 - 2 = 421 for what we send. Real hostmasks are
+# usually far shorter, so this is deliberately the pessimistic figure: trimming a filename
+# ourselves with an ellipsis is always better than the server cutting mid-colour-code, which
+# smears background colour to the end of the line in the recipient's client.
+IRC_LINE_BUDGET = 420
+
+
+def fit_irc_line(build, value, budget=IRC_LINE_BUDGET):
+    """Render build(value), shrinking `value` until the encoded line fits `budget` bytes.
+
+    The line is re-rendered from the template on every attempt rather than being cut at the
+    end, so a colour code can never be sliced in half. Byte length is measured, not
+    character length - non-ASCII artist and album names cost 2-3 bytes each.
+    """
+    line = build(value)
+    if len(line.encode("utf-8", errors="ignore")) <= budget:
+        return line
+
+    text = str(value)
+    while text and len(build(text + "...").encode("utf-8", errors="ignore")) > budget:
+        text = text[:-1]
+
+    trimmed = build(text + "..." if text else "...")
+    if len(trimmed.encode("utf-8", errors="ignore")) > budget:
+        # The template's FIXED part alone exceeds the budget, so no amount of shrinking the
+        # variable helps. Return it rather than looping; the caller's line is structurally
+        # too long and that is a separate bug, not something to hang on.
+        print(f"[IRC LINE] Fixed template exceeds {budget} bytes even with an empty field.")
+    return trimmed
+
+
+# Debug lines are produced by the IRC READ THREAD (security.check_user_status runs for every
+# PRIVMSG) and by transfer threads. They used to be written straight to the socket with a
+# blocking time.sleep(0.5) held under a lock, which stalled whoever called it: 30 banned
+# nicks resuming after a netsplit meant 15 seconds during which the read loop answered no
+# PING, parsed no NAMES and dispatched no request. They are now queued here and drained by
+# one background thread, so every caller returns immediately.
+# commands.py:283 runs importlib.reload on this module for every !rehash, and reload
+# re-executes the module body in the SAME module dict. A plain assignment here would throw
+# away every queued-but-unsent line - including the "Rehash triggered by ..." notice appended
+# one statement earlier - so the existing deque is reused when one is already present.
+_debug_queue = globals().get("_debug_queue") or collections.deque(maxlen=200)
+
+# Generation token, same idea as current_worker_id below. A reload resets _debug_drain_started
+# to False, so the next send_debug would start a SECOND drain while the first kept running
+# against the module global - N rehashes leaving N+1 pumps, each on its own timer, multiplying
+# the outbound rate on the one shared socket. A superseded drain now retires itself.
+_debug_drain_id = 0
+_debug_drain_started = False
+_debug_drain_guard = threading.Lock()
+
+
+def _debug_drain_worker(my_id):
+    """Drain the debug queue at a steady pace, one line at a time."""
+    while True:
+        try:
+            if _debug_drain_id != my_id:
+                print("[DEBUG DRAIN] Superseded by a newer drain. Retiring quietly.")
+                return
+
+            if not _debug_queue:
+                time.sleep(0.2)
+                continue
+
+            # Two gates, both required. The socket alone is not enough: irc.py publishes
+            # oserve.irc_connection immediately after connect(), several seconds before the
+            # debug channel has been joined, so draining on that signal alone would flush the
+            # whole reconnect backlog into a window where the server rejects it - and those
+            # are precisely the lines describing the outage.
+            oserve_mod = sys.modules.get('oserve')
+            irc_sock = getattr(oserve_mod, 'irc_connection', None)
+            if not irc_sock or not getattr(config, 'bot_joined_channel', False):
+                # Check BEFORE removing anything: popping first and discovering there is
+                # nowhere to send is how reconnects silently ate queued messages.
+                time.sleep(0.5)
+                continue
+
+            msg = _debug_queue.popleft()
+            try:
+                irc_sock.sendall(msg.encode("utf-8", errors="ignore"))
+            except Exception as send_err:
+                print(f"[DEBUG SEND ERROR] Could not write debug line: {send_err}")
+
+            time.sleep(getattr(config, 'DEBUG_MSG_DELAY', 0.5))
+        except Exception as drain_err:
+            print(f"[DEBUG DRAIN ERROR] {drain_err}")
+            time.sleep(1.0)
+
+
+def _ensure_debug_drain():
+    global _debug_drain_started, _debug_drain_id
+    if _debug_drain_started:
+        return
+    with _debug_drain_guard:
+        if _debug_drain_started:
+            return
+        _debug_drain_id = time.time()
+        threading.Thread(target=_debug_drain_worker, args=(_debug_drain_id,), daemon=True).start()
+        _debug_drain_started = True
+
 
 def format_size_human(bytes_size):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -95,17 +200,23 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     R = "\x0f"                  # Total nollställning efter varje enskild sektion
     B = "\x02"                  # Fetstil för live-siffror och triggers
     
-    msg = (
+    def _build(shown_name):
+        return (
         f"PRIVMSG {channel} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {B}{config.C_GREEN}Sent{B}{BG_TEXT_BOX}: {B}{file_name}{B} "
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {B}{config.C_GREEN}Sent{B}{BG_TEXT_BOX}: {B}{shown_name}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} To: {B}{config.C_GREEN}{user}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {B}{config.C_GREEN}{total_sent_str}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Yesterday: {B}{config.C_RED}{yesterday_str}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Today: {B}{config.C_RED}{today_str}{B} {config.C_ROYAL_BLUE}[as of {current_time_str}] "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {B}{config.C_GREEN}{speed_str}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
-    )
+        )
     
+
+    # The filename is the only unbounded field here and it comes straight off the disk. A
+    # long classical track name pushed this line past 512 bytes and the server truncated it
+    # mid-colour-code, so the channel saw the announcement smear into background colour.
+    msg = fit_irc_line(_build, file_name)
     if oserve:
         oserve.queue_message("channel_announce", msg)
     print(f"[ANNOUNCE] Sent block transfer complete notice to {channel} for {user} ({speed_str})")
@@ -189,6 +300,46 @@ def announce_worker():
                 
             if is_ready:
                 channels_to_spam = config.CHANNEL.split(",")
+                # DYNAMIC LIVE SPEED. Computed ONCE per advert cycle, above the per-channel
+                # loop. Inside the loop it ran six times a cycle, and with a delta window
+                # the 2nd-6th passes measured a few milliseconds each - either reporting
+                # nothing or, if a pass took over a second, a wildly inflated figure.
+                #
+                # tx["bytes_sent"] is a LIFETIME counter that accumulates from the DCC
+                # accept, so dividing it by a window that starts at first observation
+                # over-reports by up to 2x. Rate the DELTA between observations instead:
+                # bytes moved since the last cycle, over the time since the last cycle.
+                speed_bytes_per_sec = 0
+                speed_contributors = 0
+                _now = time.time()
+                with config.queue_lock if hasattr(config, "queue_lock") else threading.Lock():
+                    for tx in config.active_transfers:
+                        b_sent = tx.get("bytes_sent", 0)
+                        prev_bytes = tx.get("_speed_bytes")
+                        prev_time = tx.get("_speed_time")
+                        tx["_speed_bytes"] = b_sent
+                        tx["_speed_time"] = _now
+
+                        if prev_time is None:
+                            # First sighting: no window to measure yet.
+                            continue
+
+                        window = _now - prev_time
+                        if window < 1.0:
+                            continue
+
+                        moved = b_sent - prev_bytes
+                        if moved > 0:
+                            speed_bytes_per_sec += int(moved / window)
+                            speed_contributors += 1
+
+                # Average across the transfers that actually contributed, not across every
+                # active slot - a slot skipped for lack of a window must not drag the mean.
+                if speed_bytes_per_sec > 0 and speed_contributors > 0:
+                    speed_str = stats_mgr.format_speed(int(speed_bytes_per_sec / speed_contributors))
+                else:
+                    speed_str = "0k/s"
+
                 for chan in channels_to_spam:
                     chan = chan.strip()
                     if not chan:
@@ -202,27 +353,6 @@ def announce_worker():
                     active_dl = oserve.active_downloads if oserve else 0
                     fails_count = oserve.send_fails_count if oserve else 0
                     
-                    # 📊 DYNAMISK LIVE-HASTIGHETS-MÄTARE (Räknar ut sanna bytes per sekund!)
-                    speed_bytes_per_sec = 0
-                    import time
-                    with config.queue_lock if hasattr(config, 'queue_lock') else threading.Lock():
-                        for tx in config.active_transfers:
-                            b_sent = tx.get('bytes_sent', 0)
-                            s_time = tx.get('start_time', time.time())
-                            duration = time.time() - s_time
-                            
-                            if duration <= 0:
-                                duration = 0.1
-                                
-                            if b_sent > 0:
-                                speed_bytes_per_sec += int(b_sent / duration)
-                                
-                    # 🛡️ FIXAD: Räknar ut ett sanna live-snitt och tvättar siffran till snygg mIRC-standard!
-                    if speed_bytes_per_sec > 0 and active_dl > 0:
-                        true_live_speed = int(speed_bytes_per_sec / active_dl)
-                        speed_str = stats_mgr.format_speed(true_live_speed)
-                    else:
-                        speed_str = "0k/s"
 
                     free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)
                     queue_status = "NOW" if active_dl < config.MAX_DCC_SLOTS else "0"
@@ -292,16 +422,22 @@ def send_search_result_header(user, search_term, match_count, channel):
     R = "\x0f"                  
     B = "\x02"                  
     
-    msg = (
+    def _build(shown_term):
+        return (
         f"PRIVMSG {user} :"
         f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Search Result: {B}{config.C_GREEN}ON{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Found: {B}{config.C_RED}{match_count}{B} Match(es) For {B}{config.C_GREEN}{search_term}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Found: {B}{config.C_RED}{match_count}{B} Match(es) For {B}{config.C_GREEN}{shown_term}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Sending: {B}{config.C_RED}{sending_count}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {B}{config.C_GREEN}{free_slots}/{config.MAX_DCC_SLOTS}{B} Free "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {B}{config.C_GREEN}{queued_count}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
-    )
+        )
     
+
+    # search_term is supplied by any user in the channel and is only checked for a MINIMUM
+    # length, so a long one pushed this private notice past 512 bytes and the server cut it
+    # mid-colour-code.
+    msg = fit_irc_line(_build, search_term)
     if oserve:
         oserve.queue_message("channel_announce", msg)
     print(f"[SEARCH RESULTS] Found {match_count} sending {sending_count} to {user} in {channel} for '{search_term}'")
@@ -371,6 +507,16 @@ def send_debug(msg_text, category="INFO"):
     elif category.upper() == "BAN":
         # NYTT: Stensnygg röd block-etikett för PERMANENTA bans!
         tag_str = f"{config.C_RED}[HARDBAN]{R}{BG_TEXT_BOX}"
+    elif category.upper() == "HARDBAN":
+        # dcc.py raises this for a blocked path traversal and for a poisoned queue entry -
+        # the two most serious alerts the daemon can produce. Without this branch they fell
+        # through to the grey [INFO] tag, visually identical to routine chatter, so a
+        # filesystem probing campaign looked like ordinary traffic in the debug channel.
+        #
+        # Labelled [SECURITY], not [HARDBAN]: the "BAN" category above already renders
+        # [HARDBAN], and that one is an admin confirming a !ban. These two must not look
+        # alike - one is routine administration, the other is someone probing the filesystem.
+        tag_str = f"{config.C_RED}[SECURITY]{R}{BG_TEXT_BOX}"
     elif category.upper() == "TBAN":
         # NYTT: Stensnygg lila block-etikett för TEMPORÄRA dags-bans!
         tag_str = f"{config.C_PURPLE}[TEMPBAN]{R}{BG_TEXT_BOX}"
@@ -387,22 +533,14 @@ def send_debug(msg_text, category="INFO"):
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {R}\r\n"
     
     # ---------------------------------------------------------------------
-    # ASYNKRON RÅ SOCKET-SLUSS: Stryper flödet till 0.5s per rad vid högtryck!
-    # ---------------------------------------------------------------------
-    # Vi läser från låset vi allokerade i oserve.py
-    with config.debug_flood_lock:
-        try:
-            oserve = sys.modules.get('oserve')
-            irc_sock = getattr(oserve, 'irc_connection', None)
-            if irc_sock:
-                irc_sock.send(msg.encode("utf-8", errors="ignore"))
-                # 🏎️ ANDNINGSPAUS: Ger servern exakt 0.5 sekunder att andas, utplånar Excess Flood helt!
-                time.sleep(0.5)
-            else:
-                if oserve:
-                    oserve.queue_message(config.DEBUG_CHANNEL, msg, is_vip=True)
-        except Exception as e:
-            print(f"[DEBUG VIP SEND ERROR] Gick inte att trycka ut rå socket-data: {e}")
+    # NON-BLOCKING HAND-OFF. This used to hold config.debug_flood_lock across a
+    # time.sleep(0.5) and write the socket directly, so every caller paid 0.5s - including
+    # the IRC read thread, which calls this once per denied PRIVMSG. The queue is bounded
+    # (deque maxlen), so a flood of alerts drops the oldest lines instead of growing without
+    # limit or stalling the daemon. sendall() in the drain replaces send(), whose return
+    # value was discarded so a short write truncated the line silently.
+    _debug_queue.append(msg)
+    _ensure_debug_drain()
 
 # ---------------------------------------------------------------------
 # START-SLUSS FÖR REKLAMTRÅDEN: Anropas av irc.py vid lyckad boot!

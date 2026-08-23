@@ -45,6 +45,7 @@ MAX_USER_QUEUE     = 100    # Max antal filer en unik användare får köa upp
 MAX_GLOBAL_QUEUE   = 1000   # Max totalt antal filer i alla köer sammanlagt
 MAX_SEARCH_RESULTS = 5      # Max antal textrader som spottas ut vid @find
 MSG_DELAY          = 5.0    # Paustid i sekunder för din ordinarie meddelandekö
+DEBUG_MSG_DELAY    = 0.5    # Paustid mellan varje rad till debug-kanalen
 
 # Portspann för DCC-sändningar (Måste öppnas i brandvägg/router!)
 DCC_PORT_START     = 55000
