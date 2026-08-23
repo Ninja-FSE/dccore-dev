@@ -59,6 +59,11 @@ def irc_loop():
     if not hasattr(config, 'ORIGINAL_NICK'):
         config.ORIGINAL_NICK = getattr(config, 'NICKNAME', 'DCCore')
 
+    # Per-connection epoch. Threads spawned for one connection must not act on a later
+    # one; they compare this token before touching any shared state.
+    if not hasattr(config, 'connection_epoch'):
+        config.connection_epoch = 0
+
     # 🔄 AUTOMATISK ÅTERANSLUTNINGSLOOP (Säkrar att tråden ALDRIG dör vid split eller disconnect!)
     while True:
         # Vi utgår ALLTID ifrån att försöka ta botens sanna original-nick vid varje anslutning
@@ -84,6 +89,10 @@ def irc_loop():
             print(f"[CONNECT] Connected to socket successfully!")
         except Exception as e:
             print(f"[ERROR] Connection failed: {e}. Återansluter om 10 sekunder...")
+            # `joined` lives in the irc_loop frame and is only reset after a SUCCESSFUL
+            # handshake, so a failed attempt used to leave it latched True from the
+            # previous connection - which is what let a stale watchdog pass its guard.
+            joined = False
             time.sleep(10)
             continue
             
@@ -127,12 +136,18 @@ def irc_loop():
             try: s.close()
             except: pass
             _release_socket()
+            joined = False
             # 🛡️ BACKOFF: Utan paus här snurrade loopen så fort TCP hann koppla upp.
             # Undernets anslutningsthrottle stänger länken direkt när man kommer för
             # tätt, vilket gav tiotals försök per sekund och garanterade att vi förblev
             # throttlade (eller blev K-linade) istället för att återhämta oss.
             time.sleep(10)
             continue
+
+        # This connection is now live: claim a fresh epoch. Any thread still running from
+        # a previous connection holds an older token and will bail out on its next check.
+        config.connection_epoch += 1
+        my_epoch = config.connection_epoch
 
         buffer = ""
         joined = False
@@ -171,19 +186,39 @@ def irc_loop():
         # 🛡️ HOISTAD (issue #9): delayed_activate ligger nu här, en gång, istället för
         # nästlad inuti 366-hanteraren – så både den vanliga NAMES-vägen OCH
         # timeout-vakthunden nedan kan trigga exakt samma aktiveringslogik.
-        def delayed_activate():
+        def delayed_activate(sock=s, epoch=my_epoch):
+            # `sock` and `epoch` are bound as DEFAULT ARGUMENTS on purpose. Both were
+            # previously free variables resolved through irc_loop's frame, and that frame
+            # is rebound by every reconnect - so a thread from a dead connection read the
+            # CURRENT connection's values and published the wrong socket.
             import sys
             import time
             import announce
             import threading
-            
+
+            if config.connection_epoch != epoch:
+                return
+
             time.sleep(5)
-            config.bot_joined_channel = True
-            
+
+            # Re-check after sleeping: the connection can die inside this window.
+            if config.connection_epoch != epoch:
+                print("[ACTIVATE] Connection changed while settling. Abandoning stale activation.")
+                return
+
+            # Only claim channel sync if NAMES actually populated something. The watchdog
+            # path can reach here without any 353 having arrived, and dcc.py's stale-freeze
+            # sweep treats bot_joined_channel as proof that channel_users is authoritative -
+            # with it empty, every frozen user looks absent and their queue gets reaped.
+            if getattr(config, 'channel_users', None):
+                config.bot_joined_channel = True
+            else:
+                print("[ACTIVATE] No channel members known yet; advertising without claiming channel sync.")
+
             oserve_mod = sys.modules.get('oserve')
             if oserve_mod:
-                oserve_mod.bot_joined_channel = True
-                oserve_mod.irc_connection = s
+                oserve_mod.bot_joined_channel = config.bot_joined_channel
+                oserve_mod.irc_connection = sock
                 
             announce.is_ready = True
             if hasattr(announce, 'last_announce_time'):
@@ -221,12 +256,18 @@ def irc_loop():
             threading.Thread(target=announce.announce_worker, daemon=True).start()
             config.announce_thread_alive = True
 
-        def activation_watchdog():
+        def activation_watchdog(epoch=my_epoch):
             """🛡️ NY (issue #9): Tvingar fram aktivering efter en rimlig väntetid även om
             vissa kanaler aldrig svarade på JOIN (bannlyst, kräver invite, felstavad etc).
             Utan den här vakthunden kunde 2+ trasiga kanaler tysta ner ALL annonsering
             permanent för hela anslutningens livstid, helt utan felmeddelande."""
             time.sleep(ACTIVATION_TIMEOUT)
+            # Bail if this connection is gone. config.activation_triggered alone is not a
+            # staleness guard: the disconnect epilogue RESETS it, which re-armed exactly
+            # the threads it should have invalidated.
+            if config.connection_epoch != epoch:
+                print("[WATCHDOG] Connection changed before the timeout elapsed. Standing down.")
+                return
             if joined and not getattr(config, 'activation_triggered', False):
                 missing = target_channels - channels_confirmed
                 config.activation_triggered = True
@@ -364,7 +405,10 @@ def irc_loop():
                         # att bara räkna förekomster. Aktiverar först när alla riktiga målkanaler
                         # är bekräftade - debug-kanalens 366 kan inte längre maskera en trasig
                         # huvudkanal.
-                        m366 = re.search(r" 366 \S+ ([#\w\-]+)", line)
+                        # Anchored to the server prefix: the old unanchored search matched
+                        # anywhere in the line, so a user could PRIVMSG " 366 x #chan" and
+                        # forge a channel confirmation, activating the bot early.
+                        m366 = re.match(r"^:\S+ 366 \S+ ([#\w\-]+)", line)
                         if m366:
                             confirmed_chan = m366.group(1).lower()
                             channels_confirmed.add(confirmed_chan)
@@ -534,6 +578,8 @@ def irc_loop():
             config.channel_users.clear()
             
         config.activation_triggered = False
+        # Invalidate every thread spawned for the connection that just died.
+        config.connection_epoch += 1
         oserve_mod = sys.modules.get('oserve')
         if oserve_mod:
             oserve_mod.bot_joined_channel = False
