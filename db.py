@@ -2,7 +2,52 @@
 import os
 import time
 import datetime
+import tempfile
+import threading
 import config
+
+# Every on-disk file this module owns is small and rewritten in full, so a single
+# lock serialising the writes is enough. It is deliberately NOT config.queue_lock:
+# dcc.py calls save_dcc_queue() while already holding queue_lock, and threading.Lock
+# is not reentrant, so reusing it would deadlock on the first save.
+_disk_lock = threading.Lock()
+
+# save and load previously used two different literals ("data/..." vs "./data/...").
+# One constant now, built with os.path.join so it is correct on Windows too.
+DCC_QUEUE_FILE = getattr(config, "DCC_QUEUE_FILE", os.path.join("data", "dcc_queue.txt"))
+SPEED_RECORD_FILE = getattr(config, "SPEED_RECORD_FILE", os.path.join("data", "speed_record.txt"))
+
+
+def _atomic_write(path, text):
+    """Write `text` to `path` atomically.
+
+    Writes to a temporary file in the SAME directory (so the final step is a rename
+    within one filesystem), flushes and fsyncs it, then swaps it into place.
+
+    os.replace() is used rather than os.rename(): on Windows os.rename() raises
+    FileExistsError when the destination already exists, while os.replace()
+    overwrites atomically on both Windows and POSIX.
+
+    A reader therefore always sees either the complete previous file or the complete
+    new one - never a half-written file, and never an empty one.
+    """
+    path = os.path.abspath(path)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".tmp_", suffix=".swap")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 # =================================================================----
 # SEKTION 1: BANS.TXT (Bannlysta användare)
@@ -24,11 +69,12 @@ def load_bans_from_file():
         print(f"[DB ERROR] Kunde inte läsa {config.BANS_FILE}: {e}")
 
 def save_bans_to_file():
-    """Skriver alla aktiva bans från minnet till bans.txt"""
+    """Write the active bans from memory to bans.txt, atomically."""
     try:
-        with open(config.BANS_FILE, "w") as f:
-            for user_key, expire_ts in config.banned_users.items():
-                f.write(f"{user_key} {expire_ts}\n")
+        with _disk_lock:
+            snapshot = dict(config.banned_users)
+            body = "".join(f"{user_key} {expire_ts}\n" for user_key, expire_ts in snapshot.items())
+            _atomic_write(config.BANS_FILE, body)
     except Exception as e:
         print(f"[DB ERROR] Kunde inte spara till {config.BANS_FILE}: {e}")
 
@@ -57,11 +103,17 @@ def load_advanced_stats():
     return default_stats
 
 def save_advanced_stats(stats):
-    """Skriver ner 7-kolonnsraden till stats.txt"""
+    """Write the 7-column row to stats.txt, atomically.
+
+    The previous version truncated the live file and then wrote into it, so a crash
+    or a concurrent writer could leave a short row behind - which load_advanced_stats
+    silently discards, resetting every counter to zero.
+    """
     STATS_FILE = config.STATS_FILE
     try:
-        with open(STATS_FILE, "w") as f:
-            f.write(f"{stats[0]} {stats[1]} {stats[2]} {stats[3]} {stats[4]} {stats[5]} {stats[6]}")
+        with _disk_lock:
+            row = f"{stats[0]} {stats[1]} {stats[2]} {stats[3]} {stats[4]} {stats[5]} {stats[6]}"
+            _atomic_write(STATS_FILE, row)
     except Exception as e:
         print(f"[DB ERROR] Kunde inte spara till stats.txt: {e}")
 
@@ -124,49 +176,68 @@ def get_speed_record():
         return 0
 
 def save_speed_record(new_record):
-    """Sparar ett nytt hastighetsrekord till hårddisken"""
-    import os
-    os.makedirs("./data", exist_ok=True)
+    """Save a new speed record to disk, atomically."""
     try:
-        with open("./data/speed_record.txt", "w") as f:
-            f.write(str(int(new_record)))
+        with _disk_lock:
+            _atomic_write(SPEED_RECORD_FILE, str(int(new_record)))
     except Exception as e:
         print(f"[DB ERROR] Kunde inte spara hastighetsrekord: {e}")
 
 def save_dcc_queue():
-    """Sparar DCC-kön till disken och raderar tomma användare (Tvingar fram {} vid tom kö!)"""
+    """Persist the DCC queue, dropping users whose list is now empty.
+
+    Previously this truncated dcc_queue.txt and then serialised straight into the open
+    handle. Any crash, disk-full or concurrent writer between those two steps left a
+    truncated file - and load_dcc_queue() treats an unparseable file as "start empty",
+    so the entire queue disappeared silently on the next boot.
+    """
     import json
-    import config
-    
+
     try:
-        # Vi dammsuger bort tomma användare direkt ur minnesstrukturen
-        # 🛡️ FIXAD: Detta gjordes tidigare i två identiska loopar i rad (dödkod).
+        # Drop users whose queue is now empty.
         for user_key in list(config.dcc_queue.keys()):
             if not config.dcc_queue[user_key]:
                 del config.dcc_queue[user_key]
-                    
-        # Skriv den kliniskt rena JSON-strukturen direkt till disken
-        with open("data/dcc_queue.txt", "w", encoding="utf-8") as f:
-            json.dump(config.dcc_queue, f, indent=4)
-            
-        print("[DB-QUEUE] Kö-strukturen sparades och disksanerades framgångsrikt.")
+
+        with _disk_lock:
+            # Serialise from a snapshot: another thread mutating config.dcc_queue during
+            # json.dump would otherwise raise "dictionary changed size during iteration"
+            # and abort the save.
+            snapshot = {k: list(v) for k, v in config.dcc_queue.items()}
+            _atomic_write(DCC_QUEUE_FILE, json.dumps(snapshot, indent=4))
+
+        print("[DB-QUEUE] Queue structure saved and sanitised successfully.")
     except Exception as e:
-        print(f"[DB-QUEUE ERROR] Kunde inte spara data/dcc_queue.txt: {e}")
+        print(f"[DB-QUEUE ERROR] Could not save {DCC_QUEUE_FILE}: {e}")
 
 
 def load_dcc_queue():
-    """Laddar in den sparade DCC-kön från hårddisken vid boot"""
+    """Load the persisted DCC queue at boot.
+
+    An unreadable file still means starting empty - there is nothing else to do - but
+    the damaged file is preserved rather than silently overwritten by the next save,
+    so the queue can be recovered by hand instead of vanishing without trace.
+    """
     import json
-    import os
-    import config
-    file_path = "./data/dcc_queue.txt"
+
+    file_path = DCC_QUEUE_FILE
     if not os.path.exists(file_path):
         config.dcc_queue = {}
         return
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            config.dcc_queue = json.load(f)
-        print(f"[DB] Laddade in sparade köplatser från hårddisken!")
+            loaded = json.load(f)
+        if not isinstance(loaded, dict):
+            raise ValueError(f"expected a JSON object, got {type(loaded).__name__}")
+        config.dcc_queue = loaded
+        total = sum(len(v) for v in loaded.values() if isinstance(v, list))
+        print(f"[DB] Laddade in {total} sparad(e) köplats(er) för {len(loaded)} användare från hårddisken!")
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte läsa sparad DCC-kö, startar tom: {e}")
         config.dcc_queue = {}
+        print(f"[DB ERROR] Kunde inte läsa sparad DCC-kö, startar tom: {e}")
+        try:
+            backup = file_path + ".corrupt"
+            os.replace(file_path, backup)
+            print(f"[DB ERROR] Den skadade filen sparades som {backup} för manuell räddning.")
+        except Exception as backup_err:
+            print(f"[DB ERROR] Kunde inte ens säkerhetskopiera den skadade filen: {backup_err}")
