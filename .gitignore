@@ -70,3 +70,6 @@ venv.bak/
 
 # macOS system files
 .DS_Store
+
+# Local Claude Code config, hooks, and dev/test scratch files - never pushed to the repo
+.claude/
