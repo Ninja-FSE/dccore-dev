@@ -228,16 +228,30 @@ def check_queue_and_send(irc_sock, completed_user):
             # HÄR ÄR DEN LINJÄRA MAPP-PACKAREN: Körs en och en inuti sändnings-slussen!
             # ---------------------------------------------------------------------
             if isinstance(next_file, dict) and next_file.get('is_unpacked_rar_folder') is True:
-                if hasattr(config, 'user_processing_lock') and completed_user.lower() in config.user_processing_lock:
-                    print(f"[RAR-BLOCK] {completed_user} redan låst i RAM, blockerar spöktråd.")
-                    return
-                    
-                if getattr(config, 'rar_inprogress', False):
-                    print(f"[RAR-HOLD] {completed_user} väntar i kön eftersom en annan packning pågår live...")
-                    return
+                # FIXED (issue #27, RAR branch): this check-then-set had the same gap as
+                # section A's plain-file dispatch before that fix - the user_processing_lock
+                # check and the rar_inprogress check both ran, then BOTH interlocks got set,
+                # all outside queue_lock. Two overlapping triggers could each read both flags
+                # as clear before either claimed them, both start packing/sending the same
+                # folder for the same user. Mirror the plain-file fix: check and claim both
+                # interlocks atomically under queue_lock.
+                with queue_lock:
+                    user_already_locked = (
+                        hasattr(config, 'user_processing_lock')
+                        and completed_user.lower() in config.user_processing_lock
+                    )
+                    pack_in_progress = getattr(config, 'rar_inprogress', False)
 
-                config.rar_inprogress = True
-                if hasattr(config, 'user_processing_lock'):
+                    if user_already_locked:
+                        print(f"[RAR-BLOCK] {completed_user} redan låst i RAM, blockerar spöktråd.")
+                        return
+                    if pack_in_progress:
+                        print(f"[RAR-HOLD] {completed_user} väntar i kön eftersom en annan packning pågår live...")
+                        return
+
+                    config.rar_inprogress = True
+                    if not hasattr(config, 'user_processing_lock'):
+                        config.user_processing_lock = set()
                     config.user_processing_lock.add(completed_user.lower())
 
                 def inline_rar_packer(sock):
