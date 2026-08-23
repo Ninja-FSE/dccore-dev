@@ -11,16 +11,10 @@ LIST_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv.txt")
 SIZE_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-size.txt")
 RAWBYTES_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-rawbytes.txt")
 
-def find_latest_list():
-    """Hittar den absolut senaste .txt-listfilen i den lokala list-mappen"""
-    if not os.path.exists(config.LOCAL_LIST_DIR):
-        os.makedirs(config.LOCAL_LIST_DIR)
-        return None
-    files = [f for f in os.listdir(config.LOCAL_LIST_DIR) if f.startswith(config.LIST_BASE_NAME) and f.endswith(".txt")]
-    if not files:
-        return None
-    files.sort(reverse=True)
-    return os.path.join(config.LOCAL_LIST_DIR, files[0])
+# NOTE: a second, shadowing definition of find_latest_list() used to sit here. Python keeps
+# the LAST definition, so this one never ran - and the two had drifted: this one did not
+# exclude the "-RAR-" album list, so had it ever become the live one the bot would have
+# served the album list as its master list. Removed so they cannot diverge again.
 
 def find_latest_zip():
     """Hittar den senaste .zip-filen för när någon skriver botens nickname"""
@@ -43,9 +37,16 @@ def get_file_count_date_size_and_raw_bytes():
         with open(latest_list, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 line_strip = line.strip()
-                # RÄTTAD LOGIK: Räkna ENBART rader som faktiskt startar med din trigger!
-                # Hoppa över alla mapprobrik-avskiljare (===), tomma rader och text-headers.
-                if line_strip.startswith(f"!{config.NICKNAME} "):
+                # Count only real request lines, skipping the "===" folder separators,
+                # blank lines and text headers.
+                #
+                # This matches on "!" alone rather than on f"!{config.NICKNAME} ". The list
+                # is written with whatever nick was current at generation time, so after a
+                # 433 fallback the old test matched nothing and the advert reported 0 files
+                # even though the list was fine. Every request line in the generated file
+                # starts with "!" (update_list.py:156) and no header or separator does, so
+                # this is the same filter execute_search already applies to the same file.
+                if line_strip.startswith("!"):
                     count += 1
             
         mtime = os.path.getmtime(latest_list)
@@ -78,9 +79,18 @@ import config
 import announce
 
 def find_latest_list():
-    """Hittar den absolut senaste normala textlistan i lists-mappen"""
+    """Find the newest master text list in the lists directory.
+
+    Globs on config.LIST_BASE_NAME, which is what update_list.py actually names the files
+    with (update_list.py:38). It previously globbed on config.NICKNAME - a value irc.py
+    REBINDS at runtime when the server returns 433 and the bot falls back to ALT_NICKNAME.
+    From that moment the glob matched nothing: @find answered "No MasterList found" and the
+    5-minute advert publicly announced "For My List Of: 0 Files" into all six channels.
+    The two constants are equal in normal operation, so this changes nothing until a
+    nick collision happens.
+    """
     try:
-        all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.NICKNAME}-*.txt")))
+        all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.LIST_BASE_NAME}-*.txt")))
         # Sortera strikt bort din RAR-lista från sökningen så vi bara skannar masterlistan
         true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
         if true_master_lists:
@@ -207,7 +217,12 @@ def send_file_list(irc_sock, user, channel):
         return
         
     zip_filename = os.path.basename(current_zip_path)
-    msg = f"Preparing full list ({zip_filename}) for {user}... {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n"
+    # queue_message payloads go straight to the socket, so they must be complete IRC
+    # commands. This one was a bare text line, so the server answered
+    # "421 Preparing :Unknown command", the user never saw the notice, and a flood-queue
+    # slot was spent on an error. The other NOTICE payloads in this module were already
+    # correctly formed; the search results use PRIVMSG, which is equally valid.
+    msg = f"NOTICE {user} :Preparing full list ({zip_filename}) for {user}... {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n"
     oserve.queue_message(user, msg)
     
     # Nu skickas 'channel' med till DCC-motorn i stället för 'user'
