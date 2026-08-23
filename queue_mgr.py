@@ -39,6 +39,17 @@ def queue_worker():
                     del config.send_queue[q_user][:q_dropped]
                     print(f"[QUEUE CAP] Slängde {q_dropped} gamla rader för {q_user} (taket är {max_user}).")
 
+            # FIXED: hold everything while the bot is offline instead of draining into
+            # a void. Both lanes below pop BEFORE testing `if current_sock:`, so once
+            # irc.py started clearing oserve.irc_connection on close, every message
+            # popped during a reconnect was silently discarded - search results, queue
+            # notices and adverts alike, with no error anywhere. Waiting here keeps the
+            # queues intact until a live socket exists; the caps above stop them growing
+            # without bound during a long outage.
+            if not current_sock:
+                time.sleep(0.5)
+                continue
+
             # ---------------------------------------------------------------------
             # ISOLERAD EXPRESSFIL (PRIO 1): Töm den fristående VIP-listan först!
             # ---------------------------------------------------------------------
