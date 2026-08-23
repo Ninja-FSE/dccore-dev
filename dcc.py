@@ -997,9 +997,19 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except: pass
 
     except socket.timeout:
+        # FIXED (issue #30): previously silent. A handshake can succeed and the client can
+        # connect, but if they never acknowledge fast enough the send loop times out here
+        # with no log line at all - the only trace was a gap in the log between DCC-CONNECT
+        # and the finally block's cleanup lines.
+        print(f"[DCC-FAIL] Timeout sending to {user}: no data acknowledged within the socket timeout.")
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except Exception as e:
+        # FIXED (issue #30): `e` was captured and never used. A connection reset, a broken
+        # pipe, or any other mid-transfer failure produced the exact same silence - no way
+        # to tell which one happened after the fact, especially once the temp archive is
+        # already deleted and the queue row already gone.
+        print(f"[DCC-FAIL] Transfer to {user} failed: {type(e).__name__}: {e}")
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     finally:
