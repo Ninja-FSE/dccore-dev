@@ -56,7 +56,8 @@ DCC_PORT_END       = 55010
 MAX_REQUESTS     = 10       # Max antal kommandon (sök/fil) per tidsfönster
 REQUEST_WINDOW   = 5       # Storlek på det rullande tidsfönstret (i sekunder)
 MUTE_TIME        = 30       # Paustid i sekunder för varning vid första flood-överskridelsen
-MAX_SEND_FAILS   = 3        # Automatiskt ban efter x antal misslyckade sändningar
+MAX_SEND_FAILS   = 3        # Max antal försök per köad fil innan den slängs (se dcc.release_queue_entry)
+RAR_TIMEOUT      = 1800     # Max tid i sekunder som en rar-packning får ta innan den avbryts
 
 # ---------------------------------------------------------------------
 # 7. MIRC FÄRGKODER OCH KONTROLLTECKEN (IRC STANDARD)
