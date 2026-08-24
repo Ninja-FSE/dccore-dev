@@ -164,13 +164,17 @@ def update_stats_on_complete(file_size):
     save_advanced_stats(stats)
 
 def get_speed_record():
-    """Hämtar det sparade hastighetsrekordet i bytes/s från hårddisken"""
-    import os
-    file_path = "./data/speed_record.txt"
-    if not os.path.exists(file_path):
+    """Hämtar det sparade hastighetsrekordet i bytes/s från hårddisken.
+
+    FIXED (issue #34): previously read a hardcoded "./data/speed_record.txt" literal
+    while save_speed_record() already wrote to the SPEED_RECORD_FILE constant -
+    the same split-literal class of bug the DCC_QUEUE_FILE fix removed. Both resolved
+    to the same file only by coincidence, when the daemon's cwd is the repo root.
+    """
+    if not os.path.exists(SPEED_RECORD_FILE):
         return 0
     try:
-        with open(file_path, "r") as f:
+        with open(SPEED_RECORD_FILE, "r") as f:
             return int(f.read().strip())
     except:
         return 0
