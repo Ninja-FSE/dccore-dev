@@ -405,6 +405,16 @@ def check_queue_and_send(irc_sock, completed_user):
                 # dispatching - start_dcc_send's finally already discards this key on every
                 # exit path.
                 with queue_lock:
+                    # FIXED (issue #33): section B already re-checks capacity inside the
+                    # lock; section A never checked it at all. check_queue_and_send() is also
+                    # invoked for users who are NOT the one who just finished - a JOIN/353
+                    # thaw, the freeze-abort timer, !rehash's system trigger - so repeated
+                    # triggers could push active_transfers past MAX_DCC_SLOTS with no ceiling,
+                    # and oserve.active_downloads (the advertised slot count) followed it over.
+                    if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
+                        print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, leaving queued for the next trigger.")
+                        return
+
                     already_claimed = (
                         hasattr(config, 'user_processing_lock')
                         and completed_user.lower() in config.user_processing_lock
