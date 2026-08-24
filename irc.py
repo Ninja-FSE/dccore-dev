@@ -544,15 +544,22 @@ def irc_loop():
                             
                         msg_lower = msg.lower()
                         bot_aliases = get_bot_aliases()
-                        # Mirrors the dispatch chain exactly: broad for the list-derived
-                        # "!<alias> " trigger, live nick for everything typed by hand. A gate
-                        # narrower than the dispatch would create an unmetered command path;
-                        # a gate wider than it would charge users for messages we ignore.
+                        # FIXED (issue #35): the gate previously covered only 4 of the ~11
+                        # dispatch paths below, so -que, -remove, both CTCP variants, !list,
+                        # !debugnames and !ping could each spawn a thread or send a NOTICE
+                        # for ANY user with no rate limit at all. Admin commands (!ban,
+                        # !unban, !rehash, !update, !clearqueue) are deliberately left out:
+                        # each self-checks against ADMIN_NICK in its own handler already, so
+                        # gating them here would only meter the operator against themselves.
                         is_bot_command = (
                             msg_lower == f"@{config.NICKNAME.lower()}"
+                            or msg_lower == f"@{config.NICKNAME.lower()}-que"
+                            or msg_lower == f"@{config.NICKNAME.lower()}-remove"
                             or msg.startswith("@find ")
                             or msg.startswith("@locator ")
                             or any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
+                            or msg_lower in ("!list", "!debugnames", "!ping")
+                            or (msg.startswith("\x01") and msg.strip("\x01").strip().upper() in ("QUE", "REMOVE"))
                         )
                         if is_bot_command and security.is_flooding(user):
                             continue 
