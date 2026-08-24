@@ -75,8 +75,5 @@ venv.bak/
 .claude/
 CLAUDE.md
 
-# Lokala tester - ska inte pushas till GitHub
-tests/
-
 # Per-machine config overrides (paths, nick, channels)
 local_config.py
