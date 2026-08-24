@@ -74,6 +74,3 @@ venv.bak/
 # Claude Code local config (machine-specific hooks, session data, cache)
 .claude/
 CLAUDE.md
-
-# Lokala tester - ska inte pushas till GitHub
-tests/
