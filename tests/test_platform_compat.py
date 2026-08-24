@@ -9,6 +9,7 @@ import os
 import socket
 import sys
 import tempfile
+import time
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -149,6 +150,65 @@ class LongPathTests(unittest.TestCase):
             handle.write(b"audio")
         self.assertTrue(os.path.exists(platform_compat.long_path(target)))
         self.assertGreater(len(target), 260 if platform_compat.IS_WINDOWS else 0)
+
+
+class MissingRarBinaryTests(unittest.TestCase):
+    """A machine with no rar installed must degrade, not wedge.
+
+    This is the most likely first failure on a fresh Windows box, and it is
+    exactly the case CI exposed: the runners have no rar, so resolving the
+    binary raises before subprocess.run is ever reached. Both process-wide
+    interlocks must still be released, or folder packing is dead for every user
+    until the daemon restarts.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
+        from tests.support import (reset_config, install_fake_oserve, silence_debug,
+                                   no_disk_writes, RecordingSocket, TempTree)
+        import announce, db, dcc
+        self.config = reset_config()
+        install_fake_oserve()
+        silence_debug(announce)
+        no_disk_writes(db)
+        self.dcc = dcc
+        self.sock = RecordingSocket()
+        self.tree = TempTree()
+        self.addCleanup(self.tree.cleanup)
+        self.config.FILE_DIRECTORY = self.tree.music
+        self.config.TMP_ZIP_DIR = os.path.join(self.tree.root, "tmp_zips")
+
+        self._real = platform_compat.rar_command
+        platform_compat.rar_command = lambda configured=None: None
+        self.addCleanup(lambda: setattr(platform_compat, "rar_command", self._real))
+
+    def test_missing_rar_releases_both_interlocks(self):
+        row = {"file": "Album.rar", "path": self.tree.album, "channel": "#c",
+               "user_raw": "dave", "is_unpacked_rar_folder": True, "is_temporary_zip": True}
+        self.config.dcc_queue = {"dave": [row]}
+        self.config.channel_users = {"#c": {"dave"}}
+        self.config.bot_joined_channel = True
+
+        self.dcc.check_queue_and_send(self.sock, "dave")
+        time.sleep(0.4)
+
+        self.assertFalse(self.config.rar_inprogress,
+                         "a missing rar must not latch rar_inprogress - that kills packing "
+                         "for every user until restart")
+        self.assertNotIn("dave", getattr(self.config, "user_processing_lock", set()))
+
+    def test_missing_rar_charges_the_row_rather_than_looping(self):
+        row = {"file": "Album.rar", "path": self.tree.album, "channel": "#c",
+               "user_raw": "dave", "is_unpacked_rar_folder": True, "is_temporary_zip": True}
+        self.config.dcc_queue = {"dave": [row]}
+        self.config.channel_users = {"#c": {"dave"}}
+        self.config.bot_joined_channel = True
+
+        self.dcc.check_queue_and_send(self.sock, "dave")
+        time.sleep(0.4)
+
+        self.assertEqual(row.get("send_fails"), 1,
+                         "the failure must be charged to the retry budget, not retried forever")
 
 
 class DescribeTests(unittest.TestCase):
