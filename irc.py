@@ -13,6 +13,7 @@ import builtins
 
 # Importera botens moduler
 import config
+import platform_compat
 import list
 import dcc
 import security
@@ -114,12 +115,9 @@ def irc_loop():
         
         try:
             s.connect((config.SERVER, config.PORT))
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            
-            if hasattr(socket, 'TCP_KEEPIDLE'):
-                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10)
-                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 2)
-                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+            # The three timing knobs are Linux-only; platform_compat guards them so
+            # Windows still gets SO_KEEPALIVE with system defaults.
+            platform_compat.apply_keepalive(s, idle=10, interval=2, count=3)
                 
             oserve_mod = sys.modules.get('oserve')
             if oserve_mod:

@@ -24,6 +24,7 @@ DEBUG_CHANNEL = "#flac-serv"
 # ---------------------------------------------------------------------
 PAUSE_ON_UPDATE = True  # 🛡️ GLOBAL UNDERHÅLLSVÄXEL: Om denna är True, så pausar boten ALL fildelning och sökning under !update
 FILE_DIRECTORY = "/mnt/nfs-musik"
+RAR_BINARY     = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 TMP_ZIP_DIR = "./data/tmp_zips"
 LOCAL_LIST_DIR = "./lists"
 
@@ -103,3 +104,15 @@ rar_inprogress = False
 dcc_queue         = {}       # Centrala fildelningskön (användarnamn: [filer])
 vip_queue         = []       # Isolerad express-kö för sök-headers och reklam
 active_transfers  = []       # Trådade aktiva DCC-sändningar i realtid
+
+# ---------------------------------------------------------------------
+# 9. LOCAL OVERRIDES (not in git)
+# ---------------------------------------------------------------------
+# Create local_config.py next to this file to override anything above for one
+# machine - paths, nickname, channels - without editing a tracked file and
+# without every deployment showing up as a diff. It is gitignored.
+try:
+    from local_config import *  # noqa: F401,F403
+    print('[CONFIG] Applied overrides from local_config.py')
+except ImportError:
+    pass

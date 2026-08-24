@@ -73,3 +73,6 @@ venv.bak/
 
 # Claude Code local config (machine-specific hooks, session data, cache)
 .claude/
+
+# Per-machine config overrides (paths, nick, channels)
+local_config.py

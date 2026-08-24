@@ -10,6 +10,7 @@ import re
 import subprocess
 
 import config
+import platform_compat
 import list as list_mod
 import announce
 import db
@@ -340,7 +341,13 @@ def check_queue_and_send(irc_sock, completed_user):
 
                     # 🛡️ SCEN-SÄKRAD OCH TOTAL-ISOLERAD ARGUMENT-SLUSS:
                     work_dir_switch = f"-w{os.path.abspath(config.TMP_ZIP_DIR)}"
-                    cmd = ["rar", "a", "-ep1", work_dir_switch, os.path.abspath(target_rar_path), os.path.abspath(true_source_dir)]
+                    # Resolve the binary rather than trusting a bare name on PATH:
+                    # WinRAR installs rar.exe outside PATH entirely.
+                    rar_bin = platform_compat.rar_command(getattr(config, 'RAR_BINARY', None))
+                    if not rar_bin:
+                        raise FileNotFoundError(
+                            "rar executable not found - set config.RAR_BINARY or put rar on PATH")
+                    cmd = [rar_bin, "a", "-ep1", work_dir_switch, os.path.abspath(target_rar_path), os.path.abspath(true_source_dir)]
                     # A timeout is essential: with timeout=None a hung rar blocks this
                     # thread forever while config.rar_inprogress stays True, wedging folder
                     # packing for EVERY user until the daemon is restarted.
@@ -896,7 +903,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
 
 
     dcc_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    dcc_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # SO_REUSEADDR means the OPPOSITE thing on Windows - it lets another process
+    # bind this same port and take the incoming connection, which on a DCC
+    # listener is a hijack. platform_compat picks the right option per platform.
+    platform_compat.prepare_listener(dcc_sock)
     
     assigned_port = None
     for port in range(config.DCC_PORT_START, config.DCC_PORT_END + 1):

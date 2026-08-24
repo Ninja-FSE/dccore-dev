@@ -353,7 +353,11 @@ class PoisonedQueueRowTests(PathSecurityBase):
             dcc.check_queue_and_send(self.sock, "dave")
 
         self.assertEqual(len(self.rar_calls), 1)
-        self.assertEqual(self.rar_calls[0][0], "rar")
+        # The command is resolved through platform_compat.rar_command rather than
+        # being the literal "rar": WinRAR installs rar.exe outside PATH, so a bare
+        # name never runs on Windows. Assert it is A rar binary, not a fixed string.
+        invoked = os.path.basename(self.rar_calls[0][0]).lower()
+        self.assertIn(invoked, ("rar", "rar.exe"), self.rar_calls[0][0])
         self.assertIn(os.path.abspath(self.tree.album), self.rar_calls[0])
         # The stubbed rar failed, so the row is kept for retry rather than dropped.
         self.assertEqual(config.dcc_queue.get("dave", []), [row])
