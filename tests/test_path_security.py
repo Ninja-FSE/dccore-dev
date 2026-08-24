@@ -293,6 +293,19 @@ class PoisonedQueueRowTests(PathSecurityBase):
         dcc.subprocess.run = fake_run
         self.addCleanup(lambda: setattr(dcc.subprocess, "run", self._real_run))
 
+        # dcc.py now resolves the rar binary through platform_compat BEFORE calling
+        # subprocess.run, and raises if it cannot find one. CI runners have no rar
+        # installed, so without stubbing the lookup this test would assert on a call
+        # that never happens - and would pass or fail purely on whether the machine
+        # running it happens to have WinRAR. Pin it so the test measures the code,
+        # not the host.
+        import platform_compat
+        self._real_rar_command = platform_compat.rar_command
+        platform_compat.rar_command = lambda configured=None: os.path.join(
+            self.tree.root, "rar.exe" if os.name == "nt" else "rar")
+        self.addCleanup(
+            lambda: setattr(platform_compat, "rar_command", self._real_rar_command))
+
     def make_row(self, path):
         """A persisted !rar row, exactly as handle_download_request writes it."""
         return {
@@ -353,7 +366,11 @@ class PoisonedQueueRowTests(PathSecurityBase):
             dcc.check_queue_and_send(self.sock, "dave")
 
         self.assertEqual(len(self.rar_calls), 1)
-        self.assertEqual(self.rar_calls[0][0], "rar")
+        # The command comes from platform_compat.rar_command rather than the literal
+        # "rar" - WinRAR installs rar.exe outside PATH, so a bare name never runs on
+        # Windows. Assert it is the resolved binary, not a fixed string.
+        invoked = os.path.basename(self.rar_calls[0][0]).lower()
+        self.assertIn(invoked, ("rar", "rar.exe"), self.rar_calls[0][0])
         self.assertIn(os.path.abspath(self.tree.album), self.rar_calls[0])
         # The stubbed rar failed, so the row is kept for retry rather than dropped.
         self.assertEqual(config.dcc_queue.get("dave", []), [row])
