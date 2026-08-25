@@ -255,6 +255,19 @@ def clear_bad_ip(ip):
 # Session
 # ==========================================================================
 
+_IRC_FORMATTING = re.compile("\\x03\\d{0,2}(?:,\\d{1,2})?|[\\x02\\x0f\\x16\\x1d\\x1f]")
+
+
+def strip_irc_formatting(text):
+    """Drop mIRC colour and attribute codes.
+
+    The debug channel's lines are built for a colour-capable client sitting in a
+    channel. A console is read as a log; the codes only get in the way, and some
+    clients render a DCC CHAT window without colour support at all.
+    """
+    return _IRC_FORMATTING.sub("", str(text))
+
+
 class Session:
     """One DCC CHAT connection. The socket IS the session.
 
@@ -318,11 +331,27 @@ class Session:
                 self.close(announce_text=None)
                 return
 
+    def debug_sink(self, msg_text, category="INFO"):
+        """Target for announce.send_debug's fan-out.
+
+        A pure append, like send() itself. This runs on whatever thread called
+        send_debug - including the IRC read loop - so it must never touch the
+        socket or wait for anything.
+        """
+        if self.closed or not self.authenticated:
+            return
+        self.send(f"[{category}] {strip_irc_formatting(msg_text)}")
+
     # -- lifecycle ---------------------------------------------------------
 
     def close(self, announce_text="Session closed."):
         if self.closed:
             return
+        try:
+            import announce
+            announce.remove_debug_sink(self.debug_sink)
+        except Exception:
+            pass
         if announce_text:
             # Written inline rather than queued: the writer thread is about to
             # stop, so a queued goodbye would never leave the building.
@@ -371,30 +400,258 @@ def banner_lines():
     ]
 
 
-HELP_LINES = [
-    "Available commands:",
-    "  help    this list",
-    "  quit    close this session",
-    "",
-    "Admin commands are not in this build yet - they arrive in phase 2.",
-    "Until then they remain available in channel as before.",
-]
+def format_uptime(seconds):
+    """iroffer's phrasing, because the banner is modelled on iroffer's."""
+    seconds = int(max(0, seconds))
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    parts = []
+    if days:
+        parts.append(f"{days} Day{'s' if days != 1 else ''}")
+    if hours or days:
+        parts.append(f"{hours} Hr{'s' if hours != 1 else ''}")
+    parts.append(f"{minutes} Min")
+    if len(parts) > 1:
+        return ", ".join(parts[:-1]) + " and " + parts[-1]
+    return parts[0]
+
+
+def _uptime_seconds():
+    import stats_mgr
+    return stats_mgr.get_uptime_seconds()
+
+
+# --------------------------------------------------------------------------
+# Read-only commands. These build their own output, so they answer directly.
+# --------------------------------------------------------------------------
+
+def _cmd_version(session, args):
+    session.send(getattr(config, "SCRIPT_VERSION", "DCCore"))
+    session.send(platform_compat.describe())
+
+
+def _cmd_uptime(session, args):
+    session.send(f"Running {format_uptime(_uptime_seconds())}")
+
+
+def _cmd_slots(session, args):
+    transfers = list(getattr(config, "active_transfers", []))
+    limit = getattr(config, "MAX_DCC_SLOTS", 0)
+    session.send(f"Slots: {len(transfers)}/{limit} in use")
+    if not transfers:
+        session.send("  (nothing sending)")
+        return
+    for tx in transfers:
+        sent = tx.get("bytes_sent", 0)
+        session.send(f"  {str(tx.get('user', '?')):<20} {str(tx.get('file', '?'))[:48]:<48} "
+                     f"{sent:,} bytes")
+
+
+def _cmd_queue(session, args):
+    queue = dict(getattr(config, "dcc_queue", {}))
+    frozen = dict(getattr(config, "frozen_queues", {}))
+    target = args.strip().lower()
+
+    if target:
+        rows = queue.get(target, [])
+        if not rows:
+            session.send(f"{target} has nothing queued.")
+            return
+        session.send(f"{target}: {len(rows)} file(s)"
+                     f"{' (FROZEN)' if target in frozen else ''}")
+        for row in rows:
+            name = row.get("file", "?") if isinstance(row, dict) else str(row)
+            session.send(f"  {name}")
+        return
+
+    if not queue:
+        session.send("The queue is empty.")
+        return
+    total = sum(len(rows) for rows in queue.values())
+    session.send(f"{total} file(s) queued for {len(queue)} user(s):")
+    for user_key in sorted(queue):
+        session.send(f"  {user_key:<20} {len(queue[user_key]):>4} file(s)"
+                     f"{'  FROZEN' if user_key in frozen else ''}")
+
+
+def _cmd_status(session, args):
+    import dcc
+    import list as list_mod
+
+    transfers = getattr(config, "active_transfers", [])
+    session.send(f"{getattr(config, 'SCRIPT_VERSION', 'DCCore')} - "
+                 f"running {format_uptime(_uptime_seconds())}")
+    session.send(f"Nick        : {getattr(config, 'NICKNAME', '?')}")
+    session.send(f"Slots       : {len(transfers)}/{getattr(config, 'MAX_DCC_SLOTS', 0)} in use")
+    try:
+        session.send(f"Queued      : {dcc.get_total_queued_count()} file(s) for "
+                     f"{len(getattr(config, 'dcc_queue', {}))} user(s)")
+    except Exception as err:
+        session.send(f"Queued      : unavailable ({err})")
+    session.send(f"Frozen      : {len(getattr(config, 'frozen_queues', {}))} queue(s)")
+    session.send(f"Timed bans  : {len(getattr(config, 'banned_users', {}))}")
+    try:
+        import db
+        session.send(f"Hard bans   : {len(db.load_hard_bans())}")
+    except Exception as err:
+        session.send(f"Hard bans   : unavailable ({err})")
+    try:
+        count, date_str, size_str, _ = list_mod.get_file_count_date_size_and_raw_bytes()
+        session.send(f"MasterList  : {count:,} files, {size_str}, dated {date_str}")
+    except Exception as err:
+        session.send(f"MasterList  : unavailable ({err})")
+
+
+# --------------------------------------------------------------------------
+# Action commands.
+#
+# Each one runs on its own thread. rehash reloads eight modules and update walks
+# the whole NFS library, which takes minutes - doing either on the reader thread
+# would freeze this session for the duration and let its idle timeout fire.
+#
+# They report through announce.send_debug, which reaches this console via the
+# sink registered at authentication, so their output arrives here as well as in
+# the debug channel.
+#
+# authorised=True: the session has already proved the operator's services login
+# and a password, which is a stronger claim than the nick comparison inside
+# those handlers - and that comparison would refuse a console whose current nick
+# is not in ADMIN_NICK.
+# --------------------------------------------------------------------------
+
+def _run_detached(session, label, fn):
+    def wrapper():
+        try:
+            fn()
+        except Exception as err:
+            session.send(f"{label} failed: {err}")
+            print(f"[ADMINCHAT] {label} raised: {err}")
+    threading.Thread(target=wrapper, daemon=True).start()
+
+
+def _cmd_ban(session, args):
+    pattern = args.strip()
+    if not pattern:
+        session.send("Usage: ban <pattern>   e.g. ban *!*@spammer.net")
+        return
+    import commands
+    session.send(f"Banning {pattern} ...")
+    _run_detached(session, "ban", lambda: commands.handle_hard_ban_request(
+        session.nick, CONSOLE_SOURCE, f"!ban {pattern}", authorised=True))
+
+
+def _cmd_unban(session, args):
+    pattern = args.strip()
+    if not pattern:
+        session.send("Usage: unban <pattern>")
+        return
+    import commands
+    session.send(f"Unbanning {pattern} ...")
+    _run_detached(session, "unban", lambda: commands.handle_hard_unban_request(
+        session.nick, CONSOLE_SOURCE, f"!unban {pattern}", authorised=True))
+
+
+def _cmd_bans(session, args):
+    import db
+    patterns = db.load_hard_bans()
+    timed = dict(getattr(config, "banned_users", {}))
+    if not patterns and not timed:
+        session.send("No bans.")
+        return
+    if patterns:
+        session.send(f"Permanent ({len(patterns)}):")
+        for pattern in patterns:
+            session.send(f"  {pattern}")
+    if timed:
+        session.send(f"Timed ({len(timed)}):")
+        for user_key in sorted(timed):
+            session.send(f"  {user_key}")
+
+
+def _cmd_clearqueue(session, args):
+    target = args.strip()
+    if not target:
+        session.send("Usage: clearqueue <nick>")
+        return
+    import commands
+    session.send(f"Clearing the queue for {target} ...")
+    _run_detached(session, "clearqueue", lambda: commands.handle_admin_clear_queue(
+        session.nick, CONSOLE_SOURCE, f"!clearqueue {target}", authorised=True))
+
+
+def _cmd_rehash(session, args):
+    import commands
+    session.send("Rehashing - reloading modules in place ...")
+    _run_detached(session, "rehash", lambda: commands.handle_rehash_request(
+        session.nick, CONSOLE_SOURCE, authorised=True))
+
+
+def _cmd_update(session, args):
+    import commands
+    session.send("Rebuilding the MasterList - this walks the whole library and "
+                 "can take minutes ...")
+    _run_detached(session, "update", lambda: commands.handle_list_update_request(
+        session.nick, CONSOLE_SOURCE, authorised=True))
+
+
+def _cmd_quit(session, args):
+    session.close(announce_text="Goodbye.")
+    _forget(session)
+
+
+def _cmd_help(session, args):
+    session.send("Available commands:")
+    for name in sorted(COMMANDS):
+        _fn, summary, usage = COMMANDS[name]
+        session.send(f"  {usage:<20} {summary}")
+    session.send("")
+    session.send("Channel commands still work as before; this console does not "
+                 "replace them yet.")
+
+
+# name -> (function, one-line summary, usage shown by help)
+COMMANDS = {
+    "status":     (_cmd_status,     "everything at a glance",            "status"),
+    "queue":      (_cmd_queue,      "queued files, all or one user",     "queue [nick]"),
+    "slots":      (_cmd_slots,      "what is sending right now",         "slots"),
+    "bans":       (_cmd_bans,       "permanent and timed bans",          "bans"),
+    "uptime":     (_cmd_uptime,     "how long the daemon has run",       "uptime"),
+    "version":    (_cmd_version,    "build and platform",                "version"),
+    "ban":        (_cmd_ban,        "add a permanent wildcard ban",      "ban <pattern>"),
+    "unban":      (_cmd_unban,      "remove a permanent wildcard ban",   "unban <pattern>"),
+    "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),
+    "rehash":     (_cmd_rehash,     "reload modules in place",           "rehash"),
+    "update":     (_cmd_update,     "rebuild the MasterList",            "update"),
+    "help":       (_cmd_help,       "this list",                         "help"),
+    "quit":       (_cmd_quit,       "close this session",                "quit"),
+}
+
+# What the admin handlers see as the "channel" a console command came from. It
+# is not a channel, and it must not look like one: announce.send_debug puts this
+# straight into the debug line, and a real channel name there would read as
+# though someone had typed the command in public.
+CONSOLE_SOURCE = "DCC-CONSOLE"
 
 
 def handle_command(session, text):
-    """Dispatch one authenticated line. Phase 1 knows two commands."""
-    command = text.strip().split(" ", 1)[0].lower()
-    if not command:
+    """Dispatch one authenticated line."""
+    stripped = text.strip()
+    if not stripped:
         return
-    if command == "quit":
-        session.close(announce_text="Goodbye.")
-        _forget(session)
+    command, _, args = stripped.partition(" ")
+    entry = COMMANDS.get(command.lower())
+    if entry is None:
+        session.send(f"Unknown command: {command}. Type 'help'.")
         return
-    if command == "help":
-        for line in HELP_LINES:
-            session.send(line)
-        return
-    session.send(f"Unknown command: {command}. Type 'help'.")
+    session.last_activity = time.time()
+    print(f"[ADMINCHAT] {session.nick} ran: {stripped}")
+    try:
+        entry[0](session, args)
+    except Exception as err:
+        # One bad command must not take the session down with it.
+        session.send(f"Command failed: {err}")
+        print(f"[ADMINCHAT] Command {command!r} raised: {err}")
 
 
 # ==========================================================================
@@ -428,6 +685,14 @@ def _promote(session):
         _session = session
         if _pending is session:
             _pending = None
+    # Runtime reports reach the console from here on. Registered only after
+    # authentication, so an unauthenticated socket never sees a log line.
+    try:
+        import announce
+        announce.add_debug_sink(session.debug_sink)
+    except Exception as sink_err:
+        print(f"[ADMINCHAT] Could not attach the debug sink: {sink_err}")
+
     if previous is not None and previous is not session:
         previous.send(f"Session taken over from {session.peer_ip}. Closing this one.")
         previous.close(announce_text=None)

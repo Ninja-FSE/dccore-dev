@@ -82,6 +82,19 @@ ADMIN_PASSWORD_HASH = ""
 # own listener is already proven reachable by every DCC SEND it does.
 ADMIN_CHAT_MODE    = "auto"
 
+# Whether !ban, !unban, !rehash, !update and !clearqueue still work when typed in
+# a channel or a private message.
+#
+# Left ON. The console is new, and locking yourself out of every admin command
+# because a hostmask has a typo in it is a bad first experience. Turn it off once
+# the console has proved itself - at which point admin authority rests entirely
+# on the services host plus the password, and no longer on a nick anyone can take
+# while you are offline.
+#
+# The user commands (!list, !ping, !debugnames, @find, the queue triggers) are
+# not affected by this.
+ADMIN_CHANNEL_COMMANDS = True
+
 # The two side files update_list.py publishes alongside the master list, holding
 # the human-readable total size and the raw byte count that the channel advert and
 # @<nick>-que read back. Named here rather than as a literal in both list.py and

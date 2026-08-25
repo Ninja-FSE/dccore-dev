@@ -3,6 +3,14 @@ import sys
 import config
 import db
 
+# The five admin handlers below take authorised=False. The DCC CHAT console
+# passes authorised=True: a console session has already proved the operator's
+# Undernet services login via their +x host and then a password, which is a
+# STRONGER claim than this nick comparison, and re-checking the nick here would
+# refuse them unless their current nick also happened to be in ADMIN_NICK. Every
+# channel caller keeps the default and the nick check.
+
+
 def is_admin(user):
     """Return True if `user` may run admin commands.
 
@@ -110,7 +118,7 @@ def handle_queue_remove(s, user, target):
         print(f"[COMMANDS] Removed {len(removed_archives)} orphaned temp archive(s) with {user}'s queue.")
     print(f"[COMMANDS] {user} removed their entire queue from the disk layout.")
 
-def handle_admin_clear_queue(user, target_chan, msg_text):
+def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
     """🛡️ NY (issue #15): Tvångsrensar en ANNAN användares kö helt (spöknick, hängd post
     efter en netsplit/reconnect, etc.) - enbart admin. handle_queue_remove ovan kan bara
     en användare köra på sig själv via IRC; det här ger admin motsvarande makt över
@@ -121,7 +129,7 @@ def handle_admin_clear_queue(user, target_chan, msg_text):
     import db
     import dcc
 
-    if not is_admin(user):
+    if not authorised and not is_admin(user):
         print(f"[SECURITY] Obehörig användare {user} försökte köra !clearqueue.")
         return
 
@@ -204,7 +212,7 @@ def handle_pong_response(category="INFO"):
         
         config.ping_start_time = None
 
-def handle_rehash_request(user, target_chan):
+def handle_rehash_request(user, target_chan, authorised=False):
     """Laddar om moduler live helt i RAM-minnet UTAN att smutsa ner eller läsa från hårddisken!"""
     import importlib
     import sys
@@ -212,7 +220,7 @@ def handle_rehash_request(user, target_chan):
     import announce
     import copy
     
-    if not is_admin(user):
+    if not authorised and not is_admin(user):
         print(f"[REHASH SECURITY] Ignorerade rehash-försök från obehörig användare: {user}")
         return
 
@@ -501,12 +509,12 @@ def handle_rehash_request(user, target_chan):
         announce.send_debug(f"Rehash FAILED (Notices Resumed for safety): {e}", category="INFO")
 
 
-def handle_hard_ban_request(user, target_chan, msg_text):
+def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
     """Lägger till ett permanent wildcard-mönster i hard_bans.txt direkt via mIRC!"""
     import config
     import announce
     
-    if not is_admin(user):
+    if not authorised and not is_admin(user):
         print(f"[SECURITY] Obehörig användare {user} försökte köra !ban.")
         return
 
@@ -539,13 +547,13 @@ def handle_hard_ban_request(user, target_chan, msg_text):
     else:
         announce.send_debug(f"Pattern {pattern} is already banned permanently.", category="INFO")
 
-def handle_hard_unban_request(user, target_chan, msg_text):
+def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
     """Tar bort ett permanent wildcard-mönster ur hard_bans.txt direkt via mIRC!"""
     import config
     import announce
     import os
     
-    if not is_admin(user):
+    if not authorised and not is_admin(user):
         return
 
     parts = msg_text.split(" ", 1)
@@ -584,7 +592,7 @@ def handle_hard_unban_request(user, target_chan, msg_text):
     else:
         announce.send_debug(f"Pattern {pattern} was not found in hard_bans.txt.", category="INFO")
 
-def handle_list_update_request(user, target_chan):
+def handle_list_update_request(user, target_chan, authorised=False):
     """Kör update_list.py, väntar in processen och plockar filantalet blixtsnabbt från första raden i listfilen!"""
     import subprocess
     import sys
@@ -596,7 +604,7 @@ def handle_list_update_request(user, target_chan):
     import threading
     import time
     
-    if not is_admin(user):
+    if not authorised and not is_admin(user):
         print(f"[SECURITY] Obehörig användare {user} försökte köra !update.")
         return
 

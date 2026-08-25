@@ -706,20 +706,28 @@ def irc_loop():
                                     s.send(f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n".encode())
                             elif msg.lower() == "!ping":
                                 threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
-                            elif msg.lower() == "!rehash":
-                                threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), daemon=True).start()
-                            elif msg.startswith("!ban "):
-                                threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), daemon=True).start()
-                            elif msg.startswith("!unban "):
-                                threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
-                            elif msg.lower() == "!update":
-                                threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), daemon=True).start()
-                            elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
-                                # commands.handle_admin_clear_queue was added in #16 but never
-                                # wired into this dispatch chain, so the command had no caller
-                                # anywhere and typing it did nothing at all. The handler does
-                                # its own admin check.
-                                threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), daemon=True).start()
+                            # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
+                            # once the DCC console is trusted; the console reaches the same
+                            # handlers with authorised=True. User commands are unaffected.
+                            elif (getattr(config, 'ADMIN_CHANNEL_COMMANDS', True)
+                                  and (msg.lower() in ('!rehash', '!update')
+                                       or msg.startswith('!ban ') or msg.startswith('!unban ')
+                                       or msg_lower == '!clearqueue'
+                                       or msg_lower.startswith('!clearqueue '))):
+                                if msg.lower() == "!rehash":
+                                    threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), daemon=True).start()
+                                elif msg.startswith("!ban "):
+                                    threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), daemon=True).start()
+                                elif msg.startswith("!unban "):
+                                    threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
+                                elif msg.lower() == "!update":
+                                    threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), daemon=True).start()
+                                elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
+                                    # commands.handle_admin_clear_queue was added in #16 but never
+                                    # wired into this dispatch chain, so the command had no caller
+                                    # anywhere and typing it did nothing at all. The handler does
+                                    # its own admin check.
+                                    threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), daemon=True).start()
                             elif any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases):
                                 # Split on the first space only, so "!DCCore !rar Artist/Album"
                                 # still hands "!rar Artist/Album" to the download handler.
