@@ -80,6 +80,22 @@ def event_source_nick(line):
     return match.group(1).lower() if match else None
 
 
+def event_source_host(line):
+    """The host a line came FROM, read out of the prefix. Lowercased, or None.
+
+    Anchored at the start for the same reason as event_source_nick: a message
+    body is free text, and a hostmask quoted inside one must never be mistaken
+    for the sender's own.
+
+    This is what makes the admin console possible. On Undernet a user who has
+    logged into X and set +x is given the host "<account>.users.undernet.org",
+    which only the server can issue - so the host, unlike the nick, is proof of
+    who someone is. The PRIVMSG parser below used to discard it.
+    """
+    match = re.match(r"^:[^!\s]+!\S*@(\S+)", line)
+    return match.group(1).lower() if match else None
+
+
 def get_bot_aliases():
     """Every name this bot should answer to, lowercased, current nick first.
 
@@ -650,6 +666,16 @@ def irc_loop():
                             
                             if msg.startswith("\x01") and msg.endswith("\x01"):
                                 ctcp_cmd = msg.strip("\x01").strip().upper()
+                                # Admin console. Only ever from a private message -
+                                # a DCC CHAT offer addressed to a channel is
+                                # meaningless, and accepting one would mean acting
+                                # on a line every user in that channel can send.
+                                if (ctcp_cmd.startswith("DCC CHAT ")
+                                        and target_chan.lower() == config.NICKNAME.lower()):
+                                    import adminchat
+                                    adminchat.handle_dcc_chat(
+                                        s, line, user, msg.strip("\x01").strip())
+                                    continue
                                 if ctcp_cmd == "QUE":
                                     threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
                                     continue
