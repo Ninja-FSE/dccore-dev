@@ -41,6 +41,63 @@ def user_is_present_in_ram(user_key):
                 return True
     return False
 
+def discard_orphaned_temp_archives(user_key):
+    """Delete the temp .rar files that only `user_key`'s queue rows still name.
+
+    MUST be called with queue_lock held and BEFORE the rows are dropped: those
+    rows are the only record that the archives exist, so once they are gone the
+    files sit in TMP_ZIP_DIR forever.
+
+    Four paths delete a whole queue - the freeze-timeout sweep, the per-user
+    freeze timer, !clearqueue, and the user's own @<nick>-remove / CTCP REMOVE.
+    Only the first three cleaned up; REMOVE, the one users actually type, did
+    not. This is that cleanup, in one place.
+
+    Two rows are deliberately skipped:
+
+    * is_unpacked_rar_folder rows, whose "path" is the source album directory in
+      the music library, not a temp file. Deleting that would delete the music.
+    * archives another queue still points at, or that a transfer is streaming
+      right now. Archive names come from the FOLDER, not the user
+      (dcc.py builds "{clean_folder_name}.rar"), so two people who queued the
+      same album share one file on disk.
+
+    Returns the paths actually removed, for the caller to log.
+    """
+    removed = []
+    queue = getattr(config, 'dcc_queue', {})
+    if user_key not in queue:
+        return removed
+
+    for f_obj in queue[user_key]:
+        if not isinstance(f_obj, dict):
+            continue
+        if f_obj.get('is_temporary_zip') is not True or f_obj.get('is_unpacked_rar_folder'):
+            continue
+        temp_path = f_obj.get('path')
+        if not temp_path or not os.path.exists(temp_path):
+            continue
+
+        still_needed = any(
+            isinstance(other, dict) and other.get('path') == temp_path
+            for other_key, files in queue.items() if other_key != user_key
+            for other in files
+        )
+        if not still_needed:
+            still_needed = any(tx.get('file') == f_obj.get('file')
+                               for tx in getattr(config, 'active_transfers', []))
+        if still_needed:
+            continue
+
+        try:
+            os.remove(temp_path)
+            removed.append(temp_path)
+        except OSError as rm_err:
+            print(f"[TEMP CLEANUP] Could not remove {temp_path}: {rm_err}")
+
+    return removed
+
+
 def release_queue_entry(user, next_file, delivered, reason=""):
     """Settle the queue row for a finished attempt. Returns True if the row was kept.
 
