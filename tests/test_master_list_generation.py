@@ -1,0 +1,397 @@
+"""generate_master_list() - the scan that produces the file every user downloads.
+
+update_list.py was the last module with no test of its scan path. The stats it
+publishes alongside the list are covered by test_list_stats.py; this is the list
+itself: what the scan picks up, what the two files contain, that the header the
+advert reads agrees with the lines the search reads, and that a failed run leaves
+the previous index untouched.
+
+It also pins an invariant that is currently load-bearing and undocumented - see
+TheRequestTriggerIsStable.
+"""
+
+import os
+import sys
+import unittest
+import zipfile
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+if os.path.join(REPO_ROOT, "tests") not in sys.path:
+    sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
+
+import config  # noqa: E402
+import irc  # noqa: E402
+import list as list_mod  # noqa: E402
+import update_list  # noqa: E402
+
+from tests.support import DCCoreTestCase  # noqa: E402
+
+
+class MasterListCase(DCCoreTestCase):
+    """A library on disk, and a place to write the lists."""
+
+    def setUp(self):
+        super().setUp()
+        self.tree = self.make_tree()
+        config.LOCAL_LIST_DIR = self.tree.lists
+        config.FILE_DIRECTORY = self.tree.music
+        config.LIST_BASE_NAME = "DCCore"
+        config.NICKNAME = "DCCore"
+        config.ORIGINAL_NICK = "DCCore"
+
+    def add(self, relative, data=b"\x00" * 2048):
+        path = os.path.join(self.tree.music, relative)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(data)
+        return path
+
+    def generate(self):
+        return update_list.generate_master_list()
+
+    def list_path(self):
+        names = [n for n in os.listdir(self.tree.lists)
+                 if n.startswith(config.LIST_BASE_NAME)
+                 and n.endswith(".txt") and "-RAR-" not in n]
+        self.assertEqual(len(names), 1, f"expected one master list, found {names}")
+        return os.path.join(self.tree.lists, names[0])
+
+    def rar_path(self):
+        names = [n for n in os.listdir(self.tree.lists) if "-RAR-" in n]
+        self.assertEqual(len(names), 1, f"expected one album list, found {names}")
+        return os.path.join(self.tree.lists, names[0])
+
+    def read_list(self):
+        with open(self.list_path(), encoding="utf-8") as handle:
+            return handle.read()
+
+    def request_lines(self):
+        return [line for line in self.read_list().split("\n") if line.startswith("!")]
+
+
+class ScanFindsTheRightFiles(MasterListCase):
+    """TempTree starts with two .flac tracks in one album folder."""
+
+    def test_the_baseline_library_is_listed(self):
+        self.assertTrue(self.generate())
+        self.assertEqual(len(self.request_lines()), 2)
+
+    def test_mp3_and_flac_are_both_picked_up(self):
+        self.add("Artist/Album/track.mp3")
+        self.assertTrue(self.generate())
+        names = self.read_list()
+        self.assertIn("track.mp3", names)
+        self.assertIn("Enter Sandman.flac", names)
+
+    def test_other_files_are_ignored(self):
+        """A music library is full of covers, cue sheets and notes."""
+        for junk in ("Artist/Album/cover.jpg", "Artist/Album/info.nfo",
+                     "Artist/Album/playlist.m3u", "Artist/Album/notes.txt",
+                     "Artist/Album/disc.cue"):
+            self.add(junk, b"junk")
+        self.assertTrue(self.generate())
+        listing = self.read_list()
+        for junk in ("cover.jpg", "info.nfo", "playlist.m3u", "notes.txt", "disc.cue"):
+            with self.subTest(junk=junk):
+                self.assertNotIn(junk, listing)
+        self.assertEqual(len(self.request_lines()), 2)
+
+    def test_the_extension_test_is_case_insensitive(self):
+        """Ripped libraries are full of .FLAC and .Mp3."""
+        self.add("Artist/Loud/SHOUTING.FLAC")
+        self.add("Artist/Loud/Mixed.Mp3")
+        self.assertTrue(self.generate())
+        self.assertEqual(len(self.request_lines()), 4)
+
+    def test_it_recurses_all_the_way_down(self):
+        self.add("A/B/C/D/E/deep.flac")
+        self.assertTrue(self.generate())
+        self.assertIn("deep.flac", self.read_list())
+
+    def test_an_empty_library_still_produces_a_list(self):
+        empty = os.path.join(self.tree.root, "empty-library")
+        os.makedirs(empty, exist_ok=True)
+        config.FILE_DIRECTORY = empty
+        self.assertTrue(self.generate())
+        self.assertEqual(self.request_lines(), [])
+
+
+class WriterAndReaderAgree(MasterListCase):
+    """update_list writes the file; list.py counts it for the advert.
+
+    They are in different modules with no shared constant, so the only thing
+    keeping them consistent is that every request line starts with "!" and no
+    header does. Worth asserting, because the advert's file count is the number
+    users see in channel.
+    """
+
+    def test_the_advert_count_matches_the_files_on_disk(self):
+        for extra in ("A/one.flac", "A/two.mp3", "B/three.flac"):
+            self.add(extra)
+        self.assertTrue(self.generate())
+        count, _date, _size, _raw = list_mod.get_file_count_date_size_and_raw_bytes()
+        self.assertEqual(count, 5, "two from the tree plus three added")
+        self.assertEqual(len(self.request_lines()), 5)
+
+    def test_the_header_count_matches_the_request_lines(self):
+        self.add("A/extra.flac")
+        self.assertTrue(self.generate())
+        header = self.read_list().split("\n")[0]
+        self.assertIn(f"List of {len(self.request_lines()):,} Files", header)
+
+    def test_no_header_line_is_mistaken_for_a_request(self):
+        """The reader counts every line starting with "!"; headers must not."""
+        self.assertTrue(self.generate())
+        for line in self.read_list().split("\n")[:3]:
+            with self.subTest(line=line):
+                self.assertFalse(line.startswith("!"),
+                                 "a header starting with ! would inflate the advert count")
+
+    def test_the_album_list_is_excluded_from_the_count(self):
+        """find_latest_list skips -RAR-; if it did not, albums would be counted twice."""
+        self.assertTrue(self.generate())
+        self.assertNotIn("-RAR-", os.path.basename(list_mod.find_latest_list()))
+
+
+class TheRequestTriggerIsStable(MasterListCase):
+    """An invariant that currently holds by accident, and is worth keeping.
+
+    The list stamps its request lines with config.NICKNAME. irc.py rebinds
+    NICKNAME to ALT_NICKNAME after a 433 collision, and ALT_NICKNAME is
+    deliberately NOT one of get_bot_aliases() - so a list stamped with it goes
+    dead the moment the bot recovers its main nick.
+
+    Production is safe because handle_list_update_request runs update_list.py as
+    a SUBPROCESS, which imports a fresh config where NICKNAME is the file default
+    and equals ORIGINAL_NICK, which IS an alias. Nothing states that dependency,
+    and "why are we spawning a subprocess for this?" is a very natural cleanup.
+    """
+
+    def test_production_generates_the_list_in_a_subprocess(self):
+        source = open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8").read()
+        handler = source.split("def handle_list_update_request", 1)[1]
+        self.assertIn("subprocess.run", handler,
+                      "in-process generation would stamp the list with the LIVE nick")
+
+    def test_the_default_nick_is_an_alias_so_lists_keep_working(self):
+        config.NICKNAME = "DCCore_"          # after a 433 collision
+        config.ORIGINAL_NICK = "DCCore"
+        self.assertIn("dccore", irc.get_bot_aliases(),
+                      "a list stamped with the config default must stay requestable")
+
+    def test_the_alt_nick_is_not_an_alias(self):
+        """Which is why the subprocess matters: it never stamps the alt nick."""
+        config.NICKNAME = "DCCore"
+        config.ORIGINAL_NICK = "DCCore"
+        config.ALT_NICKNAME = "DCCore_"
+        self.assertNotIn("dccore_", irc.get_bot_aliases())
+
+    def test_in_process_generation_stamps_whatever_nick_is_live(self):
+        """Documents the hazard rather than asserting it is fine.
+
+        If this ever becomes the production path, every line of the published
+        list is stamped with a trigger the bot stops answering to on recovery.
+        """
+        config.NICKNAME = "DCCore_"
+        self.assertTrue(self.generate())
+        self.assertTrue(all(line.startswith("!DCCore_ ") for line in self.request_lines()),
+                        "in-process generation follows the live nick - hence the subprocess")
+
+
+class TheAlbumList(MasterListCase):
+    def test_one_line_per_album_folder(self):
+        self.add("Metallica/Ride The Lightning (1984)/01.flac")
+        self.add("Metallica/Ride The Lightning (1984)/02.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_lines = [l for l in handle.read().split("\n") if l.startswith("!")]
+        self.assertEqual(len(rar_lines), len(set(rar_lines)),
+                         "an album must not be advertised twice")
+
+    def test_a_multidisc_album_is_advertised_once(self):
+        """What written_rar_folders is actually for.
+
+        Two files in ONE folder are already deduplicated by the folder-change
+        check. The set only earns its keep when two DIFFERENT folders clean down
+        to the same album root - which is exactly what CD1/CD2 do.
+        """
+        self.add("Metallica/Black Album/CD1/01.flac")
+        self.add("Metallica/Black Album/CD2/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_lines = [l for l in handle.read().split("\n") if l.startswith("!")]
+        self.assertEqual(len(rar_lines), len(set(rar_lines)),
+                         "a multidisc album must not appear twice in the !rar list")
+
+    def test_it_names_the_rar_trigger(self):
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            self.assertIn("!rar", handle.read())
+
+
+class PruningSupersededLists(MasterListCase):
+    """_prune_superseded_lists deletes files, so what it spares matters."""
+
+    def touch(self, name, body="x"):
+        path = os.path.join(self.tree.lists, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        return path
+
+    def test_yesterdays_lists_are_removed(self):
+        old = self.touch(f"{config.LIST_BASE_NAME}-2020-01-01.txt")
+        old_zip = self.touch(f"{config.LIST_BASE_NAME}-2020-01-01.zip")
+        self.assertTrue(self.generate())
+        self.assertFalse(os.path.exists(old))
+        self.assertFalse(os.path.exists(old_zip))
+
+    def test_todays_new_lists_are_kept(self):
+        self.assertTrue(self.generate())
+        self.assertTrue(os.path.exists(self.list_path()))
+        self.assertTrue(os.path.exists(self.rar_path()))
+
+    def test_unrelated_files_are_never_touched(self):
+        """The list directory is a real directory someone may keep things in."""
+        keepers = [self.touch("notes.txt"), self.touch("OtherBot-2020-01-01.txt"),
+                   self.touch("readme.md"), self.touch("archive.tar.gz")]
+        self.assertTrue(self.generate())
+        for path in keepers:
+            with self.subTest(path=os.path.basename(path)):
+                self.assertTrue(os.path.exists(path),
+                                "pruning must only remove this bot's own old lists")
+
+    def test_a_file_sharing_the_bots_name_but_not_a_list_is_spared(self):
+        """The case the extension check exists for.
+
+        The "unrelated files" test above is spared by the startswith check alone,
+        so it never exercised this. What needs the extension test is a file that
+        DOES begin with LIST_BASE_NAME and is not a generated list - a log, a
+        backup, notes the operator keeps beside the lists.
+        """
+        keepers = [self.touch(f"{config.LIST_BASE_NAME}.log"),
+                   self.touch(f"{config.LIST_BASE_NAME}-notes.md"),
+                   self.touch(f"{config.LIST_BASE_NAME}-backup.tar.gz"),
+                   self.touch(f"{config.LIST_BASE_NAME}-2020-01-01.txt.bak")]
+        self.assertTrue(self.generate())
+        for path in keepers:
+            with self.subTest(path=os.path.basename(path)):
+                self.assertTrue(os.path.exists(path),
+                                "pruning must only remove .txt and .zip lists")
+
+    def test_the_side_files_are_not_pruned(self):
+        """They do not end in .txt by accident of naming - check anyway."""
+        self.assertTrue(self.generate())
+        self.assertTrue(os.path.exists(list_mod.size_file_path()))
+        self.assertTrue(os.path.exists(list_mod.rawbytes_file_path()))
+
+
+class TheSwapLeavesNothingBehind(MasterListCase):
+    def test_no_temp_files_survive_a_successful_run(self):
+        self.assertTrue(self.generate())
+        leftovers = [n for n in os.listdir(self.tree.lists) if n.endswith(".new")]
+        self.assertEqual(leftovers, [])
+
+    def test_no_temp_files_survive_a_refused_run(self):
+        """A scan finding nothing next to a good index is refused; clean up after."""
+        self.assertTrue(self.generate())
+        empty = os.path.join(self.tree.root, "vanished")
+        os.makedirs(empty, exist_ok=True)
+        config.FILE_DIRECTORY = empty
+        self.assertFalse(self.generate())
+        leftovers = [n for n in os.listdir(self.tree.lists) if n.endswith(".new")]
+        self.assertEqual(leftovers, [], "a refused run must not litter the list directory")
+
+    def test_the_zip_holds_the_final_names_not_the_temp_ones(self):
+        """Users open this archive; ".txt.new" inside it would be visible."""
+        self.assertTrue(self.generate())
+        zip_name = [n for n in os.listdir(self.tree.lists) if n.endswith(".zip")][0]
+        with zipfile.ZipFile(os.path.join(self.tree.lists, zip_name)) as archive:
+            names = archive.namelist()
+        self.assertTrue(names)
+        for name in names:
+            with self.subTest(name=name):
+                self.assertFalse(name.endswith(".new"))
+
+
+class DiscardingTempLists(MasterListCase):
+    """_discard_temp_lists is the cleanup every refusal path calls.
+
+    One of its three call sites - the "no list was written" guard - is defensive
+    and not reachable from a normal run, so the helper is tested directly rather
+    than left to whichever branch happens to be exercised.
+    """
+
+    def test_it_removes_what_is_there(self):
+        paths = []
+        for name in ("a.txt.new", "b.txt.new"):
+            path = os.path.join(self.tree.lists, name)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("half written")
+            paths.append(path)
+        update_list._discard_temp_lists(*paths)
+        for path in paths:
+            with self.subTest(path=os.path.basename(path)):
+                self.assertFalse(os.path.exists(path))
+
+    def test_a_missing_file_is_not_an_error(self):
+        """Called on paths that may never have been created."""
+        update_list._discard_temp_lists(
+            os.path.join(self.tree.lists, "never-existed.new"))
+
+    def test_none_and_empty_paths_are_tolerated(self):
+        update_list._discard_temp_lists(None, "", None)
+
+    def test_a_file_it_cannot_remove_does_not_raise(self):
+        """Cleanup runs on the failure path; it must not raise a second failure."""
+        real_remove = os.remove
+
+        def refuse(path):
+            raise OSError(13, "Permission denied")
+
+        path = os.path.join(self.tree.lists, "locked.txt.new")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("x")
+        os.remove = refuse
+        try:
+            update_list._discard_temp_lists(path)
+        finally:
+            os.remove = real_remove
+        self.assertTrue(os.path.exists(path), "the stub refused, as intended")
+
+
+class AwkwardFilenames(MasterListCase):
+    """A real library is not made of ASCII."""
+
+    def test_an_apostrophe_survives(self):
+        self.add("Artist/Album/A Winter's Tale.flac")
+        self.assertTrue(self.generate())
+        self.assertIn("A Winter's Tale.flac", self.read_list())
+
+    def test_non_ascii_survives(self):
+        self.add("Björk/Homogenic/Jóga.flac")
+        self.assertTrue(self.generate())
+        self.assertIn("Jóga.flac", self.read_list())
+
+    def test_a_filename_with_spaces_stays_on_one_line(self):
+        self.add("Artist/Album/A Very Long Track Name Indeed.flac")
+        self.assertTrue(self.generate())
+        matches = [l for l in self.request_lines()
+                   if "A Very Long Track Name Indeed.flac" in l]
+        self.assertEqual(len(matches), 1)
+
+    def test_a_filename_cannot_inject_a_second_request_line(self):
+        """Newlines in a name would forge an entry pointing anywhere."""
+        try:
+            self.add("Artist/Album/evil\nname.flac")
+        except OSError:
+            self.skipTest("this filesystem refuses newlines in filenames")
+        self.assertTrue(self.generate())
+        self.assertEqual(len(self.request_lines()),
+                         len([l for l in self.request_lines() if l.count("::INFO::") == 1]),
+                         "every request line must carry exactly one size marker")
+
+
+if __name__ == "__main__":
+    unittest.main()
