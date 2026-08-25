@@ -1,0 +1,147 @@
+# local_config.py.sample - copy this to local_config.py and fill in your own values.
+#
+# local_config.py is gitignored and imported by config.py at startup via
+# `from local_config import *` (see config.py's "LOCAL OVERRIDES" section), so
+# anything set here overrides the tracked default of the same name for this one
+# machine, without ever showing up as a diff. Delete anything you don't need to
+# change - only the names you keep here override config.py's defaults.
+#
+# This mirrors every setting in config.py (sections 1-7). Section 8 (GLOBAL
+# LIVE-MEMORY) is runtime state, not settings, and is deliberately left out -
+# overriding it here would reset that state on every rehash.
+
+# ---------------------------------------------------------------------
+# 1. SYSTEM- OCH GLOBALA MOTORINSTÄLLNINGAR
+# ---------------------------------------------------------------------
+DEBUG_MODE     = False
+SCRIPT_VERSION = "DCCore v1.10.0-RC1"
+LIST_BASE_NAME = "DCCore"
+
+# ---------------------------------------------------------------------
+# 2. IRC NÄTVERKS- OCH KANALINSTÄLLNINGAR
+# ---------------------------------------------------------------------
+SERVER        = "irc.undernet.org"
+PORT          = 6667
+NICKNAME      = "DCCore"
+ALT_NICKNAME = "DCCore_"
+ADMIN_NICK    = "FLAC"
+CHANNEL       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
+DEBUG_CHANNEL = "#flac-serv"
+
+# ---------------------------------------------------------------------
+# 3. FILSYSTEM, SÖKVÄGAR OCH TEXTDATABASER
+# ---------------------------------------------------------------------
+PAUSE_ON_UPDATE = True  # 🛡️ GLOBAL UNDERHÅLLSVÄXEL: Om denna är True, så pausar boten ALL fildelning och sökning under !update
+FILE_DIRECTORY = "/mnt/nfs-musik"
+RAR_BINARY     = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
+TMP_ZIP_DIR = "./data/tmp_zips"
+LOCAL_LIST_DIR = "./lists"
+
+# Säkra, normaliserade sökvägar direkt in i din data/ undermapp
+BANS_FILE      = "./data/bans.txt"
+STATS_FILE     = "./data/stats.txt"
+HARD_BANS_FILE = "./data/hard_bans.txt"
+
+# ---------------------------------------------------------------------
+# 4. KANALANNONSERING (REKLAMKLOCKAN)
+# ---------------------------------------------------------------------
+ANNOUNCE_INTERVAL = 300     # Tid mellan varje kanalreklam (i sekunder)
+
+# ---------------------------------------------------------------------
+# 5. BEGRÄNSNINGAR, SLOTS OCH KÖ-KONTROLL
+# ---------------------------------------------------------------------
+MAX_DCC_SLOTS      = 3      # Max antal samtidiga live-nedladdningar
+MAX_USER_QUEUE     = 100    # Max antal filer en unik användare får köa upp
+MAX_GLOBAL_QUEUE   = 1000   # Max totalt antal filer i alla köer sammanlagt
+MAX_SEARCH_RESULTS = 5      # Max antal textrader som spottas ut vid @find
+MSG_DELAY          = 5.0    # Paustid i sekunder för din ordinarie meddelandekö
+DEBUG_MSG_DELAY    = 0.5    # Paustid mellan varje rad till debug-kanalen
+
+# ---------------------------------------------------------------------
+# ADMIN CONSOLE (DCC CHAT) - see docs/ADMIN-CONSOLE.md for the full setup guide
+# ---------------------------------------------------------------------
+# Empty list = console disabled, and every DCC CHAT request is ignored.
+#
+# Each entry is a HOST pattern. It may be written bare ("FLAC.users.undernet.org")
+# or in the familiar IRC form ("*!*@FLAC.users.undernet.org"); either way only the
+# part after the last "@" is used. The nick and ident halves are discarded on
+# purpose - the ident is supplied by the client and anyone can set theirs to
+# "flac", so constraining it grants nothing. Only the host is issued by the server.
+#
+# On Undernet, log into X and set usermode +x. The server then replaces your host
+# with "<your-account>.users.undernet.org", which nobody else can obtain. That
+# host IS the proof of your services login.
+ADMIN_HOSTMASKS    = []
+# Generated with:  python adminchat.py
+ADMIN_PASSWORD_HASH = ""
+
+# How the DCC CHAT connection gets made:
+#
+#   "auto"     dial the client, and listen instead if that fails.  (default)
+#   "listen"   always listen and offer the connection back.
+#   "connect"  only ever dial the client; never listen.
+#
+# "auto" is right for most setups. Choose "listen" when the client is behind a
+# VPN, a router that does not forward the port, or a firewall that drops rather
+# than rejects - all of which show up as a TIMEOUT on the dial and then cost the
+# full connect timeout on every login before the fallback takes over. The bot's
+# own listener is already proven reachable by every DCC SEND it does.
+ADMIN_CHAT_MODE    = "auto"
+
+# Whether !ban, !unban, !rehash, !update and !clearqueue still work when typed in
+# a channel or a private message.
+#
+# Left ON. The console is new, and locking yourself out of every admin command
+# because a hostmask has a typo in it is a bad first experience. Turn it off once
+# the console has proved itself - at which point admin authority rests entirely
+# on the services host plus the password, and no longer on a nick anyone can take
+# while you are offline.
+#
+# The user commands (!list, !ping, !debugnames, @find, the queue triggers) are
+# not affected by this.
+ADMIN_CHANNEL_COMMANDS = True
+
+# The two side files update_list.py publishes alongside the master list, holding
+# the human-readable total size and the raw byte count that the channel advert and
+# @<nick>-que read back.
+LIST_SIZE_FILE     = "flac-serv-size.txt"
+LIST_RAWBYTES_FILE = "flac-serv-rawbytes.txt"
+
+# Portspann för DCC-sändningar (Måste öppnas i brandvägg/router!)
+DCC_PORT_START     = 55000
+DCC_PORT_END       = 55010
+
+# ---------------------------------------------------------------------
+# 6. ANTI-FLOOD OCH AUTOMATISKT SÄKERHETSSKYDD
+# ---------------------------------------------------------------------
+MAX_REQUESTS     = 10       # Max antal kommandon (sök/fil) per tidsfönster
+REQUEST_WINDOW   = 5       # Storlek på det rullande tidsfönstret (i sekunder)
+MUTE_TIME        = 30       # Paustid i sekunder för varning vid första flood-överskridelsen
+MAX_SEND_FAILS   = 3        # Max antal försök per köad fil innan den slängs (se dcc.release_queue_entry)
+RAR_TIMEOUT      = 1800     # Max tid i sekunder som en rar-packning får ta innan den avbryts
+
+# ---------------------------------------------------------------------
+# 7. MIRC FÄRGKODER OCH KONTROLLTECKEN (IRC STANDARD)
+# ---------------------------------------------------------------------
+C_WHITE        = "\x0300"
+C_BLACK        = "\x0301"
+C_BLUE         = "\x0302"
+C_GREEN        = "\x0303"
+C_RED          = "\x0304"
+C_BROWN        = "\x0305"
+C_PURPLE       = "\x0306"
+C_ORANGE       = "\x0307"
+C_YELLOW       = "\x0308"
+C_LIGHT_GREEN  = "\x0309"
+C_CYAN         = "\x0310"
+C_LIGHT_CYAN   = "\x0311"
+C_ROYAL_BLUE   = "\x0312"
+C_PINK         = "\x0313"
+C_GREY         = "\x0314"
+C_LIGHT_GREY   = "\x0315"
+
+# Formateringstecken
+C_RESET        = "\x03"     # Nollställer färg/fetstil
+C_BOLD         = "\x02"     # Fetstil
+C_UNDERLINE    = "\x1F"     # Understruken
+C_ITALIC       = "\x1D"     # Kursiv
