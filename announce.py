@@ -138,15 +138,23 @@ def remove_debug_sink(sink):
 
 
 def _fan_out_to_sinks(msg_text, category):
+    """Hand the line to every registered sink. Returns how many took it.
+
+    The count is what lets send_debug tell "nobody was listening" from "the
+    console has it", so a line is never lost in silence.
+    """
     with _debug_sinks_lock:
         # Sliced, not list(). announce.py imports the project's own list module,
         # which shadows the builtin here - list(...) calls the MODULE.
         sinks = _debug_sinks[:]
+    delivered = 0
     for sink in sinks:
         try:
             sink(msg_text, category)
+            delivered += 1
         except Exception as sink_err:
             print(f"[ANNOUNCE] Debug sink raised and was dropped: {sink_err}")
+    return delivered
 
 
 def _ensure_debug_drain():
@@ -583,12 +591,35 @@ def send_debug(msg_text, category="INFO"):
     # (deque maxlen), so a flood of alerts drops the oldest lines instead of growing without
     # limit or stalling the daemon. sendall() in the drain replaces send(), whose return
     # value was discarded so a short write truncated the line silently.
-    _debug_queue.append(msg)
-    _ensure_debug_drain()
+    # ---------------------------------------------------------------------
+    # ROUTING. Two switches, and a floor underneath them.
+    #
+    # DEBUG_TO_CHANNEL sends the coloured line to the debug channel, as always.
+    # DEBUG_TO_CONSOLE hands the plain text to any attached admin console.
+    #
+    # Both default on, so nothing changes for anyone who does not touch them.
+    # Turning the channel off is the point of the console: the operator stops
+    # publishing the daemon's internals to a channel other people can sit in.
+    #
+    # The floor matters more than either switch. If the channel is off and no
+    # console is attached, the line would simply cease to exist - and the moment
+    # that is most likely is exactly when something has gone wrong and nobody is
+    # connected. So when nothing took it, it goes to stdout, which the LXC
+    # console and the journal always have. Only then: printing every line
+    # unconditionally would double up on the 44 call sites that already log.
+    # ---------------------------------------------------------------------
+    delivered = 0
 
-    # Anything else listening - today, an open admin console - gets the plain
-    # text to wrap however it needs.
-    _fan_out_to_sinks(msg_text, category)
+    if getattr(config, "DEBUG_TO_CHANNEL", True):
+        _debug_queue.append(msg)
+        _ensure_debug_drain()
+        delivered += 1
+
+    if getattr(config, "DEBUG_TO_CONSOLE", True):
+        delivered += _fan_out_to_sinks(msg_text, category)
+
+    if not delivered:
+        print(f"[DEBUG {str(category).upper()}] {msg_text}")
 
 # ---------------------------------------------------------------------
 # START-SLUSS FÖR REKLAMTRÅDEN: Anropas av irc.py vid lyckad boot!

@@ -95,6 +95,25 @@ ADMIN_CHAT_MODE    = "auto"
 # not affected by this.
 ADMIN_CHANNEL_COMMANDS = True
 
+# ---------------------------------------------------------------------
+# WHERE RUNTIME REPORTS GO
+# ---------------------------------------------------------------------
+# announce.send_debug() is the daemon's running commentary - transfers, joins,
+# bans, pack failures. Both destinations are on by default.
+#
+#   DEBUG_TO_CHANNEL   the coloured line in DEBUG_CHANNEL, as it has always been
+#   DEBUG_TO_CONSOLE   the plain text in an attached DCC admin console
+#
+# Set DEBUG_TO_CHANNEL = False once the console is doing the job, and the
+# daemon's internals stop being published to a channel other people can sit in.
+#
+# Neither switch can lose a line: if the channel is off and no console happens to
+# be connected, send_debug falls back to stdout, so the LXC console and the
+# journal always have it. That case - something going wrong while nobody is
+# watching - is the one worth protecting.
+DEBUG_TO_CHANNEL   = True
+DEBUG_TO_CONSOLE   = True
+
 # The two side files update_list.py publishes alongside the master list, holding
 # the human-readable total size and the raw byte count that the channel advert and
 # @<nick>-que read back. Named here rather than as a literal in both list.py and

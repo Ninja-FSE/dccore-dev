@@ -5,7 +5,7 @@
 # anything set here overrides the tracked default of the same name for this one
 # machine, without ever showing up as a diff.
 #
-# Any name from config.py can be overridden this way, but these three are the
+# Any name from config.py can be overridden this way, but the ones below are the
 # ones actually meant to live here - see docs/ADMIN-CONSOLE.md for the full
 # setup guide.
 
@@ -31,3 +31,26 @@ ADMIN_PASSWORD_HASH = ""
 # rather than rejects - all of which show up as a TIMEOUT on the dial and then
 # cost the full connect timeout on every login before the fallback takes over.
 ADMIN_CHAT_MODE = "listen"
+
+
+# ---------------------------------------------------------------------
+# ONCE THE CONSOLE IS TRUSTED
+# ---------------------------------------------------------------------
+# Whether !ban, !unban, !rehash, !update and !clearqueue still work when typed
+# in a channel. Set False and admin authority rests entirely on the services
+# host plus the password, never on a nick someone can take while you are
+# offline. The user commands (!list, !ping, @find, the queue triggers) are not
+# affected.
+ADMIN_CHANNEL_COMMANDS = True
+
+# Where the daemon's running commentary goes - transfers, joins, bans, pack
+# failures. Both on by default.
+#
+# Set DEBUG_TO_CHANNEL = False once the console is doing the job, and the
+# daemon's internals stop being published to a channel other people can sit in.
+#
+# Neither switch can lose a line: with the channel off and no console connected,
+# send_debug falls back to stdout, so the LXC console and the journal always
+# have it.
+DEBUG_TO_CHANNEL = True
+DEBUG_TO_CONSOLE = True
