@@ -69,6 +69,19 @@ ADMIN_HOSTMASKS    = []
 # Generated with:  python adminchat.py
 ADMIN_PASSWORD_HASH = ""
 
+# How the DCC CHAT connection gets made:
+#
+#   "auto"     dial the client, and listen instead if that fails.  (default)
+#   "listen"   always listen and offer the connection back.
+#   "connect"  only ever dial the client; never listen.
+#
+# "auto" is right for most setups. Choose "listen" when the client is behind a
+# VPN, a router that does not forward the port, or a firewall that drops rather
+# than rejects - all of which show up as a TIMEOUT on the dial and then cost the
+# full connect timeout on every login before the fallback takes over. The bot's
+# own listener is already proven reachable by every DCC SEND it does.
+ADMIN_CHAT_MODE    = "auto"
+
 # The two side files update_list.py publishes alongside the master list, holding
 # the human-readable total size and the raw byte count that the channel advert and
 # @<nick>-que read back. Named here rather than as a literal in both list.py and

@@ -618,7 +618,18 @@ def handle_dcc_chat(irc_sock, line, nick, ctcp_text):
         print(f"[ADMINCHAT] DCC CHAT from {ip} refused: address is temporarily blocked.")
         return False
 
-    threading.Thread(target=_connect_and_serve, args=(nick, host, ip, port), daemon=True).start()
+    mode = str(getattr(config, "ADMIN_CHAT_MODE", "auto") or "auto").strip().lower()
+    if mode == "listen":
+        # The operator knows their client is not reachable and does not want to
+        # pay CONNECT_TIMEOUT discovering it again on every single login.
+        print(f"[ADMINCHAT] ADMIN_CHAT_MODE is 'listen'; offering the connection to {nick} "
+              f"rather than dialling {ip}:{port}.")
+        threading.Thread(target=_listen_and_serve, args=(irc_sock, nick, host, token),
+                         daemon=True).start()
+        return True
+
+    threading.Thread(target=_connect_and_serve,
+                     args=(irc_sock, nick, host, ip, port, token), daemon=True).start()
     return True
 
 
@@ -688,14 +699,36 @@ def _serve(sock, peer_ip, nick, host, description):
     print(f"[ADMINCHAT] Session with {nick} closed.")
 
 
-def _connect_and_serve(nick, host, ip, port):
-    """Dial the operator's listening client. The clean single-dialog path."""
+def _connect_and_serve(irc_sock, nick, host, ip, port, token=None):
+    """Dial the operator's listening client, and listen instead if that fails.
+
+    Dialling out is the tidier path - one dialog rather than two - but it can
+    only work if the client is actually reachable at the address it advertised,
+    and there are several ordinary reasons it is not:
+
+      * the client is behind a VPN, so it reports the VPN's exit address while
+        inbound connections to it are not forwarded anywhere;
+      * a router is not forwarding the port, or a firewall drops rather than
+        rejects, which shows up as a TIMEOUT rather than a refusal;
+      * the daemon's own outbound to high ports is blocked.
+
+    A failure here used to be the end of it. It is not: the bot's own listener
+    is proven reachable every day by DCC SEND, so falling back to offering the
+    connection costs one timeout and then works. Set ADMIN_CHAT_MODE = "listen"
+    to skip straight to it and not pay the timeout at all.
+    """
     try:
         sock = socket.create_connection((ip, port), timeout=CONNECT_TIMEOUT)
     except OSError as err:
-        print(f"[ADMINCHAT] Could not connect to {nick} at {ip}:{port} ({err}). "
-              f"If this keeps happening, the client is not reachable on that "
-              f"address - the bot will listen instead if it offers no usable IP.")
+        mode = str(getattr(config, "ADMIN_CHAT_MODE", "auto") or "auto").strip().lower()
+        if mode == "connect":
+            print(f"[ADMINCHAT] Could not connect to {nick} at {ip}:{port} ({err}). "
+                  f"ADMIN_CHAT_MODE is 'connect', so not falling back to listening.")
+            return
+        print(f"[ADMINCHAT] Could not connect to {nick} at {ip}:{port} ({err}); "
+              f"falling back to listening. Set ADMIN_CHAT_MODE = \"listen\" in "
+              f"local_config.py to go straight here and skip the wait.")
+        _listen_and_serve(irc_sock, nick, host, token)
         return
     _serve(sock, ip, nick, host, f"opened to {ip}:{port}")
 

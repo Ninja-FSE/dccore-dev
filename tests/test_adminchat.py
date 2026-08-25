@@ -325,6 +325,164 @@ class PassiveOfferWithToken(unittest.TestCase):
                         f"the token must be the last field; got {ctcp!r}")
 
 
+class ConnectFailureFallsBackToListening(unittest.TestCase):
+    """Third field report: a real address that simply does not answer.
+
+        [ADMINCHAT] Could not connect to FLAC at 93.164.139.41:55101 (timed out).
+
+    A TIMEOUT rather than a refusal means the packets left and nothing came
+    back - a VPN exit address with no inbound forwarding, a router not
+    forwarding the port, or a firewall that drops instead of rejecting. The
+    offer looked perfectly dialable, so the earlier "unusable address" fallback
+    never triggered, and the attempt just ended there.
+
+    The bot's own listener is proven reachable every day by DCC SEND, so a
+    failed dial should cost one timeout and then work.
+    """
+
+    def setUp(self):
+        adminchat.reset_state_for_tests()
+        self.addCleanup(adminchat.reset_state_for_tests)
+        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
+        config.MY_IP_OR_DOCK = "127.0.0.1"
+        self._mode = getattr(config, "ADMIN_CHAT_MODE", "auto")
+        self.addCleanup(lambda: setattr(config, "ADMIN_CHAT_MODE", self._mode))
+        config.ADMIN_CHAT_MODE = "auto"
+
+        self.sent = []
+        outer = self
+
+        class Recorder:
+            def send(self, payload):
+                outer.sent.append(payload.decode("utf-8", "replace"))
+                return len(payload)
+            sendall = send
+
+        self.irc = Recorder()
+
+    def dead_port(self):
+        """A port nothing is listening on, so connect() is refused at once."""
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        return port
+
+    def offered_port(self, timeout=8.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            for line in self.sent:
+                if "DCC CHAT chat" in line:
+                    return int(line.strip().strip("").split()[-1])
+            time.sleep(0.02)
+        return None
+
+    def test_a_refused_dial_falls_back_to_an_offer(self):
+        offer = f"DCC CHAT chat 2130706433 {self.dead_port()}"
+        self.assertTrue(adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC", offer))
+
+        port = self.offered_port()
+        self.assertIsNotNone(port, "a failed dial must be followed by an offer")
+        self.assertGreaterEqual(port, config.DCC_PORT_START)
+        self.assertLessEqual(port, config.DCC_PORT_END)
+
+    def test_the_fallback_console_actually_works(self):
+        """Not just that an offer was sent - that a session comes up on it."""
+        offer = f"DCC CHAT chat 2130706433 {self.dead_port()}"
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC", offer)
+        port = self.offered_port()
+        self.assertIsNotNone(port)
+
+        client = socket.create_connection(("127.0.0.1", port), timeout=5.0)
+        self.addCleanup(client.close)
+        client.settimeout(5.0)
+        buffer = ""
+        deadline = time.time() + 5.0
+        while "Enter Your Password:" not in buffer and time.time() < deadline:
+            try:
+                chunk = client.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            buffer += chunk.decode("utf-8", "replace")
+        self.assertIn("Enter Your Password:", buffer)
+
+    def test_a_timed_out_dial_falls_back_too(self):
+        """His exact symptom. A timeout is an OSError subclass, but assert it."""
+        real = socket.create_connection
+
+        def timeout_once(address, timeout=None, *args, **kwargs):
+            if address[1] not in range(config.DCC_PORT_START, config.DCC_PORT_END + 1):
+                raise socket.timeout("timed out")
+            return real(address, timeout, *args, **kwargs)
+
+        socket.create_connection = timeout_once
+        self.addCleanup(lambda: setattr(socket, "create_connection", real))
+
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
+                                  "DCC CHAT chat 1570209577 55101")
+        self.assertIsNotNone(self.offered_port(),
+                             "a timeout must fall back exactly as a refusal does")
+
+    def test_listen_mode_does_not_dial_at_all(self):
+        """So the operator stops paying the connect timeout on every login."""
+        config.ADMIN_CHAT_MODE = "listen"
+        dialled = []
+        real = socket.create_connection
+
+        def watch(address, *args, **kwargs):
+            dialled.append(address)
+            return real(address, *args, **kwargs)
+
+        socket.create_connection = watch
+        self.addCleanup(lambda: setattr(socket, "create_connection", real))
+
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
+                                  "DCC CHAT chat 1570209577 55101")
+        self.assertIsNotNone(self.offered_port())
+        self.assertEqual([a for a in dialled if a[1] == 55101], [],
+                         "listen mode must not dial the client")
+
+    def test_connect_mode_refuses_to_fall_back(self):
+        """For an operator who does not want the bot listening at all.
+
+        Asserted by watching the fallback itself rather than by sleeping and
+        hoping. A fixed wait passes whenever the fallback is merely still in
+        flight, which is how this test first let a mutation through: the delay
+        was the assertion, and delays are not assertions.
+        """
+        config.ADMIN_CHAT_MODE = "connect"
+
+        dial_attempted = threading.Event()
+        listened = []
+
+        real_connect = socket.create_connection
+        real_listen = adminchat._listen_and_serve
+
+        def refuse(address, *args, **kwargs):
+            dial_attempted.set()
+            raise ConnectionRefusedError("refused")
+
+        socket.create_connection = refuse
+        adminchat._listen_and_serve = lambda *a, **k: listened.append(a)
+        self.addCleanup(lambda: setattr(socket, "create_connection", real_connect))
+        self.addCleanup(lambda: setattr(adminchat, "_listen_and_serve", real_listen))
+
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
+                                  "DCC CHAT chat 2130706433 55555")
+
+        self.assertTrue(dial_attempted.wait(5.0), "the dial must at least be attempted")
+        # The decision happens on the same thread, immediately after the failure.
+        self.assertTrue(wait_for(lambda: True, timeout=0.2))
+        self.assertEqual(listened, [],
+                         "connect mode must not fall back to listening")
+
+    def test_auto_is_the_default(self):
+        self.assertEqual(str(getattr(config, "ADMIN_CHAT_MODE", "auto")).lower(), "auto")
+
+
 class ListenerUsesTheConfiguredRange(unittest.TestCase):
     """His other point: the console must respect DCC_PORT_START/END."""
 
@@ -574,7 +732,7 @@ class TheRequestGate(unittest.TestCase):
         self.assertTrue(adminchat.handle_dcc_chat(None, ADMIN_LINE, "FLAC",
                                                   "DCC CHAT chat 2130706433 55555"))
         self.assertEqual(len(self.dialled), 1)
-        nick, host, ip, port = self.dialled[0]
+        _irc, nick, host, ip, port, _token = self.dialled[0]
         self.assertEqual((host, ip, port), ("flac.users.undernet.org", "127.0.0.1", 55555))
 
     def test_no_password_configured_means_no_console(self):
