@@ -1,7 +1,31 @@
-# FLAC-Serv Versionsuppdateringar & Projektlogg 📝
+# DCCore Version Updates & Project Log 📝
 
-Här loggas alla versionsförändringar, optimeringar och buggfixar som gjorts under tidens gång i DCCore-projektet.
+All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟦 v1.10.0-RC1 (2026-08-25) - "The Platform & Forgery-Hardening Release"
+### 🚀 New features
+- **🪟 Windows support (`platform_compat.py`):** Isolated every genuine Linux/Windows difference into one new module - the DCC listener's socket option, the rar binary lookup, long-path handling, and TCP keepalive tuning. Every function is a no-op or identity on Linux, so production behaviour on Linux is unchanged; the daemon now also runs on Windows, verified by CI on both platforms.
+- **⚙️ Per-machine config overrides (`local_config.py`):** `config.py` now optionally imports a gitignored `local_config.py` so one machine can override paths, nickname, or channels without editing a tracked file or showing up as a deployment diff.
+- **🧪 Preflight script (`scripts/preflight.py`):** Mirrors the CI workflow locally - imports, compileall, the full suite, then a second run with host tooling hidden (PATH stripped) and a floor on the collected test count, so a host-dependent test or a silently-emptied test file gets caught before pushing instead of by CI.
+
+### 🐛 Bug fixes & security hardening
+- **🛡️ DCC listener hijack risk (Linux vs. Windows `SO_REUSEADDR`):** The socket option that lets Linux quickly reuse a port in `TIME_WAIT` means the opposite on Windows - it lets a *different process* bind the same port and steal the incoming connection. `platform_compat.prepare_listener()` now picks the correct option per platform.
+- **🔒 Server-numeric forgery (513/353/352/001/376):** Four `irc.py` handlers matched server numerics with a bare substring test on the raw line, so ordinary channel text could trigger them - including an unpaced raw `PONG` from a forged `513`, enough to flood-disconnect the bot from a single pasted message. Replaced with anchored matching (`is_server_numeric`) that requires the code to sit in the actual command position.
+- **🔒 User-event forgery (JOIN/PART/QUIT/NICK/433):** Same defect on the membership side - a search like `@find QUIT PLAYING GAMES` matched the QUIT handler's substring test and froze that user's queue for no reason. Replaced with anchored matching (`is_user_event` / `event_source_nick`) so the source nick can only come from the line's prefix, never its body.
+- **🗑️ `@<nick>-remove` orphaned temp archives:** Of the four code paths that clear a user's queue, the one users actually type was the only one that didn't delete the temporary `.rar` files those queue rows pointed at. Now routed through `dcc.discard_orphaned_temp_archives()`, shared with `!clearqueue`.
+- **🔓 `!unban` could truncate `hard_bans.txt` and fail open:** It rewrote the file in place; a crash or full disk mid-write could leave it truncated, and a truncated-but-readable file is indistinguishable from an empty one - so every hard-banned user would be silently admitted. Now an atomic read-modify-write under a shared disk lock via `db.add_hard_ban()` / `db.remove_hard_ban()`.
+- **🔗 `!ban` could glue two ban patterns together:** A bare append with no trailing-newline check could weld a new pattern onto the previous line on a hand-edited file, silently unbanning both. Fixed by the same atomic helper.
+- **📉 `db.get_speed_record()` used a hardcoded path** instead of the `SPEED_RECORD_FILE` constant `save_speed_record()` already used - harmless from the repo root, but silently stale if the daemon is ever started from elsewhere.
+- **🚦 Section A of `check_queue_and_send()` ignored `MAX_DCC_SLOTS`:** only Section B checked capacity before dispatching; repeated JOIN/353 thaws could push `active_transfers` past the configured slot limit.
+- **🌊 Flood gate (`is_bot_command`) missed most of the dispatch chain:** only 4 of roughly 11 real command paths were metered - `-que`/`-remove`, both CTCP variants, `!list`, `!debugnames`, and `!ping` had no rate limit at all.
+
+### 🧪 Test suite
+Went from 168 to 250+ tests across this release, all evaluating the actual guard conditions read out of the source rather than grepping for text - the pattern established for exactly this class of forgeable-handler bug. Every fix above shipped with mutation testing proving the old, broken condition turns the suite red.
+
+### ⚠️ Known open item
+`is_admin()` is still nick-based with no `ident@host` verification - an Undernet nick isn't owned without services auth, so anyone taking the admin nick while the real admin is offline gains every admin command, including `!clearqueue`. Closing this needs `irc.py`'s PRIVMSG regex to capture the hostmask (currently discarded) plus a config-format decision. Tracked as follow-up work, not fixed in this release.
+
+---
 ## 🟦 v1.9.0-RC1 (2026-08-15) - "The Gold & Audio Handshake Release"
 ### 🚀 Nya funktioner
 - **🛡️ Apostrof-räddare i Packaren (`Single Quote Filter`):** Implementerat en intelligent teckenbevarare inuti `inline_rar_packer` i `dcc.py` via `os.path.basename`. Om källmappen på din NFS-disk innehåller en apostrof (`'`), tvingas tecknet med live in i det färdiga `.rar`-filnamnet (t.ex. `A_Winter's_Tale_(1995).rar`). Detta förhindrar att tecknet tvättas bort till fula understreck, vilket säkrar 100% träffsäkerhet i din AutoQ!

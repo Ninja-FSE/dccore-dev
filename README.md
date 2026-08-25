@@ -1,10 +1,12 @@
-# FLAC-Serv IRC DCCore Daemon 🚀
+# DCCore
 
-An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe architecture) built in Python 3.10 for any IRC Network. The script is fully optimized for Proxmox LXC containers, delivering file-sharing notifications, advanced database statistics, and real-time monitoring with mIRC colors at an absolute gold standard.
+**Current version: v1.10.0-RC1**
+
+An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe architecture) built in Python 3.10, running on both Linux and Windows for any IRC Network. The script is fully optimized for Proxmox LXC containers, delivering file-sharing notifications, advanced database statistics, and real-time monitoring with mIRC colors at an absolute gold standard.
 
 ## ✨ Key Features
 
-- **⚡ VIP Express Queue:** An isolated, high-priority queue (`vip_queue`) that fires out private queue controls (`@flac-serv-que`) and search headers in under 1 millisecond—completely unaffected by standard flood protection or channel advertisements.
+- **⚡ VIP Express Queue:** An isolated, high-priority queue (`vip_queue`) that fires out private queue controls (`@DCCore-que`) and search headers in under 1 millisecond—completely unaffected by standard flood protection or channel advertisements.
 - **❄️ Smart Freeze Box & Real-Time Wakeup:** If a user with files in the queue performs a `PART` or disconnects (`QUIT`), their queue is automatically frozen in a background thread for 5 minutes. If the user rejoins (`JOIN`), the queue thaws instantly (0ms) and resumes transmission.
 - **🎨 Central mIRC Block Theme:** Fully themed via `announce.py` featuring heavy color blocks (Teal/Dark Red) and crisp white background plates, clinically cleared of color bleeding and client-specific cache artifacts.
 - **📊 Advanced 7-Column Database:** Bulletproof live statistics (`stats.txt`) tracking total sent files/bytes, yesterday's and today's activity, and synced list dates in real time with forced disk-flush (`fsync`) for local storage optimization.
@@ -17,6 +19,7 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 - `dcc.py` — DCC handshakes, socket transmitters, and smart freeze-box timers.
 - `announce.py` — Central mIRC theme, channel announcements, and the VIP debug engine.
 - `commands.py` — User commands (`que`, `remove`) isolated from the main network loop.
+- `platform_compat.py` — The handful of genuine Linux/Windows differences (socket options, the rar binary lookup, long paths, keepalive tuning), isolated so the rest of the codebase stays platform-neutral.
 - `stats_mgr.py` — Dumb data module managing file sizes and transfer speed calculations.
 - `db.py` — Database I/O interface featuring forced write-protection at EOF.
 - `config.py` — Central configuration file and runtime memory registry containing:
@@ -32,7 +35,7 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 ## ⚙️ Installation & Startup
 
 ### Prerequisites
-The script is developed and tested for **Python 3.10** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox).
+The script is developed and tested for **Python 3.10+** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox), and runs on Windows as well - the platform differences are isolated in `platform_compat.py` and covered by CI on both operating systems.
 
 ### Starting the Daemon
 To perform a completely clean reboot of the bot, clear hidden cache files, and force a fresh reload of code modifications into RAM, execute:
