@@ -52,6 +52,34 @@ def is_server_numeric(line, code):
     return re.match(r"^:\S+\s+" + code + r"\s+\S+", line) is not None
 
 
+def is_user_event(line, command):
+    """True only when `line` is a genuine user event with this command.
+
+    A user event is always ':<nick>!<user>@<host> <COMMAND> ...' - the command
+    sits in the command position, immediately after the prefix. Testing for the
+    bare substring instead matches the command name ANYWHERE, including inside a
+    PRIVMSG body, a PART or QUIT reason, or a channel TOPIC.
+
+    That was reachable by accident, not only by attack: `" QUIT " in line` matched
+    an ordinary search like "@find QUIT PLAYING GAMES", and the QUIT handler then
+    removed the searcher from every channel in config.channel_users - which
+    freezes their queue and hands it to the five-minute delete timer, for the
+    crime of looking for a song.
+    """
+    return re.match(r"^:\S+!\S+\s+" + command + r"(\s|$)", line) is not None
+
+
+def event_source_nick(line):
+    """The nick a user event came FROM, read out of the prefix.
+
+    Never search the whole line for a nick. A QUIT reason is free text, so
+    ':attacker!u@h QUIT :bye :DCCore!x@y' made `":DCCore!" in line.lower()` true
+    and handed anyone the handlers that key off who an event came from.
+    """
+    match = re.match(r"^:([^!\s]+)!", line)
+    return match.group(1).lower() if match else None
+
+
 def get_bot_aliases():
     """Every name this bot should answer to, lowercased, current nick first.
 
@@ -414,21 +442,33 @@ def irc_loop():
                         pong_code = parts[-1].strip()
                         s.send(f"PONG {pong_code}\r\n".encode())
                     # 🛡️ LIVE 433-BACKUP: Fångar enbart upp OFFICIELLA server-krockar (Ignorerar kanalsnack!)
-                    if " 433 " in line or "erroneous nickname" in line.lower():
-                        # 🚫 SPÄRR: Om det är kanaltrafik (PRIVMSG) är det bara någon som snackar – IGNORERA!
-                        if " PRIVMSG " not in line and " NOTICE " not in line:
-                            main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                            if str(config.NICKNAME).lower() == main_nick.lower():
-                                alt_nick = getattr(config, 'ALT_NICKNAME', f"{main_nick}`")
-                                print(f"[LIVE NICK COLLISION] Servern rapporterade en äkta krock för {main_nick}! Reservnick: {alt_nick}")
-                                s.send(f"NICK {alt_nick}\r\n".encode())
-                                config.NICKNAME = alt_nick
+                    # Anchored: " 433 " matched those digits anywhere in the line, and the
+                    # PRIVMSG/NOTICE exclusion under it did not cover PART or QUIT reasons
+                    # or a channel TOPIC - so parting with "bye 433" pushed the bot off its
+                    # main nick and wrote an unpaced NICK straight to the socket.
+                    # "erroneous nickname" was matching numeric 432 by its English wording;
+                    # match the numeric itself, which no server translates and no user can
+                    # forge. The PRIVMSG/NOTICE test is gone because anchoring makes it not
+                    # merely dead but harmful: a genuine 433 whose text happened to contain
+                    # the word PRIVMSG would have been discarded.
+                    if is_server_numeric(line, "433") or is_server_numeric(line, "432"):
+                        main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
+                        if str(config.NICKNAME).lower() == main_nick.lower():
+                            alt_nick = getattr(config, 'ALT_NICKNAME', f"{main_nick}`")
+                            print(f"[LIVE NICK COLLISION] Servern rapporterade en äkta krock för {main_nick}! Reservnick: {alt_nick}")
+                            s.send(f"NICK {alt_nick}\r\n".encode())
+                            config.NICKNAME = alt_nick
 
                     # 🛡️ AUTOMATISKT ÅTERTAGANDE: Återta huvudnicket live i samma millisekund som din mIRC-klient stängs!
-                    if " QUIT " in line or " PART " in line:
+                    # Anchored twice over. The old test matched " QUIT "/" PART " anywhere,
+                    # then looked for ":<mainnick>!" anywhere - and a QUIT reason is free
+                    # text. Together with the 433 handler above that was a two-line flood:
+                    # forge a 433 to push the bot onto its alt nick, forge a QUIT to pull it
+                    # back, repeat. Two unpaced NICK commands per round, from channel text.
+                    if is_user_event(line, "QUIT") or is_user_event(line, "PART"):
                         main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
                         if str(config.NICKNAME).lower() != main_nick.lower():
-                            if f":{main_nick.lower()}!" in line.lower():
+                            if event_source_nick(line) == main_nick.lower():
                                 print(f"[NICK RECOVERY] Upptäckte att huvudnicket {main_nick} loggade ut! Återtar namnet live...")
                                 try:
                                     s.send(f"NICK {main_nick}\r\n".encode())
@@ -479,13 +519,18 @@ def irc_loop():
 
 
 
-                    nick_match = re.match(r"^:([^!]+)!.* NICK :(.+)$", line)
-                    if nick_match:
-                        old_nick = nick_match.group(1).lower()
-                        new_nick = nick_match.group(2).strip()
-                        if old_nick in config.send_queue:
-                            import queue_mgr
-                            queue_mgr.config.send_queue[new_nick.lower()] = queue_mgr.config.send_queue.pop(old_nick)
+                    # Anchored: ".* NICK :" let the command sit anywhere, so "hey NICK
+                    # :victim" typed in a channel renamed the SPEAKER's send_queue key onto
+                    # the victim - and the assignment below overwrites, so it destroyed
+                    # whatever that victim had pending.
+                    if is_user_event(line, "NICK"):
+                        nick_match = re.match(r"^:([^!\s]+)!\S*\s+NICK\s+:?(\S+)", line)
+                        if nick_match:
+                            old_nick = nick_match.group(1).lower()
+                            new_nick = nick_match.group(2).strip()
+                            if old_nick in config.send_queue:
+                                import queue_mgr
+                                queue_mgr.config.send_queue[new_nick.lower()] = queue_mgr.config.send_queue.pop(old_nick)
                             
                     # Anchored: this writes straight into config.whois_status.
                     if is_server_numeric(line, "352"):
@@ -521,7 +566,11 @@ def irc_loop():
                             if thawed_users:
                                 announce.send_debug(f"Reconnect sync in {chan}: thawed {config.C_BOLD}{len(thawed_users)}{config.C_RESET} queue(s) for users who never left.", category="JOIN")
 
-                    elif " JOIN " in line and f":{config.NICKNAME}!" not in line:
+                    # Anchored: " JOIN " matched the word anywhere, so a PRIVMSG containing
+                    # it thawed the speaker's own frozen queue on demand, and let them insert
+                    # themselves into config.channel_users for a channel they are not in -
+                    # which dcc.py reads as proof of presence before it dispatches.
+                    elif is_user_event(line, "JOIN") and event_source_nick(line) != config.NICKNAME.lower():
                         join_match = re.search(r"^:([^!]+)!.* JOIN :?([#\w\-]+)", line)
                         if join_match:
                             joined_user = join_match.group(1)
@@ -539,7 +588,9 @@ def irc_loop():
                                 announce.send_debug(f"User {config.C_BOLD}{joined_user}{config.C_RESET} returned to {joined_chan}, continuing queue of {config.C_BOLD}{files_in_q}{config.C_RESET} file(s)", category="JOIN")
                                 threading.Thread(target=dcc.check_queue_and_send, args=(s, joined_user), daemon=True).start()
                                 
-                    elif " PART " in line:
+                    # Anchored: as JOIN. This one removes people from channel_users, which
+                    # freezes their queue and starts the five-minute delete timer.
+                    elif is_user_event(line, "PART"):
                         part_match = re.search(r"^:([^!]+)!.* PART ([#\w\-]+)", line)
                         if part_match:
                             p_user = part_match.group(1).lower()
@@ -547,7 +598,11 @@ def irc_loop():
                             if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
                                 config.channel_users[p_chan].remove(p_user)
 
-                    elif " QUIT " in line:
+                    # Anchored: the worst of the three, because it removes the user from
+                    # EVERY channel at once. "@find QUIT PLAYING GAMES" is an ordinary
+                    # search that silently cost the searcher their whole queue five minutes
+                    # later.
+                    elif is_user_event(line, "QUIT"):
                         quit_match = re.search(r"^:([^!]+)!", line)
                         if quit_match:
                             q_user = quit_match.group(1).lower()
@@ -615,7 +670,7 @@ def irc_loop():
                                     search_term = parts[1].strip()
                                     if search_term:
                                         threading.Thread(target=list.execute_search, args=(s, user, search_term, target_chan), daemon=True).start()
-                            elif msg == "!list":
+                            elif msg_lower == "!list":
                                 list.send_list_trigger_info(s, user)
                             elif msg.lower() == "!debugnames":
                                 if hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users:
