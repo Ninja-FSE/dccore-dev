@@ -2,8 +2,16 @@
 import time
 import db
 
-# Vi sparar botens starttid lokalt här
-start_time = time.time()
+# Vi sparar botens starttid lokalt här.
+#
+# Guarded, because !rehash reloads this module and importlib.reload re-executes
+# the body against the SAME module dict - a bare assignment reset the uptime to
+# zero on every rehash. The name already being bound is exactly what tells us
+# this is a reload rather than the first import, so the original value stands.
+try:
+    start_time
+except NameError:
+    start_time = time.time()
 
 def load_stats():
     """Läser det nya 7-kolonnsformatet från den konfigurerade sökvägen via db-modulen"""

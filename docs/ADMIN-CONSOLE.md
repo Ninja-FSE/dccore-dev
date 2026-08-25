@@ -3,11 +3,11 @@
 Administrative access over an authenticated DCC CHAT session instead of channel
 commands.
 
-**Status: phase 1.** The console authenticates and accepts `help` and `quit`. The
-admin commands themselves (`ban`, `unban`, `rehash`, `update`, `clearqueue`) are
-still the channel commands they always were — phase 2 moves them in. Nothing
-changes until you configure it: with `ADMIN_HOSTMASKS` empty, every DCC CHAT
-request is ignored and the daemon behaves exactly as before.
+**Status: phase 2.** The console authenticates and runs the full admin command
+set. The same commands still work in channel as well, until you decide otherwise
+— see `ADMIN_CHANNEL_COMMANDS`. Nothing changes until you configure it: with
+`ADMIN_HOSTMASKS` empty, every DCC CHAT request is ignored and the daemon
+behaves exactly as before.
 
 ---
 
@@ -101,6 +101,9 @@ ADMIN_PASSWORD_HASH = "pbkdf2_sha256$200000$3f0a...$91c4..."
 # Optional. "auto" (default), "listen", or "connect" - see "Using it" below.
 # Behind a VPN or a router that does not forward the port, use "listen".
 ADMIN_CHAT_MODE = "auto"
+
+# Optional. Set False to retire the in-channel admin commands - see below.
+ADMIN_CHANNEL_COMMANDS = True
 ```
 
 The mask may be written either way — both mean the same thing, because only the
@@ -191,12 +194,60 @@ For help type "help"
 Commands are bare words — there is no channel to disambiguate from, so no `!`
 prefix.
 
+### What you can see
+
 | Command | Effect |
 |---|---|
-| `help` | list the commands |
+| `status` | everything at a glance — slots, queue, bans, list, uptime |
+| `queue [nick]` | queued files, all users or one |
+| `slots` | what is sending right now, and how far along |
+| `bans` | permanent and timed bans |
+| `uptime` | how long the daemon has been running |
+| `version` | build and platform |
+
+### What you can do
+
+| Command | Effect |
+|---|---|
+| `ban <pattern>` | add a permanent wildcard ban |
+| `unban <pattern>` | remove one |
+| `clearqueue <nick>` | force-clear another user's queue |
+| `rehash` | reload modules in place |
+| `update` | rebuild the MasterList |
+| `help` | the command list |
 | `quit` | close the session |
 
+`rehash` and `update` run in the background — `update` walks the whole library
+and can take minutes — so the console stays usable while they work. Their
+progress arrives in the session as it happens, because an authenticated console
+receives the daemon's runtime log alongside the debug channel.
+
+### Your nick does not matter here
+
+The five admin commands normally check the caller's nick against `ADMIN_NICK`.
+A console session skips that check, on purpose: it has already proved your
+services login through your `+x` host **and** a password, which is a stronger
+claim than a nick anyone can take while you are offline. So the console works
+even when your current nick is not in `ADMIN_NICK` — after a `433` collision,
+for instance.
+
 ---
+
+## Retiring the channel commands
+
+`!ban`, `!unban`, `!rehash`, `!update` and `!clearqueue` still work when typed in
+a channel. That is deliberate for now — locking yourself out of every admin
+command because a hostmask has a typo in it would be a poor introduction.
+
+Once the console has proved itself, in `local_config.py`:
+
+```python
+ADMIN_CHANNEL_COMMANDS = False
+```
+
+Admin authority then rests entirely on the services host plus the password, and
+no longer on a nick. The user commands — `!list`, `!ping`, `!debugnames`,
+`@find`, the queue triggers — are not affected either way.
 
 ## Limits and timeouts
 
@@ -317,9 +368,7 @@ depth behind it. Optional TLS is on the list for a later phase.
 
 ## Coming next
 
-- **Phase 2** — the admin commands move into the console, plus `status`, `queue`,
-  `uptime` and `version`. Channel commands stay working in parallel until the
-  console has proved itself, then a config flag disables them.
-- **Phase 3** — runtime reports route into the session, so the debug channel can
-  be switched off entirely.
+- **Phase 3** — the debug channel becomes optional. An authenticated console
+  already receives the runtime log; phase 3 adds the switches to send it *only*
+  there, rather than to both.
 - **Phase 4, optional** — TLS on the chat, and a second restricted admin tier.

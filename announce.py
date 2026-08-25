@@ -105,6 +105,50 @@ def _debug_drain_worker(my_id):
             time.sleep(1.0)
 
 
+# ---------------------------------------------------------------------
+# EXTRA DEBUG SINKS
+#
+# send_debug() has always written one place: the IRC debug channel. The admin
+# console needs the same lines, so it registers itself here rather than every
+# one of the 44 call sites learning about it.
+#
+# A sink receives the PLAIN text and the category, not the mIRC-wrapped channel
+# line, because each destination wraps it differently.
+#
+# HARD RULE: a sink must not block and must not raise. send_debug is called from
+# the IRC read thread, so a sink that waits on a socket would freeze the daemon's
+# network loop - which is exactly why the console's sink only appends to a
+# bounded queue. Raising is caught here regardless, because losing a log line is
+# survivable and losing the read loop is not.
+# ---------------------------------------------------------------------
+_debug_sinks = []
+_debug_sinks_lock = threading.Lock()
+
+
+def add_debug_sink(sink):
+    with _debug_sinks_lock:
+        if sink not in _debug_sinks:
+            _debug_sinks.append(sink)
+
+
+def remove_debug_sink(sink):
+    with _debug_sinks_lock:
+        if sink in _debug_sinks:
+            _debug_sinks.remove(sink)
+
+
+def _fan_out_to_sinks(msg_text, category):
+    with _debug_sinks_lock:
+        # Sliced, not list(). announce.py imports the project's own list module,
+        # which shadows the builtin here - list(...) calls the MODULE.
+        sinks = _debug_sinks[:]
+    for sink in sinks:
+        try:
+            sink(msg_text, category)
+        except Exception as sink_err:
+            print(f"[ANNOUNCE] Debug sink raised and was dropped: {sink_err}")
+
+
 def _ensure_debug_drain():
     global _debug_drain_started, _debug_drain_id
     if _debug_drain_started:
@@ -541,6 +585,10 @@ def send_debug(msg_text, category="INFO"):
     # value was discarded so a short write truncated the line silently.
     _debug_queue.append(msg)
     _ensure_debug_drain()
+
+    # Anything else listening - today, an open admin console - gets the plain
+    # text to wrap however it needs.
+    _fan_out_to_sinks(msg_text, category)
 
 # ---------------------------------------------------------------------
 # START-SLUSS FÖR REKLAMTRÅDEN: Anropas av irc.py vid lyckad boot!
