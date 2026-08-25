@@ -357,6 +357,38 @@ class ListenerUsesTheConfiguredRange(unittest.TestCase):
         self.addCleanup(second_sock.close)
         self.assertLess(second_port, first_port)
 
+    def test_two_listeners_never_claim_the_same_port(self):
+        """Found by CI on Linux, invisible on Windows.
+
+        _open_chat_listener used to return a socket that was bound but not yet
+        listening. On POSIX, SO_REUSEADDR permits a second socket to bind the
+        same port while the first is in that state, so two console attempts
+        could claim one port and fight over the connection. Windows never had
+        the hole - SO_EXCLUSIVEADDRUSE refuses the duplicate at bind - which is
+        why only the Linux jobs went red.
+
+        listen() inside the helper claims the port properly.
+        """
+        first_sock, first_port = adminchat._open_chat_listener()
+        self.assertIsNotNone(first_sock)
+        self.addCleanup(first_sock.close)
+        second_sock, second_port = adminchat._open_chat_listener()
+        self.assertIsNotNone(second_sock, "the range needs two free ports for this test")
+        self.addCleanup(second_sock.close)
+        self.assertNotEqual(first_port, second_port,
+                            "a bound-but-not-listening socket does not claim the port")
+
+    def test_the_returned_listener_is_already_listening(self):
+        """Accept must work without the caller calling listen() first."""
+        sock, port = adminchat._open_chat_listener()
+        self.assertIsNotNone(sock)
+        self.addCleanup(sock.close)
+        sock.settimeout(2.0)
+        client = socket.create_connection(("127.0.0.1", port), timeout=2.0)
+        self.addCleanup(client.close)
+        accepted, _ = sock.accept()
+        accepted.close()
+
     def test_an_exhausted_range_is_reported_rather_than_crashing(self):
         held = []
         for port in range(config.DCC_PORT_START, config.DCC_PORT_END + 1):

@@ -643,6 +643,14 @@ def _open_chat_listener():
         platform_compat.prepare_listener(sock)
         try:
             sock.bind(("0.0.0.0", port))
+            # listen() HERE, not at the call site. On POSIX, SO_REUSEADDR lets a
+            # second socket bind the same port while the first is bound but not
+            # yet listening - so returning a merely-bound socket let two console
+            # attempts claim one port and fight over the connection. Listening
+            # claims it properly, and bind then fails for the second caller.
+            # Windows never had the hole, because SO_EXCLUSIVEADDRUSE refuses the
+            # duplicate at bind; CI caught it on Linux only.
+            sock.listen(1)
             return sock, port
         except OSError:
             sock.close()
@@ -722,7 +730,8 @@ def _listen_and_serve(irc_sock, nick, host, token=None):
 
     sock = None
     try:
-        listener.listen(1)
+        # Already listening - _open_chat_listener does it, so the port is claimed
+        # before this function ever advertises it.
         listener.settimeout(LISTEN_TIMEOUT)
         # A passive request carries a token identifying it, and the reply must
         # carry the same one back or the client cannot match our offer to the
