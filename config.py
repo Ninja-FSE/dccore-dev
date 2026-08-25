@@ -49,6 +49,26 @@ MSG_DELAY          = 5.0    # Paustid i sekunder för din ordinarie meddelandek�
 DEBUG_MSG_DELAY    = 0.5    # Paustid mellan varje rad till debug-kanalen
 
 # Portspann för DCC-sändningar (Måste öppnas i brandvägg/router!)
+# ---------------------------------------------------------------------
+# ADMIN CONSOLE (DCC CHAT)
+# ---------------------------------------------------------------------
+# Empty list = console disabled, and every DCC CHAT request is ignored.
+#
+# Each entry is a HOST pattern. It may be written bare ("FLAC.users.undernet.org")
+# or in the familiar IRC form ("*!*@FLAC.users.undernet.org"); either way only the
+# part after the last "@" is used. The nick and ident halves are discarded on
+# purpose - the ident is supplied by the client and anyone can set theirs to
+# "flac", so constraining it grants nothing. Only the host is issued by the server.
+#
+# On Undernet, log into X and set usermode +x. The server then replaces your host
+# with "<your-account>.users.undernet.org", which nobody else can obtain. That
+# host IS the proof of your services login.
+#
+# Put the real values in local_config.py, which is gitignored, NOT here.
+ADMIN_HOSTMASKS    = []
+# Generated with:  python adminchat.py
+ADMIN_PASSWORD_HASH = ""
+
 DCC_PORT_START     = 55000
 DCC_PORT_END       = 55010
 
