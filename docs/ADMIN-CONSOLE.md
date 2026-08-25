@@ -97,6 +97,10 @@ gitignored**, so nothing here reaches GitHub. Do not put these in `config.py`.
 ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
 
 ADMIN_PASSWORD_HASH = "pbkdf2_sha256$200000$3f0a...$91c4..."
+
+# Optional. "auto" (default), "listen", or "connect" - see "Using it" below.
+# Behind a VPN or a router that does not forward the port, use "listen".
+ADMIN_CHAT_MODE = "auto"
 ```
 
 The mask may be written either way — both mean the same thing, because only the
@@ -145,8 +149,24 @@ work:
    reply to the request it is waiting on. Your client then shows an incoming
    chat request to accept.
 
-If your client does not know its own IP, path 2 is what you will get every time,
-and it works — but path 1 is tidier (one dialog instead of two). In mIRC:
+If the dial fails for any reason — refused, or timed out — the bot falls back to
+path 2 automatically. Nothing is lost except the connect timeout.
+
+`ADMIN_CHAT_MODE` in `local_config.py` controls this:
+
+| value | behaviour |
+|---|---|
+| `"auto"` | dial, and listen instead if that fails *(default)* |
+| `"listen"` | always listen and offer back — never dial |
+| `"connect"` | only ever dial; never listen |
+
+**Set it to `"listen"` if your client is behind a VPN**, a router that does not
+forward the port, or a firewall that drops rather than rejects. All three show up
+as a `timed out` on the dial, and `"auto"` then pays that full timeout on every
+single login before falling back. The bot's own listener needs no such luck — it
+is the same one every DCC SEND already uses.
+
+Path 1 is tidier when it works (one dialog instead of two). In mIRC:
 **Options → Connect → Local Info**, tick *On connect, always get IP address*, and
 set the lookup method to **Server**.
 
@@ -218,6 +238,31 @@ set, or `ADMIN_HOSTMASKS` has a typo.
 
 Step 2 was skipped, or the value did not reach `local_config.py`. A console with
 no password refuses everyone rather than letting anyone in.
+
+**The log says the connection to you timed out.**
+
+```
+[ADMINCHAT] Could not connect to FLAC at 93.164.139.41:55101 (timed out);
+falling back to listening.
+```
+
+A **timeout** rather than a refusal means the packets left and nothing came back:
+the address your client advertised is not reachable from the daemon. Usual
+causes, most likely first:
+
+1. **A VPN.** Your client reports the VPN's exit address, but inbound
+   connections to it are not forwarded back to you.
+2. A router not forwarding the port to your machine.
+3. A firewall that drops rather than rejects.
+4. The daemon's own outbound blocked to high ports.
+
+A port-checker saying "open" is weaker evidence than it looks: your client's DCC
+listener exists only while a request is pending, so a check run at any other
+moment is testing something else — usually a forwarding rule rather than a live
+listener.
+
+You do not have to work out which it is. Set `ADMIN_CHAT_MODE = "listen"` and the
+bot stops dialling you altogether.
 
 **The log says it could not connect to you at `0.0.0.0`.**
 
