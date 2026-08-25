@@ -21,6 +21,25 @@ def format_total_size(bytes_size):
         bytes_size /= 1024.0
     return f"{bytes_size:.1f}PiB"
 
+def _one_line(text):
+    """Flatten anything that would break the one-entry-per-line format.
+
+    POSIX filenames may contain newlines and other control characters - only "/"
+    and NUL are forbidden - so a track called "evil\nname.flac" is perfectly
+    legal on the Linux box this daemon runs on. Written straight into the list it
+    splits one request entry into two lines, leaving a truncated entry and an
+    orphan fragment, and the file every user downloads is malformed from there
+    down. Windows refuses such names at creation, which is why CI caught this on
+    the ubuntu jobs only.
+
+    Nobody can plant one remotely - the library is the operator's own mount - so
+    this is robustness rather than a security boundary. Replacing with a space
+    keeps the entry visible and the file structurally sound; such a track is
+    already unrequestable, because the request parser splits on whitespace too.
+    """
+    return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in str(text))
+
+
 def _discard_temp_lists(*paths):
     """Remove half-written temporary lists so they cannot be mistaken for real ones."""
     for path in paths:
@@ -172,7 +191,7 @@ def generate_master_list():
                     display_folder = raw_folder_str.replace("/", "\\")
                     
                     f.write(f"\n=====================================================\n")
-                    f.write(f"{display_folder}\n")
+                    f.write(f"{_one_line(display_folder)}\n")
                     f.write(f"=====================================================\n")
                     
                     # 🛡️ KIRURGISK RAR-TVÄTT: Tvättar bort multidisc-ändelser ENBART för !rar-albumlistan!
@@ -191,10 +210,10 @@ def generate_master_list():
                         
                         # Skriv raden STRICT en gång per huvudalbum till .rar-textfilen!
                         if display_rar_folder not in written_rar_folders:
-                            f_rar.write(f"!{config.NICKNAME} !rar {display_rar_folder}\n")
+                            f_rar.write(f"!{config.NICKNAME} !rar {_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)
                 single_file_size = format_size_human(bytes_size)
-                f.write(f"!{config.NICKNAME} {filename}  ::INFO:: {single_file_size}\n")
+                f.write(f"!{config.NICKNAME} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
 
         print(f"[LIST-GEN] Textlista skapad utan problem: {tmp_txt_path}")
         print(f"[LIST-GEN] RAR-albumlista skapad utan problem: {tmp_rar_path}")

@@ -381,16 +381,123 @@ class AwkwardFilenames(MasterListCase):
                    if "A Very Long Track Name Indeed.flac" in l]
         self.assertEqual(len(matches), 1)
 
-    def test_a_filename_cannot_inject_a_second_request_line(self):
-        """Newlines in a name would forge an entry pointing anywhere."""
+    def test_a_filename_cannot_split_a_request_line(self):
+        """Found by CI on Linux; Windows refuses such a name at creation.
+
+        POSIX allows newlines in filenames - only "/" and NUL are forbidden - so
+        this is a legal track on the box the daemon runs on. Written verbatim it
+        turned one entry into two lines, leaving a truncated entry and an orphan
+        fragment, and the list was malformed from there down.
+        """
         try:
             self.add("Artist/Album/evil\nname.flac")
-        except OSError:
+        except (OSError, ValueError):
             self.skipTest("this filesystem refuses newlines in filenames")
         self.assertTrue(self.generate())
-        self.assertEqual(len(self.request_lines()),
-                         len([l for l in self.request_lines() if l.count("::INFO::") == 1]),
-                         "every request line must carry exactly one size marker")
+        lines = self.request_lines()
+        self.assertEqual(len(lines), 3, "two real tracks plus the awkward one")
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertEqual(line.count("::INFO::"), 1,
+                                 "every request line carries exactly one size marker")
+
+
+class FlatteningIsWiredIntoTheWriter(MasterListCase):
+    """That _one_line exists is not the same as the writer using it.
+
+    The filesystem test can only run where a newline is a legal filename, so on
+    Windows it skips and the wiring goes unverified - a mutation removing the
+    call from the request line survives there. Stubbing the walk instead of the
+    filesystem tests the same path on every platform.
+    """
+
+    def walk_yielding(self, *names):
+        """Make the scan see `names` in the album folder, whatever is on disk."""
+        real_walk = os.walk
+        album = self.tree.album
+
+        def fake_walk(top, *args, **kwargs):
+            for root, dirs, files in real_walk(top, *args, **kwargs):
+                if os.path.abspath(root) == os.path.abspath(album):
+                    yield root, dirs, list(names)
+                else:
+                    yield root, dirs, files
+
+        os.walk = fake_walk
+        self.addCleanup(lambda: setattr(os, "walk", real_walk))
+
+    def test_a_newline_in_a_scanned_name_cannot_split_the_entry(self):
+        self.walk_yielding("evil\nname.flac")
+        self.assertTrue(self.generate())
+        lines = self.request_lines()
+        self.assertEqual(len(lines), 1, "one file scanned, one request line")
+        self.assertEqual(lines[0].count("::INFO::"), 1)
+        self.assertIn("evil name.flac", lines[0])
+
+    def test_a_carriage_return_cannot_split_the_entry(self):
+        self.walk_yielding("cr\rname.flac")
+        self.assertTrue(self.generate())
+        self.assertEqual(len(self.request_lines()), 1)
+
+    def test_every_line_of_the_published_list_is_intact(self):
+        """The property that matters: no orphan fragments anywhere in the file."""
+        self.walk_yielding("a\nb.flac", "c\rd.mp3", "normal.flac")
+        self.assertTrue(self.generate())
+        for line in self.read_list().split("\n"):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("="):
+                continue
+            if stripped.startswith("!"):
+                with self.subTest(line=stripped):
+                    self.assertEqual(stripped.count("::INFO::"), 1)
+            else:
+                with self.subTest(line=stripped):
+                    self.assertFalse("::INFO::" in stripped,
+                                     "a size marker outside a request line is an orphan")
+
+
+class FlatteningNamesForOneLinePerEntry(unittest.TestCase):
+    """_one_line, tested directly so BOTH platforms verify it.
+
+    The filesystem test above can only run where such a filename can be created,
+    which is not Windows - so on the Windows jobs it skips and the fix would go
+    unverified. These do not touch the filesystem.
+    """
+
+    def test_a_newline_becomes_a_space(self):
+        self.assertEqual(update_list._one_line("evil\nname.flac"), "evil name.flac")
+
+    def test_a_carriage_return_becomes_a_space(self):
+        self.assertEqual(update_list._one_line("cr\rname.flac"), "cr name.flac")
+
+    def test_a_tab_becomes_a_space(self):
+        """The list is column-aligned by spaces; a tab would break the layout."""
+        self.assertEqual(update_list._one_line("tab\there.flac"), "tab here.flac")
+
+    def test_other_control_characters_go_too(self):
+        for code in (0x00, 0x07, 0x1b, 0x7f):
+            with self.subTest(code=hex(code)):
+                flattened = update_list._one_line(f"a{chr(code)}b.flac")
+                self.assertEqual(flattened, "a b.flac")
+
+    def test_ordinary_names_are_returned_unchanged(self):
+        for name in ("Enter Sandman.flac", "A Winter's Tale.flac", "track (1984).mp3"):
+            with self.subTest(name=name):
+                self.assertEqual(update_list._one_line(name), name)
+
+    def test_non_ascii_is_preserved(self):
+        """Flattening must not turn a music library into mojibake."""
+        for name in ("Jóga.flac", "Björk.mp3", "Sigur Rós - Svefn-g-englar.flac"):
+            with self.subTest(name=name):
+                self.assertEqual(update_list._one_line(name), name)
+
+    def test_the_result_never_contains_a_line_break(self):
+        """The property the whole helper exists for."""
+        for name in ("a\nb", "a\r\nb", "\n\n\n", "a\rb\nc"):
+            with self.subTest(name=name):
+                flattened = update_list._one_line(name)
+                self.assertNotIn("\n", flattened)
+                self.assertNotIn("\r", flattened)
 
 
 if __name__ == "__main__":
