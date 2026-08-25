@@ -70,6 +70,7 @@ def generate_master_list():
     import zipfile
     import re
     import config
+    import db
 
     if not os.path.exists(config.LOCAL_LIST_DIR):
         os.makedirs(config.LOCAL_LIST_DIR)
@@ -83,8 +84,8 @@ def generate_master_list():
     zip_path = os.path.join(config.LOCAL_LIST_DIR, zip_filename)
     rar_path = os.path.join(config.LOCAL_LIST_DIR, rar_filename)
     
-    SIZE_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-size.txt")
-    RAWBYTES_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-rawbytes.txt")
+    SIZE_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, config.LIST_SIZE_FILE)
+    RAWBYTES_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, config.LIST_RAWBYTES_FILE)
 
     scan_start = time.time()
 
@@ -198,11 +199,9 @@ def generate_master_list():
         print(f"[LIST-GEN] Textlista skapad utan problem: {tmp_txt_path}")
         print(f"[LIST-GEN] RAR-albumlista skapad utan problem: {tmp_rar_path}")
         
-        with open(SIZE_FILE_PATH, "w", encoding="utf-8") as sf:
-            sf.write(formatted_size)
-            
-        with open(RAWBYTES_FILE_PATH, "w", encoding="utf-8") as rbf:
-            rbf.write(str(total_bytes))
+        # The size and rawbytes side files used to be published here. They are now
+        # written with the lists in the finalise section below - see the comment
+        # there for why writing them ahead of the guards was half a rollback.
             
         # A scan that found NOTHING is almost always an unavailable mount, not an empty
         # library - and publishing it would replace a good index with an empty one, which is
@@ -242,6 +241,17 @@ def generate_master_list():
         # Everything generated cleanly. Swap the new files in, THEN remove the superseded
         # ones. os.replace overwrites atomically on both POSIX and Windows, where os.rename
         # would raise because the destination already exists.
+        #
+        # The two side files are published HERE, with the lists, and atomically. They
+        # used to be written much earlier, before the guards above - so a scan that
+        # found nothing kept the previous index and then overwrote its published size
+        # with 0B and its byte count with 0 anyway. And a plain open(..., "w")
+        # truncates first, so an interruption left a readable but EMPTY file, which
+        # is unparseable and used to cost the caller the file count and the list date
+        # as well as the size.
+        db._atomic_write(SIZE_FILE_PATH, formatted_size)
+        db._atomic_write(RAWBYTES_FILE_PATH, str(total_bytes))
+
         os.replace(tmp_txt_path, txt_path)
         os.replace(tmp_rar_path, rar_path)
         os.replace(tmp_zip_path, zip_path)
