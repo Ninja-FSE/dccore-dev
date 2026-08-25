@@ -36,6 +36,22 @@ def _release_socket():
         oserve_mod.irc_connection = None
 
 
+def is_server_numeric(line, code):
+    """True only when `line` is a genuine server numeric with this code.
+
+    A server numeric is always ':<prefix> <code> <target> ...'. Testing for the
+    bare substring instead lets any user forge one by typing it in a channel,
+    because the read loop sees every PRIVMSG as raw text before the PRIVMSG
+    parser and the ban check ever run.
+
+    That is not theoretical for this bot. `"001" in line` matched an ordinary
+    music request - "!DCCore 001 - Enter Sandman.flac" - and `" 513 " in line
+    and "PONG" in line` let anyone make the daemon emit unthrottled raw PONGs
+    straight to the socket, bypassing queue_mgr's pacing entirely.
+    """
+    return re.match(r"^:\S+\s+" + code + r"\s+\S+", line) is not None
+
+
 def get_bot_aliases():
     """Every name this bot should answer to, lowercased, current nick first.
 
@@ -389,7 +405,11 @@ def irc_loop():
                         commands.handle_pong_response(category="INFO")
                         continue
                             
-                    if " 513 " in line and "PONG" in line:
+                    # Anchored: this writes a raw PONG straight to the socket with no
+                    # pacing, ahead of the ban check and the flood gate, so an unanchored
+                    # test was a one-paste Excess Flood disconnect for any user in any
+                    # channel - banned or not.
+                    if is_server_numeric(line, "513") and "PONG" in line:
                         parts = line.split()
                         pong_code = parts[-1].strip()
                         s.send(f"PONG {pong_code}\r\n".encode())
@@ -417,7 +437,9 @@ def irc_loop():
                                     print(f"[NICK RECOVERY ERROR] Misslyckades att återta nick: {recovery_err}")
 
 
-                    if not joined and ("001" in line or "376" in line):
+                    # Anchored: "001" in line matched any message containing those three
+                    # digits anywhere, including a perfectly ordinary track request.
+                    if not joined and (is_server_numeric(line, "001") or is_server_numeric(line, "376")):
                         joined = True
                         print(f"[INFO] Ansluten till servern! Väntar 5 sekunder på stabilisering innan JOIN...")
                         
@@ -465,12 +487,16 @@ def irc_loop():
                             import queue_mgr
                             queue_mgr.config.send_queue[new_nick.lower()] = queue_mgr.config.send_queue.pop(old_nick)
                             
-                    if " 352 " in line:
+                    # Anchored: this writes straight into config.whois_status.
+                    if is_server_numeric(line, "352"):
                         parts = line.split()
                         if len(parts) > 7:
                             target_nick = parts[7].lower()
                             config.whois_status[target_nick] = True
-                    if " 353 " in line:
+                    # Anchored: this populates config.channel_users, which dcc.py treats as
+                    # proof a user is present when deciding whether to thaw a frozen queue
+                    # and dispatch to them. A forged line injected fake presence.
+                    if is_server_numeric(line, "353"):
                         name_match = re.search(r" 353 [^#]+([#\w\-]+) :(.+)$", line)
                         if name_match:
                             chan = name_match.group(1).lower()
