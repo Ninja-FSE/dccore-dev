@@ -20,6 +20,7 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 - `announce.py` — Central mIRC theme, channel announcements, and the VIP debug engine.
 - `commands.py` — User commands (`que`, `remove`) isolated from the main network loop.
 - `platform_compat.py` — The handful of genuine Linux/Windows differences (socket options, the rar binary lookup, long paths, keepalive tuning), isolated so the rest of the codebase stays platform-neutral.
+- `adminchat.py` — Authenticated DCC CHAT console for the operator, gated on the Undernet `+x` services host plus a password. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md).
 - `stats_mgr.py` — Dumb data module managing file sizes and transfer speed calculations.
 - `db.py` — Database I/O interface featuring forced write-protection at EOF.
 - `config.py` — Central configuration file and runtime memory registry containing:
