@@ -79,6 +79,95 @@ def save_bans_to_file():
         print(f"[DB ERROR] Kunde inte spara till {config.BANS_FILE}: {e}")
 
 
+# ---------------------------------------------------------------------------
+# hard_bans.txt - permanent wildcard patterns, edited live by !ban and !unban.
+#
+# security.check_user_status reads this file itself on every command. That hot
+# path is deliberately untouched; what follows exists because the two command
+# handlers have to READ-MODIFY-WRITE it, and doing that by hand went wrong in
+# three separate ways:
+#
+#   * !unban truncated the file with open(..., "w") and wrote the kept lines
+#     back one at a time. A crash, a full disk or a kill in between leaves it
+#     short or empty and the permanent bans are gone. os.replace() already
+#     fixed exactly this for bans.txt, dcc_queue.txt and the rest -
+#     hard_bans.txt was the last file still written in place.
+#
+#   * That failure mode is fail-OPEN. check_user_status only distrusts a "no
+#     match" when the read RAISED; a file that is readable but truncated looks
+#     identical to a file with no bans in it, so every hard-banned user is let
+#     through for as long as the window lasts.
+#
+#   * !ban appended with f.write(f"{pattern}\n") without checking the previous
+#     line ended in a newline. On a hand-edited file with no trailing newline
+#     that glues two patterns into one, silently unbanning both.
+#
+# Both operations run in their own daemon thread, so the whole read-modify-write
+# is done under a single _disk_lock acquisition: two of them interleaving would
+# otherwise drop whichever entry lost the race.
+# ---------------------------------------------------------------------------
+
+def _hard_bans_path():
+    return getattr(config, "HARD_BANS_FILE", os.path.join("data", "hard_bans.txt"))
+
+
+def _read_hard_bans_unlocked(path):
+    """Patterns from `path`, lowercased, in file order, deduplicated.
+
+    Blank lines and #-comments are dropped. Comments are NOT preserved across a
+    rewrite; security.py ignores them, and keeping them would mean tracking
+    their position relative to entries that come and go.
+    """
+    if not os.path.exists(path):
+        return []
+    patterns = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            pattern = line.strip().lower()
+            if pattern and not pattern.startswith("#") and pattern not in patterns:
+                patterns.append(pattern)
+    return patterns
+
+
+def load_hard_bans():
+    """Every permanent wildcard pattern currently on disk."""
+    try:
+        with _disk_lock:
+            return _read_hard_bans_unlocked(_hard_bans_path())
+    except Exception as e:
+        print(f"[DB ERROR] Kunde inte läsa {_hard_bans_path()}: {e}")
+        raise
+
+
+def add_hard_ban(pattern):
+    """Add one pattern. Returns True if it was added, False if already present."""
+    pattern = str(pattern).strip().lower()
+    if not pattern:
+        return False
+    path = _hard_bans_path()
+    with _disk_lock:
+        patterns = _read_hard_bans_unlocked(path)
+        if pattern in patterns:
+            return False
+        patterns.append(pattern)
+        _atomic_write(path, "".join(f"{p}\n" for p in patterns))
+    return True
+
+
+def remove_hard_ban(pattern):
+    """Remove one pattern. Returns True if it was removed, False if not found."""
+    pattern = str(pattern).strip().lower()
+    if not pattern:
+        return False
+    path = _hard_bans_path()
+    with _disk_lock:
+        patterns = _read_hard_bans_unlocked(path)
+        if pattern not in patterns:
+            return False
+        _atomic_write(path, "".join(f"{p}\n" for p in patterns if p != pattern))
+    return True
+
+
 # =================================================================----
 # SEKTION 2: STATS.TXT (Avancerad OmenServe-statistik)
 # =================================================================----

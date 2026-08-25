@@ -86,9 +86,16 @@ def handle_queue_remove(s, user, target):
     oserve = sys.modules.get('oserve')
     import dcc
 
+    removed_archives = []
     with dcc.queue_lock:
         # Ta bort från den vanliga kön
         if hasattr(config, 'dcc_queue') and user_key in config.dcc_queue:
+            # BEFORE dropping the rows: they are the only record that the temp
+            # archives exist. The freeze sweep, the freeze timer and !clearqueue
+            # all cleaned up here; this path - the one users actually type - did
+            # not, so every archive it orphaned stayed in TMP_ZIP_DIR until
+            # somebody noticed the disk filling.
+            removed_archives = dcc.discard_orphaned_temp_archives(user_key)
             del config.dcc_queue[user_key]
             db.save_dcc_queue() # Spika den rensade kön till hårddisken direkt!
 
@@ -99,6 +106,8 @@ def handle_queue_remove(s, user, target):
     msg = f"NOTICE {user} :Your queue has been completely removed. \r\n"
     if oserve:
         oserve.queue_message(user, msg)
+    if removed_archives:
+        print(f"[COMMANDS] Removed {len(removed_archives)} orphaned temp archive(s) with {user}'s queue.")
     print(f"[COMMANDS] {user} removed their entire queue from the disk layout.")
 
 def handle_admin_clear_queue(user, target_chan, msg_text):
@@ -107,7 +116,6 @@ def handle_admin_clear_queue(user, target_chan, msg_text):
     en användare köra på sig själv via IRC; det här ger admin motsvarande makt över
     VEM SOM HELST, direkt via en enkel textrad, utan att behöva röra dcc_queue.txt på disken
     manuellt."""
-    import os
     import config
     import announce
     import db
@@ -132,34 +140,11 @@ def handle_admin_clear_queue(user, target_chan, msg_text):
         if hasattr(config, 'dcc_queue') and target_key in config.dcc_queue:
             removed_count = len(config.dcc_queue[target_key])
 
-            # Delete any temporary .rar this queue owned before dropping the entries,
-            # matching what the freeze-timeout sweep already does (dcc.py:93 and :313).
-            # Without this the archives stay on the SSD cache forever, because the queue
-            # rows naming them are the only record that they exist.
-            for f_obj in config.dcc_queue[target_key]:
-                if not isinstance(f_obj, dict):
-                    continue
-                if f_obj.get('is_temporary_zip') is not True or f_obj.get('is_unpacked_rar_folder'):
-                    continue
-                temp_path = f_obj.get('path')
-                if not temp_path or not os.path.exists(temp_path):
-                    continue
-                # Never touch a file another user's queue still points at, and never one
-                # that is being streamed right now.
-                still_needed = any(
-                    isinstance(o, dict) and o.get('path') == temp_path
-                    for k, files in config.dcc_queue.items() if k != target_key
-                    for o in files
-                )
-                if not still_needed:
-                    still_needed = any(tx.get('file') == f_obj.get('file') for tx in config.active_transfers)
-                if still_needed:
-                    continue
-                try:
-                    os.remove(temp_path)
-                    print(f"[ADMIN CLEARQUEUE] Removed orphaned temp archive: {temp_path}")
-                except OSError as rm_err:
-                    print(f"[ADMIN CLEARQUEUE] Could not remove {temp_path}: {rm_err}")
+            # Shared with @<nick>-remove and, in a cruder form, the two freeze
+            # sweeps in dcc.py. Must run before the rows are dropped, because they
+            # are the only record that these archives exist.
+            for temp_path in dcc.discard_orphaned_temp_archives(target_key):
+                print(f"[ADMIN CLEARQUEUE] Removed orphaned temp archive: {temp_path}")
 
             del config.dcc_queue[target_key]
             db.save_dcc_queue()
@@ -520,7 +505,6 @@ def handle_hard_ban_request(user, target_chan, msg_text):
     """Lägger till ett permanent wildcard-mönster i hard_bans.txt direkt via mIRC!"""
     import config
     import announce
-    import os
     
     if not is_admin(user):
         print(f"[SECURITY] Obehörig användare {user} försökte köra !ban.")
@@ -535,19 +519,21 @@ def handle_hard_ban_request(user, target_chan, msg_text):
     if not pattern:
         return
         
-    filename = config.HARD_BANS_FILE
     
-    # Läs in befintliga bans för att undvika dubbletter
-    existing_bans = []
-    if os.path.exists(filename):
-        with open(filename, "r", encoding="utf-8") as f:
-            existing_bans = [line.strip().lower() for line in f if line.strip()]
-            
-    if pattern not in existing_bans:
-        # Skriv till filen och tvinga ner det på disken direkt
-        with open(filename, "a", encoding="utf-8") as f:
-            f.write(f"{pattern}\n")
-            
+    # db.add_hard_ban does the whole read-modify-write under the disk lock and
+    # replaces the file atomically. The old code appended with no newline check,
+    # so on a hand-edited file whose last line lacked one it glued two patterns
+    # into one and silently unbanned both; and two !ban threads could interleave
+    # and lose whichever entry lost the race.
+    import db
+    try:
+        added = db.add_hard_ban(pattern)
+    except Exception as ban_err:
+        announce.send_debug(f"Could not write hard_bans.txt: {ban_err}", category="INFO")
+        print(f"[HARD BAN ERROR] {user} kunde inte lägga till {pattern}: {ban_err}")
+        return
+
+    if added:
         announce.send_debug(f"Added permanent wildcard to hard_bans.txt: {config.C_BOLD}{pattern}{config.C_RESET}", category="BAN")
         print(f"[HARD BAN] {user} lade till permanent mönster: {pattern}")
     else:
@@ -576,24 +562,23 @@ def handle_hard_unban_request(user, target_chan, msg_text):
         announce.send_debug("The permanent hard_bans.txt file is empty.", category="INFO")
         return
         
-    # Läs in alla rader och filtrera bort just det mönster du vill häva
-    lines_to_keep = []
-    found = False
-    
-    with open(filename, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip().lower() == pattern:
-                found = True
-            else:
-                if line.strip():
-                    lines_to_keep.append(line.strip())
-                    
-    if found:
-        # Skriv tillbaka de sparade raderna till filen
-        with open(filename, "w", encoding="utf-8") as f:
-            for line in lines_to_keep:
-                f.write(f"{line}\n")
-                
+    # db.remove_hard_ban rewrites the file through a temp + os.replace. The old
+    # code truncated it with open(..., "w") and wrote the survivors back one at a
+    # time: a crash, a full disk or a kill in between left it short or EMPTY.
+    #
+    # That fails OPEN. security.check_user_status re-reads this file on every
+    # command and only distrusts a "no match" when the read RAISED - a file that
+    # is readable but truncated is indistinguishable from one with no bans in it,
+    # so every hard-banned user is admitted until somebody notices.
+    import db
+    try:
+        removed = db.remove_hard_ban(pattern)
+    except Exception as unban_err:
+        announce.send_debug(f"Could not write hard_bans.txt: {unban_err}", category="INFO")
+        print(f"[HARD UNBAN ERROR] {user} kunde inte häva {pattern}: {unban_err}")
+        return
+
+    if removed:
         announce.send_debug(f"Removed permanent wildcard from hard_bans.txt: {config.C_BOLD}{pattern}{config.C_RESET}", category="BAN")
         print(f"[HARD UNBAN] {user} hävde permanent mönster: {pattern}")
     else:
