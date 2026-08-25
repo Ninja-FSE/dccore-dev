@@ -8,8 +8,17 @@ import dcc
 import announce
 
 LIST_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv.txt")
-SIZE_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-size.txt")
-RAWBYTES_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv-rawbytes.txt")
+
+
+# Resolved per call rather than once at import. LOCAL_LIST_DIR is a config value,
+# and !rehash reloads config - a path baked in at import time would keep pointing
+# at the old directory for the life of the process after the operator moved it.
+def size_file_path():
+    return os.path.join(config.LOCAL_LIST_DIR, config.LIST_SIZE_FILE)
+
+
+def rawbytes_file_path():
+    return os.path.join(config.LOCAL_LIST_DIR, config.LIST_RAWBYTES_FILE)
 
 # NOTE: a second, shadowing definition of find_latest_list() used to sit here. Python keeps
 # the LAST definition, so this one never ran - and the two had drifted: this one did not
@@ -55,15 +64,29 @@ def get_file_count_date_size_and_raw_bytes():
         suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
         date_str = dt.strftime(f"%b {day}{suffix}")
         
+        # Each side file is read in its own try. They used to sit inside the outer
+        # try below, so an unparseable rawbytes file - int("") on a truncated write
+        # raises ValueError - collapsed the WHOLE tuple to (0, "Error", "0B", 0).
+        # The count and the list date come from the master list and were perfectly
+        # good; one clipped byte count must not throw them away and make the advert
+        # announce an error.
         size_str = "0B"
-        if os.path.exists(SIZE_FILE_PATH):
-            with open(SIZE_FILE_PATH, "r", encoding="utf-8") as sf:
-                size_str = sf.read().strip()
-                
+        try:
+            size_path = size_file_path()
+            if os.path.exists(size_path):
+                with open(size_path, "r", encoding="utf-8") as sf:
+                    size_str = sf.read().strip() or "0B"
+        except OSError as size_err:
+            print(f"[LIST] Could not read {config.LIST_SIZE_FILE}: {size_err}")
+
         raw_bytes = 0
-        if os.path.exists(RAWBYTES_FILE_PATH):
-            with open(RAWBYTES_FILE_PATH, "r", encoding="utf-8") as rbf:
-                raw_bytes = int(rbf.read().strip())
+        try:
+            raw_path = rawbytes_file_path()
+            if os.path.exists(raw_path):
+                with open(raw_path, "r", encoding="utf-8") as rbf:
+                    raw_bytes = int(rbf.read().strip())
+        except (OSError, ValueError) as raw_err:
+            print(f"[LIST] Could not read {config.LIST_RAWBYTES_FILE}: {raw_err}")
                 
         return count, date_str, size_str, raw_bytes
     except Exception as e:

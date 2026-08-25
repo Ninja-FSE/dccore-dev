@@ -69,6 +69,17 @@ ADMIN_HOSTMASKS    = []
 # Generated with:  python adminchat.py
 ADMIN_PASSWORD_HASH = ""
 
+# The two side files update_list.py publishes alongside the master list, holding
+# the human-readable total size and the raw byte count that the channel advert and
+# @<nick>-que read back. Named here rather than as a literal in both list.py and
+# update_list.py: that split literal is the same shape as issue #34, where the
+# reader and the writer of speed_record.txt agreed only by coincidence.
+#
+# The "flac-serv" prefix is historical and deliberately kept. Renaming it would
+# orphan the stats on every existing deployment until the next successful !update.
+LIST_SIZE_FILE     = "flac-serv-size.txt"
+LIST_RAWBYTES_FILE = "flac-serv-rawbytes.txt"
+
 DCC_PORT_START     = 55000
 DCC_PORT_END       = 55010
 
