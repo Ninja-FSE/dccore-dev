@@ -131,9 +131,24 @@ From your IRC client:
 /dcc chat DCCore
 ```
 
-Your client opens a listening socket and sends the offer; the bot connects back to
-you. (This is iroffer's non-passive path. DCCore opens **no** listening port for
-chat, so there is no firewall change to make.)
+There are two ways the connection gets made, and the daemon picks whichever can
+work:
+
+1. **Your client listens, the bot dials in.** The normal path, and iroffer's
+   non-passive branch. Needs no port on the bot's side at all.
+2. **The bot listens and offers back.** Used when your client's offer cannot be
+   dialled — it asked for **passive (reverse) DCC**, or it does not know its own
+   address and sent `0.0.0.0`. The bot takes a port from
+   `DCC_PORT_START`–`DCC_PORT_END`, the same range already forwarded for DCC
+   SEND, and advertises the public IP it resolved at startup. A passive request
+   carries a token, and the bot echoes it back so your client can match the
+   reply to the request it is waiting on. Your client then shows an incoming
+   chat request to accept.
+
+If your client does not know its own IP, path 2 is what you will get every time,
+and it works — but path 1 is tidier (one dialog instead of two). In mIRC:
+**Options → Connect → Local Info**, tick *On connect, always get IP address*, and
+set the lookup method to **Server**.
 
 ```
 Chat with DCCore
@@ -203,6 +218,34 @@ set, or `ADMIN_HOSTMASKS` has a typo.
 
 Step 2 was skipped, or the value did not reach `local_config.py`. A console with
 no password refuses everyone rather than letting anyone in.
+
+**The log says it could not connect to you at `0.0.0.0`.**
+
+```
+[ADMINCHAT] Could not connect to FLAC at 0.0.0.0:11283 ([Errno 111] Connection refused).
+```
+
+Your client did not know its own address and offered `0.0.0.0`. That is not a
+harmless blank: on Linux, connecting to `0.0.0.0` means "this host", so the
+daemon dialled *itself* and found nothing listening. Newer builds detect this and
+fall back to listening on the DCC port range instead, so it should now just work.
+Fix it properly in mIRC under **Options → Connect → Local Info** as above.
+
+**The log says "Unusable DCC CHAT offer".**
+
+```
+[ADMINCHAT] Unusable DCC CHAT offer from FLAC: 'DCC CHAT chat 3644888149 0 350'
+```
+
+That particular one was a parser bug, now fixed — the offer above is a valid
+passive request (`0` for the port, `350` as the token) and is handled. If you
+still see this line, the text after the colon is what the client actually sent;
+anything that is not `DCC CHAT chat <ip> <port>` or `DCC CHAT chat <ip> 0
+<token>` is genuinely unusable.
+
+**"No free port in 55000-55010 for the console."**
+Every port in the range is busy with transfers. Wait for one to finish, or widen
+`DCC_PORT_START`/`DCC_PORT_END` — remembering to forward the wider range too.
 
 **"address is temporarily blocked."**
 Three wrong passwords from that IP. Wait 15 minutes, or restart the daemon — the

@@ -197,11 +197,15 @@ class OfferParsing(unittest.TestCase):
 
     def test_a_normal_offer_parses(self):
         self.assertEqual(adminchat.parse_offer("DCC CHAT chat 2130706433 55555"),
-                         ("127.0.0.1", 55555))
+                         ("127.0.0.1", 55555, None))
 
-    def test_the_passive_form_is_refused_for_now(self):
-        """Port 0 means 'you listen instead', which phase 1 does not implement."""
-        self.assertIsNone(adminchat.parse_offer("DCC CHAT chat 2130706433 0"))
+    def test_the_passive_form_asks_us_to_listen(self):
+        """Port 0 means "you listen instead". Phase 1 refused it; it is handled now.
+
+        See ListenModeEndToEnd - an offer with no dialable address is answered
+        with an offer of our own rather than a failure.
+        """
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 2130706433 0"), (None, 0, None))
 
     def test_a_privileged_port_is_refused(self):
         self.assertIsNone(adminchat.parse_offer("DCC CHAT chat 2130706433 22"))
@@ -212,6 +216,261 @@ class OfferParsing(unittest.TestCase):
                      "DCC CHAT chat 2130706433 99999"):
             with self.subTest(junk=junk):
                 self.assertIsNone(adminchat.parse_offer(junk))
+
+
+class OfferedAddressIsUsable(unittest.TestCase):
+    """The field bug: mIRC offered 0.0.0.0 and the bot dialled itself.
+
+    Reported from a live run:
+
+        [ADMINCHAT] Could not connect to FLAC at 0.0.0.0:11283
+        ([Errno 111] Connection refused).
+
+    0.0.0.0 is what mIRC sends when its Local Info lookup has not resolved. It
+    is not a harmless no-op: on Linux connect() to 0.0.0.0 means "this host", so
+    the daemon dialled its OWN port 11283, found nothing listening, and reported
+    the refusal as though the operator's client had rejected it.
+
+    An unusable address now means "listen and offer back" rather than "fail".
+    """
+
+    def test_the_reported_offer_routes_to_listen_mode(self):
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 0 11283"), (None, 11283, None))
+
+    def test_passive_dcc_routes_to_listen_mode(self):
+        """Port 0 is the client explicitly asking us to listen."""
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 2130706433 0"), (None, 0, None))
+
+    def test_multicast_and_reserved_route_to_listen_mode(self):
+        for ip_long, label in ((3758096384, "224.0.0.0 multicast"),
+                               (4026531840, "240.0.0.0 reserved")):
+            with self.subTest(label=label):
+                ip, _, _ = adminchat.parse_offer(f"DCC CHAT chat {ip_long} 55555")
+                self.assertIsNone(ip)
+
+    def test_loopback_and_private_stay_dialable(self):
+        """An operator on the same LAN, or testing locally, is legitimate."""
+        for ip_long, expected in ((2130706433, "127.0.0.1"), (3232235777, "192.168.1.1")):
+            with self.subTest(expected=expected):
+                self.assertEqual(adminchat.parse_offer(f"DCC CHAT chat {ip_long} 55555"),
+                                 (expected, 55555, None))
+
+    def test_junk_is_still_refused_outright(self):
+        for junk in ("DCC CHAT chat x y", "DCC SEND f 1 2", "", "DCC CHAT"):
+            with self.subTest(junk=junk):
+                self.assertIsNone(adminchat.parse_offer(junk))
+
+
+class PassiveOfferWithToken(unittest.TestCase):
+    """The second field report: a passive offer read as an active one.
+
+        [ADMINCHAT] Unusable DCC CHAT offer from FLAC:
+        'DCC CHAT chat 3644888149 0 350'
+
+    The two forms are different LENGTHS:
+
+        active   DCC CHAT chat <ip> <port>        5 tokens
+        passive  DCC CHAT chat <ip> 0 <token>     6 tokens
+
+    Counting back from the end works only for the active form. On this one
+    parts[-2] was the literal 0 and parts[-1] was the token, so it parsed as
+    0.0.0.0 port 350 and was discarded as junk. Fields are read by position now.
+    """
+
+    def test_the_reported_passive_offer_parses(self):
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 3644888149 0 350"),
+                         (None, 0, "350"))
+
+    def test_a_passive_offer_without_a_token_still_parses(self):
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 3644888149 0"),
+                         (None, 0, None))
+
+    def test_an_active_offer_is_unaffected(self):
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 2130706433 55555"),
+                         ("127.0.0.1", 55555, None))
+
+    def test_a_client_that_omits_the_chat_argument_still_parses(self):
+        """The third token is an argument, not a guaranteed literal."""
+        self.assertEqual(adminchat.parse_offer("DCC CHAT 2130706433 55555"),
+                         ("127.0.0.1", 55555, None))
+
+    def test_the_token_is_echoed_back_in_our_offer(self):
+        """Required by the protocol: without it the client cannot match the reply.
+
+        A passive request is identified by its token. Our answering offer has to
+        carry the same one back, or the client has nothing to associate it with
+        and silently ignores a perfectly good offer.
+        """
+        adminchat.reset_state_for_tests()
+        self.addCleanup(adminchat.reset_state_for_tests)
+        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
+        config.MY_IP_OR_DOCK = "127.0.0.1"
+
+        sent = []
+
+        class Recorder:
+            def send(self, payload):
+                sent.append(payload.decode("utf-8", "replace"))
+                return len(payload)
+            sendall = send
+
+        self.assertTrue(adminchat.handle_dcc_chat(
+            Recorder(), ADMIN_LINE, "FLAC", "DCC CHAT chat 3644888149 0 350"))
+
+        self.assertTrue(wait_for(lambda: any("DCC CHAT chat" in s for s in sent)),
+                        "a passive request must be answered with an offer")
+        ctcp = next(s for s in sent if "DCC CHAT chat" in s)
+        self.assertTrue(ctcp.strip().strip("").endswith(" 350"),
+                        f"the token must be the last field; got {ctcp!r}")
+
+
+class ListenerUsesTheConfiguredRange(unittest.TestCase):
+    """His other point: the console must respect DCC_PORT_START/END."""
+
+    def setUp(self):
+        adminchat.reset_state_for_tests()
+        self.addCleanup(adminchat.reset_state_for_tests)
+        self._range = (config.DCC_PORT_START, config.DCC_PORT_END)
+        self.addCleanup(lambda: setattr(config, "DCC_PORT_START", self._range[0]))
+        self.addCleanup(lambda: setattr(config, "DCC_PORT_END", self._range[1]))
+
+    def test_the_listener_binds_inside_the_range(self):
+        sock, port = adminchat._open_chat_listener()
+        self.addCleanup(sock.close)
+        self.assertIsNotNone(sock)
+        self.assertGreaterEqual(port, config.DCC_PORT_START)
+        self.assertLessEqual(port, config.DCC_PORT_END)
+
+    def test_it_scans_downward_so_transfers_keep_the_low_ports(self):
+        """start_dcc_send scans upward from DCC_PORT_START; this scans the other way.
+
+        Asserted as an ordering rather than an exact port: whether 55010 itself
+        is free depends on what else the machine is doing, but two consecutive
+        listeners must still descend. An upward scan would ascend.
+        """
+        first_sock, first_port = adminchat._open_chat_listener()
+        self.assertIsNotNone(first_sock)
+        self.addCleanup(first_sock.close)
+        second_sock, second_port = adminchat._open_chat_listener()
+        self.assertIsNotNone(second_sock, "the range needs two free ports for this test")
+        self.addCleanup(second_sock.close)
+        self.assertLess(second_port, first_port)
+
+    def test_an_exhausted_range_is_reported_rather_than_crashing(self):
+        held = []
+        for port in range(config.DCC_PORT_START, config.DCC_PORT_END + 1):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.bind(("0.0.0.0", port))
+                held.append(s)
+            except OSError:
+                s.close()
+        self.addCleanup(lambda: [s.close() for s in held])
+        if len(held) != (config.DCC_PORT_END - config.DCC_PORT_START + 1):
+            self.skipTest("could not reserve the whole range on this machine")
+        sock, port = adminchat._open_chat_listener()
+        self.assertIsNone(sock)
+        self.assertIsNone(port)
+
+
+class ListenModeEndToEnd(unittest.TestCase):
+    """Reproduces the reported failure, then proves the fallback carries it."""
+
+    def setUp(self):
+        adminchat.reset_state_for_tests()
+        self.addCleanup(adminchat.reset_state_for_tests)
+        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
+        config.MY_IP_OR_DOCK = "127.0.0.1"
+        self.sent = []
+
+        outer = self
+
+        class RecordingIrcSocket:
+            def send(self, payload):
+                outer.sent.append(payload.decode("utf-8", "replace"))
+                return len(payload)
+            sendall = send
+
+        self.irc = RecordingIrcSocket()
+
+    def offered_port(self, timeout=5.0):
+        """Pull the port out of the CTCP the bot sent back."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            for line in self.sent:
+                if "DCC CHAT chat" in line:
+                    return int(line.strip().strip("").split()[-1])
+            time.sleep(0.02)
+        return None
+
+    def test_an_unroutable_offer_makes_the_bot_listen_and_offer_back(self):
+        """The whole bug, end to end: 0.0.0.0 in, a working console out."""
+        self.assertTrue(adminchat.handle_dcc_chat(
+            self.irc, ADMIN_LINE, "FLAC", "DCC CHAT chat 0 11283"))
+
+        port = self.offered_port()
+        self.assertIsNotNone(port, "the bot must offer a DCC CHAT back")
+        self.assertGreaterEqual(port, config.DCC_PORT_START)
+        self.assertLessEqual(port, config.DCC_PORT_END)
+
+        client = socket.create_connection(("127.0.0.1", port), timeout=5.0)
+        self.addCleanup(client.close)
+        client.settimeout(5.0)
+
+        buffer = ""
+        deadline = time.time() + 5.0
+        while "Enter Your Password:" not in buffer and time.time() < deadline:
+            try:
+                chunk = client.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            buffer += chunk.decode("utf-8", "replace")
+        self.assertIn("Welcome to", buffer)
+        self.assertIn("Enter Your Password:", buffer)
+
+    def test_the_offer_advertises_the_bots_own_ip(self):
+        """His suggestion: use the IP the bot got when it connected to IRC."""
+        import dcc
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC", "DCC CHAT chat 0 11283")
+        self.assertIsNotNone(self.offered_port())
+        ctcp = next(line for line in self.sent if "DCC CHAT chat" in line)
+        self.assertIn(str(dcc.get_public_ip_long()), ctcp)
+
+    def test_an_exhausted_range_does_not_crash_the_listen_thread(self):
+        """A daemon thread dying with a traceback is not "handled".
+
+        Called synchronously rather than through handle_dcc_chat: the real path
+        runs in a thread, where an unhandled exception prints and vanishes, and
+        the test would pass while the console silently never opened.
+
+        The range is narrowed to a single port that this test already holds, so
+        exhaustion is deterministic rather than dependent on the machine.
+        """
+        held = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        held.bind(("0.0.0.0", 0))
+        taken = held.getsockname()[1]
+        self.addCleanup(held.close)
+
+        original = (config.DCC_PORT_START, config.DCC_PORT_END)
+        config.DCC_PORT_START = config.DCC_PORT_END = taken
+        self.addCleanup(lambda: (setattr(config, "DCC_PORT_START", original[0]),
+                                 setattr(config, "DCC_PORT_END", original[1])))
+
+        adminchat._listen_and_serve(self.irc, "FLAC", "flac.users.undernet.org")
+
+        self.assertEqual(self.sent, [],
+                         "no offer can be sent when there is no port to offer")
+
+    def test_a_stranger_still_gets_no_offer(self):
+        """The gate runs before either transport, and must be unaffected."""
+        self.assertFalse(adminchat.handle_dcc_chat(
+            self.irc, STRANGER_LINE, "dave", "DCC CHAT chat 0 11283"))
+        time.sleep(0.3)
+        self.assertEqual(self.sent, [])
 
 
 class BadIpTracking(unittest.TestCase):

@@ -60,6 +60,7 @@ import platform_compat
 # would weaken the gate.
 # --------------------------------------------------------------------------
 CONNECT_TIMEOUT = 10.0        # dialling the operator's client
+LISTEN_TIMEOUT = 60.0         # waiting for the operator to accept our offer back
 SEND_TIMEOUT = 30.0           # a blocked write gives up rather than hanging forever
 AUTH_TIMEOUT = 60.0           # seconds to supply a password before the socket closes
 IDLE_TIMEOUT = 1800.0         # authenticated session, so a forgotten window expires
@@ -511,28 +512,69 @@ def _check_password(session, line):
 # ==========================================================================
 
 def parse_offer(ctcp_text):
-    """Pull (ip, port) out of 'DCC CHAT chat <ip-as-long> <port>'.
+    """Pull a dialable (ip, port) out of 'DCC CHAT chat <ip-as-long> <port>'.
 
-    Returns None for anything malformed, for a port outside the unprivileged
-    range, or for the passive form (port 0), which is not supported yet.
+    Returns None for anything malformed. Otherwise returns (ip, port), where ip
+    is None when the client's offer cannot be dialled and the bot should listen
+    instead:
+
+    * port 0 is the passive form - the client is explicitly asking us to listen.
+    * 0.0.0.0 means the client does not know its own address. mIRC sends this
+      when its Local Info lookup has not resolved, and it is not a no-op: on
+      Linux connect() to 0.0.0.0 is treated as "this host", so the bot dials
+      ITSELF and gets ECONNREFUSED. That is exactly the
+      "Could not connect to FLAC at 0.0.0.0:11283" in the field report.
+    * multicast and reserved ranges cannot be a listening client either.
+
+    Loopback and private addresses are deliberately kept dialable: an operator
+    on the same LAN as the daemon, or testing locally, is a legitimate case.
     """
     parts = str(ctcp_text).strip().strip("\x01").split()
     if len(parts) < 4 or parts[0].upper() != "DCC" or parts[1].upper() != "CHAT":
         return None
+
+    # Read fields by POSITION, never from the end. The two forms differ in length:
+    #
+    #   active   DCC CHAT chat <ip> <port>            5 tokens
+    #   passive  DCC CHAT chat <ip> 0 <token>         6 tokens
+    #
+    # Counting back from the end works only for the active form. On a passive
+    # offer parts[-2] is the literal 0 and parts[-1] is the token, so
+    # "DCC CHAT chat 3644888149 0 350" parsed as 0.0.0.0 port 350 and was thrown
+    # out as unusable - which is exactly what the field report showed.
+    #
+    # The third token is the "chat" argument, but not every client sends one, so
+    # it is skipped only when it is not itself a number.
+    rest = parts[2:]
+    if rest and not rest[0].lstrip("-").isdigit():
+        rest = rest[1:]
+    if len(rest) < 2:
+        return None
+
     try:
-        ip_long = int(parts[-2])
-        port = int(parts[-1])
+        ip_long = int(rest[0])
+        port = int(rest[1])
     except (ValueError, TypeError):
         return None
-    if port < 1024 or port > 65535:
+    token = rest[2] if len(rest) > 2 else None
+
+    if port < 0 or port > 65535:
         return None
     if ip_long < 0 or ip_long > 0xFFFFFFFF:
         return None
+    if port == 0:
+        # Passive DCC. The token identifies this request and MUST come back in
+        # our own offer, or the client cannot match the two and ignores us.
+        return None, 0, token
+    if port < 1024:
+        return None
     try:
-        ip = str(ipaddress.IPv4Address(ip_long))
+        address = ipaddress.IPv4Address(ip_long)
     except (ipaddress.AddressValueError, ValueError):
         return None
-    return ip, port
+    if address.is_unspecified or address.is_multicast or address.is_reserved:
+        return None, port, token
+    return str(address), port, token
 
 
 def handle_dcc_chat(irc_sock, line, nick, ctcp_text):
@@ -559,24 +601,58 @@ def handle_dcc_chat(irc_sock, line, nick, ctcp_text):
         print(f"[ADMINCHAT] Unusable DCC CHAT offer from {nick}: {ctcp_text!r}")
         return False
 
-    ip, port = offer
+    ip, port, token = offer
+    host = source_host(line)
+
+    if ip is None:
+        # Either passive DCC, or a client that does not know its own address and
+        # sent 0.0.0.0. Listen and offer the connection back instead of dialling
+        # somewhere that cannot answer.
+        print(f"[ADMINCHAT] {nick} offered no usable address "
+              f"({'passive DCC' if port == 0 else 'unroutable IP'}); listening instead.")
+        threading.Thread(target=_listen_and_serve, args=(irc_sock, nick, host, token),
+                         daemon=True).start()
+        return True
+
     if is_bad_ip(ip):
         print(f"[ADMINCHAT] DCC CHAT from {ip} refused: address is temporarily blocked.")
         return False
 
-    host = source_host(line)
     threading.Thread(target=_connect_and_serve, args=(nick, host, ip, port), daemon=True).start()
     return True
 
 
-def _connect_and_serve(nick, host, ip, port):
-    """Dial the operator's listening client and run the session."""
+def _open_chat_listener():
+    """Bind a listener inside the configured DCC port range.
+
+    Scans DOWNWARD from DCC_PORT_END. start_dcc_send() scans upward from
+    DCC_PORT_START, so a console opening while transfers are running tends to
+    land at the far end rather than competing for the same port. With
+    MAX_DCC_SLOTS transfers plus one console there is room either way.
+
+    The range is deliberately the same one as DCC SEND: it is already forwarded
+    to the daemon, so the console needs no new firewall rule.
+    """
+    start = int(getattr(config, "DCC_PORT_START", 55000))
+    end = int(getattr(config, "DCC_PORT_END", 55010))
+    for port in range(end, start - 1, -1):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # SO_REUSEADDR means the OPPOSITE thing on Windows - it lets another
+        # process bind the same port and take the connection. platform_compat
+        # picks the right option per platform.
+        platform_compat.prepare_listener(sock)
+        try:
+            sock.bind(("0.0.0.0", port))
+            return sock, port
+        except OSError:
+            sock.close()
+            continue
+    return None, None
+
+
+def _serve(sock, peer_ip, nick, host, description):
+    """Banner, prompt and reader loop. Shared by both transports."""
     global _pending
-    try:
-        sock = socket.create_connection((ip, port), timeout=CONNECT_TIMEOUT)
-    except OSError as err:
-        print(f"[ADMINCHAT] Could not connect to {nick} at {ip}:{port} ({err}).")
-        return
 
     # A short recv timeout keeps the reader loop responsive enough to notice its
     # own auth/idle deadlines; the send timeout stops a stalled peer wedging the
@@ -584,7 +660,7 @@ def _connect_and_serve(nick, host, ip, port):
     sock.settimeout(1.0)
     platform_compat.apply_keepalive(sock, idle=60, interval=15, count=4)
 
-    session = Session(sock, ip, nick, host)
+    session = Session(sock, peer_ip, nick, host)
 
     with _state_lock:
         stale_pending = _pending
@@ -599,9 +675,89 @@ def _connect_and_serve(nick, host, ip, port):
         session.send(text)
     session.send("Enter Your Password:")
 
-    print(f"[ADMINCHAT] DCC CHAT opened to {nick} ({host}) at {ip}:{port}.")
+    print(f"[ADMINCHAT] DCC CHAT {description} for {nick} ({host}).")
     _reader_loop(session)
     print(f"[ADMINCHAT] Session with {nick} closed.")
+
+
+def _connect_and_serve(nick, host, ip, port):
+    """Dial the operator's listening client. The clean single-dialog path."""
+    try:
+        sock = socket.create_connection((ip, port), timeout=CONNECT_TIMEOUT)
+    except OSError as err:
+        print(f"[ADMINCHAT] Could not connect to {nick} at {ip}:{port} ({err}). "
+              f"If this keeps happening, the client is not reachable on that "
+              f"address - the bot will listen instead if it offers no usable IP.")
+        return
+    _serve(sock, ip, nick, host, f"opened to {ip}:{port}")
+
+
+def _listen_and_serve(irc_sock, nick, host, token=None):
+    """Listen on the configured range and offer the connection back.
+
+    Used when the client's own offer cannot be dialled - it asked for passive
+    DCC, or it does not know its own address and sent 0.0.0.0. This is iroffer's
+    chat_setup_out() path, and it is the more robust one here: it depends on
+    nothing the client knows about itself, and it uses the port range the
+    operator already forwards for DCC SEND.
+
+    The address advertised is the bot's own public IP, resolved once at startup
+    and already used for every DCC SEND handshake.
+    """
+    import dcc
+
+    ip_long = dcc.get_public_ip_long()
+    if not ip_long:
+        print("[ADMINCHAT] Cannot offer a DCC CHAT: the bot's own public IP is unknown "
+              "(config.MY_IP_OR_DOCK did not resolve).")
+        return
+
+    listener, port = _open_chat_listener()
+    if listener is None:
+        start = getattr(config, "DCC_PORT_START", 55000)
+        end = getattr(config, "DCC_PORT_END", 55010)
+        print(f"[ADMINCHAT] No free port in {start}-{end} for the console; "
+              f"all of them are in use by transfers.")
+        return
+
+    sock = None
+    try:
+        listener.listen(1)
+        listener.settimeout(LISTEN_TIMEOUT)
+        # A passive request carries a token identifying it, and the reply must
+        # carry the same one back or the client cannot match our offer to the
+        # request it is waiting on, and silently ignores us.
+        suffix = f" {token}" if token else ""
+        offer = f"PRIVMSG {nick} :\x01DCC CHAT chat {ip_long} {port}{suffix}\x01\r\n"
+        irc_sock.send(offer.encode())
+        print(f"[ADMINCHAT] Offered DCC CHAT to {nick} on "
+              f"{getattr(config, 'MY_IP_OR_DOCK', '?')}:{port}; waiting for the connection.")
+        sock, addr = listener.accept()
+        peer_ip = addr[0]
+    except socket.timeout:
+        print(f"[ADMINCHAT] {nick} did not accept the DCC CHAT offer within "
+              f"{int(LISTEN_TIMEOUT)}s; giving the port back.")
+        return
+    except OSError as err:
+        print(f"[ADMINCHAT] Could not offer a DCC CHAT to {nick} ({err}).")
+        return
+    finally:
+        try:
+            listener.close()
+        except OSError:
+            pass
+
+    # The peer address is only known now, so the blocklist is checked here rather
+    # than before the offer, as it is on the dial-out path.
+    if is_bad_ip(peer_ip):
+        print(f"[ADMINCHAT] Connection from {peer_ip} dropped: address is temporarily blocked.")
+        try:
+            sock.close()
+        except OSError:
+            pass
+        return
+
+    _serve(sock, peer_ip, nick, host, f"accepted from {peer_ip} on port {port}")
 
 
 # ==========================================================================
