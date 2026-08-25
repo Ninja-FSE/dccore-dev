@@ -3,11 +3,11 @@
 Administrative access over an authenticated DCC CHAT session instead of channel
 commands.
 
-**Status: phase 2.** The console authenticates and runs the full admin command
-set. The same commands still work in channel as well, until you decide otherwise
-— see `ADMIN_CHANNEL_COMMANDS`. Nothing changes until you configure it: with
-`ADMIN_HOSTMASKS` empty, every DCC CHAT request is ignored and the daemon
-behaves exactly as before.
+**Status: complete.** The console authenticates, runs the full admin command
+set, and can receive the daemon's runtime reports instead of the debug channel.
+Everything stays as it was until you choose otherwise: with `ADMIN_HOSTMASKS`
+empty, every DCC CHAT request is ignored and the daemon behaves exactly as
+before.
 
 ---
 
@@ -233,6 +233,34 @@ for instance.
 
 ---
 
+## Where the runtime reports go
+
+`send_debug` is the daemon's running commentary — transfers, joins, bans, pack
+failures. It has two destinations, both on by default:
+
+| | |
+|---|---|
+| `DEBUG_TO_CHANNEL` | the coloured line in `DEBUG_CHANNEL`, as always |
+| `DEBUG_TO_CONSOLE` | the plain text in an attached admin console |
+
+Once the console is doing the job, in `local_config.py`:
+
+```python
+DEBUG_TO_CHANNEL = False
+```
+
+The daemon's internals then stop being published to a channel other people can
+sit in.
+
+**Neither switch can lose a line.** If the channel is off and no console happens
+to be connected, `send_debug` falls back to stdout — so the LXC console and the
+journal always have it. That case, something going wrong while nobody is
+watching, is the one worth protecting. It is a floor, not a third destination:
+when the channel or a console did take the line, nothing extra is printed.
+
+A console that has been switched on but is *not connected* counts as nobody
+listening, and so does a console whose sink raised. Both fall through to stdout.
+
 ## Retiring the channel commands
 
 `!ban`, `!unban`, `!rehash`, `!update` and `!clearqueue` still work when typed in
@@ -368,7 +396,6 @@ depth behind it. Optional TLS is on the list for a later phase.
 
 ## Coming next
 
-- **Phase 3** — the debug channel becomes optional. An authenticated console
-  already receives the runtime log; phase 3 adds the switches to send it *only*
-  there, rather than to both.
+Optional, and not built: TLS on the chat (Python's `ssl` is stdlib, and iroffer
+supports it), and iroffer's second restricted admin tier (`hadminhost`).
 - **Phase 4, optional** — TLS on the chat, and a second restricted admin tier.
