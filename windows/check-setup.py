@@ -172,8 +172,12 @@ has_hash = bool(getattr(config, "ADMIN_PASSWORD_HASH", ""))
 if not masks:
     ok("disabled (ADMIN_HOSTMASKS is empty) - this is fine")
 elif not has_hash:
-    fail("ADMIN_HOSTMASKS is set but ADMIN_PASSWORD_HASH is empty - "
-         "the console will refuse every connection. Run: python adminchat.py")
+    # A warning, not a failure. With no hash the console refuses every
+    # connection, so it fails CLOSED - nothing unsafe happens, the feature is
+    # just off. Blocking the whole daemon over an optional feature that is
+    # safely inert only teaches people to skip the check.
+    warn("ADMIN_HOSTMASKS is set but ADMIN_PASSWORD_HASH is empty - the console "
+         "will refuse every connection until you run: python adminchat.py")
 else:
     ok(f"enabled for {len(masks)} host pattern(s)")
 
