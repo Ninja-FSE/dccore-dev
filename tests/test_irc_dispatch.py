@@ -377,5 +377,79 @@ class ConnectionScopeTests(DCCoreTestCase):
                 sys.modules["oserve"] = saved
 
 
+class BroadcastSearchCaptureTests(DCCoreTestCase):
+    """irc._capture_broadcast_search_reply() - the cross-bot search broadcast
+    capture hook. webserver.py's POST /api/search/broadcast is what opens the
+    window this reads; here the window is opened directly on config so the
+    capture function itself is what's under test."""
+
+    def setUp(self):
+        super().setUp()
+        config.NICKNAME = "DCCore"
+        config.broadcast_search_inprogress = True
+        config.broadcast_search_deadline = __import__("time").time() + 30
+        config.broadcast_search_results = []
+
+    def test_a_reply_addressed_to_our_nick_is_captured(self):
+        irc._capture_broadcast_search_reply("OtherBot", "DCCore", "Some raw reply text")
+        self.assertEqual(len(config.broadcast_search_results), 1)
+        entry = config.broadcast_search_results[0]
+        self.assertEqual(entry["from"], "OtherBot")
+        self.assertEqual(entry["text"], "Some raw reply text")
+        self.assertNotIn("bot", entry)
+
+    def test_target_match_is_case_insensitive(self):
+        irc._capture_broadcast_search_reply("OtherBot", "dccore", "hello")
+        self.assertEqual(len(config.broadcast_search_results), 1)
+
+    def test_channel_chatter_is_not_captured(self):
+        irc._capture_broadcast_search_reply("SomeUser", "#mp3passion", "just chatting")
+        self.assertEqual(config.broadcast_search_results, [])
+
+    def test_nothing_is_captured_outside_an_open_window(self):
+        config.broadcast_search_inprogress = False
+        irc._capture_broadcast_search_reply("OtherBot", "DCCore", "hello")
+        self.assertEqual(config.broadcast_search_results, [])
+
+    def test_nothing_is_captured_after_the_deadline_even_if_flag_is_stale(self):
+        config.broadcast_search_deadline = __import__("time").time() - 1
+        irc._capture_broadcast_search_reply("OtherBot", "DCCore", "hello")
+        self.assertEqual(config.broadcast_search_results, [])
+
+    def test_control_codes_are_stripped_from_captured_text(self):
+        irc._capture_broadcast_search_reply("OtherBot", "DCCore", "\x0304,05Song.flac\x0f\x02!\x02")
+        entry = config.broadcast_search_results[0]
+        self.assertNotIn("\x03", entry["text"])
+        self.assertNotIn("\x02", entry["text"])
+        self.assertNotIn("\x0f", entry["text"])
+
+    def test_a_bot_filename_token_is_extracted_when_present(self):
+        irc._capture_broadcast_search_reply("OtherBot", "DCCore", "!OtherBot Enter Sandman.flac")
+        entry = config.broadcast_search_results[0]
+        self.assertEqual(entry["bot"], "OtherBot")
+        self.assertEqual(entry["filename"], "Enter Sandman.flac")
+
+    def test_no_token_means_no_bot_filename_fields(self):
+        irc._capture_broadcast_search_reply("OtherBot", "DCCore", "Found 3 matches, use my list command")
+        entry = config.broadcast_search_results[0]
+        self.assertNotIn("bot", entry)
+        self.assertNotIn("filename", entry)
+
+    def test_our_own_outbound_broadcast_cannot_capture_itself(self):
+        """The PRIVMSG dispatch's existing self-skip (user.lower() ==
+        config.NICKNAME.lower(): continue) runs BEFORE the capture call, so
+        our own outbound "@find <term>" bouncing back from the server as our
+        own PRIVMSG is never even offered to this function. Documented here
+        by exercising the function the way the self-skip guarantees it is
+        actually reached: never with our own nick as `user`."""
+        before = list(config.broadcast_search_results)
+        # Even if it WERE reached with our own nick as sender, the function
+        # itself has no special-case for that - the guarantee lives in the
+        # call site (irc.py's `if user.lower() == config.NICKNAME.lower():
+        # continue`, which sits above every call to this function), not here.
+        irc._capture_broadcast_search_reply(config.NICKNAME, config.NICKNAME, "@find sandman")
+        self.assertEqual(len(config.broadcast_search_results), len(before) + 1)
+
+
 if __name__ == "__main__":
     unittest.main()

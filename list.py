@@ -101,6 +101,22 @@ import sys
 import config
 import announce
 
+_CONTROL_CODE_RE = re.compile(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?')
+
+
+def strip_control_codes(text):
+    """Strip mIRC colour codes and formatting control characters from `text`.
+
+    Extracted out of execute_search()'s own inline version (byte-identical
+    logic, just named) so other callers can reuse it instead of reinventing
+    it: irc.py's cross-bot broadcast-search capture and dcc_fetch.py's
+    inbound-offer filename cleaning both need the exact same treatment before
+    they can safely look at or store what a foreign bot sent.
+    """
+    clean = str(text).replace('\x02', '').replace('\x1f', '').replace('\x0f', '')
+    return _CONTROL_CODE_RE.sub('', clean)
+
+
 def find_latest_list():
     """Find the newest master text list in the lists directory.
 
@@ -256,8 +272,7 @@ def execute_search(irc_sock, user, search_term, channel):
         print(f"[NEW SEARCH] {user} in {channel} searched for '{search_term}'")
         
         # Tvätta bort dolda mIRC-färgkoder och kontrolltecken från sökorden
-        raw_clean = search_term.replace('\x02', '').replace('\x1f', '').replace('\x0f', '')
-        raw_clean = re.sub(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?', '', raw_clean)
+        raw_clean = strip_control_codes(search_term)
         
         # Dela upp sökorden
         clean_term = re.sub(r'[-*_.]', ' ', raw_clean)

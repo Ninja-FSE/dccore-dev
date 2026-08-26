@@ -66,7 +66,33 @@
         <input type="text" id="search-input" class="search-input"
                placeholder="Search by filename&hellip; (min 1 word)" autocomplete="off">
         <button type="submit" class="btn btn-accent">Search</button>
+        <button type="button" id="broadcast-btn" class="btn">Search all bots</button>
       </form>
+
+      <p class="broadcast-note">
+        "Search all bots" sends <code>@find</code> into the configured broadcast channel and
+        listens for 30 seconds. No authentication protects this - anyone on the LAN can trigger it.
+      </p>
+      <p class="broadcast-status" id="broadcast-status"></p>
+
+      <div class="table-wrap broadcast-wrap" id="broadcast-wrap" style="display:none;">
+        <div class="panel-bar">
+          <span class="panel-bar-label">Replies from other bots</span>
+          <button type="button" id="download-selected-btn" class="btn btn-accent" disabled>Download selected</button>
+        </div>
+        <table class="data-table" id="broadcast-table">
+          <thead>
+            <tr>
+              <th class="col-check"></th>
+              <th>From</th>
+              <th>Reply</th>
+            </tr>
+          </thead>
+          <tbody id="broadcast-body">
+            <tr class="empty-row"><td colspan="3">No replies yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
 
       <div class="table-wrap">
         <table class="data-table" id="search-table">
@@ -113,6 +139,24 @@
           </thead>
           <tbody id="queue-body">
             <tr class="empty-row"><td colspan="4">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="panel-title">Downloads (fetched from other bots)</h2>
+      <div class="table-wrap">
+        <table class="data-table" id="downloads-table">
+          <thead>
+            <tr>
+              <th>Bot</th>
+              <th>File</th>
+              <th>State</th>
+              <th>Progress</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="downloads-body">
+            <tr class="empty-row"><td colspan="5">Nothing queued yet.</td></tr>
           </tbody>
         </table>
       </div>

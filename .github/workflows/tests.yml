@@ -34,7 +34,7 @@ jobs:
         # Catches a syntax error or a bad import before the suite even starts,
         # and would have caught the module-level mistakes found by hand this week.
         run: |
-          python -c "import config, db, stats_mgr, queue_mgr, security, list, announce, dcc, irc, commands, update_list, webserver; print('all modules import')"
+          python -c "import config, db, stats_mgr, queue_mgr, security, list, announce, dcc, dcc_fetch, irc, commands, update_list, webserver; print('all modules import')"
 
       - name: Compile every source file
         run: python -m compileall -q .

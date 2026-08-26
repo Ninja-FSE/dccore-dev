@@ -1,12 +1,18 @@
 /* DCCore Dashboard - vanilla JS, no build step, no framework.
  *
- * Talks to three read-only endpoints: /api/search, /api/queue, /api/filelists.
- * Every route is GET-only and returns plain JSON - see webserver.py.
+ * Talks to the three original read-only endpoints (/api/search, /api/queue,
+ * /api/filelists) plus the cross-bot search/fetch endpoints added alongside
+ * them: POST /api/search/broadcast, GET /api/search/broadcast/status,
+ * POST /api/fetch/enqueue, GET /api/fetch/status, GET /api/fetch/<id>/download.
+ * See webserver.py - NONE of these routes require authentication, including
+ * the mutating ones this file calls.
  */
 (function () {
   "use strict";
 
   var REFRESH_MS = 8000;
+  var BROADCAST_POLL_MS = 2000;
+  var DOWNLOADS_POLL_MS = 4000;
 
   var views = {
     search:    { title: "Search",     sub: "Find a file across the current master list." },
@@ -31,7 +37,13 @@
     connDot:      document.getElementById("conn-dot"),
     connText:     document.getElementById("conn-text"),
     statusSlots:  document.getElementById("status-slots"),
-    statusQueued: document.getElementById("status-queued")
+    statusQueued: document.getElementById("status-queued"),
+    broadcastBtn:        document.getElementById("broadcast-btn"),
+    broadcastStatus:     document.getElementById("broadcast-status"),
+    broadcastWrap:       document.getElementById("broadcast-wrap"),
+    broadcastBody:       document.getElementById("broadcast-body"),
+    downloadSelectedBtn: document.getElementById("download-selected-btn"),
+    downloadsBody:       document.getElementById("downloads-body")
   };
 
   function escapeHtml(value) {
@@ -51,6 +63,22 @@
     });
   }
 
+  // postJson deliberately does NOT throw on a non-2xx response - the mutating
+  // routes (broadcast/enqueue) return a meaningful JSON error body (409
+  // already-in-progress, 429 cooldown, 503 IRC down, 400 bad input) that the
+  // caller wants to show the operator, not treat as a network failure.
+  function postJson(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        return { ok: res.ok, status: res.status, data: data };
+      });
+    });
+  }
+
   // -------------------------------------------------------------- Routing
 
   function activateView(name) {
@@ -64,7 +92,7 @@
     el.pageTitle.textContent = views[name].title;
     el.pageSub.textContent = views[name].sub;
 
-    if (name === "queue") { loadQueue(); }
+    if (name === "queue") { loadQueue(); loadDownloads(); }
     if (name === "filelists" && !state.filelistsLoaded) { loadFilelists(); }
   }
 
@@ -106,6 +134,185 @@
         markConnection(false);
         el.searchBody.innerHTML = emptyRow(4, "Search failed: " + err.message);
       });
+  }
+
+  // ------------------------------------------------------- Broadcast search
+
+  var broadcast = { pollTimer: null, deadline: 0 };
+
+  el.broadcastBtn.addEventListener("click", function () {
+    var term = el.searchInput.value.trim();
+    if (term.length < 3) {
+      showBroadcastStatus("Type at least 3 characters first.", true);
+      return;
+    }
+    el.broadcastBtn.disabled = true;
+    postJson("/api/search/broadcast", { term: term }).then(function (res) {
+      el.broadcastBtn.disabled = false;
+      if (!res.ok) {
+        showBroadcastStatus(res.data.error || ("HTTP " + res.status), true);
+        return;
+      }
+      broadcast.deadline = res.data.deadline * 1000;
+      el.broadcastWrap.style.display = "";
+      el.broadcastBody.innerHTML = emptyRow(3, "Listening…");
+      startBroadcastPolling();
+    }).catch(function (err) {
+      el.broadcastBtn.disabled = false;
+      showBroadcastStatus("Request failed: " + err.message, true);
+    });
+  });
+
+  function showBroadcastStatus(text, isError) {
+    el.broadcastStatus.textContent = text;
+    el.broadcastStatus.classList.toggle("is-error", !!isError);
+  }
+
+  function startBroadcastPolling() {
+    if (broadcast.pollTimer) { clearInterval(broadcast.pollTimer); }
+    pollBroadcastStatus();
+    broadcast.pollTimer = setInterval(pollBroadcastStatus, BROADCAST_POLL_MS);
+  }
+
+  function pollBroadcastStatus() {
+    fetchJson("/api/search/broadcast/status").then(function (payload) {
+      markConnection(true);
+      renderBroadcastResults(payload.results);
+      if (payload.listening) {
+        var remaining = Math.max(0, Math.ceil((payload.deadline * 1000 - Date.now()) / 1000));
+        showBroadcastStatus("Listening… " + remaining + "s remaining, " +
+          payload.results.length + " repl" + (payload.results.length === 1 ? "y" : "ies") + " so far.");
+      } else {
+        showBroadcastStatus(payload.results.length
+          ? "Done. " + payload.results.length + " repl" + (payload.results.length === 1 ? "y" : "ies") + " received."
+          : "Done. No replies received.");
+        if (broadcast.pollTimer) {
+          clearInterval(broadcast.pollTimer);
+          broadcast.pollTimer = null;
+        }
+      }
+    }).catch(function (err) {
+      markConnection(false);
+      showBroadcastStatus("Could not poll broadcast status: " + err.message, true);
+    });
+  }
+
+  // Built via DOM APIs, not string-concatenated innerHTML, and this is load
+  // bearing rather than a style choice: entry.bot/entry.filename come from
+  // irc.py's best-effort "!<bot> <filename>" extraction against arbitrary
+  // text ANY IRC user can PM/NOTICE to the bot during an open broadcast
+  // window - i.e. attacker-controlled, unauthenticated text. Building the
+  // bot/filename data attributes by hand from that text (even through
+  // escapeHtml(), which never encodes the double-quote character) lets a
+  // filename like: x[quote] autofocus onfocus=[quote]alert(1) - break out of
+  // the attribute and inject a live event handler. Assigning through
+  // .dataset instead has no such hazard: the browser sets the attribute
+  // value directly, with no HTML parsing step for the attacker's text to
+  // escape through. entry.from/entry.text are plain text-node content
+  // (.textContent), which was never the vulnerable pattern - only
+  // attribute-position values are.
+  function renderBroadcastResults(results) {
+    el.broadcastBody.innerHTML = "";
+    if (!results.length) {
+      el.broadcastBody.innerHTML = emptyRow(3, "No replies yet.");
+      updateDownloadSelectedState();
+      return;
+    }
+    results.forEach(function (entry) {
+      var tr = document.createElement("tr");
+
+      var checkTd = document.createElement("td");
+      checkTd.className = "col-check";
+      if (entry.bot && entry.filename) {
+        var box = document.createElement("input");
+        box.type = "checkbox";
+        box.className = "broadcast-check";
+        box.dataset.bot = entry.bot;
+        box.dataset.filename = entry.filename;
+        box.addEventListener("change", updateDownloadSelectedState);
+        checkTd.appendChild(box);
+      }
+      tr.appendChild(checkTd);
+
+      var fromTd = document.createElement("td");
+      fromTd.className = "col-mono";
+      fromTd.textContent = entry.from;
+      tr.appendChild(fromTd);
+
+      var textTd = document.createElement("td");
+      textTd.className = "col-mono";
+      textTd.textContent = entry.text;
+      tr.appendChild(textTd);
+
+      el.broadcastBody.appendChild(tr);
+    });
+    updateDownloadSelectedState();
+  }
+
+  function updateDownloadSelectedState() {
+    var checked = el.broadcastBody.querySelectorAll(".broadcast-check:checked");
+    el.downloadSelectedBtn.disabled = checked.length === 0;
+  }
+
+  el.downloadSelectedBtn.addEventListener("click", function () {
+    var checked = el.broadcastBody.querySelectorAll(".broadcast-check:checked");
+    var items = Array.prototype.map.call(checked, function (box) {
+      return { bot: box.dataset.bot, filename: box.dataset.filename };
+    });
+    if (!items.length) { return; }
+    el.downloadSelectedBtn.disabled = true;
+    postJson("/api/fetch/enqueue", items).then(function (res) {
+      if (!res.ok && !(res.data && res.data.created && res.data.created.length)) {
+        showBroadcastStatus("Could not queue the download: " +
+          (res.data.error || (res.data.errors && res.data.errors[0] && res.data.errors[0].error) || ("HTTP " + res.status)), true);
+      } else {
+        showBroadcastStatus("Queued " + res.data.created.length + " file(s) for fetch - see Queue → Downloads.");
+        Array.prototype.forEach.call(checked, function (box) { box.checked = false; });
+      }
+      updateDownloadSelectedState();
+      loadDownloads();
+    }).catch(function (err) {
+      showBroadcastStatus("Request failed: " + err.message, true);
+      el.downloadSelectedBtn.disabled = false;
+    });
+  });
+
+  // -------------------------------------------------------------- Downloads
+
+  var DOWNLOAD_STATE_LABELS = {
+    pending: "Pending", offered: "Offered", receiving: "Receiving",
+    complete: "Complete", failed: "Failed"
+  };
+
+  function loadDownloads() {
+    fetchJson("/api/fetch/status").then(function (rows) {
+      markConnection(true);
+      renderDownloads(rows);
+    }).catch(function () { markConnection(false); });
+  }
+
+  function renderDownloads(rows) {
+    if (!rows.length) {
+      el.downloadsBody.innerHTML = emptyRow(5, "Nothing queued yet.");
+      return;
+    }
+    el.downloadsBody.innerHTML = rows.map(function (row) {
+      var state = row.state || "pending";
+      var label = DOWNLOAD_STATE_LABELS[state] || state;
+      var progress = row.total_size
+        ? Math.round(100 * (row.bytes_received || 0) / row.total_size) + "%"
+        : (row.bytes_received ? row.bytes_received + " B" : "—");
+      var action = state === "complete"
+        ? "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a>"
+        : (state === "failed" ? "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span>" : "");
+      return "<tr>" +
+        "<td class=\"col-mono\">" + escapeHtml(row.bot) + "</td>" +
+        "<td class=\"col-dim col-mono\">" + escapeHtml(row.filename) + "</td>" +
+        "<td><span class=\"status-pill status-" + escapeHtml(state) + "\">" + escapeHtml(label) + "</span></td>" +
+        "<td class=\"col-mono\">" + escapeHtml(progress) + "</td>" +
+        "<td>" + action + "</td>" +
+        "</tr>";
+    }).join("");
   }
 
   // ---------------------------------------------------------------- Queue
@@ -209,6 +416,11 @@
       }
     }).catch(function () { markConnection(false); });
   }, REFRESH_MS);
+
+  // Downloads can complete while the operator is looking at a different
+  // view, so this polls independently of which tab is active - same
+  // reasoning as the sidebar status card above.
+  setInterval(loadDownloads, DOWNLOADS_POLL_MS);
 
   activateView("search");
 })();

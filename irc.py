@@ -96,6 +96,58 @@ def event_source_host(line):
     return match.group(1).lower() if match else None
 
 
+_FETCH_TOKEN_RE = re.compile(r'!(\S+)\s+(.+)$')
+
+
+def _capture_broadcast_search_reply(user, target, msg):
+    """Cross-bot search broadcast capture (webserver.py's POST
+    /api/search/broadcast starts the window this reads).
+
+    Only fires for a line sent DIRECTLY TO OUR OWN NICK (`target`), never
+    channel chatter - a PRIVMSG or NOTICE-to-self, which is how @find-style
+    replies normally arrive (list.execute_search() itself only ever replies
+    to the requester, never the channel). No-ops instantly outside an open
+    broadcast window, so this costs nothing on the overwhelmingly common case
+    of no broadcast in progress.
+
+    Deliberately bypasses security.is_flooding(): that gate exists to meter
+    OUR users against OUR command surface. Applying it here would mean the
+    daemon could start ignoring or muting a foreign bot we explicitly asked
+    to reply, for the crime of answering the broadcast we just sent it -
+    quite apart from the fact that this capture never dispatches a command or
+    a reply of our own, so there is nothing here for a flood gate to protect.
+    """
+    if str(target).lower() != str(getattr(config, 'NICKNAME', '')).lower():
+        return
+    if not getattr(config, 'broadcast_search_inprogress', False):
+        return
+    if time.time() >= getattr(config, 'broadcast_search_deadline', 0):
+        return
+
+    cleaned = list.strip_control_codes(msg)
+    entry = {"from": user, "text": cleaned, "received_at": time.time()}
+
+    # Best-effort extraction of the one convention that is actually
+    # standardised across file-sharing bots: "!<botnick> <filename>", the
+    # same syntax this bot itself answers to (see get_bot_aliases() and
+    # dcc.handle_download_request()). Deliberately does NOT attempt to parse
+    # size, format, or anything else out of arbitrary bots' bespoke
+    # colour/box formatting - that is unrealistic and out of scope. If no
+    # such token is found, the raw cleaned text is still recorded above; the
+    # frontend just shows it without a Download button.
+    token_match = _FETCH_TOKEN_RE.search(cleaned)
+    if token_match:
+        entry["bot"] = token_match.group(1)
+        entry["filename"] = token_match.group(2).strip()
+
+    # NOTE: `builtins.list`, not the bare name - this module does `import list`
+    # (the master-list module) at the top, which shadows the builtin type in
+    # every function here.
+    if not isinstance(getattr(config, 'broadcast_search_results', None), builtins.list):
+        config.broadcast_search_results = []
+    config.broadcast_search_results.append(entry)
+
+
 def get_bot_aliases():
     """Every name this bot should answer to, lowercased, current nick first.
 
@@ -626,6 +678,21 @@ def irc_loop():
                                 if q_user in config.channel_users[chan]:
                                     config.channel_users[chan].remove(q_user)
 
+                    # Cross-bot search broadcast capture, NOTICE half. NOTICE
+                    # lines are not parsed anywhere else in this loop - many
+                    # file-sharing bots reply to @find via NOTICE rather than
+                    # PRIVMSG, so without this branch every such reply would be
+                    # silently dropped exactly like a PRIVMSG-to-self used to
+                    # be before the branch below existed. Read-only: this never
+                    # dispatches a command, so it needs none of the PRIVMSG
+                    # branch's ban/flood/dispatch machinery.
+                    notice_match = re.match(r"^:([^!]+)!.* NOTICE ([#\w\-]+) :(.+)$", line)
+                    if notice_match:
+                        notice_user = notice_match.group(1)
+                        if notice_user.lower() != config.NICKNAME.lower():
+                            _capture_broadcast_search_reply(
+                                notice_user, notice_match.group(2), notice_match.group(3).strip())
+
                     match = re.match(r"^:([^!]+)!.* PRIVMSG ([#\w\-]+) :(.+)$", line)
                     if match:
                         user = match.group(1)
@@ -633,6 +700,15 @@ def irc_loop():
                         msg = match.group(3).strip()
                         if user.lower() == config.NICKNAME.lower():
                             continue
+
+                        # Cross-bot search broadcast capture, PRIVMSG half (see
+                        # the NOTICE branch above and _capture_broadcast_search_reply()'s
+                        # own docstring). Placed before the ban check on
+                        # purpose: a foreign bot answering a broadcast we asked
+                        # for is not subject to OUR channel's ban list, and
+                        # this never dispatches anything of its own for a ban
+                        # to meaningfully gate.
+                        _capture_broadcast_search_reply(user, target_chan, msg)
 
                         if not security.check_user_status(user):
                             continue
@@ -675,6 +751,24 @@ def irc_loop():
                                     import adminchat
                                     adminchat.handle_dcc_chat(
                                         s, line, user, msg.strip("\x01").strip())
+                                    continue
+                                # Cross-bot file fetch: a DCC SEND offer answering
+                                # a fetch WE requested (see dcc_fetch.py). Private
+                                # only, same reasoning as DCC CHAT above - a DCC
+                                # SEND offer addressed to a channel is meaningless
+                                # and would mean acting on a line any channel
+                                # member could send. Admission control lives
+                                # entirely inside handle_incoming_offer(): it only
+                                # proceeds if this matches a row we ourselves
+                                # marked 'offered' a moment ago, so an unsolicited
+                                # offer from anyone is dropped there, not here.
+                                if (ctcp_cmd.startswith("DCC SEND ")
+                                        and target_chan.lower() == config.NICKNAME.lower()):
+                                    import dcc_fetch
+                                    threading.Thread(
+                                        target=dcc_fetch.handle_incoming_offer,
+                                        args=(s, user, msg.strip("\x01").strip()),
+                                        daemon=True).start()
                                     continue
                                 if ctcp_cmd == "QUE":
                                     threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()

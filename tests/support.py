@@ -72,6 +72,8 @@ RUNTIME_CONTAINERS = {
     "vip_queue": list,
     "send_queue": dict,
     "user_processing_lock": set,
+    "broadcast_search_results": list,
+    "fetch_queue": dict,
 }
 
 RUNTIME_FLAGS = {
@@ -81,6 +83,11 @@ RUNTIME_FLAGS = {
     "activation_triggered": False,
     "update_inprogress": False,
     "connection_epoch": 1,
+    "broadcast_search_inprogress": False,
+    "broadcast_search_deadline": 0,
+    "broadcast_search_term": "",
+    "last_broadcast_search_at": 0,
+    "fetch_feature_disabled": False,
 }
 
 
@@ -97,6 +104,7 @@ def reset_config(**overrides):
 
     config.queue_lock = threading.Lock()
     config.debug_flood_lock = threading.Lock()
+    config.fetch_queue_lock = threading.Lock()
 
     config.NICKNAME = "DCCore"
     config.ORIGINAL_NICK = "DCCore"
@@ -302,6 +310,27 @@ class DCCoreTestCase(unittest.TestCase):
         restore_daemon_functions()
         for tree in self._trees:
             tree.cleanup()
+
+    def set_config(self, **overrides):
+        """Set config attributes for the duration of one test, restoring
+        whatever was there before (or removing the attribute if it did not
+        exist) on teardown.
+
+        For tunables reset_config() does not already reset -
+        MAX_FETCH_SLOTS, MAX_FETCH_FILE_SIZE and similar plain config.py
+        literals are module-level state shared across the whole test run,
+        not part of RUNTIME_CONTAINERS/RUNTIME_FLAGS - so a test that sets
+        one directly and never restores it silently changes every test that
+        runs afterwards in the same process.
+        """
+        for name, value in overrides.items():
+            had_value = hasattr(config, name)
+            old_value = getattr(config, name, None)
+            setattr(config, name, value)
+            if had_value:
+                self.addCleanup(setattr, config, name, old_value)
+            else:
+                self.addCleanup(delattr, config, name)
 
     def make_tree(self, **kwargs):
         tree = TempTree(**kwargs)
