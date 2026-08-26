@@ -31,6 +31,52 @@ STRANGER_LINE = ":dave!~d@cpe-91-22-33-44.isp.net PRIVMSG DCCore :\x01DCC CHAT c
 PASSWORD = "correct horse battery staple"
 
 
+def _loopback_is_available():
+    """Can this machine actually bind and connect on loopback?
+
+    Some build sandboxes and locked-down CI images forbid it. The tests below
+    are not unit tests with a socket bolted on - they exist to prove the real
+    transport works, so faking it would defeat the point. Where the machine
+    cannot do it they skip, and say so.
+
+    Reported as a FAILURE this cost a reviewer real time: nine tests went red
+    on a sandbox that simply does not allow this, and the reasonable conclusion
+    was that the codebase had pre-existing problems. It did not. A skip says
+    "not here", which is the truth; a failure says "broken", which is not.
+
+    Both shapes the code actually uses are probed - a 0.0.0.0 listener, which is
+    what _open_chat_listener binds, and a real connect/accept round trip.
+    """
+    import socket as _socket
+
+    listener = None
+    client = None
+    accepted = None
+    try:
+        listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        listener.bind(("0.0.0.0", 0))
+        listener.listen(1)
+        listener.settimeout(2.0)
+        port = listener.getsockname()[1]
+
+        client = _socket.create_connection(("127.0.0.1", port), timeout=2.0)
+        accepted, _addr = listener.accept()
+        return True
+    except OSError:
+        return False
+    finally:
+        for sock in (accepted, client, listener):
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
+
+LOOPBACK_OK = _loopback_is_available()
+NEEDS_LOOPBACK = "needs loopback socket binding, which this machine does not allow"
+
+
 def wait_for(predicate, timeout=5.0, interval=0.02):
     """Poll rather than sleep a fixed time, so the suite is neither slow nor flaky."""
     deadline = time.time() + timeout
@@ -294,6 +340,7 @@ class PassiveOfferWithToken(unittest.TestCase):
         self.assertEqual(adminchat.parse_offer("DCC CHAT 2130706433 55555"),
                          ("127.0.0.1", 55555, None))
 
+    @unittest.skipUnless(LOOPBACK_OK, NEEDS_LOOPBACK)
     def test_the_token_is_echoed_back_in_our_offer(self):
         """Required by the protocol: without it the client cannot match the reply.
 
@@ -325,6 +372,7 @@ class PassiveOfferWithToken(unittest.TestCase):
                         f"the token must be the last field; got {ctcp!r}")
 
 
+@unittest.skipUnless(LOOPBACK_OK, NEEDS_LOOPBACK)
 class ConnectFailureFallsBackToListening(unittest.TestCase):
     """Third field report: a real address that simply does not answer.
 
@@ -483,6 +531,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
         self.assertEqual(str(getattr(config, "ADMIN_CHAT_MODE", "auto")).lower(), "auto")
 
 
+@unittest.skipUnless(LOOPBACK_OK, NEEDS_LOOPBACK)
 class ListenerUsesTheConfiguredRange(unittest.TestCase):
     """His other point: the console must respect DCC_PORT_START/END."""
 
@@ -564,6 +613,7 @@ class ListenerUsesTheConfiguredRange(unittest.TestCase):
         self.assertIsNone(port)
 
 
+@unittest.skipUnless(LOOPBACK_OK, NEEDS_LOOPBACK)
 class ListenModeEndToEnd(unittest.TestCase):
     """Reproduces the reported failure, then proves the fallback carries it."""
 
@@ -847,6 +897,7 @@ class SessionExpiry(unittest.TestCase):
         self.assertTrue(s.expired())
 
 
+@unittest.skipUnless(LOOPBACK_OK, NEEDS_LOOPBACK)
 class EndToEndOverLoopback(unittest.TestCase):
     """The real connect-out path, against a real listening socket.
 
