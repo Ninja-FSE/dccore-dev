@@ -265,7 +265,7 @@ class PassiveOfferWithToken(unittest.TestCase):
     """The second field report: a passive offer read as an active one.
 
         [ADMINCHAT] Unusable DCC CHAT offer from FLAC:
-        'DCC CHAT chat 3644888149 0 350'
+        'DCC CHAT chat 3405803861 0 350'
 
     The two forms are different LENGTHS:
 
@@ -278,11 +278,11 @@ class PassiveOfferWithToken(unittest.TestCase):
     """
 
     def test_the_reported_passive_offer_parses(self):
-        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 3644888149 0 350"),
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 3405803861 0 350"),
                          (None, 0, "350"))
 
     def test_a_passive_offer_without_a_token_still_parses(self):
-        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 3644888149 0"),
+        self.assertEqual(adminchat.parse_offer("DCC CHAT chat 3405803861 0"),
                          (None, 0, None))
 
     def test_an_active_offer_is_unaffected(self):
@@ -316,7 +316,7 @@ class PassiveOfferWithToken(unittest.TestCase):
             sendall = send
 
         self.assertTrue(adminchat.handle_dcc_chat(
-            Recorder(), ADMIN_LINE, "FLAC", "DCC CHAT chat 3644888149 0 350"))
+            Recorder(), ADMIN_LINE, "FLAC", "DCC CHAT chat 3405803861 0 350"))
 
         self.assertTrue(wait_for(lambda: any("DCC CHAT chat" in s for s in sent)),
                         "a passive request must be answered with an offer")
@@ -328,7 +328,7 @@ class PassiveOfferWithToken(unittest.TestCase):
 class ConnectFailureFallsBackToListening(unittest.TestCase):
     """Third field report: a real address that simply does not answer.
 
-        [ADMINCHAT] Could not connect to FLAC at 93.164.139.41:55101 (timed out).
+        [ADMINCHAT] Could not connect to FLAC at 203.0.113.41:55101 (timed out).
 
     A TIMEOUT rather than a refusal means the packets left and nothing came
     back - a VPN exit address with no inbound forwarding, a router not
@@ -422,7 +422,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
         self.addCleanup(lambda: setattr(socket, "create_connection", real))
 
         adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
-                                  "DCC CHAT chat 1570209577 55101")
+                                  "DCC CHAT chat 3405803817 55101")
         self.assertIsNotNone(self.offered_port(),
                              "a timeout must fall back exactly as a refusal does")
 
@@ -440,7 +440,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
         self.addCleanup(lambda: setattr(socket, "create_connection", real))
 
         adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
-                                  "DCC CHAT chat 1570209577 55101")
+                                  "DCC CHAT chat 3405803817 55101")
         self.assertIsNotNone(self.offered_port())
         self.assertEqual([a for a in dialled if a[1] == 55101], [],
                          "listen mode must not dial the client")
