@@ -19,6 +19,14 @@ ADMIN_NICK    = "FLAC,Samoth"
 CHANNEL       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
 DEBUG_CHANNEL = "#flac-serv"
 
+# The single channel a "search all bots" broadcast (@find) goes into - see
+# webserver.py's POST /api/search/broadcast. Deliberately ONE channel, never
+# all of them: broadcasting into every channel this bot has joined multiplies
+# the disruption to every other operator sharing those channels, for one
+# search. Defaults to the first entry of CHANNEL above; override explicitly
+# here (or in local_config.py) if that is not the right one.
+BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
+
 # ---------------------------------------------------------------------
 # 3. FILSYSTEM, SÖKVÄGAR OCH TEXTDATABASER
 # ---------------------------------------------------------------------
@@ -27,6 +35,13 @@ FILE_DIRECTORY = "/mnt/nfs-musik"
 RAR_BINARY     = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 TMP_ZIP_DIR = "./data/tmp_zips"
 LOCAL_LIST_DIR = "./lists"
+
+# Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
+# separate from FILE_DIRECTORY: that directory is the served library, scanned
+# by update_list.py and offered to everyone via @find/!<nick> - fetched files
+# must never be reachable through that path. They are dashboard-download-only
+# (GET /api/fetch/<id>/download in webserver.py).
+FETCHED_FILES_DIR = "./data/fetched"
 
 # Säkra, normaliserade sökvägar direkt in i din data/ undermapp
 BANS_FILE      = "./data/bans.txt"
@@ -129,6 +144,23 @@ DCC_PORT_START     = 55000
 DCC_PORT_END       = 55010
 
 # ---------------------------------------------------------------------
+# CROSS-BOT FILE FETCH (dcc_fetch.py - receiving files FROM other bots)
+# ---------------------------------------------------------------------
+# Deliberately separate from MAX_DCC_SLOTS above: that governs OUR outbound
+# SENDs to people requesting from us. Conflating the two directions would let
+# outbound leech traffic (us fetching from others) starve our own serving
+# capacity, or vice versa.
+MAX_FETCH_SLOTS         = 3        # Max samtidiga pågående/erbjudna hämtningar
+MAX_FETCH_FILE_SIZE     = 200 * 1024 * 1024   # 200 MB - avvisa erbjudandet innan vi ens ansluter
+FETCH_TRANSFER_TIMEOUT  = 600      # Sekunder - total väggklocka per överföring (mot en långsam "drip" som ständigt nollställer idle-timeout)
+FETCH_OFFER_TIMEOUT     = 60       # Sekunder en "offered"-rad får vänta på en DCC SEND innan den markeras failed
+
+# Hur ofta en ny @find-broadcast (POST /api/search/broadcast) tillåts starta.
+# Oberoende av UI:t - artighet mot andra botar/operatörer på en delad publik
+# kanal, inte bara en UI-detalj.
+BROADCAST_SEARCH_COOLDOWN = 30     # Sekunder
+
+# ---------------------------------------------------------------------
 # 6. ANTI-FLOOD OCH AUTOMATISKT SÄKERHETSSKYDD
 # ---------------------------------------------------------------------
 MAX_REQUESTS     = 10       # Max antal kommandon (sök/fil) per tidsfönster
@@ -180,6 +212,26 @@ rar_inprogress = False
 dcc_queue         = {}       # Centrala fildelningskön (användarnamn: [filer])
 vip_queue         = []       # Isolerad express-kö för sök-headers och reklam
 active_transfers  = []       # Trådade aktiva DCC-sändningar i realtid
+
+# Cross-bot search broadcast (webserver.py POST /api/search/broadcast, capture
+# in irc.py's PRIVMSG/NOTICE-to-self dispatch). broadcast_search_results is
+# append-only during the listening window: {from, text, received_at} per
+# captured line, plus {bot, filename} when a "!<bot> <file>" token was found.
+broadcast_search_inprogress = False
+broadcast_search_deadline   = 0
+broadcast_search_term       = ""
+broadcast_search_results    = []
+last_broadcast_search_at    = 0     # BROADCAST_SEARCH_COOLDOWN is measured from this
+
+# Cross-bot file fetch (dcc_fetch.py). Keyed by a generated request id ->
+# {id, bot, filename, state, requested_at, offered_at, bytes_received,
+# total_size, reason, stored_filename}. state is one of pending / offered /
+# receiving / complete / failed. Active-count is DERIVED by scanning this
+# (dcc_fetch.count_active_fetches()) rather than kept as a separate counter,
+# on purpose - a separately-maintained counter touched from multiple threads
+# (the dispatcher, the CTCP handler, the enqueue route) is exactly the kind of
+# thing that drifts out of sync with the data it is supposed to describe.
+fetch_queue = {}
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
