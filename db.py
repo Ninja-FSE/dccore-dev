@@ -172,12 +172,39 @@ def remove_hard_ban(pattern):
 # SEKTION 2: STATS.TXT (Avancerad OmenServe-statistik)
 # =================================================================----
 
-def load_advanced_stats():
-    """Läser stats.txt. Format: total_files total_bytes yest_files yest_bytes today_files today_bytes last_date"""
+# ---------------------------------------------------------------------------
+# stats.txt - lifetime and per-day transfer counters.
+#
+# Same read-modify-write hazard as hard_bans.txt above, and it matters more
+# here: these counters are only ever derived from their own previous value, so
+# nothing recomputes them and a lost update is permanent.
+#
+# Up to MAX_DCC_SLOTS transfers finish concurrently, each in its own thread,
+# and check_and_rotate_day() runs from the IRC read loop on every channel
+# message. Holding _disk_lock across only the WRITE - which is all
+# save_advanced_stats used to do - leaves the load-modify-save pair
+# unsynchronised: two completions that overlap both read the same row, and
+# whichever writes second discards the other's increment. A 300MB and a 7MB
+# transfer finishing together added one file and 300MB instead of two files
+# and 307MB.
+#
+# The midnight case is worse than a miscount: a transfer thread that loaded
+# before check_and_rotate_day() rotated, and saves after it, writes the OLD
+# date back along with un-rotated counters, so the next rotation runs a second
+# time and yesterday's totals collapse to that one transfer.
+#
+# So every public entry point below takes _disk_lock exactly once and does the
+# whole sequence under it. The _unlocked helpers exist because threading.Lock
+# is not reentrant - update_stats_on_complete() rotates and saves while it is
+# already holding the lock.
+# ---------------------------------------------------------------------------
+
+def _load_advanced_stats_unlocked():
+    """Parse stats.txt. Caller must hold _disk_lock."""
     STATS_FILE = config.STATS_FILE
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     default_stats = [0, 0, 0, 0, 0, 0, today_str]
-    
+
     if not os.path.exists(STATS_FILE):
         return default_stats
     try:
@@ -191,66 +218,115 @@ def load_advanced_stats():
         print(f"[DB ERROR] Kunde inte tolka stats.txt, använder standard: {e}")
     return default_stats
 
+
+def _save_advanced_stats_unlocked(stats):
+    """Write the 7-column row atomically. Caller must hold _disk_lock."""
+    row = f"{stats[0]} {stats[1]} {stats[2]} {stats[3]} {stats[4]} {stats[5]} {stats[6]}"
+    _atomic_write(config.STATS_FILE, row)
+
+
+def _rotate_day_unlocked(stats):
+    """Move Today to Yesterday if the date changed. Returns True if it did.
+
+    Mutates `stats` in place and does NOT write - the caller decides when to
+    save, so a rotation and an increment become one write instead of two.
+
+    Deliberately does NOT log: the caller prints after releasing _disk_lock.
+    Logging from in here would put console I/O inside the critical section, and
+    worse, a print() that raises would abandon a rotation the caller had already
+    decided to make. That is not theoretical - the Swedish log strings raise
+    UnicodeEncodeError on any console whose code page cannot encode them, which
+    is exactly how this was found.
+    """
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    if stats[6] == today_str:
+        return False
+    stats[2] = stats[4]   # Yesterday files = Today files
+    stats[3] = stats[5]   # Yesterday bytes = Today bytes
+    stats[4] = 0
+    stats[5] = 0
+    stats[6] = today_str
+    return True
+
+
+def _coerce_file_size(file_size):
+    """Best-effort integer byte count from whatever the caller passed.
+
+    Kept verbatim from the original update_stats_on_complete: callers have been
+    seen passing a list, a dict, and a decimal string. Runs OUTSIDE the lock -
+    parsing does not need it.
+    """
+    try:
+        if isinstance(file_size, list):
+            file_size = file_size[0] if len(file_size) > 0 else 0
+        if isinstance(file_size, dict):
+            file_size = file_size.get('bytes', file_size.get('size', 0))
+        return int(float(str(file_size).strip()))
+    except Exception as type_err:
+        print(f"[DB WARNING] Kunde inte tolka filstorlek '{file_size}' automatisk fallback till 0: {type_err}")
+        return 0
+
+
+def load_advanced_stats():
+    """Read stats.txt. Format: total_files total_bytes yest_files yest_bytes today_files today_bytes last_date"""
+    with _disk_lock:
+        return _load_advanced_stats_unlocked()
+
+
 def save_advanced_stats(stats):
     """Write the 7-column row to stats.txt, atomically.
 
-    The previous version truncated the live file and then wrote into it, so a crash
+    An earlier version truncated the live file and then wrote into it, so a crash
     or a concurrent writer could leave a short row behind - which load_advanced_stats
     silently discards, resetting every counter to zero.
     """
-    STATS_FILE = config.STATS_FILE
     try:
         with _disk_lock:
-            row = f"{stats[0]} {stats[1]} {stats[2]} {stats[3]} {stats[4]} {stats[5]} {stats[6]}"
-            _atomic_write(STATS_FILE, row)
+            _save_advanced_stats_unlocked(stats)
     except Exception as e:
         print(f"[DB ERROR] Kunde inte spara till stats.txt: {e}")
 
+
 def check_and_rotate_day():
-    """Kollar midnattsskifte och roterar Today till Yesterday automatiskt"""
-    stats = load_advanced_stats()
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    
-    if stats[6] != today_str:
-        print(f"[DB ROTATE] Ny dag upptäckt ({today_str}). Flyttar statistik till igår.")
-        stats[2] = stats[4]  # Yesterday files = Today files
-        stats[3] = stats[5]  # Yesterday bytes = Today bytes
-        stats[4] = 0         # Nollställ idag-filer
-        stats[5] = 0         # Nollställ idag-bytes
-        stats[6] = today_str
-        save_advanced_stats(stats)
+    """Roll Today into Yesterday at midnight. Returns the current row.
+
+    No try/except here on purpose. An earlier draft caught everything and
+    returned a freshly loaded row on failure, which meant a logging error could
+    make this hand back UN-ROTATED counters that the caller would treat as
+    current - silently wrong data instead of a loud failure. The original had no
+    handler either; this keeps that contract.
+    """
+    with _disk_lock:
+        stats = _load_advanced_stats_unlocked()
+        rotated = _rotate_day_unlocked(stats)
+        if rotated:
+            _save_advanced_stats_unlocked(stats)
+    if rotated:
+        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till år.")
     return stats
 
-def update_stats_on_complete(file_size):
-    """Räknar upp Total och Today på disken när en filöverföring är klar (Typ-säkrad)"""
-    stats = check_and_rotate_day()
-    
-    # --- STENHÅRD TYP-REPARATION MOD MOT DB-ERROR ---
-    clean_size = 0
-    try:
-        # Om file_size råkar komma in som en lista, plocka ut första elementet
-        if isinstance(file_size, list):
-            if len(file_size) > 0:
-                file_size = file_size[0]
-            else:
-                file_size = 0
-                
-        # Om det är en dictionary, leta efter kända fältnamn för storlek
-        if isinstance(file_size, dict):
-            file_size = file_size.get('bytes', file_size.get('size', 0))
-            
-        # Tvinga fram ett rent heltal via float-omväg ifall det är en textsträng med decimaler
-        clean_size = int(float(str(file_size).strip()))
-    except Exception as type_err:
-        print(f"[DB WARNING] Kunde inte tolka filstorlek '{file_size}' automatisk fallback till 0: {type_err}")
-        clean_size = 0
-    # ---------------------------------------------------------------------
 
-    stats[0] += 1          # Totala filer +1
-    stats[1] += clean_size # Totala bytes +storlek (Helt säkrad siffra)
-    stats[4] += 1          # Dagens filer +1
-    stats[5] += clean_size # Dagens bytes +storlek
-    save_advanced_stats(stats)
+def update_stats_on_complete(file_size):
+    """Count one completed transfer into the Total and Today columns.
+
+    The whole rotate-load-increment-save sequence happens under ONE _disk_lock
+    acquisition, which is the entire point of this function: dcc.py used to do
+    it by hand with load and save as separate locked calls, and concurrent
+    completions silently overwrote each other's increments.
+    """
+    clean_size = _coerce_file_size(file_size)
+    with _disk_lock:
+        stats = _load_advanced_stats_unlocked()
+        rotated = _rotate_day_unlocked(stats)
+        stats[0] += 1           # Total files
+        stats[1] += clean_size  # Total bytes
+        stats[4] += 1           # Today files
+        stats[5] += clean_size  # Today bytes
+        _save_advanced_stats_unlocked(stats)
+    if rotated:
+        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till år.")
+    return stats
+
 
 def get_speed_record():
     """Hämtar det sparade hastighetsrekordet i bytes/s från hårddisken.
