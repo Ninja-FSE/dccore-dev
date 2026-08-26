@@ -1,6 +1,6 @@
 # DCCore
 
-**Current version: v1.10.0-RC1**
+**Current version: v1.10.0-RC2**
 
 An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe architecture) built in Python 3.10, running on both Linux and Windows for any IRC Network. The script is fully optimized for Proxmox LXC containers, delivering file-sharing notifications, advanced database statistics, and real-time monitoring with mIRC colors at an absolute gold standard.
 
@@ -11,6 +11,7 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 - **🎨 Central mIRC Block Theme:** Fully themed via `announce.py` featuring heavy color blocks (Teal/Dark Red) and crisp white background plates, clinically cleared of color bleeding and client-specific cache artifacts.
 - **📊 Advanced 7-Column Database:** Bulletproof live statistics (`stats.txt`) tracking total sent files/bytes, yesterday's and today's activity, and synced list dates in real time with forced disk-flush (`fsync`) for local storage optimization.
 - **🛠️ Dedicated VIP Debug Channel:** A fully automated network gateway streaming timestamped and color-coded CLI logs (`[SENT]`, `[PART]`, `[QUIT]`, `[JOIN]`) live to the `#your-debug` channel via the VIP Express queue.
+- **🔐 Authenticated Admin Console (DCC CHAT):** A private administration channel over DCC CHAT, gated on two independent factors - the operator's Undernet services login (proved by their `+x` host, which only the IRC server can issue) and a PBKDF2-hashed password. Replaces the old nick-based admin gate, which anyone could inherit simply by taking the nick while the real operator was offline. Read-only commands (`status`, `queue`, `slots`, `bans`, `uptime`, `version`) and action commands (`ban`, `unban`, `clearqueue`, `rehash`, `update`) all run from the same session; runtime reports can be routed there instead of the public debug channel. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md).
 
 ## 📁 File Structure
 
@@ -37,6 +38,9 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 
 ### Prerequisites
 The script is developed and tested for **Python 3.10+** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox), and runs on Windows as well - the platform differences are isolated in `platform_compat.py` and covered by CI on both operating systems.
+
+### Local overrides
+Copy [`local_config.py.sample`](local_config.py.sample) to `local_config.py` (gitignored) to set machine-specific values - such as the admin console's `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH` - without editing a tracked file. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) for the full admin console setup guide.
 
 ### Starting the Daemon
 To perform a completely clean reboot of the bot, clear hidden cache files, and force a fresh reload of code modifications into RAM, execute:
