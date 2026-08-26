@@ -236,26 +236,31 @@ fetch_queue = {}
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
 # ---------------------------------------------------------------------
-# Flask is an OPTIONAL dependency. If it is not installed, webserver.start()
+# OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
+# a network-facing, unauthenticated surface should never be on just because
+# someone pulled and restarted. Opt in from local_config.py, not here.
+#
+# Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
 # logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
 # never crashes the daemon and CI never installs Flask, so this stays inert
 # there. Install it yourself (`pip install flask`) to actually use the
 # dashboard.
-WEBUI_ENABLED = True
+WEBUI_ENABLED = False
 
-# NO AUTHENTICATION. Every /api/* route is open, read-only, to anyone who can
-# reach this host:port - there is no login, no token, no password.
+# NO AUTHENTICATION. Every /api/* route is open to anyone who can reach this
+# host:port - there is no login, no token, no password. The read-only routes
+# (queue/search/file lists) are harmless to expose; the mutating ones (search
+# broadcast, cross-bot fetch) let anyone who can reach this port make the bot
+# dial out and pull files from other IRC bots.
 #
-# "0.0.0.0" is deliberate, not an oversight: it makes the dashboard reachable
-# from other machines on your LAN (phone, laptop), which is the whole point of
-# a dashboard. That is only safe on a trusted LAN.
+# "127.0.0.1" is the tracked default: safe out of the box, reachable only from
+# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# reachable from other devices on your LAN (phone, laptop) - only do that on a
+# network you trust, since there is still no authentication.
 #
 #   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. DO NOT put this host on
 #   any network you do not trust, without adding authentication first.
-#
-# If you want it reachable only from this machine, set this to "127.0.0.1" in
-# local_config.py.
-WEBUI_HOST    = "0.0.0.0"
+WEBUI_HOST    = "127.0.0.1"
 WEBUI_PORT    = 8420
 
 # ---------------------------------------------------------------------
