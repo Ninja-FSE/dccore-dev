@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DCCore Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span class="brand-name" id="brand-name">DCCore</span>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item is-active" data-view="search">
+        <span class="nav-icon">&#9906;</span> Search
+      </button>
+      <button class="nav-item" data-view="queue">
+        <span class="nav-icon">&#8801;</span> Queue
+      </button>
+      <button class="nav-item" data-view="filelists">
+        <span class="nav-icon">&#9776;</span> File Lists
+      </button>
+    </nav>
+
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-label">Status</span>
+        <span class="status-value">
+          <span class="status-dot" id="conn-dot"></span>
+          <span id="conn-text">connecting&hellip;</span>
+        </span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Slots</span>
+        <span class="status-value" id="status-slots">&mdash;</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Queued</span>
+        <span class="status-value" id="status-queued">&mdash;</span>
+      </div>
+    </div>
+
+    <div class="sidebar-foot">
+      Read-only &middot; no authentication &middot; LAN only
+    </div>
+  </aside>
+
+  <div class="main">
+
+    <header class="topbar">
+      <h1 class="topbar-title" id="page-title">Search</h1>
+      <p class="topbar-sub" id="page-sub">Find a file across the current master list.</p>
+    </header>
+
+    <section class="view is-active" id="view-search">
+      <form class="search-bar" id="search-form">
+        <input type="text" id="search-input" class="search-input"
+               placeholder="Search by filename&hellip; (min 1 word)" autocomplete="off">
+        <button type="submit" class="btn btn-accent">Search</button>
+      </form>
+
+      <div class="table-wrap">
+        <table class="data-table" id="search-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Path</th>
+              <th>Size</th>
+              <th>Channel</th>
+            </tr>
+          </thead>
+          <tbody id="search-body">
+            <tr class="empty-row"><td colspan="4">Type something and press Search.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="view" id="view-queue">
+      <div class="stat-row">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-slots">&mdash;</div>
+          <div class="stat-label">Active slots</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-files">&mdash;</div>
+          <div class="stat-label">Files queued</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-users">&mdash;</div>
+          <div class="stat-label">Users waiting</div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table" id="queue-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Next file</th>
+              <th>Count</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="queue-body">
+            <tr class="empty-row"><td colspan="4">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="view" id="view-filelists">
+      <div class="table-wrap">
+        <table class="data-table" id="filelists-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Size</th>
+              <th>Format</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody id="filelists-body">
+            <tr class="empty-row"><td colspan="4">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

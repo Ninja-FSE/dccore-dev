@@ -182,6 +182,36 @@ vip_queue         = []       # Isolerad express-kö för sök-headers och reklam
 active_transfers  = []       # Trådade aktiva DCC-sändningar i realtid
 
 # ---------------------------------------------------------------------
+# WEB DASHBOARD (read-only status page, see webserver.py)
+# ---------------------------------------------------------------------
+# OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
+# a network-facing, unauthenticated surface should never be on just because
+# someone pulled and restarted. Opt in from local_config.py, not here.
+#
+# Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
+# logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
+# never crashes the daemon and CI never installs Flask, so this stays inert
+# there. Install it yourself (`pip install flask`) to actually use the
+# dashboard.
+WEBUI_ENABLED = False
+
+# NO AUTHENTICATION. Every /api/* route is open to anyone who can reach this
+# host:port - there is no login, no token, no password. The read-only routes
+# (queue/search/file lists) are harmless to expose; the mutating ones (search
+# broadcast, cross-bot fetch) let anyone who can reach this port make the bot
+# dial out and pull files from other IRC bots.
+#
+# "127.0.0.1" is the tracked default: safe out of the box, reachable only from
+# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# reachable from other devices on your LAN (phone, laptop) - only do that on a
+# network you trust, since there is still no authentication.
+#
+#   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. DO NOT put this host on
+#   any network you do not trust, without adding authentication first.
+WEBUI_HOST    = "127.0.0.1"
+WEBUI_PORT    = 8420
+
+# ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)
 # ---------------------------------------------------------------------
 # Create local_config.py next to this file to override anything above for one

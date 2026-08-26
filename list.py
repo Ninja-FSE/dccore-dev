@@ -122,6 +122,106 @@ def find_latest_list():
         print(f"[SEARCH ERROR] Kunde inte hitta senaste listan: {e}")
     return None
 
+def _split_entry_line(line_strip):
+    """Pull the filename and size back out of one "!..." master-list line.
+
+    Mirrors the exact line update_list.py writes (update_list.py:216):
+    "!<nick> <filename>  ::INFO:: <size>". Best-effort on purpose - this feeds
+    the read-only web dashboard, never IRC, so a line that does not split
+    cleanly returns what it can rather than raising.
+    """
+    _, _, rest = line_strip.partition(" ")
+    if "  ::INFO:: " in rest:
+        filename, _, size = rest.rpartition("  ::INFO:: ")
+    else:
+        filename, size = rest, ""
+    return filename.strip(), size.strip()
+
+
+def find_matching_entries(search_words, limit=None):
+    """IRC-agnostic core of the master-list search, extracted from execute_search().
+
+    Scans the current master list exactly the way execute_search() always has -
+    same file, same "!" line filter, same "every word must appear (case-
+    insensitive) on the line" rule - but returns plain data instead of talking to
+    IRC, so it has no queue_message/announce calls and no user/channel formatting.
+    execute_search() calls this and keeps doing its own presentation on top;
+    webserver.py's build_search_payload() and build_filelists_payload() call it
+    too, with their own limit.
+
+    Also carries FOLDER context forward, which execute_search() never needed and
+    so never recorded: update_list.py writes each folder as a
+    "D:\\MUSIC\\<folder>\\" line wrapped in a pair of "====...====" rule lines
+    (update_list.py:190-195) before that folder's file lines. That header text is
+    tracked here and attached to every entry as "folder".
+
+    An empty search_words list matches every "!" line - this is what
+    build_filelists_payload() wants. That is a deliberate difference from
+    execute_search()'s own historical behaviour, where a search term that
+    stripped down to zero words (e.g. "---") matched nothing at all; callers
+    that need that old behaviour must check for an empty search_words list
+    themselves before calling in, same as execute_search() now does below.
+
+    Returns (entries, total_matches): `entries` is capped at `limit` (None means
+    unlimited) and each is {"line": the raw "!..." text, "folder": the header
+    text in effect or None, "filename": parsed filename, "size": parsed size
+    string}; `total_matches` counts every match regardless of the cap, which is
+    what the IRC search header reports even when only a handful are shown.
+    """
+    entries = []
+    total_matches = 0
+
+    current_list_path = find_latest_list()
+    if not current_list_path or not os.path.exists(current_list_path):
+        return entries, total_matches
+
+    current_folder = None
+    # "none" -> saw the opening rule line, now expecting the folder line ("open")
+    # -> saw the folder line, now expecting the closing rule line ("folder_seen")
+    state = "none"
+
+    with open(current_list_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line_strip = line.replace('\x00', '').strip()
+            if not line_strip:
+                continue
+
+            is_rule = set(line_strip) == {"="}
+            if state == "none":
+                if is_rule:
+                    state = "open"
+                    continue
+            elif state == "open":
+                if is_rule:
+                    continue  # malformed doubled rule; keep waiting for the folder line
+                current_folder = line_strip
+                state = "folder_seen"
+                continue
+            elif state == "folder_seen":
+                state = "none"
+                if is_rule:
+                    continue  # the expected closing rule
+
+            if not line_strip.startswith("!"):
+                continue
+
+            line_lower = line_strip.lower()
+            if search_words and not all(word in line_lower for word in search_words):
+                continue
+
+            total_matches += 1
+            if limit is None or len(entries) < limit:
+                filename, size = _split_entry_line(line_strip)
+                entries.append({
+                    "line": line_strip,
+                    "folder": current_folder,
+                    "filename": filename,
+                    "size": size,
+                })
+
+    return entries, total_matches
+
+
 def execute_search(irc_sock, user, search_term, channel):
     """Söker i listfilen - Kopierar och skickar raderna spikrakt precis som de står!"""
         # 🛡️ GLOBAL UNDERHÅLLSSPÄRR: Blockera sökningen om växeln är aktiv i config och uppdatering pågår!
@@ -163,36 +263,21 @@ def execute_search(irc_sock, user, search_term, channel):
         clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
         search_words = [w.strip().lower() for w in clean_term.split() if w.strip()]
         
-        matches = []
-        total_matches = 0
         # ---------------------------------------------------------------------
         # DIREKT-KOPIERANDE SKANNING (0% Omformatering - Skickar filraden rå!)
         # ---------------------------------------------------------------------
-        with open(current_list_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                # Ta bort dolda noll-bytes och rensa radslut
-                line_strip = line.replace('\x00', '').strip()
-                
-                # SÄKERHETSFILTER: Släpp ENBART fram sanna fildelningsrader som börjar med utropstecken
-                if not line_strip or not line_strip.startswith("!"):
-                    continue
-                
-                line_lower = line_strip.lower()
-                
-                # Kontrollera om ALLA sökord finns på den aktuella raden
-                is_match = True
-                for word in search_words:
-                    if word not in line_lower:
-                        is_match = False
-                        break
-                
-                if is_match and search_words:
-                    total_matches += 1
-                    
-                    # Spara raden exakt som den står på disken upp till din max-gräns
-                    max_results = getattr(config, 'MAX_SEARCH_RESULTS', 5)
-                    if len(matches) < max_results:
-                        matches.append(line_strip)
+        # find_matching_entries() treats an empty search_words as "match
+        # everything" (build_filelists_payload() wants that). execute_search()
+        # never has - a search term that stripped down to zero words (e.g.
+        # "---") has always matched nothing - so that historical behaviour is
+        # preserved explicitly here rather than inside the shared function.
+        max_results = getattr(config, 'MAX_SEARCH_RESULTS', 5)
+        if search_words:
+            found_entries, total_matches = find_matching_entries(search_words, limit=max_results)
+        else:
+            found_entries, total_matches = [], 0
+        # Raden sparas exakt som den står på disken - matches skickas rått till mIRC.
+        matches = [entry["line"] for entry in found_entries]
 
         if matches:
             # Skicka din officiella sök-header privat till mIRC

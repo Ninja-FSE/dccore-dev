@@ -54,3 +54,22 @@ ADMIN_CHANNEL_COMMANDS = True
 # have it.
 DEBUG_TO_CHANNEL = True
 DEBUG_TO_CONSOLE = True
+
+
+# ---------------------------------------------------------------------
+# WEB DASHBOARD
+# ---------------------------------------------------------------------
+# A read-only status page (search / queue / file lists) served by webserver.py.
+# Flask is optional - if it is not installed, the dashboard logs a line and
+# stays off; it never stops the daemon from starting.
+WEBUI_ENABLED = True
+
+# NO AUTHENTICATION IS PROVIDED. Every /api/* route on this port is open,
+# read-only, to anyone who can reach it - no login, no token, no password.
+# "0.0.0.0" is the tracked default and makes it reachable from anywhere on
+# your LAN (phone, laptop). DO NOT change this to a public/WAN-facing address
+# and DO NOT port-forward this port to the internet - there is nothing here to
+# stop a stranger from reading it. Set this to "127.0.0.1" instead to restrict
+# the dashboard to this machine only.
+WEBUI_HOST = "0.0.0.0"
+WEBUI_PORT = 8420

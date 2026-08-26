@@ -65,7 +65,7 @@ def main():
         # Mirrors .github/workflows/tests.yml, in the same order.
         ("every module imports", [py, "-c",
          "import config, platform_compat, db, stats_mgr, queue_mgr, security, "
-         "list, announce, dcc, irc, commands, update_list; print('ok')"]),
+         "list, announce, dcc, irc, commands, update_list, webserver; print('ok')"]),
         ("compile every source file", [py, "-m", "compileall", "-q", "."]),
         ("full suite", [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."]),
     ]
