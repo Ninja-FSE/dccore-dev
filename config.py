@@ -182,6 +182,31 @@ vip_queue         = []       # Isolerad express-kö för sök-headers och reklam
 active_transfers  = []       # Trådade aktiva DCC-sändningar i realtid
 
 # ---------------------------------------------------------------------
+# WEB DASHBOARD (read-only status page, see webserver.py)
+# ---------------------------------------------------------------------
+# Flask is an OPTIONAL dependency. If it is not installed, webserver.start()
+# logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
+# never crashes the daemon and CI never installs Flask, so this stays inert
+# there. Install it yourself (`pip install flask`) to actually use the
+# dashboard.
+WEBUI_ENABLED = True
+
+# NO AUTHENTICATION. Every /api/* route is open, read-only, to anyone who can
+# reach this host:port - there is no login, no token, no password.
+#
+# "0.0.0.0" is deliberate, not an oversight: it makes the dashboard reachable
+# from other machines on your LAN (phone, laptop), which is the whole point of
+# a dashboard. That is only safe on a trusted LAN.
+#
+#   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. DO NOT put this host on
+#   any network you do not trust, without adding authentication first.
+#
+# If you want it reachable only from this machine, set this to "127.0.0.1" in
+# local_config.py.
+WEBUI_HOST    = "0.0.0.0"
+WEBUI_PORT    = 8420
+
+# ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)
 # ---------------------------------------------------------------------
 # Create local_config.py next to this file to override anything above for one

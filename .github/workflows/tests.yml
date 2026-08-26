@@ -6,9 +6,9 @@ name: tests
 # not quietly broken the other side.
 on:
   push:
-    branches: [main, beta, windows]
+    branches: [main, beta, windows, beta-web]
   pull_request:
-    branches: [main, beta, windows]
+    branches: [main, beta, windows, beta-web]
   workflow_dispatch:
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
         # Catches a syntax error or a bad import before the suite even starts,
         # and would have caught the module-level mistakes found by hand this week.
         run: |
-          python -c "import config, db, stats_mgr, queue_mgr, security, list, announce, dcc, irc, commands, update_list; print('all modules import')"
+          python -c "import config, db, stats_mgr, queue_mgr, security, list, announce, dcc, irc, commands, update_list, webserver; print('all modules import')"
 
       - name: Compile every source file
         run: python -m compileall -q .

@@ -95,6 +95,20 @@ def startup():
     print("[SYSTEM] Initierar flood-skyddskön...")
     threading.Thread(target=queue_mgr.queue_worker, daemon=True).start()
 
+    # Optional read-only web dashboard. Lazy import (not at module top) so a
+    # missing Flask install - the normal case, since it is an optional
+    # dependency CI never installs - never affects anything that imports
+    # oserve.py itself; only the dashboard feature is unavailable.
+    try:
+        import webserver
+    except Exception as web_err:
+        print(f"[WEBUI] Could not import webserver: {web_err}")
+    else:
+        if getattr(config, "WEBUI_ENABLED", True):
+            threading.Thread(target=webserver.start, daemon=True).start()
+        else:
+            print("[WEBUI] Disabled via config.WEBUI_ENABLED = False.")
+
 
 def run_forever():
     """The reconnect loop. Never returns; only the network lives in here.
