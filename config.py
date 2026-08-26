@@ -15,7 +15,7 @@ SERVER        = "irc.undernet.org"
 PORT          = 6667
 NICKNAME      = "DCCore"
 ALT_NICKNAME = "DCCore_"
-ADMIN_NICK    = "FLAC,Samoth"
+ADMIN_NICK    = "FLAC"
 CHANNEL       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
 DEBUG_CHANNEL = "#flac-serv"
 
