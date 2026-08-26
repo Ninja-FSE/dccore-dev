@@ -5,10 +5,21 @@ name: tests
 # future port is headed, and which is the only thing that can prove a change has
 # not quietly broken the other side.
 on:
+  # Long-lived branches only, so a feature branch does not get a push run AND a
+  # pull_request run for the same commit.
   push:
-    branches: [main, beta, windows]
+    branches: [main, beta, beta-web, windows]
+
+  # Every pull request, whatever it targets.
+  #
+  # This list used to name branches, which created a chicken-and-egg trap:
+  # GitHub evaluates a pull_request trigger using the workflow file on the BASE
+  # branch, not the PR's own copy. So a PR opening against a branch that was not
+  # yet in this list could not run CI - including the PR that would have added
+  # it. #54 hit exactly that and had to be verified by hand instead.
   pull_request:
-    branches: [main, beta, windows]
+    branches: ['**']
+
   workflow_dispatch:
 
 jobs:
