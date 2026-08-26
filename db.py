@@ -302,7 +302,7 @@ def check_and_rotate_day():
         if rotated:
             _save_advanced_stats_unlocked(stats)
     if rotated:
-        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till år.")
+        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till igår.")
     return stats
 
 
@@ -324,7 +324,7 @@ def update_stats_on_complete(file_size):
         stats[5] += clean_size  # Today bytes
         _save_advanced_stats_unlocked(stats)
     if rotated:
-        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till år.")
+        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till igår.")
     return stats
 
 
