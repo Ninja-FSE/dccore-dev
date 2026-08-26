@@ -805,7 +805,7 @@ def parse_offer(ctcp_text):
     #
     # Counting back from the end works only for the active form. On a passive
     # offer parts[-2] is the literal 0 and parts[-1] is the token, so
-    # "DCC CHAT chat 3644888149 0 350" parsed as 0.0.0.0 port 350 and was thrown
+    # "DCC CHAT chat 3405803861 0 350" parsed as 0.0.0.0 port 350 and was thrown
     # out as unusable - which is exactly what the field report showed.
     #
     # The third token is the "chat" argument, but not every client sends one, so

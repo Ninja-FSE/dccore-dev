@@ -321,7 +321,7 @@ no password refuses everyone rather than letting anyone in.
 **The log says the connection to you timed out.**
 
 ```
-[ADMINCHAT] Could not connect to FLAC at 93.164.139.41:55101 (timed out);
+[ADMINCHAT] Could not connect to FLAC at 203.0.113.41:55101 (timed out);
 falling back to listening.
 ```
 
@@ -358,7 +358,7 @@ Fix it properly in mIRC under **Options → Connect → Local Info** as above.
 **The log says "Unusable DCC CHAT offer".**
 
 ```
-[ADMINCHAT] Unusable DCC CHAT offer from FLAC: 'DCC CHAT chat 3644888149 0 350'
+[ADMINCHAT] Unusable DCC CHAT offer from FLAC: 'DCC CHAT chat 3405803861 0 350'
 ```
 
 That particular one was a parser bug, now fixed — the offer above is a valid
