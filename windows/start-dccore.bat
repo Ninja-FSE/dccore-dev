@@ -1,0 +1,90 @@
+@echo off
+setlocal
+
+rem ---------------------------------------------------------------------
+rem  DCCore launcher for Windows.
+rem
+rem  The important line is the cd below. Every data path in config.py is
+rem  relative - ./data/bans.txt, ./lists - so they resolve against the
+rem  working directory. Double-clicking this file from anywhere, or
+rem  running it from a shortcut, would otherwise start the daemon with a
+rem  working directory that is not the repository, and it would quietly
+rem  create an empty data folder somewhere else and boot with no bans,
+rem  no queue and no list.
+rem
+rem  Usage:
+rem    start-dccore.bat          check the setup, then start the daemon
+rem    start-dccore.bat check    check the setup and stop
+rem ---------------------------------------------------------------------
+
+cd /d "%~dp0.."
+
+rem --- find an interpreter ----------------------------------------------
+set "PY="
+where py >nul 2>&1 && set "PY=py -3"
+if not defined PY where python >nul 2>&1 && set "PY=python"
+
+if not defined PY (
+    echo.
+    echo   Python was not found.
+    echo.
+    echo   Install Python 3.10 or newer from python.org and tick
+    echo   "Add python.exe to PATH" during setup, then run this again.
+    echo.
+    pause
+    exit /b 1
+)
+
+rem --- check-only mode ---------------------------------------------------
+if /i "%~1"=="check" (
+    %PY% windows\check-setup.py
+    echo.
+    pause
+    exit /b %errorlevel%
+)
+
+rem --- refuse to start without a local config ---------------------------
+if not exist "local_config.py" (
+    echo.
+    echo   No local_config.py found.
+    echo.
+    echo   Copy local_config.py.sample to local_config.py and fill it in.
+    echo   Without it the daemon uses the defaults in config.py, which
+    echo   point at somebody else's live bot and channels.
+    echo.
+    pause
+    exit /b 1
+)
+
+rem --- refuse to start on a broken or dangerous config -------------------
+rem  check-setup.py fails on a missing music directory, and on a config
+rem  still pointing at the production bot's nick or channels. That second
+rem  one is worth blocking: it would put a near-identical second bot into
+rem  live trading channels, which can get the other operator banned too.
+%PY% windows\check-setup.py >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo   Setup check failed - not starting. Details:
+    echo.
+    %PY% windows\check-setup.py
+    echo.
+    pause
+    exit /b 1
+)
+
+rem --- go ----------------------------------------------------------------
+echo.
+echo   Starting DCCore.  Press Ctrl-C in this window to stop it.
+echo.
+%PY% oserve.py
+set "RC=%errorlevel%"
+
+echo.
+if "%RC%"=="0" (
+    echo   DCCore exited normally.
+) else (
+    echo   DCCore exited with code %RC%.
+)
+echo.
+pause
+exit /b %RC%
