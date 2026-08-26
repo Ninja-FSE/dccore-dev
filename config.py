@@ -5,7 +5,7 @@
 # 1. SYSTEM- OCH GLOBALA MOTORINSTÄLLNINGAR
 # ---------------------------------------------------------------------
 DEBUG_MODE     = False
-SCRIPT_VERSION = "DCCore v1.10.0-RC1"
+SCRIPT_VERSION = "DCCore v1.10.0-RC2"
 LIST_BASE_NAME = "DCCore"
 
 # ---------------------------------------------------------------------
@@ -15,7 +15,7 @@ SERVER        = "irc.undernet.org"
 PORT          = 6667
 NICKNAME      = "DCCore"
 ALT_NICKNAME = "DCCore_"
-ADMIN_NICK    = "FLAC"
+ADMIN_NICK    = "FLAC,Samoth"
 CHANNEL       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
 DEBUG_CHANNEL = "#flac-serv"
 
