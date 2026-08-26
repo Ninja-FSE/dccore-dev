@@ -103,6 +103,75 @@ def apply_keepalive(sock, idle=10, interval=2, count=3):
 
 
 # ---------------------------------------------------------------------
+# Console encoding
+# ---------------------------------------------------------------------
+def install_console_encoding_guard(streams=None):
+    """Stop a limited console code page from killing the daemon.
+
+    The log strings in this project contain Swedish characters, and print()
+    encodes with whatever code page the attached stream happens to use. That
+    is fine on a Western European box, where cp1252 contains a-ring, a-umlaut
+    and o-umlaut - and fatal anywhere else:
+
+        cp1252  (Western European)   encodes them      no symptom
+        cp1253  (Greek)              cannot            UnicodeEncodeError
+        cp1251  (Cyrillic)           cannot            UnicodeEncodeError
+        cp932   (Japanese)           cannot            UnicodeEncodeError
+        ascii   (POSIX/C locale)     cannot            UnicodeEncodeError
+
+    An uncaught UnicodeEncodeError from a print() kills whatever thread ran
+    it. list.py prints on every completed search, so on a Greek-locale box the
+    search thread dies the first time anyone searches.
+
+    It only bites when the stream is NOT an interactive console: PEP 528 makes
+    Python talk UTF-16 to a real console window regardless of code page, so a
+    developer running the daemon in a terminal sees nothing wrong. Redirect
+    that same command to a log file, or run it as a service, and every print()
+    with a non-ASCII character becomes a crash. That is exactly how this
+    daemon is meant to run.
+
+    Two layers, because either alone leaves a gap:
+
+      encoding="utf-8"   so a redirected log keeps the real characters
+      errors="replace"   so ANY stream that still cannot encode something
+                         degrades to "?" instead of raising
+
+    The real fix is for the log strings to be English - this only guarantees
+    that a character can never take the process down while that work happens.
+
+    Returns the list of stream names actually reconfigured, so startup can say
+    so and the tests can assert on it.
+    """
+    if streams is None:
+        streams = (("stdout", sys.stdout), ("stderr", sys.stderr))
+
+    changed = []
+    for name, stream in streams:
+        # pythonw.exe gives None for both, and a test harness may swap in an
+        # object with no reconfigure() at all. Neither is an error.
+        if stream is None:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+
+        current = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        try:
+            if current == "utf8":
+                # Already lossless. Only pin the error handler, so that a
+                # later reconfigure elsewhere cannot reintroduce the crash.
+                reconfigure(errors="replace")
+            else:
+                reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError, AttributeError):
+            # A detached or already-closed stream. Nothing to protect.
+            continue
+        changed.append(name)
+
+    return changed
+
+
+# ---------------------------------------------------------------------
 # Long paths
 # ---------------------------------------------------------------------
 def long_path(path):

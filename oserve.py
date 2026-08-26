@@ -4,6 +4,14 @@ import time
 import sys
 import os
 
+# FIRST, before anything else can print. Several modules print at import time,
+# and on a console whose code page cannot encode the Swedish log strings
+# (cp1253, cp1251, cp932, ascii - anything but Western European) an unguarded
+# print() raises UnicodeEncodeError and takes the thread down with it. See
+# platform_compat.install_console_encoding_guard for the full explanation.
+import platform_compat
+platform_compat.install_console_encoding_guard()
+
 # Ladda alla botens specialiserade moduler
 import config
 
