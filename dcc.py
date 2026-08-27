@@ -1058,14 +1058,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # ---------------------------------------------------------------------
         try:
             import db
-            stats = db.load_advanced_stats()
-            if isinstance(stats, list) and len(stats) > 6:
-                stats[0] = str(int(stats[0]) + 1)          
-                stats[1] = str(int(stats[1]) + file_size)  
-                stats[4] = str(int(stats[4]) + 1)          
-                stats[5] = str(int(stats[5]) + file_size)  
-                db.save_advanced_stats(stats)              
-                print(f"[DB COUNTER] Statistik uppdaterad live på disken! (Skickade filer: {stats[0]}st)")
+            # ONE locked read-modify-write inside db, instead of a load here, a
+            # mutate here, and a separate save here. MAX_DCC_SLOTS transfers
+            # finish concurrently, and the unsynchronised version let whichever
+            # thread saved second discard the other's increment - permanently,
+            # since nothing ever recomputes these counters. It also rotates the
+            # day, so a transfer completing after midnight is counted correctly.
+            stats = db.update_stats_on_complete(file_size)
+            print(f"[DB COUNTER] Statistik uppdaterad live på disken! (Skickade filer: {stats[0]}st)")
         except Exception as db_err:
             print(f"[DB ERROR] Kunde inte räkna upp fildelningsstatistiken via db-modulen: {db_err}")
         # ---------------------------------------------------------------------

@@ -176,43 +176,14 @@ def format_size_human(bytes_size):
         bytes_size /= 1024.0
     return f"{bytes_size:.1f}PB"
 
-def load_advanced_stats():
-    """Format i stats.txt: total_files total_bytes yest_files yest_bytes today_files today_bytes last_date"""
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    default_stats = [0, 0, 0, 0, 0, 0, today_str]
-    STATS_FILE = config.STATS_FILE 
-    if not os.path.exists(STATS_FILE):
-        return default_stats
-    try:
-        with open(STATS_FILE, "r") as f:
-            parts = f.read().strip().split()
-            if len(parts) == 7:
-                return [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5]), parts[6]]
-            elif len(parts) == 2:
-                return [int(parts[0]), int(parts[1]), 0, 0, 0, 0, today_str]
-    except:
-        pass
-    return default_stats
-
-def save_advanced_stats(stats):
-    STATS_FILE = config.STATS_FILE 
-    try:
-        with open(STATS_FILE, "w") as f:
-            f.write(f"{stats[0]} {stats[1]} {stats[2]} {stats[3]} {stats[4]} {stats[5]} {stats[6]}")
-    except Exception as e:
-        print(f"[STATS ERROR] Kunde inte spara stats.txt: {e}")
-
-def check_and_rotate_day():
-    stats = load_advanced_stats()
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    if stats[6] != today_str:
-        stats[2] = stats[4]
-        stats[3] = stats[5]
-        stats[4] = 0
-        stats[5] = 0
-        stats[6] = today_str
-        save_advanced_stats(stats)
-    return stats
+# The stats.txt helpers that used to live here (load_advanced_stats,
+# save_advanced_stats, check_and_rotate_day) were duplicates of the ones in
+# db.py and were called by nothing but each other - every real caller,
+# including the two below, already goes through db. They are removed rather
+# than left dormant because this copy still wrote with a truncating
+# open(STATS_FILE, "w"), the exact bug db.save_advanced_stats was fixed to
+# avoid: a crash mid-write leaves a short row, which the loader discards,
+# resetting every counter to zero. Wiring them back in would undo that fix.
 
 def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed):
     """Skickar den färdigbakade, block-designade fildelningsnotisen när en fil är helt klar!"""
