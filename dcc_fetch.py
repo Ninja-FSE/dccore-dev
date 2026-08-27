@@ -89,32 +89,49 @@ RECV_CHUNK = 65536
 # was enqueued.
 _FILENAME_CHARSET_RE = re.compile(r'[^\w\-_\. \(\)]')  # mirrors dcc.py:762
 
-# Mirrors webserver.reject_if_unsafe_for_irc_line()'s \r/\n rejection - same
-# injection class: a value that gets interpolated into a raw outbound IRC
-# line lets an embedded line break smuggle one or more ADDITIONAL lines
-# (QUIT, JOIN/PART an arbitrary channel, PRIVMSG/NOTICE as this bot, ...)
-# past whatever single line was intended. \x01 is rejected here too, on top
-# of what that helper checks, because unlike a plain PRIVMSG body this value
-# is later wrapped in a CTCP (\x01...\x01) reply (see _serve_passive_offer())
-# - an embedded \x01 closes that CTCP early and lets the attacker inject
-# arbitrary trailing content into what the receiving peer parses as a second
-# CTCP or as plain text.
+# THE canonical definition of "which bytes are unsafe to interpolate into a
+# raw outbound IRC/CTCP line" - webserver.reject_if_unsafe_for_irc_line()
+# imports and calls contains_unsafe_ctcp_bytes() below rather than keeping
+# its own copy of this regex. That merge happened after this exact bug class
+# recurred a THIRD time (once in webserver.py's web-enqueue routes, once
+# here in dcc_fetch's offer parsing, and a third time because
+# reject_if_unsafe_for_irc_line() rejected \r/\n but not \x01, so it was not
+# actually equivalent to this check) - see this project's CONVENTIONS.md rule
+# against writing one fact in two places. If you are ever tempted to add a
+# second copy of this regex anywhere else in the codebase: don't - import
+# this one instead.
+#
+# A value that gets interpolated into a raw outbound IRC line lets an
+# embedded line break smuggle one or more ADDITIONAL lines (QUIT, JOIN/PART
+# an arbitrary channel, PRIVMSG/NOTICE as this bot, ...) past whatever single
+# line was intended. \x01 is unsafe for the same reason PLUS one more: any of
+# these values may end up wrapped in a CTCP (\x01...\x01) reply (see
+# _serve_passive_offer()) - an embedded \x01 closes that CTCP early and lets
+# the attacker inject arbitrary trailing content into what the receiving
+# peer parses as a second CTCP or as plain text. Rejecting \x01 everywhere,
+# even for values that only ever reach a plain PRIVMSG body (not a CTCP), is
+# deliberately conservative: a PRIVMSG body containing \x01 can itself be
+# interpreted as an inline CTCP by the receiving client.
 #
 # Checked at PARSE time (parse_dcc_send_offer(), below) for both
 # offer["filename"] (active and passive alike) and offer["token"] (passive
 # only) - not only at the one call site that currently echoes them back
-# (_serve_passive_offer()) - because this is the SECOND time this exact bug
-# class has appeared in this feature (see reject_if_unsafe_for_irc_line()'s
-# own docstring for the first, in webserver.py's web-enqueue routes).
+# (_serve_passive_offer()) - because this bug class had already recurred once
+# by the time that check was added (see the module-merge note above).
 # Rejecting the whole offer here means any future call site that touches
 # offer["filename"]/offer["token"] inherits the protection automatically,
 # instead of depending on every future author remembering to sanitize again.
 _UNSAFE_CTCP_BYTES_RE = re.compile(r'[\r\n\x01]')
 
 
-def _contains_unsafe_ctcp_bytes(value):
+def contains_unsafe_ctcp_bytes(value):
     """True if `value` contains a byte that must never reach a raw outbound
-    IRC/CTCP line unsanitized - see _UNSAFE_CTCP_BYTES_RE's comment above."""
+    IRC/CTCP line unsanitized - see _UNSAFE_CTCP_BYTES_RE's comment above.
+
+    Public (no leading underscore) because webserver.py's
+    reject_if_unsafe_for_irc_line() imports and calls this directly - see
+    that comment for why the two checks were merged into this one function.
+    """
     return bool(_UNSAFE_CTCP_BYTES_RE.search(str(value)))
 
 
@@ -134,14 +151,23 @@ def _ensure_fetch_queue():
     return config.fetch_queue
 
 
-def new_fetch_row(bot, filename, now=None):
+def new_fetch_row(bot, filename, now=None, request_type="file"):
     """Build a fresh `pending` row in the shape every reader of
     config.fetch_queue expects. Does not insert it - callers decide the key.
+
+    request_type is "file" (default - existing behaviour: admission control
+    requires an exact bot+filename match, see _claim_matching_offer_locked())
+    or "list" (a cross-bot list fetch: we send a bare "@<bot>", per irc.py's
+    own @<nick> trigger, and cannot know in advance what the target bot will
+    name its list zip - admission control for these rows matches on bot
+    alone). Every existing call site that does not pass request_type keeps
+    getting "file" rows, so nothing about today's behaviour changes.
     """
     now = time.time() if now is None else now
     return {
         "bot": str(bot).strip(),
         "filename": str(filename).strip(),
+        "request_type": request_type if request_type in ("file", "list") else "file",
         "state": "pending",
         "requested_at": now,
         "offered_at": None,
@@ -152,7 +178,7 @@ def new_fetch_row(bot, filename, now=None):
     }
 
 
-def enqueue_fetch(bot, filename):
+def enqueue_fetch(bot, filename, request_type="file"):
     """Append one `pending` row to config.fetch_queue and return its id.
 
     Does NOT dispatch anything - check_fetch_queue() (the background
@@ -164,7 +190,7 @@ def enqueue_fetch(bot, filename):
     with _fetch_lock():
         while request_id in queue:  # practically never, but be certain
             request_id = uuid.uuid4().hex[:12]
-        queue[request_id] = new_fetch_row(bot, filename)
+        queue[request_id] = new_fetch_row(bot, filename, request_type=request_type)
     return request_id
 
 
@@ -250,7 +276,7 @@ def check_fetch_queue():
             row = queue[rid]
             row["state"] = "offered"
             row["offered_at"] = now
-            to_dispatch.append((rid, row["bot"], row["filename"]))
+            to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file")))
 
     if not to_dispatch:
         return
@@ -258,11 +284,45 @@ def check_fetch_queue():
     oserve = sys.modules.get("oserve")
     channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
                or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
-    for rid, bot, filename in to_dispatch:
-        message = f"PRIVMSG {channel} :!{bot} {filename}\r\n"
+    for rid, bot, filename, request_type in to_dispatch:
+        # Defense-in-depth only, expected to be unreachable: `bot` (and, for
+        # a "file" row, `filename`) already passed
+        # webserver.reject_if_unsafe_for_irc_line() - which now delegates to
+        # this exact same contains_unsafe_ctcp_bytes() check - at enqueue
+        # time (see build_fetch_enqueue_result()/build_list_fetch_enqueue_
+        # result() in webserver.py). This is one of several places this
+        # exact injection class has recurred in this feature (see
+        # contains_unsafe_ctcp_bytes()'s own comment above), so this
+        # dispatch site - the one that actually interpolates these values
+        # into a raw outbound IRC line - does not simply trust that the
+        # enqueue-time check was applied; it refuses to build or send the
+        # message at all if either value is still unsafe for some future
+        # reason, mirroring _serve_passive_offer()'s identical re-check
+        # right before IT builds its own outbound CTCP line.
+        if contains_unsafe_ctcp_bytes(bot) or (
+                request_type != "list" and contains_unsafe_ctcp_bytes(filename)):
+            _mark_failed_locked(queue[rid], "unsafe characters in bot/filename this late")
+            print(f"[FETCH] Refusing to dispatch request {rid} "
+                  f"(bot={bot!r}, filename={filename!r}): unsafe characters "
+                  f"this late (should be unreachable - see "
+                  f"webserver.reject_if_unsafe_for_irc_line()).")
+            continue
+        if request_type == "list":
+            # The exact same bare "@<bot>" trigger irc.py answers on this
+            # bot's own nick (irc.py's `elif msg_lower == f"@{config.NICKNAME.lower()}":`
+            # branch, dispatching to list.send_file_list()) - other
+            # OmenServe-family bots on the network answer the same convention
+            # the same way: a DCC SEND of their own list zip, filename
+            # unknown to us ahead of time (see _claim_matching_offer_locked()
+            # for how admission control handles that).
+            message = f"PRIVMSG {channel} :@{bot}\r\n"
+            log_desc = f"{bot}'s file list"
+        else:
+            message = f"PRIVMSG {channel} :!{bot} {filename}\r\n"
+            log_desc = f"{filename!r} from {bot}"
         if oserve and hasattr(oserve, "queue_message"):
             oserve.queue_message(bot, message)
-        print(f"[FETCH] Requested {filename!r} from {bot} (request {rid}).")
+        print(f"[FETCH] Requested {log_desc} (request {rid}).")
 
 
 def fetch_dispatcher_worker():
@@ -335,7 +395,7 @@ def parse_dcc_send_offer(ctcp_text):
 
     if not filename:
         return None
-    if _contains_unsafe_ctcp_bytes(filename):
+    if contains_unsafe_ctcp_bytes(filename):
         # CRLF/CTCP injection guard, checked here rather than only where the
         # filename is later used - see _UNSAFE_CTCP_BYTES_RE's comment above
         # for why. Applies to the active form too, even though only the
@@ -367,7 +427,7 @@ def parse_dcc_send_offer(ctcp_text):
         if len(fields) < 4 or not fields[3]:
             return None
         token = fields[3]
-        if _contains_unsafe_ctcp_bytes(token):
+        if contains_unsafe_ctcp_bytes(token):
             # Same CRLF/CTCP injection guard as the filename above - the
             # token is echoed back into our own reply CTCP verbatim (see
             # _serve_passive_offer()), so it is just as much an injection
@@ -415,11 +475,37 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
     (None, None) if nothing pending matches - which is the admission-control
     rejection path: an offer with no matching outbound request is never
     acted on.
+
+    Branches on the candidate row's request_type, which is the ONLY thing
+    that differs between the two - everything else (size cap, path
+    containment, passive-vs-active handling) runs identically afterwards in
+    handle_incoming_offer(), regardless of which branch matched here:
+
+      * "file" (the original, default behaviour): exact bot+filename match,
+        underscore/space-normalised - unchanged from before request_type
+        existed.
+      * "list": bot alone - we sent a bare "@<bot>" (see check_fetch_queue())
+        and cannot know ahead of time what the target bot will name its list
+        zip, so any filename from the right bot is acceptable. If more than
+        one "list" row somehow ends up outstanding for the same bot at once
+        (not the normal case, but not assumed impossible either), the OLDEST
+        one is claimed - the same requested_at tie-break the dispatcher
+        itself already uses when promoting pending rows.
+
+    The exact-match "file" check runs FIRST and independently of the "list"
+    check below it (not as an either/or on the same row) - a "file" row can
+    only ever be satisfied by an exact filename match, and a "list" row can
+    only ever be satisfied by the bot-alone match; neither branch can
+    accidentally satisfy the other's requirement for a DIFFERENT row, because
+    each loop only ever looks at rows of its own request_type.
     """
     wanted_bot = str(from_nick).strip().lower()
     wanted_name = _normalize_filename_for_match(filename)
+
     for rid, row in queue.items():
         if row.get("state") != "offered":
+            continue
+        if row.get("request_type", "file") != "file":
             continue
         if str(row.get("bot", "")).strip().lower() != wanted_bot:
             continue
@@ -427,6 +513,22 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
             continue
         row["state"] = "receiving"
         return rid, row
+
+    list_candidates = [
+        (rid, row) for rid, row in queue.items()
+        if row.get("state") == "offered"
+        and row.get("request_type") == "list"
+        and str(row.get("bot", "")).strip().lower() == wanted_bot
+    ]
+    if list_candidates:
+        rid, row = min(list_candidates, key=lambda pair: pair[1].get("requested_at", 0))
+        # Record the actual advertised filename now that we know it - the row
+        # was created with filename="" (see webserver.build_list_fetch_enqueue_result()),
+        # since it genuinely was not knowable before this moment.
+        row["filename"] = filename
+        row["state"] = "receiving"
+        return rid, row
+
     return None, None
 
 
@@ -632,13 +734,14 @@ def _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name)
         # Defense-in-depth only, expected to be unreachable: parse_dcc_send_
         # offer() already rejects any offer whose filename/token contains
         # \r, \n or \x01 before it is ever turned into an `offer` dict (see
-        # _contains_unsafe_ctcp_bytes() and its callers there). This is the
-        # SECOND time this exact injection class has appeared in this
-        # feature, so this call site - the one that actually interpolates
-        # both values into a raw outbound CTCP line - does not simply trust
-        # that upstream check was applied; it refuses to build the message
-        # at all if either value is still unsafe for some future reason.
-        if _contains_unsafe_ctcp_bytes(safe_filename) or _contains_unsafe_ctcp_bytes(token):
+        # contains_unsafe_ctcp_bytes() and its callers there). This is one of
+        # several places this exact injection class has recurred in this
+        # feature (see contains_unsafe_ctcp_bytes()'s own comment above), so
+        # this call site - the one that actually interpolates both values
+        # into a raw outbound CTCP line - does not simply trust that
+        # upstream check was applied; it refuses to build the message at all
+        # if either value is still unsafe for some future reason.
+        if contains_unsafe_ctcp_bytes(safe_filename) or contains_unsafe_ctcp_bytes(token):
             _mark_failed_locked(row, "unsafe characters in offer filename/token")
             print(f"[FETCH] Refusing to answer {from_nick}'s passive DCC SEND "
                   f"offer: filename/token contains control characters this "
@@ -748,6 +851,34 @@ def _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name)
         row["state"] = "receiving"
 
     _run_transfer(row, offer, dest_dir, stored_name, sock=conn)
+
+
+def _handle_completed_list_fetch(row, zip_path):
+    """Delegate a completed request_type="list" fetch to list_fetch.py for
+    safe extraction/parsing, and record the outcome on the row for the
+    dashboard - but never let a problem there affect the fetch itself, which
+    already succeeded (the bytes arrived intact; this is purely about what is
+    INSIDE them). Imported locally, not at module top, for the same reason
+    dcc_fetch.py already imports `list as list_mod` and not e.g. `webserver`
+    at top level: keeps this module's own import graph minimal and avoids a
+    cycle (list_fetch.py imports dcc_fetch's sibling modules, not the other
+    way around).
+    """
+    try:
+        import list_fetch
+        ok, reason = list_fetch.process_fetched_list_zip(row.get("bot", ""), zip_path)
+        if not ok:
+            row["list_processing_error"] = reason or "no recognizable list file found in the zip"
+            print(f"[FETCH] {row.get('bot')}'s fetched list zip was received "
+                  f"successfully but could not be processed: {row['list_processing_error']}")
+    except Exception as err:
+        # Defense-in-depth, expected to be unreachable: list_fetch.py's own
+        # entry point already catches everything it knows how to anticipate.
+        # This exists so that an unanticipated error while processing an
+        # untrusted third party's zip can never propagate back out of a
+        # transfer that itself already completed successfully.
+        row["list_processing_error"] = f"unexpected error: {err}"
+        print(f"[FETCH] Unexpected error processing {row.get('bot')}'s fetched list zip: {err!r}")
 
 
 def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
@@ -863,6 +994,16 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
         row["state"] = "complete"
         row["bytes_received"] = bytes_received
         print(f"[FETCH] Complete: {stored_name} ({bytes_received} bytes) from {peer_desc}.")
+        if row.get("request_type") == "list":
+            # The DCC transfer itself succeeded (declared size matched what
+            # arrived) - that is what "complete" above means, and is left
+            # alone either way. What happens NEXT - safely unzipping and
+            # parsing an untrusted third party's list archive - is a
+            # genuinely separate trust boundary (see list_fetch.py's module
+            # docstring: zip-slip, zip-bomb, "no recognisable list file
+            # inside"), so it is handled by a dedicated module and never
+            # allowed to raise back into this transfer's own success path.
+            _handle_completed_list_fetch(row, dest_path)
         return
 
     if failure_reason is None:

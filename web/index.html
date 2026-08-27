@@ -26,6 +26,9 @@
       <button class="nav-item" data-view="queue">
         <span class="nav-icon">&#8801;</span> Queue
       </button>
+      <button class="nav-item" data-view="download">
+        <span class="nav-icon">&#8595;</span> Download
+      </button>
       <button class="nav-item" data-view="filelists">
         <span class="nav-icon">&#9776;</span> File Lists
       </button>
@@ -142,6 +145,29 @@
           </tbody>
         </table>
       </div>
+    </section>
+
+    <section class="view" id="view-download">
+      <div class="table-wrap bulk-fetch-wrap">
+        <form id="bulk-fetch-form" class="bulk-fetch-form">
+          <p class="broadcast-note">
+            One request per line, in the exact shape a real IRC channel command uses -
+            <code>!&lt;bot&gt; &lt;filename&gt;</code> - the same shape the Search view's
+            broadcast-result "Download" buttons produce under the hood. Example:
+          </p>
+          <p class="broadcast-note">
+            <code>!goodbot Song One.mp3</code><br>
+            <code>!otherbot Some Album Track.flac</code>
+          </p>
+          <textarea id="bulk-fetch-textarea" class="bulk-fetch-textarea" rows="6"
+                    placeholder="!goodbot Song One.mp3&#10;!otherbot Some Album Track.flac"
+                    autocomplete="off"></textarea>
+          <div class="bulk-fetch-actions">
+            <button type="submit" class="btn btn-accent">Queue requests</button>
+          </div>
+          <div id="bulk-fetch-errors" class="bulk-fetch-errors"></div>
+        </form>
+      </div>
 
       <h2 class="panel-title">Downloads (fetched from other bots)</h2>
       <div class="table-wrap">
@@ -163,6 +189,21 @@
     </section>
 
     <section class="view" id="view-filelists">
+      <div class="filelists-toolbar">
+        <form id="filelists-fetch-form" class="filelists-fetch-form">
+          <input type="text" id="filelists-fetch-input" class="search-input"
+                 placeholder="Fetch a bot's list&hellip; (nick)" autocomplete="off">
+          <button type="submit" class="btn btn-accent">Fetch</button>
+        </form>
+        <div class="filelists-switcher">
+          <label for="filelists-source-select">Showing</label>
+          <select id="filelists-source-select">
+            <option value="__own__">Our own list</option>
+          </select>
+        </div>
+      </div>
+      <p class="broadcast-status" id="filelists-fetch-status"></p>
+
       <div class="table-wrap">
         <table class="data-table" id="filelists-table">
           <thead>

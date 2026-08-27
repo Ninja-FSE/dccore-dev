@@ -224,14 +224,33 @@ broadcast_search_results    = []
 last_broadcast_search_at    = 0     # BROADCAST_SEARCH_COOLDOWN is measured from this
 
 # Cross-bot file fetch (dcc_fetch.py). Keyed by a generated request id ->
-# {id, bot, filename, state, requested_at, offered_at, bytes_received,
-# total_size, reason, stored_filename}. state is one of pending / offered /
-# receiving / complete / failed. Active-count is DERIVED by scanning this
+# {id, bot, filename, request_type, state, requested_at, offered_at,
+# bytes_received, total_size, reason, stored_filename}. state is one of
+# pending / offered / listening / receiving / complete / failed.
+# request_type is "file" (default - exact bot+filename admission match) or
+# "list" (a cross-bot list fetch, admission matches on bot alone - see
+# dcc_fetch._claim_matching_offer_locked()); filename starts "" for a "list"
+# row and is filled in with the bot's actual advertised zip name once an
+# offer is claimed. Active-count is DERIVED by scanning this
 # (dcc_fetch.count_active_fetches()) rather than kept as a separate counter,
 # on purpose - a separately-maintained counter touched from multiple threads
 # (the dispatcher, the CTCP handler, the enqueue route) is exactly the kind of
 # thing that drifts out of sync with the data it is supposed to describe.
 fetch_queue = {}
+
+# Fetched-and-parsed lists FROM OTHER BOTS (list_fetch.py), keyed by
+# lowercased bot nick -> {"bot": <original-case nick>, "fetched_at":
+# <timestamp>, "entries": [...rows in the same shape
+# list.entries_to_filelist_rows() produces for our own list...],
+# "source_zip": <the zip's stored filename>}. One entry per bot - a later
+# fetch for a nick already present REPLACES it, it does not accumulate
+# duplicates (see list_fetch.process_fetched_list_zip()). Populated only when
+# a config.fetch_queue row with request_type="list" reaches "complete" and is
+# then successfully extracted/parsed; a completed transfer whose zip could
+# not be safely extracted or contained no recognisable list file leaves this
+# untouched and records the reason on the fetch_queue row instead
+# (row["list_processing_error"]).
+fetched_bot_lists = {}
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)

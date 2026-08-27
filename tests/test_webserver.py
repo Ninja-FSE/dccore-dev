@@ -407,6 +407,31 @@ class FetchRoutesTests(DCCoreTestCase):
         self.assertEqual(result["created"], [])
         self.assertEqual(config.fetch_queue, {})
 
+    def test_bot_with_a_ctcp_delimiter_is_rejected_not_queued(self):
+        """BUG 1 regression (recurred a THIRD time): \\x01 closes the CTCP
+        wrapper dcc_fetch._serve_passive_offer() later builds early, letting
+        the receiving peer parse trailing content as a second CTCP or as
+        plain text - reject_if_unsafe_for_irc_line() used to reject only
+        \\r/\\n, not \\x01, even though dcc_fetch's own equivalent check
+        already did. Now both delegate to the same
+        dcc_fetch.contains_unsafe_ctcp_bytes()."""
+        status, result = webserver.build_fetch_enqueue_result({
+            "bot": "evilbot\x01ACTION pwned\x01",
+            "filename": "Song.flac",
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(result["created"], [])
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_filename_with_a_ctcp_delimiter_is_rejected_not_queued(self):
+        status, result = webserver.build_fetch_enqueue_result({
+            "bot": "goodbot",
+            "filename": "Song\x01.mp3",
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(result["created"], [])
+        self.assertEqual(config.fetch_queue, {})
+
     def test_non_string_bot_and_filename_are_rejected_not_silently_coerced(self):
         """BUG 3 regression: {"bot": {"nested": "dict"}, "filename": 12345}
         used to return 200 and silently str()-coerce into a real queue row.
@@ -445,6 +470,97 @@ class FetchRoutesTests(DCCoreTestCase):
 
     def test_status_payload_is_empty_list_when_queue_is_empty(self):
         self.assertEqual(webserver.build_fetch_status_payload(), [])
+
+
+class ListFetchRoutesTests(DCCoreTestCase):
+    """build_list_fetch_enqueue_result()/build_fetched_bot_list_summaries()/
+    build_fetched_bot_list_payload() - the pure logic behind
+    POST /api/filelists/fetch, GET /api/filelists/bots and
+    GET /api/filelists/bot/<nick>."""
+
+    def test_a_clean_bot_nick_is_accepted_and_creates_a_pending_list_row(self):
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        rid = result["created"][0]
+        self.assertEqual(config.fetch_queue[rid]["bot"], "goodbot")
+        self.assertEqual(config.fetch_queue[rid]["request_type"], "list")
+        self.assertEqual(config.fetch_queue[rid]["state"], "pending")
+        self.assertEqual(config.fetch_queue[rid]["filename"], "")
+
+    def test_an_empty_or_blank_bot_nick_is_rejected(self):
+        for bad in ("", "   "):
+            status, result = webserver.build_list_fetch_enqueue_result(bad)
+            self.assertEqual(status, 400, f"bot={bad!r}")
+            self.assertIn("error", result)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_non_string_bot_is_rejected_not_silently_coerced(self):
+        status, result = webserver.build_list_fetch_enqueue_result({"nested": "dict"})
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_bot_with_embedded_crlf_is_rejected_not_queued(self):
+        """Same BUG 1 injection class as POST /api/fetch/enqueue's bot/filename
+        (see FetchRoutesTests above) - the bot nick typed into the File Lists
+        fetch box reaches the exact same outbound-IRC-line boundary
+        (check_fetch_queue()'s "PRIVMSG <channel> :@<bot>\\r\\n") and must be
+        rejected the same way."""
+        status, result = webserver.build_list_fetch_enqueue_result(
+            "victimbot\r\nQUIT :pwned-by-webhook\r\nJOIN #secretadmin")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_bot_with_a_bare_lf_is_also_rejected(self):
+        status, result = webserver.build_list_fetch_enqueue_result("evilbot\nPRIVMSG #x :hi")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_bot_with_a_ctcp_delimiter_is_rejected(self):
+        """BUG 1 regression, list-fetch route: check_fetch_queue() builds
+        this bot's outbound trigger as a bare "PRIVMSG <channel> :@<bot>",
+        but a CTCP-wrapped reply is exactly what an offering bot answers
+        with, and a \\x01 in `bot` is just as much an injection vector here
+        as it is for /api/fetch/enqueue's bot/filename - see
+        webserver.reject_if_unsafe_for_irc_line()."""
+        status, result = webserver.build_list_fetch_enqueue_result(
+            "evilbot\x01ACTION pwned\x01")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_summaries_are_empty_when_nothing_has_been_fetched(self):
+        self.assertEqual(webserver.build_fetched_bot_list_summaries(), [])
+
+    def test_summaries_reflect_fetched_bots_sorted_by_nick(self):
+        config.fetched_bot_lists = {
+            "zbot": {"bot": "zbot", "fetched_at": 111.0,
+                     "entries": [{"title": "A.flac"}, {"title": "B.flac"}]},
+            "abot": {"bot": "ABot", "fetched_at": 222.0, "entries": []},
+        }
+        rows = webserver.build_fetched_bot_list_summaries()
+        self.assertEqual([r["bot"] for r in rows], ["ABot", "zbot"])
+        by_bot = {r["bot"]: r for r in rows}
+        self.assertEqual(by_bot["zbot"]["count"], 2)
+        self.assertEqual(by_bot["ABot"]["count"], 0)
+
+    def test_bot_payload_returns_404_for_an_unknown_nick(self):
+        status, result = webserver.build_fetched_bot_list_payload("nosuchbot")
+        self.assertEqual(status, 404)
+        self.assertIn("error", result)
+
+    def test_bot_payload_is_case_insensitive_and_matches_own_list_row_shape(self):
+        config.fetched_bot_lists = {
+            "goodbot": {"bot": "GoodBot", "fetched_at": 111.0,
+                        "entries": [{"title": "A.flac", "size": "1.0MB",
+                                     "format": "FLAC", "source": "GoodBot"}]},
+        }
+        status, result = webserver.build_fetched_bot_list_payload("GOODBOT")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["bot"], "GoodBot")
+        self.assertEqual(result["entries"][0]["title"], "A.flac")
+        # Exactly the row shape build_filelists_payload() uses for our own
+        # list - same four keys, nothing more, nothing less.
+        self.assertEqual(set(result["entries"][0].keys()), {"title", "size", "format", "source"})
 
 
 @unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
@@ -500,6 +616,19 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(config.fetch_queue, {})
 
+    def test_fetch_enqueue_bot_with_ctcp_delimiter_is_rejected_via_http(self):
+        """BUG 1 regression, end to end through the real Flask app: a bare
+        \\x01 in `bot` used to sail past reject_if_unsafe_for_irc_line()
+        (which only checked \\r/\\n) all the way to a 200 response."""
+        resp = self.client.post("/api/fetch/enqueue", json={
+            "bot": "evilbot2\x01INJECTED\x01",
+            "filename": "Song\x01.mp3",
+        })
+        self.assertEqual(resp.status_code, 400)
+        body = resp.get_json()
+        self.assertEqual(body["created"], [])
+        self.assertEqual(config.fetch_queue, {})
+
     def test_a_clean_broadcast_still_works_via_http(self):
         """The CRLF/type checks must not false-positive on ordinary input."""
         resp = self.client.post("/api/search/broadcast", json={"term": "sandman"})
@@ -510,6 +639,36 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         resp = self.client.post("/api/fetch/enqueue", json={"bot": "goodbot", "filename": "Song.flac"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.get_json()["created"]), 1)
+
+    def test_filelists_fetch_bot_with_crlf_is_rejected_via_http(self):
+        resp = self.client.post("/api/filelists/fetch", json={
+            "bot": "victimbot\r\nQUIT :pwned-by-webhook\r\nJOIN #secretadmin",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_filelists_fetch_bot_with_ctcp_delimiter_is_rejected_via_http(self):
+        resp = self.client.post("/api/filelists/fetch", json={
+            "bot": "evilbot\x01ACTION pwned\x01",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_clean_filelists_fetch_still_works_via_http(self):
+        resp = self.client.post("/api/filelists/fetch", json={"bot": "goodbot"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(len(body["created"]), 1)
+        self.assertEqual(config.fetch_queue[body["created"][0]]["request_type"], "list")
+
+    def test_filelists_bots_route_returns_an_empty_list_with_nothing_fetched(self):
+        resp = self.client.get("/api/filelists/bots")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(), [])
+
+    def test_filelists_bot_route_returns_404_for_an_unknown_nick(self):
+        resp = self.client.get("/api/filelists/bot/nosuchbot")
+        self.assertEqual(resp.status_code, 404)
 
 
 class BroadcastRenderingXssRegressionTests(unittest.TestCase):
@@ -563,6 +722,57 @@ class BroadcastRenderingXssRegressionTests(unittest.TestCase):
         class in the first place."""
         self.assertNotIn('data-bot="', self.source)
         self.assertNotIn('data-filename="', self.source)
+
+
+class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
+    """New user-supplied text surfaces added alongside the Download tab
+    (bot/filename pairs parsed out of the bulk-paste textarea) and the File
+    Lists bot-switcher (bot nicks typed into the fetch box, and bot nicks/
+    counts returned by GET /api/filelists/bots): same bug class as
+    BroadcastRenderingXssRegressionTests above - confirms none of this new
+    rendering code builds an HTML attribute via string-concatenated
+    innerHTML from any of it, and reuses .textContent/DOM APIs instead.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"), "r", encoding="utf-8") as f:
+            cls.source = f.read()
+
+    def _extract_function(self, name):
+        start = self.source.index(f"function {name}(")
+        return self.source[start:start + 2500]
+
+    def test_bulk_fetch_messages_are_rendered_via_textcontent(self):
+        body = self._extract_function("renderBulkFetchMessages")
+        self.assertIn(".textContent = msg.text", body)
+        self.assertNotIn("innerHTML +=", body)
+        self.assertNotIn("innerHTML +", body)
+
+    def test_filelists_switcher_options_are_built_via_dom_apis(self):
+        body = self._extract_function("renderFilelistsSwitcher")
+        self.assertIn(".textContent = row.bot", body)
+        self.assertNotIn("innerHTML +=", body)
+        self.assertNotIn("innerHTML +", body)
+
+    def test_no_new_attribute_built_via_string_concatenated_innerhtml(self):
+        """Bot nicks and filenames from the Download tab / File Lists fetch
+        box never end up inside an HTML attribute value built by string
+        concatenation anywhere in the file - the exact bug class already
+        fixed once (BUG 2, see BroadcastRenderingXssRegressionTests above)."""
+        self.assertNotIn('data-bot="', self.source)
+        self.assertNotIn('data-filename="', self.source)
+
+    def test_bulk_fetch_form_is_wired_up(self):
+        self.assertIn('el.bulkFetchForm.addEventListener("submit"', self.source)
+
+    def test_filelists_fetch_form_is_wired_up(self):
+        self.assertIn('el.filelistsFetchForm.addEventListener("submit"', self.source)
+
+    def test_bulk_fetch_line_regex_matches_the_shared_bang_bot_filename_pattern(self):
+        """Per the brief: reuse the same tolerant "!(\\S+)\\s+(.+)$" pattern
+        already used elsewhere, don't reinvent it."""
+        self.assertIn("BULK_FETCH_LINE_RE = /^!(\\S+)\\s+(.+)$/", self.source)
 
 
 class OptionalFlaskDependencyTests(unittest.TestCase):
