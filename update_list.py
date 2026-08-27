@@ -1,10 +1,11 @@
-# update_list.py - Renodlad OmenServe-layout med dubbla listor (Del 1 av 2)
+# update_list.py - OmenServe-style layout, generating both lists (part 1 of 2)
 import os
 import sys
 import datetime
 import zipfile
 import time
 import config
+import platform_compat
 import zipfile
 
 def format_size_human(bytes_size):
@@ -47,7 +48,7 @@ def _discard_temp_lists(*paths):
             if path and os.path.exists(path):
                 os.remove(path)
         except OSError as err:
-            print(f"[LIST-CLEAN ERROR] Kunde inte ta bort {path}: {err}")
+            print(f"[LIST-CLEAN ERROR] Could not remove {path}: {err}")
 
 
 def _prune_superseded_lists(keep):
@@ -60,7 +61,7 @@ def _prune_superseded_lists(keep):
     try:
         entries = os.listdir(config.LOCAL_LIST_DIR)
     except OSError as err:
-        print(f"[LIST-CLEAN ERROR] Kunde inte läsa {config.LOCAL_LIST_DIR}: {err}")
+        print(f"[LIST-CLEAN ERROR] Could not read {config.LOCAL_LIST_DIR}: {err}")
         return
 
     for item in entries:
@@ -74,14 +75,14 @@ def _prune_superseded_lists(keep):
             os.remove(os.path.join(config.LOCAL_LIST_DIR, item))
             removed += 1
         except OSError as err:
-            print(f"[LIST-CLEAN ERROR] Kunde inte ta bort {item}: {err}")
+            print(f"[LIST-CLEAN ERROR] Could not remove {item}: {err}")
 
     if removed:
-        print(f"[LIST-CLEAN] Tog bort {removed} ersatt(a) lista/listor.")
+        print(f"[LIST-CLEAN] Removed {removed} superseded list(s).")
 
 
 def generate_master_list():
-    """Skannar musikmappen, rensar gamla filer först och bygger båda listorna samtidigt"""
+    """Scan the music directory, clear the old files first, and build both lists."""
     import os
     import sys
     import time
@@ -120,19 +121,19 @@ def generate_master_list():
     tmp_rar_path = rar_path + ".new"
     tmp_zip_path = zip_path + ".new"
 
-    print(f"[LIST-GEN] Skannar biblioteket i {config.FILE_DIRECTORY}...")
+    print(f"[LIST-GEN] Scanning the library in {config.FILE_DIRECTORY}...")
     
     all_files_data = []
     total_bytes = 0
 
     for root, dirs, files in os.walk(config.FILE_DIRECTORY):
-        # Spara alla sanna låtar under sin exakta och fullständiga disk-sökväg!
+        # Keep every track under its exact, complete path on disk
         for file in files:
             if file.lower().endswith(('.mp3', '.flac')):
                 full_file_path = os.path.join(root, file)
                 file_bytes = 0
                 try:
-                    file_bytes = os.path.getsize(full_file_path)
+                    file_bytes = os.path.getsize(platform_compat.long_path(full_file_path))
                     total_bytes += file_bytes
                 except:
                     pass
@@ -141,7 +142,7 @@ def generate_master_list():
                     rel_dir = ""
                 all_files_data.append((rel_dir, file, file_bytes))
 
-    # Sortera på sanna mappnamn och filnamn
+    # Sort by the real folder and file names
     all_files_data.sort(key=lambda x: (str(x[0]).lower(), str(x[1]).lower()))
 
     total_files_count = len(all_files_data)
@@ -180,21 +181,32 @@ def generate_master_list():
             f_rar.write("="*90 + "\n\n")
 
             current_folder = None
-            written_rar_folders = set() # Skyddar din !rar-lista från att få dubbelrader!
+            written_rar_folders = set()  # Keeps the !rar list free of duplicate rows
 
             for folder, filename, bytes_size in all_files_data:
                 if folder != current_folder:
                     current_folder = folder
                     
-                    # 🛡️ NORMAL LISTUTSKRIFT: Skriver den fullständiga undermappen (t.ex. \Digital Media 1\) till textlistan!
+                    # The text list gets the complete subfolder (e.g. \Digital Media 1\)
                     raw_folder_str = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
                     display_folder = raw_folder_str.replace("/", "\\")
                     
-                    f.write(f"\n=====================================================\n")
-                    f.write(f"{_one_line(display_folder)}\n")
-                    f.write(f"=====================================================\n")
+                    # The rule is drawn to the width of the folder line it wraps, not
+                    # to a fixed 53 characters. Against the real library every one of
+                    # the 4,107 folder headers is wider than 53 - they run 54 to 136,
+                    # averaging 80 - so the fixed rule never once matched the line it
+                    # was framing.
+                    #
+                    # Measured on _one_line()'s output rather than the raw string:
+                    # that is what actually gets written, and it flattens control
+                    # characters, which changes the length.
+                    folder_line = _one_line(display_folder)
+                    folder_rule = "=" * len(folder_line)
+                    f.write(f"\n{folder_rule}\n")
+                    f.write(f"{folder_line}\n")
+                    f.write(f"{folder_rule}\n")
                     
-                    # 🛡️ KIRURGISK RAR-TVÄTT: Tvättar bort multidisc-ändelser ENBART för !rar-albumlistan!
+                    # Strip multi-disc suffixes, for the !rar album list ONLY
                     if folder:
                         rar_folder_clean = folder
                         lowered_rar = rar_folder_clean.lower()
@@ -208,15 +220,15 @@ def generate_master_list():
                         raw_rar_str = f"D:\\MUSIC\\{rar_folder_clean}\\"
                         display_rar_folder = raw_rar_str.replace("/", "\\")
                         
-                        # Skriv raden STRICT en gång per huvudalbum till .rar-textfilen!
+                        # Write the row exactly once per album to the .rar text file
                         if display_rar_folder not in written_rar_folders:
                             f_rar.write(f"!{config.NICKNAME} !rar {_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)
                 single_file_size = format_size_human(bytes_size)
                 f.write(f"!{config.NICKNAME} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
 
-        print(f"[LIST-GEN] Textlista skapad utan problem: {tmp_txt_path}")
-        print(f"[LIST-GEN] RAR-albumlista skapad utan problem: {tmp_rar_path}")
+        print(f"[LIST-GEN] Text list created: {tmp_txt_path}")
+        print(f"[LIST-GEN] RAR album list created: {tmp_rar_path}")
         
         # The size and rawbytes side files used to be published here. They are now
         # written with the lists in the finalise section below - see the comment
@@ -249,7 +261,7 @@ def generate_master_list():
             _discard_temp_lists(tmp_txt_path, tmp_rar_path, tmp_zip_path)
             return False
 
-        print(f"[LIST-GEN] Packar ner BADA textlistorna i master-zip-arkiv...")
+        print(f"[LIST-GEN] Packing BOTH text lists into the master zip...")
         # Build the zip from the temp files but store them under their FINAL names, so the
         # archive users download is identical to what it always was.
         with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -274,7 +286,7 @@ def generate_master_list():
         os.replace(tmp_txt_path, txt_path)
         os.replace(tmp_rar_path, rar_path)
         os.replace(tmp_zip_path, zip_path)
-        print(f"[LIST-GEN] Nya listor aktiverade: {os.path.basename(txt_path)}")
+        print(f"[LIST-GEN] New lists activated: {os.path.basename(txt_path)}")
 
         _prune_superseded_lists(keep={os.path.basename(txt_path),
                                       os.path.basename(rar_path),
@@ -282,8 +294,8 @@ def generate_master_list():
         return True
             
     except Exception as e:
-        print(f"[LIST-GEN ERROR] Misslyckades att generera listor: {e}")
-        print("[LIST-GEN] Den tidigare listan lamnades ororld och ar fortfarande i bruk.")
+        print(f"[LIST-GEN ERROR] Failed to generate the lists: {e}")
+        print("[LIST-GEN] The previous list was left untouched and is still in use.")
         _discard_temp_lists(tmp_txt_path, tmp_rar_path, tmp_zip_path)
         return False
 
@@ -295,8 +307,8 @@ if __name__ == "__main__":
         
     success = generate_master_list()
     if success:
-        print("--- Listan uppdaterades utan problem! ---")
+        print("--- The list was updated successfully. ---")
         sys.exit(0)
     else:
-        print("--- FEL: Kunde inte generera listan. ---")
+        print("--- ERROR: could not generate the list. ---")
         sys.exit(1)

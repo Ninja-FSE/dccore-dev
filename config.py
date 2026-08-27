@@ -1,15 +1,15 @@
 # =====================================================================
-# CONFIG.PY - CENTRAL KONFIGURATION FÖR FLAC-SERV DCCORE DAEMON
+# CONFIG.PY - CENTRAL CONFIGURATION FOR THE DCCORE DAEMON
 # =====================================================================
 # ---------------------------------------------------------------------
-# 1. SYSTEM- OCH GLOBALA MOTORINSTÄLLNINGAR
+# 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE     = False
 SCRIPT_VERSION = "DCCore v1.10.0-RC2"
 LIST_BASE_NAME = "DCCore"
 
 # ---------------------------------------------------------------------
-# 2. IRC NÄTVERKS- OCH KANALINSTÄLLNINGAR
+# 2. IRC NETWORK AND CHANNEL SETTINGS
 # ---------------------------------------------------------------------
 SERVER        = "irc.undernet.org"
 PORT          = 6667
@@ -28,9 +28,9 @@ DEBUG_CHANNEL = "#flac-serv"
 BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
 
 # ---------------------------------------------------------------------
-# 3. FILSYSTEM, SÖKVÄGAR OCH TEXTDATABASER
+# 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
-PAUSE_ON_UPDATE = True  # 🛡️ GLOBAL UNDERHÅLLSVÄXEL: Om denna är True, så pausar boten ALL fildelning och sökning under !update
+PAUSE_ON_UPDATE = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
 FILE_DIRECTORY = "/mnt/nfs-musik"
 RAR_BINARY     = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 TMP_ZIP_DIR = "./data/tmp_zips"
@@ -43,7 +43,7 @@ LOCAL_LIST_DIR = "./lists"
 # (GET /api/fetch/<id>/download in webserver.py).
 FETCHED_FILES_DIR = "./data/fetched"
 
-# Säkra, normaliserade sökvägar direkt in i din data/ undermapp
+# Safe, normalised paths into the data/ subdirectory
 BANS_FILE      = "./data/bans.txt"
 STATS_FILE     = "./data/stats.txt"
 HARD_BANS_FILE = "./data/hard_bans.txt"
@@ -54,16 +54,16 @@ HARD_BANS_FILE = "./data/hard_bans.txt"
 ANNOUNCE_INTERVAL = 300     # Tid mellan varje kanalreklam (i sekunder)
 
 # ---------------------------------------------------------------------
-# 5. BEGRÄNSNINGAR, SLOTS OCH KÖ-KONTROLL
+# 5. LIMITS, SLOTS AND QUEUE CONTROL
 # ---------------------------------------------------------------------
 MAX_DCC_SLOTS      = 3      # Max antal samtidiga live-nedladdningar
-MAX_USER_QUEUE     = 100    # Max antal filer en unik användare får köa upp
-MAX_GLOBAL_QUEUE   = 1000   # Max totalt antal filer i alla köer sammanlagt
+MAX_USER_QUEUE     = 100    # Most files a single user may queue
+MAX_GLOBAL_QUEUE   = 1000   # Most files across every queue combined
 MAX_SEARCH_RESULTS = 5      # Max antal textrader som spottas ut vid @find
-MSG_DELAY          = 5.0    # Paustid i sekunder för din ordinarie meddelandekö
+MSG_DELAY          = 5.0    # Delay in seconds for the ordinary message queue
 DEBUG_MSG_DELAY    = 0.5    # Paustid mellan varje rad till debug-kanalen
 
-# Portspann för DCC-sändningar (Måste öppnas i brandvägg/router!)
+# Port range for DCC sends (must be open on the firewall and router)
 # ---------------------------------------------------------------------
 # ADMIN CONSOLE (DCC CHAT)
 # ---------------------------------------------------------------------
@@ -162,15 +162,16 @@ BROADCAST_SEARCH_COOLDOWN = 30     # Sekunder
 
 # ---------------------------------------------------------------------
 # 6. ANTI-FLOOD OCH AUTOMATISKT SÄKERHETSSKYDD
+# 6. ANTI-FLOOD AND AUTOMATIC PROTECTION
 # ---------------------------------------------------------------------
-MAX_REQUESTS     = 10       # Max antal kommandon (sök/fil) per tidsfönster
-REQUEST_WINDOW   = 5       # Storlek på det rullande tidsfönstret (i sekunder)
-MUTE_TIME        = 30       # Paustid i sekunder för varning vid första flood-överskridelsen
-MAX_SEND_FAILS   = 3        # Max antal försök per köad fil innan den slängs (se dcc.release_queue_entry)
-RAR_TIMEOUT      = 1800     # Max tid i sekunder som en rar-packning får ta innan den avbryts
+MAX_REQUESTS     = 10       # Most commands (search or file) per time window
+REQUEST_WINDOW   = 5       # Size of the rolling time window, in seconds
+MUTE_TIME        = 30       # Mute in seconds on the first flood violation
+MAX_SEND_FAILS   = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
+RAR_TIMEOUT      = 1800     # Longest a rar packing run may take, in seconds, before it is abandoned
 
 # ---------------------------------------------------------------------
-# 7. MIRC FÄRGKODER OCH KONTROLLTECKEN (IRC STANDARD)
+# 7. MIRC COLOUR CODES AND CONTROL CHARACTERS (IRC STANDARD)
 # ---------------------------------------------------------------------
 C_WHITE        = "\x0300"
 C_BLACK        = "\x0301"
@@ -190,28 +191,28 @@ C_GREY         = "\x0314"
 C_LIGHT_GREY   = "\x0315"
 
 # Formateringstecken
-C_RESET        = "\x03"     # Nollställer färg/fetstil
+C_RESET        = "\x03"     # Resets colour and bold
 C_BOLD         = "\x02"     # Fetstil
 C_UNDERLINE    = "\x1F"     # Understruken
 C_ITALIC       = "\x1D"     # Kursiv
 
 # ---------------------------------------------------------------------
-# 8. GLOBALT LIVE-MINNE (HÅLLERS ENBART I RAM UNDER KÖRNING)
+# 8. LIVE STATE (held in memory only, for the lifetime of the process)
 # ---------------------------------------------------------------------
-search_inprogress = False    # Sök-lås (True om en genomsökning körs)
-failed_transfers  = {}       # Räknare för misslyckade överföringar per användare
-channel_users     = {}       # Aktiva användare i kanaler
-banned_users      = {}       # Aktiva spärrade användare i RAM
-user_requests     = {}       # Tidsstämplar för användares kommandon (Anti-flood)
-muted_until       = {}       # Timers för tillfälligt tystade användare
+search_inprogress = False    # Search lock: True while a scan is running
+failed_transfers  = {}       # Failed-transfer counter, per user
+channel_users     = {}       # Users currently seen in the channels
+banned_users      = {}       # Currently banned users, in memory
+user_requests     = {}       # Command timestamps per user, for anti-flood
+muted_until       = {}       # Timers for temporarily muted users
 whois_status      = {}       # Online-status via WHO-svar (True = Online)
-frozen_queues     = {}       # Sparade tidsstämplar för användare i frysboxen
+frozen_queues     = {}       # Saved timestamps for users in the freezer
 rar_inprogress = False
 
-# Centrala könätverk strukturer
-dcc_queue         = {}       # Centrala fildelningskön (användarnamn: [filer])
-vip_queue         = []       # Isolerad express-kö för sök-headers och reklam
-active_transfers  = []       # Trådade aktiva DCC-sändningar i realtid
+# The central queue structures
+dcc_queue         = {}       # The main sharing queue, as {username: [files]}
+vip_queue         = []       # Isolated express queue for search headers and adverts
+active_transfers  = []       # Live DCC sends, one thread each
 
 # Cross-bot search broadcast (webserver.py POST /api/search/broadcast, capture
 # in irc.py's PRIVMSG/NOTICE-to-self dispatch). broadcast_search_results is
