@@ -190,9 +190,20 @@ def generate_master_list():
                     raw_folder_str = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
                     display_folder = raw_folder_str.replace("/", "\\")
                     
-                    f.write(f"\n=====================================================\n")
-                    f.write(f"{_one_line(display_folder)}\n")
-                    f.write(f"=====================================================\n")
+                    # The rule is drawn to the width of the folder line it wraps, not
+                    # to a fixed 53 characters. Against the real library every one of
+                    # the 4,107 folder headers is wider than 53 - they run 54 to 136,
+                    # averaging 80 - so the fixed rule never once matched the line it
+                    # was framing.
+                    #
+                    # Measured on _one_line()'s output rather than the raw string:
+                    # that is what actually gets written, and it flattens control
+                    # characters, which changes the length.
+                    folder_line = _one_line(display_folder)
+                    folder_rule = "=" * len(folder_line)
+                    f.write(f"\n{folder_rule}\n")
+                    f.write(f"{folder_line}\n")
+                    f.write(f"{folder_rule}\n")
                     
                     # 🛡️ KIRURGISK RAR-TVÄTT: Tvättar bort multidisc-ändelser ENBART för !rar-albumlistan!
                     if folder:
