@@ -221,6 +221,22 @@ def check_fetch_queue():
                 if (now - row["offered_at"]) > offer_timeout:
                     _mark_failed_locked(row, "no response")
 
+        # Independent safety net for "listening" rows (passive DCC SEND).
+        # _serve_passive_offer() already bounds its own accept() with
+        # PASSIVE_LISTEN_TIMEOUT and marks the row 'failed' on the way out no
+        # matter how it exits (timeout, OSError, or any other exception - see
+        # its own comment on that last case). This second check exists for
+        # the failure mode none of that can cover: the daemon thread running
+        # _serve_passive_offer() dies or hangs BEFORE it gets that far (e.g.
+        # thread-start failure), leaving the row 'listening' with nothing left
+        # to ever revisit it. A generous multiple of PASSIVE_LISTEN_TIMEOUT
+        # avoids racing a passive transfer that is still legitimately waiting.
+        listen_timeout = PASSIVE_LISTEN_TIMEOUT * 3
+        for row in queue.values():
+            if row.get("state") == "listening" and row.get("listening_since") is not None:
+                if (now - row["listening_since"]) > listen_timeout:
+                    _mark_failed_locked(row, "listening row expired without a resolution")
+
         active = count_active_fetches(queue)
         free_slots = max_slots - active
         if free_slots <= 0:
@@ -505,6 +521,7 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         row["stored_filename"] = stored_name
         if is_passive:
             row["state"] = "listening"
+            row["listening_since"] = time.time()
 
     if is_passive:
         _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name)
@@ -517,16 +534,28 @@ def _open_fetch_listener():
     """Bind a listener inside the shared DCC port range, for answering a
     passive/reverse DCC SEND offer.
 
-    Scans DOWNWARD from DCC_PORT_END, exactly like adminchat._open_chat_listener()
-    (same reasoning: dcc.py's own outbound SEND, start_dcc_send(), scans UPWARD
-    from DCC_PORT_START, so the two features tend to land at opposite ends of
-    the range instead of competing for the same ports when both are busy).
-    Same range as every other DCC listener in this project, so no extra
-    firewall rule is needed for this to work.
+    Three different listeners already share this one small range (11 ports
+    by default): dcc.py's own outbound SEND (start_dcc_send()) scans UPWARD
+    from DCC_PORT_START, and adminchat._open_chat_listener()'s passive DCC
+    CHAT scans DOWNWARD from DCC_PORT_END. An earlier version of this
+    function also scanned downward from DCC_PORT_END - meaning it shared
+    adminchat's exact first-probed port and every port after it, despite a
+    docstring here claiming the two landed at "opposite ends" (that claim
+    had only ever compared this function to dcc.py, never to adminchat, the
+    listener it actually collides with).
+    Starting from the MIDPOINT and scanning outward (then wrapping) instead
+    means this function's first-probed port is never the same as either of
+    the other two listeners' first-probed port, for as long as there is more
+    than one free port in the range - all three still ultimately compete for
+    the same finite pool once it's nearly full, which no ordering can avoid.
+    Same range as every other DCC listener in this project either way, so no
+    extra firewall rule is needed for this to work.
     """
     start = int(getattr(config, "DCC_PORT_START", 55000))
     end = int(getattr(config, "DCC_PORT_END", 55010))
-    for port in range(end, start - 1, -1):
+    mid = (start + end) // 2
+    ordered_ports = list(range(mid, end + 1)) + list(range(mid - 1, start - 1, -1))
+    for port in ordered_ports:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # SO_REUSEADDR means the OPPOSITE thing on Windows - platform_compat
         # picks the right option per platform. Same call adminchat.py and
@@ -676,6 +705,24 @@ def _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name)
     except OSError as err:
         _mark_failed_locked(row, f"passive listen error: {err}")
         print(f"[FETCH] Passive DCC SEND listener error for {from_nick}: {err}")
+        return
+    except Exception as err:
+        # Defense-in-depth, expected to be unreachable: everything above this
+        # point already has its own specific handling. This exists so that
+        # NO exception - not just the two anticipated above - can ever leave
+        # this row stuck in 'listening' forever. handle_incoming_offer() runs
+        # in a bare daemon thread with nothing above it to catch a stray
+        # exception, and check_fetch_queue()'s own expiry loop only re-checks
+        # 'offered' rows (see its docstring), not 'listening' ones - so
+        # without this, an unanticipated error here would silently and
+        # permanently strand a MAX_FETCH_SLOTS slot until the process
+        # restarts. (check_fetch_queue() ALSO now expires a stale 'listening'
+        # row on a timer, as a second, independent safety net in case this
+        # function's own thread dies or hangs before even reaching this
+        # try block.)
+        _mark_failed_locked(row, f"unexpected error: {err}")
+        print(f"[FETCH] Unexpected error answering {from_nick}'s passive DCC "
+              f"SEND offer for {offer['filename']!r}: {err!r}")
         return
     finally:
         try:

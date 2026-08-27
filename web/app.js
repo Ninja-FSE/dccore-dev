@@ -280,8 +280,8 @@
   // -------------------------------------------------------------- Downloads
 
   var DOWNLOAD_STATE_LABELS = {
-    pending: "Pending", offered: "Offered", receiving: "Receiving",
-    complete: "Complete", failed: "Failed"
+    pending: "Pending", offered: "Offered", listening: "Listening",
+    receiving: "Receiving", complete: "Complete", failed: "Failed"
   };
 
   function loadDownloads() {

@@ -448,6 +448,7 @@ html, body {
 
 .status-pill.status-pending   { color: var(--text-faint); }
 .status-pill.status-offered   { color: var(--status-queued); }
+.status-pill.status-listening { color: var(--status-queued); }
 .status-pill.status-receiving { color: var(--status-sending); }
 .status-pill.status-complete  { color: var(--accent-strong); }
 .status-pill.status-failed    { color: var(--danger); }

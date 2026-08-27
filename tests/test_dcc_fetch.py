@@ -440,15 +440,45 @@ class DispatcherStateMachineTests(DCCoreTestCase):
         self.assertEqual(config.fetch_queue[rid]["state"], "pending")
         self.assertEqual(self.oserve.queued, [])
 
-    def test_count_active_fetches_only_counts_offered_and_receiving(self):
+    def test_count_active_fetches_counts_offered_listening_and_receiving(self):
         config.fetch_queue = {
             "a": {"state": "pending"},
             "b": {"state": "offered"},
-            "c": {"state": "receiving"},
-            "d": {"state": "complete"},
-            "e": {"state": "failed"},
+            "c": {"state": "listening"},
+            "d": {"state": "receiving"},
+            "e": {"state": "complete"},
+            "f": {"state": "failed"},
         }
-        self.assertEqual(dcc_fetch.count_active_fetches(), 2)
+        self.assertEqual(dcc_fetch.count_active_fetches(), 3)
+
+    def test_a_listening_row_stuck_past_the_safety_net_timeout_expires_as_failed(self):
+        """BUG regression: _serve_passive_offer() marks a 'listening' row
+        failed on its own way out (timeout/OSError/any other exception - see
+        its own comments), but if the daemon thread running it dies or hangs
+        BEFORE it gets that far, nothing else ever revisited a 'listening'
+        row - check_fetch_queue()'s expiry loop only re-examined 'offered'
+        rows, so the row (and its MAX_FETCH_SLOTS slot) would be stuck until
+        the process restarts.
+        """
+        rid = dcc_fetch.enqueue_fetch("passivebot", "Ghost.flac")
+        config.fetch_queue[rid]["state"] = "listening"
+        config.fetch_queue[rid]["listening_since"] = (
+            time.time() - (dcc_fetch.PASSIVE_LISTEN_TIMEOUT * 3) - 1)
+
+        dcc_fetch.check_fetch_queue()
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "failed")
+        self.assertEqual(row["reason"], "listening row expired without a resolution")
+
+    def test_a_listening_row_still_within_the_safety_net_window_is_left_alone(self):
+        rid = dcc_fetch.enqueue_fetch("passivebot", "Ghost.flac")
+        config.fetch_queue[rid]["state"] = "listening"
+        config.fetch_queue[rid]["listening_since"] = time.time() - 5
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "listening")
 
 
 class LoopbackTransferTests(DCCoreTestCase):
@@ -579,6 +609,61 @@ class LoopbackTransferTests(DCCoreTestCase):
         self.assertIn("connect error", row["reason"])
 
 
+class FetchListenerPortOrderingTests(DCCoreTestCase):
+    """BUG regression: _open_fetch_listener() used to scan DOWNWARD from
+    DCC_PORT_END - the exact same direction and first-probed port as
+    adminchat._open_chat_listener()'s own passive DCC CHAT listener - despite
+    its own docstring claiming the two landed at opposite ends of the range.
+    It now starts at the midpoint instead, which is never the same
+    first-probed port as either adminchat's downward-from-end scan or
+    dcc.py's own outbound SEND (upward-from-start, verified separately in
+    dcc.py's own tests) - reducing first-probe collisions with both.
+    """
+
+    def test_first_probed_port_is_the_midpoint_of_the_range(self):
+        self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55010)
+        attempted_ports = []
+        real_socket_cls = socket.socket
+
+        class RecordingSocket:
+            def __init__(self, *args, **kwargs):
+                self._real = real_socket_cls(*args, **kwargs)
+
+            def bind(self, addr):
+                attempted_ports.append(addr[1])
+                return self._real.bind(addr)
+
+            def listen(self, *args, **kwargs):
+                return self._real.listen(*args, **kwargs)
+
+            def close(self):
+                return self._real.close()
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        socket.socket = RecordingSocket
+        try:
+            listener, port = dcc_fetch._open_fetch_listener()
+        finally:
+            socket.socket = real_socket_cls
+
+        self.assertIsNotNone(listener)
+        self.addCleanup(listener.close)
+        self.assertEqual(attempted_ports[0], 55005, "midpoint of 55000-55010")
+        self.assertEqual(port, 55005)
+
+    def test_never_shares_a_first_probed_port_with_adminchat_or_dcc_py(self):
+        """adminchat scans downward from DCC_PORT_END (first probe: END);
+        dcc.py's own outbound SEND scans upward from DCC_PORT_START (first
+        probe: START). The fetch listener's first probe must be neither."""
+        self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55010)
+        listener, port = dcc_fetch._open_fetch_listener()
+        self.addCleanup(listener.close)
+        self.assertNotEqual(port, config.DCC_PORT_START)
+        self.assertNotEqual(port, config.DCC_PORT_END)
+
+
 class PassiveOfferEndToEndTests(DCCoreTestCase):
     """Passive/reverse DCC SEND: the offering bot sends port 0 plus a token
     and WE become the listener instead of dialling out. Mirrors
@@ -666,6 +751,40 @@ class PassiveOfferEndToEndTests(DCCoreTestCase):
         self.assertTrue(os.path.exists(stored_path))
         with open(stored_path, "rb") as f:
             self.assertEqual(f.read(), payload)
+
+    def test_an_unexpected_error_while_answering_is_marked_failed_not_left_stranded(self):
+        """BUG regression: _serve_passive_offer()'s accept-and-reply block
+        used to only catch socket.timeout and OSError - any other exception
+        (e.g. a future bug in oserve.queue_message itself) propagated out of
+        the bare daemon thread this runs on, leaving the row stuck in
+        'listening' forever (a permanently lost MAX_FETCH_SLOTS slot), since
+        nothing else ever revisited a 'listening' row at the time.
+        """
+        rid = self._enqueue_and_offer("faultybot", "Trouble.flac")
+        offer_line = f"DCC SEND Trouble.flac {ip_long('198.51.100.9')} 0 4096 777"
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("simulated failure in the outbound queue")
+
+        self.oserve.queue_message = _boom
+
+        dcc_fetch.handle_incoming_offer(None, "faultybot", offer_line)
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("unexpected error", row["reason"])
+
+        # The listener must not leak either - opening a fresh one right after
+        # must succeed, exactly like the existing accept-timeout test proves.
+        # Reuses dcc_fetch's own _open_fetch_listener() (which already sets
+        # SO_REUSEADDR via platform_compat.prepare_listener(), the same way
+        # production code itself tolerates a just-closed port's TIME_WAIT
+        # state) rather than a raw bind from the test, which would report a
+        # false "leak" against nothing more than an unrelated prior test's
+        # socket still lingering in TIME_WAIT on the same shared range.
+        listener2, port2 = dcc_fetch._open_fetch_listener()
+        self.assertIsNotNone(listener2, "listener leaked after an unexpected error")
+        listener2.close()
 
     def test_a_second_passive_offer_with_a_different_token_and_size_also_works(self):
         payload = os.urandom(4096)
