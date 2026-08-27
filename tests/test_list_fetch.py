@@ -252,3 +252,77 @@ class ListExtractDirTests(DCCoreTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AllDotsMemberNames(SafeExtractionTests):
+    """A zip member whose path component is nothing but dots.
+
+    ".." is caught by the containment check, because it genuinely resolves
+    outside. Longer runs are not: "...." is a legal directory name that
+    resolves INSIDE the target, so containment passes it - correctly.
+
+    What breaks is what Win32 does with it afterwards. Trailing dots are
+    stripped during path parsing, so "<extract>/...." resolves to "<extract>"
+    itself. Extraction fails, the directory cannot then be cleaned, and every
+    later fetch from that bot fails with:
+
+        [WinError 145] The directory is not empty: ...\\lists\\<bot>\\....
+
+    One hostile archive permanently disabled list fetching from that bot.
+    """
+
+    def _process(self, name, members):
+        path = os.path.join(self.tmp, name)
+        _write_zip(path, members)
+        return list_fetch.process_fetched_list_zip("dotbot", path)
+
+    def test_a_four_dot_component_is_refused(self):
+        ok, reason = self._process("dots.zip", [("....//....//x.txt", "junk")])
+        self.assertFalse(ok)
+        self.assertIn("made only of dots", reason)
+
+    def test_shorter_dot_runs_are_refused_too_by_whichever_check_sees_them(self):
+        """The two checks are layered, and which one fires depends on how
+        Win32 resolves the name.
+
+        A SINGLE "...", "...." or "....." component is a multi-level parent
+        reference there - N dots walks up N-1 levels - so containment catches
+        those and reports traversal. Only the doubled "..../...." form
+        resolves back INSIDE the target, passes containment, and reaches the
+        dots check. Both outcomes are a refusal; this pins that none of them
+        slips through either way.
+        """
+        for arc in ("../x.txt", ".../x.txt", "..../x.txt", "...../x.txt"):
+            with self.subTest(arc=arc):
+                ok, reason = self._process("d.zip", [(arc, "junk")])
+                self.assertFalse(ok, f"{arc} was accepted")
+                self.assertTrue(
+                    "traversal" in reason.lower() or "made only of dots" in reason,
+                    f"{arc} refused for an unexpected reason: {reason}")
+
+    def test_a_two_dot_component_is_still_refused(self):
+        """It was already refused, by the containment check - it must stay
+        refused now that the dots check runs first."""
+        ok, reason = self._process("dots2.zip", [("../x.txt", "junk")])
+        self.assertFalse(ok)
+
+    def test_the_bot_is_not_poisoned_for_later_fetches(self):
+        """The actual regression. Before the fix the first archive left a
+        directory that could not be removed, so this second, entirely
+        legitimate fetch failed too - permanently.
+        """
+        bad, _ = self._process("bad.zip", [("....//....//x.txt", "junk")])
+        self.assertFalse(bad)
+
+        ok, reason = self._process(
+            "good.zip", [("OtherBot-2026-08-27.txt", _list_txt())])
+        self.assertTrue(ok, f"a later legitimate fetch was refused: {reason}")
+        self.assertIn("dotbot", config.fetched_bot_lists)
+
+    def test_a_dot_component_alone_is_still_ignored(self):
+        """"." is a no-op path component, not an attack - it must not start
+        being rejected."""
+        path = os.path.join(self.tmp, "dot.zip")
+        _write_zip(path, [("./OtherBot-2026-08-27.txt", _list_txt())])
+        ok, reason = list_fetch.process_fetched_list_zip("plainbot", path)
+        self.assertTrue(ok, f"a leading './' was wrongly refused: {reason}")

@@ -144,10 +144,38 @@ def _validate_zip_members(infolist, extract_dir):
         parts = [p for p in member_name.split('/') if p not in ('', '.')]
         if not parts:
             continue
+
         dest_path = os.path.join(extract_dir, *parts)
         if not dcc.is_safe_path(extract_dir, dest_path):
             return (f"zip entry {info.filename!r} would extract outside the "
                      f"target directory (path traversal / zip-slip)")
+
+        # A component made only of dots - "..", "...", "...." and so on.
+        #
+        # ".." is caught by is_safe_path() below, because it genuinely
+        # resolves outside. Longer runs are NOT: "...." is a legal directory
+        # name that resolves INSIDE the target, so the containment check
+        # passes it, correctly.
+        #
+        # The problem is what Win32 does with it afterwards. Trailing dots are
+        # stripped during path parsing, so "<extract>/...." resolves to
+        # "<extract>" itself - a path that names a child but operates on the
+        # parent. Extraction then fails, and every later attempt to prepare
+        # that directory fails too:
+        #
+        #   [WinError 145] The directory is not empty: ...\lists\<bot>\....
+        #
+        # so one hostile archive permanently disables list fetching from that
+        # bot until somebody deletes it by hand. An extended-length "\\?\\"
+        # path does not rescue the cleanup either - it returns
+        # ERROR_INVALID_NAME. Refusing the name is the fix.
+        #
+        # Nothing legitimate is lost: no master-list archive has a member whose
+        # directory is called "....".
+        for part in parts:
+            if set(part) == {'.'}:
+                return (f"zip entry {info.filename!r} has a path component "
+                         f"made only of dots ({part!r})")
 
     return None
 
