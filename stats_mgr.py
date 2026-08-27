@@ -1,8 +1,8 @@
-# stats_mgr.py - Dedikerad modul för storleksformatering, hastighet och drifttidsdata (Skottsäker)
+# stats_mgr.py - Size formatting, transfer speed and uptime figures
 import time
 import db
 
-# Vi sparar botens starttid lokalt här.
+# The bot's start time is kept here.
 #
 # Guarded, because !rehash reloads this module and importlib.reload re-executes
 # the body against the SAME module dict - a bare assignment reset the uptime to
@@ -14,14 +14,14 @@ except NameError:
     start_time = time.time()
 
 def load_stats():
-    """Läser det nya 7-kolonnsformatet från den konfigurerade sökvägen via db-modulen"""
+    """Read the 7-column format from the configured path, via the db module."""
     return db.load_advanced_stats()
 
 def get_total_sent():
-    """Returnerar det totala antalet skickade filer som ett rent heltal (index 0)"""
+    """The total number of files sent, as a plain integer (index 0)."""
     stats = load_stats()
     try:
-        # Om databasen returnerar en nästlad lista [[319]], hämta innersta värdet
+        # If the store returns a nested list [[319]], take the innermost value
         if isinstance(stats, list) and len(stats) > 0:
             val = stats[0]
             if isinstance(val, list):
@@ -32,10 +32,10 @@ def get_total_sent():
     return 0
 
 def get_total_sent_bytes():
-    """Returnerar det totala antalet skickade bytes som ett rent heltal (index 1)"""
+    """The total number of bytes sent, as a plain integer (index 1)."""
     stats = load_stats()
     try:
-        # Om databasen returnerar en nästlad lista [[319], [9303203296]], hämta innersta värdet
+        # If the store returns a nested list [[319], [9303203296]], take the innermost value
         if isinstance(stats, list) and len(stats) > 1:
             val = stats[1]
             if isinstance(val, list):
@@ -46,7 +46,7 @@ def get_total_sent_bytes():
     return 0
 
 def format_size_human(bytes_size):
-    """Gör om råa bytes till ett smidigt format (t.ex. 361.2GB)"""
+    """Turn raw bytes into a readable size (e.g. 361.2GB)."""
     try:
         bytes_size = float(bytes_size)
     except:
@@ -58,7 +58,7 @@ def format_size_human(bytes_size):
     return f"{bytes_size:.1f}PB"
 
 def format_speed(bytes_per_sec):
-    """Gör om råa bytes per sekund till en snygg sträng (t.ex. 4.5MB/s)"""
+    """Turn raw bytes per second into a readable rate (e.g. 4.5MB/s)."""
     if bytes_per_sec == 0:
         return "0k/s"
     kb = bytes_per_sec / 1024
@@ -68,5 +68,5 @@ def format_speed(bytes_per_sec):
     return f"{mb:.2f}MB/s"
 
 def get_uptime_seconds():
-    """Returnerar drifttid i sekunder för din mIRC-kanalreklam"""
+    """Uptime in seconds, for the channel advert."""
     return int(time.time() - start_time)

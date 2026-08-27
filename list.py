@@ -1,4 +1,4 @@
-# list.py - Slimmad utgåva (Scanning borttagen - Sköts av update_list.py)
+# list.py - Slimmed down; scanning lives in update_list.py
 import os
 import time
 import datetime
@@ -26,7 +26,7 @@ def rawbytes_file_path():
 # served the album list as its master list. Removed so they cannot diverge again.
 
 def find_latest_zip():
-    """Hittar den senaste .zip-filen för när någon skriver botens nickname"""
+    """Find the newest .zip, for when somebody types the bot's nickname."""
     if not os.path.exists(config.LOCAL_LIST_DIR):
         return None
     files = [f for f in os.listdir(config.LOCAL_LIST_DIR) if f.startswith(config.LIST_BASE_NAME) and f.endswith(".zip")]
@@ -36,7 +36,7 @@ def find_latest_zip():
     return os.path.join(config.LOCAL_LIST_DIR, files[0])
 
 def get_file_count_date_size_and_raw_bytes():
-    """Hämtar det EXAKTA antalet musikfiler genom att enbart räkna rader som startar med trigger!"""
+    """The EXACT number of music files, counting only lines that start with the trigger."""
     latest_list = find_latest_list()
     if not latest_list or not os.path.exists(latest_list):
         return 0, "No List", "0B", 0
@@ -90,10 +90,10 @@ def get_file_count_date_size_and_raw_bytes():
                 
         return count, date_str, size_str, raw_bytes
     except Exception as e:
-        print(f"[ERROR] Kunde inte läsa exakt filstatistik: {e}")
+        print(f"[ERROR] Could not read the exact file statistics: {e}")
         return 0, "Error", "0B", 0
 
-# list.py - Slimmad sökmodul för OmenServe (Del 1 av 2)
+# list.py - The search module (part 1 of 2)
 import os
 import glob
 import re
@@ -130,12 +130,12 @@ def find_latest_list():
     """
     try:
         all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.LIST_BASE_NAME}-*.txt")))
-        # Sortera strikt bort din RAR-lista från sökningen så vi bara skannar masterlistan
+        # Keep the RAR list out of the search, so only the master list is scanned
         true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
         if true_master_lists:
             return true_master_lists[-1]
     except Exception as e:
-        print(f"[SEARCH ERROR] Kunde inte hitta senaste listan: {e}")
+        print(f"[SEARCH ERROR] Could not find the latest list: {e}")
     return None
 
 _INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
@@ -149,7 +149,7 @@ def strip_info_suffix(rest):
     after the "!<nick> " prefix. Other bots on the network carry the same
     "::INFO::" marker but do not agree on the whitespace around it, and
     routinely tack on more than just a size afterwards - real examples seen
-    in production: "...flac ::INFO:: 153.03MB © OmeNServE v2.60 ©",
+    in production: "...flac ::INFO:: 153.03MB (c) OmeNServE v2.60 (c)",
     "...mp3 ::INFO:: 6.32Mb 4m30s 192/44.10/JS  OmeNServE v2.60",
     "...mp3 ::INFO:: 19.95MB : OmenServe v2.71 :". A caller that only strips
     an exact "  ::INFO:: " (this project's own two-space convention) leaves
@@ -273,18 +273,18 @@ def find_matching_entries(search_words, limit=None):
 
 
 def execute_search(irc_sock, user, search_term, channel):
-    """Söker i listfilen - Kopierar och skickar raderna spikrakt precis som de står!"""
-        # 🛡️ GLOBAL UNDERHÅLLSSPÄRR: Blockera sökningen om växeln är aktiv i config och uppdatering pågår!
+    """Search the list file, sending the matching rows exactly as they are stored."""
+        # MAINTENANCE GATE: block the search while an update is running, if config says so
     if getattr(config, 'PAUSE_ON_UPDATE', False) is True and getattr(config, 'search_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Search engine is temporarily paused during MasterList rebuild. Please wait a moment.\r\n")
-        print(f"[MAINTENANCE BLOCK] Nekade sökning (@find) från {user} pga pågående !update.")
+        print(f"[MAINTENANCE BLOCK] Refused a search (@find) from {user}: an !update is running.")
         return
 
-    # Skydda systemet mot dubbelsökningar
+    # Guard against two searches at once
     if getattr(config, 'search_inprogress', False):
-        print(f"[SEARCH BLOCK] Ignorerade sökning från {user} eftersom en annan skanning pågår.")
+        print(f"[SEARCH BLOCK] Ignored a search from {user}: another scan is already running.")
         return
         
     if len(search_term) < 3:
@@ -305,15 +305,15 @@ def execute_search(irc_sock, user, search_term, channel):
 
         print(f"[NEW SEARCH] {user} in {channel} searched for '{search_term}'")
         
-        # Tvätta bort dolda mIRC-färgkoder och kontrolltecken från sökorden
+        # Strip mIRC colour codes and control characters from the search terms
         raw_clean = strip_control_codes(search_term)
         
-        # Dela upp sökorden
+        # Split the search terms
         clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
         search_words = [w.strip().lower() for w in clean_term.split() if w.strip()]
         
         # ---------------------------------------------------------------------
-        # DIREKT-KOPIERANDE SKANNING (0% Omformatering - Skickar filraden rå!)
+        # Straight copy: no reformatting, the file row is sent raw
         # ---------------------------------------------------------------------
         # find_matching_entries() treats an empty search_words as "match
         # everything" (build_filelists_payload() wants that). execute_search()
@@ -325,22 +325,22 @@ def execute_search(irc_sock, user, search_term, channel):
             found_entries, total_matches = find_matching_entries(search_words, limit=max_results)
         else:
             found_entries, total_matches = [], 0
-        # Raden sparas exakt som den står på disken - matches skickas rått till mIRC.
+        # The row is kept exactly as it is on disk - matches go to IRC raw.
         matches = [entry["line"] for entry in found_entries]
 
         if matches:
-            # Skicka din officiella sök-header privat till mIRC
+            # Send the search header privately to the requester
             announce.send_search_result_header(user, search_term, total_matches, channel)
             
             oserve = sys.modules.get('oserve')
             if oserve:
-                BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
+                BG_RED_BLOCK  = "\x0304,05"  # Dark red border
                 BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
-                BG_TEXT_BOX   = "\x0301,00" # Svart text på VIT bakgrund
-                R = "\x0f"                  # Total nollställning
+                BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
+                R = "\x0f"                  # Full reset
                 
                 for match in matches: 
-                    # Klä raden i din snygga färgblocks-ram och skicka den rått till användaren
+                    # Wrap the row in the colour-block frame and send it raw to the user
                     block_match = f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {match}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
                     result_msg = f"PRIVMSG {user} :{block_match}\r\n"
                     oserve.queue_message(user, result_msg)
@@ -348,20 +348,20 @@ def execute_search(irc_sock, user, search_term, channel):
             print(f"[SEARCH RESULT] 0 Match(es) found for {user} in {channel} on '{search_term}'")
                 
     except Exception as e:
-        print(f"[SEARCH CRITICAL ERROR] Sökningen kraschade under filskanning: {e}")
+        print(f"[SEARCH CRITICAL ERROR] The search crashed while scanning the file: {e}")
         
     finally:
-        # Släpp sökspärren så nästa användare kan söka direkt
+        # Release the search lock so the next user can search immediately
         config.search_inprogress = False
-        print(f"[SEARCH-FINISHED] Sökningen för {user} avslutades och låset frigjordes snyggt.")
+        print(f"[SEARCH-FINISHED] The search for {user} finished and the lock was released cleanly.")
 
 def send_list_trigger_info(irc_sock, user):
     msg = f"List trigger(s): {config.C_RED}@{config.NICKNAME}{config.C_RESET} {config.SCRIPT_VERSION}{config.C_RESET}\r\n"
     oserve.queue_message(user, f"NOTICE {user} :{msg}")
 
 def send_file_list(irc_sock, user, channel):
-    """Hittar den befintliga .zip-listan och startar DCC SEND med rätt kanalspårning!"""
-    # 🛡️ UNDERHÅLLS-STATUS LIVE: Om listuppdatering pågår, ge ett intelligent svar istället för felmeddelande!
+    """Find the existing .zip list and start a DCC SEND, tracking the right channel."""
+    # If a list update is running, answer with the status rather than an error
     if getattr(config, 'update_inprogress', False) is True:
         msg = f"NOTICE {user} :{config.C_BOLD}System Notice{config.C_RESET}: Master list is currently rebuilding. Please wait a few minutes and try again. \r\n"
         oserve.queue_message(user, msg)
@@ -382,7 +382,7 @@ def send_file_list(irc_sock, user, channel):
     msg = f"NOTICE {user} :Preparing full list ({zip_filename}) for {user}... {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n"
     oserve.queue_message(user, msg)
     
-    # Nu skickas 'channel' med till DCC-motorn i stället för 'user'
+    # 'channel' is handed to the DCC engine now, instead of 'user'
     dcc.handle_download_request(irc_sock, user, zip_filename, channel)
 
 
