@@ -150,18 +150,17 @@ DCC_PORT_END       = 55010
 # SENDs to people requesting from us. Conflating the two directions would let
 # outbound leech traffic (us fetching from others) starve our own serving
 # capacity, or vice versa.
-MAX_FETCH_SLOTS         = 3        # Max samtidiga pågående/erbjudna hämtningar
-MAX_FETCH_FILE_SIZE     = 200 * 1024 * 1024   # 200 MB - avvisa erbjudandet innan vi ens ansluter
-FETCH_TRANSFER_TIMEOUT  = 600      # Sekunder - total väggklocka per överföring (mot en långsam "drip" som ständigt nollställer idle-timeout)
-FETCH_OFFER_TIMEOUT     = 60       # Sekunder en "offered"-rad får vänta på en DCC SEND innan den markeras failed
+MAX_FETCH_SLOTS         = 3        # Max simultaneous in-flight/offered fetches
+MAX_FETCH_FILE_SIZE     = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
+FETCH_TRANSFER_TIMEOUT  = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
+FETCH_OFFER_TIMEOUT     = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
 
-# Hur ofta en ny @find-broadcast (POST /api/search/broadcast) tillåts starta.
-# Oberoende av UI:t - artighet mot andra botar/operatörer på en delad publik
-# kanal, inte bara en UI-detalj.
-BROADCAST_SEARCH_COOLDOWN = 30     # Sekunder
+# How often a new @find broadcast (POST /api/search/broadcast) is allowed to
+# start. Independent of the UI - courtesy to other bots/operators on a shared
+# public channel, not just a UI detail.
+BROADCAST_SEARCH_COOLDOWN = 30     # Seconds
 
 # ---------------------------------------------------------------------
-# 6. ANTI-FLOOD OCH AUTOMATISKT SÄKERHETSSKYDD
 # 6. ANTI-FLOOD AND AUTOMATIC PROTECTION
 # ---------------------------------------------------------------------
 MAX_REQUESTS     = 10       # Most commands (search or file) per time window

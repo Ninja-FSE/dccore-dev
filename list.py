@@ -149,7 +149,7 @@ def strip_info_suffix(rest):
     after the "!<nick> " prefix. Other bots on the network carry the same
     "::INFO::" marker but do not agree on the whitespace around it, and
     routinely tack on more than just a size afterwards - real examples seen
-    in production: "...flac ::INFO:: 153.03MB © OmeNServE v2.60 ©",
+    in production: "...flac ::INFO:: 153.03MB (c) OmeNServE v2.60 (c)",
     "...mp3 ::INFO:: 6.32Mb 4m30s 192/44.10/JS  OmeNServE v2.60",
     "...mp3 ::INFO:: 19.95MB : OmenServe v2.71 :". A caller that only strips
     an exact "  ::INFO:: " (this project's own two-space convention) leaves
