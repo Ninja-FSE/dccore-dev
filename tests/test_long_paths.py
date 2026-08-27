@@ -56,6 +56,51 @@ def _make(path, payload):
     return path
 
 
+def _max_path_is_enforced():
+    """Does this machine actually refuse a path longer than 260 characters?
+
+    Windows 10 1607+ can opt out of MAX_PATH entirely via the LongPathsEnabled
+    registry value, and GitHub's windows-latest images ship with it ON. On such
+    a machine a 300-character path simply works, so the control assertions
+    below - which assert that plain access FAILS - are asserting something
+    untrue of that machine rather than something untrue of the code.
+
+    That is the same trap the loopback tests fell into: an environment-
+    dependent precondition asserted as universal. Reported as a FAILURE it
+    reads as "the codebase is broken" when the honest answer is "not here".
+
+    The behaviour under test is still worth pinning on such a machine - the
+    positive tests all run everywhere - but a control that cannot reproduce
+    the hazard proves nothing and must say so.
+
+    The operator's own box enforces it: measured, 0 of 49 real library files
+    opened by plain UNC and 49 of 49 through long_path(). That is why this
+    matters at all.
+    """
+    if not platform_compat.IS_WINDOWS:
+        return False
+    probe_root = tempfile.mkdtemp(prefix="dccore-maxpath-probe-")
+    try:
+        deep = _deep_dir(probe_root, 250)
+        target = os.path.join(deep, "probe-file-with-a-long-enough-name.txt")
+        if len(target) <= 260:
+            return False
+        os.makedirs(platform_compat.long_path(deep), exist_ok=True)
+        with open(platform_compat.long_path(target), "wb") as handle:
+            handle.write(b"x")
+        # If the plain spelling can see it, this machine does not enforce it.
+        return not os.path.exists(target)
+    except OSError:
+        return True
+    finally:
+        shutil.rmtree(platform_compat.long_path(probe_root), ignore_errors=True)
+
+
+MAX_PATH_ENFORCED = _max_path_is_enforced()
+NEEDS_ENFORCEMENT = ("this machine does not enforce MAX_PATH "
+                     "(LongPathsEnabled), so the hazard cannot be reproduced here")
+
+
 class LongPathSpelling(unittest.TestCase):
     """The prefix rules. These run everywhere; on POSIX it is an identity."""
 
@@ -112,8 +157,10 @@ class AFileBeyondMaxPathIsReachable(unittest.TestCase):
         self.assertGreater(len(self.track), 260,
                            "the fixture must actually exceed MAX_PATH")
 
+    @unittest.skipUnless(MAX_PATH_ENFORCED, NEEDS_ENFORCEMENT)
     def test_control_plain_access_really_does_fail(self):
-        """If this ever stops failing, the tests below prove nothing."""
+        """If this ever stops failing on a machine that DOES enforce MAX_PATH,
+        the tests below prove nothing."""
         self.assertFalse(os.path.exists(self.track))
         with self.assertRaises(OSError):
             open(self.track, "rb").close()
@@ -204,8 +251,13 @@ class ADeepLibraryFileIsNotReportedMissing(PathSecurityBase):
             handle.write(b"\x00" * 6543)
         self.assertGreater(len(self.deep_track), 260,
                            "fixture must exceed MAX_PATH")
-        self.assertFalse(os.path.exists(self.deep_track),
-                         "fixture invariant: plain access must fail")
+        if MAX_PATH_ENFORCED:
+            # Only true where the machine enforces the limit. Where it does
+            # not, the file is plainly reachable and these tests still pass -
+            # they just are not proving anything the plain spelling could not
+            # have done on its own.
+            self.assertFalse(os.path.exists(self.deep_track),
+                             "fixture invariant: plain access must fail")
 
     def _request(self, name):
         self.notices.clear()
