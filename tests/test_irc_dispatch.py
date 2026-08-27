@@ -429,6 +429,51 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
         self.assertEqual(entry["bot"], "OtherBot")
         self.assertEqual(entry["filename"], "Enter Sandman.flac")
 
+    def test_the_info_marker_is_stripped_regardless_of_which_bot_sent_it(self):
+        """BUG regression: a broadcast-search reply is very often itself a
+        master-list line, which carries a trailing "::INFO:: <size and
+        branding>" tag - but bots on the network do not agree on the
+        whitespace around that marker, or on what they append after it.
+        list.strip_info_suffix() only handled this project's own exact
+        "  ::INFO:: " (two spaces) convention, so anything from a
+        differently-formatted bot kept its entire size/branding tail
+        attached to the "filename" - meaning the real DCC SEND offer that
+        later came back (bearing only the bare filename) never matched it,
+        and the fetch was rejected as unsolicited. These are real examples
+        captured from production, one per real third-party bot on the
+        network, each with its own spacing/branding convention.
+        """
+        real_world_replies = {
+            "AbueIo": (
+                "!AbueIo Hi-Res Masters 1984 - 38 - Metallica - Ride The "
+                "Lightning (Remastered).flac ::INFO:: 153.03MB © OmeNServE v2.60 ©",
+                "Hi-Res Masters 1984 - 38 - Metallica - Ride The Lightning (Remastered).flac",
+            ),
+            "Heywood": (
+                "!Heywood 092 - Metallica - Until It Sleeps.mp3 ::INFO:: "
+                "6.32Mb 4m30s 192/44.10/JS  OmeNServE v2.60",
+                "092 - Metallica - Until It Sleeps.mp3",
+            ),
+            "[tjserv]": (
+                "![tjserv] 047. Metallica - Master Of Puppets (Remastered).mp3 "
+                "::INFO:: 19.95MB : OmenServe v2.71 :",
+                "047. Metallica - Master Of Puppets (Remastered).mp3",
+            ),
+            "squizz": (
+                "!squizz 101-metallica-the-ecstasy_of_gold.mp3 ::INFO:: "
+                "3.7MB 2m1s VBR/256/44.1/JS * OmenServe v2.71 *",
+                "101-metallica-the-ecstasy_of_gold.mp3",
+            ),
+        }
+        for bot, (raw_reply, expected_filename) in real_world_replies.items():
+            with self.subTest(bot=bot):
+                config.broadcast_search_results = []
+                irc._capture_broadcast_search_reply("OtherBot", "DCCore", raw_reply)
+                entry = config.broadcast_search_results[0]
+                self.assertEqual(entry["bot"], bot)
+                self.assertEqual(entry["filename"], expected_filename)
+                self.assertNotIn("::INFO::", entry["filename"])
+
     def test_no_token_means_no_bot_filename_fields(self):
         irc._capture_broadcast_search_reply("OtherBot", "DCCore", "Found 3 matches, use my list command")
         entry = config.broadcast_search_results[0]
