@@ -11,7 +11,7 @@ import traceback
 import urllib.request 
 import builtins
 
-# Importera botens moduler
+# The bot's own modules
 import config
 import platform_compat
 import list
@@ -348,7 +348,7 @@ def irc_loop():
             # Start the persistent timer in the background
             threading.Thread(target=background_nick_monitor, args=(s,), daemon=True).start()
                 
-            print("[CONNECT FIX] Startar om kanalreklamen helautomatiskt...")
+            print("[CONNECT FIX] Restarting the channel advert automatically...")
             threading.Thread(target=announce.announce_worker, daemon=True).start()
             config.announce_thread_alive = True
 
@@ -374,7 +374,7 @@ def irc_loop():
                             f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(missing)}",
                             category="PART")
                     except Exception as watchdog_debug_err:
-                        print(f"[WARNING] Kunde inte skicka watchdog-debugnotis: {watchdog_debug_err}")
+                        print(f"[WARNING] Could not send the watchdog debug notice: {watchdog_debug_err}")
                 else:
                     print(f"[INFO] Watchdog: every channel confirmed just in time.")
                 threading.Thread(target=delayed_activate, daemon=True).start()
@@ -505,12 +505,12 @@ def irc_loop():
                                 socket_conn.send(f"JOIN {channels}\r\n".encode())
                                 debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-serv')
                                 socket_conn.send(f"JOIN {debug_chan}\r\n".encode())
-                                print(f"[JOIN] Gick med i huvudkanaler och debug-kanal: {debug_chan}")
+                                print(f"[JOIN] Joined the main channels and the debug channel: {debug_chan}")
                                 # NEW (issue #9): start the watchdog HERE, right after the JOIN
                                 # has actually been sent, so the timeout starts from the right moment.
                                 threading.Thread(target=activation_watchdog, daemon=True).start()
                             except Exception as join_err:
-                                print(f"[ERROR] Kunde inte skicka JOIN: {join_err}")
+                                print(f"[ERROR] Could not send JOIN: {join_err}")
                                 
                         threading.Thread(target=delayed_join, args=(s, config.CHANNEL), daemon=True).start()
 

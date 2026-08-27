@@ -34,6 +34,23 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 ### Prerequisites
 The script is developed and tested for **Python 3.10** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox).
 
+**The daemon itself needs no third-party packages.** Everything it uses to talk to
+IRC, serve files over DCC, pack albums with `rar` and run the admin console is in
+the standard library, so there is nothing to install and nothing to break on an
+upgrade:
+
+```bash
+pip install -r requirements.txt      # succeeds, installs nothing
+```
+
+The one optional extra is the web dashboard, which needs Flask. It is opt-in, and
+the bot starts fine without it - `webserver.py` catches the `ImportError`, logs
+that the dashboard is disabled, and carries on:
+
+```bash
+pip install -r requirements-web.txt  # only if you want the dashboard
+```
+
 ### Starting the Daemon
 To perform a completely clean reboot of the bot, clear hidden cache files, and force a fresh reload of code modifications into RAM, execute:
 ```bash

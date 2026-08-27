@@ -238,14 +238,31 @@ class ALoggedLineReachesDiskBeforeTheProcessDies(unittest.TestCase):
 
     GUARD = "import platform_compat; platform_compat.install_console_encoding_guard()"
 
-    def _child_source(self, setup):
+    LINES = 20
+
+    def _child_source(self, setup, marker):
+        """Print a fixed number of lines, say so, then idle until killed.
+
+        The marker file is how the parent knows the printing FINISHED. An
+        earlier version had the child print on a timer while the parent killed
+        it after a fixed 1.2s, then asserted that more than 15 lines had
+        landed - which silently measured how fast the machine was. It went red
+        on a loaded CI runner at 13 lines, having proved nothing about the code.
+
+        Signalling instead of guessing takes the machine's speed out of the
+        test entirely: the parent kills only once every line has been printed,
+        so the guarded run must show ALL of them and the unguarded run none.
+        """
         return (
             "import sys, time\n"
             "sys.path.insert(0, r'" + REPO_ROOT + "')\n"
             + setup + "\n"
-            "for i in range(50):\n"
+            "for i in range(" + str(self.LINES) + "):\n"
             "    print('line %02d' % i)\n"
-            "    time.sleep(0.05)\n"
+            # A separate channel on purpose: signalling through stdout would
+            # flush the very buffer under test.
+            "open(r'" + marker + "', 'w').close()\n"
+            "time.sleep(300)\n"
         )
 
     def _survivors(self, setup):
@@ -253,14 +270,24 @@ class ALoggedLineReachesDiskBeforeTheProcessDies(unittest.TestCase):
         handle = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
         handle.close()
         self.addCleanup(os.unlink, handle.name)
+        marker = handle.name + ".done"
+        self.addCleanup(lambda: os.path.exists(marker) and os.unlink(marker))
 
         with open(handle.name, "wb") as sink:
             proc = subprocess.Popen(
-                [sys.executable, "-c", self._child_source(setup)],
+                [sys.executable, "-c", self._child_source(setup, marker)],
                 stdout=sink, stderr=subprocess.STDOUT, env=_clean_env())
-            time.sleep(1.2)          # ~24 lines have been printed by now
+            deadline = time.time() + 60.0
+            while not os.path.exists(marker) and time.time() < deadline:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.02)
+            finished = os.path.exists(marker)
             proc.kill()
             proc.wait()
+        self.assertTrue(finished,
+                        "the child never finished printing, so this measured "
+                        "nothing about buffering")
         with open(handle.name, "r", errors="replace") as fh:
             return [l for l in fh.read().split("\n") if l.startswith("line")]
 
@@ -271,9 +298,11 @@ class ALoggedLineReachesDiskBeforeTheProcessDies(unittest.TestCase):
                          "expected an unguarded redirected child to lose its buffer")
 
     def test_the_guard_gets_the_lines_onto_disk(self):
+        """Every line, not most of them - the child is killed only after it
+        has said it finished printing, so nothing is left in flight."""
         survived = self._survivors(self.GUARD)
-        self.assertGreater(len(survived), 15,
-                           f"only {len(survived)} lines reached disk before the kill")
+        self.assertEqual(len(survived), self.LINES,
+                         f"only {len(survived)} of {self.LINES} lines reached disk")
 
     def test_the_guard_marks_the_stream_line_buffered(self):
         stream = _stream_using("cp1253")

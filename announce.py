@@ -209,7 +209,7 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
             yesterday_str = f"{str(stats[2])} Files"
             today_str = f"{str(stats[4])} Files"
     except Exception as e:
-        print(f"[ANNOUNCE ERROR] Siffrorna krockade i minnet: {e}")
+        print(f"[ANNOUNCE ERROR] The figures clashed in memory: {e}")
 
     speed_str = stats_mgr.format_speed(actual_speed) if actual_speed > 0 else "0k/s"
     current_time_str = time.strftime("%I:%M %p").lower().lstrip("0")
@@ -249,7 +249,7 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
         safe_file = str(file_name)
         send_debug(f"Sent: \"{safe_file}\" to {user} [{speed_str}]", category="INFO")
     except Exception as debug_err:
-        print(f"[DEBUG-SENT ERROR] Kunde inte skicka slutnotis till debug-kanal: {debug_err}")
+        print(f"[DEBUG-SENT ERROR] Could not send the closing notice to the debug channel: {debug_err}")
 
 def send_dcc_sending_notice(user, file_name):
     """Send the user a matching private NOTICE when a transfer starts or is queued."""
@@ -601,7 +601,7 @@ def start_announce_thread():
     """Start the background timer for the channel advert and the hidden SLOTS line."""
     import threading
     threading.Thread(target=announce_worker, daemon=True).start()
-    print("[ANNOUNCE] Reklam- och debug-klockan startades live i bakgrunden.")
+    print("[ANNOUNCE] The advert and debug timer started in the background.")
 
 def send_pack_error_notice(irc_sock, user):
     """Send the user a private NOTICE, in the same colour theme, when a request is refused."""
