@@ -734,7 +734,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{linux_sub_path}{config.C_RESET} is an artist root folder.", category="PART")
                 return
             
-            if not os.path.exists(true_source_dir) or not os.path.isdir(true_source_dir):
+            if not os.path.exists(platform_compat.long_path(true_source_dir)) or not os.path.isdir(platform_compat.long_path(true_source_dir)):
                 announce_mod.send_debug(f"Pack error: Directory not found on disk storage for {user}.", category="PART")
                 return
 
@@ -801,7 +801,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             full_path = os.path.join(base_directory, requested_file)
 
         is_master_zip = requested_file.endswith(".zip") and config.LIST_BASE_NAME in requested_file
-        if not is_master_zip and not os.path.exists(full_path):
+        if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
             latest_list_path = list_mod.find_latest_list()
             if latest_list_path and os.path.exists(latest_list_path):
                 try:
@@ -834,11 +834,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                 
                     if target_folder_rel is not None:
                         test_path = os.path.join(base_directory, target_folder_rel, requested_file)
-                        if os.path.exists(test_path):
+                        if os.path.exists(platform_compat.long_path(test_path)):
                             full_path = test_path
                 except Exception as list_err:
                     print(f"[DCC-LOOKUP ERROR] {list_err}")
-            if not os.path.exists(full_path):
+            if not os.path.exists(platform_compat.long_path(full_path)):
                 for root, dirs, files in os.walk(base_directory):
                     if requested_file in files:
                         full_path = os.path.join(root, requested_file)
@@ -848,7 +848,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             announce.send_dcc_error(user, "invalid_path")
             return
 
-        if not os.path.exists(full_path) or os.path.isdir(full_path):
+        if not os.path.exists(platform_compat.long_path(full_path)) or os.path.isdir(platform_compat.long_path(full_path)):
             announce.send_dcc_error(user, "file_not_found")
             return
 
@@ -923,7 +923,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         if not isinstance(file_name, str) or "{" in str(file_name):
             file_name = next_file.get('file', str(file_name))
 
-    file_size = os.path.getsize(file_path) if (isinstance(file_path, str) and os.path.exists(file_path)) else 0
+    # Addressed through long_path so a deep library path reports its real
+    # size instead of 0 - the DCC offer carries this number, and a 0 makes
+    # the receiver close immediately.
+    _size_probe = platform_compat.long_path(file_path) if isinstance(file_path, str) else None
+    file_size = os.path.getsize(_size_probe) if (_size_probe and os.path.exists(_size_probe)) else 0
     ip_long = get_public_ip_long()
     start_time = time.time()
     bytes_sent = 0
@@ -992,7 +996,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
         if (isinstance(next_file, dict) and next_file.get('is_temporary_zip') is True
-                and not next_file.get('is_unpacked_rar_folder') and os.path.exists(file_path)):
+                and not next_file.get('is_unpacked_rar_folder') and os.path.exists(platform_compat.long_path(file_path))):
             try: os.remove(file_path)
             except OSError: pass
 
@@ -1031,7 +1035,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
 
         start_time = time.time()       
 
-        with open(file_path, 'rb') as f:
+        with open(platform_compat.long_path(file_path), 'rb') as f:
             while True:
                 # Topptrimmad 64 KB paketstorlek för maximal nätverksprestanda
                 chunk = f.read(65536)
@@ -1157,7 +1161,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
 
                 # Om ingen annan användare eller aktiv slot behöver filen längre – RADERA FRÅN SSD!
                 if not file_still_needed:
-                    if os.path.exists(file_path):
+                    if os.path.exists(platform_compat.long_path(file_path)):
                         os.remove(file_path)
                         print(f"[DCC CLEANUP] Raderade den temporära mappen helt säkert från SSD: {file_name}")
         except Exception as file_rm_err:
