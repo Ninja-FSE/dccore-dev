@@ -5,10 +5,21 @@ name: tests
 # future port is headed, and which is the only thing that can prove a change has
 # not quietly broken the other side.
 on:
+  # Long-lived branches only, so a feature branch does not get a push run AND a
+  # pull_request run for the same commit.
   push:
-    branches: [main, beta, windows]
+    branches: [main, beta, beta-web, windows]
+
+  # Every pull request, whatever it targets.
+  #
+  # This list used to name branches, which created a chicken-and-egg trap:
+  # GitHub evaluates a pull_request trigger using the workflow file on the BASE
+  # branch, not the PR's own copy. So a PR opening against a branch that was not
+  # yet in this list could not run CI - including the PR that would have added
+  # it. #54 hit exactly that and had to be verified by hand instead.
   pull_request:
-    branches: [main, beta, windows]
+    branches: ['**']
+
   workflow_dispatch:
 
 jobs:
@@ -31,10 +42,14 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Every module imports cleanly
-        # Catches a syntax error or a bad import before the suite even starts,
-        # and would have caught the module-level mistakes found by hand this week.
-        run: |
-          python -c "import config, db, stats_mgr, queue_mgr, security, list, announce, dcc, irc, commands, update_list; print('all modules import')"
+        # Catches a syntax error or a bad import before the suite even starts.
+        #
+        # The list used to be written out here by hand, and had drifted: it named
+        # 11 modules, preflight named 12, and the project had 14 - adminchat.py
+        # and oserve.py were in neither. scripts/check_imports.py derives the list
+        # from the filesystem instead, so a new module is covered the moment it
+        # exists.
+        run: python scripts/check_imports.py
 
       - name: Compile every source file
         run: python -m compileall -q .
