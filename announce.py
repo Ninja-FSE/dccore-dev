@@ -1,4 +1,4 @@
-# announce.py - Krockfri utgåva med sys.modules
+# announce.py - Channel adverts and notices, reached through sys.modules
 import time
 import os
 import datetime
@@ -186,7 +186,7 @@ def format_size_human(bytes_size):
 # resetting every counter to zero. Wiring them back in would undo that fix.
 
 def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed):
-    """Skickar den färdigbakade, block-designade fildelningsnotisen när en fil är helt klar!"""
+    """Send the block-styled transfer notice once a file has finished."""
     import sys
     import db
     import stats_mgr
@@ -194,17 +194,17 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     import config
     oserve = sys.modules.get('oserve')
     
-    # Hämta live-mätare från databasen och statistikmotorn
+    # Read the live counters from the store and the statistics module
     total_sent = stats_mgr.get_total_sent()
     total_sent_bytes = stats_mgr.get_total_sent_bytes()
     total_sent_str = f"{total_sent} Files ({stats_mgr.format_size_human(total_sent_bytes)})"
 
-    # Hämta statistik för igår och idag (Modul-säkrad för att förhindra krock med list.py!)
+    # Yesterday's and today's figures. Guarded so the name cannot collide with list.py
     yesterday_str = "0 Files"
     today_str = "0 Files"
     try:
         stats = db.load_advanced_stats()
-        # RÄTTAD: Vi använder type(stats) == list för att helt undvika krock med list-modulen!
+        # type(stats) == list is used deliberately, to avoid colliding with the list module
         if (type(stats) == list or type(stats).__name__ == 'list') and len(stats) > 6:
             yesterday_str = f"{str(stats[2])} Files"
             today_str = f"{str(stats[4])} Files"
@@ -217,11 +217,11 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     # ---------------------------------------------------------------------
     # DITT CENTRALSTYRDA BLOCK-TEMA (Exakt kopia av din vackra kanalreklam!)
     # ---------------------------------------------------------------------
-    BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
+    BG_RED_BLOCK  = "\x0304,05"  # Dark red border
     BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
-    BG_TEXT_BOX   = "\x0301,00" # Svart text på VIT bakgrund
-    R = "\x0f"                  # Total nollställning efter varje enskild sektion
-    B = "\x02"                  # Fetstil för live-siffror och triggers
+    BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
+    R = "\x0f"                  # Full reset after each section
+    B = "\x02"                  # Bold, for live figures and triggers
     
     def _build(shown_name):
         return (
@@ -244,7 +244,7 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
         oserve.queue_message("channel_announce", msg)
     print(f"[ANNOUNCE] Sent block transfer complete notice to {channel} for {user} ({speed_str})")
 
-    # 🧼 RÄTTAD OCH ULTRA-SLIMMAD SLUTRAD: Använder din levande 'speed_str' helt kraschsäkert!
+    # The closing line, using the live 'speed_str' safely
     try:
         safe_file = str(file_name)
         send_debug(f"Sent: \"{safe_file}\" to {user} [{speed_str}]", category="INFO")
@@ -252,12 +252,12 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
         print(f"[DEBUG-SENT ERROR] Kunde inte skicka slutnotis till debug-kanal: {debug_err}")
 
 def send_dcc_sending_notice(user, file_name):
-    """Skickar en matchande privat NOTICE till användaren när överföringen startar eller köas!"""
+    """Send the user a matching private NOTICE when a transfer starts or is queued."""
     import sys
     oserve = sys.modules.get('oserve')
     
     # ---------------------------------------------------------------------
-    # PRIVAT NOTICE-BLOCK: Matchad med exakt samma färgblocks-ram!
+    # Private notice block, framed exactly like the channel one
     # ---------------------------------------------------------------------
     BG_RED_BLOCK  = "\x0304,05" 
     BG_CYAN_BLOCK = "\x0310,10" 
@@ -277,16 +277,16 @@ def send_dcc_sending_notice(user, file_name):
     print(f"[ANNOUNCE] Sent custom block notice to {user} for '{file_name}'")
 
 def get_formatted_stats_strings():
-    """Helt passiv: Läser bara av värdena från stats.txt till kanalreklamen utan att rotera!"""
+    """Read-only: takes the values from stats.txt for the advert, without rotating."""
     oserve = sys.modules.get('oserve')
     
-    # RÄTTAT: Vi bara LÄSER från databasen, vi rör inte datumen här!
+    # This only READS from the store; it must not touch the dates
     stats = db.load_advanced_stats()
     
     # Index 1 = Total bytes
     total_bytes_count = stats[1]
     
-    # Index 0 = Total filer, Index 2 = Gårdagens filer, Index 4 = Dagens filer
+    # Index 0 = total files, index 2 = yesterday's files, index 4 = today's files
     total_str = f"{stats[0]:,} Files ({format_size_human(total_bytes_count)})"
     yesterday_str = f"{stats[2]} Files"
     
@@ -297,18 +297,18 @@ def get_formatted_stats_strings():
     today_str = f"{stats[4]} Files [as of {time_now_str}]"
     return total_str, yesterday_str, today_str
 
-# Globala variabler for levande trafikstatistik (Mäts i realtid via dcc.py)
-# Global variabel som lagrar ID:t på den tråd som faktiskt har rätt att köra just nu
+# Live traffic statistics, measured in real time by dcc.py
+# The id of the thread currently entitled to run
 current_worker_id = 0
 
 def announce_worker():
-    """Fristående tidstråd för OmenServe-reklam - 100% återanslutningssäker!"""
+    """The standalone timer thread for the channel advert; safe across reconnects."""
     global current_worker_id
     import time
     import sys
     import config
     
-    # Skapa ett unikt ID för just denna trådstart baserat på nuvarande klockslag
+    # A unique id for this particular thread start, based on the current time
     my_worker_id = time.time()
     current_worker_id = my_worker_id
     
@@ -316,9 +316,9 @@ def announce_worker():
     
     while True:
         try:
-            # 🛡️ TRÅDDÖDARE: Om en återanslutning har skapat en nyare tråd, stäng ner denna direkt!
+            # If a reconnect has started a newer thread, this one shuts itself down
             if current_worker_id != my_worker_id:
-                print(f"[REKLAM-DÖD] Gamla spöktråden (ID: {my_worker_id}) stänger ner sig själv i tystnad.")
+                print(f"[ADVERT-STOP] The stale thread (id {my_worker_id}) is shutting itself down quietly.")
                 break
                 
             if is_ready:
@@ -368,7 +368,7 @@ def announce_worker():
                     if not chan:
                         continue
                         
-                    # Hämta live-data i exakt denna millisekund
+                    # Read the live figures at this exact moment
                     file_count, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes()
                     formatted_count = f"{file_count:,}"
                     
@@ -422,12 +422,12 @@ def announce_worker():
                 time.sleep(5)
                 
         except Exception as loop_error:
-            print(f"[CRITICAL ANNOUNCE ERROR] Tråden stötte på ett fel: {loop_error}")
+            print(f"[CRITICAL ANNOUNCE ERROR] The thread hit an error: {loop_error}")
             time.sleep(10)
 
 
 def send_search_result_header(user, search_term, match_count, channel):
-    """Skickar sök-headern i privat PM - Nu med både färgblock och din vita text-box!"""
+    """Send the search header as a private message, in the colour-block style."""
     import sys
     import dcc
     import config
@@ -466,7 +466,7 @@ def send_search_result_header(user, search_term, match_count, channel):
     print(f"[SEARCH RESULTS] Found {match_count} sending {sending_count} to {user} in {channel} for '{search_term}'")
 
 def send_dcc_error(user, error_type):
-    """Skickar standardiserade DCC-felmeddelanden till användaren"""
+    """Send the standard DCC error messages to the user."""
     oserve = sys.modules.get('oserve')
     errors = {
         "invalid_path": "Error: Invalid path.",
@@ -480,17 +480,17 @@ def send_dcc_error(user, error_type):
         oserve.queue_message(user, msg)
 
 def send_dcc_queue_notice(user, file_name, position):
-    """Skickar köplatser till användaren privat, perfekt inramad i ditt lyxiga färgtema!"""
+    """Send the user their queue position privately, in the same colour theme."""
     import sys
     oserve = sys.modules.get('oserve')
     if oserve:
-        # Dina exakta mIRC-färgblock och stolpar
-        BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
+        # The mIRC colour blocks and separators
+        BG_RED_BLOCK  = "\x0304,05"  # Dark red border
         BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
-        BG_TEXT_BOX   = "\x0301,00" # Svart text på VIT bakgrund
-        R = "\x0f"                  # Total nollställning
+        BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
+        R = "\x0f"                  # Full reset
         
-        # Vi bygger meddelandet i din exakta färgblocks-stil!
+        # Build the message in the colour-block style
         text_content = f"Added {file_name} to your personal queue at position #{position} of 100."
         block_msg = f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {text_content}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
         
@@ -499,7 +499,7 @@ def send_dcc_queue_notice(user, file_name, position):
 
 
 def send_debug(msg_text, category="INFO"):
-    """Skickar en färgblocks-designad loggrad live till #flac-debug via en RÅ socket-send på 0ms!"""
+    """Send a colour-block log line to the debug channel over a raw socket, undelayed."""
     import sys
     import time
     import config
@@ -507,18 +507,18 @@ def send_debug(msg_text, category="INFO"):
     current_time = time.strftime("%H:%M:%S")
     
     # ---------------------------------------------------------------------
-    # DITT UTÖKADE BLOCK-TEMA (Kritvit bakgrund + mIRC färg- och krockskydd!)
+    # The extended block theme: bright white background, guarded against colour clashes
     # ---------------------------------------------------------------------
-    BG_RED_BLOCK  = "\x0304,05" # Mörkröd kant
+    BG_RED_BLOCK  = "\x0304,05"  # Dark red border
     BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
-    BG_TEXT_BOX   = "\x0301,00" # Svart text på KRITVIT bakgrund
-    R = "\x0f"                  # Total nollställning
+    BG_TEXT_BOX   = "\x0301,00"  # Black text on a bright white background
+    R = "\x0f"                  # Full reset
     B = "\x02"                  # Fetstil
     
-    # 1. Start-blocket (Tidstämpel inramad i vitt)
+    # 1. The opening block: the timestamp, framed in white
     msg = f"PRIVMSG {config.DEBUG_CHANNEL} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} [{current_time}] {B}DEBUG{B} "
     
-    # 2. TAGG-blocket (Färgkodad baserat på händelse)
+    # 2. The tag block, colour-coded by event
     if category.upper() == "SENT":
         tag_str = f"{config.C_GREEN}[SENT]{R}{BG_TEXT_BOX}"
     elif category.upper() == "PART":
@@ -528,7 +528,7 @@ def send_debug(msg_text, category="INFO"):
     elif category.upper() == "JOIN":
         tag_str = f"{config.C_CYAN}[JOIN]{R}{BG_TEXT_BOX}"
     elif category.upper() == "BAN":
-        # NYTT: Stensnygg röd block-etikett för PERMANENTA bans!
+        # A red block label for PERMANENT bans
         tag_str = f"{config.C_RED}[HARDBAN]{R}{BG_TEXT_BOX}"
     elif category.upper() == "HARDBAN":
         # dcc.py raises this for a blocked path traversal and for a poisoned queue entry -
@@ -541,18 +541,18 @@ def send_debug(msg_text, category="INFO"):
         # alike - one is routine administration, the other is someone probing the filesystem.
         tag_str = f"{config.C_RED}[SECURITY]{R}{BG_TEXT_BOX}"
     elif category.upper() == "TBAN":
-        # NYTT: Stensnygg lila block-etikett för TEMPORÄRA dags-bans!
+        # A purple block label for TEMPORARY day-bans
         tag_str = f"{config.C_PURPLE}[TEMPBAN]{R}{BG_TEXT_BOX}"
     else:
         tag_str = f"{config.C_GREY}[INFO]{R}{BG_TEXT_BOX}"
   
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {B}Category{B}: {tag_str} "
     
-    # 3. TEXT-blocket (Rensat från gamla krockande färgkoder för en spikrak lina)
+    # 3. The text block, stripped of any colour codes that would clash
     clean_text = msg_text.replace(config.C_BOLD, "").replace(config.C_RESET, "").replace("\x02", "").replace("\x0f", "")
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Log: {clean_text} "
         
-    # 4. Slut-blocket (Stänger raden snyggt med färgstolpar)
+    # 4. The closing block, ending the line with the colour separators
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {R}\r\n"
     
     # ---------------------------------------------------------------------
@@ -593,22 +593,22 @@ def send_debug(msg_text, category="INFO"):
         print(f"[DEBUG {str(category).upper()}] {msg_text}")
 
 # ---------------------------------------------------------------------
-# START-SLUSS FÖR REKLAMTRÅDEN: Anropas av irc.py vid lyckad boot!
+# The advert thread's entry point, called by irc.py on a successful boot
 # ---------------------------------------------------------------------
 is_ready = False
 
 def start_announce_thread():
-    """Startar den fristående bakgrundsklockan för kanalreklam och dolda SLOTS i en egen tråd"""
+    """Start the background timer for the channel advert and the hidden SLOTS line."""
     import threading
     threading.Thread(target=announce_worker, daemon=True).start()
     print("[ANNOUNCE] Reklam- och debug-klockan startades live i bakgrunden.")
 
 def send_pack_error_notice(irc_sock, user):
-    """Skickar en privat NOTICE till användaren i exakt samma lyxiga färgblocks-tema vid root-spärr!"""
+    """Send the user a private NOTICE, in the same colour theme, when a request is refused."""
     import config
     import sys
     
-    # Vi hämtar dina exakta färgkoder från din befintliga struktur
+    # Take the colour codes from the existing structure
     BG_RED_BLOCK  = "\x0304,05" 
     BG_CYAN_BLOCK = "\x0310,10" 
     BG_TEXT_BOX   = "\x0301,00" 
@@ -623,11 +623,11 @@ def send_pack_error_notice(irc_sock, user):
     )
     
     try:
-        # Vi slussar ut den direkt på 0ms via oserve-motorn om den är laddad
+        # Send it straight out through oserve, if that module is loaded
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, msg, is_vip=True)
         else:
             irc_sock.send(msg.encode())
     except Exception as e:
-        print(f"[DCC NOTICE ERROR] Kunde inte slussa färgblocks-felmeddelande: {e}")
+        print(f"[DCC NOTICE ERROR] Could not send the colour-block error message: {e}")

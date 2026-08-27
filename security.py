@@ -1,20 +1,21 @@
-# security.py - Dedikerad modul för OmenServe Flood- och Banskydd
+# security.py - Flood protection and ban enforcement
 import time
 import os
 import sys
 import config
 import db
 
-# Nickar vi redan har skickat en debug-notis om (en notis per nick och körning).
-# send_debug sover 0.5s under lås och anropas härifrån av IRC-läsartråden, så en
-# notis per BLOCKERAT MEDDELANDE skulle frysa nätverksloopen och slita anslutningen.
+# Nicks we have already sent a debug notice about - one notice per nick, per run.
+# send_debug sleeps 0.5s while holding a lock and is called from here by the IRC
+# reader thread, so one notice per BLOCKED MESSAGE would freeze the network loop
+# and tear down the connection.
 _ban_notified = set()
 
 
 def check_user_status(user):
-    """Kollar användaren mot tidsbegränsade bans (RAM) och hard_bans.txt.
+    """Check the user against the timed bans in memory and against hard_bans.txt.
 
-    Returnerar False om användaren ska ignoreras helt, annars True.
+    Returns False if the user should be ignored entirely, otherwise True.
     """
     import os
     import re
@@ -39,10 +40,10 @@ def check_user_status(user):
         return False
 
     # ---------------------------------------------------------------------
-    # 1. TIDSBEGRÄNSADE BANS (dags-bans från flood-skyddet)
-    # Dessa lever i config.banned_users som {nick: utgångstid} och läses in från
-    # bans.txt vid boot. De är RADER MED TIDSSTÄMPEL, inte wildcard-mönster, och
-    # fick därför aldrig regex-matchas som den gamla koden gjorde.
+    # 1. TIMED BANS (the day-bans the flood protection issues)
+    # These live in config.banned_users as {nick: expiry} and are read from
+    # bans.txt at boot. They are TIMESTAMPED ROWS, not wildcard patterns, so they
+    # must never be regex-matched the way the old code did.
     # ---------------------------------------------------------------------
     expire_ts = config.banned_users.get(user_lower)
     if expire_ts is not None:
@@ -55,17 +56,17 @@ def check_user_status(user):
             until = time.strftime("%H:%M:%S", time.localtime(expire_ts))
             return _deny(f"temporary ban active until {until}", "TBAN")
 
-        # Bannet har löpt ut - städa bort det ur RAM och av disken.
+        # The ban has expired - clear it from memory and from disk.
         del config.banned_users[user_lower]
         _ban_notified.discard(user_lower)
         try:
             import db
             db.save_bans_to_file()
         except Exception as save_err:
-            print(f"[SECURITY ERROR] Kunde inte spara utgånget ban: {save_err}")
+            print(f"[SECURITY ERROR] Could not save the expired ban: {save_err}")
 
     # ---------------------------------------------------------------------
-    # 2. PERMANENTA WILDCARD-BANS (hard_bans.txt, ett mönster per rad)
+    # 2. PERMANENT WILDCARD BANS (hard_bans.txt, one pattern per line)
     # ---------------------------------------------------------------------
     hard_file = getattr(config, "HARD_BANS_FILE", "./data/hard_bans.txt")
     # Tracks whether the hard-ban list was actually READ. If the file is missing or the
@@ -79,10 +80,10 @@ def check_user_status(user):
                     if not pattern or pattern.startswith("#"):
                         continue
 
-                    # 🛡️ BREDD-SPÄRR: Ett mönster som bara består av stjärnor skulle
-                    # stänga ute hela kanalen. Hoppa över det och skrik i loggen.
+                    # BREADTH GUARD: a pattern made only of stars would lock out
+                    # the whole channel. Skip it and say so loudly in the log.
                     if not pattern.replace("*", ""):
-                        print(f"[SECURITY WARNING] Ignorerade alltför brett mönster i {hard_file}: {pattern!r}")
+                        print(f"[SECURITY WARNING] Ignored an over-broad pattern in {hard_file}: {pattern!r}")
                         continue
 
                     regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
@@ -90,7 +91,7 @@ def check_user_status(user):
                         return _deny(f"matched banned pattern '{pattern}'", "BAN")
             hard_check_ok = True
         except Exception as e:
-            print(f"[SECURITY ERROR] Kunde inte läsa filen {hard_file}: {e}")
+            print(f"[SECURITY ERROR] Could not read {hard_file}: {e}")
 
     # This user was seen clean, so drop any stale "already notified" mark: a LATER ban on
     # the same nick then notifies once more. Previously the mark was only cleared on the
@@ -107,11 +108,11 @@ def check_user_status(user):
     if hard_check_ok:
         _ban_notified.discard(user_lower)
 
-    return True  # Användaren är grön och fri att använda boten!
+    return True  # The user is clear to use the bot
 
 
 def is_flooding(user):
-    """Skyddar boten mot flood, rensar kön vid ban, bannar till midnatt och loggar allt till #flac-debug!"""
+    """Flood protection: clears the queue on a ban, bans until midnight, and logs it all."""
     import time
     import sys
     import config
@@ -123,7 +124,7 @@ def is_flooding(user):
     oserve = sys.modules.get('oserve')
     
     # ---------------------------------------------------------------------
-    # STEG 2: ANVÄNDAREN FORTSATTE HAMRA UNDER MUTE -> HÅRD DAGS-BAN TILL MIDNATT!
+    # STEP 2: the user kept hammering while muted -> a hard ban until midnight
     # ---------------------------------------------------------------------
     if user_key in config.muted_until:
         if now < config.muted_until[user_key]:
@@ -142,7 +143,7 @@ def is_flooding(user):
             
             print(f"[SECURITY BAN] Banned {user} until midnight. Saved to {config.BANS_FILE} via db.py.")
             
-            # NY VIP-LOGG: Skickar en lila dags-ban-notis direkt till mIRC på 0ms!
+            # VIP log: send the day-ban notice straight out, with no queue delay
             announce.send_debug(
                 f"User {user} ignored warnings and flooded during mute. Upgraded to daily ban until midnight! Saved to disk layout.", 
                 category="TBAN"
@@ -155,7 +156,7 @@ def is_flooding(user):
             del config.muted_until[user_key]
             
     # ---------------------------------------------------------------------
-    # HISTORIK-SKANNING (Rensar gamla förfrågningar utanför fönstret)
+    # Drop the requests that have fallen outside the rolling window
     # ---------------------------------------------------------------------
     if user_key not in config.user_requests:
         config.user_requests[user_key] = []
@@ -164,7 +165,7 @@ def is_flooding(user):
     config.user_requests[user_key].append(now)
     
     # ---------------------------------------------------------------------
-    # STEG 1: ANVÄNDAREN GÅR FÖR SNABBT -> TEMPORÄR MUTE/VARNING!
+    # STEP 1: the user is going too fast -> a temporary mute and a warning
     # ---------------------------------------------------------------------
     if len(config.user_requests[user_key]) > config.MAX_REQUESTS:
         config.muted_until[user_key] = now + config.MUTE_TIME
@@ -174,7 +175,7 @@ def is_flooding(user):
             
         print(f"[FLOOD CONTROL] Temporarily muted {user} for {config.MUTE_TIME} seconds. Queue cleared.")
         
-        # NY VIP-LOGG: Skickar en lila temporär varningsnotis direkt till mIRC på 0ms!
+        # VIP log: send the warning notice straight out, with no queue delay
         announce.send_debug(
             f"User {user} moving too fast! Triggered temporary mute for {config.MUTE_TIME} seconds. Queue cleared.", 
             category="TBAN"
