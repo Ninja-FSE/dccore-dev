@@ -1,4 +1,4 @@
-# oserve.py - Det centrala navet (Dirigenten för alla dina Python-moduler)
+# oserve.py - The central hub that wires every module together
 import threading
 import time
 import sys
@@ -12,11 +12,11 @@ import os
 import platform_compat
 platform_compat.install_console_encoding_guard()
 
-# Ladda alla botens specialiserade moduler
+# Load the bot's modules
 import config
 
-# 🛡️ GLOBAL MINNES-ALLOKERING: Skapar låsen direkt i RAM vid uppstart!
-# Detta håller config.py 100% ren från funktionsanrop och imports.
+# Allocate the locks at startup, in memory. This keeps config.py free of
+# function calls and imports.
 if not hasattr(config, 'queue_lock'):
     config.queue_lock = threading.Lock()
 
@@ -27,32 +27,33 @@ import list
 import dcc
 import db
 import announce
-import irc        # Hanterar nätverksporten till Undernet
-import queue_mgr  # Hanterar flood-skyddskön (Round-Robin)
-import security   # Hanterar användarbans och mutening
-import stats_mgr  # Hanterar storlekar, hastighet och uptime
-import commands    # Hanterar alla kommandon som användare kan skriva
+import irc        # The network connection to Undernet
+import queue_mgr  # The flood-protection queue (round-robin)
+import security   # User bans and muting
+import stats_mgr  # Sizes, speed and uptime
+import commands    # Every command a user can type
 
-# Kön för att hålla koll på unika användare (Flood Protection)
+# Tracks unique users, for flood protection
 config.send_queue = {}
 bot_joined_channel = False
 
-# Global nätverksreferens så att trådar alltid använder den senaste live-anslutningen
+# Shared network reference, so threads always use the current live connection
 irc_connection = None
 threads_started = False
 
-# Globala variabler for levande trafikstatistik (Mäts i realtid via dcc.py)
+# Live traffic statistics, measured in real time by dcc.py
 current_speed_bytes = 0    
 active_downloads = 0       
 send_fails_count = 0       
 total_sent_bytes = 0       
 
 def queue_message(user, message, is_vip=False):
-    """Central hjälpfunktion för kön - Nu med stenhårt isolerad och kontrollerad VIP-express!"""
+    """The queue's entry point, with a strictly isolated VIP express lane."""
     user_key = user.lower()
     import config
     
-    # VIP-SLUSS: Enbart äkta kanalreklam eller meddelanden som explicit flaggats som is_vip=True släpps in här!
+    # VIP GATE: only genuine channel adverts, or messages explicitly flagged
+    # is_vip=True, are allowed through here.
     if user_key == "channel_announce" or is_vip:
         config.vip_queue.append(message)
         return
@@ -84,23 +85,22 @@ def startup():
 
     latest_list = list.find_latest_list()
     if not latest_list:
-        print("[WARNING] Ingen fillista hittades i lists/ ännu.")
+        print("[WARNING] No file list found in lists/ yet.")
     else:
-        print(f"[INFO] Laddade senaste fillistan: {os.path.basename(latest_list)}")
+        print(f"[INFO] Loaded the latest file list: {os.path.basename(latest_list)}")
 
     if os.path.exists(config.BANS_FILE):
         db.load_bans_from_file()
 
-    # NYTT: Läser in alla sparade köplatser från hårddisken direkt vid boot!
+    # Read every saved queue slot back from disk at boot.
     db.load_dcc_queue()
 
     # ---------------------------------------------------------------------
-    # STENHÅRD SINGEL-START:
-    # Vi startar enbart kön EN ENDA GÅNG här, helt utanför alla looppar!
-    # Detta garanterar att du bara får en enda [QUEUE] på skärmen vid boot.
+    # SINGLE START: the queue is started exactly ONCE here, outside every loop,
+    # so boot produces exactly one [QUEUE] line.
     # ---------------------------------------------------------------------
     import queue_mgr
-    print("[SYSTEM] Initierar flood-skyddskön...")
+    print("[SYSTEM] Starting the flood-protection queue...")
     threading.Thread(target=queue_mgr.queue_worker, daemon=True).start()
 
 
@@ -116,26 +116,26 @@ def run_forever():
     """
     global irc_connection, bot_joined_channel
 
-    # CENTRAL ÅTERANSLUTNINGSLOOP (Hanterar ENBART nätverket!)
+    # THE RECONNECT LOOP (network only)
     while True:
         try:
-            # Överlämna hela nätverksarbetet till IRC-modulen
+            # Hand the whole network job to the IRC module
             irc.irc_loop()
         except KeyboardInterrupt:
-            print("\nStänger av...")
+            print("\nShutting down...")
             sys.exit(0)
         except Exception as main_err:
             print(f"[CRITICAL MAIN ERROR] Huvudloopen dippade: {main_err}")
 
-        # Om nätverket dör, rensar vi socketen snyggt inför nästa försök
+        # If the network dies, clear the socket cleanly before the next attempt
         irc_connection = None
         bot_joined_channel = False
 
-        # Säkerhetsspärr: Om nätverket dör, se till att reklamen vet om det
+        # Safety catch: if the network dies, make sure the advert knows
         import announce
         announce.is_ready = False
 
-        print("[CONNECT] Tappade anslutning. Återansluter till IRC Server om 10 sekunder...")
+        print("[CONNECT] Lost the connection. Reconnecting to the IRC server in 10 seconds...")
         time.sleep(10)
 
 
