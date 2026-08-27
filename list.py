@@ -138,20 +138,35 @@ def find_latest_list():
         print(f"[SEARCH ERROR] Kunde inte hitta senaste listan: {e}")
     return None
 
-def _split_entry_line(line_strip):
-    """Pull the filename and size back out of one "!..." master-list line.
+def strip_info_suffix(rest):
+    """Split "<filename>  ::INFO:: <size>" into (filename, size).
 
     Mirrors the exact line update_list.py writes (update_list.py:216):
-    "!<nick> <filename>  ::INFO:: <size>". Best-effort on purpose - this feeds
-    the read-only web dashboard, never IRC, so a line that does not split
-    cleanly returns what it can rather than raising.
+    "!<nick> <filename>  ::INFO:: <size>" - `rest` is everything after the
+    "!<nick> " prefix. Best-effort on purpose: a line that does not carry the
+    marker returns the whole thing as the filename with an empty size, rather
+    than raising. Shared by `_split_entry_line()` below (this bot's own master
+    list) and irc.py's cross-bot broadcast-search capture, which extracts the
+    same "!<nick> <filename>  ::INFO:: <size>" shape out of another bot's
+    reply and must not mistake the trailing size tag for part of the filename
+    when it later requests that exact name back with `!<nick> <filename>`.
     """
-    _, _, rest = line_strip.partition(" ")
     if "  ::INFO:: " in rest:
         filename, _, size = rest.rpartition("  ::INFO:: ")
     else:
         filename, size = rest, ""
     return filename.strip(), size.strip()
+
+
+def _split_entry_line(line_strip):
+    """Pull the filename and size back out of one "!..." master-list line.
+
+    Best-effort on purpose - this feeds the read-only web dashboard, never
+    IRC, so a line that does not split cleanly returns what it can rather
+    than raising.
+    """
+    _, _, rest = line_strip.partition(" ")
+    return strip_info_suffix(rest)
 
 
 def find_matching_entries(search_words, limit=None):
