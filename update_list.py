@@ -5,6 +5,7 @@ import datetime
 import zipfile
 import time
 import config
+import platform_compat
 import zipfile
 
 def format_size_human(bytes_size):
@@ -132,7 +133,7 @@ def generate_master_list():
                 full_file_path = os.path.join(root, file)
                 file_bytes = 0
                 try:
-                    file_bytes = os.path.getsize(full_file_path)
+                    file_bytes = os.path.getsize(platform_compat.long_path(full_file_path))
                     total_bytes += file_bytes
                 except:
                     pass
