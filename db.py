@@ -1,4 +1,4 @@
-# db.py - Central databashantering för DCCore
+# db.py - Central state storage for DCCore
 import os
 import time
 import datetime
@@ -50,11 +50,11 @@ def _atomic_write(path, text):
         raise
 
 # =================================================================----
-# SEKTION 1: BANS.TXT (Bannlysta användare)
+# SECTION 1: BANS.TXT (banned users)
 # =================================================================----
 
 def load_bans_from_file():
-    """Läser in aktiva bans från bans.txt till det globala minnet"""
+    """Load the active bans from bans.txt into memory."""
     if not os.path.exists(config.BANS_FILE):
         return
     try:
@@ -64,9 +64,9 @@ def load_bans_from_file():
                 if " " in line:
                     user_key, expire_ts = line.split(" ", 1)
                     config.banned_users[user_key.lower()] = float(expire_ts)
-        print(f"[DB] Laddade in bans från {config.BANS_FILE}")
+        print(f"[DB] Loaded bans from {config.BANS_FILE}")
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte läsa {config.BANS_FILE}: {e}")
+        print(f"[DB ERROR] Could not read {config.BANS_FILE}: {e}")
 
 def save_bans_to_file():
     """Write the active bans from memory to bans.txt, atomically."""
@@ -76,7 +76,7 @@ def save_bans_to_file():
             body = "".join(f"{user_key} {expire_ts}\n" for user_key, expire_ts in snapshot.items())
             _atomic_write(config.BANS_FILE, body)
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte spara till {config.BANS_FILE}: {e}")
+        print(f"[DB ERROR] Could not save to {config.BANS_FILE}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +135,7 @@ def load_hard_bans():
         with _disk_lock:
             return _read_hard_bans_unlocked(_hard_bans_path())
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte läsa {_hard_bans_path()}: {e}")
+        print(f"[DB ERROR] Could not read {_hard_bans_path()}: {e}")
         raise
 
 
@@ -215,7 +215,7 @@ def _load_advanced_stats_unlocked():
             elif len(parts) == 2:
                 return [int(parts[0]), int(parts[1]), 0, 0, 0, 0, today_str]
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte tolka stats.txt, använder standard: {e}")
+        print(f"[DB ERROR] Could not parse stats.txt, using defaults: {e}")
     return default_stats
 
 
@@ -263,7 +263,7 @@ def _coerce_file_size(file_size):
             file_size = file_size.get('bytes', file_size.get('size', 0))
         return int(float(str(file_size).strip()))
     except Exception as type_err:
-        print(f"[DB WARNING] Kunde inte tolka filstorlek '{file_size}' automatisk fallback till 0: {type_err}")
+        print(f"[DB WARNING] Could not parse file size '{file_size}', falling back to 0: {type_err}")
         return 0
 
 
@@ -284,7 +284,7 @@ def save_advanced_stats(stats):
         with _disk_lock:
             _save_advanced_stats_unlocked(stats)
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte spara till stats.txt: {e}")
+        print(f"[DB ERROR] Could not save to stats.txt: {e}")
 
 
 def check_and_rotate_day():
@@ -302,7 +302,7 @@ def check_and_rotate_day():
         if rotated:
             _save_advanced_stats_unlocked(stats)
     if rotated:
-        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till igår.")
+        print(f"[DB ROTATE] New day detected ({stats[6]}). Moving statistics to yesterday.")
     return stats
 
 
@@ -324,12 +324,12 @@ def update_stats_on_complete(file_size):
         stats[5] += clean_size  # Today bytes
         _save_advanced_stats_unlocked(stats)
     if rotated:
-        print(f"[DB ROTATE] Ny dag upptäckt ({stats[6]}). Flyttar statistik till igår.")
+        print(f"[DB ROTATE] New day detected ({stats[6]}). Moving statistics to yesterday.")
     return stats
 
 
 def get_speed_record():
-    """Hämtar det sparade hastighetsrekordet i bytes/s från hårddisken.
+    """Read the saved speed record, in bytes/s, from disk.
 
     FIXED (issue #34): previously read a hardcoded "./data/speed_record.txt" literal
     while save_speed_record() already wrote to the SPEED_RECORD_FILE constant -
@@ -350,7 +350,7 @@ def save_speed_record(new_record):
         with _disk_lock:
             _atomic_write(SPEED_RECORD_FILE, str(int(new_record)))
     except Exception as e:
-        print(f"[DB ERROR] Kunde inte spara hastighetsrekord: {e}")
+        print(f"[DB ERROR] Could not save the speed record: {e}")
 
 def save_dcc_queue():
     """Persist the DCC queue, dropping users whose list is now empty.
@@ -400,13 +400,13 @@ def load_dcc_queue():
             raise ValueError(f"expected a JSON object, got {type(loaded).__name__}")
         config.dcc_queue = loaded
         total = sum(len(v) for v in loaded.values() if isinstance(v, list))
-        print(f"[DB] Laddade in {total} sparad(e) köplats(er) för {len(loaded)} användare från hårddisken!")
+        print(f"[DB] Loaded {total} saved queue slot(s) for {len(loaded)} user(s) from disk.")
     except Exception as e:
         config.dcc_queue = {}
-        print(f"[DB ERROR] Kunde inte läsa sparad DCC-kö, startar tom: {e}")
+        print(f"[DB ERROR] Could not read the saved DCC queue, starting empty: {e}")
         try:
             backup = file_path + ".corrupt"
             os.replace(file_path, backup)
-            print(f"[DB ERROR] Den skadade filen sparades som {backup} för manuell räddning.")
+            print(f"[DB ERROR] The damaged file was kept as {backup} for manual recovery.")
         except Exception as backup_err:
-            print(f"[DB ERROR] Kunde inte ens säkerhetskopiera den skadade filen: {backup_err}")
+            print(f"[DB ERROR] Could not even back up the damaged file: {backup_err}")

@@ -1,5 +1,5 @@
 # =====================================================================
-# DCC.PY - FULLSTÄNDIGT KRASCHSÄKRAD OCH DUBBELFIL-OPTIMERAD MASTER-KOD
+# DCC.PY - THE TRANSFER ENGINE
 # =====================================================================
 import socket
 import threading
@@ -15,11 +15,11 @@ import list as list_mod
 import announce
 import db
 
-# Skapa trådlåset direkt i toppen av modulen så att kön räknas upp spikrakt
+# The thread lock is created at the top of the module, so the queue counts cleanly
 queue_lock = threading.Lock()
 
 def is_safe_path(base_dir, path, follow_symlinks=True):
-    """Säkerhetsfilter: Förhindrar Directory Traversal-attacker"""
+    """Safety filter: prevents directory traversal attacks."""
     if follow_symlinks:
         matchpath = os.path.realpath(path)
     else:
@@ -27,13 +27,13 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
 
     base = os.path.realpath(base_dir)
 
-    # 🛡️ FIXAD: Jämför per katalogsteg istället för en rå startswith.
-    # Med enbart startswith skulle "/mnt/nfs-musik-backup" felaktigt godkännas
-    # som en del av "/mnt/nfs-musik", eftersom strängen råkar börja likadant.
+    # FIXED: compares per directory step, rather than a plain startswith.
+    # With startswith alone, "/mnt/nfs-musik-backup" would wrongly be accepted
+    # as part of "/mnt/nfs-musik", because the string happens to begin the same way.
     return matchpath == base or matchpath.startswith(base + os.sep)
 
 def user_is_present_in_ram(user_key):
-    """Kollar om en användare finns kvar i NÅGON av botens live-kanallistor (353/JOIN-synkade)."""
+    """Is this user still in ANY of the bot's live channel lists (synced from 353/JOIN)?"""
     u = str(user_key).lower()
     for users_set in getattr(config, 'channel_users', {}).values():
         for known_user in users_set:
@@ -192,7 +192,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
 
 
 def get_total_queued_count():
-    """Räknar ut det totala antalet filer som står i alla personliga köer just nu"""
+    """The total number of files sitting in every personal queue right now."""
     total = 0
     for user_key, files in config.dcc_queue.items():
         total += len(files)
@@ -210,7 +210,7 @@ def get_public_ip_long():
     return 0
 
 def check_queue_and_send(irc_sock, completed_user):
-    """Kollar köer live och kör linjär RAR-packning via RAM-minnet (0% SERVERFLOOD!)"""
+    """Check the queues and run RAR packing one at a time, without flooding the server."""
     import announce as announce_mod
     import subprocess
     import threading
@@ -225,18 +225,18 @@ def check_queue_and_send(irc_sock, completed_user):
     user_key = completed_user.lower()
     oserve = sys.modules.get('oserve')
     
-    # 1. AUTOMATISK RENSNING AV GAMLA FRYSTA KÖER (Äldre än 5 min)
-    # 🛡️ NY NÄTVERKS-SLUSS: Svepet får ENBART köras när boten själv är fullt kanalsynkad.
-    # Under en reconnect är channel_users tom, och då raderade det gamla svepet köer för
-    # användare som aldrig hade lämnat kanalen.
+    # 1. Sweep away frozen queues older than five minutes
+    # The sweep may ONLY run once the bot itself is fully channel-synced.
+    # During a reconnect channel_users is empty, and the old sweep then deleted queues
+    # belonging to users who had never left the channel.
     if getattr(config, 'bot_joined_channel', False):
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
             current_time = time.time()
             for f_user, freeze_timestamp in list(config.frozen_queues.items()):
-                # ❄️ TINING: Användaren finns live i RAM igen – släpp frysen istället för att radera!
+                # THAW: the user is back in memory - release the freeze instead of deleting
                 if user_is_present_in_ram(f_user):
                     del config.frozen_queues[f_user]
-                    print(f"[DCC FREEZE-THAW] {f_user} är tillbaka i kanallistan. Kön räddad från rensning.")
+                    print(f"[DCC FREEZE-THAW] {f_user} is back in the channel list. Their queue was saved.")
                     continue
                 if (current_time - freeze_timestamp) > 300.0:
                     if f_user in config.dcc_queue:
@@ -257,7 +257,7 @@ def check_queue_and_send(irc_sock, completed_user):
     with queue_lock if 'queue_lock' in globals() else threading.Lock():
         if user_key and user_key in config.dcc_queue and config.dcc_queue[user_key]:
             if user_key not in config.frozen_queues:
-                next_file = config.dcc_queue[user_key][0] # 🛡️ FIXAD: Plockar det översta elementet ur dcc_queue.txt!
+                next_file = config.dcc_queue[user_key][0]  # FIXED: takes the top entry
 
 
     if next_file:
@@ -268,9 +268,9 @@ def check_queue_and_send(irc_sock, completed_user):
         
         user_is_actively_in_channel = False
         
-        # 🛡️ TOTAL SKIFTLÄGES- OCH SYSTEM-BYPASS SLUSS (Inbäddad i perfekt symmetri):
-        # Om completed_user är system-triggern ELLER om användaren precis har rehashats, 
-        # så slår vi vidöppet för att utplåna alla tysta skiftläges-blockeringar live!
+        # Case-folding and system-trigger bypass:
+        # if completed_user is the system trigger, OR the user was just rehashed, 
+        # open the gate fully, to clear any silent case-sensitivity blocks.
         if "system_next_trigger_fallback" in [str(completed_user).lower(), str(user_key)]:
             user_is_actively_in_channel = True
         else:
@@ -283,7 +283,7 @@ def check_queue_and_send(irc_sock, completed_user):
             
         if user_is_actively_in_channel is True:
             # ---------------------------------------------------------------------
-            # HÄR ÄR DEN LINJÄRA MAPP-PACKAREN: Körs en och en inuti sändnings-slussen!
+            # The folder packer runs strictly one at a time, inside the send gate
             # ---------------------------------------------------------------------
             if isinstance(next_file, dict) and next_file.get('is_unpacked_rar_folder') is True:
                 # FIXED (issue #27, RAR branch): this check-then-set had the same gap as
@@ -301,10 +301,10 @@ def check_queue_and_send(irc_sock, completed_user):
                     pack_in_progress = getattr(config, 'rar_inprogress', False)
 
                     if user_already_locked:
-                        print(f"[RAR-BLOCK] {completed_user} redan låst i RAM, blockerar spöktråd.")
+                        print(f"[RAR-BLOCK] {completed_user} is already locked in memory; blocking a stale thread.")
                         return
                     if pack_in_progress:
-                        print(f"[RAR-HOLD] {completed_user} väntar i kön eftersom en annan packning pågår live...")
+                        print(f"[RAR-HOLD] {completed_user} waits in the queue while another packing run is in progress...")
                         return
 
                     config.rar_inprogress = True
@@ -346,11 +346,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     true_source_dir = next_file['path']
                     raw_filename = next_file['file']
 
-                    # 🛡️ ANDRA FÖRSVARSLINJEN: Köposter överlever omstarter via dcc_queue.txt,
-                    # så en förgiftad rad som köades INNAN traversal-spärren fanns skulle annars
-                    # fortfarande packas här. Verifiera sökvägen igen precis före rar-anropet.
+                    # SECOND LINE OF DEFENCE: queue entries survive restarts via dcc_queue.txt,
+                    # so a poisoned row queued BEFORE the traversal guard existed would otherwise
+                    # still be packed here. Re-verify the path immediately before calling rar.
                     if not is_safe_path(config.FILE_DIRECTORY, true_source_dir):
-                        print(f"[SECURITY] Blockade förgiftad köpost för {completed_user}: {true_source_dir}")
+                        print(f"[SECURITY] Blocked a poisoned queue entry for {completed_user}: {true_source_dir}")
                         with queue_lock:
                             if completed_user.lower() in config.dcc_queue:
                                 config.dcc_queue[completed_user.lower()] = [
@@ -365,23 +365,23 @@ def check_queue_and_send(irc_sock, completed_user):
                             category="HARDBAN")
                         return
 
-                    # 1. Rensa bort eventuella gamla .rar-ändelser från strängen
+                    # 1. Strip any stale .rar suffix from the string
                     clean_name = re.sub(r'(?:\.rar)+$', '', raw_filename, flags=re.IGNORECASE)
                     
-                    # 2. 🛡️ APOSTROF-RÄDDARE: Om originalmappen på disken har en apostrof, återställ den live!
-                    # Detta garanterar att AutoQ matchar filnamnet till 100% i alla lägen.
+                    # 2. If the folder on disk contains an apostrophe, restore it here.
+                    # That is what lets AutoQ match the filename in every case.
                     folder_leaf = os.path.basename(true_source_dir.rstrip('/\\'))
                     if "'" in folder_leaf and "'" not in clean_name:
                         # Om originalet har apostrof men namnet saknar det, byt ut motsvarande understreck
-                        # genom att matcha strukturen från disk-mappen
+                        # by matching the structure of the folder on disk
                         clean_name = folder_leaf.replace(' ', '_')
                         clean_name = re.sub(r'[^a-zA-Z0-9\s\(\)\-_\']', '_', clean_name)
                     else:
-                        # Standard-tvätt om ingen apostrof-krock upptäcktes
+                        # The ordinary cleanup, when no apostrophe clash was found
                         clean_name = clean_name.replace(' ', '_')
                         clean_name = re.sub(r'[^a-zA-Z0-9\s\(\)\-_\']', '_', clean_name)
                         
-                    # 3. Spika det fullständiga, apostrof-säkrade .rar-filnamnet!
+                    # 3. Settle on the complete, apostrophe-safe .rar filename
                     rar_filename = f"{clean_name}.rar"
                     target_rar_path = os.path.normpath(os.path.join(config.TMP_ZIP_DIR, rar_filename))
 
@@ -389,14 +389,14 @@ def check_queue_and_send(irc_sock, completed_user):
                     if not os.path.exists(config.TMP_ZIP_DIR):
                         os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
                         
-                    # 🧼 VARIABEL-TVÄTT: Klipper bort dolda radbrytningar (\n) från sökvägen på 0ms!
+                    # Strip any hidden line breaks (\n) out of the path
                     if isinstance(true_source_dir, str):
                         true_source_dir = true_source_dir.strip()
 
-                    print(f"[LINJÄR RAR] Startar packning av: {true_source_dir} -> {target_rar_path}")
+                    print(f"[LINEAR RAR] Starting to pack: {true_source_dir} -> {target_rar_path}")
 
 
-                    # 🛡️ SCEN-SÄKRAD OCH TOTAL-ISOLERAD ARGUMENT-SLUSS:
+                    # Arguments are passed as a list, never through a shell:
                     work_dir_switch = f"-w{os.path.abspath(config.TMP_ZIP_DIR)}"
                     # Resolve the binary rather than trusting a bare name on PATH:
                     # WinRAR installs rar.exe outside PATH entirely.
@@ -412,11 +412,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     process = subprocess.run(cmd, capture_output=True, text=True, timeout=rar_timeout)
                     
                     if process.returncode == 0 and os.path.exists(target_rar_path):
-                        print(f"[LINJÄR RAR] Komprimering lyckades. Väntar 2.0s på disksynk...")
+                        print(f"[LINEAR RAR] Compression succeeded. Waiting 2.0s for the disk to sync...")
                         time.sleep(2.0)
                         
                         final_size = os.path.getsize(target_rar_path)
-                        print(f"[LINJÄR RAR] Arkiv helt spikat på disken: {final_size:,} bytes")
+                        print(f"[LINEAR RAR] The archive is settled on disk: {final_size:,} bytes")
                         
                         next_file['path'] = target_rar_path
                         next_file['file'] = rar_filename
@@ -448,7 +448,7 @@ def check_queue_and_send(irc_sock, completed_user):
                                             reason="rar exited " + str(process.returncode))
                         return False
 
-                # 🚀 TÄNDNINGEN AKTIV: Denna ligger på exakt rätt nivå och väcker funktionen ovanför direkt!
+                # At exactly the right level, so it wakes the function above immediately
                 threading.Thread(target=inline_rar_packer, args=(irc_sock,), daemon=True).start()
                 return
 
@@ -507,51 +507,51 @@ def check_queue_and_send(irc_sock, completed_user):
                 return
         else:
             # -----------------------------------------------------------------
-            # 🛡️ NÄTVERKS-SLUSS: Frys ALDRIG en kö när boten själv är av nätet!
-            # Vid netsplit/reconnect är channel_users tom eller halvsynkad. Då VET vi inte
-            # om användaren har gått – vi låter kön ligga helt orörd tills NAMES-synken är klar.
+            # NEVER freeze a queue while the bot itself is off the network.
+            # On a netsplit or reconnect channel_users is empty or half-synced, so we do
+            # not KNOW whether the user left. Leave the queue alone until NAMES has synced.
             # -----------------------------------------------------------------
             if not getattr(config, 'bot_joined_channel', False) or not getattr(config, 'channel_users', None):
-                print(f"[DCC FREEZE-SKIP] Boten är inte kanalsynkad ännu. Behåller kön för {completed_user} orörd.")
+                print(f"[DCC FREEZE-SKIP] The bot is not channel-synced yet. Leaving {completed_user}'s queue untouched.")
                 return
 
-            # 🛡️ DUBBELTIMER-SPÄRR: En användare får ha exakt EN nedräkning åt gången.
+            # A user may have exactly ONE countdown running at a time.
             if user_key in getattr(config, 'frozen_queues', {}):
-                print(f"[DCC FREEZE-HOLD] {completed_user} har redan en aktiv nedräkning. Startar ingen till.")
+                print(f"[DCC FREEZE-HOLD] {completed_user} already has a countdown running. Not starting another.")
                 return
 
             with queue_lock if 'queue_lock' in globals() else threading.Lock():
                 config.frozen_queues[user_key] = time.time()
-            print(f"[DCC REACTIVE FREEZE] {completed_user} har lämnat {target_chan} på riktigt! Startar timer...")
+            print(f"[DCC REACTIVE FREEZE] {completed_user} really has left {target_chan}. Starting the timer...")
             announce_mod.send_debug(f"DCC reactive freeze triggered for {completed_user} in {target_chan}. Initiating 5-minute cooldown timer.", category="QUIT")
             
             def user_queue_timer(sock, target_user, original_chan):
-                """🕒 VERIFIERANDE NEDRÄKNING (ersätter den blinda 300-sekunderssömnen).
-                Klockan pausas helt medan boten är frånkopplad – botens egen downtime får
-                ALDRIG räknas mot användarens kö – och nedräkningen avbryts direkt om
-                användaren dyker upp igen via JOIN eller NAMES-synk."""
+                """A verifying countdown, replacing the old blind 300-second sleep.
+                The clock pauses entirely while the bot is disconnected - the bot's own
+                downtime must NEVER count against a user's queue - and the countdown
+                aborts as soon as the user reappears via JOIN or a NAMES sync."""
                 t_key = target_user.lower()
                 elapsed = 0
                 
                 while elapsed < 300:
                     time.sleep(10)
                     
-                    # A) Någon annan har redan tinat upp kön (JOIN / NAMES / !rehash) – avbryt tyst.
+                    # A) Something else already thawed the queue (JOIN / NAMES / !rehash)
                     if t_key not in getattr(config, 'frozen_queues', {}):
-                        print(f"[DCC FREEZE-ABORT] {target_user} är redan upptinad. Nedräkningen avbryts, kön är räddad.")
+                        print(f"[DCC FREEZE-ABORT] {target_user} is already thawed. The countdown stops; the queue is safe.")
                         return
                         
-                    # B) Boten är själv offline – frys klockan helt och räkna INTE upp elapsed.
+                    # B) The bot itself is offline - freeze the clock, do NOT advance elapsed
                     if not getattr(config, 'bot_joined_channel', False):
-                        print(f"[DCC FREEZE-PAUSE] Boten är av nätet. Pausar nedräkningen för {target_user} på {elapsed}s.")
+                        print(f"[DCC FREEZE-PAUSE] The bot is off the network. Pausing {target_user}'s countdown at {elapsed}s.")
                         continue
                         
-                    # C) Boten är online igen – verifiera mot den färska kanallistan i RAM.
+                    # C) The bot is back online - check against the fresh channel list
                     if user_is_present_in_ram(t_key):
                         with queue_lock if 'queue_lock' in globals() else threading.Lock():
                             config.frozen_queues.pop(t_key, None)
-                        print(f"[DCC FREEZE-ABORT] {target_user} hittades live i kanallistan. Kön behålls och väcks.")
-                        announce_mod.send_debug(f"Queue for {config.C_BOLD}{target_user}{config.C_RESET} preserved – user verified back in channel before timeout.", category="JOIN")
+                        print(f"[DCC FREEZE-ABORT] {target_user} was found in the channel list. The queue is kept and woken.")
+                        announce_mod.send_debug(f"Queue for {config.C_BOLD}{target_user}{config.C_RESET} preserved - user verified back in channel before timeout.", category="JOIN")
                         threading.Thread(target=check_queue_and_send, args=(sock, target_user), daemon=True).start()
                         return
                         
@@ -573,7 +573,7 @@ def check_queue_and_send(irc_sock, completed_user):
             return
 
     # =====================================================================
-    # B) Global köhantering för nästa person i kön (Helsäkrad för 3 slots!)
+    # B) Global queue handling for the next person in line, across all slots
     # =====================================================================
     if oserve:
         oserve.active_downloads = len(config.active_transfers)
@@ -668,15 +668,15 @@ def check_queue_and_send(irc_sock, completed_user):
 
 
 def handle_download_request(irc_sock, user, requested_file, target_chan):
-    """Triggas när någon begär en fil eller en hel mapp via !rar (Helt kraschsäkrad mot .mp3/.flac list-fel)"""
+    """Runs when somebody requests a file, or a whole folder via !rar."""
     # ---------------------------------------------------------------------
-    # 🛡️ GLOBAL UNDERHÅLLSSPÄRR: (Kliniskt ren utan dolda lokal-import krockar!)
+    # The global maintenance gate:
     # ---------------------------------------------------------------------
     if getattr(config, 'PAUSE_ON_UPDATE', False) is True and getattr(config, 'search_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: MasterList is currently rebuilding. File requests temporarily paused. Please wait 1-2 minutes.\r\n")
-        print(f"[MAINTENANCE BLOCK] Nekade fildelningsbegäran (.mp3/.flac/.rar) från {user} pga pågående !update.")
+        print(f"[MAINTENANCE BLOCK] Refused a file request from {user}: an !update is running.")
         return
     # ---------------------------------------------------------------------
 
@@ -688,14 +688,14 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         print(f"[DCC] {user} requested: {requested_file}")
 
         # ---------------------------------------------------------------------
-        # ASYNKRON MAPP-PACKNING (!rar Sluss med stenhård ROOT- och NFS-säkring)
+        # Asynchronous folder packing: the !rar gate, with root and NFS guards
         # ---------------------------------------------------------------------
         if requested_file.lower().startswith("!rar "):
             import announce as announce_mod
             
             raw_win_path = requested_file[5:].strip()
             
-            # Vi klipper bort eventuella gamla rester om någon klistrar in en gammal rad
+            # Trim any leftovers, in case somebody pasted an old row
             if "::INFO::" in raw_win_path:
                 raw_win_path = raw_win_path.split("::INFO::")[0].strip()
                 
@@ -712,16 +712,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             true_source_dir = os.path.normpath(os.path.join(config.FILE_DIRECTORY, linux_sub_path))
 
             # ---------------------------------------------------------------------
-            # 🛡️ TRAVERSAL-SPÄRR (KRITISK SÄKERHETSSLUSS):
-            # Utan den här kontrollen kunde vem som helst i kanalen skriva
-            # "!rar ../../root/.ssh" och få hela den katalogen packad och skickad
-            # till sig. os.path.normpath äter upp alla "..", och den gamla
-            # root-spärren nedan släppte igenom allt som innehöll ett snedstreck.
-            # Vi verifierar därför att den FÄRDIGA sökvägen fortfarande ligger
-            # innanför musikdisken innan något annat händer.
+            # THE TRAVERSAL GUARD - this one is critical:
+            # without this check, anyone in the channel could type
+            # "!rar ../../root/.ssh" and have that whole directory packed and sent
+            # to them. os.path.normpath eats every "..", and the old root guard
+            # below let through anything that contained a slash.
+            # So the FINAL path is verified to still be inside the music directory
+            # before anything else happens.
             # ---------------------------------------------------------------------
             if not is_safe_path(config.FILE_DIRECTORY, true_source_dir):
-                print(f"[SECURITY] Blockade traversal-försök från {user}: {raw_win_path!r} -> {true_source_dir}")
+                print(f"[SECURITY] Blocked a traversal attempt from {user}: {raw_win_path!r} -> {true_source_dir}")
                 announce_mod.send_pack_error_notice(irc_sock, user)
                 announce_mod.send_debug(
                     f"Path traversal denied for {config.C_BOLD}{user}{config.C_RESET}: request resolved outside the music root.",
@@ -729,12 +729,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 return
 
             if "/" not in linux_sub_path:
-                print(f"[SECURITY] Blockade root-mappspackning från {user}: {linux_sub_path}")
+                print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {linux_sub_path}")
                 announce_mod.send_pack_error_notice(irc_sock, user)
                 announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{linux_sub_path}{config.C_RESET} is an artist root folder.", category="PART")
                 return
             
-            if not os.path.exists(true_source_dir) or not os.path.isdir(true_source_dir):
+            if not os.path.exists(platform_compat.long_path(true_source_dir)) or not os.path.isdir(platform_compat.long_path(true_source_dir)):
                 announce_mod.send_debug(f"Pack error: Directory not found on disk storage for {user}.", category="PART")
                 return
 
@@ -754,11 +754,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     config.dcc_queue[user_key] = []
 
                 # ---------------------------------------------------------------------
-                # ÅTERSTÄLLD ALBUM-NAMNGIVARE (AutoQ-kompatibel med sparade parenteser!)
+                # Album naming, kept AutoQ-compatible with the parentheses preserved
                 # ---------------------------------------------------------------------
                 folder_name = os.path.basename(true_source_dir.rstrip("/"))
                 
-                # RÄTTAD: Tillåter parenteser ( och ) samt vanliga binde-streck så att AutoQ.mrc kan matcha filnamnet!
+                # Allows parentheses and ordinary hyphens, so AutoQ.mrc can match the filename
                 clean_folder_name = re.sub(r'[^\w\-_\. \(\)]', '', folder_name).replace(" ", "_")
                 
                 master_rar_filename = f"{clean_folder_name}.rar"
@@ -778,7 +778,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 user_pos = len(config.dcc_queue[user_key])
                 print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
                 
-                # 🧼 SLIMMAD STARTRAD: Bevarad till 100%! Skickar en (1) enda ren rad till din debug-kanal direkt!
+                # One single clean line to the debug channel, nothing more
                 announce_mod.send_debug(f"{user} requested \"{clean_folder_name}\". Starting rar and sending when done.", category="INFO")
                 
                 announce_mod.send_dcc_queue_notice(user, folder_name, user_pos)
@@ -786,7 +786,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             return
 
 
-        # --- FIX 1: Hämta index [0] ur listan INNAN .strip() körs! ---
+        # --- FIX 1: take index [0] out of the list BEFORE calling .strip() ---
         if " ::INFO::" in requested_file:
             parts = requested_file.split(" ::INFO::", 1)
             requested_file = parts[0].strip()
@@ -801,7 +801,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             full_path = os.path.join(base_directory, requested_file)
 
         is_master_zip = requested_file.endswith(".zip") and config.LIST_BASE_NAME in requested_file
-        if not is_master_zip and not os.path.exists(full_path):
+        if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
             latest_list_path = list_mod.find_latest_list()
             if latest_list_path and os.path.exists(latest_list_path):
                 try:
@@ -813,11 +813,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     for idx, line in enumerate(lines):
                         line_clean = line.strip()
                         if line_clean.startswith(f"!{config.NICKNAME} "):
-                            # --- FIX 2: Säkra list-split för nick-sökningen ---
+                            # --- FIX 2: a safe list split for the nick lookup ---
                             parts_nick = line_clean.split(f"!{config.NICKNAME} ", 1)
                             current_file_in_list = parts_nick[0].strip() if parts_nick else ""
                             
-                            # --- FIX 3: Säkra list-split för info-sökningen ---
+                            # --- FIX 3: a safe list split for the info lookup ---
                             if "  ::INFO::" in current_file_in_list:
                                 parts_info = current_file_in_list.split("  ::INFO::", 1)
                                 current_file_in_list = parts_info[0].strip() if parts_info else ""
@@ -834,11 +834,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                 
                     if target_folder_rel is not None:
                         test_path = os.path.join(base_directory, target_folder_rel, requested_file)
-                        if os.path.exists(test_path):
+                        if os.path.exists(platform_compat.long_path(test_path)):
                             full_path = test_path
                 except Exception as list_err:
                     print(f"[DCC-LOOKUP ERROR] {list_err}")
-            if not os.path.exists(full_path):
+            if not os.path.exists(platform_compat.long_path(full_path)):
                 for root, dirs, files in os.walk(base_directory):
                     if requested_file in files:
                         full_path = os.path.join(root, requested_file)
@@ -848,7 +848,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             announce.send_dcc_error(user, "invalid_path")
             return
 
-        if not os.path.exists(full_path) or os.path.isdir(full_path):
+        if not os.path.exists(platform_compat.long_path(full_path)) or os.path.isdir(platform_compat.long_path(full_path)):
             announce.send_dcc_error(user, "file_not_found")
             return
 
@@ -866,20 +866,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 announce.send_dcc_error(user, "user_full")
                 return
 
-            # STENHÅRD ANVÄNDARSLUSS: Vi kollar om nicket REDAN har en sändning igång inuti active_transfers
+            # Check whether this nick ALREADY has a send running, in active_transfers
             user_already_transferring = any(str(tx['user']).lower() == user_key for tx in config.active_transfers)
             
-            # Initiera ditt tillfälliga sändningslås i config om det saknas
+            # Create the temporary send lock in config if it is missing
             if not hasattr(config, 'user_processing_lock'):
                 config.user_processing_lock = set()
                 
-            # Om användaren precis skickade in rader, kollar vi om nicket ligger låst i RAM-minnet
+            # If the user just sent rows, check whether the nick is locked in memory
             user_is_processing = user_key in config.user_processing_lock
             user_has_queue = len(config.dcc_queue.get(user_key, [])) > 0
 
-            # 🛡️ BESLUTSFATTANDE: Enbart om användaren är HELT ren i transfers, kö och minneslås får den sändas direkt!
+            # Only a user who is clear in transfers, the queue AND the memory lock sends immediately
             if not user_already_transferring and not user_is_processing and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS:
-                # Lås användarens nick i RAM-minnet omedelbart så nästa rad kastas till kön!
+                # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
                 
                 next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False}
@@ -889,12 +889,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, target_chan, next_file_fake), daemon=True).start()
                 return
             else:
-                # Användaren har redan en låt igång! Vi kastar raden spikrakt till dcc_queue.txt!
+                # This user already has a track running; the row goes to dcc_queue.txt
                 if user_key not in config.dcc_queue:
                     config.dcc_queue[user_key] = []
                 config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False})
                 
-                # Sparar och uppdaterar din dcc_queue.txt på hårddisken direkt!
+                # Save and update dcc_queue.txt on disk straight away
                 import db
                 db.save_dcc_queue()
                 
@@ -908,7 +908,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         if oserve: oserve.send_fails_count += 1
 
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
-    """Sköter nätverksportarna, dolda CTCP och strömmar byten över nätverket med bevarad tidtagning"""
+    """Handle the network ports and the CTCP, and stream the bytes with accurate timing."""
     global active_transfers
     import time
     import os
@@ -916,14 +916,18 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     import sys
     import threading
     
-    # 🛡️ TYPE-SÄKRING: Om file_path eller file_name råkar vara dictionaries, extrahera de sanna strängarna!
+    # If file_path or file_name happen to be dictionaries, pull the real strings out
     if isinstance(next_file, dict):
         if not isinstance(file_path, str) or "{" in str(file_path):
             file_path = next_file.get('path', str(file_path))
         if not isinstance(file_name, str) or "{" in str(file_name):
             file_name = next_file.get('file', str(file_name))
 
-    file_size = os.path.getsize(file_path) if (isinstance(file_path, str) and os.path.exists(file_path)) else 0
+    # Addressed through long_path so a deep library path reports its real
+    # size instead of 0 - the DCC offer carries this number, and a 0 makes
+    # the receiver close immediately.
+    _size_probe = platform_compat.long_path(file_path) if isinstance(file_path, str) else None
+    file_size = os.path.getsize(_size_probe) if (_size_probe and os.path.exists(_size_probe)) else 0
     ip_long = get_public_ip_long()
     start_time = time.time()
     bytes_sent = 0
@@ -932,14 +936,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     transfer_completed = False
     
     if ip_long == 0 or file_size == 0:
-        print(f"[DCC CRITICAL ABORT] Avbröt sändning för {user}. Path: {file_path} (Size: {file_size})")
+        print(f"[DCC CRITICAL ABORT] Aborted the send for {user}. Path: {file_path} (Size: {file_size})")
         try: 
             msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} File access issue or empty payload. Please try again.\r\n"
             irc_sock.send(msg.encode('utf-8', errors='ignore'))
         except: 
             pass
             
-        # 🛡️ BANTNINGS-BROMS: Vi rensar låsen och väntar i 3 sekunder för att utplåna Excess Flood permanent!
+        # Clear the locks and wait three seconds, to stay well clear of Excess Flood
         config.rar_inprogress = False
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
@@ -992,7 +996,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
         if (isinstance(next_file, dict) and next_file.get('is_temporary_zip') is True
-                and not next_file.get('is_unpacked_rar_folder') and os.path.exists(file_path)):
+                and not next_file.get('is_unpacked_rar_folder') and os.path.exists(platform_compat.long_path(file_path))):
             try: os.remove(file_path)
             except OSError: pass
 
@@ -1024,16 +1028,16 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         conn.settimeout(60.0)
         dcc_sock.settimeout(None)
         
-       # ⚡ PROXMOX / BAHNHOF LINUX-OPTIMERING: Tvingar nätverkskortet att spruta paketen DIREKT!
+       # Push the packets out immediately rather than letting them coalesce
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         print(f"[DCC-CONNECT] {user} connected from {addr}!")
 
         start_time = time.time()       
 
-        with open(file_path, 'rb') as f:
+        with open(platform_compat.long_path(file_path), 'rb') as f:
             while True:
-                # Topptrimmad 64 KB paketstorlek för maximal nätverksprestanda
+                # A 64 KB packet size, tuned for throughput
                 chunk = f.read(65536)
                 if not chunk: break
                 try:
@@ -1049,12 +1053,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 
         transfer_completed = True
         print(f"[DCC-SUCCESS] Filen skickades felfritt till {user}!")
-        # 🕒 DIN BEPRÖVADE ORIGINAL-PAUS: Ger mIRC exakt 1.5 sekunder att stänga filen i lugn och ro!
+        # The original pause: gives mIRC 1.5 seconds to close the file calmly
         try: time.sleep(1.5)
         except: pass
  
         # ---------------------------------------------------------------------
-        # NYTT: UPPDATERA STATISTIKEN PÅ DISKEN (Skräddarsydd för din stats.txt!)
+        # Update the statistics on disk
         # ---------------------------------------------------------------------
         try:
             import db
@@ -1065,9 +1069,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # since nothing ever recomputes these counters. It also rotates the
             # day, so a transfer completing after midnight is counted correctly.
             stats = db.update_stats_on_complete(file_size)
-            print(f"[DB COUNTER] Statistik uppdaterad live på disken! (Skickade filer: {stats[0]}st)")
+            print(f"[DB COUNTER] Statistics updated on disk. (Files sent: {stats[0]})")
         except Exception as db_err:
-            print(f"[DB ERROR] Kunde inte räkna upp fildelningsstatistiken via db-modulen: {db_err}")
+            print(f"[DB ERROR] Could not increment the sharing statistics through the db module: {db_err}")
         # ---------------------------------------------------------------------
 
         try: conn.close()
@@ -1090,14 +1094,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     finally:
-        # 🛡️ DCC-FLUSH BROMS: Ger nätverksbufferten 0.5s andrum att flusha sista kvittot!
+        # Give the network buffer 0.5s to flush the final acknowledgement
         try:
             import time
             time.sleep(0.5)
         except:
             pass
 
-        # 📊 DYNAMISK REAL_TIME HASTIGHETSRÄKNARE: (0ms exekvering utan dolda trådkrockar!)
+        # The real-time speed counter
         acute_duration = time.time() - (start_time if 'start_time' in locals() else time.time())
         if acute_duration <= 0:
             acute_duration = 0.1
@@ -1105,7 +1109,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         acute_bytes = bytes_sent if 'bytes_sent' in locals() else 0
         final_calc_speed = int(acute_bytes / acute_duration)
 
-        # 1. 🧼 SANERA TRANSFERS OCH SLOTTAR DIREKT (Dödar cache-spöket omedelbart!)
+        # 1. Clean up the transfer and the slot immediately
         try:
             with queue_lock if 'queue_lock' in globals() else threading.Lock():
                 config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
@@ -1115,7 +1119,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             print(f"[DCC CLEANUP ERROR] Kunde inte rensa active_transfers in RAM: {trans_clean_err}")
 
 
-        # 2. TRYGGA KANALMEDDELANDET I ABSOLUT FÖRSTA HAND (Säkrar din lyxiga färgblocksreklam live!)
+        # 2. Get the channel notice out first of all
         try:
             import announce as announce_mod
             # Only announce a transfer that actually completed. A failed attempt now keeps
@@ -1124,21 +1128,21 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             if transfer_completed:
                 announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, final_calc_speed)
         except Exception as ann_chan_err:
-            print(f"[ANNOUNCE KANAL ERROR] Kunde inte trycka ut färgblocksreklam till mIRC: {ann_chan_err}")
+            print(f"[ANNOUNCE CHANNEL ERROR] Could not send the channel notice: {ann_chan_err}")
 
-        # 3. STÄNG NÄTVERKSSOCKETEN TRYGGT OCH SÄKERT
+        # 3. Close the network socket safely
         try: conn.close()
         except: pass
         try: dcc_sock.close()
         except: pass
-        # 4. 🛡️ INTELLIGENT RAR-CACHE & SÄNDNINGSLÅS (Nu helt fri från dolda spökkrockar!)
+        # 4. The RAR cache and the send lock
         try:
             file_still_needed = False
             safe_path = str(file_path)
             
             if "tmp_zips" in safe_path and ".zip" not in safe_path:
                 with queue_lock if 'queue_lock' in globals() else threading.Lock():
-                    # A. Kolla om filen ligger kvar i KÖN för någon ANNAN användare i dcc_queue.txt
+                    # A. Is the file still QUEUED for some OTHER user in dcc_queue.txt?
                     for q_user, q_files in getattr(config, 'dcc_queue', {}).items():
                         if q_user.lower() != user.lower():
                             for q_obj in q_files:
@@ -1146,7 +1150,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                                     file_still_needed = True
                                     break
                     
-                    # B. Kolla om filen fortfarande skickas AKTIVT till någon annan i en annan slot!
+                    # B. Is the file still being sent ACTIVELY to somebody in another slot?
                     active_matches = 0
                     for tx in getattr(config, 'active_transfers', []):
                         if tx.get('file') == file_name:
@@ -1155,13 +1159,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                     if active_matches > 0:
                         file_still_needed = True
 
-                # Om ingen annan användare eller aktiv slot behöver filen längre – RADERA FRÅN SSD!
+                # If no other user and no active slot still needs it, delete it from disk
                 if not file_still_needed:
-                    if os.path.exists(file_path):
+                    if os.path.exists(platform_compat.long_path(file_path)):
                         os.remove(file_path)
-                        print(f"[DCC CLEANUP] Raderade den temporära mappen helt säkert från SSD: {file_name}")
+                        print(f"[DCC CLEANUP] Safely deleted the temporary archive from disk: {file_name}")
         except Exception as file_rm_err:
-            print(f"[DCC CLEANUP ERROR] Kunde inte köra disksaneringen: {file_rm_err}")
+            print(f"[DCC CLEANUP ERROR] Could not run the disk cleanup: {file_rm_err}")
         
         # 5. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
         #    unconditional pop(0), which removed whatever was first at that instant rather
@@ -1174,12 +1178,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except Exception as pop_err:
             print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
 
-        # 6. LÅS UPP RAM-MINNET OCH UTESLUT DUBBELTRÅDAR
+        # 6. Release the memory lock and rule out duplicate threads
         config.rar_inprogress = False
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
 
-        # 7. TRIGGER-VÄCKARE (Väcker kön automatiskt efter 3 sekunder på ett helt trådsäkrat sätt!)
+        # 7. Wake the queue automatically after three seconds, thread-safely
         # A retained row means the attempt FAILED and will be retried. Reusing the flat
         # 3-second completion timer as the retry timer would hammer a broken entry three
         # times in nine seconds, each pass emitting a NOTICE and a VIP notice while the VIP

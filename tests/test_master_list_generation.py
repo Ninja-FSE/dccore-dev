@@ -502,3 +502,62 @@ class FlatteningNamesForOneLinePerEntry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheFolderRuleMatchesTheFolder(MasterListCase):
+    """The ==== rule above and below each folder header used to be a fixed 53
+    characters, while the header it framed was never that width.
+
+    Measured against the operator's real 1.21TB library: 4,107 folder headers,
+    running 54 to 136 characters and averaging 80. Every single one was wider
+    than the rule, so the framing was always ragged.
+    """
+
+    def _blocks(self):
+        """Every (rule, header, rule) triple in the generated text list."""
+        self.assertTrue(update_list.generate_master_list())
+        path = list_mod.find_latest_list()
+        self.assertIsNotNone(path, "no list was generated")
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            lines = [l.rstrip("\n") for l in handle]
+
+        found = []
+        for i in range(1, len(lines) - 1):
+            above, header, below = lines[i - 1], lines[i], lines[i + 1]
+            if (above and below and set(above) == {"="} and set(below) == {"="}
+                    and set(header) != {"="}):
+                found.append((above, header, below))
+        return found
+
+    def test_every_rule_is_exactly_as_wide_as_its_folder_line(self):
+        blocks = self._blocks()
+        self.assertTrue(blocks, "the fixture produced no folder headers")
+        for above, header, below in blocks:
+            self.assertEqual(len(above), len(header),
+                             f"rule above is {len(above)}, header is {len(header)}")
+            self.assertEqual(len(below), len(header),
+                             f"rule below is {len(below)}, header is {len(header)}")
+
+    def test_the_rules_are_not_the_old_fixed_width(self):
+        """Guards the specific regression: a 53-character rule against a
+        header that is not 53 characters."""
+        for above, header, _below in self._blocks():
+            if len(header) != 53:
+                self.assertNotEqual(
+                    len(above), 53,
+                    "the rule is back to the old fixed 53 characters")
+
+    def test_a_long_folder_name_still_gets_a_matching_rule(self):
+        """The real library's widest header is 136 characters."""
+        deep = os.path.join(self.tree.music,
+                            "An Artist With A Considerably Longer Name Than Usual",
+                            "1997 - An Album Title That Also Runs Long [REMASTER] [16-44]")
+        os.makedirs(deep, exist_ok=True)
+        with open(os.path.join(deep, "01 - Track.flac"), "wb") as handle:
+            handle.write(b"\x00" * 2048)
+
+        widest = max(self._blocks(), key=lambda b: len(b[1]))
+        self.assertGreater(len(widest[1]), 53,
+                           "fixture did not produce a header wider than the old rule")
+        self.assertEqual(len(widest[0]), len(widest[1]))
+        self.assertEqual(len(widest[2]), len(widest[1]))

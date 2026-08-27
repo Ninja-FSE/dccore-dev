@@ -130,14 +130,29 @@ def install_console_encoding_guard(streams=None):
     with a non-ASCII character becomes a crash. That is exactly how this
     daemon is meant to run.
 
-    Two layers, because either alone leaves a gap:
+    Three settings, because each closes a different gap:
 
-      encoding="utf-8"   so a redirected log keeps the real characters
-      errors="replace"   so ANY stream that still cannot encode something
-                         degrades to "?" instead of raising
+      encoding="utf-8"      so a redirected log keeps the real characters
+      errors="replace"      so ANY stream that still cannot encode something
+                            degrades to "?" instead of raising
+      line_buffering=True   so a line that has been printed is ON DISK
 
-    The real fix is for the log strings to be English - this only guarantees
-    that a character can never take the process down while that work happens.
+    That last one is not about encoding, but it belongs at the same moment and
+    on the same streams. Python block-buffers stdout whenever it is not a
+    console - a pipe, a log file, a service host - so print() output sits in a
+    4-8KB buffer instead of reaching the file. Measured while deploying this
+    daemon: 75 seconds of startup logging produced ONE line on disk, and
+    force-killing the process lost every buffered line, including the JOIN and
+    the channel advert. A probe that kills a child mid-run recovers 0 of ~24
+    printed lines without this and 23 of 24 with it.
+
+    The lines lost that way are the ones leading up to whatever killed the
+    process, which are the only lines anyone actually needs. The cost is a
+    flush per line, which is nothing against this daemon's log volume.
+
+    The real fix for the ENCODING half is for the log strings to be English -
+    that half only guarantees a character can never take the process down
+    while the translation happens.
 
     Returns the list of stream names actually reconfigured, so startup can say
     so and the tests can assert on it.
@@ -158,11 +173,13 @@ def install_console_encoding_guard(streams=None):
         current = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
         try:
             if current == "utf8":
-                # Already lossless. Only pin the error handler, so that a
-                # later reconfigure elsewhere cannot reintroduce the crash.
-                reconfigure(errors="replace")
+                # Already lossless. Pin the error handler so a later
+                # reconfigure elsewhere cannot reintroduce the crash, and the
+                # buffering, which is wrong regardless of the encoding.
+                reconfigure(errors="replace", line_buffering=True)
             else:
-                reconfigure(encoding="utf-8", errors="replace")
+                reconfigure(encoding="utf-8", errors="replace",
+                            line_buffering=True)
         except (ValueError, OSError, AttributeError):
             # A detached or already-closed stream. Nothing to protect.
             continue

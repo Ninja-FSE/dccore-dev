@@ -261,21 +261,21 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_nick_recovery_accepts_quit_and_part_independently(self):
         """Catches an or/and slip, which would disable recovery entirely."""
-        condition = _guard_condition_for("huvudnicket {main_nick} loggade ut",
+        condition = _guard_condition_for("main nick {main_nick} logged out",
                                          helper=("is_user_event",))
         for key in ("QUIT", "PART"):
             with self.subTest(event=key):
                 self.assertTrue(_evaluate(condition, GENUINE[key]), condition)
 
     def test_nick_recovery_ignores_channel_chatter(self):
-        condition = _guard_condition_for("huvudnicket {main_nick} loggade ut",
+        condition = _guard_condition_for("main nick {main_nick} logged out",
                                          helper=("is_user_event",))
         self.assertFalse(
             _evaluate(condition, ":attacker!u@h PRIVMSG #c :i will QUIT now"), condition)
 
     def test_nick_recovery_identifies_the_quitter_by_prefix(self):
         """The inner guard: a QUIT reason must not be able to name the bot."""
-        condition = _guard_condition_for("huvudnicket {main_nick} loggade ut",
+        condition = _guard_condition_for("main nick {main_nick} logged out",
                                          helper=("event_source_nick",))
         real = ":DCCore!bot@host QUIT :Quit: leaving"
         self.assertTrue(_evaluate(condition, real, main_nick="DCCore"), condition)

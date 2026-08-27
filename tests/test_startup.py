@@ -95,7 +95,7 @@ class StartupRunsOnThisPlatform(BootCase):
     def test_it_warns_but_continues_with_no_master_list(self):
         """A fresh install has no list yet; that must not stop the boot."""
         output = self.boot()
-        self.assertIn("Ingen fillista", output)
+        self.assertIn("No file list found", output)
 
     def test_it_reports_the_list_when_there_is_one(self):
         name = f"{config.LIST_BASE_NAME}-2026-08-26.txt"

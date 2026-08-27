@@ -24,7 +24,9 @@ someone deletes the guard, these tests fail instead of quietly passing.
 import io
 import os
 import subprocess
+import tempfile
 import sys
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -219,6 +221,71 @@ class TheDaemonInstallsItAtStartup(unittest.TestCase):
                          result.stderr.decode("utf-8", "replace"))
         self.assertEqual(result.stderr.decode("utf-8"), SWEDISH)
         self.assertNotIn(BACKSLASH, result.stderr)
+
+
+class ALoggedLineReachesDiskBeforeTheProcessDies(unittest.TestCase):
+    """Python block-buffers stdout whenever it is not a console.
+
+    That is the normal way this daemon runs - redirected to a log file, or
+    under a service host - so print() output sits in a 4-8KB buffer instead of
+    reaching the file. Observed while deploying DCCoreWin: 75 seconds of
+    startup logging produced ONE line on disk, and force-killing the process
+    lost every buffered line, including the JOIN and the channel advert.
+
+    The lines lost that way are the ones leading up to whatever killed the
+    process, which are the only ones anyone actually needs.
+    """
+
+    GUARD = "import platform_compat; platform_compat.install_console_encoding_guard()"
+
+    def _child_source(self, setup):
+        return (
+            "import sys, time\n"
+            "sys.path.insert(0, r'" + REPO_ROOT + "')\n"
+            + setup + "\n"
+            "for i in range(50):\n"
+            "    print('line %02d' % i)\n"
+            "    time.sleep(0.05)\n"
+        )
+
+    def _survivors(self, setup):
+        """Lines that reached the FILE before the child was force-killed."""
+        handle = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+        handle.close()
+        self.addCleanup(os.unlink, handle.name)
+
+        with open(handle.name, "wb") as sink:
+            proc = subprocess.Popen(
+                [sys.executable, "-c", self._child_source(setup)],
+                stdout=sink, stderr=subprocess.STDOUT, env=_clean_env())
+            time.sleep(1.2)          # ~24 lines have been printed by now
+            proc.kill()
+            proc.wait()
+        with open(handle.name, "r", errors="replace") as fh:
+            return [l for l in fh.read().split("\n") if l.startswith("line")]
+
+    def test_without_the_guard_everything_buffered_is_lost(self):
+        """Control. If this ever stops failing the premise has changed, and the
+        test below would be proving nothing."""
+        self.assertEqual(self._survivors(""), [],
+                         "expected an unguarded redirected child to lose its buffer")
+
+    def test_the_guard_gets_the_lines_onto_disk(self):
+        survived = self._survivors(self.GUARD)
+        self.assertGreater(len(survived), 15,
+                           f"only {len(survived)} lines reached disk before the kill")
+
+    def test_the_guard_marks_the_stream_line_buffered(self):
+        stream = _stream_using("cp1253")
+        platform_compat.install_console_encoding_guard([("test", stream)])
+        self.assertTrue(stream.line_buffering)
+
+    def test_an_already_utf8_stream_is_line_buffered_too(self):
+        # The encoding branch is skipped for a UTF-8 stream. The buffering must
+        # not be skipped with it - it is wrong either way.
+        stream = _stream_using("utf-8")
+        platform_compat.install_console_encoding_guard([("test", stream)])
+        self.assertTrue(stream.line_buffering)
 
 
 if __name__ == "__main__":
