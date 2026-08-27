@@ -138,21 +138,40 @@ def find_latest_list():
         print(f"[SEARCH ERROR] Kunde inte hitta senaste listan: {e}")
     return None
 
-def strip_info_suffix(rest):
-    """Split "<filename>  ::INFO:: <size>" into (filename, size).
+_INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
 
-    Mirrors the exact line update_list.py writes (update_list.py:216):
-    "!<nick> <filename>  ::INFO:: <size>" - `rest` is everything after the
-    "!<nick> " prefix. Best-effort on purpose: a line that does not carry the
-    marker returns the whole thing as the filename with an empty size, rather
-    than raising. Shared by `_split_entry_line()` below (this bot's own master
-    list) and irc.py's cross-bot broadcast-search capture, which extracts the
-    same "!<nick> <filename>  ::INFO:: <size>" shape out of another bot's
-    reply and must not mistake the trailing size tag for part of the filename
-    when it later requests that exact name back with `!<nick> <filename>`.
+
+def strip_info_suffix(rest):
+    """Split "<filename> ::INFO:: <everything after>" into (filename, rest).
+
+    update_list.py (update_list.py:216) writes "!<nick> <filename>  ::INFO::
+    <size>" with two spaces before the marker - `rest` here is everything
+    after the "!<nick> " prefix. Other bots on the network carry the same
+    "::INFO::" marker but do not agree on the whitespace around it, and
+    routinely tack on more than just a size afterwards - real examples seen
+    in production: "...flac ::INFO:: 153.03MB © OmeNServE v2.60 ©",
+    "...mp3 ::INFO:: 6.32Mb 4m30s 192/44.10/JS  OmeNServE v2.60",
+    "...mp3 ::INFO:: 19.95MB : OmenServe v2.71 :". A caller that only strips
+    an exact "  ::INFO:: " (this project's own two-space convention) leaves
+    all of that trailing branding/metadata attached to what it thinks is the
+    filename - which is exactly what broke irc.py's cross-bot broadcast-
+    search capture: the stored "filename" included the size and branding
+    text, so the real DCC SEND offer that later came back (bearing only the
+    bare filename) never matched it and every such fetch was rejected as
+    unsolicited. Matching on the marker itself, tolerant of any amount of
+    whitespace around it, and discarding EVERYTHING after it (not just a
+    size field) fixes that for every bot's format, not just this project's
+    own. Best-effort on purpose: a line that does not carry the marker at
+    all returns the whole thing as the filename with an empty second value,
+    rather than raising. Shared by `_split_entry_line()` below (this bot's
+    own master list) and irc.py's cross-bot broadcast-search capture, which
+    extracts the same shape out of another bot's reply and must not mistake
+    any of the trailing tag for part of the filename when it later requests
+    that exact name back with `!<nick> <filename>`.
     """
-    if "  ::INFO:: " in rest:
-        filename, _, size = rest.rpartition("  ::INFO:: ")
+    parts = _INFO_MARKER_RE.split(rest, maxsplit=1)
+    if len(parts) == 2:
+        filename, size = parts
     else:
         filename, size = rest, ""
     return filename.strip(), size.strip()
