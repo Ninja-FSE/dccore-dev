@@ -174,7 +174,7 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
 def handle_ping_request(irc_sock, user, target_chan):
-    """Startar tidtagaruret och skickar en unik latens-PING till IRC-servern"""
+    """Start the timer and send a unique latency PING to the IRC server."""
     import time
     import config
     
@@ -188,7 +188,7 @@ def handle_ping_request(irc_sock, user, target_chan):
         irc_sock.send(b"PING :OSERVE_LATENCY_CHECK\r\n")
         print(f"[PING COMMAND] Latency measurement started by {user} in {target_chan}.")
     except Exception as e:
-        print(f"[PING ERROR] Kunde inte skicka PING-paket: {e}")
+        print(f"[PING ERROR] Could not send the PING packet: {e}")
 
 def handle_pong_response(category="INFO"):
     """Catch the server's reply, work out the latency to three decimals, and report it."""
@@ -311,7 +311,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
     live_worker_id = getattr(announce, 'current_worker_id', None)
 
     try:
-        # 2. REHASH: Ladda om alla centrala moduler live i minnet
+        # 2. REHASH: reload every core module live, in memory
         modules_to_reload = ['config', 'list', 'dcc', 'announce', 'security', 'db', 'stats_mgr']
         for mod_name in modules_to_reload:
             if mod_name in sys.modules:
@@ -505,7 +505,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
     except Exception as e:
         import announce
         announce.is_ready = True
-        print(f"[REHASH CRITICAL ERROR] Det gick inte att live-ladda om filerna: {e}")
+        print(f"[REHASH CRITICAL ERROR] The files could not be reloaded live: {e}")
         announce.send_debug(f"Rehash FAILED (Notices Resumed for safety): {e}", category="INFO")
 
 
@@ -624,7 +624,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
     # Reads ONLY line 1 of the real master list, so it costs almost nothing
     def get_count_from_list():
         try:
-            # Hitta alla textfiler som matchar botens namn i mappen
+            # Find every text file in the directory matching the bot's name
             # LIST_BASE_NAME, not NICKNAME: irc.py rebinds NICKNAME on a 433 fallback, and
             # update_list.py names the files with LIST_BASE_NAME. Keyed off the live nick this
             # counted 0 both before and after a rebuild, so !update reported "0 files, added 0"

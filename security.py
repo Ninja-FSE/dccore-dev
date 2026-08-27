@@ -116,8 +116,8 @@ def check_user_status(user):
     user_lower = user.lower()
 
     def _deny(reason, category):
-        """Loggar alltid till konsolen, men skickar ENBART en debug-notis per nick."""
-        print(f"[SECURITY BLOCK] Nekade {user}: {reason}")
+        """Always logs to the console, but sends ONE debug notice per nick."""
+        print(f"[SECURITY BLOCK] Denied {user}: {reason}")
         if user_lower not in _ban_notified:
             _ban_notified.add(user_lower)
             try:
@@ -126,7 +126,7 @@ def check_user_status(user):
                     category=category
                 )
             except Exception as notify_err:
-                print(f"[SECURITY ERROR] Kunde inte skicka ban-notis: {notify_err}")
+                print(f"[SECURITY ERROR] Could not send the ban notice: {notify_err}")
         return False
 
     # ---------------------------------------------------------------------

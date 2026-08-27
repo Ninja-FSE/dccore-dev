@@ -18,7 +18,7 @@ def load_stats():
     return db.load_advanced_stats()
 
 def get_total_sent():
-    """Returnerar det totala antalet skickade filer som ett rent heltal (index 0)"""
+    """The total number of files sent, as a plain integer (index 0)."""
     stats = load_stats()
     try:
         # If the store returns a nested list [[319]], take the innermost value
@@ -32,7 +32,7 @@ def get_total_sent():
     return 0
 
 def get_total_sent_bytes():
-    """Returnerar det totala antalet skickade bytes som ett rent heltal (index 1)"""
+    """The total number of bytes sent, as a plain integer (index 1)."""
     stats = load_stats()
     try:
         # If the store returns a nested list [[319], [9303203296]], take the innermost value
