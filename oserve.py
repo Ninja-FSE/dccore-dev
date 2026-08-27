@@ -18,6 +18,9 @@ if not hasattr(config, 'debug_flood_lock'):
 if not hasattr(config, 'fetch_queue_lock'):
     config.fetch_queue_lock = threading.Lock()
 
+if not hasattr(config, 'fetched_bot_lists_lock'):
+    config.fetched_bot_lists_lock = threading.Lock()
+
 import list
 import dcc
 import db

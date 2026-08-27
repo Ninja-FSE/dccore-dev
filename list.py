@@ -188,7 +188,7 @@ def _split_entry_line(line_strip):
     return strip_info_suffix(rest)
 
 
-def find_matching_entries(search_words, limit=None):
+def find_matching_entries(search_words, limit=None, list_path=None):
     """IRC-agnostic core of the master-list search, extracted from execute_search().
 
     Scans the current master list exactly the way execute_search() always has -
@@ -212,6 +212,13 @@ def find_matching_entries(search_words, limit=None):
     that need that old behaviour must check for an empty search_words list
     themselves before calling in, same as execute_search() now does below.
 
+    `list_path`, when given, scans that file instead of find_latest_list()'s
+    result - the same "!<nick> <filename>  ::INFO:: ..." shape, just not
+    necessarily THIS bot's own master list. list_fetch.py uses this to run a
+    fetched-and-extracted third-party bot's list through the exact same
+    parsing pipeline (this function, _split_entry_line(), strip_info_suffix())
+    rather than writing a second, parallel parser for someone else's list.
+
     Returns (entries, total_matches): `entries` is capped at `limit` (None means
     unlimited) and each is {"line": the raw "!..." text, "folder": the header
     text in effect or None, "filename": parsed filename, "size": parsed size
@@ -221,7 +228,7 @@ def find_matching_entries(search_words, limit=None):
     entries = []
     total_matches = 0
 
-    current_list_path = find_latest_list()
+    current_list_path = list_path if list_path is not None else find_latest_list()
     if not current_list_path or not os.path.exists(current_list_path):
         return entries, total_matches
 
@@ -270,6 +277,35 @@ def find_matching_entries(search_words, limit=None):
                 })
 
     return entries, total_matches
+
+
+def entries_to_filelist_rows(entries, source):
+    """Shape find_matching_entries() output into the File Lists view's row
+    format: {"title", "size", "format", "source"}, deduping same
+    filename+size the way webserver.build_filelists_payload() always has.
+
+    Shared by webserver.py (this bot's own list, source=config.NICKNAME) and
+    list_fetch.py (another bot's fetched-and-extracted list, source=that
+    bot's nick) so the two surfaces can never drift in what a "row" looks
+    like on the dashboard.
+    """
+    seen = set()
+    rows = []
+    for entry in entries:
+        filename = entry.get("filename", "?")
+        size = entry.get("size", "")
+        key = (filename.lower(), size)
+        if key in seen:
+            continue
+        seen.add(key)
+        ext = os.path.splitext(filename)[1].lstrip(".").upper()
+        rows.append({
+            "title": filename,
+            "size": size,
+            "format": ext,
+            "source": source,
+        })
+    return rows
 
 
 def execute_search(irc_sock, user, search_term, channel):

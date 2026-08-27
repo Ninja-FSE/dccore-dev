@@ -3,7 +3,8 @@
  * Talks to the three original read-only endpoints (/api/search, /api/queue,
  * /api/filelists) plus the cross-bot search/fetch endpoints added alongside
  * them: POST /api/search/broadcast, GET /api/search/broadcast/status,
- * POST /api/fetch/enqueue, GET /api/fetch/status, GET /api/fetch/<id>/download.
+ * POST /api/fetch/enqueue, GET /api/fetch/status, GET /api/fetch/<id>/download,
+ * POST /api/filelists/fetch, GET /api/filelists/bots, GET /api/filelists/bot/<nick>.
  * See webserver.py - NONE of these routes require authentication, including
  * the mutating ones this file calls.
  */
@@ -13,14 +14,16 @@
   var REFRESH_MS = 8000;
   var BROADCAST_POLL_MS = 2000;
   var DOWNLOADS_POLL_MS = 4000;
+  var FILELISTS_BOTS_POLL_MS = 4000;
 
   var views = {
     search:    { title: "Search",     sub: "Find a file across the current master list." },
     queue:     { title: "Queue",      sub: "Who is waiting, who is sending, right now." },
-    filelists: { title: "File Lists", sub: "Every file this bot is currently offering." }
+    download:  { title: "Download",   sub: "Bulk-paste \"!<bot> <filename>\" requests and track their progress." },
+    filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." }
   };
 
-  var state = { active: "search", filelistsLoaded: false };
+  var state = { active: "search", filelistsLoaded: false, filelistsSource: "__own__" };
 
   var el = {
     navItems:     document.querySelectorAll(".nav-item"),
@@ -43,7 +46,14 @@
     broadcastWrap:       document.getElementById("broadcast-wrap"),
     broadcastBody:       document.getElementById("broadcast-body"),
     downloadSelectedBtn: document.getElementById("download-selected-btn"),
-    downloadsBody:       document.getElementById("downloads-body")
+    downloadsBody:       document.getElementById("downloads-body"),
+    bulkFetchForm:       document.getElementById("bulk-fetch-form"),
+    bulkFetchTextarea:   document.getElementById("bulk-fetch-textarea"),
+    bulkFetchErrors:     document.getElementById("bulk-fetch-errors"),
+    filelistsFetchForm:   document.getElementById("filelists-fetch-form"),
+    filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
+    filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
+    filelistsSourceSelect: document.getElementById("filelists-source-select")
   };
 
   function escapeHtml(value) {
@@ -92,8 +102,12 @@
     el.pageTitle.textContent = views[name].title;
     el.pageSub.textContent = views[name].sub;
 
-    if (name === "queue") { loadQueue(); loadDownloads(); }
-    if (name === "filelists" && !state.filelistsLoaded) { loadFilelists(); }
+    if (name === "queue") { loadQueue(); }
+    if (name === "download") { loadDownloads(); }
+    if (name === "filelists") {
+      pollFilelistsBots();
+      if (!state.filelistsLoaded) { loadFilelists(); }
+    }
   }
 
   el.navItems.forEach(function (btn) {
@@ -277,6 +291,89 @@
     });
   });
 
+  // -------------------------------------------------------- Bulk fetch (Download tab)
+
+  // Same tolerant pattern already used to build the Search view's broadcast
+  // "Download" buttons under the hood (irc.py's own cross-bot capture uses
+  // the equivalent on the IRC side) - reused here rather than reinvented, per
+  // the brief: "!(\S+)\s+(.+)$".
+  var BULK_FETCH_LINE_RE = /^!(\S+)\s+(.+)$/;
+
+  el.bulkFetchForm.addEventListener("submit", function (evt) {
+    evt.preventDefault();
+    submitBulkFetch();
+  });
+
+  function submitBulkFetch() {
+    var lines = el.bulkFetchTextarea.value.split(/\r?\n/);
+    var items = [];
+    var messages = [];
+
+    lines.forEach(function (rawLine, idx) {
+      var line = rawLine.trim();
+      if (!line) { return; }
+      var match = BULK_FETCH_LINE_RE.exec(line);
+      if (!match) {
+        messages.push({
+          text: "Line " + (idx + 1) + ": could not parse “" + line +
+                "” - expected \"!<bot> <filename>\".",
+          isError: true
+        });
+        return;
+      }
+      items.push({ bot: match[1], filename: match[2] });
+    });
+
+    if (!items.length) {
+      if (!messages.length) {
+        messages.push({ text: "Nothing to queue - paste at least one \"!<bot> <filename>\" line.", isError: true });
+      }
+      renderBulkFetchMessages(messages);
+      return;
+    }
+
+    postJson("/api/fetch/enqueue", items).then(function (res) {
+      var createdCount = (res.data.created || []).length;
+      (res.data.errors || []).forEach(function (err) {
+        var item = err.item || {};
+        messages.push({
+          text: "\"!" + (item.bot != null ? item.bot : "?") + " " +
+                (item.filename != null ? item.filename : "?") + "\": " + err.error,
+          isError: true
+        });
+      });
+      if (createdCount) {
+        messages.unshift({ text: "Queued " + createdCount + " request(s) - see the Downloads table below.", isError: false });
+        el.bulkFetchTextarea.value = "";
+        loadDownloads();
+      } else if (!messages.length) {
+        messages.push({ text: res.data.error || "Nothing was queued.", isError: true });
+      }
+      renderBulkFetchMessages(messages);
+    }).catch(function (err) {
+      messages.push({ text: "Request failed: " + err.message, isError: true });
+      renderBulkFetchMessages(messages);
+    });
+  }
+
+  // Built via textContent, one <li> per message - never string-concatenated
+  // innerHTML - even though this box is fed by the operator's own paste
+  // rather than remote IRC text, the same "untrusted text never goes through
+  // an HTML-parsing step" discipline applies everywhere else in this file.
+  function renderBulkFetchMessages(messages) {
+    el.bulkFetchErrors.innerHTML = "";
+    if (!messages || !messages.length) { return; }
+    var ul = document.createElement("ul");
+    ul.className = "bulk-fetch-message-list";
+    messages.forEach(function (msg) {
+      var li = document.createElement("li");
+      li.textContent = msg.text;
+      li.className = msg.isError ? "is-error" : "is-ok";
+      ul.appendChild(li);
+    });
+    el.bulkFetchErrors.appendChild(ul);
+  }
+
   // -------------------------------------------------------------- Downloads
 
   var DOWNLOAD_STATE_LABELS = {
@@ -305,9 +402,17 @@
       var action = state === "complete"
         ? "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a>"
         : (state === "failed" ? "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span>" : "");
+      // A "list" row (see dcc_fetch.py's request_type) starts with no
+      // filename at all - we sent a bare "@<bot>" and cannot know what the
+      // target bot will name its list zip until it actually answers. Show
+      // something sensible instead of a blank cell until it does.
+      var filenameDisplay = row.filename;
+      if (!filenameDisplay && row.request_type === "list") {
+        filenameDisplay = row.bot + "’s file list";
+      }
       return "<tr>" +
         "<td class=\"col-mono\">" + escapeHtml(row.bot) + "</td>" +
-        "<td class=\"col-dim col-mono\">" + escapeHtml(row.filename) + "</td>" +
+        "<td class=\"col-dim col-mono\">" + escapeHtml(filenameDisplay) + "</td>" +
         "<td><span class=\"status-pill status-" + escapeHtml(state) + "\">" + escapeHtml(label) + "</span></td>" +
         "<td class=\"col-mono\">" + escapeHtml(progress) + "</td>" +
         "<td>" + action + "</td>" +
@@ -373,12 +478,83 @@
 
   // ------------------------------------------------------------ File Lists
 
+  // Fetching another bot's list ------------------------------------------
+
+  el.filelistsFetchForm.addEventListener("submit", function (evt) {
+    evt.preventDefault();
+    var bot = el.filelistsFetchInput.value.trim();
+    if (!bot) { return; }
+    postJson("/api/filelists/fetch", { bot: bot }).then(function (res) {
+      if (!res.ok) {
+        showFilelistsFetchStatus(res.data.error || ("HTTP " + res.status), true);
+        return;
+      }
+      showFilelistsFetchStatus(
+        "Requested " + bot + "’s list - track its progress on the Download tab; " +
+        "it will appear in the switcher below once fetched.");
+      el.filelistsFetchInput.value = "";
+      pollFilelistsBots();
+    }).catch(function (err) {
+      showFilelistsFetchStatus("Request failed: " + err.message, true);
+    });
+  });
+
+  function showFilelistsFetchStatus(text, isError) {
+    el.filelistsFetchStatus.textContent = text;
+    el.filelistsFetchStatus.classList.toggle("is-error", !!isError);
+  }
+
+  // Switching which bot's list is shown ------------------------------------
+
+  el.filelistsSourceSelect.addEventListener("change", function () {
+    state.filelistsSource = el.filelistsSourceSelect.value;
+    loadFilelists();
+  });
+
+  function pollFilelistsBots() {
+    fetchJson("/api/filelists/bots").then(function (rows) {
+      markConnection(true);
+      renderFilelistsSwitcher(rows);
+    }).catch(function () { markConnection(false); });
+  }
+
+  function renderFilelistsSwitcher(rows) {
+    var select = el.filelistsSourceSelect;
+    var previous = state.filelistsSource || "__own__";
+
+    select.innerHTML = "";
+    var ownOption = document.createElement("option");
+    ownOption.value = "__own__";
+    ownOption.textContent = "Our own list";
+    select.appendChild(ownOption);
+
+    rows.forEach(function (row) {
+      var opt = document.createElement("option");
+      opt.value = row.bot;
+      opt.textContent = row.bot + " (" + row.count + " files)";
+      select.appendChild(opt);
+    });
+
+    var stillAvailable = previous === "__own__" ||
+      rows.some(function (row) { return row.bot === previous; });
+    select.value = stillAvailable ? previous : "__own__";
+    state.filelistsSource = select.value;
+  }
+
+  // Loading the table itself ------------------------------------------------
+
   function loadFilelists() {
     el.filelistsBody.innerHTML = emptyRow(4, "Loading…");
-    fetchJson("/api/filelists")
-      .then(function (rows) {
+    var source = state.filelistsSource || "__own__";
+    var url = (source === "__own__")
+      ? "/api/filelists"
+      : "/api/filelists/bot/" + encodeURIComponent(source);
+
+    fetchJson(url)
+      .then(function (payload) {
         markConnection(true);
         state.filelistsLoaded = true;
+        var rows = Array.isArray(payload) ? payload : (payload.entries || []);
         if (!rows.length) {
           el.filelistsBody.innerHTML = emptyRow(4, "No files published yet.");
           return;
@@ -421,6 +597,12 @@
   // view, so this polls independently of which tab is active - same
   // reasoning as the sidebar status card above.
   setInterval(loadDownloads, DOWNLOADS_POLL_MS);
+
+  // A list-fetch (Download tab, or the File Lists fetch box) can complete
+  // while the operator is on any other view - keep the switcher's options
+  // fresh regardless of which tab is showing, same reasoning as above.
+  setInterval(pollFilelistsBots, FILELISTS_BOTS_POLL_MS);
+  pollFilelistsBots();
 
   activateView("search");
 })();

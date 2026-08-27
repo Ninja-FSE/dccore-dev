@@ -74,6 +74,7 @@ RUNTIME_CONTAINERS = {
     "user_processing_lock": set,
     "broadcast_search_results": list,
     "fetch_queue": dict,
+    "fetched_bot_lists": dict,
 }
 
 RUNTIME_FLAGS = {
@@ -105,6 +106,7 @@ def reset_config(**overrides):
     config.queue_lock = threading.Lock()
     config.debug_flood_lock = threading.Lock()
     config.fetch_queue_lock = threading.Lock()
+    config.fetched_bot_lists_lock = threading.Lock()
 
     config.NICKNAME = "DCCore"
     config.ORIGINAL_NICK = "DCCore"

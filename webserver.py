@@ -66,21 +66,32 @@ def reject_if_unsafe_for_irc_line(value, field_name):
     (`current_sock.send(msg.encode())`) - no re-validation, no re-splitting on
     the way out. A value that is not actually a string gets silently
     str()-coerced by a careless caller (see the bot/filename type-confusion
-    bug this replaced), and a string containing an embedded \\r or \\n lets
-    the caller smuggle one or more ADDITIONAL raw IRC lines - QUIT, JOIN/PART
-    an arbitrary channel, PRIVMSG/NOTICE as this bot - past whatever single
-    line the route intended to send. Both are rejected here, at the boundary,
-    before the value goes anywhere near an outbound message.
+    bug this replaced), and a string containing an embedded \\r, \\n or \\x01
+    lets the caller smuggle one or more ADDITIONAL raw IRC lines - QUIT,
+    JOIN/PART an arbitrary channel, PRIVMSG/NOTICE as this bot - or close a
+    CTCP wrapper early, past whatever single line/CTCP the route intended to
+    send. All are rejected here, at the boundary, before the value goes
+    anywhere near an outbound message.
+
+    The actual byte check is dcc_fetch.contains_unsafe_ctcp_bytes() - THE
+    single canonical definition of "which bytes are unsafe for an outbound
+    IRC/CTCP line" in this codebase (see that function's comment for why
+    this used to be two independently-maintained copies, and no longer is).
+    Imported locally, not at module level, to keep this module's "importing
+    it must never fail, even with nothing but the stdlib installed" property
+    (see the module docstring) independent of dcc_fetch's own import graph.
 
     Shared because it is already needed in >= 2 places (POST
     /api/search/broadcast's `term`, POST /api/fetch/enqueue's `bot` and
-    `filename`) - any future route that builds an outbound IRC line from web
-    input must run every such value through this too.
+    `filename`, POST /api/filelists/fetch's `bot`) - any future route that
+    builds an outbound IRC line from web input must run every such value
+    through this too.
     """
     if not isinstance(value, str):
         return f"'{field_name}' must be a string."
-    if "\r" in value or "\n" in value:
-        return f"'{field_name}' must not contain line breaks."
+    import dcc_fetch
+    if dcc_fetch.contains_unsafe_ctcp_bytes(value):
+        return f"'{field_name}' must not contain line breaks or control characters."
     return None
 
 
@@ -177,24 +188,89 @@ def build_filelists_payload():
     import list as list_mod
 
     entries, _total = list_mod.find_matching_entries([], limit=None)
+    return list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
 
-    seen = set()
-    rows = []
-    for entry in entries:
-        filename = entry.get("filename", "?")
-        size = entry.get("size", "")
-        key = (filename.lower(), size)
-        if key in seen:
-            continue
-        seen.add(key)
-        ext = os.path.splitext(filename)[1].lstrip(".").upper()
-        rows.append({
-            "title": filename,
-            "size": size,
-            "format": ext,
-            "source": getattr(config, "NICKNAME", "?"),
-        })
+
+# ==========================================================================
+# Cross-bot fetched file lists (mutating enqueue + read-only lookups). Another
+# bot's full list, fetched via dcc_fetch.py's request_type="list" rows,
+# extracted and parsed by list_fetch.py, and kept switchable in
+# config.fetched_bot_lists (keyed by lowercased bot nick, one entry per bot -
+# a later fetch for the same nick REPLACES it, see list_fetch.py). Pure logic
+# here, same reasoning as every other build_*_payload()/build_*_result()
+# function in this module: no Flask import, fully unit testable.
+# ==========================================================================
+
+def build_list_fetch_enqueue_result(bot_raw):
+    """POST /api/filelists/fetch's pure logic: validate the bot nick and
+    enqueue a request_type="list" row.
+
+    Deliberately reuses dcc_fetch.enqueue_fetch() (extended with a
+    request_type parameter) rather than build_fetch_enqueue_result() above:
+    that function's shape - a {"bot","filename"} object or a list of them -
+    is the file-fetch multi-select shape the Search view's "Download
+    selected" and the Download tab's bulk-paste box both produce, and a
+    list-fetch request has no filename at all (we do not know what the
+    target bot will name its list zip - see dcc_fetch.py's module docstring
+    for why request_type="list" matches on bot alone). Bolting an optional
+    "type" field onto that shape would make every existing caller of it - and
+    every existing test of it - reason about a case that never applies to
+    them. The two HTTP-facing validators stay separate; the actual queue,
+    dispatcher, admission control, size cap and transfer code they both feed
+    into is the exact same one, all the way through (see dcc_fetch.py).
+
+    Returns (http_status, payload_dict) with "created" (the new request id,
+    as a one-element list, so the frontend can treat this the same shape as
+    the file-fetch enqueue response).
+    """
+    import dcc_fetch
+
+    bot_err = reject_if_unsafe_for_irc_line(bot_raw, "bot")
+    if bot_err:
+        return 400, {"error": bot_err}
+
+    bot = bot_raw.strip()
+    if not bot:
+        return 400, {"error": "'bot' is required."}
+
+    request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list")
+    return 200, {"created": [request_id]}
+
+
+def build_fetched_bot_list_summaries():
+    """GET /api/filelists/bots payload: one row per bot with a fetched list
+    currently available, for the File Lists view's switcher control."""
+    store = dict(getattr(config, "fetched_bot_lists", {}) or {})
+    rows = [
+        {
+            "bot": entry.get("bot", key),
+            "fetched_at": entry.get("fetched_at", 0),
+            "count": len(entry.get("entries", []) or []),
+        }
+        for key, entry in store.items()
+    ]
+    rows.sort(key=lambda row: str(row["bot"]).lower())
     return rows
+
+
+def build_fetched_bot_list_payload(nick):
+    """GET /api/filelists/bot/<nick> payload: (http_status, payload_dict).
+
+    On success, "entries" is in the EXACT same row shape
+    build_filelists_payload() returns for this bot's own list (both go
+    through list.entries_to_filelist_rows()), so the frontend's existing File
+    Lists table rendering needs no changes to display either one - only the
+    data source (which endpoint it polled) differs.
+    """
+    store = getattr(config, "fetched_bot_lists", {}) or {}
+    entry = store.get(str(nick).strip().lower())
+    if not entry:
+        return 404, {"error": f"No fetched list is available for {nick!r} yet."}
+    return 200, {
+        "bot": entry.get("bot", nick),
+        "fetched_at": entry.get("fetched_at", 0),
+        "entries": entry.get("entries", []),
+    }
 
 
 # ==========================================================================
@@ -411,6 +487,21 @@ if HAVE_FLASK:
         @app.route("/api/fetch/status")
         def api_fetch_status():
             return jsonify(build_fetch_status_payload())
+
+        @app.route("/api/filelists/fetch", methods=["POST"])
+        def api_filelists_fetch():
+            body = request.get_json(silent=True) or {}
+            status, result = build_list_fetch_enqueue_result(body.get("bot", ""))
+            return jsonify(result), status
+
+        @app.route("/api/filelists/bots")
+        def api_filelists_bots():
+            return jsonify(build_fetched_bot_list_summaries())
+
+        @app.route("/api/filelists/bot/<nick>")
+        def api_filelists_bot(nick):
+            status, result = build_fetched_bot_list_payload(nick)
+            return jsonify(result), status
 
         @app.route("/api/fetch/<request_id>/download")
         def api_fetch_download(request_id):

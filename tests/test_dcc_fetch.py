@@ -839,15 +839,24 @@ class PassiveOfferEndToEndTests(DCCoreTestCase):
                              "before the accept timed out")
         our_port = int(self._fields_of(message)[4])
 
-        # If the listener leaked, this bind fails with "address already in use".
-        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            probe.bind(("127.0.0.1", our_port))
-        except OSError as err:
-            self.fail(f"the passive listener on port {our_port} was not "
-                     f"closed after the accept timeout: {err}")
-        finally:
-            probe.close()
+        # If the listener leaked, no port in the (tiny, 11-port) shared range
+        # would be bindable. Reuses dcc_fetch's own _open_fetch_listener()
+        # (which already applies platform_compat.prepare_listener()'s
+        # SO_REUSEADDR handling) rather than a raw bind on `our_port`
+        # specifically - a raw bind can spuriously report "still in use"
+        # against nothing more than an unrelated prior test's socket lingering
+        # in the OS's normal TIME_WAIT state on the same shared range under
+        # the full suite's load, exactly the false-positive trap
+        # platform_compat.prepare_listener() exists to avoid for real
+        # listeners (see the identical fix and reasoning on
+        # test_an_unexpected_error_while_answering_is_marked_failed_not_left_stranded
+        # above).
+        listener2, port2 = dcc_fetch._open_fetch_listener()
+        self.assertIsNotNone(
+            listener2,
+            f"the passive listener on port {our_port} was not closed after "
+            f"the accept timeout: no free port in the shared DCC range")
+        listener2.close()
 
     def test_the_row_passes_through_listening_before_receiving(self):
         """Documents the extra state hop this feature adds to the module's
@@ -1105,6 +1114,332 @@ class PassiveOfferPeerCheckTests(DCCoreTestCase):
         self.assertEqual(row["state"], "complete")
         self.assertEqual(row["passive_peer_ip"], "127.0.0.1")
         self.assertNotIn("passive_peer_ip_mismatch", row)
+
+
+class RequestTypeAdmissionControlTests(DCCoreTestCase):
+    """request_type="list" rows (a cross-bot @<bot> list-fetch, see
+    dcc_fetch.py's module docstring and check_fetch_queue()) match on bot
+    ALONE - any filename from the right bot claims them, since we cannot know
+    ahead of time what the target bot will name its list zip. request_type
+    "file" rows keep the original exact bot+filename requirement unchanged.
+    Neither can accidentally satisfy the other's requirement - see
+    _claim_matching_offer_locked()'s own docstring for the invariant these
+    tests exist to pin down.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-fetch-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+
+    def _offer_and_size_cap(self, rid, bot, filename):
+        """Force rejection at the (unrelated) size cap so admission control
+        can be observed in isolation, with no real socket involved - same
+        idiom AdmissionControlTests.test_matching_offer_is_claimed_underscore_space_equivalence
+        already uses above."""
+        self.set_config(MAX_FETCH_FILE_SIZE=10)
+        dcc_fetch.handle_incoming_offer(
+            None, bot, f"DCC SEND {filename} 2130706433 55000 999999")
+
+    def test_list_row_matches_any_filename_from_the_right_bot(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+
+        self._offer_and_size_cap(rid, "goodbot", "WhateverTheyNamedIt.zip")
+
+        row = config.fetch_queue[rid]
+        # It was CLAIMED (state moved on from 'offered') and only then failed
+        # the unrelated size cap - proving the bot-alone match itself
+        # succeeded despite the filename never having been specified ahead
+        # of time.
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("exceeds", row["reason"])
+        self.assertEqual(row["filename"], "WhateverTheyNamedIt.zip")
+
+    def test_list_row_rejects_an_offer_from_the_wrong_bot(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+
+        real_socket = socket.socket
+        socket.socket = lambda *a, **kw: self.fail("must not connect")
+        self.addCleanup(lambda: setattr(socket, "socket", real_socket))
+
+        dcc_fetch.handle_incoming_offer(
+            None, "impostorbot", "DCC SEND Anything.zip 2130706433 55000 4096")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+
+    def test_a_file_row_still_requires_an_exact_filename_even_with_a_list_row_for_the_same_bot(self):
+        """A 'file' row expecting an exact filename must still reject an
+        offer with a DIFFERENT filename from the same bot, even though a
+        'list' row for that same bot would have accepted it - a 'list' row
+        must never accidentally satisfy a 'file' row's stricter requirement."""
+        file_rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+        config.fetch_queue[file_rid]["state"] = "offered"
+        config.fetch_queue[file_rid]["offered_at"] = time.time()
+
+        real_socket = socket.socket
+        socket.socket = lambda *a, **kw: self.fail("must not connect")
+        self.addCleanup(lambda: setattr(socket, "socket", real_socket))
+
+        dcc_fetch.handle_incoming_offer(
+            None, "goodbot", "DCC SEND SomeOtherFile.zip 2130706433 55000 4096")
+
+        self.assertEqual(config.fetch_queue[file_rid]["state"], "offered")
+
+    def test_when_both_a_file_and_list_row_exist_the_exact_filename_match_wins(self):
+        """The more specific match (exact filename) takes priority over the
+        looser one (bot alone) when both are outstanding for the same bot."""
+        file_rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+        config.fetch_queue[file_rid]["state"] = "offered"
+        config.fetch_queue[file_rid]["offered_at"] = time.time()
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[list_rid]["state"] = "offered"
+        config.fetch_queue[list_rid]["offered_at"] = time.time()
+
+        self._offer_and_size_cap(file_rid, "goodbot", "Song.flac")
+
+        self.assertEqual(config.fetch_queue[file_rid]["state"], "failed")   # claimed, then hit the size cap
+        self.assertEqual(config.fetch_queue[list_rid]["state"], "offered")  # untouched
+
+    def test_a_non_matching_filename_falls_through_to_the_list_row_for_the_same_bot(self):
+        """The reverse of the above: an offer that does NOT match the 'file'
+        row's exact filename falls through and is claimed by the 'list' row
+        for the same bot instead of being rejected outright - a 'file' row
+        must never accidentally satisfy (or block) a 'list' row's looser
+        requirement for a DIFFERENT offer."""
+        file_rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+        config.fetch_queue[file_rid]["state"] = "offered"
+        config.fetch_queue[file_rid]["offered_at"] = time.time()
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[list_rid]["state"] = "offered"
+        config.fetch_queue[list_rid]["offered_at"] = time.time()
+
+        self._offer_and_size_cap(list_rid, "goodbot", "ListArchive.zip")
+
+        self.assertEqual(config.fetch_queue[file_rid]["state"], "offered")  # untouched
+        self.assertEqual(config.fetch_queue[list_rid]["state"], "failed")   # claimed, then hit the size cap
+
+    def test_multiple_list_rows_for_the_same_bot_the_oldest_is_claimed(self):
+        older_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[older_rid]["state"] = "offered"
+        config.fetch_queue[older_rid]["offered_at"] = time.time()
+        config.fetch_queue[older_rid]["requested_at"] = 1.0
+
+        newer_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[newer_rid]["state"] = "offered"
+        config.fetch_queue[newer_rid]["offered_at"] = time.time()
+        config.fetch_queue[newer_rid]["requested_at"] = 2.0
+
+        self._offer_and_size_cap(older_rid, "goodbot", "Whatever.zip")
+
+        self.assertEqual(config.fetch_queue[older_rid]["state"], "failed")
+        self.assertEqual(config.fetch_queue[newer_rid]["state"], "offered")
+
+    def test_default_request_type_is_file_for_backward_compatibility(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac")
+        self.assertEqual(config.fetch_queue[rid]["request_type"], "file")
+
+
+class ListFetchDispatcherTests(DCCoreTestCase):
+    """check_fetch_queue() sends a bare "@<bot>" (irc.py's own list trigger,
+    per list.send_file_list()) for a request_type="list" row, instead of the
+    "!<bot> <filename>" a "file" row sends - same paced outbound queue
+    (oserve.queue_message), only the message body differs."""
+
+    def test_pending_list_row_is_promoted_and_sends_a_bare_at_bot_trigger(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+
+        dcc_fetch.check_fetch_queue()
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "offered")
+        self.assertEqual(len(self.oserve.queued), 1)
+        sent_user, sent_msg, _is_vip = self.oserve.queued[0]
+        self.assertEqual(sent_user, "goodbot")
+        self.assertIn("@goodbot", sent_msg)
+        self.assertNotIn("!goodbot", sent_msg)
+
+    def test_a_pending_file_row_is_unaffected(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+
+        dcc_fetch.check_fetch_queue()
+
+        _sent_user, sent_msg, _is_vip = self.oserve.queued[0]
+        self.assertIn("!goodbot Song.flac", sent_msg)
+
+
+class DispatcherSecondLayerCtcpGuardTests(DCCoreTestCase):
+    """BUG 1 (CRITICAL) regression, dispatch-site half: webserver.py's
+    reject_if_unsafe_for_irc_line() is the FIRST layer, but check_fetch_queue()
+    is the one call site that actually interpolates `bot`/`filename` into a
+    raw outbound IRC line - it must not simply trust that upstream check was
+    applied, mirroring _serve_passive_offer()'s own second-layer re-check
+    right before it builds its own outbound CTCP line (see
+    PassiveOfferInjectionTests.test_serve_passive_offer_second_layer_guard_
+    refuses_to_build_the_reply above for that half).
+
+    dcc_fetch.enqueue_fetch() itself performs no validation at all (only
+    new_fetch_row()'s str().strip(), which does not strip \\x01) - the HTTP
+    boundary is the only thing that currently rejects unsafe bytes, so
+    calling enqueue_fetch() directly, as these tests do, is exactly how
+    "somehow-corrupted or future-mistake row data" would reach the
+    dispatcher: bypassing webserver.py's check entirely.
+    """
+
+    def test_a_file_row_with_an_unsafe_bot_nick_is_never_sent(self):
+        rid = dcc_fetch.enqueue_fetch("evilbot2\x01INJECTED\x01", "Song.mp3",
+                                       request_type="file")
+
+        dcc_fetch.check_fetch_queue()
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("unsafe characters", row["reason"])
+        self.assertEqual(self.oserve.queued, [],
+                         "the hostile bot nick must never reach "
+                         "oserve.queue_message()")
+
+    def test_a_file_row_with_an_unsafe_filename_is_never_sent(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song\x01.mp3",
+                                       request_type="file")
+
+        dcc_fetch.check_fetch_queue()
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("unsafe characters", row["reason"])
+        self.assertEqual(self.oserve.queued, [])
+
+    def test_a_list_row_with_an_unsafe_bot_nick_is_never_sent(self):
+        rid = dcc_fetch.enqueue_fetch("evilbot\x01ACTION pwned\x01", "",
+                                       request_type="list")
+
+        dcc_fetch.check_fetch_queue()
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("unsafe characters", row["reason"])
+        self.assertEqual(self.oserve.queued, [],
+                         "the hostile bot nick must never reach "
+                         "oserve.queue_message()")
+
+    def test_a_clean_row_is_completely_unaffected_by_the_second_layer_guard(self):
+        """The new re-check must not false-positive on ordinary input."""
+        file_rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+        list_rid = dcc_fetch.enqueue_fetch("otherbot", "", request_type="list")
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(config.fetch_queue[file_rid]["state"], "offered")
+        self.assertEqual(config.fetch_queue[list_rid]["state"], "offered")
+        self.assertEqual(len(self.oserve.queued), 2)
+
+
+class ListFetchEndToEndTests(DCCoreTestCase):
+    """Real loopback socket, mirroring LoopbackTransferTests' pattern above:
+    enqueue a request_type="list" row, answer it with a real (small,
+    synthetic) zip containing a fake master-list .txt, and confirm the fetch
+    completes, the zip is safely extracted, and it is parsed into
+    config.fetched_bot_lists - the full path from dcc_fetch.py's transfer
+    completion through list_fetch.py's extraction/parsing.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-fetch-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.port = self.listener.getsockname()[1]
+        self.addCleanup(self.listener.close)
+
+    def _make_list_zip(self, base_name="OtherBot"):
+        import io
+        import zipfile as zf_mod
+
+        txt = (
+            "List of 1 Files (10.0MB) generated on Jan 1st\n"
+            f"To request a file, copy/paste to the channel... !{base_name} FILENAME\n\n\n"
+            "\n" + "=" * 53 + "\n"
+            "D:\\MUSIC\\SomeAlbum\\\n"
+            + "=" * 53 + "\n"
+            f"!{base_name} Track One.flac  ::INFO:: 10.0MB\n"
+        )
+        buf = io.BytesIO()
+        with zf_mod.ZipFile(buf, "w", zf_mod.ZIP_DEFLATED) as zf:
+            zf.writestr(f"{base_name}-2026-08-27.txt", txt)
+        return buf.getvalue()
+
+    def test_list_fetch_end_to_end_extracts_and_parses(self):
+        payload = self._make_list_zip()
+        rid = dcc_fetch.enqueue_fetch("otherbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+
+        def serve():
+            self.listener.settimeout(5.0)
+            conn, _ = self.listener.accept()
+            conn.settimeout(5.0)
+            conn.sendall(payload)
+            conn.close()
+
+        server_thread = threading.Thread(target=serve, daemon=True)
+        server_thread.start()
+
+        offer_line = f"DCC SEND otherbot-list.zip {ip_long('127.0.0.1')} {self.port} {len(payload)}"
+        dcc_fetch.handle_incoming_offer(None, "otherbot", offer_line)
+        server_thread.join(timeout=5.0)
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "complete")
+        self.assertNotIn("list_processing_error", row)
+        self.assertEqual(row["filename"], "otherbot-list.zip")
+
+        entry = config.fetched_bot_lists.get("otherbot")
+        self.assertIsNotNone(entry, "a successful list fetch must populate config.fetched_bot_lists")
+        self.assertEqual(entry["bot"], "otherbot")
+        titles = [e["title"] for e in entry["entries"]]
+        self.assertIn("Track One.flac", titles)
+
+    def test_a_second_fetch_for_the_same_bot_replaces_not_accumulates(self):
+        import list_fetch
+        config.fetched_bot_lists["otherbot"] = {
+            "bot": "otherbot", "fetched_at": 1.0,
+            "entries": [{"title": "Stale.flac", "size": "1.0MB", "format": "FLAC", "source": "otherbot"}],
+            "source_zip": "old.zip",
+        }
+
+        payload = self._make_list_zip()
+        rid = dcc_fetch.enqueue_fetch("otherbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+
+        def serve():
+            self.listener.settimeout(5.0)
+            conn, _ = self.listener.accept()
+            conn.settimeout(5.0)
+            conn.sendall(payload)
+            conn.close()
+
+        server_thread = threading.Thread(target=serve, daemon=True)
+        server_thread.start()
+        offer_line = f"DCC SEND newlist.zip {ip_long('127.0.0.1')} {self.port} {len(payload)}"
+        dcc_fetch.handle_incoming_offer(None, "otherbot", offer_line)
+        server_thread.join(timeout=5.0)
+
+        entry = config.fetched_bot_lists["otherbot"]
+        titles = [e["title"] for e in entry["entries"]]
+        self.assertNotIn("Stale.flac", titles)
+        self.assertIn("Track One.flac", titles)
 
 
 if __name__ == "__main__":
