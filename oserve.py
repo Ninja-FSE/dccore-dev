@@ -80,7 +80,7 @@ def startup():
     """
     print(f"--- {config.SCRIPT_VERSION} is starting up ---")
     if not os.path.exists(config.FILE_DIRECTORY):
-        print(f"[CRITICAL] Saknar mapp: {config.FILE_DIRECTORY}")
+        print(f"[CRITICAL] Missing directory: {config.FILE_DIRECTORY}")
         sys.exit(1)
 
     latest_list = list.find_latest_list()

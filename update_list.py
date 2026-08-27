@@ -300,9 +300,9 @@ def generate_master_list():
         return False
 
 if __name__ == "__main__":
-    print("--- Startar schemalagd veckouppdatering av fillistan ---")
+    print("--- Starting the scheduled weekly file-list update ---")
     if not os.path.exists(config.FILE_DIRECTORY):
-        print(f"[CRITICAL] Saknar musikmapp: {config.FILE_DIRECTORY}")
+        print(f"[CRITICAL] Missing music directory: {config.FILE_DIRECTORY}")
         sys.exit(1)
         
     success = generate_master_list()
