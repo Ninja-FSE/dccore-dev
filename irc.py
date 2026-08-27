@@ -138,7 +138,17 @@ def _capture_broadcast_search_reply(user, target, msg):
     token_match = _FETCH_TOKEN_RE.search(cleaned)
     if token_match:
         entry["bot"] = token_match.group(1)
-        entry["filename"] = token_match.group(2).strip()
+        # A reply that is itself a master-list line - the overwhelmingly
+        # common case, since this is what most file bots echo back for a
+        # match - carries a trailing "  ::INFO:: <size>" tag. Strip it here
+        # (list.strip_info_suffix(), the same split update_list.py's own
+        # writer/reader pair uses) so the stored filename is the bare name a
+        # later `!<bot> <filename>` request can actually be answered against -
+        # the real DCC SEND offer that comes back never includes the size tag,
+        # so leaving it in place made every such fetch fail admission control
+        # as "unsolicited" (filenames never matched).
+        filename, _size = list.strip_info_suffix(token_match.group(2).strip())
+        entry["filename"] = filename
 
     # NOTE: `builtins.list`, not the bare name - this module does `import list`
     # (the master-list module) at the top, which shadows the builtin type in

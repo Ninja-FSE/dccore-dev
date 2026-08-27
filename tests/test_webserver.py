@@ -601,5 +601,31 @@ class OptionalFlaskDependencyTests(unittest.TestCase):
         self.assertIn("Disabled via config.WEBUI_ENABLED", buffer.getvalue())
 
 
+class ListeningStateRenderingTests(unittest.TestCase):
+    """Regression: dcc_fetch.py writes a 'listening' state to a fetch-queue
+    row (the interim state a passive/reverse DCC SEND offer sits in while we
+    wait for the offering bot to connect back), but web/app.js's
+    DOWNLOAD_STATE_LABELS and style.css's .status-pill rules were never
+    extended for it - the dashboard fell back to the raw string "listening"
+    with no matching color for however long that state lasted (up to
+    PASSIVE_LISTEN_TIMEOUT, 60s).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"), "r", encoding="utf-8") as f:
+            cls.app_js = f.read()
+        with open(os.path.join(REPO_ROOT, "web", "style.css"), "r", encoding="utf-8") as f:
+            cls.style_css = f.read()
+
+    def test_download_state_labels_has_an_entry_for_listening(self):
+        start = self.app_js.index("DOWNLOAD_STATE_LABELS = {")
+        body = self.app_js[start:start + 300]
+        self.assertIn("listening:", body)
+
+    def test_style_css_has_a_rule_for_status_listening(self):
+        self.assertIn(".status-pill.status-listening", self.style_css)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -20,11 +20,27 @@ default:
 State machine, owned entirely by this module:
 
     pending -> offered -> receiving -> complete
+                   |             ^
+                   |             |
+                   `-> listening-'
                    \\-----------------------------> failed (any timeout/
                                                       admission-rejection/
                                                       size-mismatch/connect-
                                                       error - see the row's
                                                       "reason" field)
+
+`listening` is the passive/reverse-DCC branch: a third-party bot that cannot
+accept an inbound connection (usually firewalled) answers our request with
+`DCC SEND <filename> <ip> 0 <size> <token>` - port 0 plus a token is the
+standard convention meaning "you listen, and reply with your own ip:port plus
+this same token" (mirrors adminchat.py's identical handling of passive DCC
+CHAT). A row only ever reaches `listening` AFTER admission control has
+already matched it to an `offered` row we ourselves created, exactly like the
+active path - see handle_incoming_offer() and _serve_passive_offer(). Once
+the offering bot connects back, the row moves to `receiving` and joins the
+same bounded-transfer code (_run_transfer()) the active path uses; if nobody
+ever connects, it fails with reason "passive offer: no connection received"
+and the listening socket is closed, never leaked.
 
 Rows live in config.fetch_queue (config.py section 8), keyed by a generated
 request id. webserver.py's /api/fetch/* routes are the only thing that
@@ -45,6 +61,7 @@ import uuid
 import config
 import dcc
 import list as list_mod
+import platform_compat
 
 # Connect timeout for dialling the offering bot, and the idle-recv timeout
 # once connected. Not config knobs - dcc.py does not expose its own mirror-
@@ -52,6 +69,14 @@ import list as list_mod
 # these are exactly that same convention on the receiving side.
 CONNECT_TIMEOUT = 15.0
 IDLE_RECV_TIMEOUT = 60.0
+
+# How long we wait, once we start listening for a passive/reverse DCC SEND,
+# for the offering bot to actually connect back. Same value and same
+# reasoning as adminchat.LISTEN_TIMEOUT (60s "waiting for the operator to
+# accept our offer back") - this is the identical protocol shape, just for
+# DCC SEND instead of DCC CHAT, so there is no reason to pick a different
+# number.
+PASSIVE_LISTEN_TIMEOUT = 60.0
 
 RECV_CHUNK = 65536
 
@@ -63,6 +88,34 @@ RECV_CHUNK = 65536
 # it only ever receives a filename we ourselves already chose when the fetch
 # was enqueued.
 _FILENAME_CHARSET_RE = re.compile(r'[^\w\-_\. \(\)]')  # mirrors dcc.py:762
+
+# Mirrors webserver.reject_if_unsafe_for_irc_line()'s \r/\n rejection - same
+# injection class: a value that gets interpolated into a raw outbound IRC
+# line lets an embedded line break smuggle one or more ADDITIONAL lines
+# (QUIT, JOIN/PART an arbitrary channel, PRIVMSG/NOTICE as this bot, ...)
+# past whatever single line was intended. \x01 is rejected here too, on top
+# of what that helper checks, because unlike a plain PRIVMSG body this value
+# is later wrapped in a CTCP (\x01...\x01) reply (see _serve_passive_offer())
+# - an embedded \x01 closes that CTCP early and lets the attacker inject
+# arbitrary trailing content into what the receiving peer parses as a second
+# CTCP or as plain text.
+#
+# Checked at PARSE time (parse_dcc_send_offer(), below) for both
+# offer["filename"] (active and passive alike) and offer["token"] (passive
+# only) - not only at the one call site that currently echoes them back
+# (_serve_passive_offer()) - because this is the SECOND time this exact bug
+# class has appeared in this feature (see reject_if_unsafe_for_irc_line()'s
+# own docstring for the first, in webserver.py's web-enqueue routes).
+# Rejecting the whole offer here means any future call site that touches
+# offer["filename"]/offer["token"] inherits the protection automatically,
+# instead of depending on every future author remembering to sanitize again.
+_UNSAFE_CTCP_BYTES_RE = re.compile(r'[\r\n\x01]')
+
+
+def _contains_unsafe_ctcp_bytes(value):
+    """True if `value` contains a byte that must never reach a raw outbound
+    IRC/CTCP line unsanitized - see _UNSAFE_CTCP_BYTES_RE's comment above."""
+    return bool(_UNSAFE_CTCP_BYTES_RE.search(str(value)))
 
 
 def _fetch_lock():
@@ -117,9 +170,17 @@ def enqueue_fetch(bot, filename):
 
 def count_active_fetches(queue=None):
     """Rows currently occupying a slot. Derived, not tracked separately - see
-    the comment on config.fetch_queue for why."""
+    the comment on config.fetch_queue for why.
+
+    'listening' counts too: a passive/reverse DCC SEND has already claimed a
+    listening socket in the shared DCC port range and a slot in the fetch
+    queue by the time it reaches this state, exactly like 'receiving' - it
+    must count against MAX_FETCH_SLOTS or an offering bot that never connects
+    would let listeners pile up unbounded.
+    """
     queue = _ensure_fetch_queue() if queue is None else queue
-    return sum(1 for row in queue.values() if row.get("state") in ("offered", "receiving"))
+    return sum(1 for row in queue.values()
+               if row.get("state") in ("offered", "listening", "receiving"))
 
 
 def _mark_failed_locked(row, reason):
@@ -159,6 +220,22 @@ def check_fetch_queue():
             if row.get("state") == "offered" and row.get("offered_at") is not None:
                 if (now - row["offered_at"]) > offer_timeout:
                     _mark_failed_locked(row, "no response")
+
+        # Independent safety net for "listening" rows (passive DCC SEND).
+        # _serve_passive_offer() already bounds its own accept() with
+        # PASSIVE_LISTEN_TIMEOUT and marks the row 'failed' on the way out no
+        # matter how it exits (timeout, OSError, or any other exception - see
+        # its own comment on that last case). This second check exists for
+        # the failure mode none of that can cover: the daemon thread running
+        # _serve_passive_offer() dies or hangs BEFORE it gets that far (e.g.
+        # thread-start failure), leaving the row 'listening' with nothing left
+        # to ever revisit it. A generous multiple of PASSIVE_LISTEN_TIMEOUT
+        # avoids racing a passive transfer that is still legitimately waiting.
+        listen_timeout = PASSIVE_LISTEN_TIMEOUT * 3
+        for row in queue.values():
+            if row.get("state") == "listening" and row.get("listening_since") is not None:
+                if (now - row["listening_since"]) > listen_timeout:
+                    _mark_failed_locked(row, "listening row expired without a resolution")
 
         active = count_active_fetches(queue)
         free_slots = max_slots - active
@@ -212,9 +289,20 @@ def parse_dcc_send_offer(ctcp_text):
     """Parse 'DCC SEND <filename> <ip_long> <port> <size>' (optionally with a
     quoted filename containing spaces, mIRC's own convention for that case).
 
-    Returns {"filename", "ip", "port", "size"} or None for anything
-    malformed. The ip_long decode is the exact inverse of
-    dcc.get_public_ip_long() (dcc.py:201-210).
+    Returns {"filename", "ip", "port", "size"} for a normal (active) offer,
+    where the caller dials `ip`:`port` itself; or, for the passive/reverse
+    form 'DCC SEND <filename> <ip_long> 0 <size> <token>',
+    {"filename", "ip": None, "port": 0, "size", "token"} - port 0 plus a
+    trailing token is the standard convention meaning the offering bot cannot
+    accept an inbound connection (usually firewalled) and wants US to listen
+    instead, then reply with our own ip:port plus the same token echoed back.
+    Mirrors adminchat.parse_offer()'s identical (ip, port, token) shape for
+    passive DCC CHAT - see that function's docstring for the same convention
+    explained in more depth. Returns None for anything malformed, including
+    a bare 'port 0' with no token (nothing to answer it with).
+
+    The ip_long decode is the exact inverse of dcc.get_public_ip_long()
+    (dcc.py:201-210).
     """
     text = str(ctcp_text).strip().strip("\x01").strip()
     if not text.upper().startswith("DCC SEND "):
@@ -247,7 +335,14 @@ def parse_dcc_send_offer(ctcp_text):
 
     if not filename:
         return None
-    if port <= 0 or port > 65535:
+    if _contains_unsafe_ctcp_bytes(filename):
+        # CRLF/CTCP injection guard, checked here rather than only where the
+        # filename is later used - see _UNSAFE_CTCP_BYTES_RE's comment above
+        # for why. Applies to the active form too, even though only the
+        # passive reply currently echoes the filename back: a filename this
+        # hostile is not a real DCC client's output either way.
+        return None
+    if port < 0 or port > 65535:
         return None
     if ip_long < 0 or ip_long > 0xFFFFFFFF:
         return None
@@ -260,6 +355,41 @@ def parse_dcc_send_offer(ctcp_text):
         # zero bytes. Treat it the same as any other unusable offer: rejected
         # here, before a connection is ever made.
         return None
+
+    if port == 0:
+        # Passive/reverse DCC SEND. The token identifies this request and
+        # MUST come back in our own reply offer, or the offering bot cannot
+        # match the two and ignores us - so a "port 0" with no token is just
+        # as unusable as any other malformed offer, not a valid passive one.
+        # ip_long is deliberately NOT validated as a real address here (it
+        # often is not one - some bots send 0): it is never dialled, so
+        # nothing depends on it being well-formed.
+        if len(fields) < 4 or not fields[3]:
+            return None
+        token = fields[3]
+        if _contains_unsafe_ctcp_bytes(token):
+            # Same CRLF/CTCP injection guard as the filename above - the
+            # token is echoed back into our own reply CTCP verbatim (see
+            # _serve_passive_offer()), so it is just as much an injection
+            # vector as the filename is.
+            return None
+        # Best-effort only (see _serve_passive_offer()'s comment above its
+        # listener.accept() call): ip_long is still present on the wire for a
+        # passive offer even though it is never dialled - real passive-DCC
+        # senders typically fill it with their own detected address, the
+        # same convention as the active-offer wire format. Decode it, if it
+        # decodes to anything at all, purely so the eventual accept() can
+        # compare the peer that actually connects against what the offer
+        # itself claimed. Deliberately not validated/trusted any further
+        # here (0 and other junk are explicitly tolerated) - nothing above
+        # depends on it being well-formed, this is purely for that one later
+        # best-effort comparison.
+        try:
+            claimed_ip = str(ipaddress.IPv4Address(ip_long)) if ip_long else None
+        except (ipaddress.AddressValueError, ValueError):
+            claimed_ip = None
+        return {"filename": filename, "ip": None, "port": 0, "size": size,
+                "token": token, "claimed_ip": claimed_ip}
 
     try:
         ip = str(ipaddress.IPv4Address(ip_long))
@@ -341,15 +471,23 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
     """Entry point, dispatched from irc.py's CTCP branch in a daemon thread.
 
     Parses the offer, enforces admission control (must match a row WE marked
-    'offered' a moment ago), enforces the size cap BEFORE connecting, then
-    runs the bounded transfer. Every exit path that is not a clean 'complete'
-    leaves the claimed row 'failed' with a short reason - it never leaves a
-    row stuck in 'receiving' forever.
+    'offered' a moment ago), enforces the size cap BEFORE connecting or
+    listening, then runs the bounded transfer. Every exit path that is not a
+    clean 'complete' leaves the claimed row 'failed' with a short reason - it
+    never leaves a row stuck in 'receiving'/'listening' forever.
+
+    Admission control, the size cap and the destination-path check are
+    IDENTICAL for the active and passive (port 0) forms and all run here,
+    BEFORE either a socket is dialled or a listening socket is ever opened -
+    an unsolicited passive offer is dropped in exactly the same place, and
+    exactly as early, as an unsolicited active one.
     """
     offer = parse_dcc_send_offer(ctcp_payload)
     if offer is None:
         print(f"[FETCH] Unusable DCC SEND offer from {from_nick}: {ctcp_payload!r}")
         return
+
+    is_passive = offer["port"] == 0
 
     queue = _ensure_fetch_queue()
     with _fetch_lock():
@@ -358,9 +496,12 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
             # ADMISSION CONTROL: no matching outbound request. This is the
             # core safety guardrail - without it, any user or bot in the
             # channel could hand the daemon an arbitrary IP:port to connect
-            # to just by sending an unsolicited DCC SEND.
-            print(f"[FETCH] Rejected unsolicited DCC SEND from {from_nick} "
-                  f"({offer['filename']!r}): no matching pending request.")
+            # to (active) or make it open a listening socket and accept
+            # arbitrary bytes (passive) just by sending an unsolicited DCC
+            # SEND. Applies identically to both forms.
+            print(f"[FETCH] Rejected unsolicited{' passive' if is_passive else ''} "
+                  f"DCC SEND from {from_nick} ({offer['filename']!r}): "
+                  f"no matching pending request.")
             return
 
         max_size = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
@@ -378,22 +519,257 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
 
         row["total_size"] = offer["size"]
         row["stored_filename"] = stored_name
+        if is_passive:
+            row["state"] = "listening"
+            row["listening_since"] = time.time()
+
+    if is_passive:
+        _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name)
+        return
 
     _run_transfer(row, offer, dest_dir, stored_name)
 
 
-def _run_transfer(row, offer, dest_dir, stored_name):
+def _open_fetch_listener():
+    """Bind a listener inside the shared DCC port range, for answering a
+    passive/reverse DCC SEND offer.
+
+    Three different listeners already share this one small range (11 ports
+    by default): dcc.py's own outbound SEND (start_dcc_send()) scans UPWARD
+    from DCC_PORT_START, and adminchat._open_chat_listener()'s passive DCC
+    CHAT scans DOWNWARD from DCC_PORT_END. An earlier version of this
+    function also scanned downward from DCC_PORT_END - meaning it shared
+    adminchat's exact first-probed port and every port after it, despite a
+    docstring here claiming the two landed at "opposite ends" (that claim
+    had only ever compared this function to dcc.py, never to adminchat, the
+    listener it actually collides with).
+    Starting from the MIDPOINT and scanning outward (then wrapping) instead
+    means this function's first-probed port is never the same as either of
+    the other two listeners' first-probed port, for as long as there is more
+    than one free port in the range - all three still ultimately compete for
+    the same finite pool once it's nearly full, which no ordering can avoid.
+    Same range as every other DCC listener in this project either way, so no
+    extra firewall rule is needed for this to work.
+    """
+    start = int(getattr(config, "DCC_PORT_START", 55000))
+    end = int(getattr(config, "DCC_PORT_END", 55010))
+    mid = (start + end) // 2
+    ordered_ports = list(range(mid, end + 1)) + list(range(mid - 1, start - 1, -1))
+    for port in ordered_ports:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # SO_REUSEADDR means the OPPOSITE thing on Windows - platform_compat
+        # picks the right option per platform. Same call adminchat.py and
+        # dcc.py's own listener setup already make.
+        platform_compat.prepare_listener(sock)
+        try:
+            sock.bind(("0.0.0.0", port))
+            # listen() HERE, before returning - see adminchat._open_chat_listener()'s
+            # comment: on POSIX, SO_REUSEADDR lets a second socket bind the
+            # same port while the first is bound but not yet listening, so a
+            # merely-bound socket could be raced by a second passive offer.
+            sock.listen(1)
+            return sock, port
+        except OSError:
+            sock.close()
+            continue
+    return None, None
+
+
+def _serve_passive_offer(irc_sock, from_nick, row, offer, dest_dir, stored_name):
+    """Answer a passive/reverse DCC SEND offer: we become the listener.
+
+    Mirrors adminchat._listen_and_serve()'s identical pattern for passive DCC
+    CHAT - open a listener in the shared DCC port range, announce our own
+    ip:port plus the offer's token through the CTCP reply, and wait with a
+    bounded timeout for the offering bot to connect back. On a successful
+    accept, hand off into the SAME bounded-transfer code (_run_transfer())
+    the active path uses - only how the socket was obtained differs.
+
+    Called only from handle_incoming_offer(), and only AFTER admission
+    control, the size cap and the destination-path check have all already
+    passed - this function is not itself a fresh trust boundary, it only
+    ever runs for a request already matched to a row this bot created.
+    """
+    ip_long = dcc.get_public_ip_long()
+    if not ip_long:
+        _mark_failed_locked(row, "our own public IP is unknown")
+        print(f"[FETCH] Cannot answer {from_nick}'s passive DCC SEND offer: "
+              f"the bot's own public IP is unknown (config.MY_IP_OR_DOCK did not resolve).")
+        return
+
+    listener, port = _open_fetch_listener()
+    if listener is None:
+        start = getattr(config, "DCC_PORT_START", 55000)
+        end = getattr(config, "DCC_PORT_END", 55010)
+        _mark_failed_locked(row, "no free DCC port for the passive listener")
+        print(f"[FETCH] No free port in {start}-{end} to answer {from_nick}'s "
+              f"passive DCC SEND offer for {offer['filename']!r}.")
+        return
+
+    oserve = sys.modules.get("oserve")
+    if not (oserve and hasattr(oserve, "queue_message")):
+        # No paced outbound queue available. This should not happen outside a
+        # very early boot race or a test that forgot to stub it, but leaving
+        # the row stuck 'listening' with no way to ever answer it would be
+        # worse than failing it outright - and the listener must not leak.
+        _mark_failed_locked(row, "outbound message queue unavailable")
+        print(f"[FETCH] Cannot answer {from_nick}'s passive DCC SEND offer: "
+              f"oserve.queue_message is unavailable.")
+        try:
+            listener.close()
+        except OSError:
+            pass
+        return
+
+    try:
+        listener.settimeout(PASSIVE_LISTEN_TIMEOUT)
+        # dcc.py's own outbound SEND replaces spaces with underscores before
+        # sending the handshake (dcc.py:1012) - the same transformation any
+        # DCC client applies, and needed here too so the filename cannot
+        # swallow the positional fields that follow it.
+        safe_filename = offer["filename"].replace(" ", "_")
+        token = offer["token"]
+        # Defense-in-depth only, expected to be unreachable: parse_dcc_send_
+        # offer() already rejects any offer whose filename/token contains
+        # \r, \n or \x01 before it is ever turned into an `offer` dict (see
+        # _contains_unsafe_ctcp_bytes() and its callers there). This is the
+        # SECOND time this exact injection class has appeared in this
+        # feature, so this call site - the one that actually interpolates
+        # both values into a raw outbound CTCP line - does not simply trust
+        # that upstream check was applied; it refuses to build the message
+        # at all if either value is still unsafe for some future reason.
+        if _contains_unsafe_ctcp_bytes(safe_filename) or _contains_unsafe_ctcp_bytes(token):
+            _mark_failed_locked(row, "unsafe characters in offer filename/token")
+            print(f"[FETCH] Refusing to answer {from_nick}'s passive DCC SEND "
+                  f"offer: filename/token contains control characters this "
+                  f"late (should be unreachable - see parse_dcc_send_offer()).")
+            return
+        message = (f"PRIVMSG {from_nick} :\x01DCC SEND {safe_filename} "
+                   f"{ip_long} {port} {offer['size']} {token}\x01\r\n")
+        oserve.queue_message(from_nick, message)
+        print(f"[FETCH] Answered {from_nick}'s passive DCC SEND offer for "
+              f"{offer['filename']!r} on port {port}; waiting for the connection.")
+
+        # SECURITY (accepted, narrowed risk - not an oversight, same spirit as
+        # WEBUI_HOST's no-auth comment in config.py): accept() below takes the
+        # FIRST TCP connection that arrives on this port, from ANYONE who can
+        # reach it, and cannot itself verify that the peer is actually
+        # `from_nick`'s bot. Passive DCC is passive precisely because the
+        # offering bot's real source address is not reliably knowable ahead of
+        # time (that is WHY it asked us to listen instead of dialling it) -
+        # there is no WHO/WHOIS-derived address lookup in this codebase to
+        # check the peer against, and the DCC SEND protocol itself has no
+        # post-connect handshake to authenticate the peer with (unlike admin
+        # DCC CHAT, which layers its own password auth over the accepted
+        # socket - see adminchat.py's _serve()/AUTH handling - there is
+        # nothing equivalent to layer on top of a raw file byte stream, which
+        # IS the payload here).
+        #
+        # Mitigations actually in place:
+        #   1. Admission control (handle_incoming_offer(), before this
+        #      function is ever called) means a listener is only ever opened
+        #      for a fetch WE explicitly requested - the residual risk is
+        #      specifically WHO answers a request we made, not whether an
+        #      attacker can make us ask in the first place.
+        #   2. The listener is single-shot: one accept(), then closed in the
+        #      `finally` below - never re-armed - and only open for
+        #      PASSIVE_LISTEN_TIMEOUT (60s) inside the narrow, already-
+        #      firewalled config.DCC_PORT_START..DCC_PORT_END range.
+        #   3. Best-effort peer check, below, after the accept succeeds: if
+        #      the offer's own ip_long field decoded to something usable
+        #      (offer["claimed_ip"], from parse_dcc_send_offer()), the
+        #      accepted peer's address is compared against it and a mismatch
+        #      is logged and recorded on the row - but deliberately NOT
+        #      treated as a hard rejection. A real offering bot behind NAT
+        #      routinely advertises a private/internal address that
+        #      legitimately differs from its outbound public address, and
+        #      hard-rejecting on that basis would break real-world interop
+        #      for exactly the deployments passive DCC exists to support.
+        #
+        # Residual, accepted risk: a same-LAN or otherwise well-positioned
+        # attacker who races the real offering bot's connection within the
+        # ~60s window, on this narrow/low-cardinality port range, can still
+        # win and have their bytes accepted as the "fetched" file. There is
+        # no robust fix for this without either inventing a nonstandard
+        # protocol extension a real third-party bot would not speak, or a
+        # WHO/WHOIS round trip this codebase does not otherwise perform -
+        # both judged disproportionate to what a plain-text file-sharing
+        # protocol with no authentication of its own can realistically offer.
+        conn, addr = listener.accept()
+    except socket.timeout:
+        _mark_failed_locked(row, "passive offer: no connection received")
+        print(f"[FETCH] {from_nick} never connected back within "
+              f"{int(PASSIVE_LISTEN_TIMEOUT)}s for the passive DCC SEND offer "
+              f"on port {port}; giving the port back.")
+        return
+    except OSError as err:
+        _mark_failed_locked(row, f"passive listen error: {err}")
+        print(f"[FETCH] Passive DCC SEND listener error for {from_nick}: {err}")
+        return
+    except Exception as err:
+        # Defense-in-depth, expected to be unreachable: everything above this
+        # point already has its own specific handling. This exists so that
+        # NO exception - not just the two anticipated above - can ever leave
+        # this row stuck in 'listening' forever. handle_incoming_offer() runs
+        # in a bare daemon thread with nothing above it to catch a stray
+        # exception, and check_fetch_queue()'s own expiry loop only re-checks
+        # 'offered' rows (see its docstring), not 'listening' ones - so
+        # without this, an unanticipated error here would silently and
+        # permanently strand a MAX_FETCH_SLOTS slot until the process
+        # restarts. (check_fetch_queue() ALSO now expires a stale 'listening'
+        # row on a timer, as a second, independent safety net in case this
+        # function's own thread dies or hangs before even reaching this
+        # try block.)
+        _mark_failed_locked(row, f"unexpected error: {err}")
+        print(f"[FETCH] Unexpected error answering {from_nick}'s passive DCC "
+              f"SEND offer for {offer['filename']!r}: {err!r}")
+        return
+    finally:
+        try:
+            listener.close()
+        except OSError:
+            pass
+
+    peer_ip = addr[0] if addr else None
+    claimed_ip = offer.get("claimed_ip")
+    row["passive_peer_ip"] = peer_ip
+    if claimed_ip and peer_ip and claimed_ip != peer_ip:
+        # Best-effort only - see the long comment above listener.accept() for
+        # why this is logged/recorded rather than treated as a hard reject.
+        row["passive_peer_ip_mismatch"] = True
+        print(f"[FETCH] WARNING: passive DCC SEND connection answering "
+              f"{from_nick}'s offer of {offer['filename']!r} arrived from "
+              f"{peer_ip}, but the offer itself claimed {claimed_ip}. "
+              f"Accepting it anyway (best-effort check only - see the "
+              f"comment above listener.accept() in dcc_fetch.py); treat a "
+              f"mismatch here as suspicious.")
+
+    with _fetch_lock():
+        row["state"] = "receiving"
+
+    _run_transfer(row, offer, dest_dir, stored_name, sock=conn)
+
+
+def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     """The actual bounded socket transfer. `row` has already been claimed
     ('receiving') and validated by handle_incoming_offer(); this just moves
     bytes, with three independent guards:
 
-      * CONNECT_TIMEOUT on the dial itself
+      * CONNECT_TIMEOUT on the dial itself (active offers only)
       * IDLE_RECV_TIMEOUT per recv() call (mirrors dcc.py:1024's conn.settimeout(60.0))
       * FETCH_TRANSFER_TIMEOUT as a wall-clock ceiling, for a slow-drip peer
         that keeps resetting the idle timer without ever finishing
 
     and aborts (deleting the partial file) if the peer sends more than it
     declared.
+
+    `sock` is None for a normal (active) offer, in which case this dials
+    offer["ip"]:offer["port"] itself exactly as before. For the passive/
+    reverse form, _serve_passive_offer() has already listened and accepted
+    the inbound connection, and hands the resulting socket in here directly -
+    everything from this point on (size cap enforcement, idle/wall-clock
+    timeouts, oversize-abort) is identical either way; only how the socket
+    was obtained differs.
     """
     total_size = offer["size"]
     dest_path = os.path.join(dest_dir, stored_name)
@@ -404,22 +780,38 @@ def _run_transfer(row, offer, dest_dir, stored_name):
     except Exception as mkdir_err:
         _mark_failed_locked(row, f"could not create destination dir: {mkdir_err}")
         print(f"[FETCH] {mkdir_err}")
-        return
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(CONNECT_TIMEOUT)
-    try:
-        sock.connect((offer["ip"], offer["port"]))
-    except Exception as connect_err:
-        _mark_failed_locked(row, f"connect error: {connect_err}")
-        print(f"[FETCH] Could not connect to {offer['ip']}:{offer['port']}: {connect_err}")
         try:
-            sock.close()
+            if sock is not None:
+                sock.close()
         except Exception:
             pass
         return
 
+    if sock is None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(CONNECT_TIMEOUT)
+        try:
+            sock.connect((offer["ip"], offer["port"]))
+        except Exception as connect_err:
+            _mark_failed_locked(row, f"connect error: {connect_err}")
+            print(f"[FETCH] Could not connect to {offer['ip']}:{offer['port']}: {connect_err}")
+            try:
+                sock.close()
+            except Exception:
+                pass
+            return
+
     sock.settimeout(IDLE_RECV_TIMEOUT)
+
+    # For a passive offer offer["ip"] is None (never dialled - see
+    # parse_dcc_send_offer()); the peer's real address is only known once we
+    # have actually accepted its connection.
+    peer_desc = offer.get("ip")
+    if peer_desc is None:
+        try:
+            peer_desc = sock.getpeername()[0]
+        except OSError:
+            peer_desc = "?"
 
     bytes_received = 0
     failure_reason = None
@@ -470,7 +862,7 @@ def _run_transfer(row, offer, dest_dir, stored_name):
     if failure_reason is None and bytes_received == total_size:
         row["state"] = "complete"
         row["bytes_received"] = bytes_received
-        print(f"[FETCH] Complete: {stored_name} ({bytes_received} bytes) from {offer.get('ip')}.")
+        print(f"[FETCH] Complete: {stored_name} ({bytes_received} bytes) from {peer_desc}.")
         return
 
     if failure_reason is None:
