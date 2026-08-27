@@ -199,14 +199,14 @@ def get_total_queued_count():
     return total
 
 def get_public_ip_long():
-    """Konverterar botens detekterade IP till ett mIRC-kompatibelt Long-format"""
+    """Convert the bot's detected IP into the mIRC-compatible long format."""
     try:
         ip = config.MY_IP_OR_DOCK
         parts = ip.split('.')
         if len(parts) == 4:
             return (int(parts[0]) << 24) + (int(parts[1]) << 16) + (int(parts[2]) << 8) + int(parts[3])
     except Exception as e:
-        print(f"[DCC IP ERROR] Kunde inte konvertera IP till Long: {e}")
+        print(f"[DCC IP ERROR] Could not convert the IP to long form: {e}")
     return 0
 
 def check_queue_and_send(irc_sock, completed_user):
@@ -372,7 +372,8 @@ def check_queue_and_send(irc_sock, completed_user):
                     # That is what lets AutoQ match the filename in every case.
                     folder_leaf = os.path.basename(true_source_dir.rstrip('/\\'))
                     if "'" in folder_leaf and "'" not in clean_name:
-                        # Om originalet har apostrof men namnet saknar det, byt ut motsvarande understreck
+                        # If the original has an apostrophe and the name does not, put it back in
+                    # place of the matching underscore
                         # by matching the structure of the folder on disk
                         clean_name = folder_leaf.replace(' ', '_')
                         clean_name = re.sub(r'[^a-zA-Z0-9\s\(\)\-_\']', '_', clean_name)
@@ -765,7 +766,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
 
                 config.dcc_queue[user_key].append({
-                    "file": master_rar_filename, # SPARAD: Nu ligger det rena namnet spikat i dcc_queue.txt!
+                    "file": master_rar_filename, # The clean name is what gets written to dcc_queue.txt
                     "path": true_source_dir,
                     "channel": target_chan,
                     "user_raw": user,
@@ -1020,7 +1021,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         irc_sock.send(ctcp_handshake.encode())
         print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
     except Exception as e:
-        print(f"[DCC ERROR] Misslyckades att skicka handskakning: {e}")
+        print(f"[DCC ERROR] Failed to send the handshake: {e}")
 
     conn = None
     try:
@@ -1116,7 +1117,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.active_downloads = len(config.active_transfers)
         except Exception as trans_clean_err:
-            print(f"[DCC CLEANUP ERROR] Kunde inte rensa active_transfers in RAM: {trans_clean_err}")
+            print(f"[DCC CLEANUP ERROR] Could not clear active_transfers in memory: {trans_clean_err}")
 
 
         # 2. Get the channel notice out first of all
