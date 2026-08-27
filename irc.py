@@ -1,5 +1,5 @@
 # =====================================================================
-# IRC.PY - DEDIKERAD IRC-NÄTVERKSMODUL FÖR UNDERNET (DEL 1 AV 3)
+# IRC.PY - THE IRC NETWORK MODULE FOR UNDERNET (PART 1 OF 3)
 # =====================================================================
 import socket
 import threading
@@ -18,17 +18,17 @@ import list
 import dcc
 import security
 
-# Flagga för att hålla koll på om kanaler är joinade
+# Tracks whether the channels have been joined
 bot_joined_channel = False
 
 
 def _release_socket():
-    """Nollställer den delade nätverksreferensen så fort en socket har stängts.
+    """Clear the shared network reference as soon as a socket has closed.
 
-    queue_mgr-pumpen och announce.send_debug kollar båda `if current_sock:` innan de
-    skriver. Utan den här nollställningen pekade referensen kvar på en STÄNGD socket
-    under hela återanslutningen, så de vakterna var verkningslösa och varje skrivning
-    kastade OSError i onödan.
+    The queue_mgr pump and announce.send_debug both check `if current_sock:` before
+    writing. Without this reset the reference still pointed at a CLOSED socket for
+    the whole reconnect, so those guards did nothing and every write raised
+    OSError for no reason.
     """
     import sys
     oserve_mod = sys.modules.get('oserve')
@@ -135,12 +135,12 @@ def get_bot_aliases():
 
 
 def irc_loop():
-    """Hanterar anslutningen, PING/PONG och alla inkommande PRIVMSG från Undernet"""
+    """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
     import announce
     oserve = sys.modules.get('oserve')
     
-    print("[IP CHECK] Hämtar din publika via ipify API...")
+    print("[IP CHECK] Fetching the public address from the ipify API...")
     try:
         req = urllib.request.Request(
             "https://api.ipify.org", 
@@ -149,12 +149,12 @@ def irc_loop():
         config.MY_IP_OR_DOCK = urllib.request.urlopen(req, timeout=5.0).read().decode("utf-8").strip()
         print(f"[IP CHECK] IP-identifiering klar! DCC IP satt till: {config.MY_IP_OR_DOCK}")
     except Exception as e:
-        print(f"[WARNING] Kunde inte nå ipify API ({e}). Fallback till 127.0.0.1")
+        print(f"[WARNING] Could not reach the ipify API ({e}). Falling back to 127.0.0.1")
         config.MY_IP_OR_DOCK = "127.0.0.1"
     
      # ---------------------------------------------------------------------
     
-    # 🛡️ GLOBAL SPARING: Sätts HÄR först av allt så att variabeln ALLTID finns i RAM!
+    # Set HERE before anything else, so the variable always exists in memory
     if not hasattr(config, 'ORIGINAL_NICK'):
         config.ORIGINAL_NICK = getattr(config, 'NICKNAME', 'DCCore')
 
@@ -163,9 +163,9 @@ def irc_loop():
     if not hasattr(config, 'connection_epoch'):
         config.connection_epoch = 0
 
-    # 🔄 AUTOMATISK ÅTERANSLUTNINGSLOOP (Säkrar att tråden ALDRIG dör vid split eller disconnect!)
+    # THE RECONNECT LOOP: makes sure this thread never dies on a split or a disconnect
     while True:
-        # Vi utgår ALLTID ifrån att försöka ta botens sanna original-nick vid varje anslutning
+        # Every connection starts by trying to claim the bot's real original nick
         config.NICKNAME = config.ORIGINAL_NICK
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -184,7 +184,7 @@ def irc_loop():
                 oserve_mod.irc_connection = s
             print(f"[CONNECT] Connected to socket successfully!")
         except Exception as e:
-            print(f"[ERROR] Connection failed: {e}. Återansluter om 10 sekunder...")
+            print(f"[ERROR] Connection failed: {e}. Reconnecting in 10 seconds...")
             # `joined` lives in the irc_loop frame and is only reset after a SUCCESSFUL
             # handshake, so a failed attempt used to leave it latched True from the
             # previous connection - which is what let a stale watchdog pass its guard.
@@ -192,7 +192,7 @@ def irc_loop():
             time.sleep(10)
             continue
             
-        # 🔑 SKICKA AUTENTISERING DIREKT (Serverstyrt NICK-val via sanna 433-returer!)
+        # Send the handshake immediately; the server decides the nick via real 433 replies
         try:
             s.send(f"NICK {config.NICKNAME}\r\n".encode())
             
@@ -208,7 +208,7 @@ def irc_loop():
                 for a_line in auth_lines:
                     if " 433 " in a_line or "erroneous nickname" in a_line.lower():
                         alt_nick = getattr(config, 'ALT_NICKNAME', f"{config.ORIGINAL_NICK}`")
-                        print(f"[SERVER 433] Nicket {config.NICKNAME} var upptaget! Växlar CURRENT_NICK till: {alt_nick}")
+                        print(f"[SERVER 433] The nick {config.NICKNAME} was taken. Switching CURRENT_NICK to: {alt_nick}")
                         s.send(f"NICK {alt_nick}\r\n".encode())
                         config.NICKNAME = alt_nick
                     
@@ -221,11 +221,11 @@ def irc_loop():
                     continue
                 break
                 
-            print(f"[INFO] Handskakning klar! CURRENT_NICK spikat som: {config.NICKNAME}. Startar läsaren...")
+            print(f"[INFO] Handshake complete. CURRENT_NICK settled as: {config.NICKNAME}. Starting the reader...")
 
-            # 🛡️ KORT RECV-TIMEOUT (se klock-logiken nedan): recv() släpper taget var
-            # 20:e sekund så att vi hinner sköta keepalive och tystnadsmätning själva.
-            # Den gamla 70-sekunderstimeouten rev ner FRISKA länkar under tysta perioder.
+            # SHORT RECV TIMEOUT (see the clock logic below): recv() lets go every
+            # 20 seconds so we can run the keepalive and the silence timer ourselves.
+            # The old 70-second timeout tore down HEALTHY links during quiet periods.
             s.settimeout(20.0)
         except Exception as auth_err:
             print(f"[ERROR] Fel under server-handskakningen: {auth_err}")
@@ -233,10 +233,10 @@ def irc_loop():
             except: pass
             _release_socket()
             joined = False
-            # 🛡️ BACKOFF: Utan paus här snurrade loopen så fort TCP hann koppla upp.
-            # Undernets anslutningsthrottle stänger länken direkt när man kommer för
-            # tätt, vilket gav tiotals försök per sekund och garanterade att vi förblev
-            # throttlade (eller blev K-linade) istället för att återhämta oss.
+            # BACKOFF: without a pause here the loop spun as fast as TCP could connect.
+            # Undernet's connection throttle closes the link immediately when you come
+            # back too fast, which gave tens of attempts a second and guaranteed we
+            # stayed throttled - or got K-lined - instead of recovering.
             time.sleep(10)
             continue
 
@@ -250,37 +250,37 @@ def irc_loop():
         bot_joined_channel = False
         announce.is_ready = False
         
-        # 🛡️ FIXAD (issue #9): Spårar VILKA kanaler som bekräftats via 366, inte bara
-        # ett löst antal. Den gamla koden räknade alla 366-rader den såg (inklusive
-        # debug-kanalens), så tröskeln kunde nås även om en riktig kanal aldrig
-        # svarade – och om två eller fler misslyckades nåddes tröskeln aldrig, vilket
+        # FIXED (issue #9): tracks WHICH channels were confirmed by 366, not just
+        # a loose count. The old code counted every 366 line it saw, including the
+        # debug channel's, so the threshold could be reached even if a real channel
+        # never answered - and if two or more failed the threshold was never reached,
         # tystade ner ALL annonsering permanent utan minsta felmeddelande.
         target_channels = set(c.strip().lower() for c in config.CHANNEL.split(",") if c.strip())
         channels_confirmed = set()
-        ACTIVATION_TIMEOUT = 20.0  # sekunder efter JOIN innan vi ger upp på kvarvarande kanaler
+        ACTIVATION_TIMEOUT = 20.0  # seconds after JOIN before giving up on the rest
         last_recv_time = time.time()
 
         # ---------------------------------------------------------------------
-        # 🛡️ TVÅ SKILDA KLOCKOR (ersätter den gamla 45s-kontrollen + 70s-timeouten):
+        # TWO SEPARATE CLOCKS, replacing the old 45s check plus 70s timeout:
         #
-        # Den gamla keepalive-kontrollen låg överst i loopen, men loopen stod blockerad
-        # i recv() i upp till 70 sekunder. recv() timeoutade alltså ALLTID före de 45
-        # sekunderna hann kontrolleras - keepalive-PING:en gick aldrig att nå, och en
-        # tyst kanal revs ner som om länken vore död. Boten återanslöt, joinade om sju
-        # kanaler, nollställde channel_users och startade om reklamtråden - om och om
-        # igen så länge kanalerna var tysta.
+        # The old keepalive check sat at the top of the loop, but the loop was blocked
+        # in recv() for up to 70 seconds. So recv() ALWAYS timed out before the 45
+        # seconds could be checked - the keepalive PING was never reachable, and a
+        # quiet channel was torn down as though the link were dead. The bot
+        # reconnected, rejoined seven channels, cleared channel_users and restarted
+        # the advert thread - over and over, for as long as the channels were quiet.
         #
-        # Nu mäter vi tystnad separat från keepalive: recv() släpper var 20:e sekund,
-        # vi PING:ar servern efter 45s tystnad, och river bara ner länken om servern
-        # inte hörts av på SILENCE_LIMIT. Riktigt döda länkar fångas ändå av
-        # TCP_KEEPIDLE/INTVL/CNT ovan på ca 16 sekunder.
+        # Silence is now measured separately from the keepalive: recv() lets go every
+        # 20 seconds, we PING the server after 45s of silence, and only tear the link
+        # down if the server has not been heard from for SILENCE_LIMIT. Genuinely dead
+        # links are still caught by TCP_KEEPIDLE/INTVL/CNT above, in about 16 seconds.
         # ---------------------------------------------------------------------
-        SILENCE_LIMIT = 180.0    # först här anser vi länken död
-        KEEPALIVE_AFTER = 45.0   # så länge får det vara tyst innan vi PING:ar
+        SILENCE_LIMIT = 180.0    # only at this point is the link considered dead
+        KEEPALIVE_AFTER = 45.0   # this much silence is allowed before we PING
         last_ping_sent = 0.0
 
-        # 🛡️ HOISTAD (issue #9): delayed_activate ligger nu här, en gång, istället för
-        # nästlad inuti 366-hanteraren – så både den vanliga NAMES-vägen OCH
+        # HOISTED (issue #9): delayed_activate lives here now, once, instead of being
+        # nested inside the 366 handler - so both the ordinary NAMES path AND
         # timeout-vakthunden nedan kan trigga exakt samma aktiveringslogik.
         def delayed_activate(sock=s, epoch=my_epoch):
             # `sock` and `epoch` are bound as DEFAULT ARGUMENTS on purpose. Both were
@@ -320,13 +320,13 @@ def irc_loop():
             if hasattr(announce, 'last_announce_time'):
                 announce.last_announce_time = time.time()
                 
-            # 🛡️ AUTOMATISK LIVE-ÅTERTAGARSLUSS (Bevakar och återtar tronen efter netsplits!)
+            # Watches for the main nick to free up after a netsplit, and reclaims it
             def background_nick_monitor(sock_inst):
                 main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                # Loopa och kolla läget var 10:e sekund i upp till 5 minuter efter JOIN
+                # Check every 10 seconds, for up to 5 minutes after JOIN
                 for _ in range(30):
                     if str(config.NICKNAME).lower() == main_nick.lower():
-                        break # Vi kör redan på huvudnicket, stäng ner bevakningen!
+                        break  # Already on the main nick; stop watching
                         
                     main_nick_active = False
                     if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
@@ -336,7 +336,7 @@ def irc_loop():
                                 break
                                 
                     if not main_nick_active:
-                        print(f"\n[NICK RECOVERY] Upptäckte att spöknicket {main_nick} har timeoutat! Byter nick...")
+                        print(f"\n[NICK RECOVERY] The ghost nick {main_nick} timed out. Changing nick...")
                         try:
                             sock_inst.send(f"NICK {main_nick}\r\n".encode())
                             config.NICKNAME = main_nick
@@ -345,7 +345,7 @@ def irc_loop():
                             break
                     time.sleep(10)
             
-            # Starta den uthålliga klockan asynkront i bakgrunden
+            # Start the persistent timer in the background
             threading.Thread(target=background_nick_monitor, args=(s,), daemon=True).start()
                 
             print("[CONNECT FIX] Startar om kanalreklamen helautomatiskt...")
@@ -353,10 +353,10 @@ def irc_loop():
             config.announce_thread_alive = True
 
         def activation_watchdog(epoch=my_epoch):
-            """🛡️ NY (issue #9): Tvingar fram aktivering efter en rimlig väntetid även om
-            vissa kanaler aldrig svarade på JOIN (bannlyst, kräver invite, felstavad etc).
-            Utan den här vakthunden kunde 2+ trasiga kanaler tysta ner ALL annonsering
-            permanent för hela anslutningens livstid, helt utan felmeddelande."""
+            """NEW (issue #9): forces activation after a reasonable wait, even if
+            some channels never answered the JOIN - banned, invite-only, misspelled.
+            Without this watchdog, two or more broken channels could silence ALL
+            advertising for the whole life of the connection, with no error at all."""
             time.sleep(ACTIVATION_TIMEOUT)
             # Bail if this connection is gone. config.activation_triggered alone is not a
             # staleness guard: the disconnect epilogue RESETS it, which re-armed exactly
@@ -368,7 +368,7 @@ def irc_loop():
                 missing = target_channels - channels_confirmed
                 config.activation_triggered = True
                 if missing:
-                    print(f"[WARNING] Aktiverar reklamen trots {len(missing)} obekräftad(e) kanal(er): {', '.join(missing)}")
+                    print(f"[WARNING] Activating the advert despite {len(missing)} unconfirmed channel(s): {', '.join(missing)}")
                     try:
                         announce.send_debug(
                             f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(missing)}",
@@ -376,7 +376,7 @@ def irc_loop():
                     except Exception as watchdog_debug_err:
                         print(f"[WARNING] Kunde inte skicka watchdog-debugnotis: {watchdog_debug_err}")
                 else:
-                    print(f"[INFO] Watchdog: alla kanaler bekräftade precis i tid.")
+                    print(f"[INFO] Watchdog: every channel confirmed just in time.")
                 threading.Thread(target=delayed_activate, daemon=True).start()
 
         while True:
@@ -388,7 +388,7 @@ def irc_loop():
                     quiet_for = now - last_recv_time
 
                     if quiet_for > SILENCE_LIMIT:
-                        print(f"[TIMEOUT] Servern har varit helt tyst i {int(quiet_for)}s. Bryter för återanslutning!")
+                        print(f"[TIMEOUT] The server has been silent for {int(quiet_for)}s. Dropping the link to reconnect.")
                         try: s.close()
                         except: pass
                         _release_socket()
@@ -399,20 +399,20 @@ def irc_loop():
                             s.send(b"PING :lagcheck\r\n")
                             last_ping_sent = now
                         except Exception as ping_err:
-                            print(f"[TIMEOUT] Keepalive-PING gick inte fram ({ping_err}). Bryter för återanslutning!")
+                            print(f"[TIMEOUT] The keepalive PING did not get through ({ping_err}). Dropping the link to reconnect.")
                             try: s.close()
                             except: pass
                             _release_socket()
                             break
                     continue
                 except socket.error as net_err:
-                    print(f"[DISCONNECT FIX] Linux Keepalive upptäckte dött nätverk ({net_err}). Bryter för återanslutning!")
+                    print(f"[DISCONNECT FIX] TCP keepalive detected a dead network ({net_err}). Dropping the link to reconnect.")
                     try: s.close()
                     except: pass
                     _release_socket()
                     break
                 except Exception as e:
-                    print(f"[IRC READ ERROR] Oväntat fel vid nätverksavläsning: {e}")
+                    print(f"[IRC READ ERROR] Unexpected error while reading from the network: {e}")
                     try: s.close()
                     except: pass
                     _release_socket()
@@ -457,7 +457,7 @@ def irc_loop():
                         parts = line.split()
                         pong_code = parts[-1].strip()
                         s.send(f"PONG {pong_code}\r\n".encode())
-                    # 🛡️ LIVE 433-BACKUP: Fångar enbart upp OFFICIELLA server-krockar (Ignorerar kanalsnack!)
+                    # Catches ONLY official server collisions; channel chatter is ignored
                     # Anchored: " 433 " matched those digits anywhere in the line, and the
                     # PRIVMSG/NOTICE exclusion under it did not cover PART or QUIT reasons
                     # or a channel TOPIC - so parting with "bye 433" pushed the bot off its
@@ -471,11 +471,11 @@ def irc_loop():
                         main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
                         if str(config.NICKNAME).lower() == main_nick.lower():
                             alt_nick = getattr(config, 'ALT_NICKNAME', f"{main_nick}`")
-                            print(f"[LIVE NICK COLLISION] Servern rapporterade en äkta krock för {main_nick}! Reservnick: {alt_nick}")
+                            print(f"[LIVE NICK COLLISION] The server reported a genuine collision for {main_nick}. Fallback nick: {alt_nick}")
                             s.send(f"NICK {alt_nick}\r\n".encode())
                             config.NICKNAME = alt_nick
 
-                    # 🛡️ AUTOMATISKT ÅTERTAGANDE: Återta huvudnicket live i samma millisekund som din mIRC-klient stängs!
+                    # Reclaim the main nick the moment the other client releases it
                     # Anchored twice over. The old test matched " QUIT "/" PART " anywhere,
                     # then looked for ":<mainnick>!" anywhere - and a QUIT reason is free
                     # text. Together with the 433 handler above that was a two-line flood:
@@ -485,19 +485,19 @@ def irc_loop():
                         main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
                         if str(config.NICKNAME).lower() != main_nick.lower():
                             if event_source_nick(line) == main_nick.lower():
-                                print(f"[NICK RECOVERY] Upptäckte att huvudnicket {main_nick} loggade ut! Återtar namnet live...")
+                                print(f"[NICK RECOVERY] The main nick {main_nick} logged out. Reclaiming it now...")
                                 try:
                                     s.send(f"NICK {main_nick}\r\n".encode())
                                     config.NICKNAME = main_nick
                                 except Exception as recovery_err:
-                                    print(f"[NICK RECOVERY ERROR] Misslyckades att återta nick: {recovery_err}")
+                                    print(f"[NICK RECOVERY ERROR] Could not reclaim the nick: {recovery_err}")
 
 
                     # Anchored: "001" in line matched any message containing those three
                     # digits anywhere, including a perfectly ordinary track request.
                     if not joined and (is_server_numeric(line, "001") or is_server_numeric(line, "376")):
                         joined = True
-                        print(f"[INFO] Ansluten till servern! Väntar 5 sekunder på stabilisering innan JOIN...")
+                        print(f"[INFO] Connected to the server. Waiting 5 seconds to settle before JOIN...")
                         
                         def delayed_join(socket_conn, channels):
                             time.sleep(5)
@@ -506,8 +506,8 @@ def irc_loop():
                                 debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-serv')
                                 socket_conn.send(f"JOIN {debug_chan}\r\n".encode())
                                 print(f"[JOIN] Gick med i huvudkanaler och debug-kanal: {debug_chan}")
-                                # 🛡️ NY (issue #9): Starta vakthunden HÄR, direkt efter att JOIN
-                                # faktiskt skickats, så timeouten mäts från rätt tidpunkt.
+                                # NEW (issue #9): start the watchdog HERE, right after the JOIN
+                                # has actually been sent, so the timeout starts from the right moment.
                                 threading.Thread(target=activation_watchdog, daemon=True).start()
                             except Exception as join_err:
                                 print(f"[ERROR] Kunde inte skicka JOIN: {join_err}")
@@ -515,9 +515,9 @@ def irc_loop():
                         threading.Thread(target=delayed_join, args=(s, config.CHANNEL), daemon=True).start()
 
                     if joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
-                        # 🛡️ FIXAD (issue #9): Parsar VILKEN kanal 366-raden gäller istället för
-                        # att bara räkna förekomster. Aktiverar först när alla riktiga målkanaler
-                        # är bekräftade - debug-kanalens 366 kan inte längre maskera en trasig
+                        # FIXED (issue #9): parses WHICH channel the 366 line refers to instead
+                        # of just counting them. Activates only once every real target channel
+                        # is confirmed - the debug channel's 366 can no longer mask a broken
                         # huvudkanal.
                         # Anchored to the server prefix: the old unanchored search matched
                         # anywhere in the line, so a user could PRIVMSG " 366 x #chan" and
@@ -526,7 +526,7 @@ def irc_loop():
                         if m366:
                             confirmed_chan = m366.group(1).lower()
                             channels_confirmed.add(confirmed_chan)
-                            print(f"[INFO] Received End of NAMES for {confirmed_chan} ({len(channels_confirmed & target_channels)}/{len(target_channels)} målkanaler bekräftade)")
+                            print(f"[INFO] Received End of NAMES for {confirmed_chan} ({len(channels_confirmed & target_channels)}/{len(target_channels)} target channels confirmed)")
                         
                         if target_channels.issubset(channels_confirmed):
                             config.activation_triggered = True
@@ -567,16 +567,16 @@ def irc_loop():
                             config.channel_users[chan].update(names)
 
                             # -------------------------------------------------
-                            # 🛡️ RECONNECT-TINING (KRITISK KÖRÄDDARE):
-                            # Efter en reconnect kommer alla som redan står i kanalen tillbaka via
-                            # NAMES (353) och INTE via JOIN. Utan den här slussen låg deras köer kvar
-                            # frysta och raderades av 5-minuterstimern trots att de aldrig lämnat.
+                            # RECONNECT THAW - this is what saves the queues:
+                            # After a reconnect, everyone already in the channel comes back via
+                            # NAMES (353) and NOT via JOIN. Without this, their queues stayed
+                            # frozen and were deleted by the 5-minute timer despite never leaving.
                             # -------------------------------------------------
                             thawed_users = [n for n in names if n in getattr(config, 'frozen_queues', {})]
                             for frozen_user in thawed_users:
                                 del config.frozen_queues[frozen_user]
                                 files_in_q = len(config.dcc_queue.get(frozen_user, []))
-                                print(f"[DCC RECONNECT VÄCKNING] {frozen_user} stod kvar i {chan} vid NAMES-synk! Tinar upp {files_in_q} fil(er).")
+                                print(f"[DCC RECONNECT THAW] {frozen_user} was still in {chan} at the NAMES sync. Thawing {files_in_q} file(s).")
                                 threading.Thread(target=dcc.check_queue_and_send, args=(s, frozen_user), daemon=True).start()
 
                             if thawed_users:
@@ -599,7 +599,7 @@ def irc_loop():
                             
                             if hasattr(config, 'frozen_queues') and j_key in config.frozen_queues:
                                 del config.frozen_queues[j_key]
-                                print(f"[DCC REALTIME VÄCKNING] {joined_user} klev in i {joined_chan} igen! Tinar upp kön.")
+                                print(f"[DCC REALTIME THAW] {joined_user} rejoined {joined_chan}. Thawing their queue.")
                                 files_in_q = len(config.dcc_queue.get(j_key, [])) if hasattr(config, 'dcc_queue') else 0
                                 announce.send_debug(f"User {config.C_BOLD}{joined_user}{config.C_RESET} returned to {joined_chan}, continuing queue of {config.C_BOLD}{files_in_q}{config.C_RESET} file(s)", category="JOIN")
                                 threading.Thread(target=dcc.check_queue_and_send, args=(s, joined_user), daemon=True).start()
@@ -737,20 +737,20 @@ def irc_loop():
                                     threading.Thread(target=dcc.handle_download_request, args=(s, user, requested_file, target_chan)).start()
                                     
                         except Exception as cmd_err:
-                            print(f"[ERROR] Fel vid hantering av botkommando från {user}: {cmd_err}")
+                            print(f"[ERROR] Error handling a bot command from {user}: {cmd_err}")
 
             except Exception as inner_loop_err:
-                print(f"[IRC INTERNAL ERROR] Oväntat fel inuti meddelandeloopen: {inner_loop_err}")
+                print(f"[IRC INTERNAL ERROR] Unexpected error inside the message loop: {inner_loop_err}")
                 try: s.close()
                 except: pass
                 _release_socket()
                 break
 
-        # 🧹 ÅTERSTÄLL ALLA FLAGOR INNAN NÄSTA VARV I WHILE TRUE DRAR IGÅNG ÅTERANSLUTNINGEN
-        print("[CONNECT] Tappade anslutning. Återansluter till IRC Server om 10 sekunder...")
+        # Reset every flag before the next pass through the reconnect loop
+        print("[CONNECT] Lost the connection. Reconnecting to the IRC server in 10 seconds...")
         config.bot_joined_channel = False
         
-        # 🛡️ FIXAD: Tömmer kanallistorna i RAM helt vid krasch så boten inte blockerar sitt eget nick nästa varv!
+        # FIXED: clears the in-memory channel lists on a crash, so the bot does not block its own nick next time
         if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
             config.channel_users.clear()
             
