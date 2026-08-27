@@ -1,4 +1,4 @@
-# commands.py - Dedikerad modul för användarkommandon (Kö-hantering)
+# commands.py - User commands, mostly queue handling
 import sys
 import config
 import db
@@ -40,18 +40,18 @@ def is_admin(user):
 
 
 def handle_queue_check(s, user, target):
-    """Räknar antal köade filer för en specifik användare och ger anpassade svar i VIP-kön!"""
+    """Count one user's queued files and answer them through the VIP queue."""
     user_key = user.lower()
     oserve = sys.modules.get('oserve')
     import list
     import dcc
     
-    # 1. Räkna hur många filer just denna användare har i kön
+    # 1. How many files this particular user has queued
     file_count = 0
     if hasattr(config, 'dcc_queue') and user_key in config.dcc_queue:
         file_count = len(config.dcc_queue[user_key])
         
-    # 2. Hämta live-statistik för den utökade 0-notisen
+    # 2. Live statistics, for the fuller empty-queue notice
     file_count_total, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes()
     formatted_total_files = f"{file_count_total:,}"
     
@@ -62,16 +62,16 @@ def handle_queue_check(s, user, target):
     queued_count = dcc.get_total_queued_count()
     queue_str = f"{queued_count}/{config.MAX_QUEUE_LIMIT}" if hasattr(config, 'MAX_QUEUE_LIMIT') else f"{queued_count}"
 
-    # 3. VÄLJ LAYOUT BASERAT PÅ OM KÖN ÄR TOM ELLER INTE (Knivskarp fetstils-spärr!)
+    # 3. Pick the layout depending on whether the queue is empty
     if file_count > 0:
-        # Layout om de faktiskt har filer i kön (Endast siffran och triggern är bold)
+        # Layout when they do have files queued; only the number and trigger are bold
         msg = (
             f"NOTICE {user} :You have {config.C_BOLD}{config.C_RED}{file_count}{config.C_RESET} files in queue. "
             f"To remove your entire queue, type: {config.C_BOLD}{config.C_RED}@{config.NICKNAME}-remove{config.C_RESET} "
             f"or send CTCP: {config.C_BOLD}{config.C_GREEN}REMOVE{config.C_RESET}\r\n"
         )
     else:
-        # DIN UTÖKADE LYX-LAYOUT: Enbart siffror, trigger och värden är bold + färg!
+        # The fuller layout: only numbers, the trigger and values are bold and coloured
         msg = (
             f"NOTICE {user} :"
             f"You have {config.C_BOLD}{config.C_RED}0{config.C_RESET} files in queue. "
@@ -89,14 +89,14 @@ def handle_queue_check(s, user, target):
     print(f"[COMMANDS] {user} checked their queue status ({file_count} files).")
 
 def handle_queue_remove(s, user, target):
-    """Raderar användarens kö helt från RAM-minnet och städar bort den från dcc_queue.txt på hårddisken"""
+    """Clear the user's queue from memory and remove it from dcc_queue.txt on disk."""
     user_key = user.lower()
     oserve = sys.modules.get('oserve')
     import dcc
 
     removed_archives = []
     with dcc.queue_lock:
-        # Ta bort från den vanliga kön
+        # Remove them from the ordinary queue
         if hasattr(config, 'dcc_queue') and user_key in config.dcc_queue:
             # BEFORE dropping the rows: they are the only record that the temp
             # archives exist. The freeze sweep, the freeze timer and !clearqueue
@@ -105,9 +105,9 @@ def handle_queue_remove(s, user, target):
             # somebody noticed the disk filling.
             removed_archives = dcc.discard_orphaned_temp_archives(user_key)
             del config.dcc_queue[user_key]
-            db.save_dcc_queue() # Spika den rensade kön till hårddisken direkt!
+            db.save_dcc_queue()  # Write the cleared queue straight to disk
 
-        # Ta även bort användaren ur frysboxen ifall de var frysta
+        # Also drop them from the freezer, in case they were frozen
         if hasattr(config, 'frozen_queues') and user_key in config.frozen_queues:
             del config.frozen_queues[user_key]
 
@@ -119,10 +119,10 @@ def handle_queue_remove(s, user, target):
     print(f"[COMMANDS] {user} removed their entire queue from the disk layout.")
 
 def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
-    """🛡️ NY (issue #15): Tvångsrensar en ANNAN användares kö helt (spöknick, hängd post
+    """NEW (issue #15): force-clears ANOTHER user's queue entirely - a ghost nick, a
     efter en netsplit/reconnect, etc.) - enbart admin. handle_queue_remove ovan kan bara
-    en användare köra på sig själv via IRC; det här ger admin motsvarande makt över
-    VEM SOM HELST, direkt via en enkel textrad, utan att behöva röra dcc_queue.txt på disken
+    a user could only ever run against themselves over IRC; this gives the admin the
+    same power over ANYONE, from a single line of text, without touching dcc_queue.txt
     manuellt."""
     import config
     import announce
@@ -130,12 +130,12 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
     import dcc
 
     if not authorised and not is_admin(user):
-        print(f"[SECURITY] Obehörig användare {user} försökte köra !clearqueue.")
+        print(f"[SECURITY] Unauthorised user {user} tried to run !clearqueue.")
         return
 
     parts = msg_text.split(" ", 1)
     if len(parts) < 2 or not parts[1].strip():
-        announce.send_debug("Syntax error! Använd: !clearqueue <nick>", category="INFO")
+        announce.send_debug("Syntax error! Usage: !clearqueue <nick>", category="INFO")
         return
 
     target_nick = parts[1].strip()
@@ -162,49 +162,49 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
             was_frozen = True
 
     if removed_count > 0 or was_frozen:
-        extra = " (var även fryst)" if was_frozen else ""
+        extra = " (was frozen too)" if was_frozen else ""
         announce.send_debug(
             f"Admin {config.C_BOLD}{user}{config.C_RESET} force-cleared queue for {config.C_BOLD}{target_nick}{config.C_RESET}: {config.C_BOLD}{removed_count}{config.C_RESET} file(s) removed{extra}.",
             category="INFO")
-        print(f"[ADMIN CLEARQUEUE] {user} tvångsrensade {target_nick}s kö ({removed_count} filer, frozen={was_frozen}).")
+        print(f"[ADMIN CLEARQUEUE] {user} force-cleared {target_nick}'s queue ({removed_count} files, frozen={was_frozen}).")
     else:
         announce.send_debug(
             f"Clearqueue: {config.C_BOLD}{target_nick}{config.C_RESET} had no queue or frozen entry to remove.",
             category="INFO")
-        print(f"[ADMIN CLEARQUEUE] {user} försökte rensa {target_nick}, men ingen kö eller fryst post hittades.")
+        print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
 def handle_ping_request(irc_sock, user, target_chan):
     """Startar tidtagaruret och skickar en unik latens-PING till IRC-servern"""
     import time
     import config
     
-    # Spara mätdata i det globala minnet så att pong-funktionen kan läsa det sen
+    # Keep the measurement in shared memory so the pong handler can read it later
     config.ping_start_time = time.time()
     config.ping_triggered_by = user
     config.ping_channel_source = target_chan
     
-    # Skicka mätpaketet direkt till serverns råa socket
+    # Send the probe straight to the server's raw socket
     try:
         irc_sock.send(b"PING :OSERVE_LATENCY_CHECK\r\n")
-        print(f"[PING COMMAND] Latensmätning startad av {user} i {target_chan}.")
+        print(f"[PING COMMAND] Latency measurement started by {user} in {target_chan}.")
     except Exception as e:
         print(f"[PING ERROR] Kunde inte skicka PING-paket: {e}")
 
 def handle_pong_response(category="INFO"):
-    """Fångar serverns svar, räknar ut latens i sekunder med 3 decimaler och skickar VIP-debug!"""
+    """Catch the server's reply, work out the latency to three decimals, and report it."""
     import time
     import config
     import announce
     
     start_time = getattr(config, 'ping_start_time', None)
     if start_time:
-        # ÄNDRAD: Vi behåller värdet i sekunder direkt i stället för millisekunder
+        # The value is kept in seconds rather than milliseconds
         latency_sec = time.time() - start_time
         
         trigger_user = getattr(config, 'ping_triggered_by', config.NICKNAME)
         source_chan = getattr(config, 'ping_channel_source', config.CHANNEL)
         
-        # ÄNDRAD: Formatet :.3f tvingar Python att alltid visa exakt 3 decimaler (t.ex. 0.129)
+        # The :.3f format always shows exactly three decimals (e.g. 0.129)
         announce.send_debug(
             f"Latency Check triggered by {trigger_user} from {source_chan} -> IRC Server Response Time: {latency_sec:.3f} sec", 
             category=category
@@ -213,7 +213,7 @@ def handle_pong_response(category="INFO"):
         config.ping_start_time = None
 
 def handle_rehash_request(user, target_chan, authorised=False):
-    """Laddar om moduler live helt i RAM-minnet UTAN att smutsa ner eller läsa från hårddisken!"""
+    """Reload the modules live, in memory, without reading anything back from disk."""
     import importlib
     import sys
     import config
@@ -221,19 +221,19 @@ def handle_rehash_request(user, target_chan, authorised=False):
     import copy
     
     if not authorised and not is_admin(user):
-        print(f"[REHASH SECURITY] Ignorerade rehash-försök från obehörig användare: {user}")
+        print(f"[REHASH SECURITY] Ignored a rehash attempt from an unauthorised user: {user}")
         return
 
     # =====================================================================
-    # 1. ULTIMAT RAM-BACKUP: Spara ALLT live-data i tillfälliga variabler
+    # 1. Back EVERY piece of live state up into local variables
     # =====================================================================
-    # A. Backup på användarlistor (NAMES)
+    # A. The channel user lists (from NAMES)
     ram_backup_users = {}
     if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
         ram_backup_users = copy.deepcopy(config.channel_users)
-        print(f"[REHASH RAM] Tog backup på användarlistor för {len(ram_backup_users)} kanaler.")
+        print(f"[REHASH RAM] Backed up the user lists for {len(ram_backup_users)} channel(s).")
 
-    # B. Backup på aktiva DCC slots
+    # B. The active DCC slots
     ram_backup_slots = 0
     ram_user_slots = {}
     for mod_name in ['dcc', 'config', 'oserve']:
@@ -247,7 +247,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
                     raw_slots = getattr(mod, attr)
                     ram_user_slots = {k.lower(): v for k, v in raw_slots.items()}
 
-    # C. Backup på KÖN (Behåll original-objekten i RAM utan disk-mellanlandning)
+    # C. The QUEUE - keep the original objects in memory, never via disk
     ram_backup_queue = {}
     for mod_name in ['dcc', 'config', 'oserve', 'queue_mgr', 'list']:
         mod = sys.modules.get(mod_name)
@@ -255,16 +255,16 @@ def handle_rehash_request(user, target_chan, authorised=False):
             for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
                 if hasattr(mod, attr) and isinstance(getattr(mod, attr), dict):
                     raw_q = getattr(mod, attr)
-                    # Spara bara användare som faktiskt har äkta låtar kvar i kön
+                    # Only keep users who still have real tracks queued
                     ram_backup_queue = {k.lower(): v for k, v in raw_q.items() if v and len(v) > 0}
 
     if ram_backup_queue:
-        print(f"[REHASH RAM] Säkrat {len(ram_backup_queue)} aktiva fildelningsköer live i RAM-minnet.")
+        print(f"[REHASH RAM] Secured {len(ram_backup_queue)} active sharing queue(s) in memory.")
 
-    # Spara undan gamla kanaler för JOIN/PART-jämförelsen
+    # Keep the old channel list, for the JOIN/PART comparison
     old_chans = [c.strip().lower() for c in config.CHANNEL.split(",") if c.strip()]
 
-    # PAUSA REKLAM TEMPORÄRT
+    # Pause the advert for the moment
     announce.is_ready = False
     announce.send_debug(f"Rehash triggered by {user} from {target_chan}. PAUSING NOTICES & ADVERTISEMENT...", category="INFO")
     
@@ -390,19 +390,19 @@ def handle_rehash_request(user, target_chan, authorised=False):
             print("[REHASH NOTE] announce_worker's own code is NOT re-entered by a rehash; "
                   "restart the daemon to pick up changes to the advert loop itself.")
         
-        # Läs in den nyladdade configen
+        # Read the freshly reloaded config
         import config
         import announce
         announce.is_ready = True
         
          # =====================================================================
-        # 3. ÅTERSTÄLL FRÅN RAM: Skriv tillbaka all data till de nya modulerna
+        # 3. RESTORE: write every value back into the newly loaded modules
         # =====================================================================
-        # Återställ användare
+        # Restore the users
         config.channel_users = ram_backup_users if ram_backup_users else {}
-        print(f"[REHASH RAM] Återställde framgångsrikt {len(config.channel_users)} kanallistor i nya RAM.")
+        print(f"[REHASH RAM] Restored {len(config.channel_users)} channel list(s) into the new modules.")
 
-        # Återställ slots
+        # Restore the slots
         for mod_name in ['dcc', 'config', 'oserve']:
             mod = sys.modules.get(mod_name)
             if mod:
@@ -416,7 +416,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
                             for k, v in ram_user_slots.items(): combined_slots[k.upper()] = v
                             setattr(mod, attr, combined_slots)
 
-        # Återställ kön (Tryck tillbaka de exakta, rena objekten STRICT på små bokstäver)
+        # Restore the queue, putting the exact objects back under lowercased keys
         if ram_backup_queue:
             combined_queue = {}
             for k, v in ram_backup_queue.items():
@@ -428,18 +428,18 @@ def handle_rehash_request(user, target_chan, authorised=False):
                     for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
                         if hasattr(mod, attr):
                             setattr(mod, attr, combined_queue)
-            print(f"[REHASH RAM] Aktiv fildelningskö återställd spikrakt i minnet på små bokstäver!")
+            print(f"[REHASH RAM] The active sharing queue was restored in memory, lowercased.")
 
 
-        # Nollställ textköerna (send_queue) till tomma dicts så de inte krockar med text
+        # Reset the text queues (send_queue) to empty dicts so they cannot clash
         for mod_name in ['queue_mgr', 'config', 'oserve', 'irc']:
             mod = sys.modules.get(mod_name)
             if mod:
                 for attr in ['send_queue', 'msg_queue', 'out_queue']:
                     if hasattr(mod, attr): setattr(mod, attr, {})
-        print(f"[REHASH RAM] Textutmatningsköerna (send_queue) har nollställts i RAM.")
+        print(f"[REHASH RAM] The outgoing text queues (send_queue) were reset.")
 
-        # Återställ din reklam-timer så den väntar 5 nya minuter
+        # Reset the advert timer, so it waits a fresh five minutes
         if hasattr(announce, 'last_announce_time'):
             import time
             announce.last_announce_time = time.time()
@@ -469,38 +469,38 @@ def handle_rehash_request(user, target_chan, authorised=False):
                         if chan.lower() in config.channel_users:
                             del config.channel_users[chan.lower()]
             
-            print("[REHASH SYNK] Skickar en bakgrunds-NAMES för att hålla listorna helt färska...")
+            print("[REHASH SYNC] Sending a background NAMES to keep the lists fresh...")
             for chan in new_chans:
                 irc_sock.send(f"NAMES {chan}\r\n".encode())
                 
             print(f"[REHASH SYNC] Channel sync completed successfully.")
         else:
-            print("[REHASH WARNING] Kunde inte synka kanaler eftersom rå socket saknades i minnet.")
+            print("[REHASH WARNING] Could not sync the channels: no raw socket was available.")
         # ---------------------------------------------------------------------
         
-        # 5. BEKRÄFTELSE VIA VIP-EXPRESSEN
+        # 5. Confirm, through the VIP express lane
         announce.send_debug(f"Rehash completed! RAM-Memory preserved seamlessly without disk-paging.", category="INFO")
         
-        # 🔥 SLUSS-ÖPPNARE: Nollställer alla gamla hängda RAM-lås och rensar spök-spärrar vid rehash!
+        # Clear any stale locks and ghost blocks left over before the rehash
         config.rar_inprogress = False
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock = set()
 
-        # Hämta den sanna, levande nätverkssocketen direkt ur RAM-minnet
+        # Take the real, live network socket straight from memory
         oserve_mod = sys.modules.get('oserve')
         live_socket = getattr(oserve_mod, 'irc_connection', None) if oserve_mod else None
         
         if live_socket:
             import dcc
             import threading
-            print("[REHASH-WAKE] Släpper fram köade användare i lediga slots...")
+            print("[REHASH-WAKE] Letting queued users into the free slots...")
             threading.Thread(
                 target=dcc.check_queue_and_send, 
                 args=(live_socket, "system_next_trigger_fallback"), 
                 daemon=True
             ).start()
         else:
-            print("[REHASH ERROR] Kunde inte väcka kön helautomatiskt eftersom live_socket saknades i RAM.")
+            print("[REHASH ERROR] Could not wake the queue automatically: live_socket was not in memory.")
         
     except Exception as e:
         import announce
@@ -510,17 +510,17 @@ def handle_rehash_request(user, target_chan, authorised=False):
 
 
 def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
-    """Lägger till ett permanent wildcard-mönster i hard_bans.txt direkt via mIRC!"""
+    """Add a permanent wildcard pattern to hard_bans.txt, straight from IRC."""
     import config
     import announce
     
     if not authorised and not is_admin(user):
-        print(f"[SECURITY] Obehörig användare {user} försökte köra !ban.")
+        print(f"[SECURITY] Unauthorised user {user} tried to run !ban.")
         return
 
     parts = msg_text.split(" ", 1)
     if len(parts) < 2:
-        announce.send_debug("Syntax error! Använd: !ban <mönster*>", category="INFO")
+        announce.send_debug("Syntax error! Usage: !ban <pattern*>", category="INFO")
         return
         
     pattern = parts[1].strip().lower()
@@ -538,17 +538,17 @@ def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
         added = db.add_hard_ban(pattern)
     except Exception as ban_err:
         announce.send_debug(f"Could not write hard_bans.txt: {ban_err}", category="INFO")
-        print(f"[HARD BAN ERROR] {user} kunde inte lägga till {pattern}: {ban_err}")
+        print(f"[HARD BAN ERROR] {user} could not add {pattern}: {ban_err}")
         return
 
     if added:
         announce.send_debug(f"Added permanent wildcard to hard_bans.txt: {config.C_BOLD}{pattern}{config.C_RESET}", category="BAN")
-        print(f"[HARD BAN] {user} lade till permanent mönster: {pattern}")
+        print(f"[HARD BAN] {user} added a permanent pattern: {pattern}")
     else:
         announce.send_debug(f"Pattern {pattern} is already banned permanently.", category="INFO")
 
 def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
-    """Tar bort ett permanent wildcard-mönster ur hard_bans.txt direkt via mIRC!"""
+    """Remove a permanent wildcard pattern from hard_bans.txt, straight from IRC."""
     import config
     import announce
     import os
@@ -558,7 +558,7 @@ def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
 
     parts = msg_text.split(" ", 1)
     if len(parts) < 2:
-        announce.send_debug("Syntax error! Använd: !unban <mönster*>", category="INFO")
+        announce.send_debug("Syntax error! Usage: !unban <pattern*>", category="INFO")
         return
         
     pattern = parts[1].strip().lower()
@@ -583,17 +583,17 @@ def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
         removed = db.remove_hard_ban(pattern)
     except Exception as unban_err:
         announce.send_debug(f"Could not write hard_bans.txt: {unban_err}", category="INFO")
-        print(f"[HARD UNBAN ERROR] {user} kunde inte häva {pattern}: {unban_err}")
+        print(f"[HARD UNBAN ERROR] {user} could not lift {pattern}: {unban_err}")
         return
 
     if removed:
         announce.send_debug(f"Removed permanent wildcard from hard_bans.txt: {config.C_BOLD}{pattern}{config.C_RESET}", category="BAN")
-        print(f"[HARD UNBAN] {user} hävde permanent mönster: {pattern}")
+        print(f"[HARD UNBAN] {user} lifted the permanent pattern: {pattern}")
     else:
         announce.send_debug(f"Pattern {pattern} was not found in hard_bans.txt.", category="INFO")
 
 def handle_list_update_request(user, target_chan, authorised=False):
-    """Kör update_list.py, väntar in processen och plockar filantalet blixtsnabbt från första raden i listfilen!"""
+    """Run update_list.py, wait for it, and read the file count from line 1 of the list."""
     import subprocess
     import sys
     import os
@@ -605,23 +605,23 @@ def handle_list_update_request(user, target_chan, authorised=False):
     import time
     
     if not authorised and not is_admin(user):
-        print(f"[SECURITY] Obehörig användare {user} försökte köra !update.")
+        print(f"[SECURITY] Unauthorised user {user} tried to run !update.")
         return
 
-    # 🛡️ DYNAMISK UNDERHÅLLSLÅSNING: Vi slår enbart på det globala RAM-låset om växeln är True i config!
+    # The global maintenance lock is only taken if the switch is True in config
     if getattr(config, 'PAUSE_ON_UPDATE', False) is True:
         if getattr(config, 'search_inprogress', False) is True:
             announce.send_debug(f"List update request from {user} denied: Another system scan is already running.", category="INFO")
             return
         config.search_inprogress = True
-        print(f"[MAINTENANCE START] {user} aktiverade !update. Botens sök- och fildelningssystem är nu PAUSAT!")
+        print(f"[MAINTENANCE START] {user} ran !update. Searching and sharing are now PAUSED.")
         announce.send_debug(f"System maintenance initiated by {user}. MasterList is rebuilding, file requests temporarily paused...", category="INFO")
     else:
-        print(f"[UPDATE START] {user} aktiverade !update. Paus-växeln är False, fildelningen rullar på under tiden.")
+        print(f"[UPDATE START] {user} ran !update. The pause switch is False, so sharing continues meanwhile.")
         announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive...", category="INFO")
 
 
-    # Inre hjälpfunktion som läser ENBART rad 1 i din RIKTIGA masterlista (0% belastning!)
+    # Reads ONLY line 1 of the real master list, so it costs almost nothing
     def get_count_from_list():
         try:
             # Hitta alla textfiler som matchar botens namn i mappen
@@ -631,26 +631,26 @@ def handle_list_update_request(user, target_chan, authorised=False):
             # while the advert reported the real total. Matches list.find_latest_list().
             all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.LIST_BASE_NAME}-*.txt")))
             
-            # SÄKERHETSSPÄRR: Rensa bort din nya RAR-lista så vi STRICT läser den sanna masterlistan!
+            # Filter out the RAR list, so only the true master list is read
             true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
             
             if true_master_lists:
-                list_path = true_master_lists[-1] # Välj den absolut senaste sanna masterlistan
+                list_path = true_master_lists[-1]  # The very newest master list
                 if os.path.exists(list_path):
                     with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
                         first_line = f.readline().strip()
                         
-                        # Letar efter mönstret "List of X Files" via regex
+                        # Look for the "List of X Files" pattern
                         match = re.search(r"List of\s+([\d,.]+)\s+Files", first_line, re.IGNORECASE)
                         if match:
                             raw_num = match.group(1).replace(",", "").replace(".", "")
                             if raw_num.isdigit():
                                 return int(raw_num)
         except Exception as e:
-            print(f"[LIST READ ERROR] Kunde inte läsa rad 1: {e}")
+            print(f"[LIST READ ERROR] Could not read line 1: {e}")
         return 0
 
-    # 1. Hämta de gamla sanna filsiffrorna från rad 1
+    # 1. Take the previous real file count from line 1
     old_count = get_count_from_list()
     announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive, bot paused...", category="INFO")
     def async_list_updater():
@@ -662,27 +662,27 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
                 return
                 
-            # 2. TRÅDAD RUN (Väntar in processen helt utan stumma tidsgränser)
+            # 2. Threaded run, waiting for the process without a blind time limit
             process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=None)
             
             if process.returncode == 0:
                 # ---------------------------------------------------------------------
-                # STENHÅRD NFS- och DISKSYNKRONISERING: Vänta 2 sekunder efter stängning!
-                # Detta ger din NAS och nätverksbufferten tid att flusha filerna rent på disken.
+                # NFS and disk sync: wait two seconds after the process closes.
+                # That gives the NAS and the network buffer time to flush the files.
                 # ---------------------------------------------------------------------
-                print(f"[UPDATE-SYNCH] Skriptet klart. Väntar 2.0s på disksynk inför filavläsning...")
+                print(f"[UPDATE-SYNC] The script finished. Waiting 2.0s for the disk to sync before reading...")
                 time.sleep(2.0)
                 # ---------------------------------------------------------------------
                 
-                # 3. HÄMTA DET NYA FILANTALET FRÅN RAD 1 (Nu helt krock-säkrat!)
+                # 3. Read the new file count from line 1
                 new_count = get_count_from_list()
                 
-                # Räkna ut den sanna, exakta skillnaden helt matematiskt
+                # Work out the exact difference
                 added_files = new_count - old_count
                 if added_files < 0: 
                     added_files = 0
                 
-                # 4. BEKRÄFTELSE VIA VIP-EXPRESSEN
+                # 4. Confirm, through the VIP express lane
                 announce.send_debug(
                     f"List update successfully completed! MasterList now contains {config.C_BOLD}{new_count:,}{config.C_RESET} files. "
                     f"Added {added_files:,} new file(s) since last index.", 
@@ -696,18 +696,18 @@ def handle_list_update_request(user, target_chan, authorised=False):
         except subprocess.TimeoutExpired:
             announce.send_debug("List update FAILED: Script execution timed out after 90 seconds.", category="INFO")
         except Exception as e:
-            print(f"[UPDATE ERROR] Det gick inte att köra listuppdateringen: {e}")
+            print(f"[UPDATE ERROR] The list update could not be run: {e}")
             announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")
         finally:
-            # 🔓 ÅTERSTÄLL AUTOMATISKT: Släpp upp det globala paus-låset till False igen!
+            # Release the global pause lock again
             config.search_inprogress = False
             
-            # 🧼 SLÄCK UNDERHÅLLS-FLAGGAN: Nu vet list.py att listan är klar och öppnar zip-slussen live!
+            # Clear the maintenance flag, so list.py knows the list is ready
             config.update_inprogress = False
-            print("[MAINTENANCE END] Botens fildelning och sökfunktioner har återstartats automatiskt.")
+            print("[MAINTENANCE END] Sharing and searching have been restarted automatically.")
 
-    # 🛡️ TÄND UNDERHÅLLS-FLAGGAN: Nu vet hela botten på under 0ms att en uppdatering startar live!
+    # Raise the maintenance flag, so the whole daemon knows an update is starting
     config.update_inprogress = True
 
-    # Starta bakgrundstråden linjärt
+    # Start the background thread
     threading.Thread(target=async_list_updater, daemon=True).start()
