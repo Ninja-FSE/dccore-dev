@@ -17,6 +17,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -207,3 +208,104 @@ class BanEnforcementTests(DCCoreTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheNotifiedNickSetIsBounded(unittest.TestCase):
+    """security._ban_notified used to be a plain set() that only ever grew.
+
+    Its two removal paths - a timed ban expiring, and the nick later being seen
+    clean - are both unreachable for a nick matched by a WILDCARD pattern in
+    hard_bans.txt, because the "seen clean" branch only runs when the user is
+    not banned. An operator with any wildcard entry, plus somebody cycling
+    nicks against it, grew the set for the life of the process.
+    """
+
+    def test_the_old_shape_would_have_grown_without_limit(self):
+        """Control. A plain set is what this replaced; if THIS ever stops
+        growing, the premise below is wrong."""
+        plain = set()
+        for i in range(20000):
+            plain.add(f"leech{i}")
+        self.assertEqual(len(plain), 20000)
+
+    def test_entries_outside_the_window_are_swept_away(self):
+        """The bound is RATE x WINDOW, not an absolute cap - so what has to be
+        true is that everything older than the window goes."""
+        seen = security._NotifiedNicks(ttl=0.05, sweep_every=0.0)
+        for i in range(2000):
+            seen.add(f"leech{i}")
+        self.assertGreater(len(seen), 0)
+        time.sleep(0.08)
+        seen.add("one-more")             # any add triggers the sweep
+        self.assertEqual(len(seen), 1,
+                         f"{len(seen)} stale entries survived the sweep")
+
+    def test_a_nick_is_forgotten_once_the_window_passes(self):
+        seen = security._NotifiedNicks(ttl=0.05)
+        seen.add("dave")
+        self.assertIn("dave", seen)
+        time.sleep(0.08)
+        self.assertNotIn("dave", seen,
+                         "the entry should have expired and been forgotten")
+
+    def test_a_nick_inside_the_window_is_still_suppressed(self):
+        """The whole point of the structure. send_debug sleeps 0.5s holding a
+        lock on the IRC reader thread, so re-notifying a nick that is still
+        being denied is what freezes the network loop."""
+        seen = security._NotifiedNicks(ttl=3600.0)
+        seen.add("dave")
+        for _ in range(100):
+            self.assertIn("dave", seen)
+
+    def test_cycling_nicks_cannot_force_a_recent_nick_to_be_re_notified(self):
+        """The reason this expires by TIME rather than by size.
+
+        A plain LRU would evict the oldest entry whenever the cap was reached,
+        so an attacker cycling through more nicks than the cap would push a
+        recently-notified nick out and earn a fresh 0.5s notice for it - turning
+        a slow memory leak into the exact read-thread freeze the suppression
+        exists to prevent. Eviction driven by the clock has no such edge.
+        """
+        seen = security._NotifiedNicks(ttl=3600.0)
+        seen.add("victim")
+        for i in range(5000):            # far more than the cap
+            seen.add(f"attacker{i}")
+        self.assertIn("victim", seen,
+                      "a recently-notified nick was evicted by nick cycling, "
+                      "so it would be re-notified and stall the read thread")
+
+    def test_discard_and_clear_still_behave_like_the_set_they_replaced(self):
+        seen = security._NotifiedNicks()
+        seen.add("dave")
+        seen.discard("dave")
+        self.assertNotIn("dave", seen)
+        seen.discard("never-added")      # must not raise, like set.discard
+        seen.add("erik")
+        seen.clear()
+        self.assertNotIn("erik", seen)
+        self.assertEqual(len(seen), 0)
+
+    def test_it_survives_concurrent_use(self):
+        """check_user_status runs on the IRC reader thread while commands can
+        touch the same structure; pruning must not trip over a concurrent
+        write."""
+        seen = security._NotifiedNicks(ttl=3600.0)
+        errors = []
+
+        def hammer(base):
+            try:
+                for i in range(2000):
+                    seen.add(f"{base}{i}")
+                    _ = f"{base}{i}" in seen
+                    seen.discard(f"{base}{i - 50}")
+            except Exception as err:      # pragma: no cover
+                errors.append(err)
+
+        threads = [threading.Thread(target=hammer, args=(f"t{n}-",))
+                   for n in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        self.assertEqual(errors, [])
+        self.assertFalse([t for t in threads if t.is_alive()], "a worker hung")

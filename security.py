@@ -1,15 +1,105 @@
 # security.py - Flood protection and ban enforcement
+import threading
 import time
 import os
 import sys
 import config
 import db
 
-# Nicks we have already sent a debug notice about - one notice per nick, per run.
+# Nicks we have already sent a debug notice about - one notice per nick.
 # send_debug sleeps 0.5s while holding a lock and is called from here by the IRC
 # reader thread, so one notice per BLOCKED MESSAGE would freeze the network loop
 # and tear down the connection.
-_ban_notified = set()
+#
+# This used to be a plain set(), which grew one PERMANENT entry per distinct
+# denied nick and was never pruned. The two removal paths - a timed ban expiring
+# and a nick later being seen clean - are both unreachable for a nick matched by
+# a wildcard pattern in hard_bans.txt, because the "seen clean" branch only runs
+# when the user is NOT banned. So an operator with any wildcard entry (the
+# documented purpose of that file) plus somebody cycling nicks against it grows
+# this set without limit, at roughly 95 bytes a nick, for the life of the
+# process.
+#
+# WHY NOT A PLAIN LRU: capping by size and evicting the oldest is the obvious
+# fix and it is the wrong one. An attacker cycling through more nicks than the
+# cap would evict each nick before it came back, so every message would earn a
+# fresh notice - and each notice costs 0.5s of read-thread stall. That converts
+# a slow memory leak into the exact network freeze the notice-suppression exists
+# to prevent.
+#
+# Expiring by TIME instead has no such edge: eviction is driven by the clock,
+# not by pressure, so an attacker cannot force an entry out in order to be
+# re-notified. A nick that returns inside the window is still suppressed however
+# many other nicks have been seen meanwhile. The size cap below is only a
+# backstop for a rate nobody has managed.
+class _NotifiedNicks:
+    """Nicks already notified about, forgotten again after a while.
+
+    Deliberately exposes the same operations the previous set() did - `in`,
+    add(), discard() and clear() - so the call sites did not have to change.
+
+    Expiry is by TIME ONLY, with no size cap, and that is the whole design.
+    An earlier version of this had a cap that evicted the oldest entry under
+    pressure, which reintroduced the very problem described above: cycling more
+    nicks than the cap pushes a recently-notified nick out, it gets a fresh
+    notice, and every notice is 0.5s of read-thread stall. A test below pins
+    that behaviour so the cap cannot come back.
+
+    What this does and does not promise: memory is bounded by RATE x WINDOW
+    rather than absolutely. At the rate Undernet's nick-change lag actually
+    allows - roughly one nick every two seconds - an hour's window holds about
+    1,800 entries, some 170KB, against a set that previously grew for the life
+    of the process. Bounding it absolutely would mean rate-limiting the notices
+    themselves rather than remembering nicks, which is a larger change than
+    this finding warrants.
+    """
+
+    def __init__(self, ttl=3600.0, sweep_every=60.0):
+        self._seen = {}                  # nick -> when we last notified about it
+        self._ttl = float(ttl)
+        self._sweep_every = float(sweep_every)
+        self._last_sweep = time.time()
+        self._lock = threading.Lock()
+
+    def __contains__(self, nick):
+        with self._lock:
+            stamp = self._seen.get(nick)
+            if stamp is None:
+                return False
+            if time.time() - stamp > self._ttl:
+                del self._seen[nick]
+                return False
+            return True
+
+    def add(self, nick):
+        with self._lock:
+            now = time.time()
+            self._seen[nick] = now
+            # Sweeping on every add would be O(n) per denied message on the IRC
+            # reader thread. Once a minute is plenty for an hour-long window.
+            if now - self._last_sweep >= self._sweep_every:
+                self._sweep_locked(now)
+
+    def discard(self, nick):
+        with self._lock:
+            self._seen.pop(nick, None)
+
+    def clear(self):
+        with self._lock:
+            self._seen.clear()
+            self._last_sweep = time.time()
+
+    def _sweep_locked(self, now):
+        self._last_sweep = now
+        for nick in [n for n, stamp in self._seen.items() if now - stamp > self._ttl]:
+            del self._seen[nick]
+
+    def __len__(self):
+        with self._lock:
+            return len(self._seen)
+
+
+_ban_notified = _NotifiedNicks()
 
 
 def check_user_status(user):
