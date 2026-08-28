@@ -12,6 +12,7 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 - **📊 Advanced 7-Column Database:** Bulletproof live statistics (`stats.txt`) tracking total sent files/bytes, yesterday's and today's activity, and synced list dates in real time with forced disk-flush (`fsync`) for local storage optimization.
 - **🛠️ Dedicated VIP Debug Channel:** A fully automated network gateway streaming timestamped and color-coded CLI logs (`[SENT]`, `[PART]`, `[QUIT]`, `[JOIN]`) live to the `#your-debug` channel via the VIP Express queue.
 - **🔐 Authenticated Admin Console (DCC CHAT):** A private administration channel over DCC CHAT, gated on two independent factors - the operator's Undernet services login (proved by their `+x` host, which only the IRC server can issue) and a PBKDF2-hashed password. Replaces the old nick-based admin gate, which anyone could inherit simply by taking the nick while the real operator was offline. Read-only commands (`status`, `queue`, `slots`, `bans`, `uptime`, `version`) and action commands (`ban`, `unban`, `clearqueue`, `rehash`, `update`) all run from the same session; runtime reports can be routed there instead of the public debug channel. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md).
+- **🌐 Web Dashboard & Cross-Bot Fetch (`beta-web` branch):** An optional read-only status page (Search / Queue / File Lists) served alongside the daemon, plus a genuinely new capability - the daemon can now *receive* files from other bots on the network, not just send them. Broadcast a `@find` and collect answers from every bot that replies; request a specific file with `!<bot> <filename>`, or a bot's entire list with `@<botnick>`, and track the transfer from a bulk-paste Download tab. Off by default (`WEBUI_ENABLED = False`), Flask is an optional dependency, and every safety boundary - admission control, size caps, zip-slip/zip-bomb protection - assumes every other bot on the network is untrusted. See `docs/UPDATES.md`'s "beta-web (unreleased)" entry for the full list of what this branch adds on top of `beta`.
 
 ## 📁 File Structure
 
@@ -24,6 +25,9 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 - `adminchat.py` — Authenticated DCC CHAT console for the operator, gated on the Undernet `+x` services host plus a password. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md).
 - `stats_mgr.py` — Dumb data module managing file sizes and transfer speed calculations.
 - `db.py` — Database I/O interface featuring forced write-protection at EOF.
+- `webserver.py` / `web/` — Optional Flask dashboard (Search, Queue, File Lists, Download); silently disables itself if Flask isn't installed.
+- `dcc_fetch.py` — Receives files FROM other bots (active and passive/reverse DCC SEND), the opposite role from `dcc.py`.
+- `list_fetch.py` — Safely unpacks another bot's fetched file-list zip (zip-slip/zip-bomb guarded) for the File Lists dashboard view.
 - `config.py` — Central configuration file and runtime memory registry containing:
   - Global Engine Settings (Debug flags, script versions, and list base names)
   - IRC Network Settings (Servers, ports, nicknames, channels, and admin control tags)
