@@ -805,6 +805,9 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
+                                            "CI never installs it, this class only runs when it "
+                                            "happens to be available locally")
 class FilelistsHttpPaginationTests(DCCoreTestCase):
     """GET /api/filelists and GET /api/filelists/bot/<nick>, end to end
     through the real Flask app - both now return a page object
