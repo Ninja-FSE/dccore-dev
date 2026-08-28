@@ -5,7 +5,7 @@
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE     = False
-SCRIPT_VERSION = "DCCore v1.10.0-RC2"
+SCRIPT_VERSION = "DCCore v1.10.0-RC3"
 LIST_BASE_NAME = "DCCore"
 
 # ---------------------------------------------------------------------
