@@ -55,6 +55,64 @@ except ImportError:
 # an operator-facing tunable like WEBUI_PORT.
 WEBUI_MAX_SEARCH_RESULTS = 50
 
+# Issue #76, option 3: GET /api/filelists and GET /api/filelists/bot/<nick>
+# used to serialise every row of the list into one HTTP response (~36,208
+# rows / ~12MB of JSON for this operator's own list, on every page view).
+# These two constants bound how much of an already-parsed row list actually
+# gets sent in one response - the parsing cost itself is unchanged (both
+# endpoints already parsed everything every call; only what gets shipped over
+# HTTP now differs).
+#
+# FILELISTS_DEFAULT_PAGE_SIZE (used when `?limit=` is omitted or invalid): 200
+# rows is comfortably within the 100-300 range a plain HTML <table> renders
+# instantly at, on any of this dashboard's supported screen sizes - a module
+# constant, not a config.py tunable, same reasoning as WEBUI_MAX_SEARCH_RESULTS
+# above: an internal display default, not an operator-facing knob.
+FILELISTS_DEFAULT_PAGE_SIZE = 200
+
+# FILELISTS_MAX_PAGE_SIZE: the ceiling `?limit=` is clamped to, regardless of
+# what a caller asks for. Without this, a single `?limit=999999999` request
+# would reintroduce exactly the problem this pagination feature exists to
+# close - one response carrying the entire list again. 2000 is a generous 10x
+# over the default (room for an operator who genuinely wants a bigger page,
+# or a future "load more" control that fetches several pages at once) while
+# still capping any one response to a small multiple of a real page, not the
+# tens of thousands of rows a full list can contain.
+FILELISTS_MAX_PAGE_SIZE = 2000
+
+
+def parse_pagination_params(raw_offset, raw_limit):
+    """Turn `?offset=&limit=` query-string values - always strings, or None
+    when the parameter was omitted entirely - into a validated (offset, limit)
+    pair of ints, for GET /api/filelists and GET /api/filelists/bot/<nick>.
+
+    Never raises: a missing, non-numeric, or negative value silently falls
+    back to a sane default rather than erroring the route - the same "never
+    trust a query parameter to already be a well-formed integer" discipline
+    every other web-input boundary in this module already applies (see
+    reject_if_unsafe_for_irc_line() above for the mutating-route equivalent).
+    `limit` is additionally clamped to FILELISTS_MAX_PAGE_SIZE - see its
+    comment for why - and a non-positive `limit` (0 or negative) is treated
+    the same as "omitted", not as "give me nothing back".
+    """
+    try:
+        offset = int(raw_offset)
+    except (TypeError, ValueError):
+        offset = 0
+    if offset < 0:
+        offset = 0
+
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        limit = FILELISTS_DEFAULT_PAGE_SIZE
+    if limit <= 0:
+        limit = FILELISTS_DEFAULT_PAGE_SIZE
+    if limit > FILELISTS_MAX_PAGE_SIZE:
+        limit = FILELISTS_MAX_PAGE_SIZE
+
+    return offset, limit
+
 
 def reject_if_unsafe_for_irc_line(value, field_name):
     """Return an error string if `value` is not safe to interpolate into an
@@ -176,19 +234,38 @@ def build_search_payload(query):
     ]
 
 
-def build_filelists_payload():
-    """The File Lists view's data: every file in THIS bot's own master list.
+def build_filelists_payload(offset=0, limit=None):
+    """The File Lists view's data: a page of THIS bot's own master list.
 
     v1 scope is deliberately THIS BOT ONLY - it serves DCCore's own master
     list, decomposed into rows, with "source" hardcoded to config.NICKNAME.
     Real cross-bot deduplication (parsing other bots' adverts in the channel)
     is out of scope; this dedup is the trivial single-source case, collapsing
     only the same filename listed under two different folders.
+
+    Issue #76, option 3: still parses the ENTIRE list every call, exactly as
+    before (this bot's own list has no size cap of its own, so there is no
+    cheaper way to know how many rows exist or to dedup correctly) - only
+    what gets returned is now a page of it, `[offset:offset+limit]`, plus the
+    `total` row count, instead of the whole thing. `limit=None` (the route's
+    default when `?limit=` was omitted) means FILELISTS_DEFAULT_PAGE_SIZE, not
+    "unlimited" - a caller that genuinely wants no cap must pass a `limit` up
+    to FILELISTS_MAX_PAGE_SIZE explicitly.
+
+    Returns {"entries": [...], "total": N, "offset": offset, "limit": limit} -
+    the shape both filelists routes now return, so the frontend's paging code
+    is shared between "our own list" and "a fetched bot's list".
     """
     import list as list_mod
 
+    if limit is None:
+        limit = FILELISTS_DEFAULT_PAGE_SIZE
+
     entries, _total = list_mod.find_matching_entries([], limit=None)
-    return list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
+    rows = list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
+    total = len(rows)
+    page = rows[offset:offset + limit]
+    return {"entries": page, "total": total, "offset": offset, "limit": limit}
 
 
 # ==========================================================================
@@ -239,13 +316,22 @@ def build_list_fetch_enqueue_result(bot_raw):
 
 def build_fetched_bot_list_summaries():
     """GET /api/filelists/bots payload: one row per bot with a fetched list
-    currently available, for the File Lists view's switcher control."""
+    currently available, for the File Lists view's switcher control.
+
+    "count" reads the "entry_count" field process_fetched_list_zip() computes
+    ONCE at fetch time (issue #76, option 2) rather than the actual row list -
+    which is no longer stored at all - so this stays a cheap dict lookup even
+    though the File Lists tab's switcher polls this route every
+    FILELISTS_BOTS_POLL_MS (see web/app.js), for every fetched bot, forever.
+    Re-parsing each bot's whole list from disk just to report a count on every
+    poll would defeat much of the point of no longer retaining it in memory.
+    """
     store = dict(getattr(config, "fetched_bot_lists", {}) or {})
     rows = [
         {
             "bot": entry.get("bot", key),
             "fetched_at": entry.get("fetched_at", 0),
-            "count": len(entry.get("entries", []) or []),
+            "count": entry.get("entry_count", 0),
         }
         for key, entry in store.items()
     ]
@@ -253,23 +339,46 @@ def build_fetched_bot_list_summaries():
     return rows
 
 
-def build_fetched_bot_list_payload(nick):
+def build_fetched_bot_list_payload(nick, offset=0, limit=None):
     """GET /api/filelists/bot/<nick> payload: (http_status, payload_dict).
 
-    On success, "entries" is in the EXACT same row shape
-    build_filelists_payload() returns for this bot's own list (both go
-    through list.entries_to_filelist_rows()), so the frontend's existing File
-    Lists table rendering needs no changes to display either one - only the
-    data source (which endpoint it polled) differs.
+    Issue #76, options 2 and 3 together: the fetched bot's rows are no longer
+    kept in memory at all (see list_fetch.process_fetched_list_zip()) - this
+    re-parses the stored list_path FRESH on every call, via
+    list_fetch.get_fetched_bot_page(), then returns one page of the result.
+    "entries" is in the EXACT same row shape build_filelists_payload() returns
+    for this bot's own list (both go through list.entries_to_filelist_rows()),
+    so the frontend's File Lists table rendering needs no changes to display
+    either one - only the data source (which endpoint it polled) differs.
+
+    A 404 covers "never fetched" (no entry in config.fetched_bot_lists at
+    all); a 502 covers "was fetched, but the on-disk file behind it can no
+    longer be read" (get_fetched_bot_page() returned a non-None error - see
+    its docstring) - both are failures a human reads on the dashboard, so the
+    exact code matters less than that a route handler never lets either case
+    raise an unhandled exception.
     """
+    import list_fetch
+
     store = getattr(config, "fetched_bot_lists", {}) or {}
     entry = store.get(str(nick).strip().lower())
     if not entry:
         return 404, {"error": f"No fetched list is available for {nick!r} yet."}
+
+    if limit is None:
+        limit = FILELISTS_DEFAULT_PAGE_SIZE
+
+    page, total, error = list_fetch.get_fetched_bot_page(entry, offset, limit)
+    if error:
+        return 502, {"error": error}
+
     return 200, {
         "bot": entry.get("bot", nick),
         "fetched_at": entry.get("fetched_at", 0),
-        "entries": entry.get("entries", []),
+        "entries": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
     }
 
 
@@ -472,7 +581,9 @@ if HAVE_FLASK:
 
         @app.route("/api/filelists")
         def api_filelists():
-            return jsonify(build_filelists_payload())
+            offset, limit = parse_pagination_params(
+                request.args.get("offset"), request.args.get("limit"))
+            return jsonify(build_filelists_payload(offset, limit))
 
         # ------------------------------------------------------------------
         # NO AUTHENTICATION ON ANY ROUTE BELOW, INCLUDING THESE MUTATING ONES.
@@ -519,7 +630,9 @@ if HAVE_FLASK:
 
         @app.route("/api/filelists/bot/<nick>")
         def api_filelists_bot(nick):
-            status, result = build_fetched_bot_list_payload(nick)
+            offset, limit = parse_pagination_params(
+                request.args.get("offset"), request.args.get("limit"))
+            status, result = build_fetched_bot_list_payload(nick, offset, limit)
             return jsonify(result), status
 
         @app.route("/api/fetch/<request_id>/download")

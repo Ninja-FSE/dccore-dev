@@ -15,6 +15,10 @@
   var BROADCAST_POLL_MS = 2000;
   var DOWNLOADS_POLL_MS = 4000;
   var FILELISTS_BOTS_POLL_MS = 4000;
+  // Matches webserver.py's FILELISTS_DEFAULT_PAGE_SIZE - keep the two in
+  // sync if either changes, so a page here always lines up with a page the
+  // server actually hands back.
+  var FILELISTS_PAGE_SIZE = 200;
 
   var views = {
     search:    { title: "Search",     sub: "Find a file across the current master list." },
@@ -23,7 +27,10 @@
     filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." }
   };
 
-  var state = { active: "search", filelistsLoaded: false, filelistsSource: "__own__" };
+  var state = {
+    active: "search", filelistsLoaded: false, filelistsSource: "__own__",
+    filelistsOffset: 0, filelistsTotal: 0
+  };
 
   var el = {
     navItems:     document.querySelectorAll(".nav-item"),
@@ -53,7 +60,10 @@
     filelistsFetchForm:   document.getElementById("filelists-fetch-form"),
     filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
-    filelistsSourceSelect: document.getElementById("filelists-source-select")
+    filelistsSourceSelect: document.getElementById("filelists-source-select"),
+    filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
+    filelistsNextBtn:     document.getElementById("filelists-next-btn"),
+    filelistsPageInfo:    document.getElementById("filelists-page-info")
   };
 
   function escapeHtml(value) {
@@ -531,6 +541,20 @@
 
   el.filelistsSourceSelect.addEventListener("change", function () {
     state.filelistsSource = el.filelistsSourceSelect.value;
+    state.filelistsOffset = 0;
+    loadFilelists();
+  });
+
+  el.filelistsPrevBtn.addEventListener("click", function () {
+    if (state.filelistsOffset <= 0) { return; }
+    state.filelistsOffset = Math.max(0, state.filelistsOffset - FILELISTS_PAGE_SIZE);
+    loadFilelists();
+  });
+
+  el.filelistsNextBtn.addEventListener("click", function () {
+    var next = state.filelistsOffset + FILELISTS_PAGE_SIZE;
+    if (next >= state.filelistsTotal) { return; }
+    state.filelistsOffset = next;
     loadFilelists();
   });
 
@@ -566,18 +590,43 @@
 
   // Loading the table itself ------------------------------------------------
 
+  // Both /api/filelists and /api/filelists/bot/<nick> now return a page of
+  // rows (`{"entries","total","offset","limit"}`) rather than everything at
+  // once (issue #76, option 3) - this renders the Prev/Next controls and the
+  // "Showing X-Y of Z" caption from state.filelistsOffset/filelistsTotal,
+  // which loadFilelists() below keeps current on every successful load.
+  function renderFilelistsPager() {
+    var total = state.filelistsTotal || 0;
+    var offset = state.filelistsOffset || 0;
+    var shown = total === 0 ? 0 : Math.min(FILELISTS_PAGE_SIZE, total - offset);
+    var start = shown === 0 ? 0 : offset + 1;
+    var end = offset + shown;
+    el.filelistsPageInfo.textContent =
+      "Showing " + start.toLocaleString() + "–" + end.toLocaleString() +
+      " of " + total.toLocaleString();
+    el.filelistsPrevBtn.disabled = offset <= 0;
+    el.filelistsNextBtn.disabled = (offset + FILELISTS_PAGE_SIZE) >= total;
+  }
+
   function loadFilelists() {
     el.filelistsBody.innerHTML = emptyRow(4, "Loading…");
     var source = state.filelistsSource || "__own__";
-    var url = (source === "__own__")
+    var offset = state.filelistsOffset || 0;
+    var base = (source === "__own__")
       ? "/api/filelists"
       : "/api/filelists/bot/" + encodeURIComponent(source);
+    var url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
 
     fetchJson(url)
       .then(function (payload) {
         markConnection(true);
         state.filelistsLoaded = true;
+        // Tolerates a bare array too (an older/unpatched server), same
+        // defensive unwrap this already did before pagination existed.
         var rows = Array.isArray(payload) ? payload : (payload.entries || []);
+        var total = Array.isArray(payload) ? rows.length : (payload.total || 0);
+        state.filelistsTotal = total;
+        renderFilelistsPager();
         if (!rows.length) {
           el.filelistsBody.innerHTML = emptyRow(4, "No files published yet.");
           return;

@@ -163,15 +163,16 @@ class SearchAndFilelistsPayloadTests(DCCoreTestCase):
         self.assertEqual(len(rows), 10)
 
     def test_filelists_covers_every_file_and_dedupes_same_name_and_size(self):
-        rows = webserver.build_filelists_payload()
-        titles = sorted(r["title"] for r in rows)
+        payload = webserver.build_filelists_payload()
+        titles = sorted(r["title"] for r in payload["entries"])
         self.assertEqual(titles, [
             "00 - Intro.flac", "01 - Enter Sandman.flac",
             "01 - Fuel.flac", "02 - Sad But True.flac",
         ])
+        self.assertEqual(payload["total"], 4)
 
     def test_filelists_rows_have_format_and_source(self):
-        rows = {r["title"]: r for r in webserver.build_filelists_payload()}
+        rows = {r["title"]: r for r in webserver.build_filelists_payload()["entries"]}
         fuel = rows["01 - Fuel.flac"]
         self.assertEqual(fuel["format"], "FLAC")
         self.assertEqual(fuel["source"], "DCCore")
@@ -208,6 +209,83 @@ class SearchAndFilelistsPayloadTests(DCCoreTestCase):
         "match everything" for build_filelists_payload()'s benefit."""
         list_mod.execute_search(None, "someuser", "---", "#mp3passion")
         self.assertEqual(self.oserve.queued, [])
+
+
+class FilelistsPaginationTests(SearchAndFilelistsPayloadTests):
+    """Issue #76, option 3: build_filelists_payload()'s offset/limit
+    behaviour. Subclasses SearchAndFilelistsPayloadTests to reuse its setUp()
+    (the 4-row master list fixture) rather than rebuilding it."""
+
+    def test_default_offset_and_limit_when_omitted(self):
+        payload = webserver.build_filelists_payload()
+        self.assertEqual(payload["offset"], 0)
+        self.assertEqual(payload["limit"], webserver.FILELISTS_DEFAULT_PAGE_SIZE)
+        self.assertEqual(payload["total"], 4)
+        self.assertEqual(len(payload["entries"]), 4)  # fixture is smaller than the default page
+
+    def test_an_explicit_offset_and_limit_slice_returns_exactly_that_slice(self):
+        full = webserver.build_filelists_payload(0, 100)["entries"]
+        titles_in_order = [r["title"] for r in full]
+
+        payload = webserver.build_filelists_payload(1, 2)
+        self.assertEqual(payload["offset"], 1)
+        self.assertEqual(payload["limit"], 2)
+        self.assertEqual(payload["total"], 4)
+        self.assertEqual([r["title"] for r in payload["entries"]], titles_in_order[1:3])
+
+    def test_an_offset_past_the_end_is_an_empty_page_with_the_correct_total(self):
+        payload = webserver.build_filelists_payload(999, 50)
+        self.assertEqual(payload["entries"], [])
+        self.assertEqual(payload["total"], 4)
+
+    def test_limit_is_clamped_at_the_documented_ceiling(self):
+        payload = webserver.build_filelists_payload(0, webserver.FILELISTS_MAX_PAGE_SIZE + 5000)
+        # build_filelists_payload() itself does not clamp - that is
+        # parse_pagination_params()'s job, exercised below - but confirms the
+        # slice still behaves sanely (returns everything there is) when
+        # handed a limit larger than the whole dataset.
+        self.assertEqual(len(payload["entries"]), 4)
+
+
+class PaginationParamParsingTests(unittest.TestCase):
+    """webserver.parse_pagination_params() - the pure (offset, limit)
+    validation shared by both GET /api/filelists and
+    GET /api/filelists/bot/<nick>. No DCCoreTestCase config isolation needed:
+    this touches no config state at all."""
+
+    def test_missing_values_fall_back_to_defaults(self):
+        offset, limit = webserver.parse_pagination_params(None, None)
+        self.assertEqual(offset, 0)
+        self.assertEqual(limit, webserver.FILELISTS_DEFAULT_PAGE_SIZE)
+
+    def test_non_numeric_values_fall_back_to_defaults_not_an_error(self):
+        offset, limit = webserver.parse_pagination_params("banana", "banana")
+        self.assertEqual(offset, 0)
+        self.assertEqual(limit, webserver.FILELISTS_DEFAULT_PAGE_SIZE)
+
+    def test_negative_offset_falls_back_to_zero(self):
+        offset, _limit = webserver.parse_pagination_params("-5", "50")
+        self.assertEqual(offset, 0)
+
+    def test_negative_or_zero_limit_falls_back_to_the_default(self):
+        for bad in ("-5", "0"):
+            with self.subTest(limit=bad):
+                _offset, limit = webserver.parse_pagination_params("0", bad)
+                self.assertEqual(limit, webserver.FILELISTS_DEFAULT_PAGE_SIZE)
+
+    def test_a_valid_explicit_offset_and_limit_pass_through_unchanged(self):
+        offset, limit = webserver.parse_pagination_params("40", "75")
+        self.assertEqual(offset, 40)
+        self.assertEqual(limit, 75)
+
+    def test_limit_is_clamped_at_the_ceiling(self):
+        offset, limit = webserver.parse_pagination_params("0", "999999999")
+        self.assertEqual(offset, 0)
+        self.assertEqual(limit, webserver.FILELISTS_MAX_PAGE_SIZE)
+
+    def test_a_limit_exactly_at_the_ceiling_is_not_reduced(self):
+        _offset, limit = webserver.parse_pagination_params("0", str(webserver.FILELISTS_MAX_PAGE_SIZE))
+        self.assertEqual(limit, webserver.FILELISTS_MAX_PAGE_SIZE)
 
 
 class BroadcastSearchTests(DCCoreTestCase):
@@ -532,10 +610,13 @@ class ListFetchRoutesTests(DCCoreTestCase):
         self.assertEqual(webserver.build_fetched_bot_list_summaries(), [])
 
     def test_summaries_reflect_fetched_bots_sorted_by_nick(self):
+        # Issue #76, option 2: summaries read the precomputed "entry_count"
+        # field, not a stored "entries" list (which no longer exists) - no
+        # real on-disk list_path is needed for this one, since
+        # build_fetched_bot_list_summaries() never reads the file itself.
         config.fetched_bot_lists = {
-            "zbot": {"bot": "zbot", "fetched_at": 111.0,
-                     "entries": [{"title": "A.flac"}, {"title": "B.flac"}]},
-            "abot": {"bot": "ABot", "fetched_at": 222.0, "entries": []},
+            "zbot": {"bot": "zbot", "fetched_at": 111.0, "entry_count": 2},
+            "abot": {"bot": "ABot", "fetched_at": 222.0, "entry_count": 0},
         }
         rows = webserver.build_fetched_bot_list_summaries()
         self.assertEqual([r["bot"] for r in rows], ["ABot", "zbot"])
@@ -548,11 +629,28 @@ class ListFetchRoutesTests(DCCoreTestCase):
         self.assertEqual(status, 404)
         self.assertIn("error", result)
 
+    def _make_fetched_entry(self, bot, files):
+        """A real on-disk list file plus the {"bot","fetched_at","list_path",
+        "entry_count","source_zip"} dict process_fetched_list_zip() now
+        stores - build_fetched_bot_list_payload() re-parses `list_path` from
+        disk on every call (issue #76, option 2), so a fake in-memory
+        "entries" list is no longer enough to exercise it."""
+        path = write_master_list(self.tree.lists, bot, [(None, files)])
+        return {
+            "bot": bot,
+            "fetched_at": 111.0,
+            "list_path": path,
+            "entry_count": len(files),
+            "source_zip": "incoming.zip",
+        }
+
+    def setUp(self):
+        super().setUp()
+        self.tree = self.make_tree()
+
     def test_bot_payload_is_case_insensitive_and_matches_own_list_row_shape(self):
         config.fetched_bot_lists = {
-            "goodbot": {"bot": "GoodBot", "fetched_at": 111.0,
-                        "entries": [{"title": "A.flac", "size": "1.0MB",
-                                     "format": "FLAC", "source": "GoodBot"}]},
+            "goodbot": self._make_fetched_entry("GoodBot", [("A.flac", "1.0MB")]),
         }
         status, result = webserver.build_fetched_bot_list_payload("GOODBOT")
         self.assertEqual(status, 200)
@@ -561,6 +659,42 @@ class ListFetchRoutesTests(DCCoreTestCase):
         # Exactly the row shape build_filelists_payload() uses for our own
         # list - same four keys, nothing more, nothing less.
         self.assertEqual(set(result["entries"][0].keys()), {"title", "size", "format", "source"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["offset"], 0)
+        self.assertEqual(result["limit"], webserver.FILELISTS_DEFAULT_PAGE_SIZE)
+
+    def test_bot_payload_paginates_and_reports_the_correct_total(self):
+        files = [(f"Track {i:02d}.flac", "1.0MB") for i in range(10)]
+        config.fetched_bot_lists = {"pagebot": self._make_fetched_entry("PageBot", files)}
+
+        status, result = webserver.build_fetched_bot_list_payload("pagebot", offset=3, limit=4)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["total"], 10)
+        self.assertEqual(result["offset"], 3)
+        self.assertEqual(result["limit"], 4)
+        self.assertEqual([r["title"] for r in result["entries"]],
+                         ["Track 03.flac", "Track 04.flac", "Track 05.flac", "Track 06.flac"])
+
+    def test_bot_payload_offset_past_the_end_is_empty_with_correct_total(self):
+        config.fetched_bot_lists = {"onebot": self._make_fetched_entry("OneBot", [("A.flac", "1.0MB")])}
+
+        status, result = webserver.build_fetched_bot_list_payload("onebot", offset=500, limit=50)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["entries"], [])
+        self.assertEqual(result["total"], 1)
+
+    def test_bot_payload_reports_a_clear_error_when_the_file_has_gone_missing(self):
+        """The extracted file can disappear between the fetch and the view -
+        an operator manually clearing data/fetched/, or an unrelated bug.
+        This must come back as a clean error response, never a 500 from an
+        unhandled exception."""
+        entry = self._make_fetched_entry("GoneBot", [("A.flac", "1.0MB")])
+        os.remove(entry["list_path"])
+        config.fetched_bot_lists = {"gonebot": entry}
+
+        status, result = webserver.build_fetched_bot_list_payload("gonebot")
+        self.assertNotEqual(status, 200)
+        self.assertIn("error", result)
 
 
 @unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
@@ -671,6 +805,72 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
+                                            "CI never installs it, this class only runs when it "
+                                            "happens to be available locally")
+class FilelistsHttpPaginationTests(DCCoreTestCase):
+    """GET /api/filelists and GET /api/filelists/bot/<nick>, end to end
+    through the real Flask app - both now return a page object
+    ({"entries","total","offset","limit"}), not a bare array, and both honour
+    `?offset=&limit=` (issue #76, option 3)."""
+
+    def setUp(self):
+        super().setUp()
+        self.tree = self.make_tree()
+        config.LOCAL_LIST_DIR = self.tree.lists
+        config.LIST_BASE_NAME = "DCCore"
+        config.NICKNAME = "DCCore"
+        write_master_list(self.tree.lists, "DCCore", [
+            (None, [(f"Track {i:02d}.flac", "1.0MB") for i in range(10)]),
+        ])
+        self.app = webserver.create_app()
+        self.client = self.app.test_client()
+
+    def test_own_list_defaults_to_the_documented_page_size(self):
+        resp = self.client.get("/api/filelists")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["total"], 10)
+        self.assertEqual(body["offset"], 0)
+        self.assertEqual(body["limit"], webserver.FILELISTS_DEFAULT_PAGE_SIZE)
+        self.assertEqual(len(body["entries"]), 10)
+
+    def test_own_list_honours_explicit_offset_and_limit(self):
+        resp = self.client.get("/api/filelists?offset=2&limit=3")
+        body = resp.get_json()
+        self.assertEqual(body["offset"], 2)
+        self.assertEqual(body["limit"], 3)
+        self.assertEqual(len(body["entries"]), 3)
+
+    def test_own_list_invalid_query_values_fall_back_to_defaults_via_http(self):
+        resp = self.client.get("/api/filelists?offset=notanumber&limit=-5")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["offset"], 0)
+        self.assertEqual(body["limit"], webserver.FILELISTS_DEFAULT_PAGE_SIZE)
+
+    def test_own_list_limit_is_clamped_via_http(self):
+        resp = self.client.get("/api/filelists?limit=999999999")
+        body = resp.get_json()
+        self.assertEqual(body["limit"], webserver.FILELISTS_MAX_PAGE_SIZE)
+
+    def test_fetched_bot_list_is_paginated_via_http(self):
+        path = write_master_list(self.tree.lists, "OtherBot", [
+            (None, [(f"Other {i:02d}.flac", "2.0MB") for i in range(7)]),
+        ])
+        config.fetched_bot_lists = {
+            "otherbot": {"bot": "OtherBot", "fetched_at": 111.0,
+                         "list_path": path, "entry_count": 7,
+                         "source_zip": "incoming.zip"},
+        }
+        resp = self.client.get("/api/filelists/bot/otherbot?offset=5&limit=10")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["total"], 7)
+        self.assertEqual(body["offset"], 5)
+        self.assertEqual(len(body["entries"]), 2)
+
+
 class BroadcastRenderingXssRegressionTests(unittest.TestCase):
     """BUG 2 regression: web/app.js's escapeHtml() (div.textContent = v;
     return div.innerHTML) never encodes `"`. renderBroadcastResults() used to
@@ -773,6 +973,64 @@ class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
         """Per the brief: reuse the same tolerant "!(\\S+)\\s+(.+)$" pattern
         already used elsewhere, don't reinvent it."""
         self.assertIn("BULK_FETCH_LINE_RE = /^!(\\S+)\\s+(.+)$/", self.source)
+
+
+class FilelistsPaginationJsRegressionTests(unittest.TestCase):
+    """Issue #76, option 3's frontend half: the File Lists table's Prev/Next
+    pager. Same "no unsafe innerHTML string-concat with untrusted text"
+    discipline as the other rendering regression tests above - the pager's
+    own text (a row count/offset, never IRC-originated) is not itself a risk,
+    but the page-size constant and wiring are pinned so a future edit can't
+    silently drift the frontend page size away from the backend default, or
+    drop the reset-to-first-page behaviour."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"), "r", encoding="utf-8") as f:
+            cls.source = f.read()
+
+    def _extract_function(self, name):
+        """Unlike the fixed-window extraction the other regression classes in
+        this file use (good enough for their short functions), renderFilelistsPager()
+        sits directly above the much longer loadFilelists() with no blank-line
+        gap, so a fixed window bleeds into the next function's body and its
+        (legitimate, elsewhere) innerHTML usage. Balances braces instead, to
+        get exactly this one function's body regardless of what follows it."""
+        start = self.source.index(f"function {name}(")
+        brace_start = self.source.index("{", start)
+        depth = 0
+        for i in range(brace_start, len(self.source)):
+            if self.source[i] == "{":
+                depth += 1
+            elif self.source[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.source[start:i + 1]
+        raise AssertionError(f"unbalanced braces looking for function {name}()")
+
+    def test_page_size_constant_matches_the_documented_backend_default(self):
+        """webserver.FILELISTS_DEFAULT_PAGE_SIZE is the source of truth; this
+        just pins that the frontend constant was set to the same number."""
+        import webserver
+        self.assertIn(f"var FILELISTS_PAGE_SIZE = {webserver.FILELISTS_DEFAULT_PAGE_SIZE};", self.source)
+
+    def test_pager_info_is_rendered_via_textcontent_not_innerhtml(self):
+        body = self._extract_function("renderFilelistsPager")
+        self.assertIn(".textContent =", body)
+        self.assertNotIn("innerHTML", body)
+
+    def test_prev_and_next_buttons_are_wired_up(self):
+        self.assertIn('el.filelistsPrevBtn.addEventListener("click"', self.source)
+        self.assertIn('el.filelistsNextBtn.addEventListener("click"', self.source)
+
+    def test_switching_bot_source_resets_to_the_first_page(self):
+        start = self.source.index('el.filelistsSourceSelect.addEventListener("change"')
+        body = self.source[start:start + 300]
+        self.assertIn("state.filelistsOffset = 0", body)
+
+    def test_load_filelists_requests_offset_and_limit_query_params(self):
+        body = self._extract_function("loadFilelists")
+        self.assertIn('"?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE', body)
 
 
 class OptionalFlaskDependencyTests(unittest.TestCase):
