@@ -1442,8 +1442,6 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         self.assertIn("Track One.flac", titles)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class LongOfferedFilenames(LoopbackTransferTests):
@@ -1521,3 +1519,7 @@ class LongOfferedFilenames(LoopbackTransferTests):
 
         self.assertEqual(row["state"], "complete")
         self.assertEqual(row["bytes_received"], len(payload))
+
+
+if __name__ == "__main__":
+    unittest.main()

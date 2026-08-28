@@ -250,8 +250,6 @@ class ListExtractDirTests(DCCoreTestCase):
         self.assertNotEqual(os.path.dirname(path), os.path.abspath(self.tmp))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class AllDotsMemberNames(SafeExtractionTests):
@@ -393,3 +391,7 @@ class LongMemberNames(SafeExtractionTests):
         _write_zip(second, [("OtherBot-2026-08-27.txt", _list_txt())])
         ok, reason = list_fetch.process_fetched_list_zip("longbot", second)
         self.assertTrue(ok, f"a later fetch was blocked by the leftover: {reason}")
+
+
+if __name__ == "__main__":
+    unittest.main()
