@@ -2,6 +2,23 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 beta-web (unreleased) - "The Web Dashboard & Cross-Bot Fetch Branch"
+Everything below lives on the `beta-web` branch only, not yet merged into `beta`/`main`. It carries every fix already released under `beta` (see the RC entries below) plus the following, developed as its own feature line:
+
+### 🚀 New features
+- **Web dashboard (`webserver.py`, `web/`):** A read-only status page served alongside the IRC daemon in the same process - Search, Queue, and File Lists views over a small Flask app. Flask is an **optional** dependency; the daemon and CI never require it, and the dashboard silently disables itself with one log line if it's missing. `WEBUI_ENABLED` ships **off** by default (matching `adminchat.py`'s own `ADMIN_HOSTMASKS = []` opt-in pattern) - real values live in `local_config.py`, never as a tracked default.
+- **Cross-bot search broadcast:** The dashboard can send a real `@find <term>` into a channel and collect PM/NOTICE replies from *other* bots for a 30-second window - something the daemon had never done before (it only ever answered its own `@find` requests). A best-effort `!<bot> <filename>` extraction turns a recognisable reply into a one-click download.
+- **Cross-bot file fetch (`dcc_fetch.py`):** The daemon can now **receive** files, not just send them - a genuinely new capability. Handles both active (dial out) and passive/reverse (`port 0` + token, mirroring `adminchat.py`'s passive DCC CHAT) DCC SEND, with admission control that only ever acts on a fetch the daemon itself requested, a size cap enforced before connecting, and a dedicated storage directory kept separate from the served library.
+- **Cross-bot list fetch (`list_fetch.py`):** Requests another bot's *entire* file list via the network's own `@<botnick>` convention, receives it as a zip (the same DCC-receive pipeline above), and extracts it under a strict safety boundary - zip-slip and zip-bomb protection, entry-count and declared-size caps, and (found afterwards, in production) a Windows-specific fix for all-dots path components that Win32's path parser silently collapses. Multiple bots' lists are kept and switchable in the dashboard.
+- **Download tab:** Bulk-paste any number of `!<bot> <filename>` lines at once; each becomes a tracked fetch-queue row (pending → offered → listening/receiving → complete/failed), throttled through its own `MAX_FETCH_SLOTS` cap, deliberately separate from `MAX_DCC_SLOTS` (an unrelated resource in the opposite direction).
+
+### 🐛 Bugs found and fixed during development
+- **CRLF/CTCP injection, found and closed three separate times** in three different input channels feeding an outbound IRC line - the web-enqueue routes, the passive-DCC-offer reply, and (in a near-identical form using `\x01` rather than `\r`/`\n`) a gap between two independently-maintained validators. The third fix unified the two into one canonical check, on the theory that a bug recurring three times in one feature is a structural problem, not three unrelated slips.
+- **Stored/attribute-injection XSS** in the dashboard's broadcast-results rendering, from building HTML attributes via string-concatenated `innerHTML` with attacker-reachable text - rebuilt using DOM APIs, which encode correctly by construction.
+- **`!rehash` silently emptied the fetch queue and every fetched bot list**, because the runtime-state preservation list predates the feature that added those two containers. Fixed by deriving the check from `config.py` itself, so the next container someone adds fails a test instead of failing silently in production.
+- **A `::INFO::` marker parser tuned only for this project's own two-space format** mis-captured the size and branding text other bots append after it as part of the "filename," breaking every cross-bot fetch of a name that came from a search-result line. Made whitespace-tolerant and marker-anchored, verified against four real, differently-formatted bots' production output.
+
+---
 ## 🟦 v1.10.0-RC2 (2026-08-26) - "The Admin Console Release"
 ### 🚀 New features
 - **🔐 Authenticated admin console over DCC CHAT (`adminchat.py`):** Closes the "known open item" from v1.10.0-RC1 - `is_admin()`'s nick-based gate, which anyone could inherit by taking the admin nick while the real operator was offline. The console instead requires two independent factors: the operator's Undernet services login, proved by the `+x` host only the IRC server can issue, and a PBKDF2-SHA256-hashed password compared in constant time. An unrecognised host gets no reply at all - not even a banner - so a stranger learns nothing about whether their guess was close. Full setup guide in `docs/ADMIN-CONSOLE.md`.
