@@ -33,6 +33,7 @@ import os
 import shutil
 import sys
 import tempfile
+import textwrap
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -195,13 +196,41 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
             f"settings.conf; a check that sees only one of them lets a value "
             f"derived between the two silently ignore the other.")
 
-    def test_no_derived_setting_is_computed_above_the_override_point(self):
-        tree = self._parse()
+    @staticmethod
+    def _assignment_parts(node):
+        """(targets, value) for a plain or annotated assignment, else (None, None).
+
+        `CHANNEL = "..."` parses to ast.Assign; `CHANNEL: str = None` parses
+        to ast.AnnAssign - a different node type, carrying `.target` rather
+        than `.targets`. Matching only Assign would make every annotated
+        setting invisible to both scans below, and this check would then
+        report green while guarding nothing - the exact failure it was
+        rewritten to remove.
+
+        `value` is None for a bare annotation (`NICKNAME: str`), which
+        derives nothing and is skipped.
+        """
+        if isinstance(node, ast.Assign):
+            return node.targets, node.value
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            return [node.target], node.value
+        return None, None
+
+    def derived_above_override(self, tree):
+        """Settings computed from another setting above the last override.
+
+        Split out of the test so it can also be run against a synthetic
+        source - the tests below check that it actually sees both assignment
+        forms, rather than the check quietly finding nothing.
+        """
         override_line = self._last_override_line(tree)
 
-        assigned = {t.id: node.lineno
-                    for node in tree.body if isinstance(node, ast.Assign)
-                    for t in node.targets if isinstance(t, ast.Name)}
+        assigned = {}
+        for node in tree.body:
+            targets, _value = self._assignment_parts(node)
+            for target in targets or []:
+                if isinstance(target, ast.Name):
+                    assigned[target.id] = node.lineno
 
         # ast.walk, not tree.body. A derived value is very likely to sit
         # inside `if not ALREADY_SET:` rather than at the top level - which is
@@ -210,16 +239,23 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         # classes, so walking the whole tree reaches settings and nothing else.
         offenders = []
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign) or node.lineno > override_line:
+            targets, value = self._assignment_parts(node)
+            if targets is None or value is None or node.lineno > override_line:
                 continue
-            sources = sorted({inner.id for inner in ast.walk(node.value)
+            sources = sorted({inner.id for inner in ast.walk(value)
                               if isinstance(inner, ast.Name) and inner.id in assigned})
             if not sources:
                 continue
-            target = node.targets[0]
+            target = targets[0]
             if isinstance(target, ast.Name):
                 offenders.append(f"{target.id} (line {node.lineno}, from "
                                  f"{', '.join(sources)})")
+        return offenders
+
+    def test_no_derived_setting_is_computed_above_the_override_point(self):
+        tree = self._parse()
+        override_line = self._last_override_line(tree)
+        offenders = self.derived_above_override(tree)
 
         self.assertEqual(
             offenders, [],
@@ -229,6 +265,62 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
             "capture the tracked default and silently ignore the operator's "
             "override: " + "; ".join(offenders) + ". Move the computation to "
             "the DERIVED VALUES section at the end of config.py.")
+
+
+
+    def test_the_scan_sees_a_plain_derived_assignment(self):
+        """Control - the form that exists in config.py today."""
+        source = textwrap.dedent("""
+            CHANNEL = "#a,#b"
+            BROADCAST = CHANNEL.split(",")[0]
+            from local_config import *
+        """)
+
+        offenders = self.derived_above_override(ast.parse(source))
+
+        self.assertEqual(len(offenders), 1)
+        self.assertIn("BROADCAST", offenders[0])
+
+    def test_the_scan_sees_an_annotated_derived_assignment(self):
+        """The regression this guards against.
+
+        `BROADCAST: str = CHANNEL.split(...)` is an ast.AnnAssign, and a scan
+        matching only ast.Assign finds nothing here - reporting the file
+        clean while the derived value silently ignores every override.
+        """
+        source = textwrap.dedent("""
+            CHANNEL: str = "#a,#b"
+            BROADCAST: str = CHANNEL.split(",")[0]
+            from local_config import *
+        """)
+
+        offenders = self.derived_above_override(ast.parse(source))
+
+        self.assertEqual(len(offenders), 1,
+                         "an annotated derived setting was invisible to the scan")
+        self.assertIn("BROADCAST", offenders[0])
+
+    def test_a_derived_value_below_the_override_point_is_allowed(self):
+        """Control - below the last override is the correct place for one, and
+        must not be reported."""
+        source = textwrap.dedent("""
+            CHANNEL: str = "#a,#b"
+            from local_config import *
+            BROADCAST: str = CHANNEL.split(",")[0]
+        """)
+
+        self.assertEqual(self.derived_above_override(ast.parse(source)), [])
+
+    def test_a_bare_annotation_derives_nothing(self):
+        """`BROADCAST: str` declares a type and computes nothing, so it is not
+        a derived value however high in the file it sits."""
+        source = textwrap.dedent("""
+            CHANNEL: str = "#a"
+            BROADCAST: str
+            from local_config import *
+        """)
+
+        self.assertEqual(self.derived_above_override(ast.parse(source)), [])
 
 
 if __name__ == "__main__":
