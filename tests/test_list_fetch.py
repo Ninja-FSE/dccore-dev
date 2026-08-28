@@ -224,6 +224,85 @@ class SafeExtractionTests(DCCoreTestCase):
         self.assertEqual(titles, ["Genuine.flac"])
 
 
+class ExtractedTextSizeCeiling(DCCoreTestCase):
+    """Issue #76: nothing before this check bounds the number of LINES the
+    extracted list contains - only the zip's own byte/member counts - and
+    every line becomes a permanently-retained dict once parsed. Measured
+    against production: a 20MB list arrived as a 0.8MB download, 143x smaller
+    on the wire than what it expanded to in memory.
+
+    This is checked on the extracted file's REAL size on disk, which is why
+    a small, highly-compressible payload (repeated identical lines compress
+    extremely well) is used below to prove this catches what the zip's own
+    declared/compressed-size guard (MAX_FETCH_FILE_SIZE) cannot: the zip
+    itself stays tiny, only the text after decompression is oversized.
+
+    Deliberately NOT a subclass of SafeExtractionTests: this patches the
+    module-level ceiling down to a size real fixture data in the tests there
+    would exceed, so sharing that base would shrink the ceiling under them.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-listfetch-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.zip_path = os.path.join(self.tmp, "incoming.zip")
+
+        self._original_limit = list_fetch.MAX_LIST_TEXT_SIZE
+        self.addCleanup(setattr, list_fetch, "MAX_LIST_TEXT_SIZE", self._original_limit)
+        list_fetch.MAX_LIST_TEXT_SIZE = 1000
+
+    def test_an_extracted_list_over_the_ceiling_is_rejected(self):
+        # Highly repetitive text compresses to a fraction of its real size -
+        # the zip itself stays small even though the extracted text does not.
+        oversized_txt = _list_txt() + ("!OtherBot Filler.flac  ::INFO:: 1.0MB\n" * 200)
+        self.assertGreater(len(oversized_txt.encode("utf-8")), 1000)
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", oversized_txt)])
+        # Prove the zip's OWN size guard would not have caught this alone -
+        # this is specifically the gap issue #76 describes, not a duplicate
+        # of the existing zip-bomb protection.
+        self.assertLess(os.path.getsize(self.zip_path), 1000,
+                        "fixture invariant: the zip itself must stay under the "
+                        "text ceiling, or this isn't testing the gap in #76")
+
+        ok, reason = list_fetch.process_fetched_list_zip("bigtextbot", self.zip_path)
+
+        self.assertFalse(ok)
+        self.assertIn("1000", reason)
+        self.assertNotIn("bigtextbot", config.fetched_bot_lists)
+
+    def test_the_extraction_directory_is_cleaned_up_on_rejection(self):
+        oversized_txt = _list_txt() + ("!OtherBot Filler.flac  ::INFO:: 1.0MB\n" * 200)
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", oversized_txt)])
+
+        list_fetch.process_fetched_list_zip("bigtextbot", self.zip_path)
+
+        self.assertFalse(os.path.exists(list_fetch.list_extract_dir("bigtextbot")))
+
+    def test_a_list_at_or_under_the_ceiling_still_works(self):
+        """Control - the check must not start rejecting ordinary lists."""
+        small_txt = _list_txt()
+        self.assertLessEqual(len(small_txt.encode("utf-8")), 1000)
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", small_txt)])
+
+        ok, reason = list_fetch.process_fetched_list_zip("smallbot", self.zip_path)
+
+        self.assertTrue(ok, reason)
+        self.assertIn("smallbot", config.fetched_bot_lists)
+
+    def test_the_shipped_default_has_real_headroom_over_a_genuine_library(self):
+        """Not a regression test for the patched value above - this pins the
+        actual shipped default (20MB) against the number that motivated it:
+        this operator's real 1.21TB/47,420-file library produces a 4MB list."""
+        self.assertEqual(self._original_limit, 20 * 1024 * 1024)
+        four_mb_real_library = 4 * 1024 * 1024
+        self.assertGreater(self._original_limit, four_mb_real_library,
+                           "the shipped ceiling no longer has headroom over a "
+                           "real library-sized list")
+
+
 class ListExtractDirTests(DCCoreTestCase):
 
     def setUp(self):
