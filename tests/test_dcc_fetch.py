@@ -1442,5 +1442,84 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         self.assertIn("Track One.flac", titles)
 
 
+
+
+class LongOfferedFilenames(LoopbackTransferTests):
+    """The offered filename's length is entirely the sending bot's choice.
+
+    _sanitize_offer_filename() rejects unsafe names but never truncates them,
+    and dcc.py wraps every path it touches in platform_compat.long_path()
+    while the fetch write path added on this branch did not. So a legal 240-
+    character name pushed the destination past Windows' 260-character
+    MAX_PATH and the transfer failed with
+
+        [FETCH] Failed (transfer error: [Errno 2] No such file or directory)
+
+    while the identical transfer named ok.mp3 reached 'complete'. The name is
+    legal on Linux, so this only ever bit on Windows.
+    """
+
+    LONG_NAME = ("L" * 236) + ".flac"      # 241 characters
+
+    def _transfer(self, filename, payload):
+        rid = self._enqueue_and_offer("peerbot", filename)
+
+        def serve():
+            self.listener.settimeout(5.0)
+            conn, _ = self.listener.accept()
+            conn.settimeout(5.0)
+            conn.sendall(payload)
+            conn.close()
+
+        server_thread = threading.Thread(target=serve, daemon=True)
+        server_thread.start()
+        dcc_fetch.handle_incoming_offer(
+            None, "peerbot", self._offer_line(filename, len(payload)))
+        server_thread.join(timeout=5.0)
+        return config.fetch_queue[rid]
+
+    def test_a_long_offered_filename_completes(self):
+        payload = b"FLAC" + (b"\x07" * 4096)
+
+        row = self._transfer(self.LONG_NAME, payload)
+
+        self.assertEqual(row["state"], "complete",
+                         f"a legal long filename failed: {row.get('error', '')}")
+        self.assertEqual(row["bytes_received"], len(payload))
+
+    def test_the_received_file_is_actually_on_disk(self):
+        """'complete' is the row's opinion; this checks the filesystem agrees,
+        which is the thing MAX_PATH actually broke."""
+        import platform_compat
+        payload = b"FLAC" + (b"\x07" * 4096)
+
+        row = self._transfer(self.LONG_NAME, payload)
+
+        stored = os.path.join(config.FETCHED_FILES_DIR, row["stored_filename"])
+        self.assertTrue(os.path.exists(platform_compat.long_path(stored)),
+                        "the row says complete but the file is not there")
+        self.assertEqual(os.path.getsize(platform_compat.long_path(stored)),
+                         len(payload))
+
+    def test_the_destination_really_is_past_max_path(self):
+        """Fixture invariant. If the temp root is short enough that the
+        destination lands under 260, the tests above prove nothing on Windows
+        and this says so rather than passing quietly."""
+        dest = os.path.join(config.FETCHED_FILES_DIR, self.LONG_NAME)
+        self.assertGreater(
+            len(dest), 260,
+            f"the destination is only {len(dest)} characters, so the MAX_PATH "
+            f"hazard is not being exercised")
+
+    def test_a_short_name_still_works(self):
+        """Control - the wrapping must not disturb the ordinary case."""
+        payload = b"FLAC" + (b"\x01\x02" * 512)
+
+        row = self._transfer("Short.flac", payload)
+
+        self.assertEqual(row["state"], "complete")
+        self.assertEqual(row["bytes_received"], len(payload))
+
+
 if __name__ == "__main__":
     unittest.main()

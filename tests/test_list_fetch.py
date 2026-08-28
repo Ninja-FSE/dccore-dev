@@ -543,5 +543,72 @@ class MalformedArchivesZipfileLeaks(SafeExtractionTests):
         self.assertTrue(ok, f"a valid archive was refused: {reason}")
 
 
+class LongMemberNames(SafeExtractionTests):
+    """A zip member name is chosen by the remote bot and never truncated, so
+    its length is entirely that bot's decision.
+
+    dcc.py wraps every path it touches in platform_compat.long_path(); the
+    extraction path added on this branch did not. A perfectly legal 240-
+    character member name pushes the destination past Windows' 260-character
+    MAX_PATH, and the whole archive was refused with:
+
+        extraction aborted: [Errno 2] No such file or directory
+
+    for a file this code is itself trying to create. The name is legal on
+    Linux, so this only ever bit on Windows.
+    """
+
+    LONG_NAME = "SomeBot-" + ("L" * 230) + ".txt"      # 242 characters
+
+    def test_a_long_member_name_extracts_parses_and_stores(self):
+        path = os.path.join(self.tmp, "long.zip")
+        _write_zip(path, [(self.LONG_NAME, _list_txt())])
+
+        ok, reason = list_fetch.process_fetched_list_zip("longbot", path)
+
+        self.assertTrue(ok, f"a legal long member name was refused: {reason}")
+        entry = config.fetched_bot_lists["longbot"]
+        self.assertEqual([row["title"] for row in entry["entries"]],
+                         ["Track One.flac"])
+
+    def test_the_destination_really_is_past_max_path(self):
+        """Fixture invariant. If the temp root is short enough that the
+        destination lands under 260, the test above proves nothing on Windows
+        and this says so instead of passing quietly."""
+        dest = os.path.join(list_fetch.list_extract_dir("longbot"), self.LONG_NAME)
+        self.assertGreater(
+            len(dest), 260,
+            f"the destination is only {len(dest)} characters, so the MAX_PATH "
+            f"hazard is not being exercised")
+
+    def test_the_hazard_is_real_on_this_machine(self):
+        """Control. Windows 10 1607+ can switch MAX_PATH off entirely via the
+        LongPathsEnabled registry value, and GitHub's windows-latest images
+        ship with it ON - so on those runners the test above would pass even
+        unfixed. Skip rather than assert something untrue of the machine."""
+        from tests.test_long_paths import MAX_PATH_ENFORCED
+        if not MAX_PATH_ENFORCED:
+            self.skipTest("this machine does not enforce MAX_PATH")
+
+        dest = os.path.join(list_fetch.list_extract_dir("probe"), self.LONG_NAME)
+        os.makedirs(list_fetch.list_extract_dir("probe"), exist_ok=True)
+        with self.assertRaises(OSError):
+            open(dest, "wb").close()
+
+    def test_a_long_named_leftover_can_still_be_cleaned_up(self):
+        """The other half: extraction opens by rmtree-ing the directory, and
+        rmtree cannot delete what it cannot open. A long-named file left by
+        one archive would otherwise block every later fetch from that bot -
+        the same way the all-dots archive did in #75."""
+        first = os.path.join(self.tmp, "first.zip")
+        _write_zip(first, [(self.LONG_NAME, _list_txt())])
+        self.assertTrue(list_fetch.process_fetched_list_zip("longbot", first)[0])
+
+        second = os.path.join(self.tmp, "second.zip")
+        _write_zip(second, [("OtherBot-2026-08-27.txt", _list_txt())])
+        ok, reason = list_fetch.process_fetched_list_zip("longbot", second)
+        self.assertTrue(ok, f"a later fetch was blocked by the leftover: {reason}")
+
+
 if __name__ == "__main__":
     unittest.main()

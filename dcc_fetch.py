@@ -907,7 +907,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     wall_deadline = time.time() + float(getattr(config, "FETCH_TRANSFER_TIMEOUT", 600))
 
     try:
-        os.makedirs(dest_dir, exist_ok=True)
+        os.makedirs(platform_compat.long_path(dest_dir), exist_ok=True)
     except Exception as mkdir_err:
         _mark_failed_locked(row, f"could not create destination dir: {mkdir_err}")
         print(f"[FETCH] {mkdir_err}")
@@ -948,7 +948,10 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     failure_reason = None
     handle = None
     try:
-        handle = open(dest_path, "wb")
+        # _sanitize_offer_filename() does not truncate, so the length of this
+        # name is entirely the offering bot's choice - wrap it like dcc.py
+        # wraps every path it touches.
+        handle = open(platform_compat.long_path(dest_path), "wb")
         while bytes_received < total_size:
             if time.time() > wall_deadline:
                 failure_reason = "overall transfer timeout"
@@ -1012,7 +1015,10 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     _mark_failed_locked(row, failure_reason)
     print(f"[FETCH] Failed ({failure_reason}): {stored_name}.")
     try:
-        if os.path.exists(dest_path):
-            os.remove(dest_path)
+        if os.path.exists(platform_compat.long_path(dest_path)):
+            # Unwrapped, exists() answers False for a >260 path and the
+            # partial file from a failed long-named transfer is never
+            # cleaned up.
+            os.remove(platform_compat.long_path(dest_path))
     except OSError:
         pass
