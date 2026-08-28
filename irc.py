@@ -8,8 +8,7 @@ import re
 import sys
 import os
 import traceback
-import urllib.request 
-import builtins
+import urllib.request
 
 # The bot's own modules
 import config
@@ -150,11 +149,9 @@ def _capture_broadcast_search_reply(user, target, msg):
         filename, _size = list.strip_info_suffix(token_match.group(2).strip())
         entry["filename"] = filename
 
-    # NOTE: `builtins.list`, not the bare name - this module does `import list`
-    # (the master-list module) at the top, which shadows the builtin type in
-    # every function here.
-    if not isinstance(getattr(config, 'broadcast_search_results', None), builtins.list):
-        config.broadcast_search_results = []
+    # config.broadcast_search_results is bound from runtime.py at import time
+    # and always exists as a real list - never rebind it, see runtime.py's
+    # docstring.
     config.broadcast_search_results.append(entry)
 
 

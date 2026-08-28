@@ -85,8 +85,9 @@ def _lock():
 
 
 def _ensure_fetched_bot_lists():
-    if not hasattr(config, "fetched_bot_lists") or config.fetched_bot_lists is None:
-        config.fetched_bot_lists = {}
+    # config.fetched_bot_lists is bound from runtime.py at import time and
+    # always exists as a real dict - never rebind it here, see runtime.py's
+    # docstring.
     return config.fetched_bot_lists
 
 

@@ -467,6 +467,17 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
 
         Read from the FILE rather than from the imported module, so a
         container another test has added at runtime cannot make this pass.
+
+        Two shapes count, because config.py has both:
+
+            dcc_queue = {}                 a literal - PRESERVE_RUNTIME's job
+            dcc_queue = runtime.dcc_queue   bound from runtime.py (see that
+                                           module) - structurally survives a
+                                           reload regardless of PRESERVE_RUNTIME,
+                                           but still a "container this file
+                                           defines" for this test's purpose:
+                                           accounted for one way or the other,
+                                           not silently missed by either.
         """
         import ast
         path = os.path.join(
@@ -477,7 +488,12 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
         for node in tree.body:
             if not isinstance(node, ast.Assign):
                 continue
-            if not isinstance(node.value, (ast.Dict, ast.List)):
+            is_literal = isinstance(node.value, (ast.Dict, ast.List))
+            is_runtime_binding = (
+                isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "runtime")
+            if not (is_literal or is_runtime_binding):
                 continue
             for target in node.targets:
                 if isinstance(target, ast.Name):

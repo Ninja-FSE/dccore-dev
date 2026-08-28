@@ -24,6 +24,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import config  # noqa: E402
+import runtime  # noqa: E402
 import announce  # noqa: E402
 import db  # noqa: E402
 import dcc  # noqa: E402
@@ -99,7 +100,23 @@ def reset_config(**overrides):
     tests do not run oserve.
     """
     for name, factory in RUNTIME_CONTAINERS.items():
-        setattr(config, name, factory())
+        canonical = getattr(runtime, name, None)
+        if canonical is None:
+            # Not one of runtime.py's containers - send_queue and
+            # user_processing_lock still live elsewhere - so a fresh object
+            # is the right reset for them.
+            setattr(config, name, factory())
+            continue
+        # For runtime.py's containers, empty the canonical object and point
+        # config's name back at it. Emptying alone is not enough: a test may
+        # have rebound config.<name> to a fixture of its own, and unless that
+        # name is brought back to the shared object the next test starts
+        # detached from runtime.py and resets would stop reaching it.
+        if isinstance(canonical, dict):
+            canonical.clear()
+        else:
+            del canonical[:]
+        setattr(config, name, canonical)
     for name, value in RUNTIME_FLAGS.items():
         setattr(config, name, value)
 

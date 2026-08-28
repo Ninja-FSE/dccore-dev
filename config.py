@@ -1,11 +1,16 @@
 # =====================================================================
 # CONFIG.PY - CENTRAL CONFIGURATION FOR THE DCCORE DAEMON
 # =====================================================================
+# The live in-memory containers this file used to define are in runtime.py
+# now, and are bound below in section 8. See that module's docstring for why:
+# !rehash reloads THIS file, which reset every one of them.
+import runtime
+
 # ---------------------------------------------------------------------
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE     = False
-SCRIPT_VERSION = "DCCore v1.10.0-RC2"
+SCRIPT_VERSION = "DCCore v1.10.0-RC3"
 LIST_BASE_NAME = "DCCore"
 
 # ---------------------------------------------------------------------
@@ -53,9 +58,9 @@ STATS_FILE     = "./data/stats.txt"
 HARD_BANS_FILE = "./data/hard_bans.txt"
 
 # ---------------------------------------------------------------------
-# 4. KANALANNONSERING (REKLAMKLOCKAN)
+# 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------
-ANNOUNCE_INTERVAL = 300     # Tid mellan varje kanalreklam (i sekunder)
+ANNOUNCE_INTERVAL = 300     # Time between each channel advert, in seconds
 
 # ---------------------------------------------------------------------
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
@@ -65,7 +70,7 @@ MAX_USER_QUEUE     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE   = 1000   # Most files across every queue combined
 MAX_SEARCH_RESULTS = 5      # Max antal textrader som spottas ut vid @find
 MSG_DELAY          = 5.0    # Delay in seconds for the ordinary message queue
-DEBUG_MSG_DELAY    = 0.5    # Paustid mellan varje rad till debug-kanalen
+DEBUG_MSG_DELAY    = 0.5    # Pause between each line sent to the debug channel
 
 # Port range for DCC sends (must be open on the firewall and router)
 # ---------------------------------------------------------------------
@@ -195,36 +200,55 @@ C_LIGHT_GREY   = "\x0315"
 
 # Formateringstecken
 C_RESET        = "\x03"     # Resets colour and bold
-C_BOLD         = "\x02"     # Fetstil
-C_UNDERLINE    = "\x1F"     # Understruken
-C_ITALIC       = "\x1D"     # Kursiv
+C_BOLD         = "\x02"     # Bold
+C_UNDERLINE    = "\x1F"     # Underline
+C_ITALIC       = "\x1D"     # Italic
 
 # ---------------------------------------------------------------------
 # 8. LIVE STATE (held in memory only, for the lifetime of the process)
 # ---------------------------------------------------------------------
-search_inprogress = False    # Search lock: True while a scan is running
-failed_transfers  = {}       # Failed-transfer counter, per user
-channel_users     = {}       # Users currently seen in the channels
-banned_users      = {}       # Currently banned users, in memory
-user_requests     = {}       # Command timestamps per user, for anti-flood
-muted_until       = {}       # Timers for temporarily muted users
-whois_status      = {}       # Online-status via WHO-svar (True = Online)
-frozen_queues     = {}       # Saved timestamps for users in the freezer
-rar_inprogress = False
+# Bound to the objects runtime.py holds - the SAME objects, not copies - so
+# every existing config.<name> reference keeps working unchanged. !rehash does
+# not reload runtime.py, so a reload of this file re-runs these bindings and
+# picks the same live containers back up instead of emptying them.
+#
+# Mutate them in place. Never rebind them: `config.dcc_queue = {}` detaches
+# this name from the object runtime.py still holds, and the two silently drift
+# apart. tests/test_runtime_state.py fails the build if anything does.
+failed_transfers  = runtime.failed_transfers   # Failed-transfer counter, per user
+channel_users     = runtime.channel_users      # Users currently seen in the channels
+banned_users      = runtime.banned_users       # Currently banned users, in memory
+user_requests     = runtime.user_requests      # Command timestamps per user, anti-flood
+muted_until       = runtime.muted_until        # Timers for temporarily muted users
+whois_status      = runtime.whois_status       # Online status via WHO reply (True = online)
+frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in the freezer
 
 # The central queue structures
-dcc_queue         = {}       # The main sharing queue, as {username: [files]}
-vip_queue         = []       # Isolated express queue for search headers and adverts
-active_transfers  = []       # Live DCC sends, one thread each
+dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}
+vip_queue         = runtime.vip_queue          # Express queue for search headers and adverts
+active_transfers  = runtime.active_transfers   # Live DCC sends, one thread each
+
+# Scalars stay here. The binding above only works for mutable objects - a bool
+# rebound in this file could never write through to runtime.py, so moving them
+# would look like a fix without being one. Their behaviour across a rehash is
+# unchanged: both are reset by the reload, and rar_inprogress being reset is
+# the documented "lock-clearing rehash" escape hatch for a wedged packer.
+search_inprogress = False    # Search lock: True while a scan is running
+rar_inprogress    = False
 
 # Cross-bot search broadcast (webserver.py POST /api/search/broadcast, capture
 # in irc.py's PRIVMSG/NOTICE-to-self dispatch). broadcast_search_results is
 # append-only during the listening window: {from, text, received_at} per
 # captured line, plus {bot, filename} when a "!<bot> <file>" token was found.
+#
+# Bound from runtime.py, same as the section above and for the same reason: a
+# !rehash used to empty this (and fetch_queue/fetched_bot_lists below) because
+# they were plain globals here. Mutate in place; never rebind - see
+# runtime.py's docstring.
 broadcast_search_inprogress = False
 broadcast_search_deadline   = 0
 broadcast_search_term       = ""
-broadcast_search_results    = []
+broadcast_search_results    = runtime.broadcast_search_results
 last_broadcast_search_at    = 0     # BROADCAST_SEARCH_COOLDOWN is measured from this
 
 # Cross-bot file fetch (dcc_fetch.py). Keyed by a generated request id ->
@@ -240,7 +264,7 @@ last_broadcast_search_at    = 0     # BROADCAST_SEARCH_COOLDOWN is measured from
 # on purpose - a separately-maintained counter touched from multiple threads
 # (the dispatcher, the CTCP handler, the enqueue route) is exactly the kind of
 # thing that drifts out of sync with the data it is supposed to describe.
-fetch_queue = {}
+fetch_queue = runtime.fetch_queue
 
 # Fetched-and-parsed lists FROM OTHER BOTS (list_fetch.py), keyed by
 # lowercased bot nick -> {"bot": <original-case nick>, "fetched_at":
@@ -254,7 +278,7 @@ fetch_queue = {}
 # not be safely extracted or contained no recognisable list file leaves this
 # untouched and records the reason on the fetch_queue row instead
 # (row["list_processing_error"]).
-fetched_bot_lists = {}
+fetched_bot_lists = runtime.fetched_bot_lists
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
@@ -289,29 +313,42 @@ WEBUI_PORT    = 8420
 # ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)
 # ---------------------------------------------------------------------
-# Create local_config.py next to this file to override anything above for one
-# machine - paths, nickname, channels - without editing a tracked file and
-# without every deployment showing up as a diff. It is gitignored.
+# Two mechanisms, both supported, so nothing breaks for an existing install:
+#
+#   local_config.py   the original - Python, `from local_config import *`.
+#                     Still read, still works. Nothing to do if you have one.
+#   settings.conf     plain text, no Python. settings.conf.sample lists every
+#                     setting with its default and what it does.
+#
+# settings.conf is applied SECOND and therefore wins where both set the same
+# name, so a migration can move settings across a few at a time and the file
+# being actively edited is the one that takes effect. See settings_file.py for
+# why the defaults above stay as Python literals rather than moving into the
+# text file as well.
 try:
     from local_config import *  # noqa: F401,F403
     print('[CONFIG] Applied overrides from local_config.py')
 except ImportError:
     pass
 
+import settings_file
+settings_file.apply_to(globals())
 
 # ---------------------------------------------------------------------
 # 10. DERIVED VALUES (computed AFTER local overrides, never before)
 # ---------------------------------------------------------------------
-# Anything whose value is computed from another setting belongs here, below the
-# local_config import, not next to the setting it reads.
+# Anything whose value is computed from another setting belongs here, below
+# BOTH override mechanisms (local_config.py and settings.conf), not next to
+# the setting it reads.
 #
-# BROADCAST_SEARCH_CHANNEL used to be derived at the top of this file, 264
-# lines above the point where overrides land. Its own comment promised it
-# "defaults to the first entry of CHANNEL" - and it did, but to the first entry
-# of the TRACKED default, not the operator's. So an operator who set
-# CHANNEL = "#their-channel" in local_config.py still had a dashboard broadcast
-# search send its @find into #mp3passion: the first channel of the shipped
-# default, a real public channel they may not even be in.
+# BROADCAST_SEARCH_CHANNEL used to be derived at the top of this file, far
+# above the point where overrides land. Its own comment promised it "defaults
+# to the first entry of CHANNEL" - and it did, but to the first entry of the
+# TRACKED default, not the operator's. So an operator who set
+# CHANNEL = "#their-channel" (in local_config.py OR settings.conf) still had a
+# dashboard broadcast search send its @find into #mp3passion: the first
+# channel of the shipped default, a real public channel they may not even be
+# in.
 #
 # Only an unset value is derived, so an explicit choice always wins.
 if not BROADCAST_SEARCH_CHANNEL:

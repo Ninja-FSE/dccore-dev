@@ -362,7 +362,9 @@ def start_broadcast_search(term):
     config.broadcast_search_inprogress = True
     config.broadcast_search_deadline = deadline
     config.broadcast_search_term = clean_term
-    config.broadcast_search_results = []
+    # In place, not `= []`: config.broadcast_search_results is bound from
+    # runtime.py - see runtime.py's docstring on why this must never rebind.
+    config.broadcast_search_results.clear()
     config.last_broadcast_search_at = now
 
     oserve.queue_message(channel, f"PRIVMSG {channel} :@find {clean_term}\r\n")

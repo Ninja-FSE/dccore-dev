@@ -146,8 +146,8 @@ def _fetch_lock():
 
 
 def _ensure_fetch_queue():
-    if not hasattr(config, "fetch_queue") or config.fetch_queue is None:
-        config.fetch_queue = {}
+    # config.fetch_queue is bound from runtime.py at import time and always
+    # exists as a real dict - never rebind it here, see runtime.py's docstring.
     return config.fetch_queue
 
 

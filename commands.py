@@ -423,7 +423,12 @@ def handle_rehash_request(user, target_chan, authorised=False):
         # 3. RESTORE: write every value back into the newly loaded modules
         # =====================================================================
         # Restore the users
-        config.channel_users = ram_backup_users if ram_backup_users else {}
+        # In place: rebinding would detach config.channel_users from the
+        # object runtime.py holds, and ram_backup_users is a deep COPY, so
+        # the two would diverge from here on (see runtime.py's docstring).
+        config.channel_users.clear()
+        if ram_backup_users:
+            config.channel_users.update(ram_backup_users)
         print(f"[REHASH RAM] Restored {len(config.channel_users)} channel list(s) into the new modules.")
 
         # Restore the slots
@@ -450,7 +455,16 @@ def handle_rehash_request(user, target_chan, authorised=False):
                 mod = sys.modules.get(mod_name)
                 if mod:
                     for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
-                        if hasattr(mod, attr):
+                        if not hasattr(mod, attr):
+                            continue
+                        existing = getattr(mod, attr)
+                        if isinstance(existing, dict):
+                            # Mutate rather than rebind. config.dcc_queue is
+                            # the object runtime.py holds; setattr here would
+                            # silently detach it and the queue would drift.
+                            existing.clear()
+                            existing.update(combined_queue)
+                        else:
                             setattr(mod, attr, combined_queue)
             print(f"[REHASH RAM] The active sharing queue was restored in memory, lowercased.")
 

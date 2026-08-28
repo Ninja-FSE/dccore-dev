@@ -1,6 +1,6 @@
 # DCCore
 
-**Current version: v1.10.0-RC2**
+**Current version: v1.10.0-RC3**
 
 An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe architecture) built in Python 3.10, running on both Linux and Windows for any IRC Network. The script is fully optimized for Proxmox LXC containers, delivering file-sharing notifications, advanced database statistics, and real-time monitoring with mIRC colors at an absolute gold standard.
 
@@ -42,6 +42,13 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 
 ### Prerequisites
 The script is developed and tested for **Python 3.10+** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox), and runs on Windows as well - the platform differences are isolated in `platform_compat.py` and covered by CI on both operating systems.
+
+### Dependencies
+**The daemon itself needs no third-party packages.** Everything it uses to talk to IRC, serve files over DCC, pack albums with `rar`, and run the admin console is in the standard library:
+```bash
+pip install -r requirements.txt      # succeeds, installs nothing
+```
+The one optional extra is the web dashboard (`beta-web`), which needs Flask and is opt-in - the bot starts fine without it.
 
 ### Local overrides
 Copy [`local_config.py.sample`](local_config.py.sample) to `local_config.py` (gitignored) to set machine-specific values - such as the admin console's `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH` - without editing a tracked file. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) for the full admin console setup guide.

@@ -77,3 +77,4 @@ CLAUDE.md
 
 # Per-machine config overrides (paths, nick, channels)
 local_config.py
+settings.conf
