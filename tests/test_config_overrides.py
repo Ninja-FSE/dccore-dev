@@ -136,30 +136,80 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
             return ast.parse(handle.read())
 
-    def _override_line(self, tree):
+    def _override_lines(self, tree):
+        """Every point where config.py's namespace is written from outside.
+
+        Found by SHAPE, not by name. Naming the mechanisms would be another
+        hand-maintained list that has to stay in step with config.py - which
+        is precisely how this check went wrong. It knew only about
+        local_config.py, so when settings.conf arrived as a second and LATER
+        override, the check kept passing while a value derived between the two
+        silently ignored it.
+
+        Two shapes cover both mechanisms, and anything else of the same kind:
+
+          * a star-import          `from local_config import *`
+          * a call handed the namespace
+                                   `settings_file.apply_to(globals())`
+        """
+        lines = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "local_config":
-                return node.lineno
-        return None
+            if isinstance(node, ast.ImportFrom) and any(
+                    alias.name == "*" for alias in node.names):
+                lines.append(node.lineno)
+            elif isinstance(node, ast.Call):
+                for argument in node.args:
+                    if (isinstance(argument, ast.Call)
+                            and isinstance(argument.func, ast.Name)
+                            and argument.func.id == "globals"):
+                        lines.append(node.lineno)
+        return sorted(lines)
+
+    def _last_override_line(self, tree):
+        """A derived value must sit below the LAST of them, not the first."""
+        lines = self._override_lines(tree)
+        return lines[-1] if lines else None
 
     def test_overrides_are_applied_somewhere_in_the_file(self):
-        """Fixture invariant: if the import is gone or renamed, the test below
-        would pass vacuously by having nothing to compare against."""
+        """Fixture invariant: with nothing detected, the test below would pass
+        vacuously by having no reference point to compare against."""
         self.assertIsNotNone(
-            self._override_line(self._parse()),
-            "config.py no longer imports local_config - the check below has "
+            self._last_override_line(self._parse()),
+            "no override mechanism found in config.py - the check below has "
             "no reference point and is silently passing")
+
+    def test_both_override_mechanisms_are_seen(self):
+        """The specific regression this replaced.
+
+        There are two mechanisms - local_config.py and settings.conf - and a
+        check that spots only the first passes happily while a value derived
+        BETWEEN the two ignores the second entirely. Asserting more than one
+        is found means losing sight of a mechanism fails here instead of in
+        production.
+        """
+        lines = self._override_lines(self._parse())
+        self.assertGreaterEqual(
+            len(lines), 2,
+            f"only {len(lines)} override point(s) found in config.py, at "
+            f"{lines}. config.py applies both local_config.py and "
+            f"settings.conf; a check that sees only one of them lets a value "
+            f"derived between the two silently ignore the other.")
 
     def test_no_derived_setting_is_computed_above_the_override_point(self):
         tree = self._parse()
-        override_line = self._override_line(tree)
+        override_line = self._last_override_line(tree)
 
         assigned = {t.id: node.lineno
                     for node in tree.body if isinstance(node, ast.Assign)
                     for t in node.targets if isinstance(t, ast.Name)}
 
+        # ast.walk, not tree.body. A derived value is very likely to sit
+        # inside `if not ALREADY_SET:` rather than at the top level - which is
+        # exactly what the real one does - and a scan of module-level
+        # statements alone cannot see it. config.py defines no functions or
+        # classes, so walking the whole tree reaches settings and nothing else.
         offenders = []
-        for node in tree.body:
+        for node in ast.walk(tree):
             if not isinstance(node, ast.Assign) or node.lineno > override_line:
                 continue
             sources = sorted({inner.id for inner in ast.walk(node.value)
@@ -174,7 +224,8 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         self.assertEqual(
             offenders, [],
             "these settings are computed from another setting ABOVE line "
-            f"{override_line}, where local_config.py is applied, so they "
+            f"{override_line}, the LAST point at which overrides are applied, "
+            "so they "
             "capture the tracked default and silently ignore the operator's "
             "override: " + "; ".join(offenders) + ". Move the computation to "
             "the DERIVED VALUES section at the end of config.py.")
