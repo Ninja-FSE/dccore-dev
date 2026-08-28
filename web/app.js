@@ -235,6 +235,82 @@
   // escape through. entry.from/entry.text are plain text-node content
   // (.textContent), which was never the vulnerable pattern - only
   // attribute-position values are.
+  // Replies arrive interleaved - every bot's header, then its matches, in
+  // whatever order they answer - which is unreadable once a dozen bots reply.
+  // Grouped by sender instead: one heading per bot carrying what it told us
+  // about itself, then its matches beneath it as the exact line you would
+  // paste into the channel.
+  function groupBroadcastResults(results) {
+    var order = [];
+    var groups = {};
+    results.forEach(function (entry) {
+      var who = entry.from || "?";
+      if (!groups[who]) {
+        groups[who] = { from: who, header: null, files: [], other: [] };
+        order.push(who);
+      }
+      var g = groups[who];
+      if (entry.header) {
+        // Keep the first header. A bot that answers twice in one window is
+        // reporting the same slot counts; the later one is not more true.
+        g.header = g.header || entry.header;
+      } else if (entry.bot && entry.filename) {
+        g.files.push(entry);
+      } else {
+        g.other.push(entry);
+      }
+    });
+    return order.map(function (who) { return groups[who]; })
+                .sort(function (a, b) { return b.files.length - a.files.length; });
+  }
+
+  // What the bot said about itself, as one line. Every field is optional -
+  // a missing one means "it did not say", never zero, so nothing is invented
+  // to fill the gap.
+  function describeBot(group) {
+    var h = group.header || {};
+    var bits = [];
+
+    if (group.files.length) {
+      // The header's count is what it FOUND; the rows are what it SENT.
+      // Beezer finds 12 and sends 5, and saying only "5" would hide that
+      // refining the search is worth doing.
+      if (typeof h.matches === "number" && h.matches > group.files.length) {
+        bits.push(h.matches + " matches, showing " + group.files.length);
+      } else {
+        bits.push(group.files.length + (group.files.length === 1 ? " match" : " matches"));
+      }
+    } else if (typeof h.matches === "number") {
+      bits.push(h.matches + " matches, none sent");
+    }
+
+    if (typeof h.slots_free === "number" && typeof h.slots_total === "number") {
+      bits.push(h.slots_free + "/" + h.slots_total + " slots free");
+    } else if (typeof h.slots_in_use === "number") {
+      // SPQR reports slots IN USE, the opposite sense - label it as such
+      // rather than silently showing it where "free" would go.
+      bits.push(h.slots_in_use + " slot" + (h.slots_in_use === 1 ? "" : "s") + " in use");
+    }
+
+    if (typeof h.queued === "number") {
+      bits.push(typeof h.queue_total === "number"
+        ? "queue " + h.queued + "/" + h.queue_total
+        : h.queued + " queued");
+    }
+
+    if (typeof h.list_size === "number") {
+      bits.push("list " + h.list_size.toLocaleString() + " files");
+    }
+
+    if (h.server) {
+      bits.push(h.server);
+    } else if (h.family === "spqr") {
+      bits.push("SPQR");
+    }
+
+    return bits.join("  ·  ");
+  }
+
   function renderBroadcastResults(results) {
     el.broadcastBody.innerHTML = "";
     if (!results.length) {
@@ -242,12 +318,35 @@
       updateDownloadSelectedState();
       return;
     }
-    results.forEach(function (entry) {
-      var tr = document.createElement("tr");
 
-      var checkTd = document.createElement("td");
-      checkTd.className = "col-check";
-      if (entry.bot && entry.filename) {
+    groupBroadcastResults(results).forEach(function (group) {
+      var headRow = document.createElement("tr");
+      headRow.className = "bot-group";
+
+      var headCell = document.createElement("td");
+      headCell.colSpan = 3;
+
+      var name = document.createElement("span");
+      name.className = "bot-group-name";
+      name.textContent = group.from;
+      headCell.appendChild(name);
+
+      var summary = describeBot(group);
+      if (summary) {
+        var meta = document.createElement("span");
+        meta.className = "bot-group-meta";
+        meta.textContent = summary;
+        headCell.appendChild(meta);
+      }
+
+      headRow.appendChild(headCell);
+      el.broadcastBody.appendChild(headRow);
+
+      group.files.forEach(function (entry) {
+        var tr = document.createElement("tr");
+
+        var checkTd = document.createElement("td");
+        checkTd.className = "col-check";
         var box = document.createElement("input");
         box.type = "checkbox";
         box.className = "broadcast-check";
@@ -255,21 +354,35 @@
         box.dataset.filename = entry.filename;
         box.addEventListener("change", updateDownloadSelectedState);
         checkTd.appendChild(box);
-      }
-      tr.appendChild(checkTd);
+        tr.appendChild(checkTd);
 
-      var fromTd = document.createElement("td");
-      fromTd.className = "col-mono";
-      fromTd.textContent = entry.from;
-      tr.appendChild(fromTd);
+        // The exact line you would paste into the channel yourself, which is
+        // also what the checkbox fetches - so what you read is what happens.
+        var cmdTd = document.createElement("td");
+        cmdTd.className = "col-mono";
+        cmdTd.colSpan = 2;
+        cmdTd.textContent = "!" + entry.bot + " " + entry.filename;
+        tr.appendChild(cmdTd);
 
-      var textTd = document.createElement("td");
-      textTd.className = "col-mono";
-      textTd.textContent = entry.text;
-      tr.appendChild(textTd);
+        el.broadcastBody.appendChild(tr);
+      });
 
-      el.broadcastBody.appendChild(tr);
+      // Anything that was neither a header nor a match still gets shown -
+      // a bot saying it found nothing, or unrelated chatter that landed in
+      // the window. Dimmed, and never with a checkbox, but never hidden:
+      // silently dropping a reply would be worse than showing a stray line.
+      group.other.forEach(function (entry) {
+        var tr = document.createElement("tr");
+        tr.appendChild(document.createElement("td"));
+        var td = document.createElement("td");
+        td.className = "col-dim col-mono";
+        td.colSpan = 2;
+        td.textContent = entry.text;
+        tr.appendChild(td);
+        el.broadcastBody.appendChild(tr);
+      });
     });
+
     updateDownloadSelectedState();
   }
 
