@@ -420,3 +420,137 @@ class BothPathsShareOneImplementation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
+    """!rehash reloads config, which re-executes config.py and rebinds every
+    module-level container to a fresh empty one. commands.PRESERVE_RUNTIME is
+    the list of what gets rescued first.
+
+    The list falls out of date. It was written for the containers that existed
+    when it was added, and the cross-bot fetch feature later added
+    config.fetch_queue and config.fetched_bot_lists without touching it - so a
+    rehash silently emptied both: every fetched bot list (each one a real
+    multi-MB DCC transfer) gone, and count_active_fetches() reporting 0 active
+    while transfers were still moving bytes, which is the same failure the
+    'active_transfers' comment in that list already warns about for the other
+    slot pool.
+
+    So this does not check for those two names. It derives the set from
+    config.py and asserts every runtime container is either preserved or
+    deliberately excluded with a reason - which catches the NEXT one somebody
+    adds, not just the two that prompted it.
+    """
+
+    # Excluded on purpose. Each entry is a claim about WHY losing it is fine.
+    NOT_PRESERVED = {
+        "ADMIN_HOSTMASKS":
+            "a setting read from local_config.py, not runtime state - it is "
+            "SUPPOSED to be re-read from the file on a rehash",
+        "vip_queue":
+            "transient OUTPUT, not state. commands.py says so explicitly: "
+            "restoring it would replay lines addressed to channels the "
+            "handler is about to PART",
+        "broadcast_search_results":
+            "the results of a 30-second @find broadcast window. The window "
+            "cannot outlive the reload, so the rows have nothing to belong to",
+        "channel_users":
+            "preserved, but by the dedicated ram_backup_users path rather "
+            "than PRESERVE_RUNTIME, because it is deep-copied",
+        "dcc_queue":
+            "preserved, but by the dedicated ram_backup_queue path, which "
+            "also lowercases the keys on the way back in",
+    }
+
+    def _config_containers(self):
+        """Module-level dict/list assignments in config.py, read from source.
+
+        Read from the FILE rather than from the imported module, so a
+        container another test has added at runtime cannot make this pass.
+
+        Two shapes count, because config.py has both:
+
+            dcc_queue = {}                 a literal - PRESERVE_RUNTIME's job
+            dcc_queue = runtime.dcc_queue   bound from runtime.py (see that
+                                           module) - structurally survives a
+                                           reload regardless of PRESERVE_RUNTIME,
+                                           but still a "container this file
+                                           defines" for this test's purpose:
+                                           accounted for one way or the other,
+                                           not silently missed by either.
+        """
+        import ast
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.py")
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        names = []
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            is_literal = isinstance(node.value, (ast.Dict, ast.List))
+            is_runtime_binding = (
+                isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "runtime")
+            if not (is_literal or is_runtime_binding):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.append(target.id)
+        return names
+
+    def test_every_runtime_container_is_preserved_or_explicitly_excluded(self):
+        containers = self._config_containers()
+        self.assertTrue(containers, "found no containers in config.py - the "
+                                    "parser is wrong, not the code")
+
+        preserved = set(commands.PRESERVE_RUNTIME)
+        unaccounted = [n for n in containers
+                       if n not in preserved and n not in self.NOT_PRESERVED]
+
+        self.assertEqual(
+            unaccounted, [],
+            "config.py defines runtime container(s) that a rehash will silently "
+            "empty: " + ", ".join(unaccounted) + ". Add each to "
+            "commands.PRESERVE_RUNTIME, or to this test's NOT_PRESERVED with a "
+            "reason why losing it is safe.")
+
+    def test_the_fetch_containers_are_in_the_preserved_list(self):
+        """The two that prompted this. Named explicitly so a future edit that
+        drops them fails with an obvious message rather than a derived one."""
+        for name in ("fetch_queue", "fetched_bot_lists"):
+            with self.subTest(container=name):
+                self.assertIn(name, commands.PRESERVE_RUNTIME)
+
+    def test_the_exclusion_list_has_not_gone_stale(self):
+        """Control. If a name is removed from config.py, its excuse here should
+        go too - otherwise the exclusion list silently grows into a place where
+        real containers can hide."""
+        containers = set(self._config_containers())
+        stale = [n for n in self.NOT_PRESERVED if n not in containers]
+        self.assertEqual(stale, [],
+                         "NOT_PRESERVED names something config.py no longer "
+                         "defines: " + ", ".join(stale))
+
+    def test_preserved_containers_survive_a_config_reload(self):
+        """The behaviour itself, not just the list: values put in before a
+        reload are still there afterwards."""
+        import importlib
+        config.fetch_queue = {"abc123": {"state": "receiving", "bot": "somebot"}}
+        config.fetched_bot_lists = {"somebot": {"bot": "somebot", "entries": [1, 2, 3]}}
+
+        preserved = {k: getattr(config, k) for k in commands.PRESERVE_RUNTIME
+                     if hasattr(config, k)}
+        importlib.reload(config)
+        self.addCleanup(importlib.reload, config)
+
+        # The reload wipes them - that is the whole point of the rescue.
+        self.assertEqual(config.fetch_queue, {},
+                         "fixture invariant: the reload should have emptied this")
+
+        for key, value in preserved.items():
+            setattr(config, key, value)
+
+        self.assertEqual(config.fetch_queue["abc123"]["state"], "receiving")
+        self.assertEqual(config.fetched_bot_lists["somebot"]["entries"], [1, 2, 3])

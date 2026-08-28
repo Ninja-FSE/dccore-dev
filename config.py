@@ -24,6 +24,18 @@ ADMIN_NICK    = "FLAC,Samoth"
 CHANNEL       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
 DEBUG_CHANNEL = "#flac-serv"
 
+# The single channel a "search all bots" broadcast (@find) goes into - see
+# webserver.py's POST /api/search/broadcast. Deliberately ONE channel, never
+# all of them: broadcasting into every channel this bot has joined multiplies
+# the disruption to every other operator sharing those channels, for one
+# search. Defaults to the first entry of CHANNEL above; override explicitly
+# here (or in local_config.py) if that is not the right one.
+# Derived from CHANNEL - but NOT here. See "DERIVED VALUES" at the end of this
+# file: computing it at this point captures the tracked default above and
+# silently ignores an operator's own CHANNEL. None means "derive it below";
+# setting it explicitly, here or in local_config.py, still wins.
+BROADCAST_SEARCH_CHANNEL = None
+
 # ---------------------------------------------------------------------
 # 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
@@ -32,6 +44,13 @@ FILE_DIRECTORY = "/mnt/nfs-musik"
 RAR_BINARY     = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 TMP_ZIP_DIR = "./data/tmp_zips"
 LOCAL_LIST_DIR = "./lists"
+
+# Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
+# separate from FILE_DIRECTORY: that directory is the served library, scanned
+# by update_list.py and offered to everyone via @find/!<nick> - fetched files
+# must never be reachable through that path. They are dashboard-download-only
+# (GET /api/fetch/<id>/download in webserver.py).
+FETCHED_FILES_DIR = "./data/fetched"
 
 # Safe, normalised paths into the data/ subdirectory
 BANS_FILE      = "./data/bans.txt"
@@ -134,6 +153,23 @@ DCC_PORT_START     = 55000
 DCC_PORT_END       = 55010
 
 # ---------------------------------------------------------------------
+# CROSS-BOT FILE FETCH (dcc_fetch.py - receiving files FROM other bots)
+# ---------------------------------------------------------------------
+# Deliberately separate from MAX_DCC_SLOTS above: that governs OUR outbound
+# SENDs to people requesting from us. Conflating the two directions would let
+# outbound leech traffic (us fetching from others) starve our own serving
+# capacity, or vice versa.
+MAX_FETCH_SLOTS         = 3        # Max simultaneous in-flight/offered fetches
+MAX_FETCH_FILE_SIZE     = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
+FETCH_TRANSFER_TIMEOUT  = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
+FETCH_OFFER_TIMEOUT     = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
+
+# How often a new @find broadcast (POST /api/search/broadcast) is allowed to
+# start. Independent of the UI - courtesy to other bots/operators on a shared
+# public channel, not just a UI detail.
+BROADCAST_SEARCH_COOLDOWN = 30     # Seconds
+
+# ---------------------------------------------------------------------
 # 6. ANTI-FLOOD AND AUTOMATIC PROTECTION
 # ---------------------------------------------------------------------
 MAX_REQUESTS     = 10       # Most commands (search or file) per time window
@@ -200,6 +236,80 @@ active_transfers  = runtime.active_transfers   # Live DCC sends, one thread each
 search_inprogress = False    # Search lock: True while a scan is running
 rar_inprogress    = False
 
+# Cross-bot search broadcast (webserver.py POST /api/search/broadcast, capture
+# in irc.py's PRIVMSG/NOTICE-to-self dispatch). broadcast_search_results is
+# append-only during the listening window: {from, text, received_at} per
+# captured line, plus {bot, filename} when a "!<bot> <file>" token was found.
+#
+# Bound from runtime.py, same as the section above and for the same reason: a
+# !rehash used to empty this (and fetch_queue/fetched_bot_lists below) because
+# they were plain globals here. Mutate in place; never rebind - see
+# runtime.py's docstring.
+broadcast_search_inprogress = False
+broadcast_search_deadline   = 0
+broadcast_search_term       = ""
+broadcast_search_results    = runtime.broadcast_search_results
+last_broadcast_search_at    = 0     # BROADCAST_SEARCH_COOLDOWN is measured from this
+
+# Cross-bot file fetch (dcc_fetch.py). Keyed by a generated request id ->
+# {id, bot, filename, request_type, state, requested_at, offered_at,
+# bytes_received, total_size, reason, stored_filename}. state is one of
+# pending / offered / listening / receiving / complete / failed.
+# request_type is "file" (default - exact bot+filename admission match) or
+# "list" (a cross-bot list fetch, admission matches on bot alone - see
+# dcc_fetch._claim_matching_offer_locked()); filename starts "" for a "list"
+# row and is filled in with the bot's actual advertised zip name once an
+# offer is claimed. Active-count is DERIVED by scanning this
+# (dcc_fetch.count_active_fetches()) rather than kept as a separate counter,
+# on purpose - a separately-maintained counter touched from multiple threads
+# (the dispatcher, the CTCP handler, the enqueue route) is exactly the kind of
+# thing that drifts out of sync with the data it is supposed to describe.
+fetch_queue = runtime.fetch_queue
+
+# Fetched-and-parsed lists FROM OTHER BOTS (list_fetch.py), keyed by
+# lowercased bot nick -> {"bot": <original-case nick>, "fetched_at":
+# <timestamp>, "entries": [...rows in the same shape
+# list.entries_to_filelist_rows() produces for our own list...],
+# "source_zip": <the zip's stored filename>}. One entry per bot - a later
+# fetch for a nick already present REPLACES it, it does not accumulate
+# duplicates (see list_fetch.process_fetched_list_zip()). Populated only when
+# a config.fetch_queue row with request_type="list" reaches "complete" and is
+# then successfully extracted/parsed; a completed transfer whose zip could
+# not be safely extracted or contained no recognisable list file leaves this
+# untouched and records the reason on the fetch_queue row instead
+# (row["list_processing_error"]).
+fetched_bot_lists = runtime.fetched_bot_lists
+
+# ---------------------------------------------------------------------
+# WEB DASHBOARD (read-only status page, see webserver.py)
+# ---------------------------------------------------------------------
+# OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
+# a network-facing, unauthenticated surface should never be on just because
+# someone pulled and restarted. Opt in from local_config.py, not here.
+#
+# Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
+# logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
+# never crashes the daemon and CI never installs Flask, so this stays inert
+# there. Install it yourself (`pip install flask`) to actually use the
+# dashboard.
+WEBUI_ENABLED = False
+
+# NO AUTHENTICATION. Every /api/* route is open to anyone who can reach this
+# host:port - there is no login, no token, no password. The read-only routes
+# (queue/search/file lists) are harmless to expose; the mutating ones (search
+# broadcast, cross-bot fetch) let anyone who can reach this port make the bot
+# dial out and pull files from other IRC bots.
+#
+# "127.0.0.1" is the tracked default: safe out of the box, reachable only from
+# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# reachable from other devices on your LAN (phone, laptop) - only do that on a
+# network you trust, since there is still no authentication.
+#
+#   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. DO NOT put this host on
+#   any network you do not trust, without adding authentication first.
+WEBUI_HOST    = "127.0.0.1"
+WEBUI_PORT    = 8420
+
 # ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)
 # ---------------------------------------------------------------------
@@ -223,3 +333,23 @@ except ImportError:
 
 import settings_file
 settings_file.apply_to(globals())
+
+# ---------------------------------------------------------------------
+# 10. DERIVED VALUES (computed AFTER local overrides, never before)
+# ---------------------------------------------------------------------
+# Anything whose value is computed from another setting belongs here, below
+# BOTH override mechanisms (local_config.py and settings.conf), not next to
+# the setting it reads.
+#
+# BROADCAST_SEARCH_CHANNEL used to be derived at the top of this file, far
+# above the point where overrides land. Its own comment promised it "defaults
+# to the first entry of CHANNEL" - and it did, but to the first entry of the
+# TRACKED default, not the operator's. So an operator who set
+# CHANNEL = "#their-channel" (in local_config.py OR settings.conf) still had a
+# dashboard broadcast search send its @find into #mp3passion: the first
+# channel of the shipped default, a real public channel they may not even be
+# in.
+#
+# Only an unset value is derived, so an explicit choice always wins.
+if not BROADCAST_SEARCH_CHANNEL:
+    BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
