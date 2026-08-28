@@ -54,6 +54,25 @@ HEADER = """\
 """
 
 
+def assignment_parts(node):
+    """(targets, value_node) for a module-level assignment, else (None, None).
+
+    `MAX_DCC_SLOTS = 3` parses to ast.Assign, but `MAX_DCC_SLOTS: int = 3`
+    parses to ast.AnnAssign - a different node type, with `.target` rather
+    than `.targets`. Matching only Assign makes every annotated setting
+    invisible, which for this generator means silently emitting a sample with
+    nothing in it.
+
+    `value_node` is None for a bare annotation (`NICKNAME: str`), which
+    declares a name's type without giving it a value.
+    """
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return [node.target], node.value
+    return None, None
+
+
 def _render(value):
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -64,10 +83,10 @@ def _render(value):
     return str(value)
 
 
-def _doc_lines(source_lines, lineno):
+def _doc_lines(source_lines, node):
     """The comment block immediately above a setting, plus its inline comment."""
     doc = []
-    index = lineno - 2                       # the line above, 0-based
+    index = node.lineno - 2                  # the line above, 0-based
     block = []
     while index >= 0:
         stripped = source_lines[index].strip()
@@ -79,11 +98,18 @@ def _doc_lines(source_lines, lineno):
         break
     doc.extend(reversed(block))
 
-    own = source_lines[lineno - 1]
-    if "#" in own:
-        inline = own.split("#", 1)[1].strip()
-        if inline:
-            doc.append(inline)
+    # Look for the inline comment only AFTER the value ends. Splitting the
+    # whole line on "#" cuts inside a string literal, so
+    #     CHANNEL = "#mp3passion,#mp3servers,..."
+    # produced a junk comment line reading `mp3passion,...#mp3download"` above
+    # every channel-valued setting in the generated sample.
+    own = source_lines[node.lineno - 1]
+    if node.end_lineno == node.lineno:
+        tail = own[node.end_col_offset:]
+        if "#" in tail:
+            inline = tail.split("#", 1)[1].strip()
+            if inline:
+                doc.append(inline)
     return doc
 
 
@@ -108,9 +134,10 @@ def build():
             if text.startswith("# ") and head[:2].rstrip(".").isdigit() and "." in head:
                 section = head.split(".", 1)[1].strip().lower()
 
-        if not isinstance(node, ast.Assign):
+        targets, value_node = assignment_parts(node)
+        if targets is None:
             continue
-        for target in node.targets:
+        for target in targets:
             if not isinstance(target, ast.Name):
                 continue
             name = target.id
@@ -121,7 +148,7 @@ def build():
             # settings.conf or a test has already applied, which would make
             # the generated sample depend on the machine that ran it.
             try:
-                default = ast.literal_eval(node.value)
+                default = ast.literal_eval(value_node)
             except (ValueError, SyntaxError):
                 default = getattr(config, name)
             if not settings_file.is_overridable(name, default):
@@ -131,7 +158,7 @@ def build():
                 out.append(f"\n[{section}]\n")
                 current = section
 
-            for line in _doc_lines(lines, node.lineno):
+            for line in _doc_lines(lines, node):
                 out.append(f"# {line}\n")
             out.append(f"#{name} = {_render(default)}\n\n")
 
