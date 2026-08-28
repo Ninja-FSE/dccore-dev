@@ -1,0 +1,191 @@
+# =====================================================================
+# DCCore - settings.conf.sample
+# =====================================================================
+# Copy this file to settings.conf and uncomment the lines you want to
+# change. Anything left commented out keeps its default, shown here.
+#
+#     cp settings.conf.sample settings.conf
+#
+# settings.conf is gitignored, so your values never show up as a diff
+# and are never overwritten by an update.
+#
+# GENERATED FILE - do not edit by hand. It is produced from config.py by
+# scripts/gen_settings_sample.py, and a test fails if the two disagree.
+#
+# NOTES
+#   * The [section] headers are for reading convenience only. They are
+#     flattened away when the file is read, so a setting works wherever
+#     you put it - and a setting may not appear twice.
+#   * Yes/no settings accept true/false, yes/no, on/off, 1/0.
+#   * List settings are comma-separated.
+#   * A '%' is an ordinary character here; it needs no escaping.
+#   * If you already have a local_config.py it still works exactly as
+#     before. This file is applied on top of it, so you can migrate a
+#     few settings at a time, or ignore this file entirely.
+#   * The mIRC colour codes (C_*) are deliberately not listed: they are
+#     raw protocol bytes rather than preferences.
+
+[system and global engine settings]
+#DEBUG_MODE = false
+
+#SCRIPT_VERSION = DCCore v1.10.0-RC3
+
+#LIST_BASE_NAME = DCCore
+
+
+[irc network and channel settings]
+#SERVER = irc.undernet.org
+
+#PORT = 6667
+
+#NICKNAME = DCCore
+
+#ALT_NICKNAME = DCCore_
+
+#ADMIN_NICK = FLAC,Samoth
+
+# mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
+#CHANNEL = #mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download
+
+# flac-serv"
+#DEBUG_CHANNEL = #flac-serv
+
+
+[filesystem, paths and text stores]
+# MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
+#PAUSE_ON_UPDATE = true
+
+#FILE_DIRECTORY = /mnt/nfs-musik
+
+# None = look for rar/rar.exe on PATH (and WinRAR's install dir)
+#RAR_BINARY = 
+
+#TMP_ZIP_DIR = ./data/tmp_zips
+
+#LOCAL_LIST_DIR = ./lists
+
+# Safe, normalised paths into the data/ subdirectory
+#BANS_FILE = ./data/bans.txt
+
+#STATS_FILE = ./data/stats.txt
+
+#HARD_BANS_FILE = ./data/hard_bans.txt
+
+
+[channel advertising (the advert clock)]
+# Time between each channel advert, in seconds
+#ANNOUNCE_INTERVAL = 300
+
+
+[limits, slots and queue control]
+# Max antal samtidiga live-nedladdningar
+#MAX_DCC_SLOTS = 3
+
+# Most files a single user may queue
+#MAX_USER_QUEUE = 100
+
+# Most files across every queue combined
+#MAX_GLOBAL_QUEUE = 1000
+
+# Max antal textrader som spottas ut vid @find
+#MAX_SEARCH_RESULTS = 5
+
+# Delay in seconds for the ordinary message queue
+#MSG_DELAY = 5.0
+
+# Pause between each line sent to the debug channel
+#DEBUG_MSG_DELAY = 0.5
+
+# Empty list = console disabled, and every DCC CHAT request is ignored.
+# 
+# Each entry is a HOST pattern. It may be written bare ("FLAC.users.undernet.org")
+# or in the familiar IRC form ("*!*@FLAC.users.undernet.org"); either way only the
+# part after the last "@" is used. The nick and ident halves are discarded on
+# purpose - the ident is supplied by the client and anyone can set theirs to
+# "flac", so constraining it grants nothing. Only the host is issued by the server.
+# 
+# On Undernet, log into X and set usermode +x. The server then replaces your host
+# with "<your-account>.users.undernet.org", which nobody else can obtain. That
+# host IS the proof of your services login.
+# 
+# Put the real values in local_config.py, which is gitignored, NOT here.
+#ADMIN_HOSTMASKS = 
+
+# Generated with:  python adminchat.py
+#ADMIN_PASSWORD_HASH = 
+
+# How the DCC CHAT connection gets made:
+# 
+# "auto"     dial the client, and listen instead if that fails.  (default)
+# "listen"   always listen and offer the connection back.
+# "connect"  only ever dial the client; never listen.
+# 
+# "auto" is right for most setups. Choose "listen" when the client is behind a
+# VPN, a router that does not forward the port, or a firewall that drops rather
+# than rejects - all of which show up as a TIMEOUT on the dial and then cost the
+# full connect timeout on every login before the fallback takes over. The bot's
+# own listener is already proven reachable by every DCC SEND it does.
+#ADMIN_CHAT_MODE = auto
+
+# Whether !ban, !unban, !rehash, !update and !clearqueue still work when typed in
+# a channel or a private message.
+# 
+# Left ON. The console is new, and locking yourself out of every admin command
+# because a hostmask has a typo in it is a bad first experience. Turn it off once
+# the console has proved itself - at which point admin authority rests entirely
+# on the services host plus the password, and no longer on a nick anyone can take
+# while you are offline.
+# 
+# The user commands (!list, !ping, !debugnames, @find, the queue triggers) are
+# not affected by this.
+#ADMIN_CHANNEL_COMMANDS = true
+
+# announce.send_debug() is the daemon's running commentary - transfers, joins,
+# bans, pack failures. Both destinations are on by default.
+# 
+# DEBUG_TO_CHANNEL   the coloured line in DEBUG_CHANNEL, as it has always been
+# DEBUG_TO_CONSOLE   the plain text in an attached DCC admin console
+# 
+# Set DEBUG_TO_CHANNEL = False once the console is doing the job, and the
+# daemon's internals stop being published to a channel other people can sit in.
+# 
+# Neither switch can lose a line: if the channel is off and no console happens to
+# be connected, send_debug falls back to stdout, so the LXC console and the
+# journal always have it. That case - something going wrong while nobody is
+# watching - is the one worth protecting.
+#DEBUG_TO_CHANNEL = true
+
+#DEBUG_TO_CONSOLE = true
+
+# The two side files update_list.py publishes alongside the master list, holding
+# the human-readable total size and the raw byte count that the channel advert and
+# @<nick>-que read back. Named here rather than as a literal in both list.py and
+# update_list.py: that split literal is the same shape as issue #34, where the
+# reader and the writer of speed_record.txt agreed only by coincidence.
+# 
+# The "flac-serv" prefix is historical and deliberately kept. Renaming it would
+# orphan the stats on every existing deployment until the next successful !update.
+#LIST_SIZE_FILE = flac-serv-size.txt
+
+#LIST_RAWBYTES_FILE = flac-serv-rawbytes.txt
+
+#DCC_PORT_START = 55000
+
+#DCC_PORT_END = 55010
+
+
+[anti-flood and automatic protection]
+# Most commands (search or file) per time window
+#MAX_REQUESTS = 10
+
+# Size of the rolling time window, in seconds
+#REQUEST_WINDOW = 5
+
+# Mute in seconds on the first flood violation
+#MUTE_TIME = 30
+
+# Attempts per queued file before it is dropped (see dcc.release_queue_entry)
+#MAX_SEND_FAILS = 3
+
+# Longest a rar packing run may take, in seconds, before it is abandoned
+#RAR_TIMEOUT = 1800

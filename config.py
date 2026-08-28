@@ -39,9 +39,9 @@ STATS_FILE     = "./data/stats.txt"
 HARD_BANS_FILE = "./data/hard_bans.txt"
 
 # ---------------------------------------------------------------------
-# 4. KANALANNONSERING (REKLAMKLOCKAN)
+# 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------
-ANNOUNCE_INTERVAL = 300     # Tid mellan varje kanalreklam (i sekunder)
+ANNOUNCE_INTERVAL = 300     # Time between each channel advert, in seconds
 
 # ---------------------------------------------------------------------
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
@@ -51,7 +51,7 @@ MAX_USER_QUEUE     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE   = 1000   # Most files across every queue combined
 MAX_SEARCH_RESULTS = 5      # Max antal textrader som spottas ut vid @find
 MSG_DELAY          = 5.0    # Delay in seconds for the ordinary message queue
-DEBUG_MSG_DELAY    = 0.5    # Paustid mellan varje rad till debug-kanalen
+DEBUG_MSG_DELAY    = 0.5    # Pause between each line sent to the debug channel
 
 # Port range for DCC sends (must be open on the firewall and router)
 # ---------------------------------------------------------------------
@@ -164,9 +164,9 @@ C_LIGHT_GREY   = "\x0315"
 
 # Formateringstecken
 C_RESET        = "\x03"     # Resets colour and bold
-C_BOLD         = "\x02"     # Fetstil
-C_UNDERLINE    = "\x1F"     # Understruken
-C_ITALIC       = "\x1D"     # Kursiv
+C_BOLD         = "\x02"     # Bold
+C_UNDERLINE    = "\x1F"     # Underline
+C_ITALIC       = "\x1D"     # Italic
 
 # ---------------------------------------------------------------------
 # 8. LIVE STATE (held in memory only, for the lifetime of the process)
@@ -203,11 +203,23 @@ rar_inprogress    = False
 # ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)
 # ---------------------------------------------------------------------
-# Create local_config.py next to this file to override anything above for one
-# machine - paths, nickname, channels - without editing a tracked file and
-# without every deployment showing up as a diff. It is gitignored.
+# Two mechanisms, both supported, so nothing breaks for an existing install:
+#
+#   local_config.py   the original - Python, `from local_config import *`.
+#                     Still read, still works. Nothing to do if you have one.
+#   settings.conf     plain text, no Python. settings.conf.sample lists every
+#                     setting with its default and what it does.
+#
+# settings.conf is applied SECOND and therefore wins where both set the same
+# name, so a migration can move settings across a few at a time and the file
+# being actively edited is the one that takes effect. See settings_file.py for
+# why the defaults above stay as Python literals rather than moving into the
+# text file as well.
 try:
     from local_config import *  # noqa: F401,F403
     print('[CONFIG] Applied overrides from local_config.py')
 except ImportError:
     pass
+
+import settings_file
+settings_file.apply_to(globals())
