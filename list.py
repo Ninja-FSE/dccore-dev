@@ -101,6 +101,22 @@ import sys
 import config
 import announce
 
+_CONTROL_CODE_RE = re.compile(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?')
+
+
+def strip_control_codes(text):
+    """Strip mIRC colour codes and formatting control characters from `text`.
+
+    Extracted out of execute_search()'s own inline version (byte-identical
+    logic, just named) so other callers can reuse it instead of reinventing
+    it: irc.py's cross-bot broadcast-search capture and dcc_fetch.py's
+    inbound-offer filename cleaning both need the exact same treatment before
+    they can safely look at or store what a foreign bot sent.
+    """
+    clean = str(text).replace('\x02', '').replace('\x1f', '').replace('\x0f', '')
+    return _CONTROL_CODE_RE.sub('', clean)
+
+
 def find_latest_list():
     """Find the newest master text list in the lists directory.
 
@@ -121,6 +137,176 @@ def find_latest_list():
     except Exception as e:
         print(f"[SEARCH ERROR] Could not find the latest list: {e}")
     return None
+
+_INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
+
+
+def strip_info_suffix(rest):
+    """Split "<filename> ::INFO:: <everything after>" into (filename, rest).
+
+    update_list.py (update_list.py:216) writes "!<nick> <filename>  ::INFO::
+    <size>" with two spaces before the marker - `rest` here is everything
+    after the "!<nick> " prefix. Other bots on the network carry the same
+    "::INFO::" marker but do not agree on the whitespace around it, and
+    routinely tack on more than just a size afterwards - real examples seen
+    in production: "...flac ::INFO:: 153.03MB (c) OmeNServE v2.60 (c)",
+    "...mp3 ::INFO:: 6.32Mb 4m30s 192/44.10/JS  OmeNServE v2.60",
+    "...mp3 ::INFO:: 19.95MB : OmenServe v2.71 :". A caller that only strips
+    an exact "  ::INFO:: " (this project's own two-space convention) leaves
+    all of that trailing branding/metadata attached to what it thinks is the
+    filename - which is exactly what broke irc.py's cross-bot broadcast-
+    search capture: the stored "filename" included the size and branding
+    text, so the real DCC SEND offer that later came back (bearing only the
+    bare filename) never matched it and every such fetch was rejected as
+    unsolicited. Matching on the marker itself, tolerant of any amount of
+    whitespace around it, and discarding EVERYTHING after it (not just a
+    size field) fixes that for every bot's format, not just this project's
+    own. Best-effort on purpose: a line that does not carry the marker at
+    all returns the whole thing as the filename with an empty second value,
+    rather than raising. Shared by `_split_entry_line()` below (this bot's
+    own master list) and irc.py's cross-bot broadcast-search capture, which
+    extracts the same shape out of another bot's reply and must not mistake
+    any of the trailing tag for part of the filename when it later requests
+    that exact name back with `!<nick> <filename>`.
+    """
+    parts = _INFO_MARKER_RE.split(rest, maxsplit=1)
+    if len(parts) == 2:
+        filename, size = parts
+    else:
+        filename, size = rest, ""
+    return filename.strip(), size.strip()
+
+
+def _split_entry_line(line_strip):
+    """Pull the filename and size back out of one "!..." master-list line.
+
+    Best-effort on purpose - this feeds the read-only web dashboard, never
+    IRC, so a line that does not split cleanly returns what it can rather
+    than raising.
+    """
+    _, _, rest = line_strip.partition(" ")
+    return strip_info_suffix(rest)
+
+
+def find_matching_entries(search_words, limit=None, list_path=None):
+    """IRC-agnostic core of the master-list search, extracted from execute_search().
+
+    Scans the current master list exactly the way execute_search() always has -
+    same file, same "!" line filter, same "every word must appear (case-
+    insensitive) on the line" rule - but returns plain data instead of talking to
+    IRC, so it has no queue_message/announce calls and no user/channel formatting.
+    execute_search() calls this and keeps doing its own presentation on top;
+    webserver.py's build_search_payload() and build_filelists_payload() call it
+    too, with their own limit.
+
+    Also carries FOLDER context forward, which execute_search() never needed and
+    so never recorded: update_list.py writes each folder as a
+    "D:\\MUSIC\\<folder>\\" line wrapped in a pair of "====...====" rule lines
+    (update_list.py:190-195) before that folder's file lines. That header text is
+    tracked here and attached to every entry as "folder".
+
+    An empty search_words list matches every "!" line - this is what
+    build_filelists_payload() wants. That is a deliberate difference from
+    execute_search()'s own historical behaviour, where a search term that
+    stripped down to zero words (e.g. "---") matched nothing at all; callers
+    that need that old behaviour must check for an empty search_words list
+    themselves before calling in, same as execute_search() now does below.
+
+    `list_path`, when given, scans that file instead of find_latest_list()'s
+    result - the same "!<nick> <filename>  ::INFO:: ..." shape, just not
+    necessarily THIS bot's own master list. list_fetch.py uses this to run a
+    fetched-and-extracted third-party bot's list through the exact same
+    parsing pipeline (this function, _split_entry_line(), strip_info_suffix())
+    rather than writing a second, parallel parser for someone else's list.
+
+    Returns (entries, total_matches): `entries` is capped at `limit` (None means
+    unlimited) and each is {"line": the raw "!..." text, "folder": the header
+    text in effect or None, "filename": parsed filename, "size": parsed size
+    string}; `total_matches` counts every match regardless of the cap, which is
+    what the IRC search header reports even when only a handful are shown.
+    """
+    entries = []
+    total_matches = 0
+
+    current_list_path = list_path if list_path is not None else find_latest_list()
+    if not current_list_path or not os.path.exists(current_list_path):
+        return entries, total_matches
+
+    current_folder = None
+    # "none" -> saw the opening rule line, now expecting the folder line ("open")
+    # -> saw the folder line, now expecting the closing rule line ("folder_seen")
+    state = "none"
+
+    with open(current_list_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line_strip = line.replace('\x00', '').strip()
+            if not line_strip:
+                continue
+
+            is_rule = set(line_strip) == {"="}
+            if state == "none":
+                if is_rule:
+                    state = "open"
+                    continue
+            elif state == "open":
+                if is_rule:
+                    continue  # malformed doubled rule; keep waiting for the folder line
+                current_folder = line_strip
+                state = "folder_seen"
+                continue
+            elif state == "folder_seen":
+                state = "none"
+                if is_rule:
+                    continue  # the expected closing rule
+
+            if not line_strip.startswith("!"):
+                continue
+
+            line_lower = line_strip.lower()
+            if search_words and not all(word in line_lower for word in search_words):
+                continue
+
+            total_matches += 1
+            if limit is None or len(entries) < limit:
+                filename, size = _split_entry_line(line_strip)
+                entries.append({
+                    "line": line_strip,
+                    "folder": current_folder,
+                    "filename": filename,
+                    "size": size,
+                })
+
+    return entries, total_matches
+
+
+def entries_to_filelist_rows(entries, source):
+    """Shape find_matching_entries() output into the File Lists view's row
+    format: {"title", "size", "format", "source"}, deduping same
+    filename+size the way webserver.build_filelists_payload() always has.
+
+    Shared by webserver.py (this bot's own list, source=config.NICKNAME) and
+    list_fetch.py (another bot's fetched-and-extracted list, source=that
+    bot's nick) so the two surfaces can never drift in what a "row" looks
+    like on the dashboard.
+    """
+    seen = set()
+    rows = []
+    for entry in entries:
+        filename = entry.get("filename", "?")
+        size = entry.get("size", "")
+        key = (filename.lower(), size)
+        if key in seen:
+            continue
+        seen.add(key)
+        ext = os.path.splitext(filename)[1].lstrip(".").upper()
+        rows.append({
+            "title": filename,
+            "size": size,
+            "format": ext,
+            "source": source,
+        })
+    return rows
+
 
 def execute_search(irc_sock, user, search_term, channel):
     """Search the list file, sending the matching rows exactly as they are stored."""
@@ -156,43 +342,27 @@ def execute_search(irc_sock, user, search_term, channel):
         print(f"[NEW SEARCH] {user} in {channel} searched for '{search_term}'")
         
         # Strip mIRC colour codes and control characters from the search terms
-        raw_clean = search_term.replace('\x02', '').replace('\x1f', '').replace('\x0f', '')
-        raw_clean = re.sub(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?', '', raw_clean)
+        raw_clean = strip_control_codes(search_term)
         
         # Split the search terms
         clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
         search_words = [w.strip().lower() for w in clean_term.split() if w.strip()]
         
-        matches = []
-        total_matches = 0
         # ---------------------------------------------------------------------
         # Straight copy: no reformatting, the file row is sent raw
         # ---------------------------------------------------------------------
-        with open(current_list_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                # Remove hidden null bytes and clean up the line ending
-                line_strip = line.replace('\x00', '').strip()
-                
-                # SAFETY FILTER: only let through genuine file rows, which start with '!'
-                if not line_strip or not line_strip.startswith("!"):
-                    continue
-                
-                line_lower = line_strip.lower()
-                
-                # Does this row contain EVERY search term?
-                is_match = True
-                for word in search_words:
-                    if word not in line_lower:
-                        is_match = False
-                        break
-                
-                if is_match and search_words:
-                    total_matches += 1
-                    
-                    # Keep the row exactly as it is on disk, up to the configured limit
-                    max_results = getattr(config, 'MAX_SEARCH_RESULTS', 5)
-                    if len(matches) < max_results:
-                        matches.append(line_strip)
+        # find_matching_entries() treats an empty search_words as "match
+        # everything" (build_filelists_payload() wants that). execute_search()
+        # never has - a search term that stripped down to zero words (e.g.
+        # "---") has always matched nothing - so that historical behaviour is
+        # preserved explicitly here rather than inside the shared function.
+        max_results = getattr(config, 'MAX_SEARCH_RESULTS', 5)
+        if search_words:
+            found_entries, total_matches = find_matching_entries(search_words, limit=max_results)
+        else:
+            found_entries, total_matches = [], 0
+        # The row is kept exactly as it is on disk - matches go to IRC raw.
+        matches = [entry["line"] for entry in found_entries]
 
         if matches:
             # Send the search header privately to the requester
@@ -201,7 +371,7 @@ def execute_search(irc_sock, user, search_term, channel):
             oserve = sys.modules.get('oserve')
             if oserve:
                 BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-                BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
+                BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
                 BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
                 R = "\x0f"                  # Full reset
                 

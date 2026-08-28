@@ -702,7 +702,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
             
-            # Ta bort eventuella dubbla snedstreck i slutet innan vi mappar mot Linux-disken
+            # Strip any doubled trailing slashes before mapping onto the Linux disk
             clean_win_path = win_path.replace("\\", "/").replace("D:/", "").replace("d:/", "")
 
 
@@ -774,7 +774,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     "is_temporary_zip": True
                 })
                 import db
-                db.save_dcc_queue() # Spika direkt till dcc_queue.txt!
+                db.save_dcc_queue()  # Commit straight to dcc_queue.txt
                 
                 user_pos = len(config.dcc_queue[user_key])
                 print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
@@ -950,7 +950,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             config.user_processing_lock.discard(user.lower())
             
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
-            config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
             
         # This abort returns BEFORE the try/finally that settles the queue row, so without
         # this call the same unreadable entry was re-selected every ~3 seconds forever,
@@ -983,7 +983,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try: irc_sock.send(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} No available DCC ports.\r\n".encode())
         except: pass
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
-            config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
 
         # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
         # NOT charged to the retry budget - a busy spell must not discard good queued files.
@@ -1113,7 +1113,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # 1. Clean up the transfer and the slot immediately
         try:
             with queue_lock if 'queue_lock' in globals() else threading.Lock():
-                config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+                config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.active_downloads = len(config.active_transfers)
         except Exception as trans_clean_err:

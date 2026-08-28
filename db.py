@@ -391,18 +391,21 @@ def load_dcc_queue():
 
     file_path = DCC_QUEUE_FILE
     if not os.path.exists(file_path):
-        config.dcc_queue = {}
+        # In place, not `= {}`: config.dcc_queue is the object runtime.py
+        # holds, and rebinding it here would detach the two (see runtime.py).
+        config.dcc_queue.clear()
         return
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
         if not isinstance(loaded, dict):
             raise ValueError(f"expected a JSON object, got {type(loaded).__name__}")
-        config.dcc_queue = loaded
+        config.dcc_queue.clear()
+        config.dcc_queue.update(loaded)
         total = sum(len(v) for v in loaded.values() if isinstance(v, list))
         print(f"[DB] Loaded {total} saved queue slot(s) for {len(loaded)} user(s) from disk.")
     except Exception as e:
-        config.dcc_queue = {}
+        config.dcc_queue.clear()
         print(f"[DB ERROR] Could not read the saved DCC queue, starting empty: {e}")
         try:
             backup = file_path + ".corrupt"

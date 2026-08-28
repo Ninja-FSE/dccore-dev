@@ -24,6 +24,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import config  # noqa: E402
+import runtime  # noqa: E402
 import announce  # noqa: E402
 import db  # noqa: E402
 import dcc  # noqa: E402
@@ -72,6 +73,9 @@ RUNTIME_CONTAINERS = {
     "vip_queue": list,
     "send_queue": dict,
     "user_processing_lock": set,
+    "broadcast_search_results": list,
+    "fetch_queue": dict,
+    "fetched_bot_lists": dict,
 }
 
 RUNTIME_FLAGS = {
@@ -81,6 +85,11 @@ RUNTIME_FLAGS = {
     "activation_triggered": False,
     "update_inprogress": False,
     "connection_epoch": 1,
+    "broadcast_search_inprogress": False,
+    "broadcast_search_deadline": 0,
+    "broadcast_search_term": "",
+    "last_broadcast_search_at": 0,
+    "fetch_feature_disabled": False,
 }
 
 
@@ -91,12 +100,30 @@ def reset_config(**overrides):
     tests do not run oserve.
     """
     for name, factory in RUNTIME_CONTAINERS.items():
-        setattr(config, name, factory())
+        canonical = getattr(runtime, name, None)
+        if canonical is None:
+            # Not one of runtime.py's containers - send_queue and
+            # user_processing_lock still live elsewhere - so a fresh object
+            # is the right reset for them.
+            setattr(config, name, factory())
+            continue
+        # For runtime.py's containers, empty the canonical object and point
+        # config's name back at it. Emptying alone is not enough: a test may
+        # have rebound config.<name> to a fixture of its own, and unless that
+        # name is brought back to the shared object the next test starts
+        # detached from runtime.py and resets would stop reaching it.
+        if isinstance(canonical, dict):
+            canonical.clear()
+        else:
+            del canonical[:]
+        setattr(config, name, canonical)
     for name, value in RUNTIME_FLAGS.items():
         setattr(config, name, value)
 
     config.queue_lock = threading.Lock()
     config.debug_flood_lock = threading.Lock()
+    config.fetch_queue_lock = threading.Lock()
+    config.fetched_bot_lists_lock = threading.Lock()
 
     config.NICKNAME = "DCCore"
     config.ORIGINAL_NICK = "DCCore"
@@ -302,6 +329,27 @@ class DCCoreTestCase(unittest.TestCase):
         restore_daemon_functions()
         for tree in self._trees:
             tree.cleanup()
+
+    def set_config(self, **overrides):
+        """Set config attributes for the duration of one test, restoring
+        whatever was there before (or removing the attribute if it did not
+        exist) on teardown.
+
+        For tunables reset_config() does not already reset -
+        MAX_FETCH_SLOTS, MAX_FETCH_FILE_SIZE and similar plain config.py
+        literals are module-level state shared across the whole test run,
+        not part of RUNTIME_CONTAINERS/RUNTIME_FLAGS - so a test that sets
+        one directly and never restores it silently changes every test that
+        runs afterwards in the same process.
+        """
+        for name, value in overrides.items():
+            had_value = hasattr(config, name)
+            old_value = getattr(config, name, None)
+            setattr(config, name, value)
+            if had_value:
+                self.addCleanup(setattr, config, name, old_value)
+            else:
+                self.addCleanup(delattr, config, name)
 
     def make_tree(self, **kwargs):
         tree = TempTree(**kwargs)

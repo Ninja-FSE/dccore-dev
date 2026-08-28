@@ -1,0 +1,237 @@
+"""Live state survives a !rehash because of where it lives, not a list.
+
+`!rehash` calls importlib.reload() on config.py, which re-executes the module
+body - so every `dcc_queue = {}` in that file rebound to a new empty container
+and the daemon's accumulated state went with it.
+
+commands.py grew a rescue for that: read the containers out before the reload,
+put them back after. It worked, but it was a hand-maintained list of names,
+and it fell out of step exactly once already - the cross-bot fetch feature
+added two containers without touching the list, so a rehash silently emptied
+every fetched bot list and reported zero active fetches while transfers were
+still running.
+
+The containers now live in runtime.py, which is not reloaded. config.py binds
+the same objects, so the several hundred existing `config.dcc_queue` references
+did not change, and a reload simply re-runs those bindings and picks the same
+live containers back up.
+
+That leaves exactly one way to break it: rebinding instead of mutating.
+`config.dcc_queue = {}` detaches config's name from the object runtime.py still
+holds, and the two drift apart silently from then on. It is an easy mistake -
+the rehash restore path itself made it twice before this change - so the last
+tests here read the source and fail the build on any occurrence.
+"""
+
+import ast
+import contextlib
+import copy
+import importlib
+import io
+import os
+import sys
+import unittest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+import config  # noqa: E402
+import runtime  # noqa: E402
+
+from tests.support import DCCoreTestCase  # noqa: E402
+
+CONTAINERS = [name for name, value in vars(runtime).items()
+              if isinstance(value, (dict, list)) and not name.startswith("_")]
+
+
+class ConfigAndRuntimeShareTheSameObjects(DCCoreTestCase):
+
+    def test_every_container_is_the_same_object_on_both_modules(self):
+        self.assertTrue(CONTAINERS, "runtime.py defines no containers - the "
+                                    "discovery above is wrong, not the code")
+        for name in CONTAINERS:
+            with self.subTest(container=name):
+                self.assertIs(getattr(config, name), getattr(runtime, name),
+                              f"config.{name} is a different object from "
+                              f"runtime.{name}, so writes through one are "
+                              f"invisible to the other")
+
+    def test_a_write_through_config_is_visible_on_runtime(self):
+        config.dcc_queue["someuser"] = ["Track.flac"]
+        self.assertEqual(runtime.dcc_queue, {"someuser": ["Track.flac"]})
+
+    def test_a_write_through_runtime_is_visible_on_config(self):
+        runtime.active_transfers.append({"user": "someuser"})
+        self.assertEqual(config.active_transfers, [{"user": "someuser"}])
+
+
+class ContainersSurviveAReload(DCCoreTestCase):
+    """The behaviour the whole change exists for."""
+
+    def _reload_config(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            importlib.reload(config)
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            importlib.reload(config)
+
+    def test_a_queued_user_is_still_queued_after_a_reload(self):
+        config.dcc_queue["someuser"] = ["Track.flac"]
+        config.active_transfers.append({"user": "someuser"})
+        config.banned_users["baduser"] = 12345
+
+        self._reload_config()
+
+        self.assertEqual(config.dcc_queue, {"someuser": ["Track.flac"]},
+                         "the reload emptied the sharing queue")
+        self.assertEqual(config.active_transfers, [{"user": "someuser"}],
+                         "the reload lost the active transfer list, so the bot "
+                         "would admit work beyond MAX_DCC_SLOTS")
+        self.assertEqual(config.banned_users, {"baduser": 12345},
+                         "the reload released every timed ban")
+
+    def test_every_container_survives_and_stays_attached(self):
+        """Derived rather than named, so a container added to runtime.py in
+        future is covered without anyone editing this test."""
+        for name in CONTAINERS:
+            container = getattr(config, name)
+            if isinstance(container, dict):
+                container["probe"] = 1
+            else:
+                container.append("probe")
+
+        self._reload_config()
+
+        for name in CONTAINERS:
+            with self.subTest(container=name):
+                after = getattr(config, name)
+                self.assertIs(after, getattr(runtime, name),
+                              "the reload left config detached from runtime")
+                self.assertTrue(after, f"the reload emptied {name}")
+
+    def test_scalars_are_still_reset_by_a_reload(self):
+        """Not a regression - a deliberate boundary, asserted so it stays one.
+
+        The binding only works for mutable objects; a bool rebound in config.py
+        could never write through to runtime.py. So the flags stay in config.py
+        and a reload still clears them, which for rar_inprogress is the
+        documented "lock-clearing rehash" escape hatch for a wedged packer.
+        """
+        config.search_inprogress = True
+        config.rar_inprogress = True
+
+        self._reload_config()
+
+        self.assertFalse(config.search_inprogress)
+        self.assertFalse(config.rar_inprogress)
+
+
+class NothingRebindsARuntimeContainer(unittest.TestCase):
+    """The one way left to break this, caught in the source.
+
+    tests/ is exempt: a fixture assigning `config.dcc_queue = {...}` is normal,
+    and tests/support.py's reset_config() re-attaches the name to runtime's
+    object at the start of every test, so a detached fixture cannot leak into
+    the next test.
+    """
+
+    def _production_modules(self):
+        return [f for f in sorted(os.listdir(REPO_ROOT))
+                if f.endswith(".py") and f != "setup.py"]
+
+    def test_the_scan_finds_modules_to_check(self):
+        """Fixture invariant - an empty file list would pass vacuously."""
+        self.assertGreater(len(self._production_modules()), 5)
+
+    def test_no_module_rebinds_a_container(self):
+        offenders = []
+        for filename in self._production_modules():
+            path = os.path.join(REPO_ROOT, filename)
+            with io.open(path, encoding="utf-8") as handle:
+                source = handle.read()
+            for node in ast.walk(ast.parse(source)):
+                targets = []
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+                    targets = [node.target]
+                for target in targets:
+                    if (isinstance(target, ast.Attribute)
+                            and isinstance(target.value, ast.Name)
+                            and target.value.id == "config"
+                            and target.attr in CONTAINERS):
+                        offenders.append(f"{filename}:{node.lineno} "
+                                         f"config.{target.attr}")
+
+        self.assertEqual(
+            offenders, [],
+            "these rebind a runtime container instead of mutating it, which "
+            "detaches config's name from the object runtime.py holds and lets "
+            "the two drift apart silently: " + "; ".join(offenders) +
+            ". Use .clear()/.update() for a dict, or [:] = ... for a list.")
+
+    def test_config_does_not_define_its_own_containers(self):
+        """A container added to config.py instead of runtime.py would not
+        survive a rehash, which is the bug this whole change removes."""
+        # ADMIN_HOSTMASKS is an empty list, but it is a SETTING - the operator
+        # fills it from local_config.py and it is SUPPOSED to be re-read on a
+        # rehash rather than preserved.
+        allowed = {"ADMIN_HOSTMASKS"}
+
+        with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+
+        offenders = []
+        for node in tree.body:
+            # AnnAssign as well as Assign: a container declared as
+            # `dcc_queue: dict = {}` is a different node type, and matching
+            # only Assign would let it past unnoticed.
+            if isinstance(node, ast.Assign):
+                targets, value_node = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets, value_node = [node.target], node.value
+            else:
+                continue
+            if not isinstance(value_node, (ast.Dict, ast.List)):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in allowed:
+                    offenders.append(f"{target.id} (line {node.lineno})")
+
+        self.assertEqual(
+            offenders, [],
+            "config.py defines container(s) of its own: " + ", ".join(offenders) +
+            ". A rehash reloads config.py and would empty them. Define them in "
+            "runtime.py and bind them here, or add to this test's allowlist "
+            "with a reason why losing them on a rehash is correct.")
+
+    def test_runtime_is_not_reloaded_by_a_rehash(self):
+        """The whole mechanism rests on this. If runtime lands in the reload
+        list, every container is emptied again and the tests above still pass,
+        because they never go through !rehash itself."""
+        with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
+            source = handle.read()
+
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "modules_to_reload":
+                    names = [el.value for el in node.value.elts
+                             if isinstance(el, ast.Constant)]
+                    self.assertIn("config", names,
+                                  "fixture invariant: config should be reloaded")
+                    self.assertNotIn(
+                        "runtime", names,
+                        "runtime.py is in modules_to_reload, so a rehash "
+                        "re-executes it and empties every container - exactly "
+                        "the bug moving them there was meant to remove")
+                    return
+        self.fail("could not find modules_to_reload in commands.py")
+
+
+if __name__ == "__main__":
+    unittest.main()

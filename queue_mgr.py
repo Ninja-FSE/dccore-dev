@@ -68,7 +68,7 @@ def queue_worker():
                     # life. The bot reconnected and looked healthy in the channel
                     # while nothing sent through queue_message ever went out again.
                     print(f"[QUEUE NET ERROR] Connection is broken ({net_err}). Clearing VIP and waiting for a new socket.")
-                    config.vip_queue = []
+                    del config.vip_queue[:]
                     time.sleep(1.0)
                     continue
 
