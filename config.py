@@ -25,7 +25,11 @@ DEBUG_CHANNEL = "#flac-serv"
 # the disruption to every other operator sharing those channels, for one
 # search. Defaults to the first entry of CHANNEL above; override explicitly
 # here (or in local_config.py) if that is not the right one.
-BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
+# Derived from CHANNEL - but NOT here. See "DERIVED VALUES" at the end of this
+# file: computing it at this point captures the tracked default above and
+# silently ignores an operator's own CHANNEL. None means "derive it below";
+# setting it explicitly, here or in local_config.py, still wins.
+BROADCAST_SEARCH_CHANNEL = None
 
 # ---------------------------------------------------------------------
 # 3. FILESYSTEM, PATHS AND TEXT STORES
@@ -293,3 +297,22 @@ try:
     print('[CONFIG] Applied overrides from local_config.py')
 except ImportError:
     pass
+
+
+# ---------------------------------------------------------------------
+# 10. DERIVED VALUES (computed AFTER local overrides, never before)
+# ---------------------------------------------------------------------
+# Anything whose value is computed from another setting belongs here, below the
+# local_config import, not next to the setting it reads.
+#
+# BROADCAST_SEARCH_CHANNEL used to be derived at the top of this file, 264
+# lines above the point where overrides land. Its own comment promised it
+# "defaults to the first entry of CHANNEL" - and it did, but to the first entry
+# of the TRACKED default, not the operator's. So an operator who set
+# CHANNEL = "#their-channel" in local_config.py still had a dashboard broadcast
+# search send its @find into #mp3passion: the first channel of the shipped
+# default, a real public channel they may not even be in.
+#
+# Only an unset value is derived, so an explicit choice always wins.
+if not BROADCAST_SEARCH_CHANNEL:
+    BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
