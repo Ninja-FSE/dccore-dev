@@ -54,6 +54,7 @@ import zipfile
 
 import config
 import dcc
+import platform_compat
 import list as list_mod
 
 # A real master-list zip (update_list.py's generate_master_list()) contains
@@ -206,8 +207,16 @@ def _extract_member(zf, info, dest_path, budget):
     pre-check doesn't already rule out. Returns the number of bytes written.
     """
     written = 0
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    with zf.open(info) as src, open(dest_path, "wb") as dst:
+    # Every path below goes through platform_compat.long_path(), the same
+    # way dcc.py wraps each path it touches. A zip member name is chosen by
+    # the remote bot and is never truncated, so a perfectly legal 240-
+    # character name pushes the destination past Windows' 260-character
+    # MAX_PATH and the write fails with "No such file or directory" - for a
+    # file this code is itself trying to create.
+    os.makedirs(platform_compat.long_path(os.path.dirname(dest_path)),
+                exist_ok=True)
+    long_dest = platform_compat.long_path(dest_path)
+    with zf.open(info) as src, open(long_dest, "wb") as dst:
         while True:
             chunk = src.read(_COPY_CHUNK)
             if not chunk:
@@ -279,18 +288,21 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
         rejection was detected.
     """
     try:
-        if os.path.exists(extract_dir):
-            shutil.rmtree(extract_dir)
-        os.makedirs(extract_dir, exist_ok=True)
+        if os.path.exists(platform_compat.long_path(extract_dir)):
+            # The directory itself is short, but a previous archive may have
+            # left long-named members inside it; rmtree cannot delete what
+            # it cannot open, and the prefix is inherited by every child.
+            shutil.rmtree(platform_compat.long_path(extract_dir))
+        os.makedirs(platform_compat.long_path(extract_dir), exist_ok=True)
     except OSError as err:
         return None, f"could not prepare the extraction directory: {err}"
 
     try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
+        with zipfile.ZipFile(platform_compat.long_path(zip_path), "r") as zf:
             infolist = zf.infolist()
             reason = _validate_zip_members(infolist, extract_dir)
             if reason:
-                shutil.rmtree(extract_dir, ignore_errors=True)
+                shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
                 return None, reason
 
             max_total = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
@@ -310,7 +322,7 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
         # (ValueError from _extract_member), and any filesystem error - every
         # one of them means "abort the whole extraction", never "keep what
         # extracted so far".
-        shutil.rmtree(extract_dir, ignore_errors=True)
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return None, f"extraction aborted: {err}"
 
     return _pick_list_file(extract_dir), None
@@ -339,7 +351,13 @@ def process_fetched_list_zip(bot, zip_path):
         print(f"[LIST-FETCH] {bot}'s list zip extracted, but {reason}.")
         return False, reason
 
-    entries, _total = list_mod.find_matching_entries([], limit=None, list_path=list_path)
+    # list.py opens this path directly and does not wrap it itself, so the
+    # prefix goes on here - at the point of use, the same idiom dcc.py uses.
+    # Without it, widening the write path above would only move the failure:
+    # extraction would succeed and the parse would raise FileNotFoundError,
+    # outside the extraction guard, on a file that is plainly there.
+    entries, _total = list_mod.find_matching_entries(
+        [], limit=None, list_path=platform_compat.long_path(list_path))
     rows = list_mod.entries_to_filelist_rows(entries, str(bot).strip())
 
     store = _ensure_fetched_bot_lists()
