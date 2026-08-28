@@ -452,6 +452,10 @@ html, body {
 .status-pill.status-receiving { color: var(--status-sending); }
 .status-pill.status-complete  { color: var(--accent-strong); }
 .status-pill.status-failed    { color: var(--danger); }
+/* Arrived intact, then refused by the extraction guard - not a
+   transfer failure, so deliberately not --danger, but it must not
+   read as a success either. */
+.status-pill.status-rejected  { color: var(--status-frozen); }
 
 /* -------------------------------------------------------- Download tab */
 

@@ -837,5 +837,85 @@ class ListeningStateRenderingTests(unittest.TestCase):
         self.assertIn(".status-pill.status-listening", self.style_css)
 
 
+class RejectedListArchiveRenderingTests(DCCoreTestCase):
+    """A list archive whose bytes arrived intact but whose contents the
+    extraction guard refused.
+
+    dcc_fetch.py deliberately leaves state == "complete" - the transfer
+    really did succeed - and records why the archive was refused in
+    row["list_processing_error"], explicitly "on the row for the dashboard".
+    /api/fetch/status serves it.
+
+    web/app.js never read it. renderDownloads() branched only on state, and
+    read row.reason only in the "failed" arm, so a rejected archive - a
+    zip-slip attempt by a foreign bot included - rendered as "Complete" with
+    a working Download button, indistinguishable from a list that fetched
+    perfectly. The field was served and discarded, and the only record of the
+    attempt was a single stdout line.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"), "r", encoding="utf-8") as f:
+            cls.app_js = f.read()
+        with open(os.path.join(REPO_ROOT, "web", "style.css"), "r", encoding="utf-8") as f:
+            cls.style_css = f.read()
+
+    def _render_downloads_source(self):
+        """Just renderDownloads()'s body.
+
+        Anchored on a two-space-indented `function` for the end, not a bare
+        one: renderDownloads contains an anonymous `function (row)` in its
+        rows.map() call, and stopping at that returns six useless lines.
+        """
+        start = self.app_js.index("  function renderDownloads(")
+        end = self.app_js.index(chr(10) + "  function ", start + 10)
+        return self.app_js[start:end]
+
+    def test_the_dashboard_reads_the_field_at_all(self):
+        """The defect in one line: written three times server side, read zero
+        times client side."""
+        # assertTrue, not assertIn: the haystack is a whole source file and
+        # assertIn prints it in full on failure.
+        self.assertTrue(
+            "list_processing_error" in self._render_downloads_source(),
+            "renderDownloads() still never reads the field the server sets "
+            "for it, so a refused archive still renders as a success")
+
+    def test_download_state_labels_has_an_entry_for_rejected(self):
+        start = self.app_js.index("DOWNLOAD_STATE_LABELS = {")
+        self.assertTrue("rejected:" in self.app_js[start:start + 500],
+                        "no display label for a rejected archive")
+
+    def test_style_css_has_a_rule_for_status_rejected(self):
+        self.assertTrue(".status-pill.status-rejected" in self.style_css,
+                        "the rejected pill has no colour rule, so it renders "
+                        "with the default and reads as an ordinary state")
+
+    def test_the_rejected_check_runs_before_the_complete_arm(self):
+        """Order matters. A rejected row is ALSO state === "complete", so if
+        the complete arm is tested first it gets the Download button anyway
+        and the fix does nothing."""
+        render = self._render_downloads_source()
+        self.assertLess(
+            render.index("if (rejected)"),
+            # The BRANCH, not a mention of it - the comment above that branch
+            # names the same condition and would otherwise match first.
+            render.index('else if (state === "complete")'),
+            "the complete branch is tested before the rejected check, so a "
+            "refused archive still gets a Download button")
+
+    def test_the_server_still_serves_the_field(self):
+        """The other half of the contract. A display fix is worthless if the
+        field ever stops being sent, and that would break silently."""
+        config.fetch_queue = {
+            "req1": {"bot": "evilbot", "state": "complete", "requested_at": 1.0,
+                     "list_processing_error": "zip entry would extract outside"},
+        }
+        rows = webserver.build_fetch_status_payload()
+        self.assertEqual(rows[0]["list_processing_error"],
+                         "zip entry would extract outside")
+
+
 if __name__ == "__main__":
     unittest.main()
