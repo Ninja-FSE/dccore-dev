@@ -186,9 +186,18 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
 
         offenders = []
         for node in tree.body:
-            if not isinstance(node, ast.Assign) or not isinstance(node.value, (ast.Dict, ast.List)):
+            # AnnAssign as well as Assign: a container declared as
+            # `dcc_queue: dict = {}` is a different node type, and matching
+            # only Assign would let it past unnoticed.
+            if isinstance(node, ast.Assign):
+                targets, value_node = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets, value_node = [node.target], node.value
+            else:
                 continue
-            for target in node.targets:
+            if not isinstance(value_node, (ast.Dict, ast.List)):
+                continue
+            for target in targets:
                 if isinstance(target, ast.Name) and target.id not in allowed:
                     offenders.append(f"{target.id} (line {node.lineno})")
 

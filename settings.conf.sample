@@ -44,10 +44,8 @@
 
 #ADMIN_NICK = FLAC,Samoth
 
-# mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
 #CHANNEL = #mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download
 
-# flac-serv"
 #DEBUG_CHANNEL = #flac-serv
 
 

@@ -17,6 +17,7 @@ isinstance(default, int) check matches True and False too and every flag would
 be read as a number.
 """
 
+import ast
 import contextlib
 import importlib
 import io
@@ -330,14 +331,22 @@ class TheSampleStaysInStepWithConfig(unittest.TestCase):
         with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         missing = []
+        # Both node types: an annotated setting (`MAX_DCC_SLOTS: int = 3`) is
+        # an ast.AnnAssign, not an ast.Assign, and matching only the latter
+        # would make this find nothing and pass vacuously.
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        self.addCleanup(lambda: sys.path.remove(os.path.join(REPO_ROOT, "scripts")))
+        import gen_settings_sample
+
         for node in tree.body:
-            if not isinstance(node, ast.Assign):
+            targets, value_node = gen_settings_sample.assignment_parts(node)
+            if targets is None:
                 continue
-            for target in node.targets:
+            for target in targets:
                 if not isinstance(target, ast.Name):
                     continue
                 try:
-                    default = ast.literal_eval(node.value)
+                    default = ast.literal_eval(value_node)
                 except (ValueError, SyntaxError):
                     continue
                 if (settings_file.is_overridable(target.id, default)
@@ -347,6 +356,88 @@ class TheSampleStaysInStepWithConfig(unittest.TestCase):
         self.assertEqual(missing, [],
                          "settings an operator may set but the sample never "
                          "mentions: " + ", ".join(missing))
+
+
+class BothAssignmentFormsAreSeen(unittest.TestCase):
+    """`MAX_DCC_SLOTS = 3` and `MAX_DCC_SLOTS: int = 3` are different AST
+    nodes - Assign and AnnAssign - and the tooling here matched only the
+    first.
+
+    That mattered the moment type annotations were proposed for every
+    setting (issue #100): the generator would have emitted a sample with
+    nothing in it, and two of the checks would have found nothing and passed
+    vacuously, reporting green while guarding nothing.
+    """
+
+    def _generator(self):
+        scripts = os.path.join(REPO_ROOT, "scripts")
+        sys.path.insert(0, scripts)
+        self.addCleanup(lambda: scripts in sys.path and sys.path.remove(scripts))
+        import gen_settings_sample
+        return gen_settings_sample
+
+    def test_both_forms_give_the_same_name_and_value(self):
+        generator = self._generator()
+        for source in ("MAX_DCC_SLOTS = 3", "MAX_DCC_SLOTS: int = 3"):
+            with self.subTest(source=source):
+                targets, value = generator.assignment_parts(ast.parse(source).body[0])
+                self.assertEqual([t.id for t in targets], ["MAX_DCC_SLOTS"])
+                self.assertEqual(ast.literal_eval(value), 3)
+
+    def test_a_bare_annotation_has_a_name_but_no_value(self):
+        """`NICKNAME: str` declares the type without giving a value."""
+        targets, value = self._generator().assignment_parts(
+            ast.parse("NICKNAME: str").body[0])
+
+        self.assertEqual([t.id for t in targets], ["NICKNAME"])
+        self.assertIsNone(value)
+
+    def test_something_that_is_not_an_assignment_is_ignored(self):
+        """Control - a def or an import must not be mistaken for a setting."""
+        targets, value = self._generator().assignment_parts(
+            ast.parse("import os").body[0])
+        self.assertIsNone(targets)
+
+
+class AHashInsideAValueIsNotAComment(unittest.TestCase):
+    """The generated sample carried a junk line above every channel setting.
+
+    `_doc_lines()` found a setting's inline comment by splitting the source
+    line on "#", which cuts inside the string literal for
+
+        CHANNEL = "#mp3passion,#mp3servers,..."
+
+    inventing a comment out of the value's own text. It shipped, above both
+    CHANNEL and DEBUG_CHANNEL.
+    """
+
+    def _doc_lines(self, source):
+        scripts = os.path.join(REPO_ROOT, "scripts")
+        sys.path.insert(0, scripts)
+        self.addCleanup(lambda: scripts in sys.path and sys.path.remove(scripts))
+        import gen_settings_sample
+        return gen_settings_sample._doc_lines([source], ast.parse(source).body[0])
+
+    def test_a_hash_in_the_value_produces_no_comment(self):
+        self.assertEqual(self._doc_lines('CHANNEL = "#mp3passion,#mp3servers"'), [])
+
+    def test_a_real_inline_comment_is_still_found(self):
+        """Control. The fix must not stop finding genuine comments, which are
+        most of the sample's documentation."""
+        self.assertEqual(
+            self._doc_lines("MAX_DCC_SLOTS = 3      # Maximum simultaneous live downloads"),
+            ["Maximum simultaneous live downloads"])
+
+    def test_a_hash_in_the_value_and_a_real_comment_after_it(self):
+        """Both on one line - the only case that tells the two apart."""
+        self.assertEqual(
+            self._doc_lines('CHANNEL = "#chan"   # the channels to join'),
+            ["the channels to join"])
+
+    def test_an_annotated_setting_keeps_its_comment(self):
+        self.assertEqual(
+            self._doc_lines("MAX_DCC_SLOTS: int = 3   # how many at once"),
+            ["how many at once"])
 
 
 if __name__ == "__main__":
