@@ -376,9 +376,15 @@
 
   // -------------------------------------------------------------- Downloads
 
+  // "rejected" is not a state dcc_fetch.py ever writes. A list archive whose
+  // bytes arrived intact but which the extraction guard refused keeps
+  // state === "complete", because the transfer really did succeed - the
+  // reason it was refused is carried separately, in list_processing_error.
+  // This is the display-side name for that combination.
   var DOWNLOAD_STATE_LABELS = {
     pending: "Pending", offered: "Offered", listening: "Listening",
-    receiving: "Receiving", complete: "Complete", failed: "Failed"
+    receiving: "Receiving", complete: "Complete", failed: "Failed",
+    rejected: "Rejected"
   };
 
   function loadDownloads() {
@@ -395,13 +401,30 @@
     }
     el.downloadsBody.innerHTML = rows.map(function (row) {
       var state = row.state || "pending";
-      var label = DOWNLOAD_STATE_LABELS[state] || state;
+      // dcc_fetch.py records a refused list archive on the row explicitly
+      // "for the dashboard", and /api/fetch/status serves it - but nothing
+      // here read it, so the field was served and discarded. A zip-slip
+      // attempt from a foreign bot rendered as "Complete" with a working
+      // Download button, indistinguishable from a list that fetched
+      // perfectly, and the only record of the attempt was one stdout line.
+      var rejected = !!row.list_processing_error;
+      var displayState = rejected ? "rejected" : state;
+      var label = DOWNLOAD_STATE_LABELS[displayState] || displayState;
       var progress = row.total_size
         ? Math.round(100 * (row.bytes_received || 0) / row.total_size) + "%"
         : (row.bytes_received ? row.bytes_received + " B" : "—");
-      var action = state === "complete"
-        ? "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a>"
-        : (state === "failed" ? "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span>" : "");
+      // Order matters: a rejected row is also state === "complete", so it has
+      // to be tested first or it gets the Download button anyway.
+      var action;
+      if (rejected) {
+        action = "<span class=\"col-dim\">" + escapeHtml(row.list_processing_error) + "</span>";
+      } else if (state === "complete") {
+        action = "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a>";
+      } else if (state === "failed") {
+        action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span>";
+      } else {
+        action = "";
+      }
       // A "list" row (see dcc_fetch.py's request_type) starts with no
       // filename at all - we sent a bare "@<bot>" and cannot know what the
       // target bot will name its list zip until it actually answers. Show
@@ -413,7 +436,7 @@
       return "<tr>" +
         "<td class=\"col-mono\">" + escapeHtml(row.bot) + "</td>" +
         "<td class=\"col-dim col-mono\">" + escapeHtml(filenameDisplay) + "</td>" +
-        "<td><span class=\"status-pill status-" + escapeHtml(state) + "\">" + escapeHtml(label) + "</span></td>" +
+        "<td><span class=\"status-pill status-" + escapeHtml(displayState) + "\">" + escapeHtml(label) + "</span></td>" +
         "<td class=\"col-mono\">" + escapeHtml(progress) + "</td>" +
         "<td>" + action + "</td>" +
         "</tr>";
