@@ -215,10 +215,10 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     current_time_str = time.strftime("%I:%M %p").lower().lstrip("0")
     
     # ---------------------------------------------------------------------
-    # DITT CENTRALSTYRDA BLOCK-TEMA (Exakt kopia av din vackra kanalreklam!)
+    # The central block theme, an exact copy of the channel advert's framing.
     # ---------------------------------------------------------------------
     BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-    BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
+    BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
     BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
     R = "\x0f"                  # Full reset after each section
     B = "\x02"                  # Bold, for live figures and triggers
@@ -438,10 +438,10 @@ def send_search_result_header(user, search_term, match_count, channel):
     queued_count = dcc.get_total_queued_count()
     sending_count = min(match_count, config.MAX_SEARCH_RESULTS)
     
-    # DITT LYX-TEMA MED DEN VITA TEXT-BOXEN
+    # The block theme with the white text box.
     BG_RED_BLOCK  = "\x0304,05" 
     BG_CYAN_BLOCK = "\x0310,10" 
-    BG_TEXT_BOX   = "\x0301,00" # Din vita bakgrundsplatta!
+    BG_TEXT_BOX   = "\x0301,00"  # The white background plate
     R = "\x0f"                  
     B = "\x02"                  
     
@@ -486,7 +486,7 @@ def send_dcc_queue_notice(user, file_name, position):
     if oserve:
         # The mIRC colour blocks and separators
         BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-        BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
+        BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
         BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
         R = "\x0f"                  # Full reset
         
@@ -510,10 +510,10 @@ def send_debug(msg_text, category="INFO"):
     # The extended block theme: bright white background, guarded against colour clashes
     # ---------------------------------------------------------------------
     BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-    BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
+    BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
     BG_TEXT_BOX   = "\x0301,00"  # Black text on a bright white background
     R = "\x0f"                  # Full reset
-    B = "\x02"                  # Fetstil
+    B = "\x02"                  # Bold
     
     # 1. The opening block: the timestamp, framed in white
     msg = f"PRIVMSG {config.DEBUG_CHANNEL} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} [{current_time}] {B}DEBUG{B} "
@@ -614,7 +614,7 @@ def send_pack_error_notice(irc_sock, user):
     BG_TEXT_BOX   = "\x0301,00" 
     B = "\x02"                  
     
-    # Vi bygger meddelandet i din officiella ram
+    # Build the message inside the standard frame
     msg = (
         f"NOTICE {user} :"
         f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} DCC-PACK: {B}Access Denied{B} "

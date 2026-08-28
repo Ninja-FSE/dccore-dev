@@ -459,7 +459,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
             announce.last_announce_time = time.time()
             
         # ---------------------------------------------------------------------
-        # 4. HELAUTOMATISK KANAL-SYNK (JOIN NYA / PART BORTTAGNA)
+        # 4. FULLY AUTOMATIC CHANNEL SYNC (JOIN NEW / PART REMOVED)
         # ---------------------------------------------------------------------
         oserve = sys.modules.get('oserve')
         irc_sock = getattr(oserve, 'irc_connection', None)

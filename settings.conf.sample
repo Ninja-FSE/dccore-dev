@@ -78,7 +78,7 @@
 
 
 [limits, slots and queue control]
-# Max antal samtidiga live-nedladdningar
+# Maximum simultaneous live downloads
 #MAX_DCC_SLOTS = 3
 
 # Most files a single user may queue
@@ -87,7 +87,7 @@
 # Most files across every queue combined
 #MAX_GLOBAL_QUEUE = 1000
 
-# Max antal textrader som spottas ut vid @find
+# Maximum result lines sent in reply to an @find
 #MAX_SEARCH_RESULTS = 5
 
 # Delay in seconds for the ordinary message queue

@@ -18,6 +18,23 @@ and each of these tests exists because of one of them:
 So one test looks for non-ASCII, and one looks for Swedish WORDS, because
 neither finds what the other does.
 
+A THIRD ROUND, AND WHAT IT SAYS ABOUT WORD LISTS
+
+The word list below missed sixteen more comments across six modules - the
+colour-block themes in announce.py and list.py, a channel-sync header in
+commands.py, two settings in config.py, a path comment in dcc.py and two
+sentences in irc.py - and this test passed the entire time.
+
+Two of them had reached settings.conf.sample, a GENERATED file an operator
+reads, so the miss was shipping Swedish to users rather than merely leaving it
+in a comment.
+
+That is the same failure the docstring above already describes, one round
+later: a check built from a list finds what is on the list. The list is now
+longer, which helps and does not fix the shape of the problem. The honest
+summary is that this test raises the cost of reintroducing Swedish; it does
+not prove there is none.
+
 WHY THIS IS NOT MERELY TIDINESS
 
 print() encodes with whatever code page the attached stream has. cp1252
@@ -48,7 +65,18 @@ SWEDISH = re.compile(
     r"vantar|packar|raderade|filerna|mappen|namnet|minnet|heltal|antalet|"
     r"totala|botens|gick|handskakning|understreck|apostrof|saknar|"
     r"originalet|matchar|textfiler|huvudkanaler|konsolen|slutnotis|"
-    r"tidtagaruret|kanalen|fildelning|sokning|sokvag|listan|kon|fran"
+    r"tidtagaruret|kanalen|fildelning|sokning|sokvag|listan|kon|fran|"
+    # Round two. Every word below was in the tree while this test reported
+    # it clean - sixteen comments across six modules, two of which had
+    # reached the generated, user-facing settings.conf.sample.
+    r"turkos|kant|fetstil|understruken|kursiv|bakgrundsplatta|vita|"
+    r"antal|samtidiga|nedladdningar|textrader|spottas|vid|"
+    r"helautomatisk|synk|borttagna|nya|spika|direkt|"
+    r"tystade|annonsering|kanalannonsering|reklamklockan|kanalreklam|"
+    r"felmeddelande|minsta|utan|vakthunden|trigga|samma|"
+    r"aktiveringslogik|eventuella|dubbla|snedstreck|slutet|innan|mappar|"
+    r"mot|bygger|meddelandet|officiella|centralstyrda|exakt|kopia|vackra|"
+    r"paustid|sekunder|mellan|varje"
     r")\b",
     re.IGNORECASE,
 )
