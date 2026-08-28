@@ -1407,14 +1407,25 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         entry = config.fetched_bot_lists.get("otherbot")
         self.assertIsNotNone(entry, "a successful list fetch must populate config.fetched_bot_lists")
         self.assertEqual(entry["bot"], "otherbot")
-        titles = [e["title"] for e in entry["entries"]]
+        # Issue #76, option 2: no "entries" key is stored any more - just a
+        # path and a count - so read it back the same way webserver.py does,
+        # on demand.
+        import list_fetch
+        rows, _total, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+        self.assertIsNone(error)
+        titles = [e["title"] for e in rows]
         self.assertIn("Track One.flac", titles)
 
     def test_a_second_fetch_for_the_same_bot_replaces_not_accumulates(self):
         import list_fetch
+        stale_dir = os.path.join(self.tmp, "stale")
+        os.makedirs(stale_dir, exist_ok=True)
+        stale_list_path = os.path.join(stale_dir, "stale-list.txt")
+        with open(stale_list_path, "w", encoding="utf-8") as f:
+            f.write("!otherbot Stale.flac  ::INFO:: 1.0MB\n")
         config.fetched_bot_lists["otherbot"] = {
             "bot": "otherbot", "fetched_at": 1.0,
-            "entries": [{"title": "Stale.flac", "size": "1.0MB", "format": "FLAC", "source": "otherbot"}],
+            "list_path": stale_list_path, "entry_count": 1,
             "source_zip": "old.zip",
         }
 
@@ -1437,7 +1448,9 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         server_thread.join(timeout=5.0)
 
         entry = config.fetched_bot_lists["otherbot"]
-        titles = [e["title"] for e in entry["entries"]]
+        rows, _total, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+        self.assertIsNone(error)
+        titles = [e["title"] for e in rows]
         self.assertNotIn("Stale.flac", titles)
         self.assertIn("Track One.flac", titles)
 

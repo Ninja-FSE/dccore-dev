@@ -45,6 +45,19 @@ def _write_zip(path, members):
         f.write(_zip_bytes(members))
 
 
+def _read_all(entry):
+    """Test helper: re-parse a whole stored entry via the same on-demand
+    reader webserver.py uses, with a limit high enough that it never actually
+    clips anything in this test suite's small fixtures - a stand-in for "give
+    me every row" in tests written before pagination existed, so most of them
+    did not need to change shape just to keep testing what they always
+    tested. Returns the row list alone; callers that care about total/error
+    call list_fetch.get_fetched_bot_page() directly instead."""
+    rows, _total, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+    assert error is None, f"unexpected read error: {error}"
+    return rows
+
+
 def _list_txt(base_name="OtherBot", files=(("Track One.flac", "10.0MB"),)):
     lines = [
         "List of 1 Files (10.0MB) generated on Jan 1st\n",
@@ -77,10 +90,20 @@ class SafeExtractionTests(DCCoreTestCase):
         self.assertIsNone(reason)
         entry = config.fetched_bot_lists["otherbot"]
         self.assertEqual(entry["bot"], "otherbot")
-        titles = [row["title"] for row in entry["entries"]]
+        # Issue #76, option 2: no "entries" key at all - a path and a
+        # precomputed count instead, so nothing here is retained in memory.
+        self.assertNotIn("entries", entry)
+        self.assertTrue(entry["list_path"])
+        self.assertTrue(os.path.exists(entry["list_path"]),
+                         "the extracted .txt must still be on disk for later, "
+                         "on-demand reads to work")
+        self.assertEqual(entry["entry_count"], 1)
+
+        rows = _read_all(entry)
+        titles = [row["title"] for row in rows]
         self.assertEqual(titles, ["Track One.flac"])
-        self.assertEqual(entry["entries"][0]["size"], "10.0MB")
-        self.assertEqual(entry["entries"][0]["source"], "otherbot")
+        self.assertEqual(rows[0]["size"], "10.0MB")
+        self.assertEqual(rows[0]["source"], "otherbot")
 
     def test_a_second_fetch_for_the_same_bot_replaces_the_first(self):
         _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt(files=(("First.flac", "1.0MB"),)))])
@@ -90,7 +113,9 @@ class SafeExtractionTests(DCCoreTestCase):
         list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
 
         self.assertEqual(len(config.fetched_bot_lists), 1)
-        titles = [row["title"] for row in config.fetched_bot_lists["otherbot"]["entries"]]
+        entry = config.fetched_bot_lists["otherbot"]
+        self.assertEqual(entry["entry_count"], 1)
+        titles = [row["title"] for row in _read_all(entry)]
         self.assertEqual(titles, ["Second.flac"])
 
     def test_bot_nick_is_case_insensitively_keyed_but_preserves_display_case(self):
@@ -206,7 +231,7 @@ class SafeExtractionTests(DCCoreTestCase):
         ok, reason = list_fetch.process_fetched_list_zip("ambiguousbot", self.zip_path)
 
         self.assertTrue(ok, reason)
-        titles = [row["title"] for row in config.fetched_bot_lists["ambiguousbot"]["entries"]]
+        titles = [row["title"] for row in _read_all(config.fetched_bot_lists["ambiguousbot"])]
         self.assertIn("Real Track.flac", titles)
 
     def test_the_rar_side_list_is_excluded_when_a_real_master_list_is_also_present(self):
@@ -220,8 +245,142 @@ class SafeExtractionTests(DCCoreTestCase):
         ok, reason = list_fetch.process_fetched_list_zip("rarbot", self.zip_path)
 
         self.assertTrue(ok, reason)
-        titles = [row["title"] for row in config.fetched_bot_lists["rarbot"]["entries"]]
+        titles = [row["title"] for row in _read_all(config.fetched_bot_lists["rarbot"])]
         self.assertEqual(titles, ["Genuine.flac"])
+
+
+class OnDemandReadingTests(DCCoreTestCase):
+    """Issue #76, option 2: process_fetched_list_zip() no longer stores the
+    parsed rows - only a path and a precomputed count - and
+    get_fetched_bot_page() re-parses that path fresh on every call, the same
+    "no caching between calls" contract webserver.build_filelists_payload()
+    already has for this bot's own list.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-listfetch-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.zip_path = os.path.join(self.tmp, "incoming.zip")
+
+    def test_entry_count_matches_the_real_post_dedup_row_count(self):
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt(files=(
+            ("A.flac", "1.0MB"), ("B.flac", "2.0MB"),
+            # Same filename+size twice - entries_to_filelist_rows() dedupes
+            # this down to one row, and entry_count must reflect THAT count,
+            # not the raw pre-dedup line count.
+            ("A.flac", "1.0MB"),
+        )))])
+
+        ok, reason = list_fetch.process_fetched_list_zip("dedupbot", self.zip_path)
+        self.assertTrue(ok, reason)
+
+        entry = config.fetched_bot_lists["dedupbot"]
+        rows = _read_all(entry)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(entry["entry_count"], len(rows))
+
+    def test_on_demand_read_returns_the_same_rows_the_old_stored_approach_would_have(self):
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt(files=(
+            ("Track One.flac", "10.0MB"),
+        )))])
+        ok, reason = list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
+        self.assertTrue(ok, reason)
+        entry = config.fetched_bot_lists["otherbot"]
+
+        # What the OLD code would have stored under "entries", reconstructed
+        # independently via the same list.py pipeline this test module
+        # already trusts (see _list_txt()/write_master_list() elsewhere).
+        import list as list_mod
+        expected_entries, _total = list_mod.find_matching_entries(
+            [], limit=None, list_path=entry["list_path"])
+        expected_rows = list_mod.entries_to_filelist_rows(expected_entries, "otherbot")
+
+        rows = _read_all(entry)
+        self.assertEqual(rows, expected_rows)
+
+    def test_the_extracted_file_survives_on_disk_after_a_successful_fetch(self):
+        """Nothing deletes the extracted .txt after a successful fetch - it
+        must still be there for a LATER, independent on-demand read to work,
+        including one long after process_fetched_list_zip() itself returned."""
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt())])
+        list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
+
+        entry = config.fetched_bot_lists["otherbot"]
+        self.assertTrue(os.path.exists(entry["list_path"]))
+        # A second, independent read - proving no state from the first read
+        # was needed for this to work.
+        rows = _read_all(entry)
+        self.assertEqual([r["title"] for r in rows], ["Track One.flac"])
+
+    def test_a_missing_list_path_is_handled_gracefully_not_raised(self):
+        """The operator manually clears data/fetched/ (or some other bug
+        removes the file) after a successful fetch - a later on-demand read
+        must return a clear error, never an unhandled exception."""
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt())])
+        list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
+        entry = config.fetched_bot_lists["otherbot"]
+
+        os.remove(entry["list_path"])
+
+        rows, total, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
+        self.assertEqual(rows, [])
+        self.assertEqual(total, 0)
+        self.assertIsNotNone(error)
+        self.assertIn("otherbot", error.lower())
+
+    def test_an_unreadable_list_path_is_handled_gracefully_not_raised(self):
+        """A file that still exists but can no longer be opened (permissions
+        changed, a network mount dropped) is the same class of problem as a
+        missing file, just discovered a moment later - inside the open()
+        call rather than an os.path.exists() check."""
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt())])
+        list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
+        entry = config.fetched_bot_lists["otherbot"]
+
+        if os.name == "nt" or os.geteuid() == 0:
+            self.skipTest("permission bits are not enforced for this process "
+                           "(root, or not POSIX) - cannot exercise this path")
+        os.chmod(entry["list_path"], 0o000)
+        self.addCleanup(os.chmod, entry["list_path"], 0o644)
+
+        rows, total, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
+        self.assertEqual(rows, [])
+        self.assertEqual(total, 0)
+        self.assertIsNotNone(error)
+
+    def test_a_missing_list_path_field_is_handled_gracefully(self):
+        """Defense in depth: an entry somehow missing the field entirely
+        (a future bug, or hand-edited state) must not raise either."""
+        rows, total, error = list_fetch.get_fetched_bot_page(
+            {"bot": "ghostbot"}, 0, 100)
+        self.assertEqual(rows, [])
+        self.assertEqual(total, 0)
+        self.assertIsNotNone(error)
+
+    def test_pagination_slices_the_freshly_parsed_rows(self):
+        files = tuple((f"Track {i:02d}.flac", "1.0MB") for i in range(10))
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt(files=files))])
+        list_fetch.process_fetched_list_zip("pagebot", self.zip_path)
+        entry = config.fetched_bot_lists["pagebot"]
+
+        page, total, error = list_fetch.get_fetched_bot_page(entry, 3, 4)
+        self.assertIsNone(error)
+        self.assertEqual(total, 10)
+        self.assertEqual([r["title"] for r in page],
+                         ["Track 03.flac", "Track 04.flac", "Track 05.flac", "Track 06.flac"])
+
+    def test_an_offset_past_the_end_returns_an_empty_page_with_the_correct_total(self):
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt())])
+        list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
+        entry = config.fetched_bot_lists["otherbot"]
+
+        page, total, error = list_fetch.get_fetched_bot_page(entry, 999, 100)
+        self.assertIsNone(error)
+        self.assertEqual(page, [])
+        self.assertEqual(total, 1)
 
 
 class ExtractedTextSizeCeiling(DCCoreTestCase):
@@ -490,7 +649,8 @@ class ConcurrentFetchesForOneBot(SafeExtractionTests):
         bot, _results = self._run_pinned_pair()
 
         entry = config.fetched_bot_lists[bot]
-        archives = {row["title"][0] for row in entry["entries"] if row.get("title")}
+        rows = _read_all(entry)
+        archives = {row["title"][0] for row in rows if row.get("title")}
         self.assertEqual(
             len(archives), 1,
             f"the stored list mixes rows from both archives: {sorted(archives)}")
@@ -510,6 +670,123 @@ class ConcurrentFetchesForOneBot(SafeExtractionTests):
                 self.assertIn(which, results, "the fetch never returned")
                 ok, reason = results[which]
                 self.assertTrue(ok, f"a clean archive was refused: {reason}")
+
+
+class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
+    """Issue #76 regression: get_fetched_bot_page() used to take NO lock at
+    all, while process_fetched_list_zip() extracts by rmtree-ing the shared
+    extract_dir and then rewriting the exact same list_path in place
+    (open(long_dest, "wb") - no temp-file-then-rename). A same-bot re-fetch
+    reuses that exact path (list_extract_dir() keys only on the bot nick), so
+    a concurrent read could land mid-rewrite: not "file missing" (already
+    handled cleanly elsewhere as a clean error), but a torn, partially
+    rewritten file silently parsed into a wrong, in-between row count - a
+    plain 200-shaped result with no exception at all.
+
+    This races a writer thread doing real re-fetches (no artificial pinning
+    or hooks - the bug needs none) against reader threads calling
+    get_fetched_bot_page() in a tight loop, and asserts every single read's
+    `total` is one of the two genuinely valid row counts - never anything
+    else. Before the fix (get_fetched_bot_page() sharing process_fetched_
+    list_zip()'s _lock()), this reliably observed several dozen out-of-range
+    totals; after it, zero, because a read can no longer land inside an
+    in-progress rewrite.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-listfetch-race-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+
+    def _make_zip(self, path, count):
+        # The SAME member name every time, so _pick_list_file() always
+        # resolves to the identical extract_dir/SomeBot-List.txt path - the
+        # exact condition the bug report describes: a same-bot re-fetch
+        # reuses the EXACT SAME list_path an in-flight reader might already
+        # be reading, rather than switching to a differently-named file
+        # (which would just hit the already-handled "missing" path instead).
+        body = "".join(
+            f"!SomeBot Track{i}.flac  ::INFO:: 5.00MB\n" for i in range(count))
+        _write_zip(path, [("SomeBot-List.txt", body)])
+
+    def test_reads_never_observe_a_torn_total_during_concurrent_refetches(self):
+        import threading
+
+        bot = "racebot"
+        count_a, count_b = 800, 1400
+        zip_a = os.path.join(self.tmp, "a.zip")
+        zip_b = os.path.join(self.tmp, "b.zip")
+        self._make_zip(zip_a, count_a)
+        self._make_zip(zip_b, count_b)
+
+        # Seed an initial fetch so readers always have something on record
+        # from the moment they start.
+        ok, reason = list_fetch.process_fetched_list_zip(bot, zip_a)
+        self.assertTrue(ok, reason)
+
+        READER_THREADS = 2
+        READS_PER_THREAD = 40
+        # A generous safety cap on how many times the writer will re-fetch
+        # while waiting for the readers to finish their fixed quota of reads
+        # - not the thing that stops the writer under normal conditions (the
+        # readers finishing is), just a backstop so a stuck reader cannot
+        # wedge this test into looping forever.
+        MAX_FETCH_ROUNDS = 2000
+        stop_writer = threading.Event()
+        state_lock = threading.Lock()
+        errors = []
+        bad_totals = []
+        read_count = [0]
+        readers_done = [0]
+
+        def writer():
+            i = 0
+            while not stop_writer.is_set() and i < MAX_FETCH_ROUNDS:
+                zip_path = zip_a if i % 2 == 0 else zip_b
+                ok, reason = list_fetch.process_fetched_list_zip(bot, zip_path)
+                if not ok:
+                    with state_lock:
+                        errors.append(f"re-fetch {i} on {zip_path!r} failed: {reason}")
+                    break
+                i += 1
+
+        def reader():
+            for _ in range(READS_PER_THREAD):
+                entry = config.fetched_bot_lists.get(bot)
+                _page, total, error = list_fetch.get_fetched_bot_page(entry, 0, 10 ** 9)
+                with state_lock:
+                    read_count[0] += 1
+                    if error is None and total not in (count_a, count_b):
+                        bad_totals.append(total)
+            with state_lock:
+                readers_done[0] += 1
+                if readers_done[0] == READER_THREADS:
+                    stop_writer.set()
+
+        threads = [threading.Thread(target=writer, daemon=True)]
+        threads += [threading.Thread(target=reader, daemon=True)
+                    for _ in range(READER_THREADS)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+            self.assertFalse(thread.is_alive(),
+                             "a writer/reader thread never finished within the "
+                             "timeout - possible deadlock between the read and "
+                             "write lock paths")
+
+        self.assertEqual(errors, [], f"a re-fetch failed unexpectedly: {errors}")
+        self.assertEqual(
+            read_count[0], READER_THREADS * READS_PER_THREAD,
+            "not every reader thread completed its full quota of reads")
+        self.assertEqual(
+            bad_totals, [],
+            f"observed {len(bad_totals)} torn read(s) out of {read_count[0]} "
+            f"whose total was neither {count_a} nor {count_b} (a same-bot "
+            f"re-fetch raced a read into a partially-rewritten list file): "
+            f"{bad_totals[:10]}")
 
 
 class FallbackLockIsShared(DCCoreTestCase):
@@ -647,7 +924,7 @@ class LongMemberNames(SafeExtractionTests):
 
         self.assertTrue(ok, f"a legal long member name was refused: {reason}")
         entry = config.fetched_bot_lists["longbot"]
-        self.assertEqual([row["title"] for row in entry["entries"]],
+        self.assertEqual([row["title"] for row in _read_all(entry)],
                          ["Track One.flac"])
 
     def test_the_destination_really_is_past_max_path(self):

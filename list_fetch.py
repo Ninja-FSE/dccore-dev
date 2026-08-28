@@ -362,11 +362,26 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
 
 def process_fetched_list_zip(bot, zip_path):
     """Entry point, called by dcc_fetch.py once a request_type="list" fetch
-    reaches 'complete'. Safely extracts `zip_path`, locates and parses the
-    master-list .txt inside it via list.py's existing pipeline, and stores
-    the result in config.fetched_bot_lists keyed by lowercased bot nick -
-    REPLACING any previous entry for the same bot, per the operator's
-    explicit "switchable, not accumulating" requirement.
+    reaches 'complete'. Safely extracts `zip_path`, locates the master-list
+    .txt inside it, and stores a REFERENCE to it - not its parsed contents -
+    in config.fetched_bot_lists keyed by lowercased bot nick, REPLACING any
+    previous entry for the same bot, per the operator's explicit
+    "switchable, not accumulating" requirement.
+
+    Issue #76, option 2: earlier versions of this function parsed the whole
+    extracted list here and stored the resulting row list permanently in
+    memory - alongside the byte-size cap above, that meant the single largest
+    cost of a fetched list (every "!" line, forever, until the next fetch or
+    a process restart) was paid once at fetch time and then never freed. This
+    still does ONE parse+dedup pass below (to prove the file is genuinely
+    parseable - a file that merely LOOKS like a valid master list but is
+    actually garbage must still be caught here, same as before - and to get
+    an accurate post-dedup row count for the dashboard switcher) but keeps
+    only that count afterward. get_fetched_bot_page() below re-parses
+    `list_path` fresh on every later request, exactly the way
+    webserver.build_filelists_payload() has always done for THIS bot's own
+    list - nothing about a fetched list is retained in memory between views
+    except this small summary dict.
 
     Returns (success, reason): reason is None on success, otherwise a short
     human-readable string suitable for logging/dashboard display. Never
@@ -385,6 +400,17 @@ def process_fetched_list_zip(bot, zip_path):
     time, so the peak cost of a parse is one list instead of one per slot.
     Extraction is a background step measured in seconds, so the wait costs
     nothing that matters.
+
+    get_fetched_bot_page() below acquires this SAME lock around its read, for
+    exactly the reason this docstring already gives for writers: extraction
+    reuses the same on-disk list_path a concurrent read could be parsing
+    (list_extract_dir() keys on the bot nick, not on any per-fetch id), and
+    rewrites it via rmtree+open("wb") rather than write-then-rename. Without
+    the read side sharing this lock, a same-bot re-fetch could race a read
+    into a torn, partially-rewritten file - not an exception, a silently
+    wrong `total` and row set. The bounded stall this adds to a read (waiting
+    out an in-progress fetch, itself already a background step measured in
+    seconds) is the same accepted tradeoff as above, extended to reads.
     """
     with _lock():
         return _process_fetched_list_zip_unlocked(bot, zip_path)
@@ -425,18 +451,118 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
     # Without it, widening the write path above would only move the failure:
     # extraction would succeed and the parse would raise FileNotFoundError,
     # outside the extraction guard, on a file that is plainly there.
+    #
+    # This is the ONE courtesy parse - see process_fetched_list_zip()'s
+    # docstring. `rows` is only ever used for its length below; nothing here
+    # keeps a reference to it (or to `entries`) once entry_count is taken, so
+    # both are free to be garbage-collected as soon as this function returns.
     entries, _total = list_mod.find_matching_entries(
         [], limit=None, list_path=platform_compat.long_path(list_path))
     rows = list_mod.entries_to_filelist_rows(entries, str(bot).strip())
+    entry_count = len(rows)
 
     store = _ensure_fetched_bot_lists()
     store[str(bot).strip().lower()] = {
         "bot": str(bot).strip(),
         "fetched_at": time.time(),
-        "entries": rows,
+        # The plain, already-absolute path _pick_list_file() returned -
+        # NOT long_path()-wrapped here. Every reader of this field (the parse
+        # call just above, and get_fetched_bot_page() below) wraps it with
+        # platform_compat.long_path() itself, at the point of use - the same
+        # "wrap on use, not on store" idiom the rest of this module already
+        # follows for `list_path`/`extract_dir`. Storing the plain path keeps
+        # it portable to whatever wraps it next, rather than baking in
+        # Windows' "\\\\?\\" prefix (a no-op on Linux, but still a form this
+        # value should not permanently commit to).
+        "list_path": list_path,
+        "entry_count": entry_count,
         "source_zip": os.path.basename(zip_path),
     }
 
-    print(f"[LIST-FETCH] Stored {len(rows)} entries from {bot}'s fetched list "
-          f"({os.path.basename(list_path)}).")
+    print(f"[LIST-FETCH] Stored a reference to {entry_count} entries from "
+          f"{bot}'s fetched list ({os.path.basename(list_path)}) - parsed "
+          f"fresh from disk on each view, not retained in memory.")
     return True, None
+
+
+def get_fetched_bot_page(entry, offset, limit):
+    """Issue #76, option 2's on-demand reader: given one
+    config.fetched_bot_lists[...] entry (the dict process_fetched_list_zip()
+    above builds - "bot", "fetched_at", "list_path", "entry_count",
+    "source_zip"), re-parse its `list_path` FRESH via
+    list.find_matching_entries() + list.entries_to_filelist_rows() - no
+    caching between calls, exactly like webserver.build_filelists_payload()
+    already does for this bot's own list - dedup, and return one page of the
+    result.
+
+    Returns (page_rows, total_row_count, error): `error` is None on success;
+    otherwise a short, human-readable string (e.g. the file having gone
+    missing from disk since the fetch - an operator manually clearing
+    data/fetched/, or some other bug entirely) and `page_rows`/`total` are
+    ([], 0). Never raises - the caller (webserver.build_fetched_bot_list_payload)
+    turns a non-None `error` into an HTTP error response, the same "pure
+    logic returns a result, the route just serialises it" shape as every
+    other build_*_payload() function in webserver.py.
+
+    `offset`/`limit` are applied to the deduped row list, after re-parsing -
+    the same slicing webserver.py applies to this bot's own list, so the two
+    endpoints share one pagination contract even though only one of them
+    shares this module's parsing code.
+
+    Held under the same module-wide _lock() process_fetched_list_zip() uses
+    around its own extract->parse->store sequence, for the read (the
+    existence check and the parse below) - not just the dict lookups, which
+    are plain, fast, GIL-atomic reads and stay unlocked either way. Without
+    this, a same-bot re-fetch racing a read here is a genuine torn-read
+    hazard, not a hypothetical one: _extract_and_locate_list_file() reuses the
+    exact same list_path (list_extract_dir() keys only on the bot nick) and
+    rewrites it via rmtree+open("wb") rather than write-then-rename, so a read
+    that lands mid-rewrite can see a truncated file and silently return a
+    wrong `total` instead of raising - no exception, no "file missing", just
+    a plausible-looking short page. Taking the same lock here makes such a
+    read block briefly until the in-progress fetch finishes, instead of
+    reading a half-written file - the same "one thing touches the on-disk
+    representation at a time" guarantee process_fetched_list_zip() already
+    gives writers, extended to readers.
+
+    No deadlock risk: this is the only other place in the codebase that
+    acquires this lock, dcc_fetch.py's call into process_fetched_list_zip()
+    happens with no other lock held (see _handle_completed_list_fetch()'s
+    docstring), and nothing this function calls (list_mod.find_matching_entries,
+    entries_to_filelist_rows) ever acquires config.fetched_bot_lists_lock
+    itself - so there is no cycle and no re-entrant acquisition of this
+    plain, non-reentrant Lock.
+    """
+    bot = entry.get("bot", "?")
+    list_path = entry.get("list_path")
+    if not list_path:
+        reason = f"no list file is on record for {bot}'s fetched list"
+        print(f"[LIST-FETCH] {reason}.")
+        return [], 0, reason
+
+    resolved_path = platform_compat.long_path(list_path)
+    with _lock():
+        if not os.path.exists(resolved_path):
+            reason = (f"{bot}'s fetched list file is no longer on disk "
+                       f"({os.path.basename(list_path)!r} is missing - it may have "
+                       f"been cleared manually since the fetch); fetch the list again")
+            print(f"[LIST-FETCH] {reason}.")
+            return [], 0, reason
+
+        try:
+            entries, _total = list_mod.find_matching_entries(
+                [], limit=None, list_path=resolved_path)
+            rows = list_mod.entries_to_filelist_rows(entries, bot)
+        except OSError as err:
+            # Caught here, not left to propagate into the Flask route: a file
+            # that exists (the check above passed) but became unreadable between
+            # that check and this open() - permissions changed, a network mount
+            # dropped - is the same class of "gone since the fetch" problem as
+            # the missing-file case above, just caught a moment later.
+            reason = f"could not read {bot}'s fetched list file: {err}"
+            print(f"[LIST-FETCH] {reason}")
+            return [], 0, reason
+
+    total = len(rows)
+    page = rows[offset:offset + limit]
+    return page, total, None
