@@ -1411,9 +1411,11 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         # path and a count - so read it back the same way webserver.py does,
         # on demand.
         import list_fetch
-        rows, _total, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+        # Paged by folder now: flatten the groups back to rows, which is all
+        # this test ever cared about.
+        folders, _n, _files, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
         self.assertIsNone(error)
-        titles = [e["title"] for e in rows]
+        titles = [e["title"] for g in folders for e in g["entries"]]
         self.assertIn("Track One.flac", titles)
 
     def test_a_second_fetch_for_the_same_bot_replaces_not_accumulates(self):
@@ -1448,9 +1450,11 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         server_thread.join(timeout=5.0)
 
         entry = config.fetched_bot_lists["otherbot"]
-        rows, _total, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+        # Paged by folder now: flatten the groups back to rows, which is all
+        # this test ever cared about.
+        folders, _n, _files, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
         self.assertIsNone(error)
-        titles = [e["title"] for e in rows]
+        titles = [e["title"] for g in folders for e in g["entries"]]
         self.assertNotIn("Stale.flac", titles)
         self.assertIn("Track One.flac", titles)
 

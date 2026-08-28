@@ -80,6 +80,17 @@ FILELISTS_DEFAULT_PAGE_SIZE = 200
 # tens of thousands of rows a full list can contain.
 FILELISTS_MAX_PAGE_SIZE = 2000
 
+# The unit of `offset`/`limit` on both file-list routes is a FOLDER, not a row.
+# Bots keep their libraries in folders and the dashboard groups by them, so a
+# page that ends mid-album is a page that ends in the wrong place - and a
+# folder is only useful expanded if all of it is there.
+#
+# The row ceiling that bounds such a page is list.FILELISTS_MAX_PAGE_ROWS,
+# declared beside the paging function it bounds. It is not re-exported here:
+# this module imports list lazily, inside the handlers, so that importing
+# webserver.py does not drag in oserve/dcc/announce - which is what lets
+# tests/test_webserver.py exercise these routes on their own.
+
 
 def parse_pagination_params(raw_offset, raw_limit):
     """Turn `?offset=&limit=` query-string values - always strings, or None
@@ -263,9 +274,20 @@ def build_filelists_payload(offset=0, limit=None):
 
     entries, _total = list_mod.find_matching_entries([], limit=None)
     rows = list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
-    total = len(rows)
-    page = rows[offset:offset + limit]
-    return {"entries": page, "total": total, "offset": offset, "limit": limit}
+    groups = list_mod.group_rows_by_folder(rows)
+    page, total_folders, total_rows = list_mod.page_folder_groups(
+        groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
+    return {
+        "folders": page,
+        "total": total_folders,
+        "total_files": total_rows,
+        "offset": offset,
+        "limit": limit,
+        # What the caller actually got. The row ceiling can end a page early,
+        # so the frontend advances by this rather than by `limit` - otherwise
+        # a truncated page would silently skip the folders it did not receive.
+        "returned": len(page),
+    }
 
 
 # ==========================================================================
@@ -368,17 +390,20 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None):
     if limit is None:
         limit = FILELISTS_DEFAULT_PAGE_SIZE
 
-    page, total, error = list_fetch.get_fetched_bot_page(entry, offset, limit)
+    page, total_folders, total_rows, error = list_fetch.get_fetched_bot_page(
+        entry, offset, limit)
     if error:
         return 502, {"error": error}
 
     return 200, {
         "bot": entry.get("bot", nick),
         "fetched_at": entry.get("fetched_at", 0),
-        "entries": page,
-        "total": total,
+        "folders": page,
+        "total": total_folders,
+        "total_files": total_rows,
         "offset": offset,
         "limit": limit,
+        "returned": len(page),
     }
 
 

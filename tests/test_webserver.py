@@ -108,6 +108,21 @@ class QueuePayloadTests(DCCoreTestCase):
         self.assertEqual(result["count"], 1)
 
 
+def payload_rows(payload):
+    """Flat rows out of a folder-grouped file-list payload.
+
+    Both file-list endpoints page by FOLDER now and return
+    {"folders": [{"folder", "count", "entries"}, ...]}. Most tests here are
+    asserting things about rows - what a row contains, whether a file is
+    present - and do not care how the page was cut, so they read through this
+    rather than each learning the grouped shape.
+
+    Tests that are about the PAGING ITSELF use payload["folders"] directly:
+    for those, the grouping is the thing under test.
+    """
+    return [row for group in payload["folders"] for row in group["entries"]]
+
+
 class SearchAndFilelistsPayloadTests(DCCoreTestCase):
 
     def setUp(self):
@@ -164,15 +179,22 @@ class SearchAndFilelistsPayloadTests(DCCoreTestCase):
 
     def test_filelists_covers_every_file_and_dedupes_same_name_and_size(self):
         payload = webserver.build_filelists_payload()
-        titles = sorted(r["title"] for r in payload["entries"])
+        titles = sorted(r["title"] for r in payload_rows(payload))
+        # "00 - Intro.flac" is listed under BOTH albums in the fixture, and
+        # appears twice now. It used to collapse to one row, because the dedup
+        # key was (filename, size) with no folder in it - invisible while rows
+        # were a flat list, wrong once they are grouped: the second album
+        # would show as missing a track it actually has.
         self.assertEqual(titles, [
-            "00 - Intro.flac", "01 - Enter Sandman.flac",
+            "00 - Intro.flac", "00 - Intro.flac", "01 - Enter Sandman.flac",
             "01 - Fuel.flac", "02 - Sad But True.flac",
         ])
-        self.assertEqual(payload["total"], 4)
+        # `total` counts FOLDERS, the unit of a page. total_files counts rows.
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["total_files"], 5)
 
     def test_filelists_rows_have_format_and_source(self):
-        rows = {r["title"]: r for r in webserver.build_filelists_payload()["entries"]}
+        rows = {r["title"]: r for r in payload_rows(webserver.build_filelists_payload())}
         fuel = rows["01 - Fuel.flac"]
         self.assertEqual(fuel["format"], "FLAC")
         self.assertEqual(fuel["source"], "DCCore")
@@ -220,23 +242,29 @@ class FilelistsPaginationTests(SearchAndFilelistsPayloadTests):
         payload = webserver.build_filelists_payload()
         self.assertEqual(payload["offset"], 0)
         self.assertEqual(payload["limit"], webserver.FILELISTS_DEFAULT_PAGE_SIZE)
-        self.assertEqual(payload["total"], 4)
-        self.assertEqual(len(payload["entries"]), 4)  # fixture is smaller than the default page
+        self.assertEqual(payload["total"], 2, "total counts folders, not rows")
+        self.assertEqual(payload["returned"], 2)
+        self.assertEqual(len(payload["folders"]), 2)  # fixture is smaller than a page
 
     def test_an_explicit_offset_and_limit_slice_returns_exactly_that_slice(self):
-        full = webserver.build_filelists_payload(0, 100)["entries"]
-        titles_in_order = [r["title"] for r in full]
+        all_folders = webserver.build_filelists_payload(0, 100)["folders"]
+        names_in_order = [g["folder"] for g in all_folders]
 
-        payload = webserver.build_filelists_payload(1, 2)
+        # offset/limit count FOLDERS: page two of one folder each.
+        payload = webserver.build_filelists_payload(1, 1)
         self.assertEqual(payload["offset"], 1)
-        self.assertEqual(payload["limit"], 2)
-        self.assertEqual(payload["total"], 4)
-        self.assertEqual([r["title"] for r in payload["entries"]], titles_in_order[1:3])
+        self.assertEqual(payload["limit"], 1)
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual([g["folder"] for g in payload["folders"]], names_in_order[1:2])
+        # A folder arrives whole or not at all - never split across pages.
+        self.assertEqual(len(payload["folders"][0]["entries"]),
+                         payload["folders"][0]["count"])
 
     def test_an_offset_past_the_end_is_an_empty_page_with_the_correct_total(self):
         payload = webserver.build_filelists_payload(999, 50)
-        self.assertEqual(payload["entries"], [])
-        self.assertEqual(payload["total"], 4)
+        self.assertEqual(payload["folders"], [])
+        self.assertEqual(payload["returned"], 0)
+        self.assertEqual(payload["total"], 2)
 
     def test_limit_is_clamped_at_the_documented_ceiling(self):
         payload = webserver.build_filelists_payload(0, webserver.FILELISTS_MAX_PAGE_SIZE + 5000)
@@ -244,7 +272,8 @@ class FilelistsPaginationTests(SearchAndFilelistsPayloadTests):
         # parse_pagination_params()'s job, exercised below - but confirms the
         # slice still behaves sanely (returns everything there is) when
         # handed a limit larger than the whole dataset.
-        self.assertEqual(len(payload["entries"]), 4)
+        self.assertEqual(len(payload["folders"]), 2)
+        self.assertEqual(len(payload_rows(payload)), 5)
 
 
 class PaginationParamParsingTests(unittest.TestCase):
@@ -629,18 +658,22 @@ class ListFetchRoutesTests(DCCoreTestCase):
         self.assertEqual(status, 404)
         self.assertIn("error", result)
 
-    def _make_fetched_entry(self, bot, files):
+    def _make_fetched_entry(self, bot, files, folders=None):
         """A real on-disk list file plus the {"bot","fetched_at","list_path",
         "entry_count","source_zip"} dict process_fetched_list_zip() now
         stores - build_fetched_bot_list_payload() re-parses `list_path` from
         disk on every call (issue #76, option 2), so a fake in-memory
         "entries" list is no longer enough to exercise it."""
-        path = write_master_list(self.tree.lists, bot, [(None, files)])
+        # `folders` when the test is about paging, which counts folders -
+        # a flat `files` list is one group and would page as one item.
+        path = write_master_list(self.tree.lists, bot,
+                                 folders or [(None, files)])
         return {
             "bot": bot,
             "fetched_at": 111.0,
             "list_path": path,
-            "entry_count": len(files),
+            "entry_count": (len(files) if files is not None
+                            else sum(len(f) for _folder, f in folders)),
             "source_zip": "incoming.zip",
         }
 
@@ -655,33 +688,42 @@ class ListFetchRoutesTests(DCCoreTestCase):
         status, result = webserver.build_fetched_bot_list_payload("GOODBOT")
         self.assertEqual(status, 200)
         self.assertEqual(result["bot"], "GoodBot")
-        self.assertEqual(result["entries"][0]["title"], "A.flac")
+        rows = [r for g in result["folders"] for r in g["entries"]]
+        self.assertEqual(rows[0]["title"], "A.flac")
         # Exactly the row shape build_filelists_payload() uses for our own
-        # list - same four keys, nothing more, nothing less.
-        self.assertEqual(set(result["entries"][0].keys()), {"title", "size", "format", "source"})
-        self.assertEqual(result["total"], 1)
+        # list - same five keys, nothing more, nothing less. "folder" joined
+        # them when the views became folder-grouped.
+        self.assertEqual(set(rows[0].keys()),
+                         {"title", "size", "format", "source", "folder"})
+        self.assertEqual(result["total"], 1, "one folder in this fixture")
+        self.assertEqual(result["total_files"], 1)
         self.assertEqual(result["offset"], 0)
         self.assertEqual(result["limit"], webserver.FILELISTS_DEFAULT_PAGE_SIZE)
 
     def test_bot_payload_paginates_and_reports_the_correct_total(self):
-        files = [(f"Track {i:02d}.flac", "1.0MB") for i in range(10)]
-        config.fetched_bot_lists = {"pagebot": self._make_fetched_entry("PageBot", files)}
+        folders = [(f"D:/MUSIC/Album {i:02d}/", [(f"Track {i:02d}.flac", "1.0MB")])
+                   for i in range(10)]
+        config.fetched_bot_lists = {
+            "pagebot": self._make_fetched_entry("PageBot", None, folders=folders)}
 
         status, result = webserver.build_fetched_bot_list_payload("pagebot", offset=3, limit=4)
         self.assertEqual(status, 200)
-        self.assertEqual(result["total"], 10)
+        self.assertEqual(result["total"], 10, "offset/limit count folders")
+        self.assertEqual(result["total_files"], 10)
         self.assertEqual(result["offset"], 3)
         self.assertEqual(result["limit"], 4)
-        self.assertEqual([r["title"] for r in result["entries"]],
-                         ["Track 03.flac", "Track 04.flac", "Track 05.flac", "Track 06.flac"])
+        self.assertEqual([g["folder"].rstrip("/") for g in result["folders"]],
+                         ["D:/MUSIC/Album 03", "D:/MUSIC/Album 04",
+                          "D:/MUSIC/Album 05", "D:/MUSIC/Album 06"])
 
     def test_bot_payload_offset_past_the_end_is_empty_with_correct_total(self):
         config.fetched_bot_lists = {"onebot": self._make_fetched_entry("OneBot", [("A.flac", "1.0MB")])}
 
         status, result = webserver.build_fetched_bot_list_payload("onebot", offset=500, limit=50)
         self.assertEqual(status, 200)
-        self.assertEqual(result["entries"], [])
-        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["folders"], [])
+        self.assertEqual(result["returned"], 0)
+        self.assertEqual(result["total"], 1, "one folder in this fixture")
 
     def test_bot_payload_reports_a_clear_error_when_the_file_has_gone_missing(self):
         """The extracted file can disappear between the fetch and the view -
@@ -820,8 +862,12 @@ class FilelistsHttpPaginationTests(DCCoreTestCase):
         config.LOCAL_LIST_DIR = self.tree.lists
         config.LIST_BASE_NAME = "DCCore"
         config.NICKNAME = "DCCore"
+        # Ten folders of one track each. The old fixture put all ten files
+        # under no folder at all, which pages as a single group now and would
+        # exercise nothing.
         write_master_list(self.tree.lists, "DCCore", [
-            (None, [(f"Track {i:02d}.flac", "1.0MB") for i in range(10)]),
+            (f"D:\MUSIC\Album {i:02d}\\", [(f"Track {i:02d}.flac", "1.0MB")])
+            for i in range(10)
         ])
         self.app = webserver.create_app()
         self.client = self.app.test_client()
@@ -830,17 +876,18 @@ class FilelistsHttpPaginationTests(DCCoreTestCase):
         resp = self.client.get("/api/filelists")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
-        self.assertEqual(body["total"], 10)
+        self.assertEqual(body["total"], 10, "ten folders")
+        self.assertEqual(body["total_files"], 10)
         self.assertEqual(body["offset"], 0)
         self.assertEqual(body["limit"], webserver.FILELISTS_DEFAULT_PAGE_SIZE)
-        self.assertEqual(len(body["entries"]), 10)
+        self.assertEqual(len(body["folders"]), 10)
 
     def test_own_list_honours_explicit_offset_and_limit(self):
         resp = self.client.get("/api/filelists?offset=2&limit=3")
         body = resp.get_json()
         self.assertEqual(body["offset"], 2)
         self.assertEqual(body["limit"], 3)
-        self.assertEqual(len(body["entries"]), 3)
+        self.assertEqual(len(body["folders"]), 3, "three FOLDERS, not three rows")
 
     def test_own_list_invalid_query_values_fall_back_to_defaults_via_http(self):
         resp = self.client.get("/api/filelists?offset=notanumber&limit=-5")
@@ -856,7 +903,8 @@ class FilelistsHttpPaginationTests(DCCoreTestCase):
 
     def test_fetched_bot_list_is_paginated_via_http(self):
         path = write_master_list(self.tree.lists, "OtherBot", [
-            (None, [(f"Other {i:02d}.flac", "2.0MB") for i in range(7)]),
+            (f"D:/MUSIC/Other {i:02d}/", [(f"Other {i:02d}.flac", "2.0MB")])
+            for i in range(7)
         ])
         config.fetched_bot_lists = {
             "otherbot": {"bot": "OtherBot", "fetched_at": 111.0,
@@ -866,9 +914,9 @@ class FilelistsHttpPaginationTests(DCCoreTestCase):
         resp = self.client.get("/api/filelists/bot/otherbot?offset=5&limit=10")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
-        self.assertEqual(body["total"], 7)
+        self.assertEqual(body["total"], 7, "seven folders")
         self.assertEqual(body["offset"], 5)
-        self.assertEqual(len(body["entries"]), 2)
+        self.assertEqual(len(body["folders"]), 2, "the tail: folders 5 and 6")
 
 
 class BroadcastRenderingXssRegressionTests(unittest.TestCase):

@@ -29,7 +29,8 @@
 
   var state = {
     active: "search", filelistsLoaded: false, filelistsSource: "__own__",
-    filelistsOffset: 0, filelistsTotal: 0
+    filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
+    filelistsHistory: []
   };
 
   var el = {
@@ -63,7 +64,9 @@
     filelistsSourceSelect: document.getElementById("filelists-source-select"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
-    filelistsPageInfo:    document.getElementById("filelists-page-info")
+    filelistsPageInfo:    document.getElementById("filelists-page-info"),
+    filelistsExpandAll:   document.getElementById("filelists-expand-all"),
+    filelistsCollapseAll: document.getElementById("filelists-collapse-all")
   };
 
   function escapeHtml(value) {
@@ -542,18 +545,30 @@
   el.filelistsSourceSelect.addEventListener("change", function () {
     state.filelistsSource = el.filelistsSourceSelect.value;
     state.filelistsOffset = 0;
+    state.filelistsHistory = [];
     loadFilelists();
   });
 
   el.filelistsPrevBtn.addEventListener("click", function () {
     if (state.filelistsOffset <= 0) { return; }
-    state.filelistsOffset = Math.max(0, state.filelistsOffset - FILELISTS_PAGE_SIZE);
+    // Pop the offset this page was reached FROM rather than subtracting a
+    // page size. Forward steps are not a fixed width (see Next below), so
+    // arithmetic backwards would land somewhere no page ever started.
+    state.filelistsOffset = state.filelistsHistory.length
+      ? state.filelistsHistory.pop()
+      : Math.max(0, state.filelistsOffset - FILELISTS_PAGE_SIZE);
     loadFilelists();
   });
 
   el.filelistsNextBtn.addEventListener("click", function () {
-    var next = state.filelistsOffset + FILELISTS_PAGE_SIZE;
+    // Advance by the number of folders the server actually RETURNED, not by
+    // the number asked for. A page is also capped by a row ceiling, so a
+    // request for 200 folders can come back with 33 - and stepping by 200
+    // would skip the 167 in between without a word.
+    var step = state.filelistsReturned || FILELISTS_PAGE_SIZE;
+    var next = state.filelistsOffset + step;
     if (next >= state.filelistsTotal) { return; }
+    state.filelistsHistory.push(state.filelistsOffset);
     state.filelistsOffset = next;
     loadFilelists();
   });
@@ -590,61 +605,160 @@
 
   // Loading the table itself ------------------------------------------------
 
-  // Both /api/filelists and /api/filelists/bot/<nick> now return a page of
-  // rows (`{"entries","total","offset","limit"}`) rather than everything at
-  // once (issue #76, option 3) - this renders the Prev/Next controls and the
-  // "Showing X-Y of Z" caption from state.filelistsOffset/filelistsTotal,
-  // which loadFilelists() below keeps current on every successful load.
-  function renderFilelistsPager() {
-    var total = state.filelistsTotal || 0;
-    var offset = state.filelistsOffset || 0;
-    var shown = total === 0 ? 0 : Math.min(FILELISTS_PAGE_SIZE, total - offset);
-    var start = shown === 0 ? 0 : offset + 1;
-    var end = offset + shown;
-    el.filelistsPageInfo.textContent =
-      "Showing " + start.toLocaleString() + "–" + end.toLocaleString() +
-      " of " + total.toLocaleString();
-    el.filelistsPrevBtn.disabled = offset <= 0;
-    el.filelistsNextBtn.disabled = (offset + FILELISTS_PAGE_SIZE) >= total;
-  }
+    // Both /api/filelists and /api/filelists/bot/<nick> return a page of
+    // FOLDERS - `{"folders","total","total_files","offset","limit"}` - rather
+    // than a page of loose rows. Paging by the folder keeps a folder whole:
+    // the folder is the unit an operator browses, and paging by row split
+    // large ones across a page boundary, so page two opened mid-folder under
+    // no heading at all.
+    //
+    // `total` counts folders, which is what the pager steps through;
+    // `total_files` counts the rows inside them, which is what the operator
+    // actually wants to know about the list.
+    function renderFilelistsPager(totalFiles) {
+      var total = state.filelistsTotal || 0;
+      var offset = state.filelistsOffset || 0;
+      var shown = state.filelistsReturned || 0;
+      var start = shown === 0 ? 0 : offset + 1;
+      var end = offset + shown;
+      var files = totalFiles || 0;
+      el.filelistsPageInfo.textContent =
+        "Folders " + start.toLocaleString() + "–" + end.toLocaleString() +
+        " of " + total.toLocaleString() +
+        " (" + files.toLocaleString() + (files === 1 ? " file)" : " files)");
+      el.filelistsPrevBtn.disabled = offset <= 0;
+      el.filelistsNextBtn.disabled = (offset + shown) >= total;
+    }
 
-  function loadFilelists() {
-    el.filelistsBody.innerHTML = emptyRow(4, "Loading…");
-    var source = state.filelistsSource || "__own__";
-    var offset = state.filelistsOffset || 0;
-    var base = (source === "__own__")
-      ? "/api/filelists"
-      : "/api/filelists/bot/" + encodeURIComponent(source);
-    var url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+    // A file that reached us with no folder heading above it still has to be
+    // shown under something.
+    function folderLabel(name) {
+      return name ? name : "(no folder)";
+    }
 
-    fetchJson(url)
-      .then(function (payload) {
-        markConnection(true);
-        state.filelistsLoaded = true;
-        // Tolerates a bare array too (an older/unpatched server), same
-        // defensive unwrap this already did before pagination existed.
-        var rows = Array.isArray(payload) ? payload : (payload.entries || []);
-        var total = Array.isArray(payload) ? rows.length : (payload.total || 0);
-        state.filelistsTotal = total;
-        renderFilelistsPager();
-        if (!rows.length) {
-          el.filelistsBody.innerHTML = emptyRow(4, "No files published yet.");
-          return;
-        }
-        el.filelistsBody.innerHTML = rows.map(function (row) {
-          return "<tr>" +
-            "<td class=\"col-mono\">" + escapeHtml(row.title) + "</td>" +
-            "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
-            "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
-            "<td class=\"col-dim col-mono\">" + escapeHtml(row.source) + "</td>" +
-            "</tr>";
-        }).join("");
-      })
-      .catch(function (err) {
-        markConnection(false);
-        el.filelistsBody.innerHTML = emptyRow(4, "Could not load file lists: " + err.message);
+    // The count is the point of a collapsed folder: it says how much is inside
+    // before the operator spends a click finding out. `count` is the folder's
+    // TRUE size, so a folder that arrived truncated still reports what it
+    // holds rather than only what fitted on the page.
+    function folderHeadingHtml(group, index) {
+      var count = group.count || 0;
+      return "<tr class=\"folder-row\">" +
+        "<td colspan=\"4\">" +
+          "<button type=\"button\" class=\"folder-toggle\" aria-expanded=\"false\"" +
+                 " data-folder-index=\"" + index + "\">" +
+            "<span class=\"folder-caret\" aria-hidden=\"true\"></span>" +
+            "<span class=\"folder-name\">" +
+              escapeHtml(folderLabel(group.folder)) + "</span>" +
+            "<span class=\"folder-count\">" + count.toLocaleString() +
+              (count === 1 ? " file" : " files") + "</span>" +
+          "</button>" +
+        "</td></tr>";
+    }
+
+    function folderFilesHtml(group, index) {
+      var entries = group.entries || [];
+      var rows = entries.map(function (row) {
+        return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
+          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + "</td>" +
+          "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
+          "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
+          "<td class=\"col-dim col-mono\">" + escapeHtml(row.source) + "</td>" +
+          "</tr>";
       });
-  }
+      // A folder bigger than the page's row ceiling arrives cut short. Say so
+      // in place, so the rows on screen cannot quietly disagree with the count
+      // in the heading right above them.
+      if (group.truncated) {
+        rows.push(
+          "<tr class=\"file-row folder-truncated is-hidden\" data-folder-index=\"" +
+          index + "\"><td colspan=\"4\">Showing the first " +
+          entries.length.toLocaleString() + " of " +
+          (group.count || 0).toLocaleString() +
+          " files in this folder.</td></tr>");
+      }
+      return rows.join("");
+    }
+
+    function setFolderExpanded(index, expanded) {
+      var rows = el.filelistsBody.querySelectorAll(
+        ".file-row[data-folder-index=\"" + index + "\"]");
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].classList.toggle("is-hidden", !expanded);
+      }
+    }
+
+    function setAllFolders(expanded) {
+      var toggles = el.filelistsBody.querySelectorAll(".folder-toggle");
+      for (var i = 0; i < toggles.length; i++) {
+        toggles[i].setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+      var rows = el.filelistsBody.querySelectorAll(".file-row");
+      for (var j = 0; j < rows.length; j++) {
+        rows[j].classList.toggle("is-hidden", !expanded);
+      }
+    }
+
+    // Delegated once here rather than bound per heading: the table is rebuilt
+    // on every page change and every source change, and a per-heading listener
+    // would have to be re-attached each time.
+    el.filelistsBody.addEventListener("click", function (evt) {
+      var toggle = evt.target.closest ? evt.target.closest(".folder-toggle") : null;
+      if (!toggle) { return; }
+      var expanded = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+      setFolderExpanded(toggle.getAttribute("data-folder-index"), !expanded);
+    });
+
+    el.filelistsExpandAll.addEventListener("click", function () { setAllFolders(true); });
+    el.filelistsCollapseAll.addEventListener("click", function () { setAllFolders(false); });
+
+    // Accepts the older flat shapes as well as the folder one: a bare array,
+    // or a payload carrying `entries`, both become a single unnamed folder
+    // rather than a blank table. That is the same defensive unwrap this did
+    // before paging existed, extended to cover the shape that replaced it.
+    function folderGroupsFrom(payload) {
+      if (Array.isArray(payload)) {
+        return payload.length
+          ? [{ folder: "", count: payload.length, entries: payload }]
+          : [];
+      }
+      if (payload.folders) { return payload.folders; }
+      var rows = payload.entries || [];
+      return rows.length ? [{ folder: "", count: rows.length, entries: rows }] : [];
+    }
+
+    function loadFilelists() {
+      el.filelistsBody.innerHTML = emptyRow(4, "Loading…");
+      var source = state.filelistsSource || "__own__";
+      var offset = state.filelistsOffset || 0;
+      var base = (source === "__own__")
+        ? "/api/filelists"
+        : "/api/filelists/bot/" + encodeURIComponent(source);
+      var url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+
+      fetchJson(url)
+        .then(function (payload) {
+          markConnection(true);
+          state.filelistsLoaded = true;
+          var groups = folderGroupsFrom(payload);
+          state.filelistsTotal = Array.isArray(payload)
+            ? groups.length : (payload.total || 0);
+          state.filelistsReturned = groups.length;
+          renderFilelistsPager(Array.isArray(payload)
+            ? payload.length : (payload.total_files || 0));
+          if (!groups.length) {
+            el.filelistsBody.innerHTML = emptyRow(4, "No files published yet.");
+            return;
+          }
+          el.filelistsBody.innerHTML = groups.map(function (group, index) {
+            return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
+          }).join("");
+        })
+        .catch(function (err) {
+          markConnection(false);
+          el.filelistsBody.innerHTML = emptyRow(4, "Could not load file lists: " + err.message);
+        });
+    }
 
   // ------------------------------------------------------------------ Init
 
