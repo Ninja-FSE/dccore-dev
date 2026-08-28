@@ -66,6 +66,17 @@ import list as list_mod
 # this is an internal safety bound, not an operator-facing knob.
 MAX_LIST_ZIP_ENTRIES = 300
 
+# Issue #76: every guard up to this point counts bytes or zip members - none
+# of them counts LINES, and every "!" line in the extracted text becomes a
+# permanently-retained dict once parsed. A real master list is small: this
+# operator's own 1.21TB/47,420-file library produces a 4MB text list, so 20MB
+# is 5x headroom over the largest real list anyone here has actually seen, and
+# only ever rejects something that isn't a genuine master list. Checked on the
+# EXTRACTED file's real size on disk, before it is parsed - not the zip's
+# declared/compressed size, which is exactly what let a small download expand
+# into hundreds of megabytes of retained rows in the first place.
+MAX_LIST_TEXT_SIZE = 20 * 1024 * 1024
+
 _COPY_CHUNK = 65536
 
 
@@ -389,6 +400,24 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
     if list_path is None:
         reason = "no recognizable master-list .txt file was found inside the zip"
         print(f"[LIST-FETCH] {bot}'s list zip extracted, but {reason}.")
+        return False, reason
+
+    # Issue #76: nothing before this point bounds the number of LINES the
+    # extracted text file contains, only the zip's own byte/member counts -
+    # and every line becomes a permanently-retained dict below. Checked here,
+    # on the real extracted size, before a single line is parsed.
+    try:
+        text_size = os.path.getsize(platform_compat.long_path(list_path))
+    except OSError as err:
+        reason = f"could not stat the extracted list file: {err}"
+        print(f"[LIST-FETCH] Rejected list zip from {bot}: {reason}")
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        return False, reason
+    if text_size > MAX_LIST_TEXT_SIZE:
+        reason = (f"the extracted list is {text_size} bytes, over the "
+                  f"{MAX_LIST_TEXT_SIZE}-byte ceiling for a real master list")
+        print(f"[LIST-FETCH] Rejected list zip from {bot}: {reason}")
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return False, reason
 
     # list.py opens this path directly and does not wrap it itself, so the
