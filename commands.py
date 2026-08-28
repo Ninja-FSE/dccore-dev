@@ -212,6 +212,52 @@ def handle_pong_response(category="INFO"):
         
         config.ping_start_time = None
 
+# ---------------------------------------------------------------------------
+# Runtime state that must survive a !rehash.
+#
+# Module level on purpose. This used to be a local inside
+# handle_rehash_request(), which is part of why it fell out of date: a list
+# that has to be updated whenever config.py gains a container is useless if
+# nothing can see it. tests/test_commands.py now derives the set of
+# containers from config.py and asserts each one is either in here or
+# explicitly excused, so the next omission fails a test instead of silently
+# emptying something on the next rehash.
+# ---------------------------------------------------------------------------
+# =====================================================================
+# 1b. RUNTIME STATE THAT MUST SURVIVE THE RELOAD
+# =====================================================================
+# importlib.reload re-executes a module body, so every name config.py assigns in its
+# "GLOBALT LIVE-MINNE" section is reset to an empty container. The block above already
+# rescues dcc_queue and channel_users; everything else in that section was being
+# silently destroyed on every !rehash.
+#
+# NOT preserved, deliberately - these are cleared ON PURPOSE and that behaviour is kept:
+#   send_queue          - blanked below so stale text cannot collide after the reload
+#   rar_inprogress      - the documented "lock-clearing rehash" escape hatch for a
+#   user_processing_lock  packer that wedged; !rehash is the only way to clear them
+PRESERVE_RUNTIME = (
+    'active_transfers',   # losing this reports 0 active slots while transfers run,
+                          # so the bot admits work beyond MAX_DCC_SLOTS
+    'banned_users',       # every timed ban silently released
+    'frozen_queues',      # freeze timers lost, so departed users' queues never expire
+    'muted_until',        # flood mutes released
+    'whois_status',
+    'user_requests',      # flood history, so a flooder gets a clean slate
+    'failed_transfers',   # per-file retry counters
+    'fetch_queue',        # the cross-bot fetch pool. Losing it is the same failure the
+                          # active_transfers comment above describes, in the other slot
+                          # pool: count_active_fetches() counts rows here, so an empty
+                          # dict reports 0 active while transfers are still moving bytes
+                          # and the next batch runs past MAX_FETCH_SLOTS. Orphaned rows
+                          # also strand their finished files - the transfer completes,
+                          # writes state='complete' onto a row nothing reads, and
+                          # /api/fetch/<id>/download 404s for a file plainly on disk.
+    'fetched_bot_lists',  # every fetched cross-bot list, each one a real multi-MB DCC
+                          # transfer from another bot. Losing it empties the Download
+                          # tab with no log line saying why.
+)
+
+
 def handle_rehash_request(user, target_chan, authorised=False):
     """Reload the modules live, in memory, without reading anything back from disk."""
     import importlib
@@ -268,28 +314,6 @@ def handle_rehash_request(user, target_chan, authorised=False):
     announce.is_ready = False
     announce.send_debug(f"Rehash triggered by {user} from {target_chan}. PAUSING NOTICES & ADVERTISEMENT...", category="INFO")
     
-    # =====================================================================
-    # 1b. RUNTIME STATE THAT MUST SURVIVE THE RELOAD
-    # =====================================================================
-    # importlib.reload re-executes a module body, so every name config.py assigns in its
-    # "GLOBALT LIVE-MINNE" section is reset to an empty container. The block above already
-    # rescues dcc_queue and channel_users; everything else in that section was being
-    # silently destroyed on every !rehash.
-    #
-    # NOT preserved, deliberately - these are cleared ON PURPOSE and that behaviour is kept:
-    #   send_queue          - blanked below so stale text cannot collide after the reload
-    #   rar_inprogress      - the documented "lock-clearing rehash" escape hatch for a
-    #   user_processing_lock  packer that wedged; !rehash is the only way to clear them
-    PRESERVE_RUNTIME = (
-        'active_transfers',   # losing this reports 0 active slots while transfers run,
-                              # so the bot admits work beyond MAX_DCC_SLOTS
-        'banned_users',       # every timed ban silently released
-        'frozen_queues',      # freeze timers lost, so departed users' queues never expire
-        'muted_until',        # flood mutes released
-        'whois_status',
-        'user_requests',      # flood history, so a flooder gets a clean slate
-        'failed_transfers',   # per-file retry counters
-    )
     # vip_queue is deliberately NOT preserved, for the same reason send_queue is not: it is
     # transient OUTPUT, not state. Restoring it would also replay lines addressed to channels
     # this very handler is about to PART, which the server answers with 404.

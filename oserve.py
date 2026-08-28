@@ -23,6 +23,12 @@ if not hasattr(config, 'queue_lock'):
 if not hasattr(config, 'debug_flood_lock'):
     config.debug_flood_lock = threading.Lock()
 
+if not hasattr(config, 'fetch_queue_lock'):
+    config.fetch_queue_lock = threading.Lock()
+
+if not hasattr(config, 'fetched_bot_lists_lock'):
+    config.fetched_bot_lists_lock = threading.Lock()
+
 import list
 import dcc
 import db
@@ -102,6 +108,43 @@ def startup():
     import queue_mgr
     print("[SYSTEM] Starting the flood-protection queue...")
     threading.Thread(target=queue_mgr.queue_worker, daemon=True).start()
+
+    # Cross-bot file fetch storage (dcc_fetch.py). Non-fatal on purpose,
+    # unlike the FILE_DIRECTORY check above: FILE_DIRECTORY is a hard
+    # precondition for the daemon's core purpose (serving the library), while
+    # this is a newer, optional feature - a permissions failure here logs and
+    # leaves fetch_feature_disabled set rather than taking the whole daemon
+    # down. dcc_fetch/webserver check that flag before accepting an offer or
+    # an enqueue request.
+    try:
+        fetched_dir = getattr(config, "FETCHED_FILES_DIR", "./data/fetched")
+        os.makedirs(fetched_dir, exist_ok=True)
+        config.fetch_feature_disabled = False
+    except Exception as fetch_dir_err:
+        print(f"[FETCH] Could not create {fetched_dir}: {fetch_dir_err}. Cross-bot file fetch disabled.")
+        config.fetch_feature_disabled = True
+
+    try:
+        import dcc_fetch
+        threading.Thread(target=dcc_fetch.fetch_dispatcher_worker, daemon=True).start()
+    except Exception as fetch_worker_err:
+        print(f"[FETCH] Could not start fetch dispatcher: {fetch_worker_err}")
+
+    # Optional web dashboard (mostly read-only status views, plus the
+    # cross-bot search/fetch routes - see webserver.py's module docstring).
+    # Lazy import (not at module top) so a missing Flask install - the normal
+    # case, since it is an optional dependency CI never installs - never
+    # affects anything that imports oserve.py itself; only the dashboard
+    # feature is unavailable.
+    try:
+        import webserver
+    except Exception as web_err:
+        print(f"[WEBUI] Could not import webserver: {web_err}")
+    else:
+        if getattr(config, "WEBUI_ENABLED", True):
+            threading.Thread(target=webserver.start, daemon=True).start()
+        else:
+            print("[WEBUI] Disabled via config.WEBUI_ENABLED = False.")
 
 
 def run_forever():

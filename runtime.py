@@ -67,3 +67,15 @@ frozen_queues    = {}    # Saved timestamps for users in the freezer
 dcc_queue        = {}    # The main sharing queue, as {username: [files]}
 vip_queue        = []    # Isolated express queue for search headers and adverts
 active_transfers = []    # Live DCC sends, one thread each
+
+# Cross-bot search/fetch (beta-web) ------------------------------------------
+# Added here, not in config.py, for the exact reason this module exists: a
+# !rehash silently emptied these two the moment the feature landed, since
+# they were plain config.py globals like everything above USED to be - the
+# same bug class this file was created to remove structurally rather than by
+# remembering to list every container. See tests/test_runtime_state.py's
+# test_config_does_not_define_its_own_containers, which now catches this for
+# any future addition too.
+broadcast_search_results = []  # Captured replies during an open @find broadcast window
+fetch_queue              = {}  # Cross-bot file/list fetch requests, keyed by request id
+fetched_bot_lists        = {}  # Parsed lists fetched FROM other bots, keyed by lowercased nick

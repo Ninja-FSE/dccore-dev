@@ -48,6 +48,18 @@
 
 #DEBUG_CHANNEL = #flac-serv
 
+# The single channel a "search all bots" broadcast (@find) goes into - see
+# webserver.py's POST /api/search/broadcast. Deliberately ONE channel, never
+# all of them: broadcasting into every channel this bot has joined multiplies
+# the disruption to every other operator sharing those channels, for one
+# search. Defaults to the first entry of CHANNEL above; override explicitly
+# here (or in local_config.py) if that is not the right one.
+# Derived from CHANNEL - but NOT here. See "DERIVED VALUES" at the end of this
+# file: computing it at this point captures the tracked default above and
+# silently ignores an operator's own CHANNEL. None means "derive it below";
+# setting it explicitly, here or in local_config.py, still wins.
+#BROADCAST_SEARCH_CHANNEL = 
+
 
 [filesystem, paths and text stores]
 # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
@@ -61,6 +73,13 @@
 #TMP_ZIP_DIR = ./data/tmp_zips
 
 #LOCAL_LIST_DIR = ./lists
+
+# Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
+# separate from FILE_DIRECTORY: that directory is the served library, scanned
+# by update_list.py and offered to everyone via @find/!<nick> - fetched files
+# must never be reachable through that path. They are dashboard-download-only
+# (GET /api/fetch/<id>/download in webserver.py).
+#FETCHED_FILES_DIR = ./data/fetched
 
 # Safe, normalised paths into the data/ subdirectory
 #BANS_FILE = ./data/bans.txt
@@ -171,6 +190,28 @@
 
 #DCC_PORT_END = 55010
 
+# Deliberately separate from MAX_DCC_SLOTS above: that governs OUR outbound
+# SENDs to people requesting from us. Conflating the two directions would let
+# outbound leech traffic (us fetching from others) starve our own serving
+# capacity, or vice versa.
+# Max simultaneous in-flight/offered fetches
+#MAX_FETCH_SLOTS = 3
+
+# 200 MB - reject the offer before we even connect
+#MAX_FETCH_FILE_SIZE = 209715200
+
+# Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
+#FETCH_TRANSFER_TIMEOUT = 600
+
+# Seconds an "offered" row waits for a DCC SEND before it's marked failed
+#FETCH_OFFER_TIMEOUT = 60
+
+# How often a new @find broadcast (POST /api/search/broadcast) is allowed to
+# start. Independent of the UI - courtesy to other bots/operators on a shared
+# public channel, not just a UI detail.
+# Seconds
+#BROADCAST_SEARCH_COOLDOWN = 30
+
 
 [anti-flood and automatic protection]
 # Most commands (search or file) per time window
@@ -187,3 +228,33 @@
 
 # Longest a rar packing run may take, in seconds, before it is abandoned
 #RAR_TIMEOUT = 1800
+
+
+[mirc colour codes and control characters (irc standard)]
+# OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
+# a network-facing, unauthenticated surface should never be on just because
+# someone pulled and restarted. Opt in from local_config.py, not here.
+# 
+# Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
+# logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
+# never crashes the daemon and CI never installs Flask, so this stays inert
+# there. Install it yourself (`pip install flask`) to actually use the
+# dashboard.
+#WEBUI_ENABLED = false
+
+# NO AUTHENTICATION. Every /api/* route is open to anyone who can reach this
+# host:port - there is no login, no token, no password. The read-only routes
+# (queue/search/file lists) are harmless to expose; the mutating ones (search
+# broadcast, cross-bot fetch) let anyone who can reach this port make the bot
+# dial out and pull files from other IRC bots.
+# 
+# "127.0.0.1" is the tracked default: safe out of the box, reachable only from
+# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# reachable from other devices on your LAN (phone, laptop) - only do that on a
+# network you trust, since there is still no authentication.
+# 
+# DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. DO NOT put this host on
+# any network you do not trust, without adding authentication first.
+#WEBUI_HOST = 127.0.0.1
+
+#WEBUI_PORT = 8420
