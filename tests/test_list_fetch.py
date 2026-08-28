@@ -14,6 +14,7 @@ Deliberately stdlib-only, like the rest of the suite.
 
 import io
 import os
+import struct
 import sys
 import unittest
 import zipfile
@@ -326,3 +327,94 @@ class AllDotsMemberNames(SafeExtractionTests):
         _write_zip(path, [("./OtherBot-2026-08-27.txt", _list_txt())])
         ok, reason = list_fetch.process_fetched_list_zip("plainbot", path)
         self.assertTrue(ok, f"a leading './' was wrongly refused: {reason}")
+
+
+def _crafted_zip(path, mutate):
+    """A valid deflated archive whose bytes are then rewritten in place.
+
+    Every case below has correct headers - the archive opens, infolist() is
+    clean, the member count and sizes all pass the existing guards. Only
+    reading the member out fails, which is why these got past everything.
+    """
+    body = ("!SomeBot Track.flac  ::INFO:: 5.00MB\n" * 300).encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("SomeBot-List.txt", body)
+    with open(path, "rb") as handle:
+        raw = bytearray(handle.read())
+    with zipfile.ZipFile(path) as archive:
+        local_offset = archive.infolist()[0].header_offset
+    mutate(raw, local_offset, raw.find(b"PK\x01\x02"))
+    with open(path, "wb") as handle:
+        handle.write(bytes(raw))
+    return path
+
+
+def _corrupt_the_stream(raw, local_offset, _central_offset):
+    """Garbage inside the compressed data -> zlib.error on decompression."""
+    name_len, extra_len = struct.unpack("<HH", raw[local_offset + 26:local_offset + 30])
+    start = local_offset + 30 + name_len + extra_len
+    for index in range(start + 12, start + 30):
+        raw[index] ^= 0xFF
+
+
+def _unknown_compression_method(raw, local_offset, central_offset):
+    """Method 99 -> NotImplementedError, no decompressor exists."""
+    struct.pack_into("<H", raw, local_offset + 8, 99)
+    struct.pack_into("<H", raw, central_offset + 10, 99)
+
+
+def _flag_as_encrypted(raw, local_offset, central_offset):
+    """General-purpose flag bit 0 -> RuntimeError, password required."""
+    struct.pack_into("<H", raw, local_offset + 6, 0x0001)
+    struct.pack_into("<H", raw, central_offset + 8, 0x0001)
+
+
+class MalformedArchivesZipfileLeaks(SafeExtractionTests):
+    """Archives whose headers parse cleanly but whose contents cannot be read.
+
+    The guard caught (BadZipFile, ValueError, OSError). zipfile raises three
+    more for a hand-crafted archive, and none of them subclass those:
+
+      * zlib.error          - the deflate stream is corrupt
+      * NotImplementedError - a compression method with no decompressor
+      * RuntimeError        - a member flagged encrypted, no password given
+
+    A remote peer chooses these bytes and process_fetched_list_zip() is
+    documented "Never raises", so each one reached the fetch thread instead
+    of being reported as a refused list.
+    """
+
+    def _refused(self, name, mutate):
+        path = _crafted_zip(os.path.join(self.tmp, name), mutate)
+        ok, reason = list_fetch.process_fetched_list_zip("probebot", path)
+        self.assertFalse(ok, "a broken archive was accepted")
+        self.assertIn("extraction aborted", reason)
+        return reason
+
+    def test_a_corrupt_deflate_stream_is_refused(self):
+        reason = self._refused("corrupt.zip", _corrupt_the_stream)
+        self.assertIn("decompressing", reason)
+
+    def test_an_unknown_compression_method_is_refused(self):
+        reason = self._refused("method.zip", _unknown_compression_method)
+        self.assertIn("NotImplementedError", reason)
+
+    def test_a_member_flagged_encrypted_is_refused(self):
+        reason = self._refused("encrypted.zip", _flag_as_encrypted)
+        self.assertIn("encrypted", reason)
+
+    def test_the_extraction_directory_is_cleaned_up(self):
+        """Every other abort path removes the half-extracted directory. These
+        must too, or the next fetch from that bot inherits the debris - the
+        same way the all-dots archive used to poison a bot permanently."""
+        self._refused("corrupt2.zip", _corrupt_the_stream)
+        self.assertFalse(
+            os.path.exists(list_fetch.list_extract_dir("probebot")),
+            "the aborted extraction left its directory behind")
+
+    def test_a_sound_archive_is_still_accepted(self):
+        """Control. The wider guard must not start swallowing good ones."""
+        path = os.path.join(self.tmp, "fine.zip")
+        _write_zip(path, [("OtherBot-2026-08-27.txt", _list_txt())])
+        ok, reason = list_fetch.process_fetched_list_zip("goodbot", path)
+        self.assertTrue(ok, f"a valid archive was refused: {reason}")

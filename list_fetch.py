@@ -312,6 +312,19 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
         # extracted so far".
         shutil.rmtree(extract_dir, ignore_errors=True)
         return None, f"extraction aborted: {err}"
+    except Exception as err:
+        # zipfile leaks more than those three for a hand-crafted archive:
+        # zlib.error for a corrupt deflate stream, NotImplementedError for a
+        # compression method it has no decompressor for, and RuntimeError for
+        # a member flagged encrypted. None of them subclass the cases above.
+        #
+        # A remote peer chooses these bytes, and process_fetched_list_zip()
+        # promises callers it never raises, so anything that gets past the
+        # specific cases still means "abort this extraction" - never an
+        # exception loose in the fetch thread. The type name goes into the
+        # reason because, unlike the cases above, it is not self-describing.
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        return None, f"extraction aborted: {type(err).__name__}: {err}"
 
     return _pick_list_file(extract_dir), None
 
