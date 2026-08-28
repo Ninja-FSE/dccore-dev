@@ -837,8 +837,6 @@ class ListeningStateRenderingTests(unittest.TestCase):
         self.assertIn(".status-pill.status-listening", self.style_css)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class JsonBodyMustBeAnObject(DCCoreTestCase):
@@ -909,3 +907,7 @@ class JsonBodyMustBeAnObject(DCCoreTestCase):
             "get_json(silent=True) or {}" in source,
             "a POST route coerces its body with `or {}` again, which lets a "
             "truthy non-dict through to .get() and returns a 500")
+
+
+if __name__ == "__main__":
+    unittest.main()
