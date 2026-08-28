@@ -702,7 +702,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
             
-            # Ta bort eventuella dubbla snedstreck i slutet innan vi mappar mot Linux-disken
+            # Strip any doubled trailing slashes before mapping onto the Linux disk
             clean_win_path = win_path.replace("\\", "/").replace("D:/", "").replace("d:/", "")
 
 
@@ -774,7 +774,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     "is_temporary_zip": True
                 })
                 import db
-                db.save_dcc_queue() # Spika direkt till dcc_queue.txt!
+                db.save_dcc_queue()  # Commit straight to dcc_queue.txt
                 
                 user_pos = len(config.dcc_queue[user_key])
                 print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")

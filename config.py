@@ -46,10 +46,10 @@ ANNOUNCE_INTERVAL = 300     # Time between each channel advert, in seconds
 # ---------------------------------------------------------------------
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
 # ---------------------------------------------------------------------
-MAX_DCC_SLOTS      = 3      # Max antal samtidiga live-nedladdningar
+MAX_DCC_SLOTS      = 3      # Maximum simultaneous live downloads
 MAX_USER_QUEUE     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE   = 1000   # Most files across every queue combined
-MAX_SEARCH_RESULTS = 5      # Max antal textrader som spottas ut vid @find
+MAX_SEARCH_RESULTS = 5      # Maximum result lines sent in reply to an @find
 MSG_DELAY          = 5.0    # Delay in seconds for the ordinary message queue
 DEBUG_MSG_DELAY    = 0.5    # Pause between each line sent to the debug channel
 

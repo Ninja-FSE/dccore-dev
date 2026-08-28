@@ -254,7 +254,7 @@ def irc_loop():
         # a loose count. The old code counted every 366 line it saw, including the
         # debug channel's, so the threshold could be reached even if a real channel
         # never answered - and if two or more failed the threshold was never reached,
-        # tystade ner ALL annonsering permanent utan minsta felmeddelande.
+        # which silenced ALL advertising permanently, with no error message.
         target_channels = set(c.strip().lower() for c in config.CHANNEL.split(",") if c.strip())
         channels_confirmed = set()
         ACTIVATION_TIMEOUT = 20.0  # seconds after JOIN before giving up on the rest
@@ -281,7 +281,7 @@ def irc_loop():
 
         # HOISTED (issue #9): delayed_activate lives here now, once, instead of being
         # nested inside the 366 handler - so both the ordinary NAMES path AND
-        # timeout-vakthunden nedan kan trigga exakt samma aktiveringslogik.
+        # the timeout watchdog below can trigger the same activation logic.
         def delayed_activate(sock=s, epoch=my_epoch):
             # `sock` and `epoch` are bound as DEFAULT ARGUMENTS on purpose. Both were
             # previously free variables resolved through irc_loop's frame, and that frame

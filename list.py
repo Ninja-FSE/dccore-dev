@@ -201,7 +201,7 @@ def execute_search(irc_sock, user, search_term, channel):
             oserve = sys.modules.get('oserve')
             if oserve:
                 BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-                BG_CYAN_BLOCK = "\x0310,10" # Turkos kant
+                BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
                 BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
                 R = "\x0f"                  # Full reset
                 
