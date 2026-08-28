@@ -837,5 +837,77 @@ class ListeningStateRenderingTests(unittest.TestCase):
         self.assertIn(".status-pill.status-listening", self.style_css)
 
 
+
+
+class JsonBodyMustBeAnObject(DCCoreTestCase):
+    """POST bodies that parse to something other than a JSON object.
+
+    The two routes used `request.get_json(silent=True) or {}`, which only
+    substitutes for a FALSY result. A truthy non-dict - `["a"]`, `"text"`, `7`
+    - passed straight through to `.get()` on the next line and raised
+    AttributeError, which Flask turns into a 500 with a traceback. Every other
+    bad input to these routes gets a 400.
+
+    An empty dict is the right substitute rather than an error of its own: it
+    is exactly what a missing body already produces, and the validators
+    downstream turn that into their normal 400.
+    """
+
+    def test_an_object_passes_through_unchanged(self):
+        body = {"term": "sandman"}
+        self.assertIs(webserver.json_object(body), body)
+
+    def test_truthy_non_objects_become_an_empty_object(self):
+        """The bug. Each of these is truthy, so `or {}` left it intact."""
+        for bad in (["a", "b"], "text", 7, 1.5, True):
+            with self.subTest(body=bad):
+                self.assertEqual(webserver.json_object(bad), {})
+
+    def test_falsy_bodies_still_become_an_empty_object(self):
+        """Control. `or {}` already handled these - the replacement must too,
+        or a request with no body at all starts failing differently."""
+        for empty in (None, {}, [], "", 0):
+            with self.subTest(body=empty):
+                self.assertEqual(webserver.json_object(empty), {})
+
+    def test_the_result_is_always_safe_to_call_get_on(self):
+        """The defect stated directly: whatever the peer sent, the next line
+        of every route is a .get(), and it must not raise."""
+        for bad in (["a"], "text", 7, None, True):
+            with self.subTest(body=bad):
+                self.assertEqual(webserver.json_object(bad).get("term", ""), "")
+
+    def test_a_non_object_body_reaches_the_normal_400(self):
+        """End to end through the pure route logic: a bad body should land on
+        the same 400 an empty body gets, not a 500."""
+        status, _payload = webserver.start_broadcast_search(
+            webserver.json_object(["not", "an", "object"]).get("term", ""))
+        self.assertEqual(status, 400)
+
+        status, _payload = webserver.build_list_fetch_enqueue_result(
+            webserver.json_object("not an object").get("bot", ""))
+        self.assertEqual(status, 400)
+
+    def test_no_post_route_still_coerces_with_or(self):
+        """Guards the wiring, not just the helper.
+
+        A route that goes back to `request.get_json(silent=True) or {}`
+        reintroduces the 500, and a unit test of json_object() on its own
+        would never notice - the helper would still be correct, just unused.
+        """
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "webserver.py")
+        with io.open(path, encoding="utf-8") as handle:
+            source = handle.read()
+
+        # assertFalse, not assertNotIn: the haystack is the whole module, and
+        # assertNotIn prints it in full on failure.
+        self.assertFalse(
+            "get_json(silent=True) or {}" in source,
+            "a POST route coerces its body with `or {}` again, which lets a "
+            "truthy non-dict through to .get() and returns a 500")
+
+
 if __name__ == "__main__":
     unittest.main()

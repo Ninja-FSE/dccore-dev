@@ -300,6 +300,23 @@ def build_broadcast_status_payload():
     }
 
 
+def json_object(body):
+    """A parsed JSON request body as a dict, or an empty one.
+
+    request.get_json(silent=True) returns whatever the body parsed to, and the
+    `or {}` this replaces only substitutes for a FALSY result. A truthy
+    non-dict - an array, a string, a number - passed straight through to
+    .get() on the next line and raised AttributeError, which Flask turns into
+    a 500 with a traceback, for input the routes should simply reject.
+
+    An empty dict is the right substitute rather than an error of its own,
+    because it is exactly what a missing body already produces: the route
+    validators downstream turn that into their normal 400. Kept pure, and out
+    of the request context, so tests can reach it with no Flask installed.
+    """
+    return body if isinstance(body, dict) else {}
+
+
 def start_broadcast_search(term):
     """Validate and kick off a cross-bot @find broadcast. Returns
     (http_status, payload_dict); the Flask route below only parses the
@@ -470,7 +487,7 @@ if HAVE_FLASK:
 
         @app.route("/api/search/broadcast", methods=["POST"])
         def api_search_broadcast():
-            body = request.get_json(silent=True) or {}
+            body = json_object(request.get_json(silent=True))
             status, result = start_broadcast_search(body.get("term", ""))
             return jsonify(result), status
 
@@ -490,7 +507,7 @@ if HAVE_FLASK:
 
         @app.route("/api/filelists/fetch", methods=["POST"])
         def api_filelists_fetch():
-            body = request.get_json(silent=True) or {}
+            body = json_object(request.get_json(silent=True))
             status, result = build_list_fetch_enqueue_result(body.get("bot", ""))
             return jsonify(result), status
 
