@@ -1,6 +1,11 @@
 # =====================================================================
 # CONFIG.PY - CENTRAL CONFIGURATION FOR THE DCCORE DAEMON
 # =====================================================================
+# The live in-memory containers this file used to define are in runtime.py
+# now, and are bound below in section 8. See that module's docstring for why:
+# !rehash reloads THIS file, which reset every one of them.
+import runtime
+
 # ---------------------------------------------------------------------
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
@@ -166,20 +171,34 @@ C_ITALIC       = "\x1D"     # Kursiv
 # ---------------------------------------------------------------------
 # 8. LIVE STATE (held in memory only, for the lifetime of the process)
 # ---------------------------------------------------------------------
-search_inprogress = False    # Search lock: True while a scan is running
-failed_transfers  = {}       # Failed-transfer counter, per user
-channel_users     = {}       # Users currently seen in the channels
-banned_users      = {}       # Currently banned users, in memory
-user_requests     = {}       # Command timestamps per user, for anti-flood
-muted_until       = {}       # Timers for temporarily muted users
-whois_status      = {}       # Online-status via WHO-svar (True = Online)
-frozen_queues     = {}       # Saved timestamps for users in the freezer
-rar_inprogress = False
+# Bound to the objects runtime.py holds - the SAME objects, not copies - so
+# every existing config.<name> reference keeps working unchanged. !rehash does
+# not reload runtime.py, so a reload of this file re-runs these bindings and
+# picks the same live containers back up instead of emptying them.
+#
+# Mutate them in place. Never rebind them: `config.dcc_queue = {}` detaches
+# this name from the object runtime.py still holds, and the two silently drift
+# apart. tests/test_runtime_state.py fails the build if anything does.
+failed_transfers  = runtime.failed_transfers   # Failed-transfer counter, per user
+channel_users     = runtime.channel_users      # Users currently seen in the channels
+banned_users      = runtime.banned_users       # Currently banned users, in memory
+user_requests     = runtime.user_requests      # Command timestamps per user, anti-flood
+muted_until       = runtime.muted_until        # Timers for temporarily muted users
+whois_status      = runtime.whois_status       # Online status via WHO reply (True = online)
+frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in the freezer
 
 # The central queue structures
-dcc_queue         = {}       # The main sharing queue, as {username: [files]}
-vip_queue         = []       # Isolated express queue for search headers and adverts
-active_transfers  = []       # Live DCC sends, one thread each
+dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}
+vip_queue         = runtime.vip_queue          # Express queue for search headers and adverts
+active_transfers  = runtime.active_transfers   # Live DCC sends, one thread each
+
+# Scalars stay here. The binding above only works for mutable objects - a bool
+# rebound in this file could never write through to runtime.py, so moving them
+# would look like a fix without being one. Their behaviour across a rehash is
+# unchanged: both are reset by the reload, and rar_inprogress being reset is
+# the documented "lock-clearing rehash" escape hatch for a wedged packer.
+search_inprogress = False    # Search lock: True while a scan is running
+rar_inprogress    = False
 
 # ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)

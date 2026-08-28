@@ -950,7 +950,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             config.user_processing_lock.discard(user.lower())
             
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
-            config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
             
         # This abort returns BEFORE the try/finally that settles the queue row, so without
         # this call the same unreadable entry was re-selected every ~3 seconds forever,
@@ -983,7 +983,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try: irc_sock.send(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} No available DCC ports.\r\n".encode())
         except: pass
         with queue_lock if 'queue_lock' in globals() else threading.Lock():
-            config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
 
         # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
         # NOT charged to the retry budget - a busy spell must not discard good queued files.
@@ -1113,7 +1113,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # 1. Clean up the transfer and the slot immediately
         try:
             with queue_lock if 'queue_lock' in globals() else threading.Lock():
-                config.active_transfers = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+                config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.active_downloads = len(config.active_transfers)
         except Exception as trans_clean_err:
