@@ -68,12 +68,19 @@ MAX_LIST_ZIP_ENTRIES = 300
 _COPY_CHUNK = 65536
 
 
+_FALLBACK_LOCK = threading.Lock()
+
+
 def _lock():
     """The dedicated lock oserve.py allocates at startup for
-    config.fetched_bot_lists, or a fresh one as a fallback - same idiom as
+    config.fetched_bot_lists, or a module-level fallback - same idiom as
     dcc_fetch._fetch_lock(), needed so tests (and any other caller that never
-    ran oserve.startup()) still have something to synchronise on."""
-    return getattr(config, "fetched_bot_lists_lock", None) or threading.Lock()
+    ran oserve.startup()) still have something to synchronise on.
+
+    The fallback is allocated once, at import, rather than per call: returning
+    a fresh Lock() each time would hand every caller a different object and so
+    would serialise nothing at all."""
+    return getattr(config, "fetched_bot_lists_lock", None) or _FALLBACK_LOCK
 
 
 def _ensure_fetched_bot_lists():
@@ -328,7 +335,26 @@ def process_fetched_list_zip(bot, zip_path):
     human-readable string suitable for logging/dashboard display. Never
     raises - every anticipated failure mode (bad zip, zip bomb, path
     traversal, no recognisable list file) is handled here.
+
+    The whole extract -> parse -> store sequence runs under the lock, not just
+    the store write at the end. list_extract_dir() keys on the bot nick alone,
+    and extraction opens by rmtree-ing that directory, so two fetches for the
+    same bot would otherwise delete each other's files mid-extraction - and
+    the fetch slot pool allows several transfers to complete at once.
+
+    The lock is module-wide rather than per bot, which also serialises fetches
+    for DIFFERENT bots. That is deliberate: it needs no nick-keyed registry to
+    grow, and it means only one list is ever being parsed into memory at a
+    time, so the peak cost of a parse is one list instead of one per slot.
+    Extraction is a background step measured in seconds, so the wait costs
+    nothing that matters.
     """
+    with _lock():
+        return _process_fetched_list_zip_unlocked(bot, zip_path)
+
+
+def _process_fetched_list_zip_unlocked(bot, zip_path):
+    """The body of process_fetched_list_zip. Caller must hold _lock()."""
     extract_dir = list_extract_dir(bot)
     list_path, reason = _extract_and_locate_list_file(zip_path, extract_dir)
     if reason:
@@ -343,13 +369,12 @@ def process_fetched_list_zip(bot, zip_path):
     rows = list_mod.entries_to_filelist_rows(entries, str(bot).strip())
 
     store = _ensure_fetched_bot_lists()
-    with _lock():
-        store[str(bot).strip().lower()] = {
-            "bot": str(bot).strip(),
-            "fetched_at": time.time(),
-            "entries": rows,
-            "source_zip": os.path.basename(zip_path),
-        }
+    store[str(bot).strip().lower()] = {
+        "bot": str(bot).strip(),
+        "fetched_at": time.time(),
+        "entries": rows,
+        "source_zip": os.path.basename(zip_path),
+    }
 
     print(f"[LIST-FETCH] Stored {len(rows)} entries from {bot}'s fetched list "
           f"({os.path.basename(list_path)}).")

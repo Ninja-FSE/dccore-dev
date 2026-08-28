@@ -326,3 +326,128 @@ class AllDotsMemberNames(SafeExtractionTests):
         _write_zip(path, [("./OtherBot-2026-08-27.txt", _list_txt())])
         ok, reason = list_fetch.process_fetched_list_zip("plainbot", path)
         self.assertTrue(ok, f"a leading './' was wrongly refused: {reason}")
+
+
+class ConcurrentFetchesForOneBot(SafeExtractionTests):
+    """Two list fetches for the SAME bot completing at once.
+
+    list_extract_dir() keys on the bot nick alone, and extraction opens by
+    rmtree-ing that directory, so before the lock was widened to cover the
+    whole sequence the second fetch deleted the first one's files while the
+    first was still working inside them. The fetch slot pool lets several
+    transfers finish together, so this needed no unusual timing to hit - and
+    both calls still returned success, so nothing reported it.
+
+    The interleaving is pinned rather than raced for: the first call is held
+    just after its extraction finishes, the second then runs a complete fetch,
+    and only then is the first released to parse whatever is left on disk.
+    Both archives are clean and well formed - any failure here is the shared
+    directory, not the input.
+    """
+
+    def _tagged_zip(self, tag, count):
+        body = "".join(
+            f"!SomeBot {tag}Track{i}.flac  ::INFO:: 5.00MB\n" for i in range(count))
+        path = os.path.join(self.tmp, f"{tag}.zip")
+        _write_zip(path, [(f"SomeBot-{tag}.txt", body)])
+        return path
+
+    def _run_pinned_pair(self):
+        import threading
+        bot = "samebot"
+        zip_a = self._tagged_zip("A", 30)
+        zip_b = self._tagged_zip("B", 70)
+
+        a_extracted = threading.Event()
+        b_finished = threading.Event()
+        real_pick = list_fetch._pick_list_file
+        guard = threading.Lock()
+        seen = []
+
+        def hooked(extract_dir):
+            with guard:
+                is_first = not seen
+                seen.append(1)
+            if is_first:
+                a_extracted.set()
+                # Once the lock covers the whole sequence the other thread is
+                # blocked and cannot signal, so this times out instead. That
+                # is the fix working, not the test failing - hence a short,
+                # bounded wait rather than an indefinite one.
+                b_finished.wait(timeout=1.0)
+            return real_pick(extract_dir)
+
+        list_fetch._pick_list_file = hooked
+        self.addCleanup(setattr, list_fetch, "_pick_list_file", real_pick)
+
+        results = {}
+
+        def fetch_a():
+            results["a"] = list_fetch.process_fetched_list_zip(bot, zip_a)
+
+        def fetch_b():
+            a_extracted.wait(timeout=5.0)
+            results["b"] = list_fetch.process_fetched_list_zip(bot, zip_b)
+            b_finished.set()
+
+        threads = [threading.Thread(target=fetch_a, daemon=True),
+                   threading.Thread(target=fetch_b, daemon=True)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+            self.assertFalse(thread.is_alive(),
+                             "a fetch thread never finished - the widened lock "
+                             "should serialise these two, not deadlock them")
+        return bot, results
+
+    def test_the_stored_record_matches_the_archive_it_names(self):
+        """The defect itself.
+
+        Unfixed, the first call parsed the SECOND call's extracted files and
+        stored them under its own source_zip - a record labelled "A.zip"
+        holding every row from B.zip, reported to the operator as a successful
+        fetch of A.
+        """
+        bot, _results = self._run_pinned_pair()
+
+        entry = config.fetched_bot_lists[bot]
+        archives = {row["title"][0] for row in entry["entries"] if row.get("title")}
+        self.assertEqual(
+            len(archives), 1,
+            f"the stored list mixes rows from both archives: {sorted(archives)}")
+        self.assertEqual(
+            entry["source_zip"][0], archives.pop(),
+            f"the stored record names {entry['source_zip']} but its rows came "
+            f"from the other archive - one fetch parsed the other's extracted "
+            f"files after overwriting the shared extraction directory")
+
+    def test_both_fetches_still_report_a_result(self):
+        """Control. Serialising them must not make either call fail or hang -
+        both archives are valid, so both fetches should succeed."""
+        _bot, results = self._run_pinned_pair()
+
+        for which in ("a", "b"):
+            with self.subTest(fetch=which):
+                self.assertIn(which, results, "the fetch never returned")
+                ok, reason = results[which]
+                self.assertTrue(ok, f"a clean archive was refused: {reason}")
+
+
+class FallbackLockIsShared(DCCoreTestCase):
+    """_lock() falls back to a module-level lock when oserve.py has not run.
+
+    It used to build `threading.Lock()` inline, handing every caller a brand
+    new object that each acquired uncontended - so the fallback path
+    synchronised nothing at all, silently.
+    """
+
+    def test_repeated_calls_return_one_object(self):
+        saved = getattr(config, "fetched_bot_lists_lock", None)
+        if saved is not None:
+            del config.fetched_bot_lists_lock
+            self.addCleanup(setattr, config, "fetched_bot_lists_lock", saved)
+
+        self.assertIs(list_fetch._lock(), list_fetch._lock(),
+                      "the fallback hands out a fresh lock per call, so "
+                      "concurrent callers never actually exclude each other")
