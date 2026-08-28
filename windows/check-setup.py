@@ -88,11 +88,29 @@ if nick in UPSTREAM_NICKS:
     fail(f"NICKNAME is still {config.NICKNAME!r} - it will collide with the "
          f"production bot. Set your own in local_config.py.")
 
+# Sharing a channel with the upstream bot is only a problem when the NICK is
+# also still the default. Two distinct operators in one channel is the entire
+# point of the network - these channels are full of file servers, and a second
+# one with its own nick and its own library is an ordinary participant.
+#
+# The hazard this guards against is narrower: a copy of the sample config that
+# nobody edited, putting a second "DCCore" into the live channels. That is a
+# near-identical twin of the upstream bot, and it can get the OTHER operator
+# banned, which is why it is worth refusing to start over.
+#
+# Failing on the channels alone blocked the legitimate case - an operator
+# running their own bot, under their own nick, in the channels they trade in.
 channels = str(getattr(config, "CHANNEL", ""))
 shared = [c for c in UPSTREAM_CHANNELS if c in channels.lower()]
-if shared:
-    fail(f"CHANNEL still points at the production bot's channels: "
-         f"{', '.join(shared)}. Use your own test channel.")
+if shared and nick in UPSTREAM_NICKS:
+    fail(f"CHANNEL points at the production bot's channels "
+         f"({', '.join(shared)}) AND NICKNAME is still {config.NICKNAME!r}. "
+         f"That is a second copy of the same bot in the live channels - set "
+         f"your own nickname first.")
+elif shared:
+    warn(f"sharing {', '.join(shared)} with the upstream bot - fine under "
+         f"your own nick ({config.NICKNAME}), just make sure the library and "
+         f"triggers are yours")
 else:
     ok(f"channels {channels}")
 
