@@ -14,17 +14,42 @@ real data-shaping and mutation logic with plain unittest, no Flask install
 required - keeping the "stdlib-only" property the rest of the test suite
 relies on. create_app() and start() are the only things gated on HAVE_FLASK.
 
-NO AUTHENTICATION ON ANY ROUTE, INCLUDING THE MUTATING ONES ADDED FOR CROSS-BOT
-SEARCH/FETCH. See the WEBUI_HOST comment in config.py: this is the same
-deliberate operator decision for a LAN-only deployment, not an oversight -
-extended, on purpose, to /api/search/broadcast and /api/fetch/* even though
-those routes DO mutate state (they queue an outbound IRC line, and dial an
-IP:port a foreign bot supplies). The operator was explicitly warned what that
-means before choosing to proceed. See the heavy comment block directly above
-each mutating route in create_app() below - do not add a new mutating route
-without adding the same warning there, and do not add authentication-shaped
-workarounds (an API key in a query string, an unchecked cookie) without
-actually implementing authentication; that only adds false confidence.
+EVERY ROUTE REQUIRES A LOGIN, INCLUDING STATIC ASSETS. The dashboard used to
+run with no authentication at all - a deliberate LAN-only decision, extended
+on purpose even to /api/search/broadcast and /api/fetch/* despite those
+routes mutating state (queuing an outbound IRC line, dialling an IP:port a
+foreign bot supplies). That changed because WEBUI_HOST is no longer
+guaranteed to stay LAN-only in practice: it shares one password with the DCC
+CHAT admin console (config.ADMIN_PASSWORD_HASH, generated with `python
+adminchat.py`) rather than a second credential to configure and forget about.
+start() now refuses to run at all when that hash is unset - see the check
+near the bottom of this file - so the dashboard is never reachable
+unauthenticated, not even briefly on a fresh install.
+
+The login route ("/login") is the ONLY exemption from the require_login()
+before_request hook below; everything else, static files included, is behind
+it. The session is a plain signed Flask cookie (app.secret_key, generated
+fresh per process) - it does not survive a daemon restart, which is a
+deliberate simplification: re-logging in after a restart costs nothing, and
+it avoids a second secret to persist and protect. This is real
+authentication, not the workaround kind the module docstring used to warn
+against (an API key in a query string, a cookie nobody checks) - the password
+is verified against ADMIN_PASSWORD_HASH via adminchat.verify_password() on
+every login attempt, and nothing downstream trusts a request that has not
+passed require_login(). Repeated failures from one address are temporarily
+blocked (_note_bad_web_login()/_is_bad_web_ip(), same attempt-count and
+block-duration policy as adminchat.py's own DCC CHAT console tracker, reused
+from there directly) - in a POOL SEPARATE FROM adminchat.py's, on purpose:
+since the password is shared, a shared block budget would let a web attacker
+spend it down and lock the real operator out of the DCC console too.
+
+What plain-HTTP session/password transmission still cannot fix: an attacker
+already sharing the network segment can read the password and the session
+cookie off the wire. The WEBUI_HOST comment in config.py's warning against
+untrusted networks is about exactly that, and still applies with auth in
+place - a password gate stops a stranger from finding the dashboard and
+using it, not from a wire-level eavesdropper on a network the operator should
+not have put this host on to begin with.
 
 Nothing here is added to commands.py's modules_to_reload. A !rehash reload
 re-executes this module's body, which would try to re-bind a live listening
@@ -40,10 +65,11 @@ import sys
 import threading
 import time
 
+import adminchat
 import config
 
 try:
-    from flask import Flask, jsonify, request, send_from_directory
+    from flask import Flask, jsonify, redirect, request, send_from_directory, session
     HAVE_FLASK = True
 except ImportError:
     HAVE_FLASK = False
@@ -437,9 +463,9 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None):
 
 
 # ==========================================================================
-# Cross-bot search broadcast (mutating - see the NO AUTHENTICATION notice on
-# each route below). Pure logic lives here, same reasoning as the
-# build_*_payload() functions above: no Flask import, fully unit testable.
+# Cross-bot search broadcast (mutating - behind the same login as every other
+# route, see the module docstring). Pure logic lives here, same reasoning as
+# the build_*_payload() functions above: no Flask import, fully unit testable.
 # ==========================================================================
 
 BROADCAST_SEARCH_WINDOW = 30.0        # seconds the listening window stays open
@@ -487,11 +513,10 @@ def start_broadcast_search(term):
     cooldown, the in-memory state transition, queuing the outbound line - is
     exercised by tests/test_webserver.py with no Flask install required.
 
-    NO AUTHENTICATION. Anyone who can reach this host:port can make the
-    daemon send an @find into a real, public IRC channel. See the
-    WEBUI_HOST comment in config.py - this is the same deliberate, already
-    made "LAN-only, no auth" operator decision, extended to a route that
-    (unlike the rest of this file) actually sends something.
+    Behind the same login as every other route in this app (see the module
+    docstring) - a logged-in operator can make the daemon send an @find into
+    a real, public IRC channel, which is why this route, unlike most others
+    here, actually sends something rather than just reading state.
     """
     term = "" if term is None else term
     term_err = reject_if_unsafe_for_irc_line(term, "term")
@@ -550,8 +575,8 @@ def start_broadcast_search(term):
 
 
 # ==========================================================================
-# Cross-bot file fetch (mutating - see the NO AUTHENTICATION notice on each
-# route below). Pure logic, same reasoning as above.
+# Cross-bot file fetch (mutating - behind the same login as every other
+# route). Pure logic, same reasoning as above.
 # ==========================================================================
 
 def build_fetch_enqueue_result(payload):
@@ -671,10 +696,124 @@ def build_verify_list_payload():
 # Flask app - only built/used when Flask is actually installed.
 # ==========================================================================
 
+# Self-contained on purpose: the login page must render before a session
+# exists, so it cannot depend on web/style.css (that request would itself be
+# behind the login it is trying to render) or on any operator data.
+LOGIN_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>DCCore Dashboard - Login</title>
+<style>
+  body {{ font-family: -apple-system, "Segoe UI", sans-serif; background: #0b0f12;
+          color: #e6edf0; display: flex; align-items: center; justify-content: center;
+          height: 100vh; margin: 0; }}
+  form {{ background: #131a1f; padding: 2rem 2.25rem; border-radius: 10px;
+          min-width: 260px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }}
+  h1 {{ font-size: 1.05rem; margin: 0 0 1.25rem; font-weight: 600; }}
+  input {{ width: 100%; padding: 0.55rem 0.6rem; margin-bottom: 1rem; box-sizing: border-box;
+           background: #0b0f12; border: 1px solid #2a343b; border-radius: 6px; color: #e6edf0; }}
+  button {{ width: 100%; padding: 0.55rem; background: #2dd4c8; color: #06231f; border: 0;
+            border-radius: 6px; font-weight: 600; cursor: pointer; }}
+  .error {{ color: #f87171; font-size: 0.85rem; margin: -0.75rem 0 1rem; }}
+</style></head>
+<body>
+  <form method="post" action="/login">
+    <h1>DCCore Dashboard</h1>
+    {error_html}
+    <input type="password" name="password" placeholder="Admin password" autofocus>
+    <button type="submit">Log in</button>
+  </form>
+</body></html>"""
+
+
+# Failed-login tracking for THIS route, deliberately separate from
+# adminchat.py's own _bad_ips pool even though the policy (attempt count,
+# block duration) is identical and reused from there directly. The password
+# is shared with the DCC CHAT admin console on purpose - but the block budget
+# is not, because if it were, an attacker guessing at this HTTP form could
+# spend down the same counter and lock the real operator out of the DCC
+# console too. Same policy, separate pools: one abusive address costs it
+# access to this route only.
+_web_bad_ips = {}
+_web_bad_ips_lock = threading.Lock()
+
+
+def _note_bad_web_login(ip):
+    if not ip:
+        return
+    with _web_bad_ips_lock:
+        entry = _web_bad_ips.get(ip) or [0, 0.0]
+        entry[0] += 1
+        if entry[0] >= adminchat.MAX_PASSWORD_ATTEMPTS:
+            entry[1] = time.time() + adminchat.BAD_IP_BLOCK_SECONDS
+        _web_bad_ips[ip] = entry
+
+
+def _is_bad_web_ip(ip):
+    if not ip:
+        return False
+    with _web_bad_ips_lock:
+        entry = _web_bad_ips.get(ip)
+        if not entry:
+            return False
+        if entry[1] and time.time() >= entry[1]:
+            del _web_bad_ips[ip]  # block expired; forget it so a typo is not permanent
+            return False
+        return bool(entry[1])
+
+
+def _clear_bad_web_ip(ip):
+    with _web_bad_ips_lock:
+        _web_bad_ips.pop(ip, None)
+
+
 if HAVE_FLASK:
 
     def create_app():
         app = Flask(__name__, static_folder="web", static_url_path="")
+        app.secret_key = os.urandom(32)
+        # The mutating routes (broadcast search, fetch enqueue, list fetch)
+        # all POST; Lax is the app's own decision instead of whatever the
+        # visitor's browser happens to default to.
+        app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+        @app.before_request
+        def require_login():
+            # The sole exemption: everything else, static files included,
+            # needs a session already marked authenticated by a prior POST
+            # here. Endpoint rather than path, so a future route can't
+            # accidentally slip past this by sharing a path prefix.
+            if request.endpoint == "login":
+                return None
+            if not session.get("authenticated"):
+                if request.path.startswith("/api/"):
+                    return jsonify({"error": "Authentication required."}), 401
+                return redirect("/login")
+            return None
+
+        @app.route("/login", methods=["GET", "POST"])
+        def login():
+            error = None
+            if request.method == "POST":
+                ip = request.remote_addr
+                if _is_bad_web_ip(ip):
+                    error = "Too many failed attempts. Try again later."
+                else:
+                    stored = getattr(config, "ADMIN_PASSWORD_HASH", "")
+                    supplied = request.form.get("password", "")
+                    if adminchat.verify_password(stored, supplied):
+                        _clear_bad_web_ip(ip)
+                        session["authenticated"] = True
+                        return redirect("/")
+                    _note_bad_web_login(ip)
+                    error = "Incorrect password."
+            error_html = '<p class="error">{}</p>'.format(error) if error else ""
+            status = 401 if error else 200
+            return LOGIN_PAGE.format(error_html=error_html), status
+
+        @app.route("/logout", methods=["GET", "POST"])
+        def logout():
+            session.clear()
+            return redirect("/login")
 
         @app.route("/")
         def index():
@@ -695,16 +834,10 @@ if HAVE_FLASK:
             return jsonify(build_filelists_payload(offset, limit))
 
         # ------------------------------------------------------------------
-        # NO AUTHENTICATION ON ANY ROUTE BELOW, INCLUDING THESE MUTATING ONES.
-        # See the WEBUI_HOST comment in config.py: the operator was explicitly
-        # warned that this means anyone who can reach this host:port can make
-        # the daemon broadcast an @find into a real public channel and dial
-        # out to arbitrary bot-supplied IP:ports, and chose to proceed without
-        # auth anyway - consistent with this dashboard's existing "LAN-only,
-        # no auth, by design" stance. Do not add authentication-shaped
-        # workarounds here (an API key in a query string, a cookie nobody
-        # sets) without actually implementing authentication; that only adds
-        # false confidence.
+        # These routes below DO mutate state (queuing an outbound IRC line,
+        # dialling an IP:port a foreign bot supplies) - which is exactly why
+        # they sit behind the same require_login() as everything else, same
+        # as every other route in this app. See the module docstring.
         # ------------------------------------------------------------------
 
         @app.route("/api/search/broadcast", methods=["POST"])
@@ -791,14 +924,20 @@ def start():
     if not getattr(config, "WEBUI_ENABLED", False):
         print("[WEBUI] Disabled via config.WEBUI_ENABLED = False.")
         return
+    if not adminchat.password_is_configured():
+        print("[WEBUI] ADMIN_PASSWORD_HASH is not set; refusing to start the dashboard "
+              "without a login. Generate one with `python adminchat.py` and put the "
+              "result in local_config.py or settings.conf.")
+        return
 
     # 127.0.0.1 when absent, matching config.py. 0.0.0.0 would bind every
-    # interface and put an unauthenticated API on the LAN, which is the
-    # opposite of what a missing setting should buy anyone.
+    # interface and put the dashboard on the LAN, which is the opposite of
+    # what a missing setting should buy anyone - even with a login gate, that
+    # is a decision the operator should make explicitly, not by omission.
     host = getattr(config, "WEBUI_HOST", "127.0.0.1")
     port = getattr(config, "WEBUI_PORT", 8420)
     app = create_app()
-    print(f"[WEBUI] Dashboard starting on http://{host}:{port}/ (no authentication - LAN-only).")
+    print(f"[WEBUI] Dashboard starting on http://{host}:{port}/ (login required).")
     try:
         # use_reloader=False is NOT optional: Flask's reloader re-execs the whole
         # process, and this runs on an already-live daemon thread - a re-exec

@@ -232,8 +232,8 @@
 
 [mirc colour codes and control characters (irc standard)]
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
-# a network-facing, unauthenticated surface should never be on just because
-# someone pulled and restarted. Opt in from local_config.py, not here.
+# a network-facing surface should never be on just because someone pulled and
+# restarted. Opt in from local_config.py, not here.
 # 
 # Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
 # logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
@@ -242,19 +242,20 @@
 # dashboard.
 #WEBUI_ENABLED = false
 
-# NO AUTHENTICATION. Every /api/* route is open to anyone who can reach this
-# host:port - there is no login, no token, no password. The read-only routes
-# (queue/search/file lists) are harmless to expose; the mutating ones (search
-# broadcast, cross-bot fetch) let anyone who can reach this port make the bot
-# dial out and pull files from other IRC bots.
+# LOGIN REQUIRED, shared with the DCC CHAT admin console: every route,
+# including static assets, needs a session started by POSTing the password
+# for ADMIN_PASSWORD_HASH to /login (see webserver.py's module docstring).
+# webserver.start() refuses to run at all while that hash is empty, so there
+# is no window where the dashboard is reachable unauthenticated.
 # 
 # "127.0.0.1" is the tracked default: safe out of the box, reachable only from
 # this machine. Set this to "0.0.0.0" in local_config.py if you want it
-# reachable from other devices on your LAN (phone, laptop) - only do that on a
-# network you trust, since there is still no authentication.
+# reachable from other devices on your LAN (phone, laptop).
 # 
-# DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. DO NOT put this host on
-# any network you do not trust, without adding authentication first.
+# DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. A login gate does not stop
+# someone who shares the network segment from reading the password or the
+# session cookie off the wire - there is no TLS here. DO NOT put this host
+# on any network you do not trust.
 #WEBUI_HOST = 127.0.0.1
 
 #WEBUI_PORT = 8420
