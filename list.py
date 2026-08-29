@@ -279,6 +279,91 @@ def find_matching_entries(search_words, limit=None, list_path=None):
     return entries, total_matches
 
 
+# Every folder heading in the master list starts with this, whatever the
+# library's real location is: update_list.py writes it verbatim (see its
+# raw_folder_str) because the OmenServe listing format has always looked that
+# way. It is a piece of the format, NOT a path - the operator's library may
+# well be at Z:\1 Metal or /mnt/nfs-musik. What follows it is the folder
+# relative to FILE_DIRECTORY, which is what dcc.py joins to resolve a request.
+LIST_FOLDER_PREFIX = "D:\\MUSIC\\"
+
+
+def resolve_list_folder(header, base=None):
+    """Turn a master-list folder heading into a real path on this machine.
+
+    Mirrors what dcc.handle_download_request() does when it resolves a
+    requested name: strip the format's fixed prefix, and join what remains to
+    FILE_DIRECTORY. An entry that carried no heading at all resolves to the
+    library root, which is where such a file actually sits.
+
+    This exists so the operator is shown a path they can act on. The raw
+    heading names a drive most installs do not have, which is worse than
+    useless in a tool whose whole job is "go and look at these folders".
+    """
+    base = getattr(config, "FILE_DIRECTORY", "") if base is None else base
+    text = (header or "").strip()
+    if text.upper().startswith(LIST_FOLDER_PREFIX):
+        text = text[len(LIST_FOLDER_PREFIX):]
+    # Headings are written with backslashes regardless of the host, so split on
+    # both and let os.path.join put the platform's own separator back.
+    parts = [part for part in text.replace("\\", "/").split("/") if part]
+    return os.path.join(base, *parts) if parts else base
+
+
+def find_duplicate_filenames(entries):
+    """Filenames the master list carries under more than one folder.
+
+    Takes find_matching_entries([]) output and returns
+
+        [{"filename": str, "folders": [str, ...], "count": int}, ...]
+
+    in the order the list meets them, folders in list order too, and only for
+    names that appear under two or more folders.
+
+    WHY THIS IS WORTH KNOWING
+
+    A request names a file, not a path. "!<nick> Track 01.flac" is all a
+    requester can say, because a bare filename is all the list gives them to
+    copy. dcc.handle_download_request() then resolves that name against this
+    same list and serves the FIRST folder it finds it under - so every later
+    copy is listed, looks requestable, and cannot be fetched at all.
+
+    READS THE LIST, NOT THE LIBRARY
+
+    Deliberately. The list is what the requester saw and what the resolver
+    reads, so a name that collides here is a name that collides for them,
+    whatever the filesystem happens to hold at this moment. It also means this
+    can be answered on demand from a file already on disk, without walking the
+    library again.
+
+    The order is the useful part: the first folder listed under a name is the
+    copy a request for that name will actually reach.
+
+    Matching is case-insensitive, because the resolver compares lowercased and
+    a requester typing a name back cannot be expected to reproduce its case.
+    """
+    folders_by_name = {}
+    first_seen = []
+    for entry in entries:
+        filename = (entry.get("filename") or "").strip()
+        if not filename:
+            continue
+        key = filename.lower()
+        # A folderless entry is a real location - the library root - not a
+        # missing value, so it counts as somewhere a copy can sit.
+        folder = entry.get("folder") or ""
+        if key not in folders_by_name:
+            folders_by_name[key] = []
+            first_seen.append((filename, key))
+        folders = folders_by_name[key]
+        if folder not in folders:
+            folders.append(folder)
+    return [{"filename": name,
+             "folders": folders_by_name[key],
+             "count": len(folders_by_name[key])}
+            for name, key in first_seen if len(folders_by_name[key]) > 1]
+
+
 def entries_to_filelist_rows(entries, source):
     """Shape find_matching_entries() output into the File Lists view's row
     format: {"title", "size", "format", "source"}, deduping same
@@ -294,7 +379,17 @@ def entries_to_filelist_rows(entries, source):
     for entry in entries:
         filename = entry.get("filename", "?")
         size = entry.get("size", "")
-        key = (filename.lower(), size)
+        # `or ""`, not a get() default: a list with no folder headers
+        # stores folder=None, and .get(k, "") returns the default only
+        # when the KEY is absent, never when its value is None.
+        folder = entry.get("folder") or ""
+        # Folder is part of the key. It was (filename, size) alone, which
+        # collapsed the same track appearing under two albums into one row and
+        # silently discarded the second folder - invisible while rows were a
+        # flat list, wrong once they are grouped under the folder they came
+        # from. (Zero occurrences in the operator's own 36,208-entry library,
+        # but a fetched bot's list has no such guarantee.)
+        key = (folder.lower(), filename.lower(), size)
         if key in seen:
             continue
         seen.add(key)
@@ -304,8 +399,105 @@ def entries_to_filelist_rows(entries, source):
             "size": size,
             "format": ext,
             "source": source,
+            "folder": folder,
         })
     return rows
+
+
+def group_rows_by_folder(rows):
+    """Rows from entries_to_filelist_rows() -> one group per folder.
+
+    [{"folder": str, "count": int, "entries": [row, ...]}, ...]
+
+    Order is first-seen, which is the master list's own order, so albums stay
+    where update_list.py wrote them instead of being re-sorted into an order
+    the operator does not recognise from their own disk.
+
+    A row with no folder - possible in a foreign bot's list, whose format is
+    not ours to rely on - is grouped under "" rather than dropped, and the
+    frontend labels that group rather than showing a blank heading.
+    """
+    order = []
+    groups = {}
+    for row in rows:
+        folder = row.get("folder", "") or ""
+        group = groups.get(folder)
+        if group is None:
+            group = {"folder": folder, "count": 0, "entries": []}
+            groups[folder] = group
+            order.append(folder)
+        group["entries"].append(row)
+        group["count"] += 1
+    return [groups[folder] for folder in order]
+
+
+# The second bound on a page of folders, applied between folders and never
+# inside one. A folder count alone does not bound the response: folder sizes
+# are uneven (the operator's own library runs 1 to 127 files, median 9), and a
+# foreign bot's list carries no shape guarantee at all. This is the safety
+# valve for the unbounded-payload problem of issue #76, not the unit of paging.
+#
+# 2500 is chosen against the real library: 200 folders comes to about 1,720
+# rows, so the valve stays shut in ordinary use and only trips on a list of
+# unusually large folders.
+FILELISTS_MAX_PAGE_ROWS = 2500
+
+
+def page_folder_groups(groups, offset, limit, max_rows=None):
+    """One page of folder groups, sliced by FOLDER rather than by row.
+
+    Returns (page, total_folders, total_rows).
+
+    A folder is never split across a page: whatever the caller asked for, a
+    group is returned whole or not at all. Grouping only helps if opening a
+    folder shows all of it.
+
+    `max_rows` is a safety valve, not the unit. Folder sizes are uneven - the
+    operator's library runs 1 to 127 files per folder, median 9 - so a folder
+    count alone does not bound the response, which is the unbounded-payload
+    problem issue #76 existed to remove. The page stops early once adding the
+    next folder would exceed it, and always returns at least one folder even
+    if that folder alone is larger, because returning nothing would leave the
+    caller unable to advance.
+    """
+    total_folders = len(groups)
+    total_rows = sum(group["count"] for group in groups)
+
+    if offset < 0:
+        offset = 0
+    window = groups[offset:offset + limit] if limit else groups[offset:]
+
+    if not max_rows:
+        return window, total_folders, total_rows
+
+    page = []
+    rows_so_far = 0
+    for group in window:
+        if page and rows_so_far + group["count"] > max_rows:
+            break
+        if not page and group["count"] > max_rows:
+            # One folder larger than the whole ceiling. Returning it whole
+            # would reopen the unbounded response issue #76 removed - and it
+            # is not hypothetical: a list with no folder headers at all parses
+            # as ONE group holding every row, which is exactly the shape a
+            # foreign bot can send.
+            #
+            # So this is the one place a group is cut. It is still returned,
+            # because returning nothing would leave the caller unable to
+            # advance past it, and `count` still reports the true size so the
+            # view can say "showing 2500 of 51000" rather than quietly
+            # implying that is all there is.
+            page.append({
+                "folder": group["folder"],
+                "count": group["count"],
+                "entries": group["entries"][:max_rows],
+                "truncated": True,
+            })
+            rows_so_far += max_rows
+            break
+        page.append(group)
+        rows_so_far += group["count"]
+    return page, total_folders, total_rows
 
 
 def execute_search(irc_sock, user, search_term, channel):

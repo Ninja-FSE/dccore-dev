@@ -32,6 +32,9 @@
       <button class="nav-item" data-view="filelists">
         <span class="nav-icon">&#9776;</span> File Lists
       </button>
+      <button class="nav-item" data-view="tools">
+        <span class="nav-icon">&#9881;</span> Tools
+      </button>
     </nav>
 
     <div class="status-card">
@@ -204,6 +207,11 @@
       </div>
       <p class="broadcast-status" id="filelists-fetch-status"></p>
 
+      <div class="folder-controls">
+        <button type="button" class="btn btn-small" id="filelists-expand-all">Expand all</button>
+        <button type="button" class="btn btn-small" id="filelists-collapse-all">Collapse all</button>
+      </div>
+
       <div class="table-wrap">
         <table class="data-table" id="filelists-table">
           <thead>
@@ -223,6 +231,23 @@
         <button type="button" class="btn btn-small" id="filelists-prev-btn">Prev</button>
         <span class="filelists-pager-info" id="filelists-page-info"></span>
         <button type="button" class="btn btn-small" id="filelists-next-btn">Next</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-tools">
+      <div class="tool-card">
+        <div class="tool-head">
+          <h2 class="tool-name">Verify list</h2>
+          <button type="button" class="btn btn-accent" id="verify-run-btn">Run</button>
+        </div>
+        <p class="tool-what">
+          Reads the master list and reports any filename that appears under more
+          than one folder. A request names a file, not a path, so only the first
+          copy listed under each name can ever be fetched &mdash; the rest are
+          listed but unreachable.
+        </p>
+        <p class="tool-status" id="verify-status"></p>
+        <div class="verify-results" id="verify-results"></div>
       </div>
     </section>
 

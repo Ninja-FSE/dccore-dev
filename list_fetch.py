@@ -538,7 +538,7 @@ def get_fetched_bot_page(entry, offset, limit):
     if not list_path:
         reason = f"no list file is on record for {bot}'s fetched list"
         print(f"[LIST-FETCH] {reason}.")
-        return [], 0, reason
+        return [], 0, 0, reason
 
     resolved_path = platform_compat.long_path(list_path)
     with _lock():
@@ -547,7 +547,7 @@ def get_fetched_bot_page(entry, offset, limit):
                        f"({os.path.basename(list_path)!r} is missing - it may have "
                        f"been cleared manually since the fetch); fetch the list again")
             print(f"[LIST-FETCH] {reason}.")
-            return [], 0, reason
+            return [], 0, 0, reason
 
         try:
             entries, _total = list_mod.find_matching_entries(
@@ -561,8 +561,12 @@ def get_fetched_bot_page(entry, offset, limit):
             # the missing-file case above, just caught a moment later.
             reason = f"could not read {bot}'s fetched list file: {err}"
             print(f"[LIST-FETCH] {reason}")
-            return [], 0, reason
+            return [], 0, 0, reason
 
-    total = len(rows)
-    page = rows[offset:offset + limit]
-    return page, total, None
+    # Grouped and paged by FOLDER, the same contract as this bot's own list -
+    # see list.FILELISTS_MAX_PAGE_ROWS for why a folder count alone is not a
+    # sufficient bound.
+    groups = list_mod.group_rows_by_folder(rows)
+    page, total_folders, total_rows = list_mod.page_folder_groups(
+        groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
+    return page, total_folders, total_rows, None

@@ -16,6 +16,7 @@ Two independent things are pinned down here.
 """
 
 import os
+import time
 import unittest
 
 from tests.support import (DCCoreTestCase, reset_config, install_fake_oserve,
@@ -494,6 +495,244 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
         # continue`, which sits above every call to this function), not here.
         irc._capture_broadcast_search_reply(config.NICKNAME, config.NICKNAME, "@find sandman")
         self.assertEqual(len(config.broadcast_search_results), len(before) + 1)
+
+
+
+class BroadcastRepliesFromRealBots(DCCoreTestCase):
+    """Captured from a live @find in a real channel, not invented.
+
+    Every bot answering an @find sends a HEADER line and then one line per
+    match, and the header contains a "!" token too - it is telling the user
+    what to type:
+
+        Search Result 1 Match For X  Copy And Paste !Vibessono FILENAME To ...
+        !Vibessono 50 Oldies Party - ... .mp3  ::INFO:: 4.6MB
+
+    The extraction searched anywhere in the line, so the header matched as
+    well and produced a Download button for a file literally named
+    "FILENAME To The Channel To Request. (25/25) Free Slots...".
+
+    Ordinary channel chatter arriving inside the 30-second window was worse.
+    A KeepTrack thank-you note - "Thank You !!! I have now received 1
+    file(s)..." - yielded bot="!!" and offered to fetch from it.
+
+    Both would have sent a nonsense "!" line into a live public channel on
+    click. Anchoring the token to the start of the line separates them: a
+    result line always begins with its token, a sentence mentioning one
+    never does.
+    """
+
+    # Verbatim from a broadcast for "Testament Souls" in #mp3passion.
+    HEADERS = [
+        ("Vibessono", "Search Result 1 Match For Testament Souls Copy And Paste "
+                      "!Vibessono FILENAME To The Channel To Request. (25/25) "
+                      "Free Slots, 0 Queued OmeNServE v2.60"),
+        ("ValMp3", "Search Result ~ 2 Matches For Testament Souls ~ Copy And "
+                   "Paste !ValMp3 FILENAME To The Channel To Request. (5/5) "
+                   "Free Slots, 0 Queued OmeNServE v2.60"),
+        ("[tjserv]", "Search Result : 1 Match For Testament Souls : Copy And "
+                     "Paste ![tjserv] FILENAME To The Channel To Request. (6/6)"),
+    ]
+
+    RESULTS = [
+        ("Vibessono", "!Vibessono 50 Oldies Party - 29614 - Testament - Souls Of "
+                      "Black.mp3  ::INFO:: 4.6MB OmeNServE v2.60",
+         "50 Oldies Party - 29614 - Testament - Souls Of Black.mp3"),
+        ("`Stryder", "!`Stryder Testament - Original Album Series - 404 - Souls "
+                     "Of Black.mp3  ::INFO:: 7.7MB OmeNServE v2.60",
+         "Testament - Original Album Series - 404 - Souls Of Black.mp3"),
+        ("[tjserv]", "![tjserv] Testament (1990) Souls Of Black.rar  ::INFO:: "
+                     "89.92MB : OmenServe v2.71 :",
+         "Testament (1990) Souls Of Black.rar"),
+        ("kurtb66", "!kurtb66 14 - Testament - Souls Of Black.mp3  ::INFO:: "
+                    "4.8MB OmenServe v2.71",
+         "14 - Testament - Souls Of Black.mp3"),
+    ]
+
+    CHATTER = [
+        "Thank You !!! I have now received 1 file(s) 702 Kb from you, for a "
+        "total of 24,024 file(s) 104 GbB leeched since 31st December 2008 "
+        "KeepTrack 6.2 by ^OmeN^",
+        "Matches for *Testament*Souls* Copy and Paste in Channel to Request a "
+        "File (Slot:0/) (Que:0/16) in Use",
+    ]
+
+    def setUp(self):
+        super().setUp()
+        config.NICKNAME = "DCCore"
+        config.broadcast_search_inprogress = True
+        config.broadcast_search_deadline = time.time() + 30
+        config.broadcast_search_results = []
+
+    def _capture(self, sender, text):
+        irc._capture_broadcast_search_reply(sender, "DCCore", text)
+        return config.broadcast_search_results[-1]
+
+    def test_a_header_line_offers_no_download(self):
+        """The header names the bot mid-sentence and uses the literal word
+        FILENAME as a placeholder. Offering to fetch that sends the words
+        "FILENAME To The Channel To Request." into a public channel."""
+        for sender, text in self.HEADERS:
+            with self.subTest(bot=sender):
+                entry = self._capture(sender, text)
+                self.assertNotIn("filename", entry,
+                                 f"header line offered a download: {entry.get('filename')!r}")
+
+    def test_unrelated_chatter_offers_no_download(self):
+        """A KeepTrack thank-you note landed mid-window and produced
+        bot="!!" - a fetch request addressed to a bot that does not exist."""
+        for text in self.CHATTER:
+            with self.subTest(text=text[:40]):
+                entry = self._capture("SomeUser", text)
+                self.assertNotIn("filename", entry)
+                self.assertNotIn("bot", entry)
+
+    def test_a_real_result_still_offers_the_download(self):
+        """The control, and the reason the fix cannot simply drop anything
+        containing a header-ish phrase: these are what the feature is for."""
+        for sender, text, expected in self.RESULTS:
+            with self.subTest(bot=sender):
+                entry = self._capture(sender, text)
+                self.assertEqual(entry.get("bot"), sender)
+                self.assertEqual(entry.get("filename"), expected)
+
+    def test_awkward_nicks_survive(self):
+        """Real nicks in these channels carry punctuation - a backtick, square
+        brackets. The token is whitespace-delimited on purpose so those keep
+        working rather than being split apart."""
+        entry = self._capture("`Stryder", self.RESULTS[1][1])
+        self.assertEqual(entry.get("bot"), "`Stryder")
+
+        entry = self._capture("[tjserv]", self.RESULTS[2][1])
+        self.assertEqual(entry.get("bot"), "[tjserv]")
+
+    def test_every_reply_is_still_recorded_either_way(self):
+        """Nothing is dropped. A line with no usable token is still shown to
+        the operator, just without a button - the header lines carry the free
+        slot counts and queue depth, which are worth reading."""
+        for _sender, text in self.HEADERS:
+            self._capture("SomeBot", text)
+        for text in self.CHATTER:
+            self._capture("SomeUser", text)
+
+        self.assertEqual(len(config.broadcast_search_results),
+                         len(self.HEADERS) + len(self.CHATTER))
+        for entry in config.broadcast_search_results:
+            self.assertTrue(entry["text"], "the raw reply text was lost")
+
+
+
+class SearchHeaderStats(DCCoreTestCase):
+    """irc.parse_search_header() - reading the line a bot sends before its
+    matches, so it can become the heading above them instead of a row.
+
+    Every fixture here is verbatim from a live @find in #mp3passion. Two bot
+    families answer in these channels and they report different things, which
+    is why nothing below assumes a field is present.
+    """
+
+    def test_an_omenserve_header(self):
+        stats = irc.parse_search_header(
+            "Search Result 4 Matches For Testament Souls Copy And Paste "
+            "!kurtb66 FILENAME To The Channel To Request. (10/10) Free Slots, "
+            "0 Queued OmenServe v2.71")
+
+        self.assertEqual(stats["family"], "omenserve")
+        self.assertEqual(stats["matches"], 4)
+        self.assertEqual(stats["slots_free"], 10)
+        self.assertEqual(stats["slots_total"], 10)
+        self.assertEqual(stats["queued"], 0)
+        self.assertEqual(stats["server"], "OmenServe v2.71")
+
+    def test_operators_pick_their_own_separators(self):
+        """The same format, decorated with ':', '~' or '*' between sections.
+        Nothing may anchor on punctuation."""
+        for sep in (":", "~", "*"):
+            with self.subTest(separator=sep):
+                stats = irc.parse_search_header(
+                    f"Search Result {sep} 1 Match For X {sep} Copy And Paste "
+                    f"!bot FILENAME To The Channel To Request. (2/2) Free "
+                    f"Slots, 0 Queued {sep} OmeNServE v2.60 {sep}")
+                self.assertEqual(stats["matches"], 1)
+                self.assertEqual(stats["slots_free"], 2)
+                self.assertEqual(stats["server"], "OmeNServE v2.60")
+
+    def test_a_bot_that_found_more_than_it_sent(self):
+        """Beezer answers with a list size and a truncation notice instead of
+        slot counts. The gap between 'matches' and what arrives is the whole
+        reason to show it - otherwise five looks like all there is."""
+        stats = irc.parse_search_header(
+            "Search Result  12 Matches For Testament Souls   Get My List Of "
+            "94,952 Files By Typing @Beezer In The Channel Or Refine Your "
+            "Search. Sending first 5 Results   OmeNServE v2.60")
+
+        self.assertEqual(stats["matches"], 12)
+        self.assertEqual(stats["sending"], 5)
+        self.assertEqual(stats["list_size"], 94952)
+        self.assertNotIn("slots_free", stats, "this header reports no slots - "
+                                              "absent must not become zero")
+
+    def test_an_spqr_header(self):
+        """SPQR is an older mIRC script, still run by a minority of operators.
+        It reports slots IN USE rather than free, gives a queue capacity, and
+        carries no version string or match count at all."""
+        stats = irc.parse_search_header(
+            "Matches for *Testament*Souls* Copy and Paste in Channel to "
+            "Request a File (Slot:0/) (Que:0/16) in Use")
+
+        self.assertEqual(stats["family"], "spqr")
+        self.assertEqual(stats["slots_in_use"], 0)
+        self.assertEqual(stats["queued"], 0)
+        self.assertEqual(stats["queue_total"], 16)
+        self.assertNotIn("slots_free", stats,
+                         "in-use slots must never be reported as free")
+        self.assertNotIn("server", stats)
+        self.assertNotIn("matches", stats)
+
+    def test_a_result_line_is_never_a_header(self):
+        """A match ends in the same version string inside its ::INFO:: tail,
+        so without an explicit guard it parses as a header and every result
+        row would carry the sender's stats."""
+        self.assertIsNone(irc.parse_search_header(
+            "!Vibessono 50 Oldies Party - Testament.mp3  ::INFO:: 4.6MB "
+            "OmeNServE v2.60"))
+
+    def test_an_spqr_result_line_is_never_a_header(self):
+        """SPQR matches carry no ::INFO:: tag at all - a bare token and a
+        filename."""
+        self.assertIsNone(irc.parse_search_header(
+            "!BigTruck Testament - Souls of Black.mp3"))
+
+    def test_unrelated_chatter_is_not_a_header(self):
+        self.assertIsNone(irc.parse_search_header(
+            "Thank You !!! I have now received 1 file(s) 702 Kb from you, for "
+            "a total of 24,024 file(s) 104 GbB leeched since 31st December "
+            "2008 KeepTrack 6.2 by ^OmeN^"))
+        self.assertIsNone(irc.parse_search_header(""))
+        self.assertIsNone(irc.parse_search_header("just some words"))
+
+    def test_the_capture_attaches_stats_to_the_header_only(self):
+        """End to end: a bot's header and its match land as two entries, one
+        carrying stats and one carrying a fetchable filename - never both."""
+        config.NICKNAME = "DCCore"
+        config.broadcast_search_inprogress = True
+        config.broadcast_search_deadline = time.time() + 30
+        config.broadcast_search_results = []
+
+        irc._capture_broadcast_search_reply(
+            "kurtb66", "DCCore",
+            "Search Result 4 Matches For X Copy And Paste !kurtb66 FILENAME "
+            "To The Channel To Request. (10/10) Free Slots, 0 Queued "
+            "OmenServe v2.71")
+        irc._capture_broadcast_search_reply(
+            "kurtb66", "DCCore",
+            "!kurtb66 14 - Testament - Souls Of Black.mp3  ::INFO:: 4.8MB")
+
+        header, result = config.broadcast_search_results
+        self.assertIn("header", header)
+        self.assertNotIn("filename", header)
+        self.assertEqual(result["filename"], "14 - Testament - Souls Of Black.mp3")
+        self.assertNotIn("header", result)
 
 
 if __name__ == "__main__":

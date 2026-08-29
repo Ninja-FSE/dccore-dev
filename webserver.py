@@ -80,6 +80,17 @@ FILELISTS_DEFAULT_PAGE_SIZE = 200
 # tens of thousands of rows a full list can contain.
 FILELISTS_MAX_PAGE_SIZE = 2000
 
+# The unit of `offset`/`limit` on both file-list routes is a FOLDER, not a row.
+# Bots keep their libraries in folders and the dashboard groups by them, so a
+# page that ends mid-album is a page that ends in the wrong place - and a
+# folder is only useful expanded if all of it is there.
+#
+# The row ceiling that bounds such a page is list.FILELISTS_MAX_PAGE_ROWS,
+# declared beside the paging function it bounds. It is not re-exported here:
+# this module imports list lazily, inside the handlers, so that importing
+# webserver.py does not drag in oserve/dcc/announce - which is what lets
+# tests/test_webserver.py exercise these routes on their own.
+
 
 def parse_pagination_params(raw_offset, raw_limit):
     """Turn `?offset=&limit=` query-string values - always strings, or None
@@ -263,9 +274,20 @@ def build_filelists_payload(offset=0, limit=None):
 
     entries, _total = list_mod.find_matching_entries([], limit=None)
     rows = list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
-    total = len(rows)
-    page = rows[offset:offset + limit]
-    return {"entries": page, "total": total, "offset": offset, "limit": limit}
+    groups = list_mod.group_rows_by_folder(rows)
+    page, total_folders, total_rows = list_mod.page_folder_groups(
+        groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
+    return {
+        "folders": page,
+        "total": total_folders,
+        "total_files": total_rows,
+        "offset": offset,
+        "limit": limit,
+        # What the caller actually got. The row ceiling can end a page early,
+        # so the frontend advances by this rather than by `limit` - otherwise
+        # a truncated page would silently skip the folders it did not receive.
+        "returned": len(page),
+    }
 
 
 # ==========================================================================
@@ -277,6 +299,31 @@ def build_filelists_payload(offset=0, limit=None):
 # here, same reasoning as every other build_*_payload()/build_*_result()
 # function in this module: no Flask import, fully unit testable.
 # ==========================================================================
+
+def fetch_feature_error():
+    """Why the cross-bot fetch feature will not accept work, or None.
+
+    oserve.startup() sets config.fetch_feature_disabled when FETCHED_FILES_DIR
+    could not be created - there is nowhere to put a fetched file, so
+    dcc_fetch.check_fetch_queue() refuses to promote any row past `pending`.
+    The two HTTP routes that CREATE those rows have to refuse for the same
+    reason, or the dashboard accepts a request, reports it queued, and it then
+    sits pending forever with nothing said about why.
+
+    Absent means DISABLED, deliberately. The attribute exists from the moment
+    startup() has run, so the only way to read it missing is to ask before
+    then - and of the two guesses available at that point, accepting a fetch
+    with nowhere to put the file is the worse one. That also holds the
+    behaviour steady if the dashboard is ever started earlier in the boot
+    sequence than it is today.
+    """
+    if getattr(config, "fetch_feature_disabled", True):
+        return ("Cross-bot file fetch is unavailable: the fetch directory "
+                "(FETCHED_FILES_DIR) could not be created when the bot "
+                "started. Check the path and its permissions, then restart "
+                "the bot.")
+    return None
+
 
 def build_list_fetch_enqueue_result(bot_raw):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
@@ -300,6 +347,10 @@ def build_list_fetch_enqueue_result(bot_raw):
     as a one-element list, so the frontend can treat this the same shape as
     the file-fetch enqueue response).
     """
+
+    unavailable = fetch_feature_error()
+    if unavailable:
+        return 503, {"error": unavailable}
     import dcc_fetch
 
     bot_err = reject_if_unsafe_for_irc_line(bot_raw, "bot")
@@ -368,17 +419,20 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None):
     if limit is None:
         limit = FILELISTS_DEFAULT_PAGE_SIZE
 
-    page, total, error = list_fetch.get_fetched_bot_page(entry, offset, limit)
+    page, total_folders, total_rows, error = list_fetch.get_fetched_bot_page(
+        entry, offset, limit)
     if error:
         return 502, {"error": error}
 
     return 200, {
         "bot": entry.get("bot", nick),
         "fetched_at": entry.get("fetched_at", 0),
-        "entries": page,
-        "total": total,
+        "folders": page,
+        "total": total_folders,
+        "total_files": total_rows,
         "offset": offset,
         "limit": limit,
+        "returned": len(page),
     }
 
 
@@ -509,6 +563,10 @@ def build_fetch_enqueue_result(payload):
     Returns (http_status, payload_dict) with "created" (the new request ids)
     and "errors" (one entry per rejected item, if any).
     """
+
+    unavailable = fetch_feature_error()
+    if unavailable:
+        return 503, {"error": unavailable}
     import dcc_fetch
 
     items = [payload] if isinstance(payload, dict) else payload
@@ -556,6 +614,40 @@ def build_fetch_status_payload():
         row_out["id"] = request_id
         rows.append(row_out)
     return rows
+
+
+def build_verify_list_payload():
+    """GET /api/tools/verify-list payload: filenames the master list carries
+    under more than one folder.
+
+    Computed on demand rather than stored. The list on disk is the source of
+    truth and is already parsed by find_matching_entries(), so there is no
+    side file to keep in step, nothing to go stale between an !update and a
+    look at this view, and no second walk of the library.
+
+    Returns every duplicate rather than a page of them. The count is bounded
+    by how many names actually collide, which on a healthy library is zero and
+    on an unhealthy one is the number the operator most wants to see in full.
+    """
+    import list as list_mod
+
+    entries, _total = list_mod.find_matching_entries([], limit=None)
+    duplicates = list_mod.find_duplicate_filenames(entries)
+    # Resolved here rather than in the finder: the finder answers "which names
+    # collide, and where does the LIST put them", which is a question about the
+    # list alone. Turning a heading into a path this machine has is a
+    # presentation concern, and it is what the operator can act on.
+    duplicates = [dict(item, folders=[list_mod.resolve_list_folder(folder)
+                                      for folder in item["folders"]])
+                  for item in duplicates]
+    return {
+        "checked": len(entries),
+        "duplicates": duplicates,
+        "total": len(duplicates),
+        # Distinct from `total`: how many individual copies are unreachable,
+        # which is the number that answers "how much of my library is this".
+        "unreachable": sum(item["count"] - 1 for item in duplicates),
+    }
 
 
 # ==========================================================================
@@ -617,6 +709,10 @@ if HAVE_FLASK:
         @app.route("/api/fetch/status")
         def api_fetch_status():
             return jsonify(build_fetch_status_payload())
+
+        @app.route("/api/tools/verify-list")
+        def api_tools_verify_list():
+            return jsonify(build_verify_list_payload())
 
         @app.route("/api/filelists/fetch", methods=["POST"])
         def api_filelists_fetch():

@@ -440,5 +440,158 @@ class AHashInsideAValueIsNotAComment(unittest.TestCase):
             ["how many at once"])
 
 
+
+
+class ConfigDeclaresEachSettingsType(unittest.TestCase):
+    """config.py annotates its settings, and settings_file reads that back.
+
+    Before annotations, a setting's default value WAS its type declaration -
+    `MAX_DCC_SLOTS = 3` is an int, so its override is read as an int. That
+    works until a setting is legitimately unset: `None` declares nothing, and
+    a setting that is unset-until-configured is exactly what #100 needs.
+    """
+
+    def test_every_setting_config_py_declares_carries_a_type(self):
+        """The point of annotating them was to annotate all of them. One left
+        behind falls back to inferring from its value, which is the behaviour
+        being retired - and it would be invisible without this.
+
+        Reads config.py's SOURCE rather than the imported module. Other
+        modules attach their own attributes to config at runtime - commands.py
+        sets ORIGINAL_NICK, adminchat.py and dcc.py read MY_IP_OR_DOCK - and
+        those are not settings this file declares. Scanning the live namespace
+        would report them, and would also depend on which tests happened to
+        run first.
+        """
+        with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+
+        annotated = {node.target.id for node in tree.body
+                     if isinstance(node, ast.AnnAssign)
+                     and isinstance(node.target, ast.Name)}
+
+        missing = []
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            try:
+                value = ast.literal_eval(node.value)
+            except Exception:
+                # Computed, so it is a derived value rather than a default.
+                continue
+            for target in node.targets:
+                # A name annotated where it is defined and re-assigned lower
+                # down - BROADCAST_SEARCH_CHANNEL, derived at the end of the
+                # file - is already declared.
+                if isinstance(target, ast.Name) and target.id not in annotated:
+                    if settings_file.is_overridable(target.id, value):
+                        missing.append(target.id)
+
+        self.assertEqual(
+            sorted(set(missing)), [],
+            "these settings are overridable but declare no type, so their "
+            "type is still inferred from the value: " + ", ".join(sorted(set(missing))))
+
+    def test_a_declared_type_matches_the_value_it_ships_with(self):
+        """An annotation that disagrees with its own default is worse than
+        none: it would silently coerce every override to the wrong type."""
+        declared = settings_file.declared_types(vars(config))
+
+        wrong = []
+        for name, kind in sorted(declared.items()):
+            value = getattr(config, name, None)
+            if value is not None and type(value) is not kind:
+                wrong.append(f"{name}: declared {kind.__name__}, "
+                             f"ships {type(value).__name__}")
+
+        self.assertEqual(wrong, [], "; ".join(wrong))
+
+    def test_only_real_types_are_reported(self):
+        """A string annotation (`from __future__ import annotations`, or a
+        typing construct) is not something coerce can use, so it is ignored
+        rather than guessed at."""
+        namespace = {"__annotations__": {"A": int, "B": "int", "C": None}}
+
+        self.assertEqual(settings_file.declared_types(namespace), {"A": int})
+
+    def test_a_namespace_with_no_annotations_is_not_an_error(self):
+        self.assertEqual(settings_file.declared_types({}), {})
+
+
+class CoercionUsesTheDeclaredType(unittest.TestCase):
+
+    def test_the_declaration_wins_over_the_defaults_own_type(self):
+        """The case the annotations exist for: a default of None says nothing
+        about what the value should become, and the declaration says it is a
+        whole number."""
+        self.assertEqual(settings_file.coerce("X", "7", None, int), 7)
+
+    def test_without_a_declaration_the_default_still_decides(self):
+        """Every call site that predates annotations keeps working - the
+        declaration is a fourth argument, not a new requirement."""
+        self.assertEqual(settings_file.coerce("X", "7", 0), 7)
+        self.assertIs(settings_file.coerce("X", "yes", False), True)
+
+    def test_an_empty_value_leaves_a_none_default_unset(self):
+        """RAR_BINARY's meaning: unset is "look on PATH", and an empty line in
+        the file says the same thing rather than an empty string. Declaring it
+        a str must not turn that into ""."""
+        self.assertIsNone(settings_file.coerce("RAR_BINARY", "", None, str))
+        self.assertIsNone(settings_file.coerce("RAR_BINARY", "   ", None, str))
+
+    def test_a_set_value_for_a_none_default_comes_back_as_the_declared_type(self):
+        self.assertEqual(settings_file.coerce("RAR_BINARY", "/usr/bin/rar", None, str),
+                         "/usr/bin/rar")
+
+    def test_a_declared_bool_is_not_read_as_a_number(self):
+        """bool is a SUBCLASS of int, which is why the isinstance() version of
+        this had to test bool first. Matching the type exactly removes the
+        trap; this pins that it stays removed."""
+        self.assertIs(settings_file.coerce("FLAG", "yes", True, bool), True)
+        self.assertIs(settings_file.coerce("FLAG", "off", True, bool), False)
+        with self.assertRaises(ValueError):
+            settings_file.coerce("FLAG", "1978", True, bool)
+
+    def test_a_declared_list_still_splits_on_commas(self):
+        self.assertEqual(settings_file.coerce("L", "a, b ,c", [], list), ["a", "b", "c"])
+
+    def test_a_bad_value_for_a_declared_type_is_rejected_not_guessed(self):
+        with self.assertRaises(ValueError):
+            settings_file.coerce("N", "not a number", None, int)
+
+
+class ApplyingUsesTheDeclaration(unittest.TestCase):
+    """End to end through apply_to(), which is where the declaration is
+    actually looked up."""
+
+    def test_a_none_defaulted_setting_is_coerced_by_its_annotation(self):
+        namespace = {"COUNT": None, "__annotations__": {"COUNT": int}}
+
+        report = settings_file.apply_to(
+            namespace, path=self._write("COUNT = 12"), log=lambda *_a: None)
+
+        self.assertEqual(namespace["COUNT"], 12)
+        self.assertIsInstance(namespace["COUNT"], int)
+        self.assertEqual(report["bad"], [])
+
+    def test_without_the_annotation_the_same_file_yields_text(self):
+        """Control, and the reason the annotation is needed at all: with no
+        declaration a None default can only give back what was written."""
+        namespace = {"COUNT": None}
+
+        settings_file.apply_to(
+            namespace, path=self._write("COUNT = 12"), log=lambda *_a: None)
+
+        self.assertEqual(namespace["COUNT"], "12")
+
+    def _write(self, text):
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".conf", delete=False, encoding="utf-8")
+        handle.write(text + "\n")
+        handle.close()
+        self.addCleanup(os.unlink, handle.name)
+        return handle.name
+
+
 if __name__ == "__main__":
     unittest.main()

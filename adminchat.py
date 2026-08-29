@@ -600,6 +600,39 @@ def _cmd_quit(session, args):
     _forget(session)
 
 
+def _cmd_verify(session, args):
+    """Report filenames the master list carries under more than one folder.
+
+    Reads the list rather than walking the library: it is the list a requester
+    copies a name out of, and the list dcc.py resolves that name against, so
+    it is where a collision actually matters.
+    """
+    import list as list_mod
+
+    entries, _total = list_mod.find_matching_entries([], limit=None)
+    if not entries:
+        session.send("The master list is empty or could not be read. "
+                     "Run 'update' first.")
+        return
+
+    duplicates = list_mod.find_duplicate_filenames(entries)
+    if not duplicates:
+        session.send(f"{len(entries):,} file(s) checked - every filename is unique.")
+        return
+
+    session.send(f"{len(duplicates):,} filename(s) appear under more than one "
+                 f"folder, out of {len(entries):,} checked.")
+    session.send("A request names a file, not a path, so only the first copy "
+                 "listed under each name can be fetched:")
+    for item in duplicates[:VERIFY_CONSOLE_LIMIT]:
+        session.send(f"  {item['filename']}  ({item['count']} folders)")
+        for folder in item["folders"]:
+            session.send(f"      {list_mod.resolve_list_folder(folder)}")
+    if len(duplicates) > VERIFY_CONSOLE_LIMIT:
+        session.send(f"  ... and {len(duplicates) - VERIFY_CONSOLE_LIMIT:,} more "
+                     f"not shown. The dashboard's Tools view lists them all.")
+
+
 def _cmd_help(session, args):
     session.send("Available commands:")
     for name in sorted(COMMANDS):
@@ -608,6 +641,12 @@ def _cmd_help(session, args):
     session.send("")
     session.send("Channel commands still work as before; this console does not "
                  "replace them yet.")
+
+
+# How many duplicate names the console spells out in full. Every line here
+# is a DCC CHAT line, so a library with hundreds of collisions would flood
+# the session; the count is always reported, only the detail is capped.
+VERIFY_CONSOLE_LIMIT = 20
 
 
 # name -> (function, one-line summary, usage shown by help)
@@ -623,6 +662,7 @@ COMMANDS = {
     "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),
     "rehash":     (_cmd_rehash,     "reload modules in place",           "rehash"),
     "update":     (_cmd_update,     "rebuild the MasterList",            "update"),
+    "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "help":       (_cmd_help,       "this list",                         "help"),
     "quit":       (_cmd_quit,       "close this session",                "quit"),
 }
