@@ -101,6 +101,11 @@ class _NotifiedNicks:
 
 _ban_notified = _NotifiedNicks()
 
+# Set once check_user_status() has told the console that hard_bans.txt is
+# missing, so that warning prints once per process rather than once per
+# message - this check runs on every single command.
+_hard_bans_missing_warned = False
+
 
 def check_user_status(user):
     """Check the user against the timed bans in memory and against hard_bans.txt.
@@ -182,6 +187,16 @@ def check_user_status(user):
             hard_check_ok = True
         except Exception as e:
             print(f"[SECURITY ERROR] Could not read {hard_file}: {e}")
+    else:
+        # Fails open (see the comment on hard_check_ok above) - and previously
+        # did so silently. This path is relative, so it also degrades this way
+        # if the daemon is ever started from the wrong working directory, not
+        # only when the operator genuinely has no hard bans configured yet.
+        global _hard_bans_missing_warned
+        if not _hard_bans_missing_warned:
+            _hard_bans_missing_warned = True
+            print(f"[SECURITY WARNING] {hard_file} not found - "
+                  f"permanent wildcard bans are not being enforced.")
 
     # This user was seen clean, so drop any stale "already notified" mark: a LATER ban on
     # the same nick then notifies once more. Previously the mark was only cleared on the
