@@ -13,7 +13,7 @@ import socket
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
+REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, REPO)
 os.chdir(REPO)
 
@@ -57,7 +57,7 @@ else:
     ok(f"Python {version.major}.{version.minor}.{version.micro}")
 
 if os.name != "nt":
-    warn("this check is written for Windows; on Linux use the normal start script")
+    warn("this check is written for Windows; on Linux use scripts/linux/check-setup.py instead")
 else:
     ok("running on Windows")
 
@@ -214,7 +214,7 @@ if warnings:
 else:
     print("  Ready to start.")
 print()
-print("  Start it with:  windows\\start-dccore.bat")
+print("  Start it with:  scripts\\windows\\start-dccore.bat")
 print("  Stop it with:   Ctrl-C in that window")
 print("=" * 68)
 print()

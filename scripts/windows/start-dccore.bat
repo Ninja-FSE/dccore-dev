@@ -13,11 +13,11 @@ rem  create an empty data folder somewhere else and boot with no bans,
 rem  no queue and no list.
 rem
 rem  Usage:
-rem    start-dccore.bat          check the setup, then start the daemon
-rem    start-dccore.bat check    check the setup and stop
+rem    scripts\windows\start-dccore.bat          check the setup, then start the daemon
+rem    scripts\windows\start-dccore.bat check    check the setup and stop
 rem ---------------------------------------------------------------------
 
-cd /d "%~dp0.."
+cd /d "%~dp0..\.."
 
 rem --- find an interpreter ----------------------------------------------
 set "PY="
@@ -37,7 +37,7 @@ if not defined PY (
 
 rem --- check-only mode ---------------------------------------------------
 if /i "%~1"=="check" (
-    %PY% windows\check-setup.py
+    %PY% scripts\windows\check-setup.py
     echo.
     pause
     exit /b %errorlevel%
@@ -61,12 +61,12 @@ rem  check-setup.py fails on a missing music directory, and on a config
 rem  still pointing at the production bot's nick or channels. That second
 rem  one is worth blocking: it would put a near-identical second bot into
 rem  live trading channels, which can get the other operator banned too.
-%PY% windows\check-setup.py >nul 2>&1
+%PY% scripts\windows\check-setup.py >nul 2>&1
 if errorlevel 1 (
     echo.
     echo   Setup check failed - not starting. Details:
     echo.
-    %PY% windows\check-setup.py
+    %PY% scripts\windows\check-setup.py
     echo.
     pause
     exit /b 1

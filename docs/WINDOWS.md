@@ -52,7 +52,7 @@ Set at minimum:
 ### 2. Check the setup
 
 ```
-windows\start-dccore.bat check
+scripts\windows\start-dccore.bat check
 ```
 
 This loads the same config the daemon will and reports what it resolved. It
@@ -63,7 +63,7 @@ channels.
 ### 3. Start it
 
 ```
-windows\start-dccore.bat
+scripts\windows\start-dccore.bat
 ```
 
 Ctrl-C in that window stops it. The launcher runs the setup check first and
@@ -79,8 +79,8 @@ anywhere other than the repository folder, the daemon quietly creates an empty
 `data` folder wherever it happened to start and boots with no bans, no queue and
 no list.
 
-`start-dccore.bat` does `cd /d "%~dp0.."` before anything else, so it is correct
-from a double-click, a shortcut, or any other directory.
+`start-dccore.bat` does `cd /d "%~dp0..\.."` before anything else, so it is
+correct from a double-click, a shortcut, or any other directory.
 
 **This is also why there is no Windows service yet.** A service starts in
 `C:\Windows\System32`, and no launcher is involved to correct it. Making that
