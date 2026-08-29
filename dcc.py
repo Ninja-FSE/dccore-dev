@@ -14,6 +14,7 @@ import platform_compat
 import list as list_mod
 import announce
 import db
+import runtime
 
 # The thread lock is created at the top of the module, so the queue counts cleanly
 queue_lock = threading.Lock()
@@ -35,10 +36,11 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
 def user_is_present_in_ram(user_key):
     """Is this user still in ANY of the bot's live channel lists (synced from 353/JOIN)?"""
     u = str(user_key).lower()
-    for users_set in getattr(config, 'channel_users', {}).values():
-        for known_user in users_set:
-            if str(known_user).lower() == u:
-                return True
+    with runtime.channel_users_lock():
+        for users_set in getattr(config, 'channel_users', {}).values():
+            for known_user in users_set:
+                if str(known_user).lower() == u:
+                    return True
     return False
 
 def discard_orphaned_temp_archives(user_key):
@@ -274,12 +276,13 @@ def check_queue_and_send(irc_sock, completed_user):
         if "system_next_trigger_fallback" in [str(completed_user).lower(), str(user_key)]:
             user_is_actively_in_channel = True
         else:
-            if hasattr(config, 'channel_users'):
-                for chan_name, users_set in config.channel_users.items():
-                    lowered_channel_users = [u.lower() for u in users_set]
-                    if user_key in lowered_channel_users or str(completed_user).lower() in lowered_channel_users:
-                        user_is_actively_in_channel = True
-                        break
+            with runtime.channel_users_lock():
+                if hasattr(config, 'channel_users'):
+                    for chan_name, users_set in config.channel_users.items():
+                        lowered_channel_users = [u.lower() for u in users_set]
+                        if user_key in lowered_channel_users or str(completed_user).lower() in lowered_channel_users:
+                            user_is_actively_in_channel = True
+                            break
             
         if user_is_actively_in_channel is True:
             # ---------------------------------------------------------------------
@@ -635,14 +638,15 @@ def check_queue_and_send(irc_sock, completed_user):
                 else:
                     channels_to_check = config.CHANNEL.split(',')
 
-                if hasattr(config, 'channel_users'):
-                    for single_chan in channels_to_check:
-                        n_chan = str(single_chan).strip().lower()
-                        if n_chan in config.channel_users:
-                            lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
-                            if queue_key in lowered_glob_users:
-                                user_is_globally_active = True
-                                break
+                with runtime.channel_users_lock():
+                    if hasattr(config, 'channel_users'):
+                        for single_chan in channels_to_check:
+                            n_chan = str(single_chan).strip().lower()
+                            if n_chan in config.channel_users:
+                                lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
+                                if queue_key in lowered_glob_users:
+                                    user_is_globally_active = True
+                                    break
 
                 if user_is_globally_active is True:
                     if g_next.get('is_unpacked_rar_folder') is True:
