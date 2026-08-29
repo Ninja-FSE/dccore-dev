@@ -606,13 +606,23 @@ def build_fetch_enqueue_result(payload):
 
 def build_fetch_status_payload():
     """GET /api/fetch/status payload: every fetch_queue row, oldest first, so
-    the dashboard's Downloads panel has a stable order to render."""
-    queue = dict(getattr(config, "fetch_queue", {}) or {})
+    the dashboard's Downloads panel has a stable order to render.
+
+    Reads config.fetch_queue under the same lock dcc_fetch.py's writers use
+    (enqueue_fetch() inserting a new row, check_fetch_queue() promoting or
+    expiring one) - without it, this dict(...) copy could observe a row
+    appearing mid-insert, or raise "dictionary changed size during
+    iteration" if a new row was enqueued from another thread while this
+    copy was being built.
+    """
+    import dcc_fetch
+    with dcc_fetch._fetch_lock():
+        queue = {request_id: dict(row)
+                 for request_id, row in getattr(config, "fetch_queue", {}).items()}
     rows = []
     for request_id, row in sorted(queue.items(), key=lambda kv: kv[1].get("requested_at", 0)):
-        row_out = dict(row)
-        row_out["id"] = request_id
-        rows.append(row_out)
+        row["id"] = request_id
+        rows.append(row)
     return rows
 
 
@@ -733,9 +743,19 @@ if HAVE_FLASK:
 
         @app.route("/api/fetch/<request_id>/download")
         def api_fetch_download(request_id):
-            queue = getattr(config, "fetch_queue", {}) or {}
-            row = queue.get(request_id)
-            if not row or row.get("state") != "complete" or not row.get("stored_filename"):
+            import dcc_fetch
+            # Snapshot just the two fields needed, under the same lock the
+            # writers use, so "complete"/stored_filename can never be read as
+            # a torn pair - the lock is released before send_from_directory()
+            # touches the filesystem.
+            with dcc_fetch._fetch_lock():
+                row = getattr(config, "fetch_queue", {}).get(request_id)
+                if row and row.get("state") == "complete" and row.get("stored_filename"):
+                    stored_filename = row["stored_filename"]
+                    download_name = row.get("filename") or stored_filename
+                else:
+                    stored_filename = None
+            if not stored_filename:
                 return jsonify({"error": "Unknown, incomplete, or failed fetch."}), 404
             # Never build this path from the URL parameter - request_id only
             # selects a row, and the row's OWN already-validated
@@ -744,8 +764,8 @@ if HAVE_FLASK:
             # opened.
             directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
             return send_from_directory(
-                directory, row["stored_filename"], as_attachment=True,
-                download_name=row.get("filename") or row["stored_filename"])
+                directory, stored_filename, as_attachment=True,
+                download_name=download_name)
 
         return app
 
@@ -760,11 +780,15 @@ def start():
     if not HAVE_FLASK:
         print("[WEBUI] Flask not installed; dashboard disabled.")
         return
-    if not getattr(config, "WEBUI_ENABLED", True):
+    # See oserve.startup(): absent means off, the same way config.py ships it.
+    if not getattr(config, "WEBUI_ENABLED", False):
         print("[WEBUI] Disabled via config.WEBUI_ENABLED = False.")
         return
 
-    host = getattr(config, "WEBUI_HOST", "0.0.0.0")
+    # 127.0.0.1 when absent, matching config.py. 0.0.0.0 would bind every
+    # interface and put an unauthenticated API on the LAN, which is the
+    # opposite of what a missing setting should buy anyone.
+    host = getattr(config, "WEBUI_HOST", "127.0.0.1")
     port = getattr(config, "WEBUI_PORT", 8420)
     app = create_app()
     print(f"[WEBUI] Dashboard starting on http://{host}:{port}/ (no authentication - LAN-only).")

@@ -106,6 +106,13 @@ def startup():
 
     if os.path.exists(config.BANS_FILE):
         db.load_bans_from_file()
+    else:
+        # Same shape as the list-file check above: say so, rather than
+        # starting with an empty ban list and no way to tell that apart
+        # from "every temporary ban already expired". A wrong working
+        # directory (this path is relative - see the launcher scripts'
+        # own comments) produces exactly this silently.
+        print(f"[WARNING] No {config.BANS_FILE} yet - starting with no active bans.")
 
     # Read every saved queue slot back from disk at boot.
     db.load_dcc_queue()
@@ -150,7 +157,10 @@ def startup():
     except Exception as web_err:
         print(f"[WEBUI] Could not import webserver: {web_err}")
     else:
-        if getattr(config, "WEBUI_ENABLED", True):
+        # False when absent, matching what config.py ships. The dashboard is
+        # an unauthenticated listener, so a missing switch must not be read
+        # as consent to open one - see config.WEBUI_ENABLED's own comment.
+        if getattr(config, "WEBUI_ENABLED", False):
             threading.Thread(target=webserver.start, daemon=True).start()
         else:
             print("[WEBUI] Disabled via config.WEBUI_ENABLED = False.")

@@ -39,6 +39,12 @@ class BanEnforcementTests(DCCoreTestCase):
         security._ban_notified.clear()
         self.addCleanup(security._ban_notified.clear)
 
+        # Same shape as _ban_notified above: a module global that survives
+        # between tests exactly as it survives between messages in the
+        # daemon. Start clean and leave clean.
+        security._hard_bans_missing_warned = False
+        self.addCleanup(setattr, security, "_hard_bans_missing_warned", False)
+
         self.ban_dir = tempfile.mkdtemp(prefix="dccore-bans-")
         self.addCleanup(shutil.rmtree, self.ban_dir, True)
         self.hard_bans = os.path.join(self.ban_dir, "hard_bans.txt")
@@ -118,6 +124,23 @@ class BanEnforcementTests(DCCoreTestCase):
         """No hard_bans.txt at all is not an error: the scan fails open."""
         self.assertFalse(os.path.exists(self.hard_bans))
         self.assertTrue(self.check("dave"))
+
+    def test_missing_hard_ban_file_warns_once_not_every_message(self):
+        """Defect: failing open used to do so silently, every single time this
+        runs - which is every message, since this is a hot path. A wrong
+        working directory degrades identically to "no hard bans configured",
+        so the fix is a warning, not a failure - but one per process, not
+        one per message, or the notice becomes the flood it would be warning
+        about."""
+        self.assertFalse(os.path.exists(self.hard_bans))
+
+        self.check("dave")
+        self.assertIn(self.hard_bans, self.last_stdout)
+        self.assertIn("not being enforced", self.last_stdout)
+
+        self.check("someoneelse")
+        self.assertNotIn(self.hard_bans, self.last_stdout,
+                         "warned again on the second message, not just the first")
 
     # -- timed bans ------------------------------------------------------
 

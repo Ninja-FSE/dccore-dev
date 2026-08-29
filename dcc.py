@@ -14,6 +14,7 @@ import platform_compat
 import list as list_mod
 import announce
 import db
+import runtime
 
 # THE queue lock: created once here, at the top of the module, before any function
 # below can be called - so `with queue_lock:` throughout this file always resolves
@@ -35,13 +36,32 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
     # as part of "/mnt/nfs-musik", because the string happens to begin the same way.
     return matchpath == base or matchpath.startswith(base + os.sep)
 
+def _is_temp_zip_cache_file(path):
+    """Is `path` one of the packed .rar archives in TMP_ZIP_DIR - eligible for
+    the "delete once nothing else needs it" cleanup in start_dcc_send()?
+
+    Checked against config.TMP_ZIP_DIR's actual configured value, not a
+    hardcoded directory name: a literal "tmp_zips" substring check against
+    the shipped default meant an operator who renamed the setting (via
+    local_config.py or settings.conf, both documented override points)
+    would have every packed .rar sent successfully and never cleaned up
+    afterward - this would simply never be true again, silently.
+
+    The ".zip" exclusion is unchanged from before this fix: TMP_ZIP_DIR also
+    holds the master list's own zip, which this cleanup must never touch.
+    """
+    path = str(path)
+    return is_safe_path(config.TMP_ZIP_DIR, path) and ".zip" not in path
+
+
 def user_is_present_in_ram(user_key):
     """Is this user still in ANY of the bot's live channel lists (synced from 353/JOIN)?"""
     u = str(user_key).lower()
-    for users_set in getattr(config, 'channel_users', {}).values():
-        for known_user in users_set:
-            if str(known_user).lower() == u:
-                return True
+    with runtime.channel_users_lock():
+        for users_set in getattr(config, 'channel_users', {}).values():
+            for known_user in users_set:
+                if str(known_user).lower() == u:
+                    return True
     return False
 
 def discard_orphaned_temp_archives(user_key):
@@ -277,12 +297,13 @@ def check_queue_and_send(irc_sock, completed_user):
         if "system_next_trigger_fallback" in [str(completed_user).lower(), str(user_key)]:
             user_is_actively_in_channel = True
         else:
-            if hasattr(config, 'channel_users'):
-                for chan_name, users_set in config.channel_users.items():
-                    lowered_channel_users = [u.lower() for u in users_set]
-                    if user_key in lowered_channel_users or str(completed_user).lower() in lowered_channel_users:
-                        user_is_actively_in_channel = True
-                        break
+            with runtime.channel_users_lock():
+                if hasattr(config, 'channel_users'):
+                    for chan_name, users_set in config.channel_users.items():
+                        lowered_channel_users = [u.lower() for u in users_set]
+                        if user_key in lowered_channel_users or str(completed_user).lower() in lowered_channel_users:
+                            user_is_actively_in_channel = True
+                            break
             
         if user_is_actively_in_channel is True:
             # ---------------------------------------------------------------------
@@ -638,14 +659,15 @@ def check_queue_and_send(irc_sock, completed_user):
                 else:
                     channels_to_check = config.CHANNEL.split(',')
 
-                if hasattr(config, 'channel_users'):
-                    for single_chan in channels_to_check:
-                        n_chan = str(single_chan).strip().lower()
-                        if n_chan in config.channel_users:
-                            lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
-                            if queue_key in lowered_glob_users:
-                                user_is_globally_active = True
-                                break
+                with runtime.channel_users_lock():
+                    if hasattr(config, 'channel_users'):
+                        for single_chan in channels_to_check:
+                            n_chan = str(single_chan).strip().lower()
+                            if n_chan in config.channel_users:
+                                lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
+                                if queue_key in lowered_glob_users:
+                                    user_is_globally_active = True
+                                    break
 
                 if user_is_globally_active is True:
                     if g_next.get('is_unpacked_rar_folder') is True:
@@ -704,16 +726,19 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 raw_win_path = raw_win_path.split("::INFO::")[0].strip()
                 
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
-            
-            # Strip any doubled trailing slashes before mapping onto the Linux disk
-            clean_win_path = win_path.replace("\\", "/").replace("D:/", "").replace("d:/", "")
 
-
-            if clean_win_path.upper().startswith("MUSIC/"):
-                clean_win_path = clean_win_path[6:]
-                
-            linux_sub_path = clean_win_path.strip("/")
-            true_source_dir = os.path.normpath(os.path.join(config.FILE_DIRECTORY, linux_sub_path))
+            # This used to be a third, differently-shaped copy of the same
+            # "D:\MUSIC\<folder>\" prefix-stripping list.resolve_list_folder()
+            # already does - non-anchored `.replace("D:/", "")` calls rather
+            # than a startswith-anchored strip, which would have silently
+            # matched "D:/" anywhere in the string, not just at the start.
+            # os.path.normpath is kept even though resolve_list_folder()
+            # itself doesn't call it: is_safe_path() below re-resolves the
+            # path with os.path.realpath() regardless, but this is the
+            # traversal guard's input and there is no reason to change its
+            # exact shape while consolidating the prefix logic.
+            true_source_dir = os.path.normpath(
+                list_mod.resolve_list_folder(win_path, base=config.FILE_DIRECTORY))
 
             # ---------------------------------------------------------------------
             # THE TRAVERSAL GUARD - this one is critical:
@@ -732,10 +757,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     category="HARDBAN")
                 return
 
-            if "/" not in linux_sub_path:
-                print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {linux_sub_path}")
+            # An artist root (one path segment under FILE_DIRECTORY, no album
+            # subfolder) rather than an actual album folder. relpath() rather
+            # than the old hand-built linux_sub_path - same question, asked
+            # of the path resolve_list_folder() already produced.
+            relative_to_root = os.path.relpath(true_source_dir, config.FILE_DIRECTORY)
+            if os.sep not in relative_to_root:
+                print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {relative_to_root}")
                 announce_mod.send_pack_error_notice(irc_sock, user)
-                announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{linux_sub_path}{config.C_RESET} is an artist root folder.", category="PART")
+                announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{relative_to_root}{config.C_RESET} is an artist root folder.", category="PART")
                 return
             
             if not os.path.exists(platform_compat.long_path(true_source_dir)) or not os.path.isdir(platform_compat.long_path(true_source_dir)):
@@ -811,7 +841,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 try:
                     with open(latest_list_path, "r", encoding="utf-8", errors="ignore") as lf:
                         lines = lf.readlines()
-                    target_folder_rel = None
+                    target_folder = None
                     clean_req = str(requested_file).lower().strip()
                     
                     for idx, line in enumerate(lines):
@@ -835,15 +865,22 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                             if clean_req == str(current_file_in_list).lower().strip():
                                 for back_idx in range(idx, -1, -1):
                                     back_line = lines[back_idx].strip()
-                                    if back_line.upper().startswith("D:\\MUSIC\\"):
-                                        raw_folder = back_line[9:]
-                                        if raw_folder.endswith("\\"): raw_folder = raw_folder[:-1]
-                                        target_folder_rel = raw_folder.replace("\\", "/")
+                                    # The prefix-stripping itself is
+                                    # list_mod.resolve_list_folder() - this used
+                                    # to be a second, hand-written copy of it
+                                    # (a hardcoded back_line[9:] rather than
+                                    # len(LIST_FOLDER_PREFIX), and its own
+                                    # trailing-backslash/separator handling),
+                                    # which could silently drift from the
+                                    # original if the list format ever changed.
+                                    if back_line.upper().startswith(list_mod.LIST_FOLDER_PREFIX):
+                                        target_folder = list_mod.resolve_list_folder(
+                                            back_line, base=base_directory)
                                         break
-                                if target_folder_rel is not None: break
-                                
-                    if target_folder_rel is not None:
-                        test_path = os.path.join(base_directory, target_folder_rel, requested_file)
+                                if target_folder is not None: break
+
+                    if target_folder is not None:
+                        test_path = os.path.join(target_folder, requested_file)
                         if os.path.exists(platform_compat.long_path(test_path)):
                             full_path = test_path
                 except Exception as list_err:
@@ -1119,6 +1156,22 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         acute_bytes = bytes_sent if 'bytes_sent' in locals() else 0
         final_calc_speed = int(acute_bytes / acute_duration)
 
+        # The record the channel advert publishes. db has had
+        # save_speed_record() from the start and announce.py has read it into
+        # every advert since, but nothing ever sat between the two - the only
+        # callers of the writer were tests. So the advert has shown
+        # "Record: 0k/s" for the life of the feature, on every install.
+        #
+        # Only a transfer that actually completed counts: a send that failed
+        # part-way has moved real bytes in real time, so its rate looks like a
+        # legitimate sample and is not one.
+        if transfer_completed:
+            try:
+                import stats_mgr as stats_mgr_mod
+                stats_mgr_mod.update_speed_record(final_calc_speed, acute_duration)
+            except Exception as record_err:
+                print(f"[STATS ERROR] Could not update the speed record: {record_err}")
+
         # 1. Clean up the transfer and the slot immediately
         try:
             with queue_lock:
@@ -1149,8 +1202,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try:
             file_still_needed = False
             safe_path = str(file_path)
-            
-            if "tmp_zips" in safe_path and ".zip" not in safe_path:
+
+            if _is_temp_zip_cache_file(safe_path):
                 with queue_lock:
                     # A. Is the file still QUEUED for some OTHER user in dcc_queue.txt?
                     for q_user, q_files in getattr(config, 'dcc_queue', {}).items():

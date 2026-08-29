@@ -2,6 +2,7 @@
 import sys
 import config
 import db
+import runtime
 
 # The five admin handlers below take authorised=False. The DCC CHAT console
 # passes authorised=True: a console session has already proved the operator's
@@ -275,8 +276,12 @@ def handle_rehash_request(user, target_chan, authorised=False):
     # =====================================================================
     # A. The channel user lists (from NAMES)
     ram_backup_users = {}
-    if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
-        ram_backup_users = copy.deepcopy(config.channel_users)
+    backed_up_users = False
+    with runtime.channel_users_lock():
+        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+            ram_backup_users = copy.deepcopy(config.channel_users)
+            backed_up_users = True
+    if backed_up_users:
         print(f"[REHASH RAM] Backed up the user lists for {len(ram_backup_users)} channel(s).")
 
     # B. The active DCC slots
@@ -426,10 +431,12 @@ def handle_rehash_request(user, target_chan, authorised=False):
         # In place: rebinding would detach config.channel_users from the
         # object runtime.py holds, and ram_backup_users is a deep COPY, so
         # the two would diverge from here on (see runtime.py's docstring).
-        config.channel_users.clear()
-        if ram_backup_users:
-            config.channel_users.update(ram_backup_users)
-        print(f"[REHASH RAM] Restored {len(config.channel_users)} channel list(s) into the new modules.")
+        with runtime.channel_users_lock():
+            config.channel_users.clear()
+            if ram_backup_users:
+                config.channel_users.update(ram_backup_users)
+            restored_count = len(config.channel_users)
+        print(f"[REHASH RAM] Restored {restored_count} channel list(s) into the new modules.")
 
         # Restore the slots
         for mod_name in ['dcc', 'config', 'oserve']:
@@ -495,8 +502,9 @@ def handle_rehash_request(user, target_chan, authorised=False):
                 if chan not in old_chans:
                     irc_sock.send(f"JOIN {chan}\r\n".encode())
                     announce.send_debug(f"Joining channel {chan} due to new configuration layout!", category="JOIN")
-                    if chan.lower() not in config.channel_users:
-                        config.channel_users[chan.lower()] = set()
+                    with runtime.channel_users_lock():
+                        if chan.lower() not in config.channel_users:
+                            config.channel_users[chan.lower()] = set()
             
             for chan in old_chans:
                 if chan not in new_chans:
@@ -504,8 +512,9 @@ def handle_rehash_request(user, target_chan, authorised=False):
                     if chan != debug_chan:
                         irc_sock.send(f"PART {chan} :Removed from DDCore\r\n".encode())
                         announce.send_debug(f"Parting channel {chan} due to new configuration layout!", category="PART")
-                        if chan.lower() in config.channel_users:
-                            del config.channel_users[chan.lower()]
+                        with runtime.channel_users_lock():
+                            if chan.lower() in config.channel_users:
+                                del config.channel_users[chan.lower()]
             
             print("[REHASH SYNC] Sending a background NAMES to keep the lists fresh...")
             for chan in new_chans:

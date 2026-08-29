@@ -15,6 +15,7 @@ import config
 import platform_compat
 import list
 import dcc
+import runtime
 import security
 
 # Tracks whether the channels have been joined
@@ -536,11 +537,12 @@ def irc_loop():
                         break  # Already on the main nick; stop watching
                         
                     main_nick_active = False
-                    if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
-                        for chan_name, users_set in config.channel_users.items():
-                            if main_nick.lower() in [u.lower() for u in users_set]:
-                                main_nick_active = True
-                                break
+                    with runtime.channel_users_lock():
+                        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+                            for chan_name, users_set in config.channel_users.items():
+                                if main_nick.lower() in [u.lower() for u in users_set]:
+                                    main_nick_active = True
+                                    break
                                 
                     if not main_nick_active:
                         print(f"\n[NICK RECOVERY] The ghost nick {main_nick} timed out. Changing nick...")
@@ -769,9 +771,10 @@ def irc_loop():
                         if name_match:
                             chan = name_match.group(1).lower()
                             names = [n.strip("@+~&%").lower() for n in name_match.group(2).split()]
-                            if chan not in config.channel_users:
-                                config.channel_users[chan] = set()
-                            config.channel_users[chan].update(names)
+                            with runtime.channel_users_lock():
+                                if chan not in config.channel_users:
+                                    config.channel_users[chan] = set()
+                                config.channel_users[chan].update(names)
 
                             # -------------------------------------------------
                             # RECONNECT THAW - this is what saves the queues:
@@ -800,9 +803,10 @@ def irc_loop():
                             joined_chan = join_match.group(2)
                             j_key = joined_user.lower()
                             
-                            if joined_chan.lower() not in config.channel_users:
-                                config.channel_users[joined_chan.lower()] = set()
-                            config.channel_users[joined_chan.lower()].add(j_key)
+                            with runtime.channel_users_lock():
+                                if joined_chan.lower() not in config.channel_users:
+                                    config.channel_users[joined_chan.lower()] = set()
+                                config.channel_users[joined_chan.lower()].add(j_key)
                             
                             if hasattr(config, 'frozen_queues') and j_key in config.frozen_queues:
                                 del config.frozen_queues[j_key]
@@ -818,8 +822,9 @@ def irc_loop():
                         if part_match:
                             p_user = part_match.group(1).lower()
                             p_chan = part_match.group(2).lower()
-                            if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
-                                config.channel_users[p_chan].remove(p_user)
+                            with runtime.channel_users_lock():
+                                if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
+                                    config.channel_users[p_chan].remove(p_user)
 
                     # Anchored: the worst of the three, because it removes the user from
                     # EVERY channel at once. "@find QUIT PLAYING GAMES" is an ordinary
@@ -829,9 +834,10 @@ def irc_loop():
                         quit_match = re.search(r"^:([^!]+)!", line)
                         if quit_match:
                             q_user = quit_match.group(1).lower()
-                            for chan in config.channel_users:
-                                if q_user in config.channel_users[chan]:
-                                    config.channel_users[chan].remove(q_user)
+                            with runtime.channel_users_lock():
+                                for chan in config.channel_users:
+                                    if q_user in config.channel_users[chan]:
+                                        config.channel_users[chan].remove(q_user)
 
                     # Cross-bot search broadcast capture, NOTICE half. NOTICE
                     # lines are not parsed anywhere else in this loop - many
@@ -948,8 +954,11 @@ def irc_loop():
                             elif msg_lower == "!list":
                                 list.send_list_trigger_info(s, user)
                             elif msg.lower() == "!debugnames":
-                                if hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users:
-                                    current_qty = len(config.channel_users[target_chan.lower()])
+                                with runtime.channel_users_lock():
+                                    have_count = hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users
+                                    if have_count:
+                                        current_qty = len(config.channel_users[target_chan.lower()])
+                                if have_count:
                                     s.send(f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n".encode())
                                 else:
                                     s.send(f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n".encode())
@@ -1000,8 +1009,9 @@ def irc_loop():
         config.bot_joined_channel = False
         
         # FIXED: clears the in-memory channel lists on a crash, so the bot does not block its own nick next time
-        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
-            config.channel_users.clear()
+        with runtime.channel_users_lock():
+            if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
+                config.channel_users.clear()
             
         config.activation_triggered = False
         # Invalidate every thread spawned for the connection that just died.
