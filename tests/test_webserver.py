@@ -1245,5 +1245,135 @@ class RejectedListArchiveRenderingTests(DCCoreTestCase):
                          "zip entry would extract outside")
 
 
+
+
+class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
+    """The two routes that CREATE fetch rows have to honour the same flag
+    dcc_fetch.check_fetch_queue() honours.
+
+    oserve.startup() sets config.fetch_feature_disabled when
+    FETCHED_FILES_DIR could not be created, and the dispatcher then refuses to
+    promote any row past `pending`. Before this, the HTTP routes accepted the
+    request anyway: the dashboard reported the fetch queued, and it sat there
+    forever with nothing said about why. One [FETCH] line on the console at
+    startup was the only evidence.
+    """
+
+    def _unset_the_flag(self):
+        """Remove the attribute and put it back afterwards. Deleting module
+        state in a test that does not restore it leaves the next test to
+        discover it, which is the kind of order-dependence that only shows up
+        when the suite is run in a different order."""
+        had = hasattr(config, "fetch_feature_disabled")
+        previous = getattr(config, "fetch_feature_disabled", None)
+        if had:
+            del config.fetch_feature_disabled
+
+        def restore():
+            if had:
+                config.fetch_feature_disabled = previous
+            elif hasattr(config, "fetch_feature_disabled"):
+                del config.fetch_feature_disabled
+
+        self.addCleanup(restore)
+
+    def test_a_file_fetch_is_refused_rather_than_queued(self):
+        config.fetch_feature_disabled = True
+
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "goodbot", "filename": "Song.flac"})
+
+        self.assertEqual(status, 503)
+        self.assertIn("FETCHED_FILES_DIR", result["error"])
+        self.assertEqual(config.fetch_queue, {},
+                         "the row must not be created - it could never be promoted")
+
+    def test_a_list_fetch_is_refused_rather_than_queued(self):
+        config.fetch_feature_disabled = True
+
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual(status, 503)
+        self.assertIn("FETCHED_FILES_DIR", result["error"])
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_multi_item_request_creates_none_of_them(self):
+        """The bulk shape has its own path through the validator, so it gets
+        its own check: partial acceptance would be worse than refusal."""
+        config.fetch_feature_disabled = True
+
+        status, _result = webserver.build_fetch_enqueue_result([
+            {"bot": "a", "filename": "One.flac"},
+            {"bot": "b", "filename": "Two.flac"},
+        ])
+
+        self.assertEqual(status, 503)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_the_error_says_what_to_do_about_it(self):
+        """An operator reading this in the dashboard has to be able to act on
+        it - the cause is a directory that could not be created, and the fix
+        needs a restart once that is sorted."""
+        config.fetch_feature_disabled = True
+
+        message = webserver.fetch_feature_error()
+
+        self.assertIn("permissions", message.lower())
+        self.assertIn("restart", message.lower())
+
+    def test_both_routes_still_work_when_the_feature_is_on(self):
+        """Control. reset_config() leaves the flag False, which is the normal
+        running state - these must not have been broken by the gate."""
+        config.fetch_feature_disabled = False
+
+        file_status, _f = webserver.build_fetch_enqueue_result(
+            {"bot": "goodbot", "filename": "Song.flac"})
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual((file_status, list_status), (200, 200))
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_the_flag_being_absent_counts_as_off(self):
+        """The reason the read is `getattr(..., True)` rather than the
+        `getattr(..., False)` it used to be.
+
+        The attribute exists only once oserve.startup() has set it, so reading
+        it missing means asking before that point. Accepting a fetch with
+        nowhere to put the file is the worse of the two guesses - and #100
+        would start the dashboard earlier in the boot sequence than the line
+        that sets this, which turns "before that point" from unreachable into
+        an ordinary startup window.
+        """
+        self._unset_the_flag()
+
+        self.assertIsNotNone(webserver.fetch_feature_error(),
+                             "a missing flag must read as disabled, not enabled")
+
+        status, _result = webserver.build_fetch_enqueue_result(
+            {"bot": "goodbot", "filename": "Song.flac"})
+
+        self.assertEqual(status, 503)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_the_dispatcher_agrees_with_the_routes(self):
+        """Both sides of the same flag: the routes refuse to create the row,
+        and the dispatcher refuses to promote one that already exists. They
+        have to read the missing attribute the same way, or a row created
+        under one reading gets stranded by the other."""
+        import dcc_fetch
+
+        # Create the row through the real path, with the feature on, so it has
+        # exactly the shape the dispatcher expects.
+        config.fetch_feature_disabled = False
+        request_id = dcc_fetch.enqueue_fetch("somebot", "Song.flac")
+
+        self._unset_the_flag()
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(config.fetch_queue[request_id]["state"], "pending",
+                         "the dispatcher promoted a row while the feature "
+                         "reads as disabled")
+
+
 if __name__ == "__main__":
     unittest.main()

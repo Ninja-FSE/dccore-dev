@@ -226,7 +226,9 @@ def check_fetch_queue():
     thread started by oserve.startup(), mirroring how queue_mgr.queue_worker
     is started) rather than being wired into an unrelated existing loop.
     """
-    if getattr(config, "fetch_feature_disabled", False):
+    # Absent means DISABLED: see webserver.fetch_feature_error() for why
+    # the missing attribute has to fail toward not-fetching.
+    if getattr(config, "fetch_feature_disabled", True):
         # FETCHED_FILES_DIR could not be created at startup (see
         # oserve.startup()) - leave rows sitting `pending` rather than ever
         # promoting them; there is nowhere safe to write a completed file.
