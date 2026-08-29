@@ -278,6 +278,31 @@ def build_filelists_payload(offset=0, limit=None):
 # function in this module: no Flask import, fully unit testable.
 # ==========================================================================
 
+def fetch_feature_error():
+    """Why the cross-bot fetch feature will not accept work, or None.
+
+    oserve.startup() sets config.fetch_feature_disabled when FETCHED_FILES_DIR
+    could not be created - there is nowhere to put a fetched file, so
+    dcc_fetch.check_fetch_queue() refuses to promote any row past `pending`.
+    The two HTTP routes that CREATE those rows have to refuse for the same
+    reason, or the dashboard accepts a request, reports it queued, and it then
+    sits pending forever with nothing said about why.
+
+    Absent means DISABLED, deliberately. The attribute exists from the moment
+    startup() has run, so the only way to read it missing is to ask before
+    then - and of the two guesses available at that point, accepting a fetch
+    with nowhere to put the file is the worse one. That also holds the
+    behaviour steady if the dashboard is ever started earlier in the boot
+    sequence than it is today.
+    """
+    if getattr(config, "fetch_feature_disabled", True):
+        return ("Cross-bot file fetch is unavailable: the fetch directory "
+                "(FETCHED_FILES_DIR) could not be created when the bot "
+                "started. Check the path and its permissions, then restart "
+                "the bot.")
+    return None
+
+
 def build_list_fetch_enqueue_result(bot_raw):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
@@ -300,6 +325,10 @@ def build_list_fetch_enqueue_result(bot_raw):
     as a one-element list, so the frontend can treat this the same shape as
     the file-fetch enqueue response).
     """
+
+    unavailable = fetch_feature_error()
+    if unavailable:
+        return 503, {"error": unavailable}
     import dcc_fetch
 
     bot_err = reject_if_unsafe_for_irc_line(bot_raw, "bot")
@@ -509,6 +538,10 @@ def build_fetch_enqueue_result(payload):
     Returns (http_status, payload_dict) with "created" (the new request ids)
     and "errors" (one entry per rejected item, if any).
     """
+
+    unavailable = fetch_feature_error()
+    if unavailable:
+        return 503, {"error": unavailable}
     import dcc_fetch
 
     items = [payload] if isinstance(payload, dict) else payload
