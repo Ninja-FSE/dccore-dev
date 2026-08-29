@@ -24,7 +24,8 @@
     search:    { title: "Search",     sub: "Find a file across the current master list." },
     queue:     { title: "Queue",      sub: "Who is waiting, who is sending, right now." },
     download:  { title: "Download",   sub: "Bulk-paste \"!<bot> <filename>\" requests and track their progress." },
-    filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." }
+    filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
+    tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." }
   };
 
   var state = {
@@ -66,7 +67,10 @@
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
     filelistsExpandAll:   document.getElementById("filelists-expand-all"),
-    filelistsCollapseAll: document.getElementById("filelists-collapse-all")
+    filelistsCollapseAll: document.getElementById("filelists-collapse-all"),
+    verifyRunBtn:         document.getElementById("verify-run-btn"),
+    verifyStatus:         document.getElementById("verify-status"),
+    verifyResults:        document.getElementById("verify-results")
   };
 
   function escapeHtml(value) {
@@ -872,6 +876,77 @@
           el.filelistsBody.innerHTML = emptyRow(4, "Could not load file lists: " + err.message);
         });
     }
+
+  // ---------------------------------------------------------------- Tools
+
+  // The Tools view runs nothing on its own. Verifying the list re-reads and
+  // re-parses the whole master list, which is work worth doing when the
+  // operator asks for it and not on every tab switch.
+  function renderVerifyResults(payload) {
+    var duplicates = payload.duplicates || [];
+    var checked = payload.checked || 0;
+
+    if (!duplicates.length) {
+      el.verifyStatus.textContent =
+        "No duplicates. All " + checked.toLocaleString() +
+        " filenames in the list are unique.";
+      el.verifyStatus.classList.remove("is-error");
+      el.verifyResults.innerHTML = "";
+      return;
+    }
+
+    var unreachable = payload.unreachable || 0;
+    el.verifyStatus.textContent =
+      duplicates.length.toLocaleString() +
+      (duplicates.length === 1 ? " filename appears" : " filenames appear") +
+      " under more than one folder, out of " + checked.toLocaleString() +
+      " checked. " + unreachable.toLocaleString() +
+      (unreachable === 1 ? " copy is" : " copies are") + " unreachable.";
+    el.verifyStatus.classList.remove("is-error");
+
+    el.verifyResults.innerHTML = duplicates.map(function (item) {
+      // The FIRST folder is the one a request for this name actually
+      // reaches - dcc.py resolves the name against this same list and takes
+      // the first match. Marking it is the whole point of showing the
+      // folders in list order rather than sorted.
+      var folders = (item.folders || []).map(function (folder, index) {
+        return "<li class=\"verify-folder" + (index === 0 ? " is-served" : "") + "\">" +
+          "<span class=\"verify-path\">" +
+            escapeHtml(folder || "(library root)") + "</span>" +
+          (index === 0 ? "<span class=\"verify-tag\">served</span>"
+                       : "<span class=\"verify-tag is-dim\">unreachable</span>") +
+          "</li>";
+      }).join("");
+      return "<div class=\"verify-group\">" +
+        "<div class=\"verify-name\">" +
+          "<span class=\"verify-file\">" + escapeHtml(item.filename) + "</span>" +
+          "<span class=\"verify-count\">" + (item.count || 0) + " folders</span>" +
+        "</div>" +
+        "<ul class=\"verify-folders\">" + folders + "</ul>" +
+      "</div>";
+    }).join("");
+  }
+
+  el.verifyRunBtn.addEventListener("click", function () {
+    el.verifyRunBtn.disabled = true;
+    el.verifyStatus.classList.remove("is-error");
+    el.verifyStatus.textContent = "Reading the master list…";
+    el.verifyResults.innerHTML = "";
+
+    fetchJson("/api/tools/verify-list")
+      .then(function (payload) {
+        markConnection(true);
+        renderVerifyResults(payload);
+      })
+      .catch(function (err) {
+        markConnection(false);
+        el.verifyStatus.textContent = "Could not verify the list: " + err.message;
+        el.verifyStatus.classList.add("is-error");
+      })
+      .then(function () {
+        el.verifyRunBtn.disabled = false;
+      });
+  });
 
   // ------------------------------------------------------------------ Init
 

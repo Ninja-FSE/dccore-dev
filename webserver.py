@@ -616,6 +616,40 @@ def build_fetch_status_payload():
     return rows
 
 
+def build_verify_list_payload():
+    """GET /api/tools/verify-list payload: filenames the master list carries
+    under more than one folder.
+
+    Computed on demand rather than stored. The list on disk is the source of
+    truth and is already parsed by find_matching_entries(), so there is no
+    side file to keep in step, nothing to go stale between an !update and a
+    look at this view, and no second walk of the library.
+
+    Returns every duplicate rather than a page of them. The count is bounded
+    by how many names actually collide, which on a healthy library is zero and
+    on an unhealthy one is the number the operator most wants to see in full.
+    """
+    import list as list_mod
+
+    entries, _total = list_mod.find_matching_entries([], limit=None)
+    duplicates = list_mod.find_duplicate_filenames(entries)
+    # Resolved here rather than in the finder: the finder answers "which names
+    # collide, and where does the LIST put them", which is a question about the
+    # list alone. Turning a heading into a path this machine has is a
+    # presentation concern, and it is what the operator can act on.
+    duplicates = [dict(item, folders=[list_mod.resolve_list_folder(folder)
+                                      for folder in item["folders"]])
+                  for item in duplicates]
+    return {
+        "checked": len(entries),
+        "duplicates": duplicates,
+        "total": len(duplicates),
+        # Distinct from `total`: how many individual copies are unreachable,
+        # which is the number that answers "how much of my library is this".
+        "unreachable": sum(item["count"] - 1 for item in duplicates),
+    }
+
+
 # ==========================================================================
 # Flask app - only built/used when Flask is actually installed.
 # ==========================================================================
@@ -675,6 +709,10 @@ if HAVE_FLASK:
         @app.route("/api/fetch/status")
         def api_fetch_status():
             return jsonify(build_fetch_status_payload())
+
+        @app.route("/api/tools/verify-list")
+        def api_tools_verify_list():
+            return jsonify(build_verify_list_payload())
 
         @app.route("/api/filelists/fetch", methods=["POST"])
         def api_filelists_fetch():
