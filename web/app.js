@@ -24,12 +24,14 @@
     search:    { title: "Search",     sub: "Find a file across the current master list." },
     queue:     { title: "Queue",      sub: "Who is waiting, who is sending, right now." },
     download:  { title: "Download",   sub: "Bulk-paste \"!<bot> <filename>\" requests and track their progress." },
-    filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." }
+    filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
+    tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." }
   };
 
   var state = {
     active: "search", filelistsLoaded: false, filelistsSource: "__own__",
-    filelistsOffset: 0, filelistsTotal: 0
+    filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
+    filelistsHistory: []
   };
 
   var el = {
@@ -63,7 +65,12 @@
     filelistsSourceSelect: document.getElementById("filelists-source-select"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
-    filelistsPageInfo:    document.getElementById("filelists-page-info")
+    filelistsPageInfo:    document.getElementById("filelists-page-info"),
+    filelistsExpandAll:   document.getElementById("filelists-expand-all"),
+    filelistsCollapseAll: document.getElementById("filelists-collapse-all"),
+    verifyRunBtn:         document.getElementById("verify-run-btn"),
+    verifyStatus:         document.getElementById("verify-status"),
+    verifyResults:        document.getElementById("verify-results")
   };
 
   function escapeHtml(value) {
@@ -235,6 +242,82 @@
   // escape through. entry.from/entry.text are plain text-node content
   // (.textContent), which was never the vulnerable pattern - only
   // attribute-position values are.
+  // Replies arrive interleaved - every bot's header, then its matches, in
+  // whatever order they answer - which is unreadable once a dozen bots reply.
+  // Grouped by sender instead: one heading per bot carrying what it told us
+  // about itself, then its matches beneath it as the exact line you would
+  // paste into the channel.
+  function groupBroadcastResults(results) {
+    var order = [];
+    var groups = {};
+    results.forEach(function (entry) {
+      var who = entry.from || "?";
+      if (!groups[who]) {
+        groups[who] = { from: who, header: null, files: [], other: [] };
+        order.push(who);
+      }
+      var g = groups[who];
+      if (entry.header) {
+        // Keep the first header. A bot that answers twice in one window is
+        // reporting the same slot counts; the later one is not more true.
+        g.header = g.header || entry.header;
+      } else if (entry.bot && entry.filename) {
+        g.files.push(entry);
+      } else {
+        g.other.push(entry);
+      }
+    });
+    return order.map(function (who) { return groups[who]; })
+                .sort(function (a, b) { return b.files.length - a.files.length; });
+  }
+
+  // What the bot said about itself, as one line. Every field is optional -
+  // a missing one means "it did not say", never zero, so nothing is invented
+  // to fill the gap.
+  function describeBot(group) {
+    var h = group.header || {};
+    var bits = [];
+
+    if (group.files.length) {
+      // The header's count is what it FOUND; the rows are what it SENT.
+      // Beezer finds 12 and sends 5, and saying only "5" would hide that
+      // refining the search is worth doing.
+      if (typeof h.matches === "number" && h.matches > group.files.length) {
+        bits.push(h.matches + " matches, showing " + group.files.length);
+      } else {
+        bits.push(group.files.length + (group.files.length === 1 ? " match" : " matches"));
+      }
+    } else if (typeof h.matches === "number") {
+      bits.push(h.matches + " matches, none sent");
+    }
+
+    if (typeof h.slots_free === "number" && typeof h.slots_total === "number") {
+      bits.push(h.slots_free + "/" + h.slots_total + " slots free");
+    } else if (typeof h.slots_in_use === "number") {
+      // SPQR reports slots IN USE, the opposite sense - label it as such
+      // rather than silently showing it where "free" would go.
+      bits.push(h.slots_in_use + " slot" + (h.slots_in_use === 1 ? "" : "s") + " in use");
+    }
+
+    if (typeof h.queued === "number") {
+      bits.push(typeof h.queue_total === "number"
+        ? "queue " + h.queued + "/" + h.queue_total
+        : h.queued + " queued");
+    }
+
+    if (typeof h.list_size === "number") {
+      bits.push("list " + h.list_size.toLocaleString() + " files");
+    }
+
+    if (h.server) {
+      bits.push(h.server);
+    } else if (h.family === "spqr") {
+      bits.push("SPQR");
+    }
+
+    return bits.join("  ·  ");
+  }
+
   function renderBroadcastResults(results) {
     el.broadcastBody.innerHTML = "";
     if (!results.length) {
@@ -242,12 +325,35 @@
       updateDownloadSelectedState();
       return;
     }
-    results.forEach(function (entry) {
-      var tr = document.createElement("tr");
 
-      var checkTd = document.createElement("td");
-      checkTd.className = "col-check";
-      if (entry.bot && entry.filename) {
+    groupBroadcastResults(results).forEach(function (group) {
+      var headRow = document.createElement("tr");
+      headRow.className = "bot-group";
+
+      var headCell = document.createElement("td");
+      headCell.colSpan = 3;
+
+      var name = document.createElement("span");
+      name.className = "bot-group-name";
+      name.textContent = group.from;
+      headCell.appendChild(name);
+
+      var summary = describeBot(group);
+      if (summary) {
+        var meta = document.createElement("span");
+        meta.className = "bot-group-meta";
+        meta.textContent = summary;
+        headCell.appendChild(meta);
+      }
+
+      headRow.appendChild(headCell);
+      el.broadcastBody.appendChild(headRow);
+
+      group.files.forEach(function (entry) {
+        var tr = document.createElement("tr");
+
+        var checkTd = document.createElement("td");
+        checkTd.className = "col-check";
         var box = document.createElement("input");
         box.type = "checkbox";
         box.className = "broadcast-check";
@@ -255,21 +361,35 @@
         box.dataset.filename = entry.filename;
         box.addEventListener("change", updateDownloadSelectedState);
         checkTd.appendChild(box);
-      }
-      tr.appendChild(checkTd);
+        tr.appendChild(checkTd);
 
-      var fromTd = document.createElement("td");
-      fromTd.className = "col-mono";
-      fromTd.textContent = entry.from;
-      tr.appendChild(fromTd);
+        // The exact line you would paste into the channel yourself, which is
+        // also what the checkbox fetches - so what you read is what happens.
+        var cmdTd = document.createElement("td");
+        cmdTd.className = "col-mono";
+        cmdTd.colSpan = 2;
+        cmdTd.textContent = "!" + entry.bot + " " + entry.filename;
+        tr.appendChild(cmdTd);
 
-      var textTd = document.createElement("td");
-      textTd.className = "col-mono";
-      textTd.textContent = entry.text;
-      tr.appendChild(textTd);
+        el.broadcastBody.appendChild(tr);
+      });
 
-      el.broadcastBody.appendChild(tr);
+      // Anything that was neither a header nor a match still gets shown -
+      // a bot saying it found nothing, or unrelated chatter that landed in
+      // the window. Dimmed, and never with a checkbox, but never hidden:
+      // silently dropping a reply would be worse than showing a stray line.
+      group.other.forEach(function (entry) {
+        var tr = document.createElement("tr");
+        tr.appendChild(document.createElement("td"));
+        var td = document.createElement("td");
+        td.className = "col-dim col-mono";
+        td.colSpan = 2;
+        td.textContent = entry.text;
+        tr.appendChild(td);
+        el.broadcastBody.appendChild(tr);
+      });
     });
+
     updateDownloadSelectedState();
   }
 
@@ -542,18 +662,30 @@
   el.filelistsSourceSelect.addEventListener("change", function () {
     state.filelistsSource = el.filelistsSourceSelect.value;
     state.filelistsOffset = 0;
+    state.filelistsHistory = [];
     loadFilelists();
   });
 
   el.filelistsPrevBtn.addEventListener("click", function () {
     if (state.filelistsOffset <= 0) { return; }
-    state.filelistsOffset = Math.max(0, state.filelistsOffset - FILELISTS_PAGE_SIZE);
+    // Pop the offset this page was reached FROM rather than subtracting a
+    // page size. Forward steps are not a fixed width (see Next below), so
+    // arithmetic backwards would land somewhere no page ever started.
+    state.filelistsOffset = state.filelistsHistory.length
+      ? state.filelistsHistory.pop()
+      : Math.max(0, state.filelistsOffset - FILELISTS_PAGE_SIZE);
     loadFilelists();
   });
 
   el.filelistsNextBtn.addEventListener("click", function () {
-    var next = state.filelistsOffset + FILELISTS_PAGE_SIZE;
+    // Advance by the number of folders the server actually RETURNED, not by
+    // the number asked for. A page is also capped by a row ceiling, so a
+    // request for 200 folders can come back with 33 - and stepping by 200
+    // would skip the 167 in between without a word.
+    var step = state.filelistsReturned || FILELISTS_PAGE_SIZE;
+    var next = state.filelistsOffset + step;
     if (next >= state.filelistsTotal) { return; }
+    state.filelistsHistory.push(state.filelistsOffset);
     state.filelistsOffset = next;
     loadFilelists();
   });
@@ -590,61 +722,231 @@
 
   // Loading the table itself ------------------------------------------------
 
-  // Both /api/filelists and /api/filelists/bot/<nick> now return a page of
-  // rows (`{"entries","total","offset","limit"}`) rather than everything at
-  // once (issue #76, option 3) - this renders the Prev/Next controls and the
-  // "Showing X-Y of Z" caption from state.filelistsOffset/filelistsTotal,
-  // which loadFilelists() below keeps current on every successful load.
-  function renderFilelistsPager() {
-    var total = state.filelistsTotal || 0;
-    var offset = state.filelistsOffset || 0;
-    var shown = total === 0 ? 0 : Math.min(FILELISTS_PAGE_SIZE, total - offset);
-    var start = shown === 0 ? 0 : offset + 1;
-    var end = offset + shown;
-    el.filelistsPageInfo.textContent =
-      "Showing " + start.toLocaleString() + "–" + end.toLocaleString() +
-      " of " + total.toLocaleString();
-    el.filelistsPrevBtn.disabled = offset <= 0;
-    el.filelistsNextBtn.disabled = (offset + FILELISTS_PAGE_SIZE) >= total;
+    // Both /api/filelists and /api/filelists/bot/<nick> return a page of
+    // FOLDERS - `{"folders","total","total_files","offset","limit"}` - rather
+    // than a page of loose rows. Paging by the folder keeps a folder whole:
+    // the folder is the unit an operator browses, and paging by row split
+    // large ones across a page boundary, so page two opened mid-folder under
+    // no heading at all.
+    //
+    // `total` counts folders, which is what the pager steps through;
+    // `total_files` counts the rows inside them, which is what the operator
+    // actually wants to know about the list.
+    function renderFilelistsPager(totalFiles) {
+      var total = state.filelistsTotal || 0;
+      var offset = state.filelistsOffset || 0;
+      var shown = state.filelistsReturned || 0;
+      var start = shown === 0 ? 0 : offset + 1;
+      var end = offset + shown;
+      var files = totalFiles || 0;
+      el.filelistsPageInfo.textContent =
+        "Folders " + start.toLocaleString() + "–" + end.toLocaleString() +
+        " of " + total.toLocaleString() +
+        " (" + files.toLocaleString() + (files === 1 ? " file)" : " files)");
+      el.filelistsPrevBtn.disabled = offset <= 0;
+      el.filelistsNextBtn.disabled = (offset + shown) >= total;
+    }
+
+    // A file that reached us with no folder heading above it still has to be
+    // shown under something.
+    function folderLabel(name) {
+      return name ? name : "(no folder)";
+    }
+
+    // The count is the point of a collapsed folder: it says how much is inside
+    // before the operator spends a click finding out. `count` is the folder's
+    // TRUE size, so a folder that arrived truncated still reports what it
+    // holds rather than only what fitted on the page.
+    function folderHeadingHtml(group, index) {
+      var count = group.count || 0;
+      return "<tr class=\"folder-row\">" +
+        "<td colspan=\"4\">" +
+          "<button type=\"button\" class=\"folder-toggle\" aria-expanded=\"false\"" +
+                 " data-folder-index=\"" + index + "\">" +
+            "<span class=\"folder-caret\" aria-hidden=\"true\"></span>" +
+            "<span class=\"folder-name\">" +
+              escapeHtml(folderLabel(group.folder)) + "</span>" +
+            "<span class=\"folder-count\">" + count.toLocaleString() +
+              (count === 1 ? " file" : " files") + "</span>" +
+          "</button>" +
+        "</td></tr>";
+    }
+
+    function folderFilesHtml(group, index) {
+      var entries = group.entries || [];
+      var rows = entries.map(function (row) {
+        return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
+          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + "</td>" +
+          "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
+          "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
+          "<td class=\"col-dim col-mono\">" + escapeHtml(row.source) + "</td>" +
+          "</tr>";
+      });
+      // A folder bigger than the page's row ceiling arrives cut short. Say so
+      // in place, so the rows on screen cannot quietly disagree with the count
+      // in the heading right above them.
+      if (group.truncated) {
+        rows.push(
+          "<tr class=\"file-row folder-truncated is-hidden\" data-folder-index=\"" +
+          index + "\"><td colspan=\"4\">Showing the first " +
+          entries.length.toLocaleString() + " of " +
+          (group.count || 0).toLocaleString() +
+          " files in this folder.</td></tr>");
+      }
+      return rows.join("");
+    }
+
+    function setFolderExpanded(index, expanded) {
+      var rows = el.filelistsBody.querySelectorAll(
+        ".file-row[data-folder-index=\"" + index + "\"]");
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].classList.toggle("is-hidden", !expanded);
+      }
+    }
+
+    function setAllFolders(expanded) {
+      var toggles = el.filelistsBody.querySelectorAll(".folder-toggle");
+      for (var i = 0; i < toggles.length; i++) {
+        toggles[i].setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+      var rows = el.filelistsBody.querySelectorAll(".file-row");
+      for (var j = 0; j < rows.length; j++) {
+        rows[j].classList.toggle("is-hidden", !expanded);
+      }
+    }
+
+    // Delegated once here rather than bound per heading: the table is rebuilt
+    // on every page change and every source change, and a per-heading listener
+    // would have to be re-attached each time.
+    el.filelistsBody.addEventListener("click", function (evt) {
+      var toggle = evt.target.closest ? evt.target.closest(".folder-toggle") : null;
+      if (!toggle) { return; }
+      var expanded = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+      setFolderExpanded(toggle.getAttribute("data-folder-index"), !expanded);
+    });
+
+    el.filelistsExpandAll.addEventListener("click", function () { setAllFolders(true); });
+    el.filelistsCollapseAll.addEventListener("click", function () { setAllFolders(false); });
+
+    // Accepts the older flat shapes as well as the folder one: a bare array,
+    // or a payload carrying `entries`, both become a single unnamed folder
+    // rather than a blank table. That is the same defensive unwrap this did
+    // before paging existed, extended to cover the shape that replaced it.
+    function folderGroupsFrom(payload) {
+      if (Array.isArray(payload)) {
+        return payload.length
+          ? [{ folder: "", count: payload.length, entries: payload }]
+          : [];
+      }
+      if (payload.folders) { return payload.folders; }
+      var rows = payload.entries || [];
+      return rows.length ? [{ folder: "", count: rows.length, entries: rows }] : [];
+    }
+
+    function loadFilelists() {
+      el.filelistsBody.innerHTML = emptyRow(4, "Loading…");
+      var source = state.filelistsSource || "__own__";
+      var offset = state.filelistsOffset || 0;
+      var base = (source === "__own__")
+        ? "/api/filelists"
+        : "/api/filelists/bot/" + encodeURIComponent(source);
+      var url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+
+      fetchJson(url)
+        .then(function (payload) {
+          markConnection(true);
+          state.filelistsLoaded = true;
+          var groups = folderGroupsFrom(payload);
+          state.filelistsTotal = Array.isArray(payload)
+            ? groups.length : (payload.total || 0);
+          state.filelistsReturned = groups.length;
+          renderFilelistsPager(Array.isArray(payload)
+            ? payload.length : (payload.total_files || 0));
+          if (!groups.length) {
+            el.filelistsBody.innerHTML = emptyRow(4, "No files published yet.");
+            return;
+          }
+          el.filelistsBody.innerHTML = groups.map(function (group, index) {
+            return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
+          }).join("");
+        })
+        .catch(function (err) {
+          markConnection(false);
+          el.filelistsBody.innerHTML = emptyRow(4, "Could not load file lists: " + err.message);
+        });
+    }
+
+  // ---------------------------------------------------------------- Tools
+
+  // The Tools view runs nothing on its own. Verifying the list re-reads and
+  // re-parses the whole master list, which is work worth doing when the
+  // operator asks for it and not on every tab switch.
+  function renderVerifyResults(payload) {
+    var duplicates = payload.duplicates || [];
+    var checked = payload.checked || 0;
+
+    if (!duplicates.length) {
+      el.verifyStatus.textContent =
+        "No duplicates. All " + checked.toLocaleString() +
+        " filenames in the list are unique.";
+      el.verifyStatus.classList.remove("is-error");
+      el.verifyResults.innerHTML = "";
+      return;
+    }
+
+    var unreachable = payload.unreachable || 0;
+    el.verifyStatus.textContent =
+      duplicates.length.toLocaleString() +
+      (duplicates.length === 1 ? " filename appears" : " filenames appear") +
+      " under more than one folder, out of " + checked.toLocaleString() +
+      " checked. " + unreachable.toLocaleString() +
+      (unreachable === 1 ? " copy is" : " copies are") + " unreachable.";
+    el.verifyStatus.classList.remove("is-error");
+
+    el.verifyResults.innerHTML = duplicates.map(function (item) {
+      // The FIRST folder is the one a request for this name actually
+      // reaches - dcc.py resolves the name against this same list and takes
+      // the first match. Marking it is the whole point of showing the
+      // folders in list order rather than sorted.
+      var folders = (item.folders || []).map(function (folder, index) {
+        return "<li class=\"verify-folder" + (index === 0 ? " is-served" : "") + "\">" +
+          "<span class=\"verify-path\">" +
+            escapeHtml(folder || "(library root)") + "</span>" +
+          (index === 0 ? "<span class=\"verify-tag\">served</span>"
+                       : "<span class=\"verify-tag is-dim\">unreachable</span>") +
+          "</li>";
+      }).join("");
+      return "<div class=\"verify-group\">" +
+        "<div class=\"verify-name\">" +
+          "<span class=\"verify-file\">" + escapeHtml(item.filename) + "</span>" +
+          "<span class=\"verify-count\">" + (item.count || 0) + " folders</span>" +
+        "</div>" +
+        "<ul class=\"verify-folders\">" + folders + "</ul>" +
+      "</div>";
+    }).join("");
   }
 
-  function loadFilelists() {
-    el.filelistsBody.innerHTML = emptyRow(4, "Loading…");
-    var source = state.filelistsSource || "__own__";
-    var offset = state.filelistsOffset || 0;
-    var base = (source === "__own__")
-      ? "/api/filelists"
-      : "/api/filelists/bot/" + encodeURIComponent(source);
-    var url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+  el.verifyRunBtn.addEventListener("click", function () {
+    el.verifyRunBtn.disabled = true;
+    el.verifyStatus.classList.remove("is-error");
+    el.verifyStatus.textContent = "Reading the master list…";
+    el.verifyResults.innerHTML = "";
 
-    fetchJson(url)
+    fetchJson("/api/tools/verify-list")
       .then(function (payload) {
         markConnection(true);
-        state.filelistsLoaded = true;
-        // Tolerates a bare array too (an older/unpatched server), same
-        // defensive unwrap this already did before pagination existed.
-        var rows = Array.isArray(payload) ? payload : (payload.entries || []);
-        var total = Array.isArray(payload) ? rows.length : (payload.total || 0);
-        state.filelistsTotal = total;
-        renderFilelistsPager();
-        if (!rows.length) {
-          el.filelistsBody.innerHTML = emptyRow(4, "No files published yet.");
-          return;
-        }
-        el.filelistsBody.innerHTML = rows.map(function (row) {
-          return "<tr>" +
-            "<td class=\"col-mono\">" + escapeHtml(row.title) + "</td>" +
-            "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
-            "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
-            "<td class=\"col-dim col-mono\">" + escapeHtml(row.source) + "</td>" +
-            "</tr>";
-        }).join("");
+        renderVerifyResults(payload);
       })
       .catch(function (err) {
         markConnection(false);
-        el.filelistsBody.innerHTML = emptyRow(4, "Could not load file lists: " + err.message);
+        el.verifyStatus.textContent = "Could not verify the list: " + err.message;
+        el.verifyStatus.classList.add("is-error");
+      })
+      .then(function () {
+        el.verifyRunBtn.disabled = false;
       });
-  }
+  });
 
   // ------------------------------------------------------------------ Init
 
