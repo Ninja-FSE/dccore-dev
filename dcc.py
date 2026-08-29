@@ -1116,6 +1116,22 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         acute_bytes = bytes_sent if 'bytes_sent' in locals() else 0
         final_calc_speed = int(acute_bytes / acute_duration)
 
+        # The record the channel advert publishes. db has had
+        # save_speed_record() from the start and announce.py has read it into
+        # every advert since, but nothing ever sat between the two - the only
+        # callers of the writer were tests. So the advert has shown
+        # "Record: 0k/s" for the life of the feature, on every install.
+        #
+        # Only a transfer that actually completed counts: a send that failed
+        # part-way has moved real bytes in real time, so its rate looks like a
+        # legitimate sample and is not one.
+        if transfer_completed:
+            try:
+                import stats_mgr as stats_mgr_mod
+                stats_mgr_mod.update_speed_record(final_calc_speed, acute_duration)
+            except Exception as record_err:
+                print(f"[STATS ERROR] Could not update the speed record: {record_err}")
+
         # 1. Clean up the transfer and the slot immediately
         try:
             with queue_lock if 'queue_lock' in globals() else threading.Lock():
