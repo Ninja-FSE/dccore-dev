@@ -820,10 +820,14 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             return
 
 
-        # --- FIX 1: take index [0] out of the list BEFORE calling .strip() ---
-        if " ::INFO::" in requested_file:
-            parts = requested_file.split(" ::INFO::", 1)
-            requested_file = parts[0].strip()
+        # A request copied straight off a search result carries its own
+        # "  ::INFO:: <size>" tail (list.py's own two-space convention, but
+        # strip_info_suffix() tolerates any spacing and any cross-bot
+        # branding after the marker too). That size is the one thing that
+        # tells two identically-named copies apart, so it is kept as a hint
+        # for the list scan below instead of being thrown away.
+        requested_file, requested_size_hint = list_mod.strip_info_suffix(requested_file)
+        requested_size_hint = requested_size_hint.lower().strip()
 
         requested_file = str(requested_file).lstrip("/")
 
@@ -842,8 +846,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     with open(latest_list_path, "r", encoding="utf-8", errors="ignore") as lf:
                         lines = lf.readlines()
                     target_folder = None
+                    fallback_folder = None
                     clean_req = str(requested_file).lower().strip()
-                    
+
                     for idx, line in enumerate(lines):
                         line_clean = line.strip()
                         if line_clean.startswith(f"!{config.NICKNAME} "):
@@ -855,14 +860,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                             # code without it, leaving the os.walk() below to
                             # answer every request.
                             parts_nick = line_clean.split(f"!{config.NICKNAME} ", 1)
-                            current_file_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
-                            
-                            # --- FIX 3: a safe list split for the info lookup ---
-                            if "  ::INFO::" in current_file_in_list:
-                                parts_info = current_file_in_list.split("  ::INFO::", 1)
-                                current_file_in_list = parts_info[0].strip() if parts_info else ""
-                                
+                            rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
+
+                            current_file_in_list, current_size_in_list = list_mod.strip_info_suffix(rest_in_list)
+
                             if clean_req == str(current_file_in_list).lower().strip():
+                                found_folder = None
                                 for back_idx in range(idx, -1, -1):
                                     back_line = lines[back_idx].strip()
                                     # The prefix-stripping itself is
@@ -874,10 +877,38 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                     # which could silently drift from the
                                     # original if the list format ever changed.
                                     if back_line.upper().startswith(list_mod.LIST_FOLDER_PREFIX):
-                                        target_folder = list_mod.resolve_list_folder(
+                                        found_folder = list_mod.resolve_list_folder(
                                             back_line, base=base_directory)
                                         break
-                                if target_folder is not None: break
+                                if found_folder is None:
+                                    continue
+
+                                # Two or more copies can share this exact name
+                                # and differ only in size. Without a size hint,
+                                # or if it matches nothing, the first copy the
+                                # list names wins - same as before this change,
+                                # and pinned by
+                                # test_no_error_is_reported_for_a_duplicate.
+                                # With one, a copy whose own ::INFO:: size
+                                # matches it wins instead, so a request built
+                                # from a search result's exact line reaches the
+                                # copy that result actually named. A bare
+                                # request (no hint - AutoQ.mrc and every
+                                # existing caller) still stops at this first
+                                # match exactly as before; only a hinted
+                                # request that has not matched yet pays for
+                                # scanning on, since that is the one case
+                                # where the answer isn't already known.
+                                if fallback_folder is None:
+                                    fallback_folder = found_folder
+                                    if not requested_size_hint:
+                                        break
+                                if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
+                                    target_folder = found_folder
+                                    break
+
+                    if target_folder is None:
+                        target_folder = fallback_folder
 
                     if target_folder is not None:
                         test_path = os.path.join(target_folder, requested_file)

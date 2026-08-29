@@ -80,18 +80,23 @@ class TwoFoldersOneFilename(PathSecurityBase):
                 return os.path.basename(root)
         self.fail("fixture invariant: neither copy was written to disk")
 
-    def _write_list(self, folders):
+    def _write_list(self, folders, sizes=None):
         """A master list in the shape update_list.py writes: a folder heading
         wrapped in rule lines, then one "!<nick> <file>  ::INFO:: <size>" row
         per file. The "D:\\MUSIC\\" prefix is the fixed heading update_list.py
-        emits whatever the library's real path is, not a real directory."""
+        emits whatever the library's real path is, not a real directory.
+
+        `sizes`, when given, maps folder -> its own ::INFO:: size string, for
+        tests that need the duplicate copies to genuinely differ in size
+        rather than sharing the fixture's default "1.0MB"."""
         rule = "=" * 53
         lines = ["List of files generated on Jan 1st\n", "\n"]
         for folder in folders:
+            size = (sizes or {}).get(folder, "1.0MB")
             lines += ["\n", rule + "\n",
                       "D:\\MUSIC\\%s\\\n" % folder,
                       rule + "\n",
-                      "!%s %s  ::INFO:: 1.0MB\n" % (config.NICKNAME, NAME)]
+                      "!%s %s  ::INFO:: %s\n" % (config.NICKNAME, NAME, size)]
         path = os.path.join(self.tree.lists,
                             "%s-2026-01-01.txt" % config.LIST_BASE_NAME)
         with io.open(path, "w", encoding="utf-8") as handle:
@@ -169,6 +174,50 @@ class TwoFoldersOneFilename(PathSecurityBase):
         kinds = self._request(NAME)
 
         self.assertNotIn("error", kinds)
+
+    def test_a_size_hint_picks_the_matching_copy_over_the_first(self):
+        """A request built from a search result's own line - the name plus
+        its "  ::INFO:: <size>" tail - reaches the copy that size names, even
+        when it is not the one the list would otherwise serve first."""
+        self._write_list([self.list_first, self.walk_first],
+                          sizes={self.list_first: "1.0MB", self.walk_first: "2.0MB"})
+
+        self._request("%s  ::INFO:: 2.0MB" % NAME)
+
+        self.assertEqual(self._served_path(), self._path(self.walk_first))
+
+    def test_an_unmatched_size_hint_falls_back_to_the_first_copy(self):
+        """A size that names none of the duplicates is not an error - the
+        request behaves exactly as if no size had been given at all."""
+        self._request("%s  ::INFO:: 9.9MB" % NAME)
+
+        self.assertEqual(self._served_path(), self._path(self.list_first))
+
+    def test_a_bare_request_stops_at_the_first_match(self):
+        """No size hint means the first list line that matches is already the
+        answer - the scan must not keep going and resolve later copies' folders
+        too, since on a library with tens of thousands of lines that is the
+        difference between a lookup that stops instantly and one that walks
+        the whole file on every bare-name request (what AutoQ.mrc sends)."""
+        third = "Mid Album"
+        self._album(third)
+        self._write_list([self.list_first, third, self.walk_first])
+
+        resolved = []
+        original = dcc.list_mod.resolve_list_folder
+
+        def counting_resolve(*args, **kwargs):
+            resolved.append(1)
+            return original(*args, **kwargs)
+
+        dcc.list_mod.resolve_list_folder = counting_resolve
+        try:
+            self._request(NAME)
+        finally:
+            dcc.list_mod.resolve_list_folder = original
+
+        self.assertEqual(len(resolved), 1,
+                          "a bare request resolved more than one copy's folder")
 
     # -- controls ----------------------------------------------------------
 
