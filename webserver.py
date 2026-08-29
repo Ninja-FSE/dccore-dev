@@ -36,7 +36,12 @@ authentication, not the workaround kind the module docstring used to warn
 against (an API key in a query string, a cookie nobody checks) - the password
 is verified against ADMIN_PASSWORD_HASH via adminchat.verify_password() on
 every login attempt, and nothing downstream trusts a request that has not
-passed require_login().
+passed require_login(). Repeated failures from one address are temporarily
+blocked (_note_bad_web_login()/_is_bad_web_ip(), same attempt-count and
+block-duration policy as adminchat.py's own DCC CHAT console tracker, reused
+from there directly) - in a POOL SEPARATE FROM adminchat.py's, on purpose:
+since the password is shared, a shared block budget would let a web attacker
+spend it down and lock the real operator out of the DCC console too.
 
 What plain-HTTP session/password transmission still cannot fix: an attacker
 already sharing the network segment can read the password and the session
@@ -713,11 +718,56 @@ LOGIN_PAGE = """<!doctype html>
 </body></html>"""
 
 
+# Failed-login tracking for THIS route, deliberately separate from
+# adminchat.py's own _bad_ips pool even though the policy (attempt count,
+# block duration) is identical and reused from there directly. The password
+# is shared with the DCC CHAT admin console on purpose - but the block budget
+# is not, because if it were, an attacker guessing at this HTTP form could
+# spend down the same counter and lock the real operator out of the DCC
+# console too. Same policy, separate pools: one abusive address costs it
+# access to this route only.
+_web_bad_ips = {}
+_web_bad_ips_lock = threading.Lock()
+
+
+def _note_bad_web_login(ip):
+    if not ip:
+        return
+    with _web_bad_ips_lock:
+        entry = _web_bad_ips.get(ip) or [0, 0.0]
+        entry[0] += 1
+        if entry[0] >= adminchat.MAX_PASSWORD_ATTEMPTS:
+            entry[1] = time.time() + adminchat.BAD_IP_BLOCK_SECONDS
+        _web_bad_ips[ip] = entry
+
+
+def _is_bad_web_ip(ip):
+    if not ip:
+        return False
+    with _web_bad_ips_lock:
+        entry = _web_bad_ips.get(ip)
+        if not entry:
+            return False
+        if entry[1] and time.time() >= entry[1]:
+            del _web_bad_ips[ip]  # block expired; forget it so a typo is not permanent
+            return False
+        return bool(entry[1])
+
+
+def _clear_bad_web_ip(ip):
+    with _web_bad_ips_lock:
+        _web_bad_ips.pop(ip, None)
+
+
 if HAVE_FLASK:
 
     def create_app():
         app = Flask(__name__, static_folder="web", static_url_path="")
         app.secret_key = os.urandom(32)
+        # The mutating routes (broadcast search, fetch enqueue, list fetch)
+        # all POST; Lax is the app's own decision instead of whatever the
+        # visitor's browser happens to default to.
+        app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
         @app.before_request
         def require_login():
@@ -737,12 +787,18 @@ if HAVE_FLASK:
         def login():
             error = None
             if request.method == "POST":
-                stored = getattr(config, "ADMIN_PASSWORD_HASH", "")
-                supplied = request.form.get("password", "")
-                if adminchat.verify_password(stored, supplied):
-                    session["authenticated"] = True
-                    return redirect("/")
-                error = "Incorrect password."
+                ip = request.remote_addr
+                if _is_bad_web_ip(ip):
+                    error = "Too many failed attempts. Try again later."
+                else:
+                    stored = getattr(config, "ADMIN_PASSWORD_HASH", "")
+                    supplied = request.form.get("password", "")
+                    if adminchat.verify_password(stored, supplied):
+                        _clear_bad_web_ip(ip)
+                        session["authenticated"] = True
+                        return redirect("/")
+                    _note_bad_web_login(ip)
+                    error = "Incorrect password."
             error_html = '<p class="error">{}</p>'.format(error) if error else ""
             status = 401 if error else 200
             return LOGIN_PAGE.format(error_html=error_html), status

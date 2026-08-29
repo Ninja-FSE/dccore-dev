@@ -39,7 +39,13 @@ def log_in_test_client(client, password=WEBUI_TEST_PASSWORD):
     would - so a protected route's test reaches the code under test instead
     of the 401/redirect require_login() now puts in front of every route.
     Low iteration count purely for test speed; see test_adminchat.py for the
-    same pattern."""
+    same pattern.
+
+    Clears webserver._web_bad_ips first: every Flask test client presents the
+    same synthetic remote_addr, so a block left over from an earlier test in
+    the same process (module-level state, not reset between tests otherwise)
+    would fail a login this call has no reason to expect to fail."""
+    webserver._web_bad_ips.clear()
     resp = client.post("/login", data={"password": password})
     assert resp.status_code == 302, "test login failed - fixture's own password/hash disagree"
     return resp
@@ -991,6 +997,11 @@ class LoginGateTests(DCCoreTestCase):
             WEBUI_TEST_PASSWORD, iterations=1000))
         self.app = webserver.create_app()
         self.client = self.app.test_client()
+        # Module-level state, not reset between tests otherwise, and every
+        # Flask test client in this process presents the same synthetic
+        # remote_addr - so a block one test method leaves behind would reach
+        # the next one regardless of run order.
+        webserver._web_bad_ips.clear()
 
     def test_an_unauthenticated_page_request_redirects_to_login(self):
         resp = self.client.get("/")
@@ -1026,6 +1037,39 @@ class LoginGateTests(DCCoreTestCase):
 
         still_locked = self.client.get("/api/queue")
         self.assertEqual(still_locked.status_code, 401)
+
+    def test_repeated_failures_block_the_address_even_with_the_right_password(self):
+        """The same password guards the DCC CHAT console (see adminchat.py's
+        own _bad_ips), so this form must not be a fourth, unthrottled way to
+        guess it. adminchat.MAX_PASSWORD_ATTEMPTS wrong attempts trip the
+        block; the very next request is refused even when it finally supplies
+        the correct password."""
+        for _ in range(adminchat.MAX_PASSWORD_ATTEMPTS):
+            self.client.post("/login", data={"password": "not-it"})
+
+        resp = self.client.post("/login", data={"password": WEBUI_TEST_PASSWORD})
+        self.assertEqual(resp.status_code, 401)
+        self.assertIn(b"Too many failed attempts", resp.data)
+
+    def test_the_web_block_pool_is_separate_from_admin_consoles(self):
+        """Defect guard: sharing one counter with adminchat.py's DCC console
+        would let a web-side attacker spend down the operator's own block
+        budget there too - a denial of service against the console, using
+        nothing but repeated wrong guesses through this HTTP form."""
+        for _ in range(adminchat.MAX_PASSWORD_ATTEMPTS):
+            self.client.post("/login", data={"password": "not-it"})
+
+        self.assertFalse(adminchat.is_bad_ip("127.0.0.1"),
+                         "the DCC console's own block pool must be untouched")
+
+    def test_the_session_cookie_is_samesite_lax(self):
+        """One of the mutating routes behind this login sends a real @find
+        into a channel. SameSite=Lax is what stops a plain cross-site POST
+        from riding in on it - left to the app rather than a browser default."""
+        resp = self.client.post("/login", data={"password": WEBUI_TEST_PASSWORD})
+        cookie_headers = resp.headers.getlist("Set-Cookie")
+        self.assertTrue(any("SameSite=Lax" in h for h in cookie_headers),
+                        cookie_headers)
 
     def test_logout_clears_the_session_and_relocks_every_route(self):
         log_in_test_client(self.client, WEBUI_TEST_PASSWORD)
