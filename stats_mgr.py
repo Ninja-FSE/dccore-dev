@@ -67,6 +67,49 @@ def format_speed(bytes_per_sec):
     mb = kb / 1024
     return f"{mb:.2f}MB/s"
 
+# How long a completed transfer must have run before its measured rate is
+# allowed to stand as a record.
+#
+# dcc.py floors the measured duration at 0.1s and derives it from a start_time
+# that is not guaranteed to be bound - when it is not, the duration comes out
+# as 0, is floored, and the rate reads as ten times the file size however long
+# the send really took. A record is permanent and public: one bad sample and
+# the advert publishes a number the bot can never beat, for good. Requiring a
+# real second of transfer throws away nothing anyone would recognise as a
+# record and closes that off.
+MIN_RECORD_SECONDS = 1.0
+
+
+def update_speed_record(bytes_per_sec, duration=None):
+    """Store `bytes_per_sec` if it beats the saved record. Returns the record
+    in force afterwards, whether or not this call changed it.
+
+    Reads and writes through db, so the atomic write and the disk lock are the
+    same ones every other persisted counter uses.
+
+    Refuses a sample that is not a positive number, and - when a duration is
+    given - one measured over less than MIN_RECORD_SECONDS. Refusing is silent
+    on purpose: a transfer too short to time is the ordinary case for a small
+    file, not something worth a line in the log on every send.
+    """
+    current = db.get_speed_record()
+
+    try:
+        speed = int(bytes_per_sec)
+    except (TypeError, ValueError):
+        return current
+
+    if speed <= 0:
+        return current
+    if duration is not None and duration < MIN_RECORD_SECONDS:
+        return current
+    if speed <= current:
+        return current
+
+    db.save_speed_record(speed)
+    return speed
+
+
 def get_uptime_seconds():
     """Uptime in seconds, for the channel advert."""
     return int(time.time() - start_time)
