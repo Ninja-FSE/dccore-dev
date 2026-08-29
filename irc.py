@@ -13,6 +13,7 @@ import urllib.request
 # The bot's own modules
 import config
 import platform_compat
+import runtime
 import list
 import dcc
 import runtime
@@ -236,6 +237,164 @@ def parse_search_header(text):
         stats["sending"] = _as_int(sending.group(1))
 
     return stats or None
+
+
+# ---------------------------------------------------------------------------
+# Reading the periodic advert other bots send to the channel
+# ---------------------------------------------------------------------------
+#
+# Every file-serving bot on this network announces itself on a timer. Captured
+# from #Mp3Passion on 2026-08-29, sixteen distinct bots, all in the same broad
+# shape and almost no two formatted alike (separators written as <> below, this
+# file being ASCII-only - see tests/test_source_language.py):
+#
+#   Type: @Bsk For My List Of: 719,041 Files <> Slots: 10/10 <> Queued: 0
+#   <> Speed: 0cps <> Next: NOW <> Served: 3,456,016 <> List: Aug 10th
+#
+#   <> Type: @D_F_D For My List Of: 127,312 Files <> Utilization: 0.94TB /
+#   17.75TB <> Speed: 0cps <> Served: 283,570 <> List: Aug 28th
+#
+#   27,500 full albums in .rar: Type: @[tjserv] For My List Of: 77,018 Files :
+#   Slots: 6/6 : Queued: 0 : Speed: 0cps : Served: 1,624,853 : List: Aug 29th :
+#
+#   Type: @karaoke_dude For My List Of: 475,128 Files Slots: 4/4 Queued: 0
+#   Speed: 0cps Next: NOW Served: 320,664 List: Aug 19th Search: OFF
+#
+# What that sample settles, and why this parser looks the way it does:
+#
+#   * The LABELS are stable, the layout is not. Across sixteen bots the
+#     separator is a yen sign, a tilde, a colon, a control character, plain
+#     spacing, or - for five of them - a byte that is not valid UTF-8 and so
+#     never survives the socket's errors="ignore" decode at all. Nothing here
+#     keys on position or on what sits between fields.
+#   * Preamble is normal. [tjserv] opens with "27,500 full albums in .rar:",
+#     DJVirtual with a sentence of French. The advert is not the whole line.
+#   * Nicks can carry brackets - @[tjserv] - so a word-characters-only pattern
+#     would miss them.
+#   * Adverts get truncated. Vibessono's runs into the 512-byte line limit and
+#     ends at a bare "List:" with the date cut off.
+#   * A list DATE is published by fifteen of the sixteen. A list SIZE is
+#     published by none of them except DCCore itself, so nothing may depend on
+#     it. DCCore words its date "created Aug 27th" where the rest say
+#     "List: Aug 27th"; both are read.
+#
+# Same rule as parse_search_header() above: return whatever that bot actually
+# published and treat every field as optional. A missing key means "this bot
+# did not say", never zero.
+#
+# The sixteen captured adverts are kept verbatim as the fixtures of
+# tests/test_advert_listener.py, which is the specification for all of this.
+
+# How often the registry is written to disk at most. Adverts arrive far more
+# often than anything reads the file.
+KNOWN_BOTS_FLUSH_SECONDS = 30.0
+
+_ADVERT_NICK_RE = re.compile(r"Type:\s*@(\S+)", re.IGNORECASE)
+_ADVERT_COUNT_RE = re.compile(r"For\s+My\s+List\s+Of:\s*([\d,]+)\s*Files", re.IGNORECASE)
+_ADVERT_SIZE_RE = re.compile(r"Files\s*\(([^)]{1,20})\)", re.IGNORECASE)
+_ADVERT_DATE_RE = re.compile(
+    r"(?:List:|created)\s*([A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?)", re.IGNORECASE)
+
+
+def parse_channel_advert(text):
+    """Stats out of another bot's channel advert, or None if it is not one.
+
+    Returns {"nick", "files", "list_date", "list_size"} with every key but
+    "nick" optional - absent means the bot did not publish it.
+
+    Identified by two things together: a "Type: @<nick>" trigger and a
+    "For My List Of: <n> Files" count. Either alone is ordinary chatter -
+    somebody telling a friend what to type, or quoting a bot at them.
+    """
+    if not text:
+        return None
+
+    clean = list.strip_control_codes(text)
+
+    nick = _ADVERT_NICK_RE.search(clean)
+    count = _ADVERT_COUNT_RE.search(clean)
+    if not nick or not count:
+        return None
+
+    advert = {
+        "nick": nick.group(1),
+        "files": _as_int(count.group(1).replace(",", "")),
+    }
+
+    size = _ADVERT_SIZE_RE.search(clean)
+    if size:
+        advert["list_size"] = size.group(1).strip()
+
+    date = _ADVERT_DATE_RE.search(clean)
+    if date:
+        advert["list_date"] = re.sub(r"\s+", " ", date.group(1)).strip()
+
+    return advert
+
+
+def _capture_channel_advert(user, target, msg):
+    """Record another bot's periodic advert in runtime.known_bots.
+
+    Observational only: it never dispatches, never replies, and never gates
+    anything. Called from the channel PRIVMSG path beside the broadcast
+    capture, and for the same reason - a foreign bot advertising in a channel
+    we sit in is not subject to our ban list and has nothing for a ban to
+    meaningfully gate.
+
+    THE SENDER IS THE AUTHORITY ON IDENTITY, NOT THE TEXT
+
+    "Type: @Someone" is just characters in a message, and any user can type
+    them. Registering what the text claims would let anyone impersonate any
+    bot - and the whole point of this registry is deciding whether the list we
+    hold for a nick is current, so a poisoned entry means showing green for a
+    list that was never theirs.
+
+    So an advert whose claimed nick does not match the nick that sent it is
+    dropped. Every one of the sixteen bots captured from #Mp3Passion agrees
+    with its own sender, so nothing legitimate is lost.
+    """
+    if not user or not target or not target.startswith("#"):
+        return
+
+    advert = parse_channel_advert(msg)
+    if not advert:
+        return
+
+    if advert["nick"].lower() != user.lower():
+        print(f"[ADVERT] {user} advertised as {advert['nick']!r} - ignoring; "
+              f"the sender is the authority on who a bot is.")
+        return
+
+    entry = dict(runtime.known_bots.get(user.lower()) or {})
+    entry.update({
+        "nick": user,
+        "channel": target,
+        "last_seen": time.time(),
+    })
+    for key in ("files", "list_date", "list_size"):
+        if key in advert:
+            entry[key] = advert[key]
+    runtime.known_bots[user.lower()] = entry
+
+    # Written on an interval rather than on every advert: with fifty bots
+    # announcing every few minutes this fires dozens of times a minute, and
+    # nothing reads the file until a dashboard is opened.
+    _flush_known_bots()
+
+
+def _flush_known_bots(now=None, force=False):
+    """Persist the registry, at most once per KNOWN_BOTS_FLUSH_SECONDS."""
+    now = time.time() if now is None else now
+    if not force and now - runtime.known_bots_flushed_at < KNOWN_BOTS_FLUSH_SECONDS:
+        return False
+    try:
+        import db
+        db.save_known_bots(runtime.known_bots)
+        runtime.known_bots_flushed_at = now
+        return True
+    except Exception as err:
+        print(f"[ADVERT] Could not save the bot registry: {err}")
+        return False
 
 
 def _capture_broadcast_search_reply(user, target, msg):
@@ -870,6 +1029,12 @@ def irc_loop():
                         # this never dispatches anything of its own for a ban
                         # to meaningfully gate.
                         _capture_broadcast_search_reply(user, target_chan, msg)
+
+                        # Bot registry, same placement and the same reasoning:
+                        # observational, dispatches nothing, and a foreign bot
+                        # advertising in a channel we sit in is not subject to
+                        # our ban list.
+                        _capture_channel_advert(user, target_chan, msg)
 
                         if not security.check_user_status(user):
                             continue

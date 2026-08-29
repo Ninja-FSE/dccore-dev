@@ -88,6 +88,12 @@
 
 #HARD_BANS_FILE = ./data/hard_bans.txt
 
+# Other bots seen advertising in our channels, and what each last published
+# about its own list. JSON rather than the column format the files above use:
+# the record has several fields and will grow, and stats.txt's fixed seven
+# columns is exactly the shape that turns "add a field" into a migration.
+#KNOWN_BOTS_FILE = ./data/known_bots.json
+
 
 [channel advertising (the advert clock)]
 # Time between each channel advert, in seconds

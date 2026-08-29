@@ -57,6 +57,12 @@ BANS_FILE: str      = "./data/bans.txt"
 STATS_FILE: str     = "./data/stats.txt"
 HARD_BANS_FILE: str = "./data/hard_bans.txt"
 
+# Other bots seen advertising in our channels, and what each last published
+# about its own list. JSON rather than the column format the files above use:
+# the record has several fields and will grow, and stats.txt's fixed seven
+# columns is exactly the shape that turns "add a field" into a migration.
+KNOWN_BOTS_FILE: str = "./data/known_bots.json"
+
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------
@@ -279,6 +285,16 @@ fetch_queue = runtime.fetch_queue
 # untouched and records the reason on the fetch_queue row instead
 # (row["list_processing_error"]).
 fetched_bot_lists = runtime.fetched_bot_lists
+
+# Other file-serving bots seen advertising in the channels, keyed by lowercase
+# nick -> {nick, channel, files, list_date, list_size, last_seen}. Populated by
+# irc._capture_channel_advert() purely from channel traffic; every field but
+# nick/channel/last_seen is whatever that bot chose to publish, so absent means
+# "did not say" rather than zero. Persisted to KNOWN_BOTS_FILE so the dashboard
+# is not empty for the first advert cycle after a restart.
+#
+# Bound from runtime.py for the same reason as everything above it.
+known_bots = runtime.known_bots
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
