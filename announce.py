@@ -323,55 +323,12 @@ def announce_worker():
                 
             if is_ready:
                 channels_to_spam = config.CHANNEL.split(",")
-                # DYNAMIC LIVE SPEED. Computed ONCE per advert cycle, above the per-channel
-                # loop. Inside the loop it ran six times a cycle, and with a delta window
-                # the 2nd-6th passes measured a few milliseconds each - either reporting
-                # nothing or, if a pass took over a second, a wildly inflated figure.
-                #
-                # tx["bytes_sent"] is a LIFETIME counter that accumulates from the DCC
-                # accept, so dividing it by a window that starts at first observation
-                # over-reports by up to 2x. Rate the DELTA between observations instead:
-                # bytes moved since the last cycle, over the time since the last cycle.
-                speed_bytes_per_sec = 0
-                speed_contributors = 0
-                _now = time.time()
-                # dcc.queue_lock, not config.queue_lock: every append/removal on
-                # config.active_transfers throughout dcc.py holds dcc.queue_lock (dcc.py's
-                # own module-level lock - see its top-of-file comment). config.queue_lock
-                # is a SEPARATE Lock() object oserve.py allocates onto config, and this
-                # line used to take that one instead - two different locks guarding the
-                # same list, so this read and every dcc.py writer could run fully
-                # concurrently despite both appearing to "hold a lock". Iterating
-                # active_transfers while dcc.py appends/removes from it (list.append()
-                # during iteration is usually silent corruption, not an exception) needs
-                # the SAME lock dcc.py uses, or it synchronises against nothing at all.
-                with dcc.queue_lock:
-                    for tx in config.active_transfers:
-                        b_sent = tx.get("bytes_sent", 0)
-                        prev_bytes = tx.get("_speed_bytes")
-                        prev_time = tx.get("_speed_time")
-                        tx["_speed_bytes"] = b_sent
-                        tx["_speed_time"] = _now
-
-                        if prev_time is None:
-                            # First sighting: no window to measure yet.
-                            continue
-
-                        window = _now - prev_time
-                        if window < 1.0:
-                            continue
-
-                        moved = b_sent - prev_bytes
-                        if moved > 0:
-                            speed_bytes_per_sec += int(moved / window)
-                            speed_contributors += 1
-
-                # Average across the transfers that actually contributed, not across every
-                # active slot - a slot skipped for lack of a window must not drag the mean.
-                if speed_bytes_per_sec > 0 and speed_contributors > 0:
-                    speed_str = stats_mgr.format_speed(int(speed_bytes_per_sec / speed_contributors))
-                else:
-                    speed_str = "0k/s"
+                # The sampling itself now lives in stats_mgr.live_speed(), so the
+                # dashboard can show the same figure without reimplementing it or
+                # importing the daemon to get at dcc.queue_lock. It caches for a
+                # second, which is what stops two callers stealing each other's
+                # measurement window - see its docstring.
+                speed_str = stats_mgr.format_speed(stats_mgr.live_speed())
 
                 for chan in channels_to_spam:
                     chan = chan.strip()
