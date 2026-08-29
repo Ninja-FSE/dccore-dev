@@ -117,6 +117,14 @@ else:
 ok(f"debug channel {getattr(config, 'DEBUG_CHANNEL', '?')}")
 ok(f"admin nick {getattr(config, 'ADMIN_NICK', '?')}")
 
+max_slots = int(getattr(config, "MAX_DCC_SLOTS", 3))
+if max_slots < 1:
+    fail(f"MAX_DCC_SLOTS is {max_slots} - with no positive slot count the bot "
+         f"can never dispatch a single transfer; every request just sits in "
+         f"the queue forever")
+else:
+    ok(f"max DCC slots {max_slots}")
+
 # --- paths --------------------------------------------------------------
 print()
 print("Paths")
@@ -161,30 +169,41 @@ print()
 print("DCC ports")
 start = int(getattr(config, "DCC_PORT_START", 55000))
 end = int(getattr(config, "DCC_PORT_END", 55010))
-free = 0
-for port in range(start, end + 1):
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        platform_compat.prepare_listener(probe)
-        probe.bind(("0.0.0.0", port))
-        free += 1
-    except OSError:
-        pass
-    finally:
-        probe.close()
 
-if free == 0:
-    fail(f"no port in {start}-{end} could be bound - something else is using "
-         f"them (another instance of this daemon running at the same time is "
-         f"the common cause)")
-elif free < (end - start + 1):
-    warn(f"{free} of {end - start + 1} ports free in {start}-{end} - if "
-         f"another instance of this daemon is running, it is normal for it "
-         f"to be holding some of these")
+if start > end:
+    # range(start, end + 1) is simply empty when start > end - the bind loop
+    # below would then find 0 free ports and report "no port could be bound",
+    # which reads as "something else is using them" and sends an operator
+    # looking for a phantom port conflict instead of the swapped values that
+    # are actually the problem.
+    fail(f"DCC_PORT_START ({start}) is greater than DCC_PORT_END ({end}) - "
+         f"the range is empty, so no DCC transfer can ever open a listening "
+         f"port; check for the two values being swapped in local_config.py")
 else:
-    ok(f"all {free} ports free in {start}-{end}")
-print("         (these must also be forwarded to this machine for anyone to "
-      "download from you)")
+    free = 0
+    for port in range(start, end + 1):
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            platform_compat.prepare_listener(probe)
+            probe.bind(("0.0.0.0", port))
+            free += 1
+        except OSError:
+            pass
+        finally:
+            probe.close()
+
+    if free == 0:
+        fail(f"no port in {start}-{end} could be bound - something else is using "
+             f"them (another instance of this daemon running at the same time is "
+             f"the common cause)")
+    elif free < (end - start + 1):
+        warn(f"{free} of {end - start + 1} ports free in {start}-{end} - if "
+             f"another instance of this daemon is running, it is normal for it "
+             f"to be holding some of these")
+    else:
+        ok(f"all {free} ports free in {start}-{end}")
+    print("         (these must also be forwarded to this machine for anyone to "
+          "download from you)")
 
 # --- admin console -------------------------------------------------------
 print()
