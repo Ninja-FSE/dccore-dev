@@ -13,7 +13,7 @@ import socket
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
+REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, REPO)
 os.chdir(REPO)
 
@@ -218,7 +218,7 @@ if warnings:
 else:
     print("  Ready to start.")
 print()
-print("  Start it with:  ./scripts/start-dccore.sh")
+print("  Start it with:  ./scripts/linux/start-dccore.sh")
 print("  Stop it with:   Ctrl-C in that terminal")
 print("=" * 68)
 print()

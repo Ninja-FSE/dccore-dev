@@ -56,9 +56,9 @@ Copy [`local_config.py.sample`](local_config.py.sample) to `local_config.py` (gi
 ### First-time setup
 Before the first real start, verify the setup without connecting to IRC:
 ```bash
-./scripts/start-dccore.sh check
+./scripts/linux/start-dccore.sh check
 ```
-This catches the two mistakes that actually cause trouble: a music directory that does not exist, and a config still carrying the upstream nickname or channels - which would put a near-identical second bot into the production bot's live channels. Once it reports "Ready to start", `./scripts/start-dccore.sh` runs the same check and then starts the daemon - correct working directory included, so it also works from a cron job, a systemd unit, or a shortcut.
+This catches the two mistakes that actually cause trouble: a music directory that does not exist, and a config still carrying the upstream nickname or channels - which would put a near-identical second bot into the production bot's live channels. Once it reports "Ready to start", `./scripts/linux/start-dccore.sh` runs the same check and then starts the daemon - correct working directory included, so it also works from a cron job, a systemd unit, or a shortcut.
 
 ### Starting the Daemon
 To perform a completely clean reboot of the bot, clear hidden cache files, and force a fresh reload of code modifications into RAM, execute:

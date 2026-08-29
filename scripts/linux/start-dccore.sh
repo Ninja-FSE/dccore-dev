@@ -11,10 +11,10 @@
 # with no bans, no queue and no list.
 #
 # Usage:
-#   ./scripts/start-dccore.sh          check the setup, then start the daemon
-#   ./scripts/start-dccore.sh check    check the setup and stop
+#   ./scripts/linux/start-dccore.sh          check the setup, then start the daemon
+#   ./scripts/linux/start-dccore.sh check    check the setup and stop
 
-cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 
 # --- find an interpreter ------------------------------------------------
 PY=""
@@ -36,7 +36,7 @@ fi
 
 # --- check-only mode ------------------------------------------------------
 if [ "$1" = "check" ]; then
-    "$PY" scripts/check-setup.py
+    "$PY" scripts/linux/check-setup.py
     exit $?
 fi
 
@@ -57,11 +57,11 @@ fi
 # pointing at the production bot's nick or channels. That second one is worth
 # blocking: it would put a near-identical second bot into live trading
 # channels, which can get the other operator banned too.
-if ! "$PY" scripts/check-setup.py >/dev/null 2>&1; then
+if ! "$PY" scripts/linux/check-setup.py >/dev/null 2>&1; then
     echo
     echo "  Setup check failed - not starting. Details:"
     echo
-    "$PY" scripts/check-setup.py
+    "$PY" scripts/linux/check-setup.py
     echo
     exit 1
 fi
