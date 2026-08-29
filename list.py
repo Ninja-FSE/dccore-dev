@@ -294,7 +294,17 @@ def entries_to_filelist_rows(entries, source):
     for entry in entries:
         filename = entry.get("filename", "?")
         size = entry.get("size", "")
-        key = (filename.lower(), size)
+        # `or ""`, not a get() default: a list with no folder headers
+        # stores folder=None, and .get(k, "") returns the default only
+        # when the KEY is absent, never when its value is None.
+        folder = entry.get("folder") or ""
+        # Folder is part of the key. It was (filename, size) alone, which
+        # collapsed the same track appearing under two albums into one row and
+        # silently discarded the second folder - invisible while rows were a
+        # flat list, wrong once they are grouped under the folder they came
+        # from. (Zero occurrences in the operator's own 36,208-entry library,
+        # but a fetched bot's list has no such guarantee.)
+        key = (folder.lower(), filename.lower(), size)
         if key in seen:
             continue
         seen.add(key)
@@ -304,8 +314,105 @@ def entries_to_filelist_rows(entries, source):
             "size": size,
             "format": ext,
             "source": source,
+            "folder": folder,
         })
     return rows
+
+
+def group_rows_by_folder(rows):
+    """Rows from entries_to_filelist_rows() -> one group per folder.
+
+    [{"folder": str, "count": int, "entries": [row, ...]}, ...]
+
+    Order is first-seen, which is the master list's own order, so albums stay
+    where update_list.py wrote them instead of being re-sorted into an order
+    the operator does not recognise from their own disk.
+
+    A row with no folder - possible in a foreign bot's list, whose format is
+    not ours to rely on - is grouped under "" rather than dropped, and the
+    frontend labels that group rather than showing a blank heading.
+    """
+    order = []
+    groups = {}
+    for row in rows:
+        folder = row.get("folder", "") or ""
+        group = groups.get(folder)
+        if group is None:
+            group = {"folder": folder, "count": 0, "entries": []}
+            groups[folder] = group
+            order.append(folder)
+        group["entries"].append(row)
+        group["count"] += 1
+    return [groups[folder] for folder in order]
+
+
+# The second bound on a page of folders, applied between folders and never
+# inside one. A folder count alone does not bound the response: folder sizes
+# are uneven (the operator's own library runs 1 to 127 files, median 9), and a
+# foreign bot's list carries no shape guarantee at all. This is the safety
+# valve for the unbounded-payload problem of issue #76, not the unit of paging.
+#
+# 2500 is chosen against the real library: 200 folders comes to about 1,720
+# rows, so the valve stays shut in ordinary use and only trips on a list of
+# unusually large folders.
+FILELISTS_MAX_PAGE_ROWS = 2500
+
+
+def page_folder_groups(groups, offset, limit, max_rows=None):
+    """One page of folder groups, sliced by FOLDER rather than by row.
+
+    Returns (page, total_folders, total_rows).
+
+    A folder is never split across a page: whatever the caller asked for, a
+    group is returned whole or not at all. Grouping only helps if opening a
+    folder shows all of it.
+
+    `max_rows` is a safety valve, not the unit. Folder sizes are uneven - the
+    operator's library runs 1 to 127 files per folder, median 9 - so a folder
+    count alone does not bound the response, which is the unbounded-payload
+    problem issue #76 existed to remove. The page stops early once adding the
+    next folder would exceed it, and always returns at least one folder even
+    if that folder alone is larger, because returning nothing would leave the
+    caller unable to advance.
+    """
+    total_folders = len(groups)
+    total_rows = sum(group["count"] for group in groups)
+
+    if offset < 0:
+        offset = 0
+    window = groups[offset:offset + limit] if limit else groups[offset:]
+
+    if not max_rows:
+        return window, total_folders, total_rows
+
+    page = []
+    rows_so_far = 0
+    for group in window:
+        if page and rows_so_far + group["count"] > max_rows:
+            break
+        if not page and group["count"] > max_rows:
+            # One folder larger than the whole ceiling. Returning it whole
+            # would reopen the unbounded response issue #76 removed - and it
+            # is not hypothetical: a list with no folder headers at all parses
+            # as ONE group holding every row, which is exactly the shape a
+            # foreign bot can send.
+            #
+            # So this is the one place a group is cut. It is still returned,
+            # because returning nothing would leave the caller unable to
+            # advance past it, and `count` still reports the true size so the
+            # view can say "showing 2500 of 51000" rather than quietly
+            # implying that is all there is.
+            page.append({
+                "folder": group["folder"],
+                "count": group["count"],
+                "entries": group["entries"][:max_rows],
+                "truncated": True,
+            })
+            rows_so_far += max_rows
+            break
+        page.append(group)
+        rows_so_far += group["count"]
+    return page, total_folders, total_rows
 
 
 def execute_search(irc_sock, user, search_term, channel):
