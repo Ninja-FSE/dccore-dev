@@ -457,6 +457,33 @@ html, body {
    read as a success either. */
 .status-pill.status-rejected  { color: var(--status-frozen); }
 
+/* ------------------------------------------ Grouped broadcast results */
+
+/* One heading per bot that answered, above its matches. Reads as a section
+   break inside the table rather than as another result row - the checkbox
+   column is deliberately empty here, because a heading is never fetchable. */
+.data-table tbody tr.bot-group td {
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+}
+
+.data-table tbody tr.bot-group:hover td {
+  background: var(--bg-inset);
+}
+
+.bot-group-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.bot-group-meta {
+  margin-left: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* -------------------------------------------------------- Download tab */
 
 .bulk-fetch-wrap {
