@@ -814,9 +814,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     for idx, line in enumerate(lines):
                         line_clean = line.strip()
                         if line_clean.startswith(f"!{config.NICKNAME} "):
-                            # --- FIX 2: a safe list split for the nick lookup ---
+                            # str.split() puts what came BEFORE the separator in
+                            # [0], and the line starts with the separator - so
+                            # [0] is the empty string on every line here, and
+                            # this comparison never matched anything. The
+                            # filename is in [1]; the whole list lookup was dead
+                            # code without it, leaving the os.walk() below to
+                            # answer every request.
                             parts_nick = line_clean.split(f"!{config.NICKNAME} ", 1)
-                            current_file_in_list = parts_nick[0].strip() if parts_nick else ""
+                            current_file_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
                             
                             # --- FIX 3: a safe list split for the info lookup ---
                             if "  ::INFO::" in current_file_in_list:
