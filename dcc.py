@@ -892,9 +892,17 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                 # With one, a copy whose own ::INFO:: size
                                 # matches it wins instead, so a request built
                                 # from a search result's exact line reaches the
-                                # copy that result actually named.
+                                # copy that result actually named. A bare
+                                # request (no hint - AutoQ.mrc and every
+                                # existing caller) still stops at this first
+                                # match exactly as before; only a hinted
+                                # request that has not matched yet pays for
+                                # scanning on, since that is the one case
+                                # where the answer isn't already known.
                                 if fallback_folder is None:
                                     fallback_folder = found_folder
+                                    if not requested_size_hint:
+                                        break
                                 if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
                                     target_folder = found_folder
                                     break

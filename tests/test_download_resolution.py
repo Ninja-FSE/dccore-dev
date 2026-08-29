@@ -193,6 +193,32 @@ class TwoFoldersOneFilename(PathSecurityBase):
 
         self.assertEqual(self._served_path(), self._path(self.list_first))
 
+    def test_a_bare_request_stops_at_the_first_match(self):
+        """No size hint means the first list line that matches is already the
+        answer - the scan must not keep going and resolve later copies' folders
+        too, since on a library with tens of thousands of lines that is the
+        difference between a lookup that stops instantly and one that walks
+        the whole file on every bare-name request (what AutoQ.mrc sends)."""
+        third = "Mid Album"
+        self._album(third)
+        self._write_list([self.list_first, third, self.walk_first])
+
+        resolved = []
+        original = dcc.list_mod.resolve_list_folder
+
+        def counting_resolve(*args, **kwargs):
+            resolved.append(1)
+            return original(*args, **kwargs)
+
+        dcc.list_mod.resolve_list_folder = counting_resolve
+        try:
+            self._request(NAME)
+        finally:
+            dcc.list_mod.resolve_list_folder = original
+
+        self.assertEqual(len(resolved), 1,
+                          "a bare request resolved more than one copy's folder")
+
     # -- controls ----------------------------------------------------------
 
     def test_a_unique_filename_in_a_folder_still_resolves(self):
