@@ -738,6 +738,8 @@ html, body {
 .verify-tag.is-dim {
   background: transparent;
   color: var(--text-faint);
+}
+
 /* ---------------------------------------------- File Lists: folder grouping */
 
 .folder-controls {
@@ -822,8 +824,28 @@ html, body {
   display: none;
 }
 
+/* A file is content underneath its folder heading, not a peer of it. The
+   heading keeps the full-strength text colour and the files sit one step back,
+   so a long expanded folder reads as a block belonging to the line above it
+   rather than as more rows of the same kind. */
+/* Specificity, not order, decides this one: `.data-table tbody td` above sets
+   the full-strength colour at (0,1,2), so a plain `.file-row td` at (0,1,1)
+   loses to it wherever it sits in the file. Qualified to (0,2,3) so it wins,
+   which is the whole reason the selector is this long. */
+.data-table tbody tr.file-row td {
+  color: var(--text-dim);
+}
+
+.data-table tbody tr.file-row:hover td {
+  color: var(--text);
+}
+
+/* The indent carries a quiet rule so the run of files stays visibly attached
+   to its heading. Drawn with an inset shadow rather than a border because a
+   border on the cell would sit at the cell edge, not at the indent. */
 .col-indent {
   padding-left: 34px;
+  box-shadow: inset 18px 0 0 -17px var(--border);
 }
 
 .folder-truncated td {
