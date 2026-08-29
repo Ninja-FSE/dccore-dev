@@ -8,11 +8,16 @@ this arrangement is meant to make obvious.
 
 WHY THE FEATURE EXISTS
 
-A request names a file, not a path. "!<nick> Track 01.flac" is all a requester
-can say, because a bare filename is all the list gives them to copy.
-dcc.handle_download_request() resolves that name against the same list and
-serves the first folder it finds it under, so every later copy is listed,
-looks requestable, and cannot be fetched.
+A request that names a file alone is all a requester can send from the list on
+its own: "!<nick> Track 01.flac". dcc.handle_download_request() resolves that
+name against the same list and serves the FIRST folder it finds it under, so
+every later copy is listed, looks requestable, and is shadowed by the first.
+
+Since #128 that is the whole of the claim rather than more than it. A requester
+who pastes a search result's entire line - its "  ::INFO:: <size>" tail
+included - reaches the copy that size names. The tool used to say those copies
+were "unreachable", which stopped being true; it says shadowed now, and the
+payload field is named for what it counts.
 """
 
 import io
@@ -208,6 +213,82 @@ class TheFolderResolver(DCCoreTestCase):
             os.path.join(config.FILE_DIRECTORY, "Alpha"))
 
 
+    # ---- input that did not come from our own list -----------------------
+    #
+    # #121 gave this function a second caller with a very different shape:
+    # dcc.handle_download_request()'s `!rar` path, which passes a folder the
+    # USER typed into the channel. Every test above feeds it a heading our own
+    # update_list.py wrote. These feed it what an attacker would.
+    #
+    # The contract being pinned is that resolve_list_folder() is a JOINER, not
+    # a sanitiser. It exists to turn a list heading into a path, and the
+    # traversal guard is is_safe_path() immediately after it at the call site.
+    # Quietly normalising an escape away here would be worse than useless: the
+    # request would stop being refused and start resolving to some other real
+    # folder instead, which is an attacker's best outcome, not ours.
+
+    def test_an_absolute_path_cannot_escape_the_library(self):
+        """The one property worth having here rather than downstream. An
+        absolute path is joined as though relative, so it lands inside the
+        library instead of at the root of the disk - os.path.join()'s own
+        behaviour would otherwise discard the base entirely and return
+        '/etc/passwd'."""
+        resolved = list_mod.resolve_list_folder("/etc/passwd", base="/srv/music")
+
+        self.assertTrue(
+            resolved.startswith("/srv/music"),
+            f"an absolute path escaped the library root: {resolved!r}")
+
+    def test_a_windows_absolute_path_cannot_escape_either(self):
+        resolved = list_mod.resolve_list_folder("C:\\Windows\\System32",
+                                                base="/srv/music")
+
+        self.assertTrue(resolved.startswith("/srv/music"), resolved)
+
+    def test_dot_dot_survives_for_the_guard_to_refuse(self):
+        """Deliberately NOT normalised away.
+
+        `is_safe_path()` at the call site resolves the result and refuses
+        anything landing outside FILE_DIRECTORY, and a refusal is the correct
+        answer to a traversal attempt. Collapsing the `..` here would turn that
+        refusal into a successful resolution of a different folder - the same
+        request quietly succeeding against something the operator never
+        offered.
+        """
+        resolved = list_mod.resolve_list_folder("D:\\MUSIC\\..\\..\\etc\\",
+                                                base="/srv/music")
+
+        self.assertIn("..", resolved,
+                      "the traversal was normalised away instead of being left "
+                      "for the guard to refuse")
+
+    def test_doubled_separators_collapse(self):
+        """A heading with a doubled slash is a formatting artefact, not an
+        attack, and must not produce an empty path component."""
+        self.assertEqual(
+            list_mod.resolve_list_folder("D:\\MUSIC\\\\Album\\", base="/srv/music"),
+            os.path.join("/srv/music", "Album"))
+
+    def test_the_rar_path_still_refuses_a_traversal_end_to_end(self):
+        """The guard this function relies on, asserted rather than assumed.
+
+        dcc.py joins the resolved folder and then calls is_safe_path() against
+        the library root. That is what makes leaving `..` alone above safe, so
+        it is worth one test proving the pair works together rather than two
+        proving each half separately.
+        """
+        import dcc
+
+        escaped = list_mod.resolve_list_folder("D:\\MUSIC\\..\\..\\etc\\",
+                                               base=config.FILE_DIRECTORY)
+
+        self.assertFalse(
+            dcc.is_safe_path(config.FILE_DIRECTORY, escaped),
+            "is_safe_path() accepted a path resolve_list_folder() left a "
+            "traversal in - the two together are the guard")
+
+
+
 class TheAdminConsoleCommand(ListOnDisk):
     """adminchat's `verify`. The console is one of the two surfaces an
     operator has - it is not the debug channel, and it does not need the
@@ -243,7 +324,7 @@ class TheAdminConsoleCommand(ListOnDisk):
         path has no way to tell why this is worth acting on."""
         self.write_list([("A", ["x.flac"]), ("B", ["x.flac"])])
 
-        self.assertIn("names a file, not a path", self.run_verify().text)
+        self.assertIn("names a file alone", self.run_verify().text)
 
     def test_the_detail_is_capped_but_the_count_is_not(self):
         """Every line here is a DCC CHAT line. A library with hundreds of
@@ -289,7 +370,7 @@ class TheDashboardPayload(ListOnDisk):
         self.assertEqual(payload["duplicates"], [])
         self.assertEqual(payload["total"], 0)
         self.assertEqual(payload["checked"], 2)
-        self.assertEqual(payload["unreachable"], 0)
+        self.assertEqual(payload["shadowed"], 0)
 
     def test_a_duplicate_comes_back_with_its_folders(self):
         self.write_list([("Alpha Album", ["Track 01.flac"]),
@@ -306,16 +387,17 @@ class TheDashboardPayload(ListOnDisk):
             "the operator is shown paths on THIS machine, not the list's "
             "fixed heading")
 
-    def test_unreachable_counts_copies_not_names(self):
-        """`total` answers "how many names collide"; `unreachable` answers
-        "how many files can I not get", which is the one that says how much of
-        the library is affected. A name in three folders costs two copies."""
+    def test_shadowed_counts_copies_not_names(self):
+        """`total` answers "how many names collide"; `shadowed` answers "how
+        many copies a bare-name request can never reach", which is the one
+        saying how much of the library is affected. A name in three folders
+        shadows two copies."""
         self.write_list([("A", ["x.flac"]), ("B", ["x.flac"]), ("C", ["x.flac"])])
 
         payload = webserver.build_verify_list_payload()
 
         self.assertEqual(payload["total"], 1, "one name collides")
-        self.assertEqual(payload["unreachable"], 2, "two of the three copies")
+        self.assertEqual(payload["shadowed"], 2, "two of the three copies")
 
     def test_the_two_surfaces_agree(self):
         """The point of sharing one finder. If these ever disagree, one of the

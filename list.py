@@ -287,6 +287,9 @@ def find_matching_entries(search_words, limit=None, list_path=None):
 # relative to FILE_DIRECTORY, which is what dcc.py joins to resolve a request.
 LIST_FOLDER_PREFIX = "D:\\MUSIC\\"
 
+# A leading drive specifier on one path component: "C:", "C:Windows".
+_DRIVE_PREFIX_RE = re.compile(r"^[A-Za-z]:")
+
 
 def resolve_list_folder(header, base=None):
     """Turn a master-list folder heading into a real path on this machine.
@@ -307,6 +310,20 @@ def resolve_list_folder(header, base=None):
     # Headings are written with backslashes regardless of the host, so split on
     # both and let os.path.join put the platform's own separator back.
     parts = [part for part in text.replace("\\", "/").split("/") if part]
+
+    # A drive specifier has to come off each part before joining. On Windows,
+    # os.path.join() treats an argument like "C:" or "C:Windows" as
+    # drive-relative and DISCARDS everything before it - so a heading naming
+    # any drive other than the one the prefix strips returns a path with no
+    # relation to `base` at all, which is the one thing this promises not to do.
+    #
+    # Reachable input since #121: the `!rar` path passes a folder the user
+    # typed in the channel through here. is_safe_path() still refuses the
+    # result, but a joiner that can silently drop its own base is the wrong
+    # thing to be relying on a downstream guard for.
+    parts = [_DRIVE_PREFIX_RE.sub("", part, count=1) for part in parts]
+    parts = [part for part in parts if part]
+
     return os.path.join(base, *parts) if parts else base
 
 

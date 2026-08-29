@@ -242,9 +242,10 @@
         </div>
         <p class="tool-what">
           Reads the master list and reports any filename that appears under more
-          than one folder. A request names a file, not a path, so only the first
-          copy listed under each name can ever be fetched &mdash; the rest are
-          listed but unreachable.
+          than one folder. A request that names a file alone reaches only the
+          first copy listed under that name &mdash; the rest are shadowed by it.
+          Pasting a search result&rsquo;s whole line, size included, reaches the
+          copy that size names.
         </p>
         <p class="tool-status" id="verify-status"></p>
         <div class="verify-results" id="verify-results"></div>

@@ -622,8 +622,9 @@ def _cmd_verify(session, args):
 
     session.send(f"{len(duplicates):,} filename(s) appear under more than one "
                  f"folder, out of {len(entries):,} checked.")
-    session.send("A request names a file, not a path, so only the first copy "
-                 "listed under each name can be fetched:")
+    session.send("A request that names a file alone reaches only the first copy "
+                 "listed under that name. Pasting a search result's whole line, "
+                 "size included, reaches the copy that size names:")
     for item in duplicates[:VERIFY_CONSOLE_LIMIT]:
         session.send(f"  {item['filename']}  ({item['count']} folders)")
         for folder in item["folders"]:

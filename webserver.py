@@ -654,9 +654,16 @@ def build_verify_list_payload():
         "checked": len(entries),
         "duplicates": duplicates,
         "total": len(duplicates),
-        # Distinct from `total`: how many individual copies are unreachable,
-        # which is the number that answers "how much of my library is this".
-        "unreachable": sum(item["count"] - 1 for item in duplicates),
+        # Distinct from `total`: how many individual copies a bare-name
+        # request can never reach, which is the number answering "how much of
+        # my library is this".
+        #
+        # "shadowed" rather than "unreachable" since #128: a requester pasting
+        # a search result's whole line, "  ::INFO:: <size>" tail included,
+        # reaches the copy that size names. These copies are shadowed by the
+        # first-listed one for anyone who types the name alone - which is what
+        # AutoQ.mrc and every ordinary request sends - not unreachable outright.
+        "shadowed": sum(item["count"] - 1 for item in duplicates),
     }
 
 
