@@ -701,16 +701,19 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 raw_win_path = raw_win_path.split("::INFO::")[0].strip()
                 
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
-            
-            # Strip any doubled trailing slashes before mapping onto the Linux disk
-            clean_win_path = win_path.replace("\\", "/").replace("D:/", "").replace("d:/", "")
 
-
-            if clean_win_path.upper().startswith("MUSIC/"):
-                clean_win_path = clean_win_path[6:]
-                
-            linux_sub_path = clean_win_path.strip("/")
-            true_source_dir = os.path.normpath(os.path.join(config.FILE_DIRECTORY, linux_sub_path))
+            # This used to be a third, differently-shaped copy of the same
+            # "D:\MUSIC\<folder>\" prefix-stripping list.resolve_list_folder()
+            # already does - non-anchored `.replace("D:/", "")` calls rather
+            # than a startswith-anchored strip, which would have silently
+            # matched "D:/" anywhere in the string, not just at the start.
+            # os.path.normpath is kept even though resolve_list_folder()
+            # itself doesn't call it: is_safe_path() below re-resolves the
+            # path with os.path.realpath() regardless, but this is the
+            # traversal guard's input and there is no reason to change its
+            # exact shape while consolidating the prefix logic.
+            true_source_dir = os.path.normpath(
+                list_mod.resolve_list_folder(win_path, base=config.FILE_DIRECTORY))
 
             # ---------------------------------------------------------------------
             # THE TRAVERSAL GUARD - this one is critical:
@@ -729,10 +732,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     category="HARDBAN")
                 return
 
-            if "/" not in linux_sub_path:
-                print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {linux_sub_path}")
+            # An artist root (one path segment under FILE_DIRECTORY, no album
+            # subfolder) rather than an actual album folder. relpath() rather
+            # than the old hand-built linux_sub_path - same question, asked
+            # of the path resolve_list_folder() already produced.
+            relative_to_root = os.path.relpath(true_source_dir, config.FILE_DIRECTORY)
+            if os.sep not in relative_to_root:
+                print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {relative_to_root}")
                 announce_mod.send_pack_error_notice(irc_sock, user)
-                announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{linux_sub_path}{config.C_RESET} is an artist root folder.", category="PART")
+                announce_mod.send_debug(f"Pack denied for {user}: {config.C_BOLD}{relative_to_root}{config.C_RESET} is an artist root folder.", category="PART")
                 return
             
             if not os.path.exists(platform_compat.long_path(true_source_dir)) or not os.path.isdir(platform_compat.long_path(true_source_dir)):
@@ -808,7 +816,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 try:
                     with open(latest_list_path, "r", encoding="utf-8", errors="ignore") as lf:
                         lines = lf.readlines()
-                    target_folder_rel = None
+                    target_folder = None
                     clean_req = str(requested_file).lower().strip()
                     
                     for idx, line in enumerate(lines):
@@ -832,15 +840,22 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                             if clean_req == str(current_file_in_list).lower().strip():
                                 for back_idx in range(idx, -1, -1):
                                     back_line = lines[back_idx].strip()
-                                    if back_line.upper().startswith("D:\\MUSIC\\"):
-                                        raw_folder = back_line[9:]
-                                        if raw_folder.endswith("\\"): raw_folder = raw_folder[:-1]
-                                        target_folder_rel = raw_folder.replace("\\", "/")
+                                    # The prefix-stripping itself is
+                                    # list_mod.resolve_list_folder() - this used
+                                    # to be a second, hand-written copy of it
+                                    # (a hardcoded back_line[9:] rather than
+                                    # len(LIST_FOLDER_PREFIX), and its own
+                                    # trailing-backslash/separator handling),
+                                    # which could silently drift from the
+                                    # original if the list format ever changed.
+                                    if back_line.upper().startswith(list_mod.LIST_FOLDER_PREFIX):
+                                        target_folder = list_mod.resolve_list_folder(
+                                            back_line, base=base_directory)
                                         break
-                                if target_folder_rel is not None: break
-                                
-                    if target_folder_rel is not None:
-                        test_path = os.path.join(base_directory, target_folder_rel, requested_file)
+                                if target_folder is not None: break
+
+                    if target_folder is not None:
+                        test_path = os.path.join(target_folder, requested_file)
                         if os.path.exists(platform_compat.long_path(test_path)):
                             full_path = test_path
                 except Exception as list_err:
