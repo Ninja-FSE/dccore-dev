@@ -10,7 +10,7 @@ import runtime
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False
-SCRIPT_VERSION: str = "DCCore v1.10.0-RC3"
+SCRIPT_VERSION: str = "DCCore v1.10.0-RC4"
 LIST_BASE_NAME: str = "DCCore"
 
 # ---------------------------------------------------------------------
