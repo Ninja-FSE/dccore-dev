@@ -291,6 +291,28 @@ class RarRequestTraversalTests(PathSecurityBase):
         # And the queue worker really was woken for it.
         self.assertIn("check_queue_and_send", self.dispatched_names())
 
+    def test_bracket_tags_are_kept_so_autoq_can_match_the_archive_name(self):
+        """Defect guard: AutoQ.mrc's own completion check de-underscores the
+        received filename and compares it to the basename of the folder path
+        it queued - it never touches brackets. Stripping "[WEB]"/"[192K]"-style
+        tags here left the two sides of that comparison permanently unequal,
+        so the transfer completed correctly but the request never left
+        AutoQ's queue window."""
+        tagged = os.path.join(self.tree.music, "Metallica", "Master Of Puppets [WEB] [320K]")
+        os.makedirs(tagged, exist_ok=True)
+        with io.open(os.path.join(tagged, "track.flac"), "w", encoding="utf-8") as handle:
+            handle.write("AUDIO")
+
+        # The trailing slash matters: a real "!rar" request always carries one
+        # (mIRC's own folder path never ends bare on the leaf name), and
+        # without it the request's own trailing-bracket-tag strip - meant for
+        # an appended annotation, not the folder's own name - would eat the
+        # "[320K]" this test exists to prove survives.
+        self.request("Metallica/Master Of Puppets [WEB] [320K]/")
+
+        rows = config.dcc_queue["dave"]
+        self.assertEqual(rows[0]["file"], "Master_Of_Puppets_[WEB]_[320K].rar")
+
     def test_artist_root_request_is_still_refused(self):
         """Defect guard: containment must not shadow the artist-root rule.
 
