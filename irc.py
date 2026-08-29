@@ -95,7 +95,25 @@ def event_source_host(line):
     return match.group(1).lower() if match else None
 
 
-_FETCH_TOKEN_RE = re.compile(r'!(\S+)\s+(.+)$')
+# Anchored to the START of the line, deliberately.
+#
+# Every bot that answers an @find replies with a header line and then one
+# line per match, and the HEADER also contains a "!" token - it is telling
+# the user what to type:
+#
+#   Search Result 1 Match For X   Copy And Paste !Vibessono FILENAME To ...
+#   !Vibessono 50 Oldies Party - ... .mp3  ::INFO:: 4.6MB
+#
+# Searching anywhere in the line matched the header too, and produced a
+# Download button for a file literally named "FILENAME To The Channel To
+# Request. (25/25) Free Slots...". Ordinary channel chatter arriving during
+# the window was worse: "Thank You !!! I have now received 1 file(s)..."
+# yielded bot="!!" and offered to fetch from it.
+#
+# Both would have sent a nonsense "!" request into a live channel on click.
+# A real result line always begins with its token; a sentence mentioning one
+# never does.
+_FETCH_TOKEN_RE = re.compile(r'^!(\S+)\s+(.+)$')
 
 
 def _capture_broadcast_search_reply(user, target, msg):
