@@ -216,11 +216,19 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
             source = handle.read()
 
         for node in ast.walk(ast.parse(source)):
-            if not isinstance(node, ast.Assign):
+            # AnnAssign as well as Assign. Annotating the list would otherwise
+            # leave this scan matching nothing at all - which the self.fail()
+            # after the loop already turns into a loud failure rather than a
+            # quiet pass, but the scan should simply see it.
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets, value = [node.target], node.value
+            else:
                 continue
-            for target in node.targets:
+            for target in targets:
                 if isinstance(target, ast.Name) and target.id == "modules_to_reload":
-                    names = [el.value for el in node.value.elts
+                    names = [el.value for el in value.elts
                              if isinstance(el, ast.Constant)]
                     self.assertIn("config", names,
                                   "fixture invariant: config should be reloaded")

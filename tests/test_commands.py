@@ -486,16 +486,28 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
             tree = ast.parse(handle.read())
         names = []
         for node in tree.body:
-            if not isinstance(node, ast.Assign):
+            # `ADMIN_HOSTMASKS = [...]` is an ast.Assign, but
+            # `ADMIN_HOSTMASKS: list = [...]` is an ast.AnnAssign - a different
+            # node type carrying `.target` rather than `.targets`. Matching
+            # only ast.Assign made every annotated container invisible here,
+            # and this guard then reported the name as one config.py no longer
+            # defines.
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets, value = [node.target], node.value
+            else:
                 continue
-            is_literal = isinstance(node.value, (ast.Dict, ast.List))
+            if value is None:
+                continue  # a bare annotation declares a type and binds nothing
+            is_literal = isinstance(value, (ast.Dict, ast.List))
             is_runtime_binding = (
-                isinstance(node.value, ast.Attribute)
-                and isinstance(node.value.value, ast.Name)
-                and node.value.value.id == "runtime")
+                isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Name)
+                and value.value.id == "runtime")
             if not (is_literal or is_runtime_binding):
                 continue
-            for target in node.targets:
+            for target in targets:
                 if isinstance(target, ast.Name):
                     names.append(target.id)
         return names

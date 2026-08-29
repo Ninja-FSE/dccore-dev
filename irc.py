@@ -95,7 +95,146 @@ def event_source_host(line):
     return match.group(1).lower() if match else None
 
 
-_FETCH_TOKEN_RE = re.compile(r'!(\S+)\s+(.+)$')
+# Anchored to the START of the line, deliberately.
+#
+# Every bot that answers an @find replies with a header line and then one
+# line per match, and the HEADER also contains a "!" token - it is telling
+# the user what to type:
+#
+#   Search Result 1 Match For X   Copy And Paste !Vibessono FILENAME To ...
+#   !Vibessono 50 Oldies Party - ... .mp3  ::INFO:: 4.6MB
+#
+# Searching anywhere in the line matched the header too, and produced a
+# Download button for a file literally named "FILENAME To The Channel To
+# Request. (25/25) Free Slots...". Ordinary channel chatter arriving during
+# the window was worse: "Thank You !!! I have now received 1 file(s)..."
+# yielded bot="!!" and offered to fetch from it.
+#
+# Both would have sent a nonsense "!" request into a live channel on click.
+# A real result line always begins with its token; a sentence mentioning one
+# never does.
+_FETCH_TOKEN_RE = re.compile(r'^!(\S+)\s+(.+)$')
+
+
+# ---------------------------------------------------------------------
+# Reading the HEADER line other bots send before their matches
+# ---------------------------------------------------------------------
+# An @find reply arrives as a header line and then one line per match. The
+# header is not a result - it is the bot introducing itself - and it carries
+# the things worth showing above a group of results: how many matches it
+# found, how busy it is, and what it runs.
+#
+# Two families answer in these channels.
+#
+# OmenServe (v2.60 and v2.71 both seen) is the common one:
+#
+#   Search Result 3 Matches For X  Copy And Paste !bot FILENAME To The
+#   Channel To Request. (4/4) Free Slots, 0 Queued OmeNServE v2.60
+#
+# Operators pick their own separator between sections - ":", "~", "*", or
+# none at all - so nothing below anchors on punctuation, only on the words.
+# When a search matches more than it will send, it says so instead of
+# listing slots:
+#
+#   Search Result 12 Matches For X   Get My List Of 94,952 Files By Typing
+#   @Beezer In The Channel Or Refine Your Search. Sending first 5 Results
+#
+# SPQR is an older, less widely used mIRC script - a minority of operators
+# still run it. Different shape, no version string, no match count, and its
+# RESULT lines carry no "::INFO:: <size>" tag either:
+#
+#   Matches for *X*  Copy and Paste in Channel to Request a File
+#   (Slot:0/) (Que:0/16) in Use
+#
+# Anything unrecognised returns None rather than a wrong guess. The grouped
+# view falls back to counting the result lines actually received, which
+# works for every family including ones nobody here has seen.
+_HDR_MATCHES    = re.compile(r'(\d[\d,]*)\s+Match(?:es)?\b', re.I)
+_HDR_SLOTS      = re.compile(r'\((\d+)\s*/\s*(\d+)\)\s*Free\s*Slots', re.I)
+_HDR_QUEUED     = re.compile(r'(\d+)\s+Queued\b', re.I)
+_HDR_SERVER     = re.compile(r'\b(Omen\s*Serve?\s*v?\s*[\d.]+)', re.I)
+_HDR_LIST_SIZE  = re.compile(r'List\s+Of\s+([\d,]+)\s+Files', re.I)
+_HDR_SENDING    = re.compile(r'Sending\s+first\s+(\d+)', re.I)
+_HDR_SPQR_SLOTS = re.compile(r'\(Slot:\s*(\d+)\s*/\s*(\d*)\)', re.I)
+_HDR_SPQR_QUEUE = re.compile(r'\(Que:\s*(\d+)\s*/\s*(\d+)\)', re.I)
+
+
+def _as_int(text):
+    """"94,952" -> 94952. Returns None for anything that is not a number."""
+    try:
+        return int(str(text).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_search_header(text):
+    """Stats out of another bot's @find header line, or None if it is not one.
+
+    Returns a dict with whatever that family actually publishes - callers
+    must treat every key as optional. A missing key means "this bot did not
+    say", never "zero": showing 0 free slots for a bot that simply does not
+    report them would be worse than showing nothing.
+    """
+    if not text:
+        return None
+
+    # A RESULT line is never a header, even though it often ends in the same
+    # version string inside its "::INFO:: 4.6MB OmeNServE v2.60" tail. Gating
+    # here rather than at the call site means the function cannot be misused
+    # into decorating a result row with the sender's stats.
+    if _FETCH_TOKEN_RE.search(text):
+        return None
+
+    stats = {}
+
+    slots = _HDR_SLOTS.search(text)
+    if slots:
+        stats["family"] = "omenserve"
+        stats["slots_free"] = _as_int(slots.group(1))
+        stats["slots_total"] = _as_int(slots.group(2))
+    else:
+        spqr = _HDR_SPQR_SLOTS.search(text)
+        if spqr:
+            stats["family"] = "spqr"
+            # SPQR reports slots IN USE, and often leaves the total blank -
+            # the opposite sense from OmenServe's "free". Kept as its own
+            # key so the frontend never has to guess which one it holds.
+            stats["slots_in_use"] = _as_int(spqr.group(1))
+            total = _as_int(spqr.group(2))
+            if total is not None:
+                stats["slots_total"] = total
+
+    queued = _HDR_QUEUED.search(text)
+    if queued:
+        stats["queued"] = _as_int(queued.group(1))
+    else:
+        spqr_q = _HDR_SPQR_QUEUE.search(text)
+        if spqr_q:
+            stats["family"] = stats.get("family", "spqr")
+            stats["queued"] = _as_int(spqr_q.group(1))
+            stats["queue_total"] = _as_int(spqr_q.group(2))
+
+    server = _HDR_SERVER.search(text)
+    if server:
+        stats["server"] = " ".join(server.group(1).split())
+        stats.setdefault("family", "omenserve")
+
+    matches = _HDR_MATCHES.search(text)
+    if matches:
+        stats["matches"] = _as_int(matches.group(1))
+
+    list_size = _HDR_LIST_SIZE.search(text)
+    if list_size:
+        stats["list_size"] = _as_int(list_size.group(1))
+
+    sending = _HDR_SENDING.search(text)
+    if sending:
+        # "12 Matches ... Sending first 5 Results" - it found more than it
+        # sent, which is worth saying above the group so the operator knows
+        # to refine rather than assuming five is all there is.
+        stats["sending"] = _as_int(sending.group(1))
+
+    return stats or None
 
 
 def _capture_broadcast_search_reply(user, target, msg):
@@ -148,6 +287,15 @@ def _capture_broadcast_search_reply(user, target, msg):
         # as "unsolicited" (filenames never matched).
         filename, _size = list.strip_info_suffix(token_match.group(2).strip())
         entry["filename"] = filename
+    else:
+        # Not a result, so it may be the header the bot sends before its
+        # matches - the one line that says how many it found, how busy it is
+        # and what it runs. Parsed here, once, rather than in the dashboard on
+        # every poll. None for anything unrecognised, which is most channel
+        # chatter that happens to land inside the window.
+        header = parse_search_header(cleaned)
+        if header:
+            entry["header"] = header
 
     # config.broadcast_search_results is bound from runtime.py at import time
     # and always exists as a real list - never rebind it, see runtime.py's

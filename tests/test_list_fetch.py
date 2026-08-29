@@ -24,6 +24,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import config  # noqa: E402
+import list as list_module  # noqa: E402
 import list_fetch  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -53,9 +54,34 @@ def _read_all(entry):
     did not need to change shape just to keep testing what they always
     tested. Returns the row list alone; callers that care about total/error
     call list_fetch.get_fetched_bot_page() directly instead."""
-    rows, _total, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+    # Paged by FOLDER now, so flatten the groups back to a flat row list -
+    # what every caller of this helper is actually asserting about.
+    groups, _folders, _rows, error = list_fetch.get_fetched_bot_page(
+        entry, 0, 10**9)
+    rows = [row for group in groups for row in group["entries"]]
     assert error is None, f"unexpected read error: {error}"
     return rows
+
+
+def _list_txt_folders(base_name, folders):
+    """A master list spanning SEVERAL folders.
+
+    _list_txt() below writes one folder, which is all the extraction tests
+    ever needed. Paging is by folder now, so a one-folder list exercises
+    nothing - these tests need a list with folders to page over.
+    """
+    rule = "=" * 53
+    lines = [
+        "List of N Files generated on Jan 1st\n",
+        f"To request a file, copy/paste to the channel... !{base_name} FILENAME\n\n\n",
+    ]
+    for folder, files in folders:
+        lines.append("\n" + rule + "\n")
+        lines.append(folder + "\n")
+        lines.append(rule + "\n")
+        for filename, size in files:
+            lines.append(f"!{base_name} {filename}  ::INFO:: {size}\n")
+    return "".join(lines)
 
 
 def _list_txt(base_name="OtherBot", files=(("Track One.flac", "10.0MB"),)):
@@ -325,9 +351,9 @@ class OnDemandReadingTests(DCCoreTestCase):
 
         os.remove(entry["list_path"])
 
-        rows, total, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
+        rows, folders, files, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
         self.assertEqual(rows, [])
-        self.assertEqual(total, 0)
+        self.assertEqual((folders, files), (0, 0))
         self.assertIsNotNone(error)
         self.assertIn("otherbot", error.lower())
 
@@ -346,41 +372,53 @@ class OnDemandReadingTests(DCCoreTestCase):
         os.chmod(entry["list_path"], 0o000)
         self.addCleanup(os.chmod, entry["list_path"], 0o644)
 
-        rows, total, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
+        rows, folders, files, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
         self.assertEqual(rows, [])
-        self.assertEqual(total, 0)
+        self.assertEqual((folders, files), (0, 0))
         self.assertIsNotNone(error)
 
     def test_a_missing_list_path_field_is_handled_gracefully(self):
         """Defense in depth: an entry somehow missing the field entirely
         (a future bug, or hand-edited state) must not raise either."""
-        rows, total, error = list_fetch.get_fetched_bot_page(
+        rows, folders, files, error = list_fetch.get_fetched_bot_page(
             {"bot": "ghostbot"}, 0, 100)
         self.assertEqual(rows, [])
-        self.assertEqual(total, 0)
+        self.assertEqual((folders, files), (0, 0))
         self.assertIsNotNone(error)
 
     def test_pagination_slices_the_freshly_parsed_rows(self):
-        files = tuple((f"Track {i:02d}.flac", "1.0MB") for i in range(10))
-        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt(files=files))])
+        # Forward slashes: the folder is only a grouping key here, and
+        # backslashes in a test literal buy nothing but escaping bugs.
+        folders = [(f"D:/MUSIC/Album {i:02d}/",
+                    [(f"Track {i:02d}.flac", "1.0MB")]) for i in range(10)]
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt",
+                                    _list_txt_folders("OtherBot", folders))])
         list_fetch.process_fetched_list_zip("pagebot", self.zip_path)
         entry = config.fetched_bot_lists["pagebot"]
 
-        page, total, error = list_fetch.get_fetched_bot_page(entry, 3, 4)
+        page, total_folders, total_files, error = list_fetch.get_fetched_bot_page(
+            entry, 3, 4)
         self.assertIsNone(error)
-        self.assertEqual(total, 10)
-        self.assertEqual([r["title"] for r in page],
-                         ["Track 03.flac", "Track 04.flac", "Track 05.flac", "Track 06.flac"])
+        self.assertEqual(total_folders, 10, "offset/limit count folders")
+        self.assertEqual(total_files, 10)
+        self.assertEqual([g["folder"].rstrip("/") for g in page],
+                         ["D:/MUSIC/Album 03", "D:/MUSIC/Album 04",
+                          "D:/MUSIC/Album 05", "D:/MUSIC/Album 06"])
+        # Whole folders, never a partial one.
+        for group in page:
+            self.assertEqual(len(group["entries"]), group["count"])
 
     def test_an_offset_past_the_end_returns_an_empty_page_with_the_correct_total(self):
         _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt())])
         list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
         entry = config.fetched_bot_lists["otherbot"]
 
-        page, total, error = list_fetch.get_fetched_bot_page(entry, 999, 100)
+        page, total_folders, total_files, error = list_fetch.get_fetched_bot_page(
+            entry, 999, 100)
         self.assertIsNone(error)
         self.assertEqual(page, [])
-        self.assertEqual(total, 1)
+        self.assertEqual(total_folders, 1, "one folder in this fixture")
+        self.assertEqual(total_files, 1)
 
 
 class ExtractedTextSizeCeiling(DCCoreTestCase):
@@ -755,11 +793,16 @@ class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
         def reader():
             for _ in range(READS_PER_THREAD):
                 entry = config.fetched_bot_lists.get(bot)
-                _page, total, error = list_fetch.get_fetched_bot_page(entry, 0, 10 ** 9)
+                # total_files, not the folder count: both archives here have
+                # the same single folder, so only the ROW total can show a
+                # read that landed between the two - which is the torn read
+                # this test exists to catch.
+                _page, _folders, total_files, error = list_fetch.get_fetched_bot_page(
+                    entry, 0, 10 ** 9)
                 with state_lock:
                     read_count[0] += 1
-                    if error is None and total not in (count_a, count_b):
-                        bad_totals.append(total)
+                    if error is None and total_files not in (count_a, count_b):
+                        bad_totals.append(total_files)
             with state_lock:
                 readers_done[0] += 1
                 if readers_done[0] == READER_THREADS:
@@ -964,6 +1007,139 @@ class LongMemberNames(SafeExtractionTests):
         _write_zip(second, [("OtherBot-2026-08-27.txt", _list_txt())])
         ok, reason = list_fetch.process_fetched_list_zip("longbot", second)
         self.assertTrue(ok, f"a later fetch was blocked by the leftover: {reason}")
+
+
+
+
+class FolderGrouping(unittest.TestCase):
+    """group_rows_by_folder(): the shape the File Lists view renders."""
+
+    def rows(self, *pairs):
+        return [{"folder": folder, "title": title, "size": "1.0MB",
+                 "format": "FLAC", "source": "bot"} for folder, title in pairs]
+
+    def test_rows_group_under_their_folder_in_first_seen_order(self):
+        """First-seen, not sorted: the master list's own order is the order the
+        operator recognises from their own disk."""
+        groups = list_module.group_rows_by_folder(self.rows(
+            ("Z/", "one"), ("A/", "two"), ("Z/", "three")))
+
+        self.assertEqual([g["folder"] for g in groups], ["Z/", "A/"])
+
+    def test_a_folder_that_reappears_later_rejoins_its_first_group(self):
+        """Rows for one folder are not required to be adjacent - a list can
+        interleave them, and each folder must still appear once."""
+        groups = list_module.group_rows_by_folder(self.rows(
+            ("A/", "one"), ("B/", "two"), ("A/", "three")))
+
+        self.assertEqual(len(groups), 2)
+        self.assertEqual([r["title"] for r in groups[0]["entries"]], ["one", "three"])
+
+    def test_the_count_matches_the_entries(self):
+        groups = list_module.group_rows_by_folder(self.rows(
+            ("A/", "one"), ("A/", "two"), ("B/", "three")))
+
+        for group in groups:
+            self.assertEqual(group["count"], len(group["entries"]), group["folder"])
+
+    def test_rows_with_no_folder_are_kept_under_one_empty_name(self):
+        """A foreign bot's list may carry no folder headings at all. Those rows
+        are grouped, not dropped - the view labels the empty name itself."""
+        groups = list_module.group_rows_by_folder(
+            [{"folder": "", "title": "one"}, {"folder": None, "title": "two"}])
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["folder"], "")
+        self.assertEqual(groups[0]["count"], 2)
+
+
+class FolderPaging(unittest.TestCase):
+    """page_folder_groups(): the page is a whole number of folders."""
+
+    def groups(self, sizes):
+        return [{"folder": "F%02d" % i, "count": size,
+                 "entries": [{"title": "t%d" % j} for j in range(size)]}
+                for i, size in enumerate(sizes)]
+
+    def test_a_page_holds_whole_folders_and_reports_both_totals(self):
+        page, folders, rows = list_module.page_folder_groups(
+            self.groups([3, 4, 5]), 0, 2)
+
+        self.assertEqual([g["folder"] for g in page], ["F00", "F01"])
+        self.assertEqual(folders, 3, "three folders in the list")
+        self.assertEqual(rows, 12, "twelve files across all three, not just this page")
+
+    def test_offset_past_the_end_is_empty_with_the_totals_intact(self):
+        page, folders, rows = list_module.page_folder_groups(
+            self.groups([3, 4]), 99, 10)
+
+        self.assertEqual(page, [])
+        self.assertEqual((folders, rows), (2, 7))
+
+    def test_a_negative_offset_reads_from_the_start(self):
+        page, _folders, _rows = list_module.page_folder_groups(
+            self.groups([3, 4]), -5, 1)
+
+        self.assertEqual([g["folder"] for g in page], ["F00"])
+
+    def test_the_row_ceiling_ends_a_page_before_the_folder_limit(self):
+        """Folder sizes are uneven, so a folder count alone does not bound the
+        response - which is the unbounded payload issue #76 removed."""
+        page, _folders, _rows = list_module.page_folder_groups(
+            self.groups([40, 40, 40]), 0, 10, max_rows=100)
+
+        self.assertEqual(len(page), 2, "the third would take it to 120 rows")
+        self.assertEqual(sum(g["count"] for g in page), 80)
+
+    def test_one_folder_larger_than_the_ceiling_is_cut_but_still_returned(self):
+        """The one place a folder is split. Returning nothing would leave the
+        caller unable to advance past it, so it comes back cut and flagged -
+        and `count` keeps reporting the true size."""
+        page, _folders, _rows = list_module.page_folder_groups(
+            self.groups([500]), 0, 10, max_rows=100)
+
+        self.assertEqual(len(page), 1)
+        self.assertEqual(len(page[0]["entries"]), 100, "cut to the ceiling")
+        self.assertEqual(page[0]["count"], 500, "still reports what it holds")
+        self.assertTrue(page[0]["truncated"])
+
+    def test_an_untruncated_folder_carries_no_truncated_flag(self):
+        """Control: the view only marks a folder cut short, so the flag must
+        be absent - or falsey - everywhere else."""
+        page, _folders, _rows = list_module.page_folder_groups(
+            self.groups([3]), 0, 10, max_rows=100)
+
+        self.assertFalse(page[0].get("truncated"))
+
+    def test_walking_by_the_number_returned_visits_every_folder_once(self):
+        """THE CONTRACT THE PAGER DEPENDS ON.
+
+        A page is bounded by TWO limits - the folder count asked for, and the
+        row ceiling - so a request for 200 folders can come back with 41. A
+        caller that advances by the number it ASKED for therefore steps clean
+        over the folders it was not given, and they become unreachable: no
+        error, no gap in the display, just files that cannot be browsed to.
+
+        Advancing by the number RETURNED is what makes the walk complete, so
+        this pins it against a library the ceiling actually bites on.
+        """
+        groups = self.groups([60] * 200)
+        limit, ceiling = 200, 500
+
+        offset, seen, guard = 0, [], 0
+        while True:
+            guard += 1
+            self.assertLess(guard, 1000, "the walk failed to terminate")
+            page, total, _rows = list_module.page_folder_groups(
+                groups, offset, limit, max_rows=ceiling)
+            seen.extend(g["folder"] for g in page)
+            if not page or offset + len(page) >= total:
+                break
+            offset += len(page)
+
+        self.assertLess(guard, 200, "the ceiling should not reduce pages to one folder")
+        self.assertEqual(len(seen), 200, "every folder was reached")
+        self.assertEqual(len(set(seen)), 200, "and none was served twice")
 
 
 if __name__ == "__main__":

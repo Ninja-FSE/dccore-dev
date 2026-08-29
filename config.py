@@ -9,20 +9,20 @@ import runtime
 # ---------------------------------------------------------------------
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
-DEBUG_MODE     = False
-SCRIPT_VERSION = "DCCore v1.10.0-RC3"
-LIST_BASE_NAME = "DCCore"
+DEBUG_MODE: bool    = False
+SCRIPT_VERSION: str = "DCCore v1.10.0-RC3"
+LIST_BASE_NAME: str = "DCCore"
 
 # ---------------------------------------------------------------------
 # 2. IRC NETWORK AND CHANNEL SETTINGS
 # ---------------------------------------------------------------------
-SERVER        = "irc.undernet.org"
-PORT          = 6667
-NICKNAME      = "DCCore"
-ALT_NICKNAME = "DCCore_"
-ADMIN_NICK    = "FLAC,Samoth"
-CHANNEL       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
-DEBUG_CHANNEL = "#flac-serv"
+SERVER: str        = "irc.undernet.org"
+PORT: int          = 6667
+NICKNAME: str      = "DCCore"
+ALT_NICKNAME: str  = "DCCore_"
+ADMIN_NICK: str    = "FLAC,Samoth"
+CHANNEL: str       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
+DEBUG_CHANNEL: str = "#flac-serv"
 
 # The single channel a "search all bots" broadcast (@find) goes into - see
 # webserver.py's POST /api/search/broadcast. Deliberately ONE channel, never
@@ -34,43 +34,43 @@ DEBUG_CHANNEL = "#flac-serv"
 # file: computing it at this point captures the tracked default above and
 # silently ignores an operator's own CHANNEL. None means "derive it below";
 # setting it explicitly, here or in local_config.py, still wins.
-BROADCAST_SEARCH_CHANNEL = None
+BROADCAST_SEARCH_CHANNEL: str = None
 
 # ---------------------------------------------------------------------
 # 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
-PAUSE_ON_UPDATE = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
-FILE_DIRECTORY = "/mnt/nfs-musik"
-RAR_BINARY     = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
-TMP_ZIP_DIR = "./data/tmp_zips"
-LOCAL_LIST_DIR = "./lists"
+PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
+FILE_DIRECTORY: str   = "/mnt/nfs-musik"
+RAR_BINARY: str       = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
+TMP_ZIP_DIR: str      = "./data/tmp_zips"
+LOCAL_LIST_DIR: str   = "./lists"
 
 # Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
 # separate from FILE_DIRECTORY: that directory is the served library, scanned
 # by update_list.py and offered to everyone via @find/!<nick> - fetched files
 # must never be reachable through that path. They are dashboard-download-only
 # (GET /api/fetch/<id>/download in webserver.py).
-FETCHED_FILES_DIR = "./data/fetched"
+FETCHED_FILES_DIR: str = "./data/fetched"
 
 # Safe, normalised paths into the data/ subdirectory
-BANS_FILE      = "./data/bans.txt"
-STATS_FILE     = "./data/stats.txt"
-HARD_BANS_FILE = "./data/hard_bans.txt"
+BANS_FILE: str      = "./data/bans.txt"
+STATS_FILE: str     = "./data/stats.txt"
+HARD_BANS_FILE: str = "./data/hard_bans.txt"
 
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------
-ANNOUNCE_INTERVAL = 300     # Time between each channel advert, in seconds
+ANNOUNCE_INTERVAL: int = 300     # Time between each channel advert, in seconds
 
 # ---------------------------------------------------------------------
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
 # ---------------------------------------------------------------------
-MAX_DCC_SLOTS      = 3      # Maximum simultaneous live downloads
-MAX_USER_QUEUE     = 100    # Most files a single user may queue
-MAX_GLOBAL_QUEUE   = 1000   # Most files across every queue combined
-MAX_SEARCH_RESULTS = 5      # Maximum result lines sent in reply to an @find
-MSG_DELAY          = 5.0    # Delay in seconds for the ordinary message queue
-DEBUG_MSG_DELAY    = 0.5    # Pause between each line sent to the debug channel
+MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
+MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
+MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
+MAX_SEARCH_RESULTS: int = 5      # Maximum result lines sent in reply to an @find
+MSG_DELAY: float        = 5.0    # Delay in seconds for the ordinary message queue
+DEBUG_MSG_DELAY: float  = 0.5    # Pause between each line sent to the debug channel
 
 # Port range for DCC sends (must be open on the firewall and router)
 # ---------------------------------------------------------------------
@@ -89,9 +89,9 @@ DEBUG_MSG_DELAY    = 0.5    # Pause between each line sent to the debug channel
 # host IS the proof of your services login.
 #
 # Put the real values in local_config.py, which is gitignored, NOT here.
-ADMIN_HOSTMASKS    = []
+ADMIN_HOSTMASKS: list = []
 # Generated with:  python adminchat.py
-ADMIN_PASSWORD_HASH = ""
+ADMIN_PASSWORD_HASH: str = ""
 
 # How the DCC CHAT connection gets made:
 #
@@ -104,7 +104,7 @@ ADMIN_PASSWORD_HASH = ""
 # than rejects - all of which show up as a TIMEOUT on the dial and then cost the
 # full connect timeout on every login before the fallback takes over. The bot's
 # own listener is already proven reachable by every DCC SEND it does.
-ADMIN_CHAT_MODE    = "auto"
+ADMIN_CHAT_MODE: str = "auto"
 
 # Whether !ban, !unban, !rehash, !update and !clearqueue still work when typed in
 # a channel or a private message.
@@ -117,7 +117,7 @@ ADMIN_CHAT_MODE    = "auto"
 #
 # The user commands (!list, !ping, !debugnames, @find, the queue triggers) are
 # not affected by this.
-ADMIN_CHANNEL_COMMANDS = True
+ADMIN_CHANNEL_COMMANDS: bool = True
 
 # ---------------------------------------------------------------------
 # WHERE RUNTIME REPORTS GO
@@ -135,8 +135,8 @@ ADMIN_CHANNEL_COMMANDS = True
 # be connected, send_debug falls back to stdout, so the LXC console and the
 # journal always have it. That case - something going wrong while nobody is
 # watching - is the one worth protecting.
-DEBUG_TO_CHANNEL   = True
-DEBUG_TO_CONSOLE   = True
+DEBUG_TO_CHANNEL: bool = True
+DEBUG_TO_CONSOLE: bool = True
 
 # The two side files update_list.py publishes alongside the master list, holding
 # the human-readable total size and the raw byte count that the channel advert and
@@ -146,11 +146,11 @@ DEBUG_TO_CONSOLE   = True
 #
 # The "flac-serv" prefix is historical and deliberately kept. Renaming it would
 # orphan the stats on every existing deployment until the next successful !update.
-LIST_SIZE_FILE     = "flac-serv-size.txt"
-LIST_RAWBYTES_FILE = "flac-serv-rawbytes.txt"
+LIST_SIZE_FILE: str     = "flac-serv-size.txt"
+LIST_RAWBYTES_FILE: str = "flac-serv-rawbytes.txt"
 
-DCC_PORT_START     = 55000
-DCC_PORT_END       = 55010
+DCC_PORT_START: int = 55000
+DCC_PORT_END: int   = 55010
 
 # ---------------------------------------------------------------------
 # CROSS-BOT FILE FETCH (dcc_fetch.py - receiving files FROM other bots)
@@ -159,24 +159,24 @@ DCC_PORT_END       = 55010
 # SENDs to people requesting from us. Conflating the two directions would let
 # outbound leech traffic (us fetching from others) starve our own serving
 # capacity, or vice versa.
-MAX_FETCH_SLOTS         = 3        # Max simultaneous in-flight/offered fetches
-MAX_FETCH_FILE_SIZE     = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
-FETCH_TRANSFER_TIMEOUT  = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
-FETCH_OFFER_TIMEOUT     = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
+MAX_FETCH_SLOTS: int        = 3        # Max simultaneous in-flight/offered fetches
+MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
+FETCH_TRANSFER_TIMEOUT: int = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
+FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
 
 # How often a new @find broadcast (POST /api/search/broadcast) is allowed to
 # start. Independent of the UI - courtesy to other bots/operators on a shared
 # public channel, not just a UI detail.
-BROADCAST_SEARCH_COOLDOWN = 30     # Seconds
+BROADCAST_SEARCH_COOLDOWN: int = 30     # Seconds
 
 # ---------------------------------------------------------------------
 # 6. ANTI-FLOOD AND AUTOMATIC PROTECTION
 # ---------------------------------------------------------------------
-MAX_REQUESTS     = 10       # Most commands (search or file) per time window
-REQUEST_WINDOW   = 5       # Size of the rolling time window, in seconds
-MUTE_TIME        = 30       # Mute in seconds on the first flood violation
-MAX_SEND_FAILS   = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
-RAR_TIMEOUT      = 1800     # Longest a rar packing run may take, in seconds, before it is abandoned
+MAX_REQUESTS: int   = 10       # Most commands (search or file) per time window
+REQUEST_WINDOW: int = 5       # Size of the rolling time window, in seconds
+MUTE_TIME: int      = 30       # Mute in seconds on the first flood violation
+MAX_SEND_FAILS: int = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
+RAR_TIMEOUT: int    = 1800     # Longest a rar packing run may take, in seconds, before it is abandoned
 
 # ---------------------------------------------------------------------
 # 7. MIRC COLOUR CODES AND CONTROL CHARACTERS (IRC STANDARD)
@@ -292,7 +292,7 @@ fetched_bot_lists = runtime.fetched_bot_lists
 # never crashes the daemon and CI never installs Flask, so this stays inert
 # there. Install it yourself (`pip install flask`) to actually use the
 # dashboard.
-WEBUI_ENABLED = False
+WEBUI_ENABLED: bool = False
 
 # NO AUTHENTICATION. Every /api/* route is open to anyone who can reach this
 # host:port - there is no login, no token, no password. The read-only routes
@@ -307,8 +307,8 @@ WEBUI_ENABLED = False
 #
 #   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. DO NOT put this host on
 #   any network you do not trust, without adding authentication first.
-WEBUI_HOST    = "127.0.0.1"
-WEBUI_PORT    = 8420
+WEBUI_HOST: str = "127.0.0.1"
+WEBUI_PORT: int = 8420
 
 # ---------------------------------------------------------------------
 # 9. LOCAL OVERRIDES (not in git)

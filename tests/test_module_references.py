@@ -68,8 +68,13 @@ def module_name_literals(source):
                 if isinstance(element, ast.Constant) and isinstance(element.value, str):
                     found.append((element.value, node.lineno))
 
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
+        # AnnAssign as well as Assign: `modules_to_reload: list = [...]` is a
+        # different node type, and matching only ast.Assign would drop the one
+        # list this scan most exists to check.
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            node_targets = (node.targets if isinstance(node, ast.Assign)
+                            else [node.target])
+            for target in node_targets:
                 if (isinstance(target, ast.Name) and target.id == "modules_to_reload"
                         and isinstance(node.value, ast.List)):
                     for element in node.value.elts:
