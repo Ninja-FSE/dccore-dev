@@ -279,6 +279,91 @@ def find_matching_entries(search_words, limit=None, list_path=None):
     return entries, total_matches
 
 
+# Every folder heading in the master list starts with this, whatever the
+# library's real location is: update_list.py writes it verbatim (see its
+# raw_folder_str) because the OmenServe listing format has always looked that
+# way. It is a piece of the format, NOT a path - the operator's library may
+# well be at Z:\1 Metal or /mnt/nfs-musik. What follows it is the folder
+# relative to FILE_DIRECTORY, which is what dcc.py joins to resolve a request.
+LIST_FOLDER_PREFIX = "D:\\MUSIC\\"
+
+
+def resolve_list_folder(header, base=None):
+    """Turn a master-list folder heading into a real path on this machine.
+
+    Mirrors what dcc.handle_download_request() does when it resolves a
+    requested name: strip the format's fixed prefix, and join what remains to
+    FILE_DIRECTORY. An entry that carried no heading at all resolves to the
+    library root, which is where such a file actually sits.
+
+    This exists so the operator is shown a path they can act on. The raw
+    heading names a drive most installs do not have, which is worse than
+    useless in a tool whose whole job is "go and look at these folders".
+    """
+    base = getattr(config, "FILE_DIRECTORY", "") if base is None else base
+    text = (header or "").strip()
+    if text.upper().startswith(LIST_FOLDER_PREFIX):
+        text = text[len(LIST_FOLDER_PREFIX):]
+    # Headings are written with backslashes regardless of the host, so split on
+    # both and let os.path.join put the platform's own separator back.
+    parts = [part for part in text.replace("\\", "/").split("/") if part]
+    return os.path.join(base, *parts) if parts else base
+
+
+def find_duplicate_filenames(entries):
+    """Filenames the master list carries under more than one folder.
+
+    Takes find_matching_entries([]) output and returns
+
+        [{"filename": str, "folders": [str, ...], "count": int}, ...]
+
+    in the order the list meets them, folders in list order too, and only for
+    names that appear under two or more folders.
+
+    WHY THIS IS WORTH KNOWING
+
+    A request names a file, not a path. "!<nick> Track 01.flac" is all a
+    requester can say, because a bare filename is all the list gives them to
+    copy. dcc.handle_download_request() then resolves that name against this
+    same list and serves the FIRST folder it finds it under - so every later
+    copy is listed, looks requestable, and cannot be fetched at all.
+
+    READS THE LIST, NOT THE LIBRARY
+
+    Deliberately. The list is what the requester saw and what the resolver
+    reads, so a name that collides here is a name that collides for them,
+    whatever the filesystem happens to hold at this moment. It also means this
+    can be answered on demand from a file already on disk, without walking the
+    library again.
+
+    The order is the useful part: the first folder listed under a name is the
+    copy a request for that name will actually reach.
+
+    Matching is case-insensitive, because the resolver compares lowercased and
+    a requester typing a name back cannot be expected to reproduce its case.
+    """
+    folders_by_name = {}
+    first_seen = []
+    for entry in entries:
+        filename = (entry.get("filename") or "").strip()
+        if not filename:
+            continue
+        key = filename.lower()
+        # A folderless entry is a real location - the library root - not a
+        # missing value, so it counts as somewhere a copy can sit.
+        folder = entry.get("folder") or ""
+        if key not in folders_by_name:
+            folders_by_name[key] = []
+            first_seen.append((filename, key))
+        folders = folders_by_name[key]
+        if folder not in folders:
+            folders.append(folder)
+    return [{"filename": name,
+             "folders": folders_by_name[key],
+             "count": len(folders_by_name[key])}
+            for name, key in first_seen if len(folders_by_name[key]) > 1]
+
+
 def entries_to_filelist_rows(entries, source):
     """Shape find_matching_entries() output into the File Lists view's row
     format: {"title", "size", "format", "source"}, deduping same
