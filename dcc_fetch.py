@@ -135,14 +135,21 @@ def contains_unsafe_ctcp_bytes(value):
     return bool(_UNSAFE_CTCP_BYTES_RE.search(str(value)))
 
 
+_FALLBACK_FETCH_LOCK = threading.Lock()
+
+
 def _fetch_lock():
     """The dedicated fetch_queue lock oserve.py allocates at startup, or a
-    fresh one as a fallback - same idiom as dcc.py's
-    `queue_lock if 'queue_lock' in globals() else threading.Lock()`, needed
-    because tests and any other caller that never ran oserve.startup() would
-    otherwise have nothing to synchronise on.
+    shared module-level fallback for any caller that never ran
+    oserve.startup() (tests, most notably).
+
+    The fallback is a single object reused on every call, not a fresh
+    `threading.Lock()` built on the spot: constructing a new lock per call
+    would let two concurrent callers each acquire a DIFFERENT lock and
+    achieve no mutual exclusion at all, silently. Same pattern as
+    list_fetch.py's `_lock()` and runtime.channel_users_lock().
     """
-    return getattr(config, "fetch_queue_lock", None) or threading.Lock()
+    return getattr(config, "fetch_queue_lock", None) or _FALLBACK_FETCH_LOCK
 
 
 def _ensure_fetch_queue():

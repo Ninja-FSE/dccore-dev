@@ -335,7 +335,17 @@ def announce_worker():
                 speed_bytes_per_sec = 0
                 speed_contributors = 0
                 _now = time.time()
-                with config.queue_lock if hasattr(config, "queue_lock") else threading.Lock():
+                # dcc.queue_lock, not config.queue_lock: every append/removal on
+                # config.active_transfers throughout dcc.py holds dcc.queue_lock (dcc.py's
+                # own module-level lock - see its top-of-file comment). config.queue_lock
+                # is a SEPARATE Lock() object oserve.py allocates onto config, and this
+                # line used to take that one instead - two different locks guarding the
+                # same list, so this read and every dcc.py writer could run fully
+                # concurrently despite both appearing to "hold a lock". Iterating
+                # active_transfers while dcc.py appends/removes from it (list.append()
+                # during iteration is usually silent corruption, not an exception) needs
+                # the SAME lock dcc.py uses, or it synchronises against nothing at all.
+                with dcc.queue_lock:
                     for tx in config.active_transfers:
                         b_sent = tx.get("bytes_sent", 0)
                         prev_bytes = tx.get("_speed_bytes")

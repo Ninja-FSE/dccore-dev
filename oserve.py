@@ -17,8 +17,17 @@ import config
 
 # Allocate the locks at startup, in memory. This keeps config.py free of
 # function calls and imports.
-if not hasattr(config, 'queue_lock'):
-    config.queue_lock = threading.Lock()
+#
+# No config.queue_lock here: dcc.py's own module-level `queue_lock` (created at
+# dcc.py's import time, before any function that uses it can be called) is THE
+# queue lock every part of this codebase means by that name - see dcc.py's own
+# comment on it. A separate config.queue_lock used to be allocated here and used
+# in exactly one place (announce.py's transfer-speed calculation), guarding the
+# same config.active_transfers list dcc.py's mutations guard with dcc.queue_lock -
+# two different lock objects for the same data, providing no mutual exclusion
+# against each other at all. Fixed by pointing announce.py at dcc.queue_lock
+# instead; this allocation is removed rather than left to invite the same mistake
+# again.
 
 if not hasattr(config, 'debug_flood_lock'):
     config.debug_flood_lock = threading.Lock()
