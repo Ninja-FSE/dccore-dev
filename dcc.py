@@ -32,6 +32,24 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
     # as part of "/mnt/nfs-musik", because the string happens to begin the same way.
     return matchpath == base or matchpath.startswith(base + os.sep)
 
+def _is_temp_zip_cache_file(path):
+    """Is `path` one of the packed .rar archives in TMP_ZIP_DIR - eligible for
+    the "delete once nothing else needs it" cleanup in start_dcc_send()?
+
+    Checked against config.TMP_ZIP_DIR's actual configured value, not a
+    hardcoded directory name: a literal "tmp_zips" substring check against
+    the shipped default meant an operator who renamed the setting (via
+    local_config.py or settings.conf, both documented override points)
+    would have every packed .rar sent successfully and never cleaned up
+    afterward - this would simply never be true again, silently.
+
+    The ".zip" exclusion is unchanged from before this fix: TMP_ZIP_DIR also
+    holds the master list's own zip, which this cleanup must never touch.
+    """
+    path = str(path)
+    return is_safe_path(config.TMP_ZIP_DIR, path) and ".zip" not in path
+
+
 def user_is_present_in_ram(user_key):
     """Is this user still in ANY of the bot's live channel lists (synced from 353/JOIN)?"""
     u = str(user_key).lower()
@@ -1146,8 +1164,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try:
             file_still_needed = False
             safe_path = str(file_path)
-            
-            if "tmp_zips" in safe_path and ".zip" not in safe_path:
+
+            if _is_temp_zip_cache_file(safe_path):
                 with queue_lock if 'queue_lock' in globals() else threading.Lock():
                     # A. Is the file still QUEUED for some OTHER user in dcc_queue.txt?
                     for q_user, q_files in getattr(config, 'dcc_queue', {}).items():

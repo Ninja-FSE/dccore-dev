@@ -163,6 +163,43 @@ class IsSafePathTests(DCCoreTestCase):
         self.assertTrue(dcc.is_safe_path(self.tree.music, staying))
 
 
+class TempZipCacheFileTests(DCCoreTestCase):
+    """dcc._is_temp_zip_cache_file - decides whether start_dcc_send()'s
+    finally block is allowed to delete a file once nothing needs it anymore.
+
+    Defect guard: this used to be a literal "tmp_zips" substring check
+    against the shipped DEFAULT directory name, not config.TMP_ZIP_DIR's
+    actual configured value. Every test fixture happens to use that default
+    name, which is exactly why nothing had caught it - renaming the setting
+    (a documented, supported override) made this condition never true again,
+    silently, and packed .rar archives leaked on disk forever."""
+
+    def setUp(self):
+        super().setUp()
+        self.tree = self.make_tree()
+
+    def test_a_file_in_the_configured_temp_dir_is_eligible(self):
+        path = os.path.join(config.TMP_ZIP_DIR, "Some_Album.rar")
+        self.assertTrue(dcc._is_temp_zip_cache_file(path))
+
+    def test_still_eligible_after_the_directory_is_renamed(self):
+        """The regression this guards against."""
+        renamed = os.path.join(self.tree.root, "packing-cache")
+        os.makedirs(renamed, exist_ok=True)
+        config.TMP_ZIP_DIR = renamed
+
+        path = os.path.join(renamed, "Some_Album.rar")
+        self.assertTrue(dcc._is_temp_zip_cache_file(path))
+
+    def test_a_file_outside_the_temp_dir_is_not_eligible(self):
+        """A library file must never be treated as disposable cache."""
+        self.assertFalse(dcc._is_temp_zip_cache_file(self.tree.tracks[0]))
+
+    def test_the_master_list_zip_is_excluded_even_inside_the_temp_dir(self):
+        zip_path = os.path.join(config.TMP_ZIP_DIR, f"{config.LIST_BASE_NAME}.zip")
+        self.assertFalse(dcc._is_temp_zip_cache_file(zip_path))
+
+
 class RarRequestTraversalTests(PathSecurityBase):
     """handle_download_request's "!rar" branch - the first line of defence."""
 
