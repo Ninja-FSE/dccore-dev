@@ -66,7 +66,7 @@ Once it reports "Ready to start", `./scripts/linux/start-dccore.sh` runs the sam
 ```bat
 scripts\windows\start-dccore.bat check
 ```
-Same check, same refusal conditions. Once it reports "Ready to start", double-clicking `scripts\windows\start-dccore.bat` (or running it from a shortcut) runs the check and then starts the daemon - it anchors its own working directory first, so it doesn't matter where the shortcut or the double-click happens from. The full Windows setup guide (`docs/WINDOWS.md`) lives on the `windows` branch, not here on `beta`.
+Same check, same refusal conditions. Once it reports "Ready to start", double-clicking `scripts\windows\start-dccore.bat` (or running it from a shortcut) runs the check and then starts the daemon - it anchors its own working directory first, so it doesn't matter where the shortcut or the double-click happens from. The full Windows setup guide is [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ### Starting the Daemon
 To perform a completely clean reboot of the bot on Linux, clear hidden cache files, and force a fresh reload of code modifications into RAM, execute:
