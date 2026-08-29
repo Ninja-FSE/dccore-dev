@@ -788,12 +788,23 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     config.dcc_queue[user_key] = []
 
                 # ---------------------------------------------------------------------
-                # Album naming, kept AutoQ-compatible with the parentheses preserved
+                # Album naming, kept AutoQ-compatible with the parentheses AND
+                # brackets preserved
                 # ---------------------------------------------------------------------
                 folder_name = os.path.basename(true_source_dir.rstrip("/"))
-                
-                # Allows parentheses and ordinary hyphens, so AutoQ.mrc can match the filename
-                clean_folder_name = re.sub(r'[^\w\-_\. \(\)]', '', folder_name).replace(" ", "_")
+
+                # Allows parentheses, square brackets and ordinary hyphens, so
+                # AutoQ.mrc can match the filename. AutoQ's own filercvd handler
+                # reconciles a completed .rar against the folder path it queued
+                # by de-underscoring the received name (swapping "_" back to " ")
+                # and comparing it to that path's basename - it never touches
+                # brackets. A folder tagged "[WEB] [192K]" used to lose those
+                # brackets here while AutoQ still expected them on the other
+                # side of that comparison, so the two strings never matched and
+                # the request stayed listed as outstanding in AutoQ's queue
+                # window forever, even though the transfer itself completed
+                # correctly every time.
+                clean_folder_name = re.sub(r'[^\w\-_\. \(\)\[\]]', '', folder_name).replace(" ", "_")
                 
                 master_rar_filename = f"{clean_folder_name}.rar"
 
