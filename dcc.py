@@ -15,7 +15,10 @@ import list as list_mod
 import announce
 import db
 
-# The thread lock is created at the top of the module, so the queue counts cleanly
+# THE queue lock: created once here, at the top of the module, before any function
+# below can be called - so `with queue_lock:` throughout this file always resolves
+# to this one object, never needs a fallback, and is what db.py's and announce.py's
+# own comments mean when they say "queue_lock".
 queue_lock = threading.Lock()
 
 def is_safe_path(base_dir, path, follow_symlinks=True):
@@ -230,7 +233,7 @@ def check_queue_and_send(irc_sock, completed_user):
     # During a reconnect channel_users is empty, and the old sweep then deleted queues
     # belonging to users who had never left the channel.
     if getattr(config, 'bot_joined_channel', False):
-        with queue_lock if 'queue_lock' in globals() else threading.Lock():
+        with queue_lock:
             current_time = time.time()
             for f_user, freeze_timestamp in list(config.frozen_queues.items()):
                 # THAW: the user is back in memory - release the freeze instead of deleting
@@ -254,7 +257,7 @@ def check_queue_and_send(irc_sock, completed_user):
         user_key = ""
 
     next_file = None
-    with queue_lock if 'queue_lock' in globals() else threading.Lock():
+    with queue_lock:
         if user_key and user_key in config.dcc_queue and config.dcc_queue[user_key]:
             if user_key not in config.frozen_queues:
                 next_file = config.dcc_queue[user_key][0]  # FIXED: takes the top entry
@@ -521,7 +524,7 @@ def check_queue_and_send(irc_sock, completed_user):
                 print(f"[DCC FREEZE-HOLD] {completed_user} already has a countdown running. Not starting another.")
                 return
 
-            with queue_lock if 'queue_lock' in globals() else threading.Lock():
+            with queue_lock:
                 config.frozen_queues[user_key] = time.time()
             print(f"[DCC REACTIVE FREEZE] {completed_user} really has left {target_chan}. Starting the timer...")
             announce_mod.send_debug(f"DCC reactive freeze triggered for {completed_user} in {target_chan}. Initiating 5-minute cooldown timer.", category="QUIT")
@@ -549,7 +552,7 @@ def check_queue_and_send(irc_sock, completed_user):
                         
                     # C) The bot is back online - check against the fresh channel list
                     if user_is_present_in_ram(t_key):
-                        with queue_lock if 'queue_lock' in globals() else threading.Lock():
+                        with queue_lock:
                             config.frozen_queues.pop(t_key, None)
                         print(f"[DCC FREEZE-ABORT] {target_user} was found in the channel list. The queue is kept and woken.")
                         announce_mod.send_debug(f"Queue for {config.C_BOLD}{target_user}{config.C_RESET} preserved - user verified back in channel before timeout.", category="JOIN")
@@ -559,7 +562,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     elapsed += 10
                 
                 if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
-                    with queue_lock if 'queue_lock' in globals() else threading.Lock():
+                    with queue_lock:
                         if t_key in config.dcc_queue:
                             for f_obj in config.dcc_queue[t_key]:
                                 if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
@@ -580,7 +583,7 @@ def check_queue_and_send(irc_sock, completed_user):
         oserve.active_downloads = len(config.active_transfers)
         
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
-        with queue_lock if 'queue_lock' in globals() else threading.Lock():
+        with queue_lock:
             # FIXED: re-check the slot count INSIDE the lock. The test above is already
             # stale by the time we acquire, so two concurrent callers could both pass it
             # and overshoot MAX_DCC_SLOTS.
@@ -955,7 +958,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
             
-        with queue_lock if 'queue_lock' in globals() else threading.Lock():
+        with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
             
         # This abort returns BEFORE the try/finally that settles the queue row, so without
@@ -988,7 +991,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     if assigned_port is None:
         try: irc_sock.send(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} No available DCC ports.\r\n".encode())
         except: pass
-        with queue_lock if 'queue_lock' in globals() else threading.Lock():
+        with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
 
         # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
@@ -1118,7 +1121,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
 
         # 1. Clean up the transfer and the slot immediately
         try:
-            with queue_lock if 'queue_lock' in globals() else threading.Lock():
+            with queue_lock:
                 config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.active_downloads = len(config.active_transfers)
@@ -1148,7 +1151,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             safe_path = str(file_path)
             
             if "tmp_zips" in safe_path and ".zip" not in safe_path:
-                with queue_lock if 'queue_lock' in globals() else threading.Lock():
+                with queue_lock:
                     # A. Is the file still QUEUED for some OTHER user in dcc_queue.txt?
                     for q_user, q_files in getattr(config, 'dcc_queue', {}).items():
                         if q_user.lower() != user.lower():

@@ -120,7 +120,6 @@ def reset_config(**overrides):
     for name, value in RUNTIME_FLAGS.items():
         setattr(config, name, value)
 
-    config.queue_lock = threading.Lock()
     config.debug_flood_lock = threading.Lock()
     config.fetch_queue_lock = threading.Lock()
     config.fetched_bot_lists_lock = threading.Lock()

@@ -413,6 +413,62 @@ class DebugDrainDeliveryTests(QuietTestCase):
         )
 
 
+class TransferSpeedLockUsesDccQueueLock(unittest.TestCase):
+    """announce_worker()'s per-cycle transfer-speed calculation iterates
+    config.active_transfers - the exact list dcc.py appends to and filters
+    in place under dcc.queue_lock (dcc.py's own module-level lock) every
+    time a transfer starts or ends. This block used to guard its OWN read
+    with config.queue_lock instead - a completely separate Lock() object
+    oserve.py allocated - so it excluded nothing dcc.py's writers were
+    doing: two different locks "protecting" the same list is the same as
+    no lock at all between the two sides.
+
+    Reads announce.py's own source rather than re-typing the condition, so
+    an edit that reintroduces config.queue_lock (or a bare fallback
+    threading.Lock()) here fails this test instead of silently reopening
+    the race - the same discipline test_irc_dispatch.py already uses for
+    its own dispatch-chain conditions.
+    """
+
+    def setUp(self):
+        source_path = os.path.abspath(announce.__file__)
+        if source_path.endswith(".pyc"):  # pragma: no cover - defensive
+            source_path = source_path[:-1]
+        with open(source_path, "r", encoding="utf-8") as handle:
+            self.lines = handle.read().splitlines()
+
+    def _code_lines_containing(self, fragment):
+        """Lines containing `fragment`, excluding comments - so this module's
+        own explanatory comments about the historical bug do not trip the
+        very tests written to guard against it."""
+        return [line.strip() for line in self.lines
+                if fragment in line and not line.strip().startswith("#")]
+
+    def test_the_active_transfers_scan_is_guarded_by_dcc_queue_lock(self):
+        matches = self._code_lines_containing("for tx in config.active_transfers:")
+        self.assertEqual(len(matches), 1,
+                         f"expected exactly one active_transfers scan, found {len(matches)}")
+
+    def test_config_queue_lock_is_never_referenced(self):
+        matches = self._code_lines_containing("config.queue_lock")
+        self.assertEqual(matches, [],
+                         "config.queue_lock reappeared in announce.py - it is a "
+                         "different lock object than dcc.queue_lock, which is what "
+                         "actually guards config.active_transfers; see dcc.py's and "
+                         "oserve.py's comments on this exact mistake")
+
+    def test_the_scan_is_preceded_by_a_with_dcc_queue_lock_line(self):
+        for index, line in enumerate(self.lines):
+            if "for tx in config.active_transfers:" in line:
+                preceding = "\n".join(self.lines[max(0, index - 6):index])
+                self.assertIn("with dcc.queue_lock:", preceding,
+                             "the active_transfers scan is no longer guarded by "
+                             "dcc.queue_lock - the same lock dcc.py holds for every "
+                             "append/removal on that list")
+                return
+        self.fail("could not locate the active_transfers scan to check its guard")
+
+
 def _rmtree(path):
     import shutil
 

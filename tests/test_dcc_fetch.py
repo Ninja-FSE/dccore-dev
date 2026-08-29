@@ -373,6 +373,32 @@ class SizeCapTests(DCCoreTestCase):
         self.assertIn("exceeds", row["reason"])
 
 
+class FallbackLockIsShared(DCCoreTestCase):
+    """_fetch_lock() falls back to a module-level lock when oserve.py has not
+    run (tests, most notably).
+
+    It used to build `threading.Lock()` inline on every call, handing every
+    caller a brand new object it acquired uncontended - so the fallback path
+    synchronised nothing at all, silently. Same fix and same test shape as
+    list_fetch.py's _lock() (see FallbackLockIsShared in test_list_fetch.py)
+    and runtime.channel_users_lock().
+    """
+
+    def test_repeated_calls_return_one_object(self):
+        saved = getattr(config, "fetch_queue_lock", None)
+        if saved is not None:
+            del config.fetch_queue_lock
+            self.addCleanup(setattr, config, "fetch_queue_lock", saved)
+
+        self.assertIs(dcc_fetch._fetch_lock(), dcc_fetch._fetch_lock(),
+                      "the fallback hands out a fresh lock per call, so "
+                      "concurrent callers never actually exclude each other")
+
+    def test_config_fetch_queue_lock_wins_once_it_exists(self):
+        config.fetch_queue_lock = threading.Lock()
+        self.assertIs(dcc_fetch._fetch_lock(), config.fetch_queue_lock)
+
+
 class DispatcherStateMachineTests(DCCoreTestCase):
 
     def test_pending_rows_are_promoted_to_offered_and_a_request_is_queued(self):

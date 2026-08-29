@@ -9,7 +9,7 @@ so the queue or the statistics vanished silently on the next boot.
 These tests pin down the fixed behaviour: write-to-temp-then-os.replace, a failed
 write that leaves the previous file untouched, a damaged file preserved as
 <name>.corrupt, and - the one that is not about disk at all - save_dcc_queue()
-never touching config.queue_lock, because dcc.py calls it while already holding it.
+never touching dcc.queue_lock, because dcc.py calls it while already holding it.
 """
 
 import json
@@ -24,6 +24,7 @@ from tests.support import DCCoreTestCase, queue_row
 
 import config
 import db
+import dcc
 
 
 def _tmp_residue(directory):
@@ -297,10 +298,17 @@ class TestCorruptQueueFile(PersistenceTestCase):
 
 
 class TestQueueLockDeadlockGuard(PersistenceTestCase):
+    """Held lock is dcc.queue_lock - dcc.py's own module-level lock, not
+    config.queue_lock. These tests used to hold config.queue_lock (a
+    separate object oserve.py allocated but dcc.py never actually touches -
+    see dcc.py's and oserve.py's own comments on that mistake) while
+    claiming to reproduce "exactly what dcc.py does", so a real reentrancy
+    regression against the lock dcc.py genuinely holds would have gone
+    uncaught here."""
 
-    def test_save_dcc_queue_does_not_take_config_queue_lock(self):
-        """Defect: save_dcc_queue() guarded itself with config.queue_lock, but dcc.py calls
-        it from inside "with config.queue_lock:" and threading.Lock is not reentrant - the
+    def test_save_dcc_queue_does_not_take_dcc_queue_lock(self):
+        """Defect: save_dcc_queue() guarded itself with dcc.queue_lock, but dcc.py calls
+        it from inside "with dcc.queue_lock:" and threading.Lock is not reentrant - the
         first save after a transfer deadlocked the whole daemon.
 
         Run in a daemon thread with a join timeout so a regression fails the test instead
@@ -311,7 +319,7 @@ class TestQueueLockDeadlockGuard(PersistenceTestCase):
 
         def caller():
             try:
-                with config.queue_lock:          # exactly what dcc.py does
+                with dcc.queue_lock:          # exactly what dcc.py does
                     db.save_dcc_queue()
             except Exception as err:             # pragma: no cover - defensive
                 errors.append(err)
@@ -334,7 +342,7 @@ class TestQueueLockDeadlockGuard(PersistenceTestCase):
         finished = threading.Event()
 
         def caller():
-            with config.queue_lock:
+            with dcc.queue_lock:
                 db.save_bans_to_file()
                 db.save_advanced_stats([1, 2, 3, 4, 5, 6, "2026-08-23"])
                 db.save_speed_record(4242)
@@ -350,8 +358,8 @@ class TestQueueLockDeadlockGuard(PersistenceTestCase):
 
     def test_disk_lock_is_a_separate_lock_object(self):
         """Structural guard for the same defect: db's own serialising lock must never be
-        config.queue_lock, however the modules are imported or reloaded."""
-        self.assertIsNot(db._disk_lock, config.queue_lock)
+        dcc.queue_lock, however the modules are imported or reloaded."""
+        self.assertIsNot(db._disk_lock, dcc.queue_lock)
         self.assertIsNot(db._disk_lock, getattr(config, "debug_flood_lock", None))
 
     def test_save_does_not_leave_the_disk_lock_held_after_a_failure(self):

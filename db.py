@@ -7,7 +7,7 @@ import threading
 import config
 
 # Every on-disk file this module owns is small and rewritten in full, so a single
-# lock serialising the writes is enough. It is deliberately NOT config.queue_lock:
+# lock serialising the writes is enough. It is deliberately NOT dcc.queue_lock:
 # dcc.py calls save_dcc_queue() while already holding queue_lock, and threading.Lock
 # is not reentrant, so reusing it would deadlock on the first save.
 _disk_lock = threading.Lock()
