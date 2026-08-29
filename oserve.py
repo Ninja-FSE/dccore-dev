@@ -141,7 +141,10 @@ def startup():
     except Exception as web_err:
         print(f"[WEBUI] Could not import webserver: {web_err}")
     else:
-        if getattr(config, "WEBUI_ENABLED", True):
+        # False when absent, matching what config.py ships. The dashboard is
+        # an unauthenticated listener, so a missing switch must not be read
+        # as consent to open one - see config.WEBUI_ENABLED's own comment.
+        if getattr(config, "WEBUI_ENABLED", False):
             threading.Thread(target=webserver.start, daemon=True).start()
         else:
             print("[WEBUI] Disabled via config.WEBUI_ENABLED = False.")

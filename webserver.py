@@ -760,11 +760,15 @@ def start():
     if not HAVE_FLASK:
         print("[WEBUI] Flask not installed; dashboard disabled.")
         return
-    if not getattr(config, "WEBUI_ENABLED", True):
+    # See oserve.startup(): absent means off, the same way config.py ships it.
+    if not getattr(config, "WEBUI_ENABLED", False):
         print("[WEBUI] Disabled via config.WEBUI_ENABLED = False.")
         return
 
-    host = getattr(config, "WEBUI_HOST", "0.0.0.0")
+    # 127.0.0.1 when absent, matching config.py. 0.0.0.0 would bind every
+    # interface and put an unauthenticated API on the LAN, which is the
+    # opposite of what a missing setting should buy anyone.
+    host = getattr(config, "WEBUI_HOST", "127.0.0.1")
     port = getattr(config, "WEBUI_PORT", 8420)
     app = create_app()
     print(f"[WEBUI] Dashboard starting on http://{host}:{port}/ (no authentication - LAN-only).")
