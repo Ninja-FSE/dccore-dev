@@ -13,6 +13,7 @@ import ast
 import io
 import os
 import sys
+import threading
 import time
 import unittest
 from contextlib import redirect_stdout
@@ -578,6 +579,115 @@ class FetchRoutesTests(DCCoreTestCase):
 
     def test_status_payload_is_empty_list_when_queue_is_empty(self):
         self.assertEqual(webserver.build_fetch_status_payload(), [])
+
+
+class FetchStatusPayloadConcurrencyTests(DCCoreTestCase):
+    """build_fetch_status_payload() used to read config.fetch_queue with no
+    lock at all, while dcc_fetch.check_fetch_queue() has always promoted a
+    row to 'offered' under dcc_fetch._fetch_lock() as TWO separate
+    statements - `row["state"] = "offered"` then `row["offered_at"] = now`
+    (dcc_fetch.py, promoting a pending row). Every existing reader of the
+    status payload treats state=="offered" and offered_at being set as a
+    package - the dashboard shows "waiting on <bot>" only once an offer
+    time exists - so a read landing between those two statements used to be
+    able to observe "offered" with offered_at still None, a torn pair no
+    valid row can actually be in.
+
+    This races a writer performing exactly that two-step promotion, over
+    and over, against build_fetch_status_payload(), asserting the pair is
+    never torn - then proves the identical writer reliably produces a torn
+    read when the read is left unlocked (the pre-fix shape), confirming the
+    passing test depends on the fix rather than being compatible with it by
+    chance.
+    """
+
+    ROUNDS = 5000
+
+    def setUp(self):
+        super().setUp()
+        import dcc_fetch
+        self.rid = dcc_fetch.enqueue_fetch("racebot", "Song.flac")
+
+    def _promote_and_revert(self, stop):
+        """The exact two statements dcc_fetch.check_fetch_queue() uses to
+        promote a pending row, under the real lock, followed by a revert so
+        the row can be promoted again on the next round."""
+        import dcc_fetch
+        row = config.fetch_queue[self.rid]
+        i = 0
+        while not stop.is_set() and i < self.ROUNDS:
+            with dcc_fetch._fetch_lock():
+                row["state"] = "offered"
+                row["offered_at"] = time.time()
+            with dcc_fetch._fetch_lock():
+                row["state"] = "pending"
+                row["offered_at"] = None
+            i += 1
+        stop.set()
+
+    def test_concurrent_promotion_and_status_payload_reads_never_see_a_torn_pair(self):
+        stop = threading.Event()
+        torn = []
+
+        def reader():
+            while not stop.is_set():
+                for row in webserver.build_fetch_status_payload():
+                    if row["state"] == "offered" and row["offered_at"] is None:
+                        torn.append(dict(row))
+
+        writer_thread = threading.Thread(target=self._promote_and_revert, args=(stop,), daemon=True)
+        reader_thread = threading.Thread(target=reader, daemon=True)
+        writer_thread.start()
+        reader_thread.start()
+        writer_thread.join(timeout=30)
+        stop.set()
+        reader_thread.join(timeout=10)
+
+        self.assertFalse(writer_thread.is_alive(), "writer thread never finished - possible deadlock")
+        self.assertFalse(reader_thread.is_alive(), "reader thread never finished - possible deadlock")
+        self.assertEqual(torn, [],
+                         f"observed {len(torn)} torn read(s) of state=='offered' with "
+                         f"offered_at still None, despite the shared lock: {torn[:5]}")
+
+    def test_without_the_lock_the_same_workload_produces_a_torn_pair(self):
+        """Control: the identical promote/revert workload, with the read
+        left unlocked (the pre-fix shape of build_fetch_status_payload()),
+        reliably observes the torn pair - proving the test above is not
+        vacuously passing.
+
+        sys.setswitchinterval() is turned down for this test only, forcing
+        far more frequent thread switches - the default 5ms interval
+        otherwise lets the whole promote-then-revert workload finish inside
+        one timeslice often enough that this control can pass by luck even
+        though nothing here is actually synchronised.
+        """
+        old_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        self.addCleanup(sys.setswitchinterval, old_interval)
+
+        stop = threading.Event()
+        torn = []
+
+        def unlocked_reader():
+            while not stop.is_set():
+                queue = dict(getattr(config, "fetch_queue", {}) or {})
+                for row in queue.values():
+                    row_out = dict(row)
+                    if row_out["state"] == "offered" and row_out["offered_at"] is None:
+                        torn.append(row_out)
+
+        writer_thread = threading.Thread(target=self._promote_and_revert, args=(stop,), daemon=True)
+        reader_thread = threading.Thread(target=unlocked_reader, daemon=True)
+        writer_thread.start()
+        reader_thread.start()
+        writer_thread.join(timeout=30)
+        stop.set()
+        reader_thread.join(timeout=10)
+
+        self.assertTrue(len(torn) > 0,
+                        "the unlocked control workload never observed a torn pair - "
+                        "this test would no longer prove the fix prevents anything; "
+                        "it needs a heavier workload")
 
 
 class ListFetchRoutesTests(DCCoreTestCase):
