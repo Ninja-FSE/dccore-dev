@@ -24,11 +24,25 @@ if REPO_ROOT not in sys.path:
 if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
+import adminchat  # noqa: E402
 import config  # noqa: E402
 import list as list_mod  # noqa: E402
 import webserver  # noqa: E402
 
 from tests.support import DCCoreTestCase, queue_row  # noqa: E402
+
+WEBUI_TEST_PASSWORD = "test-password"
+
+
+def log_in_test_client(client, password=WEBUI_TEST_PASSWORD):
+    """POST the login form on a Flask test client, the same way a browser
+    would - so a protected route's test reaches the code under test instead
+    of the 401/redirect require_login() now puts in front of every route.
+    Low iteration count purely for test speed; see test_adminchat.py for the
+    same pattern."""
+    resp = client.post("/login", data={"password": password})
+    assert resp.status_code == 302, "test login failed - fixture's own password/hash disagree"
+    return resp
 
 
 def write_master_list(lists_dir, base_name, folders):
@@ -865,8 +879,11 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.oserve.irc_connection = "fake-connected-socket"
         config.CHANNEL = "#mp3passion,#mp3servers"
         config.BROADCAST_SEARCH_CHANNEL = "#mp3passion"
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(
+            WEBUI_TEST_PASSWORD, iterations=1000))
         self.app = webserver.create_app()
         self.client = self.app.test_client()
+        log_in_test_client(self.client)
 
     def test_broadcast_term_with_crlf_is_rejected_via_http(self):
         resp = self.client.post("/api/search/broadcast", json={
@@ -961,6 +978,80 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
 @unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
                                             "CI never installs it, this class only runs when it "
                                             "happens to be available locally")
+class LoginGateTests(DCCoreTestCase):
+    """require_login() and the /login, /logout routes it exempts itself from.
+
+    Every route in create_app() sits behind this gate now - these tests are
+    the ones that actually exercise logging in and out, rather than assuming
+    the fixtures elsewhere (which all log in during setUp) prove it works."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(
+            WEBUI_TEST_PASSWORD, iterations=1000))
+        self.app = webserver.create_app()
+        self.client = self.app.test_client()
+
+    def test_an_unauthenticated_page_request_redirects_to_login(self):
+        resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.headers["Location"].endswith("/login"))
+
+    def test_an_unauthenticated_api_request_gets_json_401_not_a_redirect(self):
+        """An API caller (fetch(), not a browser navigation) wants a status
+        code and a body it can branch on, not a 302 to an HTML page."""
+        resp = self.client.get("/api/queue")
+        self.assertEqual(resp.status_code, 401)
+        self.assertIn("error", resp.get_json())
+
+    def test_the_login_page_itself_is_reachable_unauthenticated(self):
+        """Defect guard: require_login() must exempt exactly this route, or
+        an unauthenticated visitor could never reach the form that logs them
+        in - the site would refuse everyone, permanently, including its own
+        operator."""
+        resp = self.client.get("/login")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Admin password", resp.data)
+
+    def test_the_right_password_logs_in_and_reaches_protected_routes(self):
+        log_in_test_client(self.client, WEBUI_TEST_PASSWORD)
+
+        resp = self.client.get("/api/queue")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_the_wrong_password_is_refused_and_leaves_routes_locked(self):
+        resp = self.client.post("/login", data={"password": "not-it"})
+        self.assertEqual(resp.status_code, 401)
+        self.assertIn(b"Incorrect password", resp.data)
+
+        still_locked = self.client.get("/api/queue")
+        self.assertEqual(still_locked.status_code, 401)
+
+    def test_logout_clears_the_session_and_relocks_every_route(self):
+        log_in_test_client(self.client, WEBUI_TEST_PASSWORD)
+        self.assertEqual(self.client.get("/api/queue").status_code, 200)
+
+        logout_resp = self.client.post("/logout")
+        self.assertEqual(logout_resp.status_code, 302)
+        self.assertTrue(logout_resp.headers["Location"].endswith("/login"))
+
+        self.assertEqual(self.client.get("/api/queue").status_code, 401)
+
+    def test_a_static_asset_is_also_behind_the_gate(self):
+        """The docstring's claim - "including static assets" - would be false
+        if web/style.css slipped past require_login() by being served through
+        Flask's separate "static" endpoint rather than a named @app.route."""
+        resp = self.client.get("/style.css")
+        self.assertEqual(resp.status_code, 302)
+
+        log_in_test_client(self.client, WEBUI_TEST_PASSWORD)
+        resp = self.client.get("/style.css")
+        self.assertEqual(resp.status_code, 200)
+
+
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
+                                            "CI never installs it, this class only runs when it "
+                                            "happens to be available locally")
 class FilelistsHttpPaginationTests(DCCoreTestCase):
     """GET /api/filelists and GET /api/filelists/bot/<nick>, end to end
     through the real Flask app - both now return a page object
@@ -980,8 +1071,11 @@ class FilelistsHttpPaginationTests(DCCoreTestCase):
             (f"D:\MUSIC\Album {i:02d}\\", [(f"Track {i:02d}.flac", "1.0MB")])
             for i in range(10)
         ])
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(
+            WEBUI_TEST_PASSWORD, iterations=1000))
         self.app = webserver.create_app()
         self.client = self.app.test_client()
+        log_in_test_client(self.client)
 
     def test_own_list_defaults_to_the_documented_page_size(self):
         resp = self.client.get("/api/filelists")
@@ -1550,20 +1644,23 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
 
 class TheDashboardSwitchFailsClosed(unittest.TestCase):
     """config.py ships `WEBUI_ENABLED = False` and `WEBUI_HOST = "127.0.0.1"`,
-    and states why in as many words: the dashboard is a network-facing,
-    unauthenticated surface that "should never be on just because someone
-    pulled and restarted", where "every /api/* route is open to anyone who can
-    reach this host:port - there is no login, no token, no password".
+    and states why in as many words: a network-facing surface that "should
+    never be on just because someone pulled and restarted" (WEBUI_ENABLED),
+    put only on loopback unless the operator explicitly widens it
+    (WEBUI_HOST) - now on top of the login gate in webserver.py, not instead
+    of it.
 
     Both readers used to fall back to `True` and `"0.0.0.0"` when the name was
     absent. So a missing switch did not just fail to honour the shipped
-    default - it opened an unauthenticated API on every interface, which is
-    the strongest possible inversion of what config.py promises.
+    default - it put the dashboard on every interface, which is the strongest
+    possible inversion of what config.py promises.
 
     Absent is reachable rather than theoretical: a bare annotation binds no
     name at all, and #100's mandatory-settings work is precisely about
     removing shipped values from settings.
     """
+
+    TEST_PASSWORD_HASH = "pbkdf2_sha256$1000$00$00"  # never actually verified in this class
 
     def setUp(self):
         self._real_flask = webserver.HAVE_FLASK
@@ -1631,9 +1728,10 @@ class TheDashboardSwitchFailsClosed(unittest.TestCase):
                       "a missing switch started an unauthenticated listener")
 
     def test_an_absent_host_binds_loopback_not_every_interface(self):
-        """0.0.0.0 would put the unauthenticated API on the LAN. Loopback is
-        what config.py ships, so loopback is what a missing value means."""
+        """0.0.0.0 would put the dashboard on the LAN. Loopback is what
+        config.py ships, so loopback is what a missing value means."""
         self._set("WEBUI_ENABLED", True)
+        self._set("ADMIN_PASSWORD_HASH", self.TEST_PASSWORD_HASH)
         self._unset("WEBUI_HOST")
 
         with redirect_stdout(io.StringIO()):
@@ -1645,6 +1743,7 @@ class TheDashboardSwitchFailsClosed(unittest.TestCase):
         """Control: failing closed is about the ABSENT case. An operator who
         deliberately binds every interface must still get that."""
         self._set("WEBUI_ENABLED", True)
+        self._set("ADMIN_PASSWORD_HASH", self.TEST_PASSWORD_HASH)
         self._set("WEBUI_HOST", "0.0.0.0")
 
         with redirect_stdout(io.StringIO()):
@@ -1655,6 +1754,7 @@ class TheDashboardSwitchFailsClosed(unittest.TestCase):
     def test_the_switch_being_on_still_starts_it(self):
         """Control: the gate must not have been welded shut."""
         self._set("WEBUI_ENABLED", True)
+        self._set("ADMIN_PASSWORD_HASH", self.TEST_PASSWORD_HASH)
 
         buffer = io.StringIO()
         with redirect_stdout(buffer):
@@ -1662,6 +1762,20 @@ class TheDashboardSwitchFailsClosed(unittest.TestCase):
 
         self.assertNotIn("Disabled via", buffer.getvalue())
         self.assertIn("port", self.recorded)
+
+    def test_an_unset_password_hash_refuses_to_start_even_when_enabled(self):
+        """The dashboard must never be reachable with no way to log in.
+        WEBUI_ENABLED alone is not enough of a gate any more - a password has
+        to actually be configured, or start() refuses regardless."""
+        self._set("WEBUI_ENABLED", True)
+        self._set("ADMIN_PASSWORD_HASH", "")
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            webserver.start()
+
+        self.assertIn("ADMIN_PASSWORD_HASH is not set", buffer.getvalue())
+        self.assertEqual(self.recorded, {}, "app.run() must not have been reached")
 
 
 class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
