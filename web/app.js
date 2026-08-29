@@ -895,13 +895,18 @@
       return;
     }
 
-    var unreachable = payload.unreachable || 0;
+    // "shadowed", not "unreachable" - see webserver.build_verify_list_payload().
+    // Since #128 a requester pasting a search result's whole line reaches the
+    // copy its size names; it is the bare-name request that only ever gets the
+    // first one listed.
+    var shadowed = payload.shadowed || 0;
     el.verifyStatus.textContent =
       duplicates.length.toLocaleString() +
       (duplicates.length === 1 ? " filename appears" : " filenames appear") +
       " under more than one folder, out of " + checked.toLocaleString() +
-      " checked. " + unreachable.toLocaleString() +
-      (unreachable === 1 ? " copy is" : " copies are") + " unreachable.";
+      " checked. " + shadowed.toLocaleString() +
+      (shadowed === 1 ? " copy is" : " copies are") +
+      " reachable only by pasting a search result's whole line.";
     el.verifyStatus.classList.remove("is-error");
 
     el.verifyResults.innerHTML = duplicates.map(function (item) {
@@ -914,7 +919,7 @@
           "<span class=\"verify-path\">" +
             escapeHtml(folder || "(library root)") + "</span>" +
           (index === 0 ? "<span class=\"verify-tag\">served</span>"
-                       : "<span class=\"verify-tag is-dim\">unreachable</span>") +
+                       : "<span class=\"verify-tag is-dim\">shadowed</span>") +
           "</li>";
       }).join("");
       return "<div class=\"verify-group\">" +
