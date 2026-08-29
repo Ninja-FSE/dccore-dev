@@ -123,6 +123,16 @@ class StartupRunsOnThisPlatform(BootCase):
         self.assertFalse(os.path.exists(config.BANS_FILE))
         self.boot()
 
+    def test_a_missing_bans_file_says_so(self):
+        """The gap this guards: a wrong working directory makes BANS_FILE's
+        relative path resolve to nowhere, and the daemon used to start with
+        an empty ban list and no way to tell that apart from every ban
+        having already expired."""
+        self.assertFalse(os.path.exists(config.BANS_FILE))
+        output = self.boot()
+        self.assertIn(config.BANS_FILE, output)
+        self.assertIn("no active bans", output.lower())
+
 
 class ReconnectLoopResetsTheGlobals(BootCase):
     """The trap this refactor had to avoid.

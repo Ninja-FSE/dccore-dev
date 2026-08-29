@@ -97,6 +97,13 @@ def startup():
 
     if os.path.exists(config.BANS_FILE):
         db.load_bans_from_file()
+    else:
+        # Same shape as the list-file check above: say so, rather than
+        # starting with an empty ban list and no way to tell that apart
+        # from "every temporary ban already expired". A wrong working
+        # directory (this path is relative - see the launcher scripts'
+        # own comments) produces exactly this silently.
+        print(f"[WARNING] No {config.BANS_FILE} yet - starting with no active bans.")
 
     # Read every saved queue slot back from disk at boot.
     db.load_dcc_queue()
