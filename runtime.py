@@ -54,6 +54,8 @@ change nothing except to make it look as though it had. Their behaviour across
 a rehash is unchanged.
 """
 
+import threading
+
 # Per-user bookkeeping -------------------------------------------------------
 failed_transfers = {}    # Failed-transfer counter, per user
 channel_users    = {}    # Users currently seen in the channels
@@ -79,3 +81,27 @@ active_transfers = []    # Live DCC sends, one thread each
 broadcast_search_results = []  # Captured replies during an open @find broadcast window
 fetch_queue              = {}  # Cross-bot file/list fetch requests, keyed by request id
 fetched_bot_lists        = {}  # Parsed lists fetched FROM other bots, keyed by lowercased nick
+
+# channel_users is mutated from the IRC read thread (irc.py, on every
+# JOIN/PART/QUIT/353) and iterated from other threads (dcc.py's queue
+# dispatch, commands.py's rehash) with no lock at all until this one -
+# unlike dcc_queue/fetch_queue/fetched_bot_lists, which have always had one.
+# Lives here rather than being allocated onto config by oserve.py like those
+# three: a Lock() object constructed in config.py would be a NEW lock every
+# time !rehash reloads it, exactly the rebind trap the rest of this module
+# exists to avoid - config.py never held a lock object directly for that
+# reason, and this one shouldn't be the first.
+_channel_users_lock = threading.Lock()
+
+
+def channel_users_lock():
+    """The lock every read and write of channel_users must hold.
+
+    A deferred import, not a module-level one: config.py imports this
+    module, so importing config back at load time here would cycle. By the
+    time this function is actually called, both modules are already fully
+    loaded, so the deferred import just looks config up in sys.modules -
+    the standard way to break a cycle like this one.
+    """
+    import config
+    return getattr(config, "channel_users_lock", None) or _channel_users_lock
