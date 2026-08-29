@@ -41,6 +41,15 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # Optional dependency (see requirements-web.txt) - the daemon itself needs
+      # nothing and runs fine without this. Installed here so the suite exercises
+      # webserver.py's real Flask routes rather than always taking the
+      # @skipUnless(webserver.HAVE_FLASK, ...) path: those routes had gone
+      # untested in CI since the day they were added, on every PR, because
+      # nothing here ever installed Flask.
+      - name: Install the optional web dashboard dependency
+        run: pip install -r requirements-web.txt
+
       - name: Every module imports cleanly
         # Catches a syntax error or a bad import before the suite even starts.
         #
