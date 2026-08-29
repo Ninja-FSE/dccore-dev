@@ -15,6 +15,19 @@ listing they published.
 The two only disagree when the same filename exists in more than one folder.
 Step 2 had a bug that made it never match at all, so step 3 answered every
 request - including the ones step 2 would have answered differently.
+
+WHY THE FIXTURE DERIVES THE WALK ORDER INSTEAD OF ASSUMING IT
+
+These tests need the two resolvers to disagree, which means knowing which
+folder os.walk reaches first. That is the FILESYSTEM's choice and not ours:
+NTFS returns directories in roughly alphabetical order, while ext4's htree
+gives a hash order with no relation to the names. An earlier version of this
+file hardcoded "Alpha Album comes first", which held on Windows and failed
+deterministically on ext4.
+
+So the order is measured at setUp and the list is built against it. What the
+tests assert - that the list wins over the walk - is then true on any
+filesystem, rather than only on the one they were written on.
 """
 
 import io
@@ -29,30 +42,43 @@ import dcc  # noqa: E402
 from tests.test_path_security import InlineThread, PathSecurityBase, quiet  # noqa: E402
 
 NAME = "Track 01.flac"
+ALBUMS = ("Alpha Album", "Zebra Album")
 
 
 class TwoFoldersOneFilename(PathSecurityBase):
-    """The same track name under two albums, where the list and the
-    filesystem would choose differently.
-
-    "Alpha Album" sorts first, so os.walk() reaches it first. The list names
-    "Zebra Album" first. Every assertion below turns on which of those wins,
-    which is exactly the question a duplicate filename asks.
-    """
+    """The same track name under two albums, with the list and the filesystem
+    deliberately disagreeing about which one to serve."""
 
     def setUp(self):
         super().setUp()
-        self.alpha = self._album("Alpha Album", "ALPHA")
-        self.zebra = self._album("Zebra Album", "ZEBRA")
-        self._write_list(["Zebra Album", "Alpha Album"])
+        for folder in ALBUMS:
+            self._album(folder)
 
-    def _album(self, folder, payload):
+        # Measured, not assumed - see the module docstring.
+        self.walk_first = self._walk_reaches_first()
+        self.list_first = next(f for f in ALBUMS if f != self.walk_first)
+        self._write_list([self.list_first, self.walk_first])
+
+    # -- fixture ----------------------------------------------------------
+
+    def _album(self, folder):
+        """One album holding the shared name. The file's contents are its own
+        folder name, so a test can tell which copy was actually opened."""
         directory = os.path.join(self.tree.music, folder)
         os.makedirs(directory, exist_ok=True)
-        path = os.path.join(directory, NAME)
-        with io.open(path, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-        return path
+        with io.open(os.path.join(directory, NAME), "w", encoding="utf-8") as handle:
+            handle.write(folder)
+        return os.path.join(directory, NAME)
+
+    def _path(self, folder):
+        return os.path.join(self.tree.music, folder, NAME)
+
+    def _walk_reaches_first(self):
+        """The folder os.walk hands back first on THIS filesystem."""
+        for root, _dirs, files in os.walk(self.tree.music):
+            if NAME in files:
+                return os.path.basename(root)
+        self.fail("fixture invariant: neither copy was written to disk")
 
     def _write_list(self, folders):
         """A master list in the shape update_list.py writes: a folder heading
@@ -99,41 +125,42 @@ class TwoFoldersOneFilename(PathSecurityBase):
         answer is the copy they meant."""
         self._request(NAME)
 
-        self.assertEqual(self._served_path(), self.zebra,
-                         "served the copy the filesystem happened to reach "
-                         "first, not the one the published list names first")
+        self.assertEqual(
+            self._served_path(), self._path(self.list_first),
+            "served the copy the filesystem happened to reach first, not the "
+            "one the published list names first")
 
-    def test_the_walk_would_have_picked_the_other_one(self):
-        """Fixture invariant, and the discriminator for the test above.
+    def test_the_two_resolvers_genuinely_disagree(self):
+        """Fixture invariant, and the discriminator for the test above: the
+        list must name a different folder from the one the walk reaches, or
+        that test would pass without proving anything."""
+        self.assertNotEqual(self.list_first, self.walk_first)
+        self.assertIn(self.walk_first, ALBUMS)
 
-        If os.walk ever stopped reaching Alpha first, the test above would
-        pass without proving anything - it would be asserting a coincidence.
-        """
         found = None
         for root, _dirs, files in os.walk(self.tree.music):
             if NAME in files:
-                found = os.path.join(root, NAME)
+                found = os.path.basename(root)
                 break
 
-        self.assertEqual(found, self.alpha,
-                         "fixture invariant: the walk must reach the copy the "
-                         "list does NOT name first, or these tests prove nothing")
+        self.assertEqual(found, self.walk_first,
+                         "the walk order changed between setUp and now")
 
     def test_reordering_the_list_changes_which_copy_is_served(self):
         """The list is genuinely being read, rather than the right answer
-        coming out for some other reason."""
-        self._write_list(["Alpha Album", "Zebra Album"])
+        arriving for some other reason."""
+        self._write_list([self.walk_first, self.list_first])
 
         self._request(NAME)
 
-        self.assertEqual(self._served_path(), self.alpha)
+        self.assertEqual(self._served_path(), self._path(self.walk_first))
 
     def test_the_served_copy_is_the_one_whose_contents_go_out(self):
         """The path is not just cosmetic - it is what gets read off disk."""
         self._request(NAME)
 
         with io.open(self._served_path(), encoding="utf-8") as handle:
-            self.assertEqual(handle.read(), "ZEBRA")
+            self.assertEqual(handle.read(), self.list_first)
 
     def test_no_error_is_reported_for_a_duplicate(self):
         """Documents the behaviour rather than asking for it: a duplicate is
@@ -147,18 +174,23 @@ class TwoFoldersOneFilename(PathSecurityBase):
 
     def test_a_unique_filename_in_a_folder_still_resolves(self):
         """The ordinary case, which is every request on a clean library."""
-        only = self._album("Solo Album", "SOLO")
-        self._write_list(["Zebra Album", "Alpha Album", "Solo Album"])
+        directory = os.path.join(self.tree.music, "Solo Album")
+        os.makedirs(directory, exist_ok=True)
+        with io.open(os.path.join(directory, "Only Here.flac"), "w",
+                     encoding="utf-8") as handle:
+            handle.write("SOLO")
         with io.open(os.path.join(self.tree.lists,
                                   "%s-2026-01-01.txt" % config.LIST_BASE_NAME),
                      "a", encoding="utf-8") as handle:
+            rule = "=" * 53
+            handle.write("\n%s\nD:\\MUSIC\\Solo Album\\\n%s\n" % (rule, rule))
             handle.write("!%s Only Here.flac  ::INFO:: 1.0MB\n" % config.NICKNAME)
-        os.rename(only, os.path.join(os.path.dirname(only), "Only Here.flac"))
 
         kinds = self._request("Only Here.flac")
 
         self.assertNotIn("error", kinds)
-        self.assertEqual(os.path.basename(self._served_path() or ""), "Only Here.flac")
+        self.assertEqual(self._served_path(),
+                         os.path.join(directory, "Only Here.flac"))
 
     def test_a_missing_file_is_still_refused(self):
         """Without this, "no error" above could pass for a build that never
