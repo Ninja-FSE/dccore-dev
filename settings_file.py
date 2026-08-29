@@ -118,14 +118,45 @@ def parse(text):
     return flat
 
 
-def coerce(name, raw, default):
-    """Convert `raw` to the type of `default`. Raises ValueError on failure."""
-    text = raw.strip()
+def declared_types(namespace):
+    """{NAME: type} for every setting config.py annotates.
 
-    # bool BEFORE int, always: bool is a SUBCLASS of int in Python, so an
-    # isinstance(default, int) test matches True and False too and every flag
-    # would be read as a number.
-    if isinstance(default, bool):
+    A module's annotated assignments populate its `__annotations__`, so this
+    reads config.py's own declaration back rather than being a second list to
+    keep in step with it - the same reason the default value itself was the
+    type declaration before annotations existed.
+
+    Anything whose annotation is not a plain type is ignored rather than
+    guessed at, and the caller falls back to the default's own type.
+    """
+    annotations = namespace.get("__annotations__") or {}
+    return {name: kind for name, kind in annotations.items() if isinstance(kind, type)}
+
+
+def coerce(name, raw, default, declared=None):
+    """Convert `raw` to `declared`, or to the type of `default` without one.
+
+    Raises ValueError on failure.
+
+    The declared type is what lets a setting be unset-until-configured. A
+    default of None says nothing about what the value should become, so
+    `RAR_BINARY: str = None` is the annotation carrying that meaning instead
+    of the value having to imply it.
+    """
+    text = raw.strip()
+    kind = declared if declared is not None else type(default)
+
+    if default is None and not text:
+        # A setting whose default is None is "unset unless you say otherwise"
+        # - RAR_BINARY is the example, meaning "look on PATH". An empty value
+        # in the file means the same thing rather than an empty string.
+        return None
+
+    # bool is checked BEFORE int for readers who remember why it had to be:
+    # bool is a SUBCLASS of int, so the isinstance() test this used to do
+    # matched True and False as well and read every flag as a number. Matching
+    # the type exactly removes that trap rather than ordering around it.
+    if kind is bool:
         lowered = text.lower()
         if lowered in _TRUE:
             return True
@@ -134,26 +165,25 @@ def coerce(name, raw, default):
         raise ValueError(
             f"expected a yes/no value (one of {sorted(_TRUE | _FALSE)}), got {raw!r}")
 
-    if isinstance(default, int):
+    if kind is int:
         try:
             return int(text)
         except ValueError:
             raise ValueError(f"expected a whole number, got {raw!r}") from None
 
-    if isinstance(default, float):
+    if kind is float:
         try:
             return float(text)
         except ValueError:
             raise ValueError(f"expected a number, got {raw!r}") from None
 
-    if isinstance(default, list):
+    if kind is list:
         return [part.strip() for part in text.split(",") if part.strip()]
 
-    if default is None:
-        # A setting whose default is None is "unset unless you say otherwise"
-        # - RAR_BINARY is the example, meaning "look on PATH". An empty value
-        # in the file means the same thing rather than an empty string.
-        return text or None
+    if kind is type(None):
+        # No annotation and a None default: nothing declares what this should
+        # become, so it stays the text the operator wrote.
+        return text
 
     return raw.strip("\n")
 
@@ -180,12 +210,13 @@ def apply_to(namespace, path=None, log=print):
             f"continuing with the built-in defaults: {err}")
         return report
 
+    types = declared_types(namespace)
     for key, raw in entries.items():
         if key not in namespace or not is_overridable(key, namespace[key]):
             report["unknown"].append(key)
             continue
         try:
-            value = coerce(key, raw, namespace[key])
+            value = coerce(key, raw, namespace[key], types.get(key))
         except ValueError as err:
             report["bad"].append((key, str(err)))
             continue
