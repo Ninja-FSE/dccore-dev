@@ -9,6 +9,7 @@ and "disabled via config" paths, which must never raise regardless of whether
 Flask happens to be installed in the environment running this file.
 """
 
+import ast
 import io
 import os
 import sys
@@ -1107,9 +1108,21 @@ class OptionalFlaskDependencyTests(unittest.TestCase):
         real_have_flask = webserver.HAVE_FLASK
         webserver.HAVE_FLASK = True
         self.addCleanup(lambda: setattr(webserver, "HAVE_FLASK", real_have_flask))
-        real_enabled = getattr(config, "WEBUI_ENABLED", True)
+        # Restores absence as absence. Defaulting to True here would have the
+        # cleanup CREATE the switch, set to the value this PR exists to stop
+        # anything assuming.
+        missing = object()
+        real_enabled = getattr(config, "WEBUI_ENABLED", missing)
         config.WEBUI_ENABLED = False
-        self.addCleanup(lambda: setattr(config, "WEBUI_ENABLED", real_enabled))
+
+        def restore_enabled():
+            if real_enabled is missing:
+                if hasattr(config, "WEBUI_ENABLED"):
+                    del config.WEBUI_ENABLED
+            else:
+                config.WEBUI_ENABLED = real_enabled
+
+        self.addCleanup(restore_enabled)
 
         buffer = io.StringIO()
         with redirect_stdout(buffer):
@@ -1421,6 +1434,216 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
         self.assertEqual(config.fetch_queue[request_id]["state"], "pending",
                          "the dispatcher promoted a row while the feature "
                          "reads as disabled")
+
+
+
+
+class TheDashboardSwitchFailsClosed(unittest.TestCase):
+    """config.py ships `WEBUI_ENABLED = False` and `WEBUI_HOST = "127.0.0.1"`,
+    and states why in as many words: the dashboard is a network-facing,
+    unauthenticated surface that "should never be on just because someone
+    pulled and restarted", where "every /api/* route is open to anyone who can
+    reach this host:port - there is no login, no token, no password".
+
+    Both readers used to fall back to `True` and `"0.0.0.0"` when the name was
+    absent. So a missing switch did not just fail to honour the shipped
+    default - it opened an unauthenticated API on every interface, which is
+    the strongest possible inversion of what config.py promises.
+
+    Absent is reachable rather than theoretical: a bare annotation binds no
+    name at all, and #100's mandatory-settings work is precisely about
+    removing shipped values from settings.
+    """
+
+    def setUp(self):
+        self._real_flask = webserver.HAVE_FLASK
+        webserver.HAVE_FLASK = True
+        self.addCleanup(lambda: setattr(webserver, "HAVE_FLASK", self._real_flask))
+        # Replaced for EVERY test in this class, not only the ones that inspect
+        # the bind. These drive start() directly, so if the gate under test
+        # regresses the real Flask app binds a socket and blocks the whole
+        # suite - which is exactly what happened while mutation-testing this
+        # change. A test must not be able to start a live listener because the
+        # code it is testing broke.
+        self.recorded = self._record_run()
+
+    def _unset(self, name):
+        """Remove a config attribute for one test and put it back exactly as it
+        was - including putting back its absence, if it was absent."""
+        missing = object()
+        previous = getattr(config, name, missing)
+        if previous is not missing:
+            delattr(config, name)
+
+        def restore():
+            if previous is missing:
+                if hasattr(config, name):
+                    delattr(config, name)
+            else:
+                setattr(config, name, previous)
+
+        self.addCleanup(restore)
+
+    def _set(self, name, value):
+        self._unset(name)
+        setattr(config, name, value)
+
+    def _record_run(self):
+        """Stand in for create_app() so start() can be driven all the way to
+        the bind without a socket ever being opened."""
+        recorded = {}
+
+        class FakeApp:
+            def run(self, **kwargs):
+                recorded.update(kwargs)
+
+        missing = object()
+        previous = getattr(webserver, "create_app", missing)
+        webserver.create_app = lambda: FakeApp()
+
+        def restore():
+            if previous is missing:
+                del webserver.create_app
+            else:
+                webserver.create_app = previous
+
+        self.addCleanup(restore)
+        return recorded
+
+    def test_an_absent_switch_reads_as_disabled(self):
+        self._unset("WEBUI_ENABLED")
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            webserver.start()
+
+        self.assertIn("Disabled via config.WEBUI_ENABLED", buffer.getvalue(),
+                      "a missing switch started an unauthenticated listener")
+
+    def test_an_absent_host_binds_loopback_not_every_interface(self):
+        """0.0.0.0 would put the unauthenticated API on the LAN. Loopback is
+        what config.py ships, so loopback is what a missing value means."""
+        self._set("WEBUI_ENABLED", True)
+        self._unset("WEBUI_HOST")
+
+        with redirect_stdout(io.StringIO()):
+            webserver.start()
+
+        self.assertEqual(self.recorded.get("host"), "127.0.0.1")
+
+    def test_an_explicit_host_is_still_honoured(self):
+        """Control: failing closed is about the ABSENT case. An operator who
+        deliberately binds every interface must still get that."""
+        self._set("WEBUI_ENABLED", True)
+        self._set("WEBUI_HOST", "0.0.0.0")
+
+        with redirect_stdout(io.StringIO()):
+            webserver.start()
+
+        self.assertEqual(self.recorded.get("host"), "0.0.0.0")
+
+    def test_the_switch_being_on_still_starts_it(self):
+        """Control: the gate must not have been welded shut."""
+        self._set("WEBUI_ENABLED", True)
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            webserver.start()
+
+        self.assertNotIn("Disabled via", buffer.getvalue())
+        self.assertIn("port", self.recorded)
+
+
+class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
+    """Every `getattr(config, "WEBUI_*", <default>)` must use the value
+    config.py actually ships.
+
+    Derived from the source rather than listed by hand, so a WEBUI_* setting
+    added later is covered without anyone remembering to add it here.
+
+    A fallback that disagrees with the shipped default is a second, invisible
+    default that applies only when something has already gone wrong - which is
+    exactly the moment the permissive answer is the one you least want. These
+    four gate a network listener with no authentication on it.
+    """
+
+    SOURCES = ("oserve.py", "webserver.py")
+
+    def shipped_defaults(self):
+        path = os.path.join(REPO_ROOT, "config.py")
+        with io.open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        shipped = {}
+        for node in tree.body:
+            target = value = None
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                target, value = node.target.id, node.value
+            elif (isinstance(node, ast.Assign) and len(node.targets) == 1
+                  and isinstance(node.targets[0], ast.Name)):
+                target, value = node.targets[0].id, node.value
+            if target and value is not None:
+                try:
+                    shipped[target] = ast.literal_eval(value)
+                except (ValueError, TypeError, SyntaxError):
+                    pass
+        return shipped
+
+    def fallbacks(self):
+        """[(file, line, name, fallback), ...] for every WEBUI_* getattr."""
+        found = []
+        for filename in self.SOURCES:
+            path = os.path.join(REPO_ROOT, filename)
+            with io.open(path, encoding="utf-8") as handle:
+                source = handle.read()
+            for node in ast.walk(ast.parse(source)):
+                if not isinstance(node, ast.Call):
+                    continue
+                if not (isinstance(node.func, ast.Name) and node.func.id == "getattr"):
+                    continue
+                if len(node.args) != 3:
+                    continue
+                target, name, default = node.args
+                if not (isinstance(target, ast.Name) and target.id == "config"):
+                    continue
+                if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+                    continue
+                if not name.value.startswith("WEBUI_"):
+                    continue
+                try:
+                    found.append((filename, node.lineno, name.value,
+                                  ast.literal_eval(default)))
+                except (ValueError, TypeError, SyntaxError):
+                    continue
+        return found
+
+    def test_every_webui_fallback_equals_the_shipped_default(self):
+        shipped = self.shipped_defaults()
+
+        wrong = []
+        for filename, lineno, name, fallback in self.fallbacks():
+            if name not in shipped:
+                continue
+            if shipped[name] != fallback or type(shipped[name]) is not type(fallback):
+                wrong.append(f"{filename}:{lineno} {name} ships {shipped[name]!r} "
+                             f"but falls back to {fallback!r}")
+
+        self.assertEqual(
+            wrong, [],
+            "these fallbacks contradict config.py, so a missing setting takes "
+            "a different path from the one shipped: " + "; ".join(wrong))
+
+    def test_the_scan_finds_the_call_sites_it_is_meant_to_check(self):
+        """Fixture invariant. If the scan stops matching - because the code
+        adopts a shape it does not recognise - the test above would pass while
+        checking nothing, which is the failure it exists to prevent."""
+        found = self.fallbacks()
+
+        self.assertGreaterEqual(
+            len(found), 3,
+            f"only {len(found)} WEBUI_* fallback(s) found across "
+            f"{', '.join(self.SOURCES)}; the scan has probably stopped "
+            f"recognising the shape rather than the code having stopped using it")
+        self.assertIn("WEBUI_ENABLED", [name for _f, _l, name, _d in found])
 
 
 if __name__ == "__main__":
