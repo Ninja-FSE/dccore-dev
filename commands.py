@@ -172,11 +172,13 @@ def handle_queue_remove(s, user, target):
     print(f"[COMMANDS] {user} removed their entire queue from the disk layout.")
 
 def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
-    """NEW (issue #15): force-clears ANOTHER user's queue entirely - a ghost nick, a
-    efter en netsplit/reconnect, etc.) - enbart admin. handle_queue_remove ovan kan bara
-    a user could only ever run against themselves over IRC; this gives the admin the
-    same power over ANYONE, from a single line of text, without touching dcc_queue.txt
-    manuellt."""
+    """Force-clear ANOTHER user's queue entirely - admin only (issue #15).
+
+    For a ghost nick left behind by a netsplit or a reconnect.
+    handle_queue_remove above is the version a user can run, and only ever
+    against themselves; this gives the admin the same power over anyone, from
+    one line of text, without editing dcc_queue.txt by hand.
+    """
     import config
     import announce
     import db
@@ -423,7 +425,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
         if 'commands' in sys.modules:
             importlib.reload(sys.modules['commands'])
             
-        print(f"[REHASH SUCCESS] Alla Python-moduler har blivit live-uppdaterade i RAM av {user}!")
+        print(f"[REHASH SUCCESS] Every Python module was reloaded in memory by {user}.")
 
         # Put the live state back before anything else runs against the fresh modules. The
         # explicit dcc_queue / channel_users restores further down still run afterwards and

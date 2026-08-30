@@ -50,6 +50,7 @@ translating those would destroy what they test.
 import io
 import os
 import re
+import tokenize
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,6 +75,16 @@ SWEDISH = re.compile(
     # Round two. Every word below was in the tree while this test reported
     # it clean - sixteen comments across six modules, two of which had
     # reached the generated, user-facing settings.conf.sample.
+    # Round three, and the first one that was not about the list at all: the
+    # scan below could not see the MIDDLE lines of a docstring, so a Swedish
+    # paragraph in commands.py survived every pass. These are the words that
+    # paragraph and the rehash notice were written in.
+    #
+    # "alla" is deliberately NOT here even though it appears in both. It
+    # matches "Alla marcia" in tests/test_announce_output.py's Beethoven
+    # fixture - the exact false-positive trap the note at the top of this
+    # list already describes. "tar" is out for the same reason: archive.tar.gz.
+    r"blivit|moduler|uppdaterade|enbart|manuellt|ovan|efter|"
     r"turkos|kant|fetstil|understruken|kursiv|bakgrundsplatta|vita|"
     r"antal|samtidiga|nedladdningar|textrader|spottas|vid|"
     r"helautomatisk|synk|borttagna|nya|spika|direkt|"
@@ -94,6 +105,46 @@ def _modules():
         if name.endswith(".py") and name != "local_config.py":
             out.append(os.path.join(REPO_ROOT, name))
     return out
+
+
+# Python 3.12 stopped emitting an f-string as one STRING token and started
+# splitting it into FSTRING_START / FSTRING_MIDDLE / FSTRING_END. Nearly every
+# message in this codebase is an f-string, so reading token.string alone made
+# almost all of them invisible on 3.12+ while still passing on 3.11 - a hole
+# far bigger than the one being fixed, and only visible because putting the
+# rehash notice back in Swedish did not fail this test.
+#
+# Looked up by name rather than named directly: CI runs two Python versions and
+# the older one has no such constants to import.
+_PROSE_TOKENS = {tokenize.COMMENT, tokenize.STRING}
+for _name in ("FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END"):
+    if hasattr(tokenize, _name):
+        _PROSE_TOKENS.add(getattr(tokenize, _name))
+
+
+def _prose_lines(path):
+    """(line number, text) for every line of every comment and string literal.
+
+    This used to be a line filter: a line counted as prose if it started with
+    "#" or contained a quote character. That only ever saw the FIRST and LAST
+    lines of a docstring - the middle ones start with neither - so a Swedish
+    paragraph in the middle of one was invisible to this test through three
+    separate rounds of "the last Swedish lines".
+
+    Tokenising decides WHICH lines are prose; the text returned is still the
+    raw source line, because how a string's interior is tokenised changed
+    between the Python versions CI runs and the span never did. A line holding
+    both code and a string is returned whole, exactly as the old filter did.
+    """
+    with io.open(path, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+
+    wanted = set()
+    with io.open(path, "rb") as handle:
+        for token in tokenize.tokenize(handle.readline):
+            if token.type in _PROSE_TOKENS:
+                wanted.update(range(token.start[0], token.end[0] + 1))
+    return [(n, lines[n - 1]) for n in sorted(wanted) if n <= len(lines)]
 
 
 class TheSourceIsAscii(unittest.TestCase):
@@ -122,21 +173,54 @@ class TheSourceIsEnglish(unittest.TestCase):
     def test_no_module_contains_swedish(self):
         offenders = []
         for path in _modules():
-            with io.open(path, encoding="utf-8") as handle:
-                lines = handle.readlines()
-            for n, line in enumerate(lines, 1):
-                stripped = line.strip()
-                # Only prose - comments, docstrings and message strings.
-                if not (stripped.startswith("#") or '"' in stripped or "'" in stripped):
-                    continue
-                found = SWEDISH.findall(line)
+            for n, text in _prose_lines(path):
+                found = SWEDISH.findall(text)
                 if found:
                     offenders.append(
                         f"{os.path.basename(path)}:{n}: {sorted(set(w.lower() for w in found))} "
-                        f"-> {stripped[:60]}")
+                        f"-> {text.strip()[:60]}")
         self.assertEqual(
             offenders, [],
             "Swedish in module source:\n  " + "\n  ".join(offenders))
+
+    def test_it_can_see_the_middle_of_a_docstring(self):
+        """Control for the defect that motivated the rewrite, not for the word
+        list. A line filter passes this; the tokenizer does not."""
+        lines = [
+            "def f():",
+            '    """A summary line in English.',
+            "    kunde inte skicka anything",
+            '    """',
+        ]
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write(chr(10).join(lines) + chr(10))
+            path = handle.name
+        self.addCleanup(os.remove, path)
+
+        prose = [text for _n, text in _prose_lines(path)]
+
+        self.assertTrue(any(SWEDISH.findall(text) for text in prose),
+                        "the middle of a docstring is still invisible")
+
+    def test_it_can_see_inside_an_f_string(self):
+        """Control for the second miss, found by mutation: 3.12 splits an
+        f-string into its own token types, and nearly every message in this
+        codebase is an f-string."""
+        lines = ["def f(user):",
+                 '    print(f"[REHASH] Alla moduler har blivit uppdaterade av {user}")']
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write(chr(10).join(lines) + chr(10))
+            path = handle.name
+        self.addCleanup(os.remove, path)
+
+        prose = [text for _n, text in _prose_lines(path)]
+
+        self.assertTrue(any(SWEDISH.findall(text) for text in prose),
+                        "the inside of an f-string is invisible on this Python")
 
     def test_the_detector_actually_detects(self):
         """Control. A word list that matched nothing would let this pass on a
