@@ -24,6 +24,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import config  # noqa: E402
+import db  # noqa: E402
 import list as list_module  # noqa: E402
 import list_fetch  # noqa: E402
 
@@ -419,6 +420,71 @@ class OnDemandReadingTests(DCCoreTestCase):
         self.assertEqual(page, [])
         self.assertEqual(total_folders, 1, "one folder in this fixture")
         self.assertEqual(total_files, 1)
+
+
+class SurvivingARestart(DCCoreTestCase):
+    """The extracted files under FETCHED_FILES_DIR were always untouched by a
+    restart - only config.fetched_bot_lists, the daemon's in-memory map of
+    which bots they belong to, was not. Reported live: an operator had real
+    fetched lists sitting on disk, restarted the bot, and the File Lists
+    switcher had no memory of any of them."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-listfetch-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.zip_path = os.path.join(self.tmp, "incoming.zip")
+
+        self.registry_path = os.path.join(self.tmp, "fetched_bot_lists.json")
+        self.set_config(FETCHED_BOT_LISTS_FILE=self.registry_path)
+        previous = db.FETCHED_BOT_LISTS_FILE
+        db.FETCHED_BOT_LISTS_FILE = self.registry_path
+        self.addCleanup(setattr, db, "FETCHED_BOT_LISTS_FILE", previous)
+
+    def test_a_fetch_survives_a_restart(self):
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt())])
+        ok, reason = list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
+        self.assertTrue(ok, reason)
+
+        # The "restart": memory forgotten, nothing but the disk files left.
+        config.fetched_bot_lists.clear()
+
+        config.fetched_bot_lists.update(db.load_fetched_bot_lists())
+
+        self.assertIn("otherbot", config.fetched_bot_lists)
+        entry = config.fetched_bot_lists["otherbot"]
+        self.assertTrue(os.path.exists(entry["list_path"]),
+                        "the registry survived, but points at a file that is gone")
+        rows = _read_all(entry)
+        self.assertEqual(len(rows), entry["entry_count"])
+
+    def test_no_file_yet_is_an_empty_registry_not_an_error(self):
+        self.assertEqual(db.load_fetched_bot_lists(), {})
+
+    def test_an_unreadable_registry_does_not_stop_the_daemon(self):
+        """The extracted files are untouched either way - a corrupt registry
+        costs an empty switcher until the next fetch, not a refusal to boot."""
+        with open(self.registry_path, "w", encoding="utf-8") as handle:
+            handle.write("{not json at all")
+
+        self.assertEqual(db.load_fetched_bot_lists(), {})
+
+    def test_the_registry_is_loaded_at_startup(self):
+        """The shape of #119: a correct, tested load/save pair that nothing
+        on the boot path calls is exactly as unhelpful as no persistence at
+        all - a unit test cannot see that oserve.py never asks for it."""
+        with open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle.read().splitlines()
+                     if not line.strip().startswith("#")]
+        loads = [line for line in lines if "load_fetched_bot_lists(" in line]
+
+        self.assertTrue(
+            loads,
+            "oserve.py does not load the fetched-lists registry at startup, "
+            "so persisting it buys nothing - the File Lists switcher is "
+            "empty on every restart regardless")
 
 
 class ExtractedTextSizeCeiling(DCCoreTestCase):

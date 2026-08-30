@@ -128,6 +128,16 @@ def startup():
     if config.known_bots:
         print(f"[STARTUP] Bot registry: {len(config.known_bots)} bot(s) remembered.")
 
+    # Lists already fetched FROM other bots. The extracted files under
+    # FETCHED_FILES_DIR are untouched by a restart - only the daemon's
+    # in-memory map of which bots they belong to was, since
+    # list_fetch.py only ever writes into it live as a fetch completes.
+    # Without this, the File Lists switcher went blank on every restart
+    # despite the files still being right there on disk.
+    config.fetched_bot_lists.update(db.load_fetched_bot_lists())
+    if config.fetched_bot_lists:
+        print(f"[STARTUP] Fetched lists: {len(config.fetched_bot_lists)} bot(s) remembered.")
+
     # ---------------------------------------------------------------------
     # SINGLE START: the queue is started exactly ONCE here, outside every loop,
     # so boot produces exactly one [QUEUE] line.
