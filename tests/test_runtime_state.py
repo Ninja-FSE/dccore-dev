@@ -179,7 +179,10 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
         # ADMIN_HOSTMASKS is an empty list, but it is a SETTING - the operator
         # fills it from local_config.py and it is SUPPOSED to be re-read on a
         # rehash rather than preserved.
-        allowed = {"ADMIN_HOSTMASKS"}
+        # CUSTOM_THEME joins it for the same reason: per-role colour overrides
+        # an operator writes in config.py or local_config.py, which a rehash is
+        # SUPPOSED to pick up rather than preserve.
+        allowed = {"ADMIN_HOSTMASKS", "CUSTOM_THEME"}
 
         with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())

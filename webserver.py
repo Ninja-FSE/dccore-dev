@@ -1006,7 +1006,7 @@ SETTINGS_CATEGORIES = (
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE"]),
-    ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
+    ("advertising",   "Advertising & search",  ["THEME", "ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN"]),
     ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME",
                                                 "MAX_SEND_FAILS", "RAR_TIMEOUT"]),
@@ -1066,6 +1066,7 @@ SETTINGS_LABELS = {
     "LIST_SIZE_FILE": "List size file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
 
+    "THEME": "Colour theme",
     "ANNOUNCE_INTERVAL": "Advert interval (seconds)",
     "BROADCAST_SEARCH_CHANNEL": "Broadcast search channel",
     "BROADCAST_SEARCH_COOLDOWN": "Broadcast search cooldown (seconds)",

@@ -230,6 +230,26 @@ RAR_TIMEOUT: int    = 1800     # Longest a rar packing run may take, in seconds,
 # ---------------------------------------------------------------------
 # 7. MIRC COLOUR CODES AND CONTROL CHARACTERS (IRC STANDARD)
 # ---------------------------------------------------------------------
+# How everything this bot says in a channel or a notice is coloured. One name
+# selects a palette that all eight outbound message paths read - see theme.py
+# for the roles and the presets.
+#
+# This is not decoration. In a busy channel a dozen bots advertise at once and
+# the palette is how a person tells them apart at a glance, so two DCCore
+# operators who both took the default are indistinguishable. "classic" is the
+# look DCCore has always had, and stays the default so that no existing
+# install silently changes identity.
+THEME: str = "classic"        # classic, midnight, forest, orchid, plain
+
+# Override individual roles on top of the chosen preset, for an operator who
+# would rather be unique than pick from a list:
+#
+#     CUSTOM_THEME = {"border": "\x0306,06", "value": "\x0311"}
+#
+# A dict, so it lives here or in local_config.py rather than on the settings
+# page - settings.conf holds primitives. Unknown role names are ignored.
+CUSTOM_THEME: dict = {}
+
 C_WHITE        = "\x0300"
 C_BLACK        = "\x0301"
 C_BLUE         = "\x0302"
