@@ -60,6 +60,11 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SWEDISH = re.compile(
     r"\b("
     r"och|att|inte|ingen|inget|inga|kunde|skicka|skickar|skickas|skickade|"
+    # Added after two lines survived every earlier pass: the sent-file
+    # notice in dcc.py and the address line irc.py prints on every boot.
+    # "skickade" was listed but "skickades" was not, which is the whole
+    # story - the list grows one real miss at a time, not by guessing.
+    r"skickades|filen|felfritt|identifiering|klar|klart|satt|"
     r"startar|returnerar|misslyckades|ladda|laddade|hitta|hittade|"
     r"konvertera|konverterar|loggar|anvandare|nekade|rensar|sparar|"
     r"vantar|packar|raderade|filerna|mappen|namnet|minnet|heltal|antalet|"

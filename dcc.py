@@ -1145,7 +1145,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 if oserve: oserve.total_sent_bytes += len(chunk)
                 
         transfer_completed = True
-        print(f"[DCC-SUCCESS] Filen skickades felfritt till {user}!")
+        print(f"[DCC-SUCCESS] Sent the whole file to {user} with no errors.")
         # The original pause: gives mIRC 1.5 seconds to close the file calmly
         try: time.sleep(1.5)
         except: pass
