@@ -351,6 +351,12 @@ def fetch_feature_error():
     return None
 
 
+BOT_ALONE_FETCH_CONFLICT_ERROR = (
+    "A list or folder request is already in progress for this bot - wait "
+    "for it to finish before starting another."
+)
+
+
 def build_list_fetch_enqueue_result(bot_raw):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
@@ -371,7 +377,14 @@ def build_list_fetch_enqueue_result(bot_raw):
 
     Returns (http_status, payload_dict) with "created" (the new request id,
     as a one-element list, so the frontend can treat this the same shape as
-    the file-fetch enqueue response).
+    the file-fetch enqueue response) - or 409 if this bot already has a
+    "list" or "folder" request outstanding (see
+    dcc_fetch.has_outstanding_bot_alone_request()'s docstring for why the
+    two request_types can never safely coexist for the same bot: neither
+    convention's response filename is predictable ahead of time, so both
+    match incoming DCC SEND offers on bot alone, and a second one racing the
+    first would create an offer no admission-control branch could correctly
+    attribute).
     """
 
     unavailable = fetch_feature_error()
@@ -387,7 +400,16 @@ def build_list_fetch_enqueue_result(bot_raw):
     if not bot:
         return 400, {"error": "'bot' is required."}
 
+    if dcc_fetch.has_outstanding_bot_alone_request(bot):
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+
     request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list")
+    if request_id is None:
+        # Defense in depth: enqueue_fetch() enforces this same invariant
+        # itself (see its docstring), so this should be unreachable given
+        # the pre-check just above - but never surface it as a fabricated
+        # success if some future race or caller change makes it reachable.
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
     return 200, {"created": [request_id]}
 
 
@@ -409,7 +431,10 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
 
     Returns (http_status, payload_dict) with "created" (the new request id,
     as a one-element list, matching the same response shape every other
-    fetch-enqueue route already returns).
+    fetch-enqueue route already returns) - or 409 if this bot already has a
+    "list" or "folder" request outstanding (see build_list_fetch_enqueue_
+    result()'s docstring and dcc_fetch.has_outstanding_bot_alone_request()
+    for why).
     """
 
     unavailable = fetch_feature_error()
@@ -429,7 +454,14 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     if not bot or not folder:
         return 400, {"error": "Both 'bot' and 'folder' are required."}
 
+    if dcc_fetch.has_outstanding_bot_alone_request(bot):
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+
     request_id = dcc_fetch.enqueue_fetch(bot, f"!rar {folder}", request_type="folder")
+    if request_id is None:
+        # Defense in depth - see build_list_fetch_enqueue_result()'s
+        # identical comment above.
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
     return 200, {"created": [request_id]}
 
 

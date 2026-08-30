@@ -35,6 +35,30 @@ def ip_long(ip):
     return int(ipaddress.IPv4Address(ip))
 
 
+_bypass_row_counter = 0
+
+
+def insert_row_bypassing_enqueue_guard(bot, filename, request_type):
+    """Insert a row straight into config.fetch_queue via
+    dcc_fetch.new_fetch_row(), skipping dcc_fetch.enqueue_fetch() entirely -
+    and with it, enqueue_fetch()'s has_outstanding_bot_alone_request() guard
+    (see that function's docstring).
+
+    Exists ONLY so a couple of tests can still put two "list"/"folder" rows
+    outstanding for the same bot at once, on purpose, to exercise
+    _claim_matching_offer_locked()'s oldest-wins tie-break as the
+    defense-in-depth path it now is: that state is no longer reachable
+    through the normal enqueue_fetch() call path (the whole point of the
+    guard), but the queue is still just a dict, so the tie-break logic stays
+    in place for any other way such a row pair could end up there.
+    """
+    global _bypass_row_counter
+    _bypass_row_counter += 1
+    rid = f"bypass{_bypass_row_counter}"
+    config.fetch_queue[rid] = dcc_fetch.new_fetch_row(bot, filename, request_type=request_type)
+    return rid
+
+
 class OfferParsingTests(unittest.TestCase):
 
     def test_a_normal_offer_parses(self):
@@ -1340,12 +1364,21 @@ class RequestTypeAdmissionControlTests(DCCoreTestCase):
         self.assertEqual(config.fetch_queue[list_rid]["state"], "failed")   # claimed, then hit the size cap
 
     def test_multiple_list_rows_for_the_same_bot_the_oldest_is_claimed(self):
-        older_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        """This state (two outstanding "list" rows for the same bot) can no
+        longer arise through the normal enqueue_fetch() call path -
+        enqueue_fetch() itself now refuses a second bot-alone row for a bot
+        that already has one outstanding (see
+        dcc_fetch.has_outstanding_bot_alone_request()), which is covered by
+        EnqueueTimeBotAloneCollisionTests below. This test uses
+        insert_row_bypassing_enqueue_guard() to still exercise
+        _claim_matching_offer_locked()'s oldest-wins tie-break as the
+        defense-in-depth path it now is."""
+        older_rid = insert_row_bypassing_enqueue_guard("goodbot", "", request_type="list")
         config.fetch_queue[older_rid]["state"] = "offered"
         config.fetch_queue[older_rid]["offered_at"] = time.time()
         config.fetch_queue[older_rid]["requested_at"] = 1.0
 
-        newer_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        newer_rid = insert_row_bypassing_enqueue_guard("goodbot", "", request_type="list")
         config.fetch_queue[newer_rid]["state"] = "offered"
         config.fetch_queue[newer_rid]["offered_at"] = time.time()
         config.fetch_queue[newer_rid]["requested_at"] = 2.0
@@ -1453,33 +1486,43 @@ class FolderRarRequestTypeTests(DCCoreTestCase):
         self.assertEqual(config.fetch_queue[file_rid]["state"], "failed")    # claimed, then hit the size cap
         self.assertEqual(config.fetch_queue[folder_rid]["state"], "offered")  # untouched
 
-    def test_a_list_row_and_a_folder_row_for_the_same_bot_do_not_cross_satisfy(self):
-        """Three request_types can now coexist for the same bot. 'list' and
-        'folder' both match on bot alone, with no signal in a bare DCC SEND
-        that could tell the two conventions apart on receipt - so exactly
-        ONE of them is ever claimed by a given offer, deterministically
-        (_claim_matching_offer_locked() checks its "list" branch before its
-        "folder" branch - see that function's docstring), never both, and
-        never a torn/ambiguous state on either row."""
+    def test_a_list_row_and_a_folder_row_for_the_same_bot_can_no_longer_coexist(self):
+        """Previously (before enqueue_fetch()'s has_outstanding_bot_alone_
+        request() guard existed), a 'list' row and a 'folder' row could both
+        end up outstanding for the same bot at once - and since neither
+        convention's response filename is predictable ahead of time, a bare
+        DCC SEND offer from that bot could not be told apart at claim time:
+        whichever branch _claim_matching_offer_locked() checked first would
+        win, even if the offer actually answered the OTHER request. That
+        ambiguity is now refused at its source - enqueue_fetch() will not
+        create a second bot-alone row for a bot that already has one
+        outstanding - so this scenario can no longer be constructed through
+        the normal enqueue path at all. See EnqueueTimeBotAloneCollisionTests
+        below for the tests that pin that down, and
+        test_multiple_list_rows_for_the_same_bot_the_oldest_is_claimed /
+        test_multiple_folder_rows_for_the_same_bot_the_oldest_is_claimed
+        above for _claim_matching_offer_locked()'s tie-break staying in place
+        as a defense-in-depth fallback for the case where the queue was
+        mutated directly."""
         list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
         config.fetch_queue[list_rid]["state"] = "offered"
         config.fetch_queue[list_rid]["offered_at"] = time.time()
+
         folder_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
-        config.fetch_queue[folder_rid]["state"] = "offered"
-        config.fetch_queue[folder_rid]["offered_at"] = time.time()
 
-        self._offer_and_size_cap(list_rid, "goodbot", "WhateverName.zip")
-
-        self.assertEqual(config.fetch_queue[list_rid]["state"], "failed")     # claimed, then hit the size cap
-        self.assertEqual(config.fetch_queue[folder_rid]["state"], "offered")  # untouched
+        self.assertIsNone(folder_rid)
+        self.assertEqual(len(config.fetch_queue), 1)
 
     def test_multiple_folder_rows_for_the_same_bot_the_oldest_is_claimed(self):
-        older_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Older/Album", request_type="folder")
+        """See test_multiple_list_rows_for_the_same_bot_the_oldest_is_claimed's
+        docstring above - same reasoning, folder/folder instead of
+        list/list."""
+        older_rid = insert_row_bypassing_enqueue_guard("goodbot", "!rar Older/Album", request_type="folder")
         config.fetch_queue[older_rid]["state"] = "offered"
         config.fetch_queue[older_rid]["offered_at"] = time.time()
         config.fetch_queue[older_rid]["requested_at"] = 1.0
 
-        newer_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Newer/Album", request_type="folder")
+        newer_rid = insert_row_bypassing_enqueue_guard("goodbot", "!rar Newer/Album", request_type="folder")
         config.fetch_queue[newer_rid]["state"] = "offered"
         config.fetch_queue[newer_rid]["offered_at"] = time.time()
         config.fetch_queue[newer_rid]["requested_at"] = 2.0
@@ -1502,6 +1545,132 @@ class FolderRarRequestTypeTests(DCCoreTestCase):
         # requested_filename - set once at creation - was left untouched.
         self.assertEqual(row["filename"], "Artist_Album_2020.rar")
         self.assertEqual(row["requested_filename"], "!rar Artist/Album")
+
+
+class EnqueueTimeBotAloneCollisionTests(DCCoreTestCase):
+    """"list" and "folder" rows both use bot-alone admission control (see
+    _claim_matching_offer_locked()'s docstring) - neither convention's
+    response filename is knowable ahead of time. If both were ever allowed
+    outstanding for the same bot at once, a DCC SEND offer from that bot
+    could not be told apart at claim time, and whichever branch happened to
+    run first would silently claim an offer that may actually answer the
+    OTHER request (misattributed size cap, wrong post-processing, and the
+    real request left to eventually time out).
+
+    Rather than resolve that ambiguity at claim time, it is now refused at
+    its source: dcc_fetch.has_outstanding_bot_alone_request() (called from
+    enqueue_fetch() itself, and pre-checked by webserver.py's two enqueue
+    routes for a clean 409) refuses a second "list"/"folder" row for a bot
+    that already has one outstanding. These tests pin down that check in
+    isolation, at the dcc_fetch layer."""
+
+    def test_has_outstanding_bot_alone_request_is_false_with_an_empty_queue(self):
+        self.assertFalse(dcc_fetch.has_outstanding_bot_alone_request("goodbot"))
+
+    def test_folder_request_refused_when_a_list_request_is_outstanding_for_the_same_bot(self):
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        self.assertIsNotNone(list_rid)
+
+        self.assertTrue(dcc_fetch.has_outstanding_bot_alone_request("goodbot"))
+        folder_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
+
+        self.assertIsNone(folder_rid)
+        self.assertEqual(len(config.fetch_queue), 1)
+
+    def test_list_request_refused_when_a_folder_request_is_outstanding_for_the_same_bot(self):
+        """The reverse pairing of the test above - order must not matter."""
+        folder_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
+        self.assertIsNotNone(folder_rid)
+
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+
+        self.assertIsNone(list_rid)
+        self.assertEqual(len(config.fetch_queue), 1)
+
+    def test_a_second_list_request_for_the_same_bot_is_also_refused(self):
+        """Not just list/folder cross-collisions - two rows of the SAME
+        bot-alone type for the same bot are just as ambiguous at claim time,
+        so they collide too."""
+        first_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        self.assertIsNotNone(first_rid)
+
+        second_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+
+        self.assertIsNone(second_rid)
+        self.assertEqual(len(config.fetch_queue), 1)
+
+    def test_bot_name_comparison_is_case_and_whitespace_insensitive(self):
+        """Same normalisation _claim_matching_offer_locked() already applies
+        to `bot` - two rows for what is really the same bot must collide
+        even if the casing/whitespace differs between the two requests."""
+        list_rid = dcc_fetch.enqueue_fetch(" GoodBot ", "", request_type="list")
+        self.assertIsNotNone(list_rid)
+
+        folder_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
+
+        self.assertIsNone(folder_rid)
+
+    def test_a_folder_request_for_a_different_bot_is_unaffected(self):
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        self.assertIsNotNone(list_rid)
+
+        folder_rid = dcc_fetch.enqueue_fetch("otherbot", "!rar Artist/Album", request_type="folder")
+
+        self.assertIsNotNone(folder_rid)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_new_bot_alone_request_succeeds_once_the_first_has_completed(self):
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[list_rid]["state"] = "complete"
+
+        folder_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
+
+        self.assertIsNotNone(folder_rid)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_new_bot_alone_request_succeeds_once_the_first_has_failed(self):
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[list_rid]["state"] = "failed"
+
+        folder_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
+
+        self.assertIsNotNone(folder_rid)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_pending_or_listening_or_receiving_request_still_blocks(self):
+        """Every unresolved state counts, not just 'offered' - a row that
+        has not yet even been dispatched ('pending'), or is mid-transfer
+        ('listening'/'receiving'), is just as much an outstanding request as
+        one sitting 'offered'."""
+        for blocking_state in ("pending", "offered", "listening", "receiving"):
+            with self.subTest(state=blocking_state):
+                config.fetch_queue.clear()
+                list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+                config.fetch_queue[list_rid]["state"] = blocking_state
+
+                folder_rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
+
+                self.assertIsNone(folder_rid)
+
+    def test_a_file_request_is_never_blocked_by_an_outstanding_list_request(self):
+        """'file' rows use exact-match admission control and were never
+        ambiguous with 'list'/'folder' - this check must not touch them."""
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        self.assertIsNotNone(list_rid)
+
+        file_rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+
+        self.assertIsNotNone(file_rid)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_file_request_never_blocks_a_later_list_or_folder_request(self):
+        file_rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+        self.assertIsNotNone(file_rid)
+
+        list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+
+        self.assertIsNotNone(list_rid)
+        self.assertEqual(len(config.fetch_queue), 2)
 
 
 class ListFetchDispatcherTests(DCCoreTestCase):

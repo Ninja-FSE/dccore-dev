@@ -1809,13 +1809,20 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
 
     def test_both_routes_still_work_when_the_feature_is_on(self):
         """Control. reset_config() leaves the flag False, which is the normal
-        running state - these must not have been broken by the gate."""
+        running state - these must not have been broken by the gate.
+
+        Three different bots, deliberately: "goodbot" for both the "list"
+        and "folder" request would now be refused with 409 (they collide -
+        see webserver.BOT_ALONE_FETCH_CONFLICT_ERROR and
+        dcc_fetch.has_outstanding_bot_alone_request()) - that conflict is
+        its own test elsewhere; this one is purely a control that all three
+        routes work when the feature is on."""
         config.fetch_feature_disabled = False
 
         file_status, _f = webserver.build_fetch_enqueue_result(
             {"bot": "goodbot", "filename": "Song.flac"})
-        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
-        folder_status, _r = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+        list_status, _l = webserver.build_list_fetch_enqueue_result("listbot")
+        folder_status, _r = webserver.build_folder_rar_fetch_enqueue_result("folderbot", "Artist/Album")
 
         self.assertEqual((file_status, list_status, folder_status), (200, 200, 200))
         self.assertEqual(len(config.fetch_queue), 3)
@@ -1934,6 +1941,88 @@ class FolderRarFetchRouteTests(DCCoreTestCase):
             "goodbot", "Artist\x01/Album")
         self.assertEqual(status, 400)
         self.assertEqual(config.fetch_queue, {})
+
+
+class BotAloneFetchConflictRouteTests(DCCoreTestCase):
+    """POST /api/filelists/fetch and POST /api/filelists/fetch-folder-rar
+    both refuse a "list"/"folder" request for a bot that already has one of
+    either type outstanding - see dcc_fetch.has_outstanding_bot_alone_
+    request()'s docstring for why: both request_types match an incoming DCC
+    SEND offer on bot alone (neither convention's response filename is
+    predictable ahead of time), so letting two of them race for the same bot
+    could make a real transfer get silently misattributed to the wrong row.
+
+    dcc_fetch.py's own EnqueueTimeBotAloneCollisionTests covers the
+    underlying enqueue_fetch() check in isolation; these tests confirm the
+    two HTTP-facing routes surface it as a clean 409 and, critically, still
+    create no row at all when refused."""
+
+    def test_folder_request_refused_with_409_when_a_list_request_is_outstanding(self):
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 409)
+        self.assertIn("error", result)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_list_request_refused_with_409_when_a_folder_request_is_outstanding(self):
+        folder_status, _r = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+        self.assertEqual(folder_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual(status, 409)
+        self.assertIn("error", result)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_a_second_list_request_for_the_same_bot_is_also_refused_with_409(self):
+        first_status, _ = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(first_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual(status, 409)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_a_folder_request_for_a_different_bot_still_succeeds(self):
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("otherbot", "Artist/Album")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_new_request_succeeds_once_the_outstanding_one_has_resolved(self):
+        list_status, list_result = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+        list_rid = list_result["created"][0]
+        config.fetch_queue[list_rid]["state"] = "complete"
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_file_fetch_is_never_blocked_by_an_outstanding_list_request(self):
+        """'file' rows (POST /api/fetch/enqueue) use exact-match admission
+        control and were never ambiguous with 'list'/'folder' - this
+        conflict check must not touch that route."""
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "goodbot", "filename": "Song.flac"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(config.fetch_queue), 2)
 
 
 class TheDashboardSwitchFailsClosed(unittest.TestCase):
