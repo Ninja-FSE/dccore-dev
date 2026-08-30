@@ -152,6 +152,29 @@ class LongPathTests(unittest.TestCase):
         self.assertGreater(len(target), 260 if platform_compat.IS_WINDOWS else 0)
 
 
+def wait_until(predicate, timeout=15.0, interval=0.01):
+    """Poll until `predicate()` is true, or give up after `timeout`.
+
+    Replaces a flat time.sleep() before asserting on work a background thread
+    does. A fixed wait asserts on the CLOCK: it passes on a developer laptop
+    where the thread finishes in a millisecond and fails on a loaded CI runner
+    that has not been scheduled yet - reporting a defect that is not there.
+    windows-latest/3.10 collected on a 0.4s wait here while 3.12 passed on the
+    same image, which is how it announced itself.
+
+    A generous ceiling rather than a tight one, because the thing being tested
+    is that the work HAPPENS, not that it happens quickly. Something genuinely
+    wedged still fails the run; it just takes 15 seconds to say so. Same
+    correction as #152 and #157.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
 class MissingRarBinaryTests(unittest.TestCase):
     """A machine with no rar installed must degrade, not wedge.
 
@@ -190,7 +213,7 @@ class MissingRarBinaryTests(unittest.TestCase):
         self.config.bot_joined_channel = True
 
         self.dcc.check_queue_and_send(self.sock, "dave")
-        time.sleep(0.4)
+        wait_until(lambda: not self.config.rar_inprogress)
 
         self.assertFalse(self.config.rar_inprogress,
                          "a missing rar must not latch rar_inprogress - that kills packing "
@@ -205,7 +228,7 @@ class MissingRarBinaryTests(unittest.TestCase):
         self.config.bot_joined_channel = True
 
         self.dcc.check_queue_and_send(self.sock, "dave")
-        time.sleep(0.4)
+        wait_until(lambda: row.get("send_fails") is not None)
 
         self.assertEqual(row.get("send_fails"), 1,
                          "the failure must be charged to the retry budget, not retried forever")
