@@ -2042,6 +2042,132 @@ class SettingsPayloadTests(DCCoreTestCase):
         self.assertIn("error", result)
         self.assertFalse(os.path.exists(self.settings_path))
 
+    def test_a_mixed_batch_with_the_password_hash_rejects_the_whole_batch(self):
+        """apply_settings_changes()'s ADMIN_PASSWORD_HASH check runs before
+        any write, on the whole incoming dict - so a batch that smuggles the
+        hash in alongside a legitimate setting must be rejected as a whole,
+        not have the legitimate half quietly applied. Same shape as
+        test_apply_settings_changes_rejects_the_password_hash_directly above,
+        but pins the mixed-batch case specifically: that test only ever sent
+        a single-key {"ADMIN_PASSWORD_HASH": ...} payload, which could not
+        have caught a bug where a legitimate co-occurring key slipped
+        through."""
+        status, result = webserver.apply_settings_changes(
+            {"MAX_DCC_SLOTS": "42", "ADMIN_PASSWORD_HASH": "evilhash"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", result)
+        self.assertFalse(os.path.exists(self.settings_path),
+                          "MAX_DCC_SLOTS must not be written when the batch is rejected")
+
+    def test_concurrent_saves_do_not_lose_either_change(self):
+        """Two overlapping saves used to race settings_file.save()'s
+        read-modify-write cycle: each reads the same starting settings.conf,
+        computes text containing only its own change, and whichever atomic
+        replace() lands last wins - silently discarding the other caller's
+        change even though both callers got a 200. _settings_save_lock
+        (webserver.py) now serialises the whole settings_file.save() call,
+        so this must not happen regardless of timing.
+
+        A real save() completes fast enough that two threads rarely actually
+        overlap inside the danger window on their own, so this widens that
+        window by delaying settings_file._atomic_write() itself - the exact
+        seam the lost update happens across - long enough that an unlocked
+        second caller would reliably start its own read before the first
+        caller's write has landed. See the control test below, which uses
+        the identical delay with the lock bypassed and shows the loss really
+        does happen without it.
+        """
+        real_atomic_write = settings_file._atomic_write
+
+        def slow_atomic_write(path, text):
+            time.sleep(0.2)
+            real_atomic_write(path, text)
+
+        settings_file._atomic_write = slow_atomic_write
+        self.addCleanup(setattr, settings_file, "_atomic_write", real_atomic_write)
+
+        outcomes = {}
+
+        def call(name, value):
+            outcomes[name] = webserver.apply_settings_changes({name: value})
+
+        t1 = threading.Thread(target=call, args=("MAX_DCC_SLOTS", "42"))
+        t2 = threading.Thread(target=call, args=("NICKNAME", "RaceNick"))
+        t1.start()
+        time.sleep(0.05)  # let t1 get into its (locked) save before t2 tries to join in
+        t2.start()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+
+        self.assertFalse(t1.is_alive(), "first save never finished - possible deadlock")
+        self.assertFalse(t2.is_alive(), "second save never finished - possible deadlock")
+        self.assertEqual(outcomes["MAX_DCC_SLOTS"][0], 200)
+        self.assertEqual(outcomes["NICKNAME"][0], 200)
+
+        with io.open(self.settings_path, encoding="utf-8") as handle:
+            entries = settings_file.parse(handle.read())
+        self.assertEqual(entries.get("MAX_DCC_SLOTS"), "42",
+                          "MAX_DCC_SLOTS was lost to the concurrent save race")
+        self.assertEqual(entries.get("NICKNAME"), "RaceNick",
+                          "NICKNAME was lost to the concurrent save race")
+
+    def test_without_the_lock_concurrent_saves_can_lose_a_change(self):
+        """Control for the test above: the identical concurrent workload,
+        calling settings_file.save() directly rather than going through
+        webserver's locked _save_settings_and_rehash(), reliably loses one
+        of the two changes - proving the passing test above depends on
+        _settings_save_lock actually being held, rather than being
+        incapable of ever catching a regression here."""
+        real_atomic_write = settings_file._atomic_write
+
+        def slow_atomic_write(path, text):
+            time.sleep(0.2)
+            real_atomic_write(path, text)
+
+        settings_file._atomic_write = slow_atomic_write
+        self.addCleanup(setattr, settings_file, "_atomic_write", real_atomic_write)
+
+        def call(name, value):
+            settings_file.save(vars(config), {name: value})
+
+        t1 = threading.Thread(target=call, args=("MAX_DCC_SLOTS", "42"))
+        t2 = threading.Thread(target=call, args=("NICKNAME", "RaceNick"))
+        t1.start()
+        time.sleep(0.05)
+        t2.start()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+
+        with io.open(self.settings_path, encoding="utf-8") as handle:
+            entries = settings_file.parse(handle.read())
+        lost = [name for name, value in (("MAX_DCC_SLOTS", "42"), ("NICKNAME", "RaceNick"))
+                if entries.get(name) != value]
+        self.assertTrue(lost, "the unlocked control workload never lost a change - this "
+                              "test would no longer prove the lock prevents anything; it "
+                              "needs a wider delay/window")
+
+    def test_an_unwritable_settings_directory_returns_a_clean_error_not_a_crash(self):
+        """settings_file._atomic_write() can raise a plain OSError/
+        PermissionError (e.g. the settings directory itself is not writable)
+        that is NOT a settings_file.SettingsWriteError.
+        _save_settings_and_rehash() must catch that too, or it propagates out
+        of the Flask route as an unhandled 500 with a non-JSON body - which
+        the frontend's postJson() cannot parse, since it calls res.json()
+        unconditionally on the response."""
+        unwritable_dir = os.path.join(self.make_tree().root, "readonly")
+        os.makedirs(unwritable_dir)
+        os.chmod(unwritable_dir, 0o555)
+        self.addCleanup(lambda: os.path.isdir(unwritable_dir) and os.chmod(unwritable_dir, 0o755))
+        os.environ["DCCORE_SETTINGS_FILE"] = os.path.join(unwritable_dir, "settings.conf")
+
+        try:
+            status, result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
+        finally:
+            os.chmod(unwritable_dir, 0o755)  # restore before tearDown's tree cleanup runs
+
+        self.assertEqual(status, 400)
+        self.assertIn("error", result)
+
     def test_apply_settings_changes_rejects_an_unknown_setting(self):
         status, result = webserver.apply_settings_changes({"NOT_A_REAL_SETTING": "x"})
         self.assertEqual(status, 400)
@@ -2136,6 +2262,28 @@ class SettingsHttpRouteTests(DCCoreTestCase):
         with io.open(self.settings_path, encoding="utf-8") as handle:
             entries = settings_file.parse(handle.read())
         self.assertEqual(entries["MAX_DCC_SLOTS"], "7")
+
+    def test_post_settings_returns_clean_json_on_an_unwritable_directory(self):
+        """End-to-end version of SettingsPayloadTests.test_an_unwritable_
+        settings_directory_returns_a_clean_error_not_a_crash: through the
+        real Flask route, an unwritable settings directory must come back
+        as a JSON 400, not an unhandled 500 whose body isn't JSON at all
+        (which is what the frontend's postJson() would choke on)."""
+        unwritable_dir = os.path.join(self.make_tree().root, "readonly")
+        os.makedirs(unwritable_dir)
+        os.chmod(unwritable_dir, 0o555)
+        self.addCleanup(lambda: os.path.isdir(unwritable_dir) and os.chmod(unwritable_dir, 0o755))
+        os.environ["DCCORE_SETTINGS_FILE"] = os.path.join(unwritable_dir, "settings.conf")
+
+        try:
+            resp = self.client.post("/api/settings", json={"MAX_DCC_SLOTS": "9"})
+        finally:
+            os.chmod(unwritable_dir, 0o755)  # restore before tearDown's tree cleanup runs
+
+        self.assertEqual(resp.status_code, 400)
+        body = resp.get_json()
+        self.assertIsNotNone(body, "response body was not JSON")
+        self.assertIn("error", body)
 
     def test_post_settings_password_then_logs_in_with_the_new_password(self):
         real_rehash = commands.handle_rehash_request
