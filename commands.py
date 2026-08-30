@@ -40,6 +40,58 @@ def is_admin(user):
     return str(user).lower() in allowed
 
 
+def handle_help_request(s, user, target):
+    """Answer "@<nick>-help" with how to actually use this bot.
+
+    The gap this closes: somebody sees the advert in a busy channel, and the
+    advert has no room to explain anything beyond the trigger. Every other
+    serving script on the network answers a help request; this one had no way
+    to be asked.
+
+    Answered by NOTICE to the person who asked, like every other user command
+    here, so a stranger working out how the bot works costs the channel
+    nothing.
+
+    Sent as several short lines rather than one long one. IRC drops anything
+    past 512 bytes including the prefix the server adds, and announce.py keeps
+    a 420-byte budget for exactly that reason - a single help message would sit
+    right on that edge and lose its tail on the nicks with the longest
+    hostmasks, which is the least predictable way to break.
+
+    What it lists follows what the bot actually serves: with
+    config.RAR_ENABLED off, !rar is refused, so telling somebody to type it
+    would be handing out the same instruction the album list stopped shipping.
+    """
+    oserve = sys.modules.get('oserve')
+    if not oserve:
+        return
+
+    nick = config.NICKNAME
+    bold, red, reset = config.C_BOLD, config.C_RED, config.C_RESET
+
+    lines = [
+        f"I am a file server. To see what I have, type: {bold}{red}@{nick}{reset} "
+        f"- I will send you my list as a zip.",
+        f"To request a file, paste a line from that list, for example: "
+        f"{bold}{red}!{nick} Artist - Song.mp3{reset}",
+    ]
+
+    if getattr(config, "RAR_ENABLED", True):
+        lines.append(
+            f"To request a whole album packed as one .rar, use the album list "
+            f"in the same zip: {bold}{red}!{nick} !rar D:\\MUSIC\\Artist\\Album\\{reset}")
+
+    lines.append(
+        f"Your queue: {bold}{red}@{nick}-que{reset} to see it, "
+        f"{bold}{red}@{nick}-remove{reset} to cancel it. "
+        f"To search every bot at once, type: {bold}{red}@find <words>{reset}")
+
+    for line in lines:
+        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n", is_vip=True)
+
+    print(f"[HELP] Sent the usage notice to {user} (asked in {target}).")
+
+
 def handle_queue_check(s, user, target):
     """Count one user's queued files and answer them through the VIP queue."""
     user_key = user.lower()

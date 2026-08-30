@@ -1337,6 +1337,7 @@ def irc_loop():
                         # gating them here would only meter the operator against themselves.
                         is_bot_command = (
                             msg_lower == f"@{config.NICKNAME.lower()}"
+                            or msg_lower == f"@{config.NICKNAME.lower()}-help"
                             or msg_lower == f"@{config.NICKNAME.lower()}-que"
                             or msg_lower == f"@{config.NICKNAME.lower()}-remove"
                             or msg.startswith("@find ")
@@ -1391,6 +1392,9 @@ def irc_loop():
                                     continue
                             elif msg_lower == f"@{config.NICKNAME.lower()}":
                                 threading.Thread(target=list.send_file_list, args=(s, user, target_chan)).start()
+                            elif msg_lower == f"@{config.NICKNAME.lower()}-help":
+                                threading.Thread(target=commands.handle_help_request, args=(s, user, target_chan), daemon=True).start()
+                                continue
                             elif msg_lower == f"@{config.NICKNAME.lower()}-que":
                                 threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
                                 continue
