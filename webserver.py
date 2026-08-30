@@ -716,8 +716,8 @@ SETTINGS_CATEGORIES = (
     ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
                                                 "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
-                                                "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "LIST_SIZE_FILE",
-                                                "LIST_RAWBYTES_FILE"]),
+                                                "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
+                                                "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE"]),
     ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN"]),
     ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME",
@@ -770,6 +770,7 @@ SETTINGS_LABELS = {
     "STATS_FILE": "Stats file",
     "HARD_BANS_FILE": "Hard bans file",
     "KNOWN_BOTS_FILE": "Known bots file",
+    "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "LIST_SIZE_FILE": "List size file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
 

@@ -97,6 +97,15 @@
 # columns is exactly the shape that turns "add a field" into a migration.
 #KNOWN_BOTS_FILE = ./data/known_bots.json
 
+# Which bots we hold a fetched list for, and where it lives on disk - one
+# small entry per bot ("bot", "fetched_at", "list_path", "entry_count",
+# "source_zip"), not the parsed list itself. Without this, the extracted
+# files under FETCHED_FILES_DIR survived a restart untouched but the File
+# Lists switcher had no memory of them at all, since config.fetched_bot_lists
+# is otherwise populated only by a live fetch completing. Same JSON-file
+# treatment as KNOWN_BOTS_FILE, for the same reason.
+#FETCHED_BOT_LISTS_FILE = ./data/fetched_bot_lists.json
+
 
 [channel advertising (the advert clock)]
 # Time between each channel advert, in seconds

@@ -53,6 +53,7 @@ import time
 import zipfile
 
 import config
+import db
 import dcc
 import platform_compat
 import list as list_mod
@@ -478,6 +479,14 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
         "entry_count": entry_count,
         "source_zip": os.path.basename(zip_path),
     }
+
+    # Persisted immediately, not on a timer: unlike the bot registry (updated
+    # on every advert, throttled for exactly that reason), a list fetch
+    # completing is already an infrequent, deliberate event. Without this, the
+    # extracted files under FETCHED_FILES_DIR survived a restart untouched
+    # while the daemon's memory of which bots they belonged to did not, and
+    # the File Lists switcher went blank until the next fetch.
+    db.save_fetched_bot_lists(dict(store))
 
     print(f"[LIST-FETCH] Stored a reference to {entry_count} entries from "
           f"{bot}'s fetched list ({os.path.basename(list_path)}) - parsed "
