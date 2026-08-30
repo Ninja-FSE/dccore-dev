@@ -2,6 +2,7 @@
 # IRC.PY - THE IRC NETWORK MODULE FOR UNDERNET (PART 1 OF 3)
 # =====================================================================
 import socket
+import functools
 import threading
 import time
 import re
@@ -463,6 +464,37 @@ def _record_bot(key, user, target, advert, now):
     runtime.known_bots[key] = entry
 
 
+def never_breaks_the_read_loop(capture):
+    """Wrap an observational capture so it cannot take the connection down.
+
+    The two capture functions below run on EVERY channel line, before the ban
+    check and before the anti-flood gate, because they observe rather than
+    dispatch and a foreign bot is not subject to our ban list. That placement
+    is right, and it is also what makes an exception in either of them so
+    expensive: it escapes the whole per-line block, and the only handler that
+    catches it closes the socket and drops into the reconnect loop.
+
+    So a stranger who can make one of these raise can hold the daemon in a
+    reconnect loop for as long as they care to keep typing - unauthenticated,
+    unmetered, and with a ban unable to stop it. That is what a malformed
+    number in a SLOTS line did until the parser above was fixed.
+
+    Fixing the parser removes the one known way in. This removes the CLASS:
+    whatever else these two learn to read, a line they cannot parse costs
+    exactly that line.
+    """
+    @functools.wraps(capture)
+    def guarded(*args, **kwargs):
+        try:
+            return capture(*args, **kwargs)
+        except Exception as err:
+            print(f"[CAPTURE ERROR] {capture.__name__} gave up on one line "
+                  f"({type(err).__name__}: {err}). The connection is unaffected.")
+            return None
+    return guarded
+
+
+@never_breaks_the_read_loop
 def _capture_channel_advert(user, target, msg, now=None):
     """Record another bot's periodic advert in runtime.known_bots.
 
@@ -610,6 +642,20 @@ def _flush_known_bots(now=None, force=False):
 SLOTS_MAX_PLAUSIBLE_BYTES = 10 ** 16
 
 
+def plain_int(text):
+    """The integer this field holds, or None if it is not a plain number.
+
+    str.isdigit() is True for characters int() REFUSES - superscript two is
+    the shortest example - so guarding a field with isdigit() and then calling
+    int() on it is not a guard at all. It is also True for digits from other
+    scripts that int() does accept, where an Arabic-Indic zero would be read
+    as 0. Neither belongs in a field another bot's script wrote as a decimal
+    number, so this asks the one question that field is actually posing.
+    """
+    text = str(text)
+    return int(text) if text.isascii() and text.isdigit() else None
+
+
 def parse_advert_slots(text, known_files):
     """Size and software out of a bot's CTCP SLOTS line, calibrated against the
     file count its own advert already published.
@@ -642,8 +688,8 @@ def parse_advert_slots(text, known_files):
 
     found = {}
     index = at[0] + 1
-    if index < len(fields) and fields[index].isdigit():
-        size = int(fields[index])
+    size = plain_int(fields[index]) if index < len(fields) else None
+    if size is not None:
         # A library cannot hold fewer bytes than it holds files. SPQR's line
         # ends at the count and has no size at all, which lands here too.
         if known_files <= size < SLOTS_MAX_PLAUSIBLE_BYTES:
@@ -655,6 +701,13 @@ def parse_advert_slots(text, known_files):
     # fields makes no difference.
     software = []
     for field in reversed(fields):
+        # isdigit() and not plain_int() here, deliberately, and the two are
+        # asking different questions. The size field above asks "can int()
+        # convert this", so isdigit() was the wrong test and raised on a
+        # superscript two. This asks "is this field number-shaped, marking
+        # where the numeric region ends" - and a garbage numeral IS part of
+        # that region, so treating it as a boundary keeps it out of the
+        # software string rather than letting it leak in as text.
         if field.isdigit():
             break
         software.append(field)
@@ -684,6 +737,7 @@ def _capture_advert_slots(user, target, msg, now):
     _flush_known_bots()
 
 
+@never_breaks_the_read_loop
 def _capture_broadcast_search_reply(user, target, msg):
     """Cross-bot search broadcast capture (webserver.py's POST
     /api/search/broadcast starts the window this reads).
