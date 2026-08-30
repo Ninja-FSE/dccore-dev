@@ -689,45 +689,76 @@ class FetchStatusPayloadConcurrencyTests(DCCoreTestCase):
                          f"observed {len(torn)} torn read(s) of state=='offered' with "
                          f"offered_at still None, despite the shared lock: {torn[:5]}")
 
-    def test_without_the_lock_the_same_workload_produces_a_torn_pair(self):
-        """Control: the identical promote/revert workload, with the read
-        left unlocked (the pre-fix shape of build_fetch_status_payload()),
-        reliably observes the torn pair - proving the test above is not
-        vacuously passing.
+    def test_the_torn_pair_is_real_and_visible_without_the_lock(self):
+        """Control for the test above: the promotion really does pass through
+        a state where `state` is already "offered" and `offered_at` is still
+        None, and a reader that does not take the lock really can be looking
+        at that instant. Without this, the test above could be passing because
+        the torn state does not exist rather than because the lock prevents it.
 
-        sys.setswitchinterval() is turned down for this test only, forcing
-        far more frequent thread switches - the default 5ms interval
-        otherwise lets the whole promote-then-revert workload finish inside
-        one timeslice often enough that this control can pass by luck even
-        though nothing here is actually synchronised.
+        Shown by standing at that instant rather than racing to catch it. The
+        two statements are the ones check_fetch_queue() runs under the lock;
+        between them the row IS torn, and what an unlocked reader would get is
+        simply read there.
+
+        The earlier version of this ran two threads for 5000 rounds with
+        sys.setswitchinterval() turned down and asserted the race was
+        observed. That is a coin toss the interpreter is free to lose - it
+        failed on windows-latest / Python 3.10 with "the unlocked control
+        workload never observed a torn pair", and passing meant the scheduler
+        cooperated, not that the code was right.
         """
-        old_interval = sys.getswitchinterval()
-        sys.setswitchinterval(1e-6)
-        self.addCleanup(sys.setswitchinterval, old_interval)
+        import dcc_fetch
+        row = config.fetch_queue[self.rid]
 
-        stop = threading.Event()
-        torn = []
+        with dcc_fetch._fetch_lock():
+            row["state"] = "offered"
+            # Standing between the two statements. An unlocked reader running
+            # now sees exactly this - a shallow copy is what
+            # build_fetch_status_payload() would have taken.
+            unlocked_view = [dict(other) for other in config.fetch_queue.values()]
+            row["offered_at"] = time.time()
 
-        def unlocked_reader():
-            while not stop.is_set():
-                queue = dict(getattr(config, "fetch_queue", {}) or {})
-                for row in queue.values():
-                    row_out = dict(row)
-                    if row_out["state"] == "offered" and row_out["offered_at"] is None:
-                        torn.append(row_out)
+        torn = [entry for entry in unlocked_view
+                if entry["state"] == "offered" and entry["offered_at"] is None]
 
-        writer_thread = threading.Thread(target=self._promote_and_revert, args=(stop,), daemon=True)
-        reader_thread = threading.Thread(target=unlocked_reader, daemon=True)
-        writer_thread.start()
-        reader_thread.start()
-        writer_thread.join(timeout=30)
-        stop.set()
+        self.assertTrue(
+            torn,
+            "the promotion no longer passes through a torn state, so the "
+            "locked test above is not proving anything - if the two writes "
+            "have been made atomic some other way, that test should be "
+            "rewritten around whatever now guarantees it")
+
+    def test_the_locked_reader_cannot_stand_at_that_instant(self):
+        """The other half, and the reason the lock is what fixes it: a reader
+        that takes the same lock cannot execute between those two statements
+        at all, because the writer is holding it. Asserted by trying, from
+        another thread, while the torn state is held."""
+        import dcc_fetch
+        row = config.fetch_queue[self.rid]
+        read_done = threading.Event()
+        observed = []
+
+        def locked_reader():
+            observed.extend(webserver.build_fetch_status_payload())
+            read_done.set()
+
+        with dcc_fetch._fetch_lock():
+            row["state"] = "offered"
+            reader_thread = threading.Thread(target=locked_reader, daemon=True)
+            reader_thread.start()
+            # It cannot get in while this block holds the lock. If it could,
+            # it would see the torn pair the test above just demonstrated.
+            self.assertFalse(read_done.wait(timeout=0.5),
+                             "a reader completed a read while the row was torn")
+            row["offered_at"] = time.time()
+
+        self.assertTrue(read_done.wait(timeout=10), "the reader never finished")
         reader_thread.join(timeout=10)
-
-        self.assertTrue(len(torn) > 0,
-                        "the unlocked control workload never observed a torn pair - "
-                        "this test would no longer prove the fix prevents anything; "
-                        "it needs a heavier workload")
+        self.assertEqual(
+            [entry for entry in observed
+             if entry["state"] == "offered" and entry["offered_at"] is None], [],
+            "the locked reader still came back with a torn pair")
 
 
 class ListFetchRoutesTests(DCCoreTestCase):
@@ -2084,23 +2115,36 @@ class SettingsPayloadTests(DCCoreTestCase):
         dashboard for as long as the real rehash (socket I/O, several
         importlib.reload()s) takes."""
         real_rehash = commands.handle_rehash_request
+        entered = threading.Event()
+        release = threading.Event()
         finished = threading.Event()
 
-        def slow_rehash(*_args, **_kwargs):
-            time.sleep(0.3)
+        def blocking_rehash(*_args, **_kwargs):
+            entered.set()
+            release.wait(timeout=10)
             finished.set()
 
-        commands.handle_rehash_request = slow_rehash
+        commands.handle_rehash_request = blocking_rehash
+        self.addCleanup(release.set)
         self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
 
-        started = time.time()
         status, _result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
-        elapsed = time.time() - started
 
+        # Nothing has released the rehash yet. If the save had waited for it,
+        # the call above could not have returned at all - which is the whole
+        # property, stated without measuring anything.
+        #
+        # This used to assert the call took under 0.1s. That is not the
+        # property, it is a proxy for it, and on a loaded CI runner a call
+        # that blocks on nothing at all still took 0.316s - so the test failed
+        # for a reason it was never about.
         self.assertEqual(status, 200)
-        self.assertLess(elapsed, 0.1)
-        self.assertFalse(finished.is_set(), "the calling thread must return before the rehash finishes")
-        self.assertTrue(finished.wait(timeout=2), "the dispatched rehash thread never actually ran")
+        self.assertTrue(entered.wait(timeout=10), "the rehash thread never started")
+        self.assertFalse(finished.is_set(),
+                         "the calling thread waited for the rehash to finish")
+
+        release.set()
+        self.assertTrue(finished.wait(timeout=10), "the dispatched rehash never completed")
 
     def test_apply_settings_changes_rejects_the_password_hash_directly(self):
         status, result = webserver.apply_settings_changes({"ADMIN_PASSWORD_HASH": "x"})
