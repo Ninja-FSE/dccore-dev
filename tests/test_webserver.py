@@ -28,6 +28,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
 import adminchat  # noqa: E402
 import commands  # noqa: E402
 import config  # noqa: E402
+import db  # noqa: E402
 import list as list_mod  # noqa: E402
 import settings_file  # noqa: E402
 import webserver  # noqa: E402
@@ -709,6 +710,20 @@ class FetchDeleteResultTests(DCCoreTestCase):
         status, result = webserver.build_fetch_delete_result("../../../etc/r5")
         self.assertEqual(status, 200)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
+
+    def test_deleting_a_row_removes_it_from_persisted_history_immediately(self):
+        """Not up to 2s later on check_fetch_queue()'s own polling tick - a
+        crash in that window would otherwise bring the just-deleted row back
+        on the next boot, pointing at a file that no longer exists."""
+        import dcc_fetch
+        self._put_row("r6", state="complete", stored_filename=None)
+        dcc_fetch.check_fetch_queue()  # first tick: persist it
+        self.assertIn("r6", db.load_fetch_history())
+
+        status, result = webserver.build_fetch_delete_result("r6")
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("r6", db.load_fetch_history())
 
 
 @unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "

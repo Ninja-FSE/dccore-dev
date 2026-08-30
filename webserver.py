@@ -823,6 +823,12 @@ def build_fetch_delete_result(request_id):
         except OSError as remove_err:
             print(f"[WEBUI] Could not delete fetched file {stored_filename!r}: {remove_err}")
 
+    # Right away, not up to 2s later on check_fetch_queue()'s own polling
+    # tick (dcc_fetch._persist_fetch_history_locked()) - a crash in that
+    # window would otherwise bring this just-deleted row back on the next
+    # boot, pointing at a file that no longer exists.
+    dcc_fetch.persist_fetch_history()
+
     return 200, {"deleted": request_id}
 
 
@@ -892,7 +898,7 @@ SETTINGS_CATEGORIES = (
                                                 "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
-                                                "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE"]),
+                                                "FETCH_HISTORY_FILE", "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE"]),
     ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN"]),
     ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME",
@@ -946,6 +952,7 @@ SETTINGS_LABELS = {
     "HARD_BANS_FILE": "Hard bans file",
     "KNOWN_BOTS_FILE": "Known bots file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
+    "FETCH_HISTORY_FILE": "Fetch history file",
     "LIST_SIZE_FILE": "List size file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
 

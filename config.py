@@ -73,6 +73,17 @@ KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 # treatment as KNOWN_BOTS_FILE, for the same reason.
 FETCHED_BOT_LISTS_FILE: str = "./data/fetched_bot_lists.json"
 
+# Every 'complete'/'failed' cross-bot fetch row - the dashboard Downloads
+# table's only record of a finished fetch, and what its Delete button acts
+# on. Without this, config.fetch_queue was in-memory only: a file finished
+# downloading, survived on disk under FETCHED_FILES_DIR untouched, but its
+# row (and therefore its Download/Delete buttons) vanished on the very next
+# restart. Same JSON-file treatment as FETCHED_BOT_LISTS_FILE, for the same
+# reason - in-flight rows (pending/offered/listening/receiving) are
+# deliberately never written here, since none of those can mean anything
+# once the process that was driving them is gone.
+FETCH_HISTORY_FILE: str = "./data/fetch_history.json"
+
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------

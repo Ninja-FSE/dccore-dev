@@ -138,6 +138,16 @@ def startup():
     if config.fetched_bot_lists:
         print(f"[STARTUP] Fetched lists: {len(config.fetched_bot_lists)} bot(s) remembered.")
 
+    # Finished cross-bot fetches (complete or failed), same restart-survival
+    # reasoning as fetched_bot_lists just above: the actual files under
+    # FETCHED_FILES_DIR were untouched by a restart, but the Downloads
+    # table's only record of them - a row in config.fetch_queue - was
+    # in-memory only until now, so a completed download and its Delete
+    # button both silently vanished from the dashboard on every restart.
+    config.fetch_queue.update(db.load_fetch_history())
+    if config.fetch_queue:
+        print(f"[STARTUP] Fetch history: {len(config.fetch_queue)} finished fetch(es) remembered.")
+
     # ---------------------------------------------------------------------
     # SINGLE START: the queue is started exactly ONCE here, outside every loop,
     # so boot produces exactly one [QUEUE] line.

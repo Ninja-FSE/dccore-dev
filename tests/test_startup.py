@@ -119,6 +119,18 @@ class StartupRunsOnThisPlatform(BootCase):
         self.boot()
         self.assertEqual(len(loaded), 1, "a queue saved before a restart must come back")
 
+    def test_it_loads_saved_fetch_history(self):
+        """A finished fetch's row (the only thing the dashboard Downloads
+        table and its Delete button have to point at) must survive a
+        restart the same way the bot registry and fetched-lists registry
+        already do - see db.load_fetch_history()'s own docstring."""
+        loaded = []
+        real = db.load_fetch_history
+        db.load_fetch_history = lambda: (loaded.append(1), {})[-1]
+        self.addCleanup(lambda: setattr(db, "load_fetch_history", real))
+        self.boot()
+        self.assertEqual(len(loaded), 1, "finished fetches saved before a restart must come back")
+
     def test_no_bans_file_is_not_an_error(self):
         self.assertFalse(os.path.exists(config.BANS_FILE))
         self.boot()

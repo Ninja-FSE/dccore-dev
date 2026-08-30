@@ -323,11 +323,28 @@ class DCCoreTestCase(unittest.TestCase):
         self.config = reset_config()
         self.oserve = install_fake_oserve()
         self._trees = []
+        # dcc_fetch.check_fetch_queue() persists finished fetches to disk on
+        # every tick it runs (dcc_fetch._persist_fetch_history_locked()), and
+        # reset_config() leaves fetch_feature_disabled False - so the many
+        # tests across this suite that call check_fetch_queue() would
+        # otherwise write straight into the real repository's
+        # data/fetch_history.json. Redirect it to a throwaway path, and
+        # reset the "what did we last write" cache so one test's leftover
+        # state can never mask another's.
+        import db
+        import dcc_fetch
+        self._fetch_history_dir = tempfile.mkdtemp(prefix="dccore-fetch-history-")
+        self._real_fetch_history_file = db.FETCH_HISTORY_FILE
+        db.FETCH_HISTORY_FILE = os.path.join(self._fetch_history_dir, "fetch_history.json")
+        dcc_fetch._last_persisted_terminal_ids = frozenset()
 
     def tearDown(self):
         restore_daemon_functions()
         for tree in self._trees:
             tree.cleanup()
+        import db
+        db.FETCH_HISTORY_FILE = self._real_fetch_history_file
+        shutil.rmtree(self._fetch_history_dir, ignore_errors=True)
 
     def set_config(self, **overrides):
         """Set config attributes for the duration of one test, restoring
