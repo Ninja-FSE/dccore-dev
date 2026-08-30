@@ -82,6 +82,10 @@ def handle_help_request(s, user, target):
             f"in the same zip: {bold}{red}!{nick} !rar D:\\MUSIC\\Artist\\Album\\{reset}")
 
     lines.append(
+        f"What I have and what I have sent: {bold}{red}@{nick}-stats{reset}. "
+        f"What people request most: {bold}{red}@{nick}-top{reset}.")
+
+    lines.append(
         f"Your queue: {bold}{red}@{nick}-que{reset} to see it, "
         f"{bold}{red}@{nick}-remove{reset} to cancel it. "
         f"To search every bot at once, type: {bold}{red}@find <words>{reset}")
@@ -856,3 +860,193 @@ def handle_list_update_request(user, target_chan, authorised=False):
 
     # Start the background thread
     threading.Thread(target=async_list_updater, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# @<nick>-stats and @<nick>-top
+#
+# The numbers the bot already knows, on demand and in private. The advert
+# carries most of what -stats reports, but it fires on a timer into a busy
+# channel: somebody who missed it, or who is in a PM, had no way to ask. -top
+# is not published anywhere except the web dashboard, which only the operator
+# can see.
+#
+# Both answer by NOTICE to whoever asked, like every other user command here,
+# so a stranger looking the bot over costs the channel nothing.
+# ---------------------------------------------------------------------------
+
+# Long enough for a real "Artist - Title" to stay recognisable. In BYTES, not
+# characters: a library of Bjork, Sigur Ros and Motley Crue costs two bytes a
+# letter, and five names clamped to 44 CHARACTERS came to 596 bytes against a
+# 420 budget - the same trap announce.fit_irc_line() measures in bytes for.
+TOP_NAME_BYTES = 44
+
+# Five each. Ten would need a second line per section, and four notices for a
+# command a stranger can repeat is more of the channel's flood budget than a
+# curiosity is worth.
+TOP_ROWS = 5
+
+
+def _clamp_name(name, limit=None):
+    """A display name short enough to line up, measured in bytes.
+
+    The limit is read on every call rather than bound as a default argument.
+    A default is evaluated once, at import, so `limit=TOP_NAME_BYTES` made the
+    constant look tunable while ignoring every later change to it - including
+    the one a test needs to reach the "not even one entry fits" branch in
+    section() below.
+
+    The head is kept, not the tail: "Bach - Goldberg Variations - Aria da
+    Capo" tells you what it is and "...ria da Capo" does not.
+
+    errors="ignore" on the decode is what drops a multi-byte character the cut
+    landed in the middle of. Half a character is not a shorter name, it is a
+    mojibake box in everybody's client.
+    """
+    limit = TOP_NAME_BYTES if limit is None else limit
+    text = " ".join(str(name).split())
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit - 3].decode("utf-8", "ignore").rstrip() + "..."
+
+
+def handle_stats_request(s, user, target):
+    """Answer "@<nick>-stats" with what this bot has and what it has sent."""
+    oserve = sys.modules.get('oserve')
+    if not oserve:
+        return
+
+    import list as list_mod
+    import dcc
+    import stats_mgr
+
+    bold, green, red, reset = (config.C_BOLD, config.C_GREEN,
+                               config.C_RED, config.C_RESET)
+
+    def figure(text, colour=green):
+        return f"{bold}{colour}{text}{reset}"
+
+    shared_count, list_date, shared_size, _raw = \
+        list_mod.get_file_count_date_size_and_raw_bytes()
+
+    total_sent = stats_mgr.get_total_sent()
+    total_bytes = stats_mgr.get_total_sent_bytes()
+
+    # _rolled, not the raw row: the day is only rotated on disk when a transfer
+    # completes, so a bot that has sent nothing since midnight still has
+    # yesterday's numbers in the Today columns. The dashboard reads it rolled
+    # and so must this, or the same bot answers two different numbers depending
+    # on which one you ask.
+    yesterday_files = today_files = 0
+    try:
+        row = db.load_advanced_stats_rolled()
+        if len(row) > 5:
+            yesterday_files, today_files = row[2], row[4]
+    except Exception as err:
+        print(f"[COMMANDS] Could not read the day figures for {user}: {err}")
+
+    active = oserve.active_downloads if oserve else 0
+    free_slots = max(0, config.MAX_DCC_SLOTS - active)
+    queued = dcc.get_total_queued_count()
+
+    speed_now = stats_mgr.format_speed(stats_mgr.live_speed())
+    record = stats_mgr.format_speed(db.get_speed_record())
+
+    # get_file_count_date_size_and_raw_bytes() answers "No List" as the DATE
+    # when there is nothing to read, which reads as a date in the sentence it
+    # was going into. A bot that has not built its list yet is the state every
+    # fresh install is in, and the first thing somebody would ask about.
+    if shared_count or list_date != "No List":
+        shared_line = (f"Sharing {figure(f'{shared_count:,}')} files "
+                       f"({figure(shared_size)}), list built {figure(list_date, red)}.")
+    else:
+        shared_line = "No list has been built yet, so there is nothing to share."
+
+    lines = [
+        shared_line,
+
+        f"Sent {figure(f'{total_sent:,}')} files "
+        f"({figure(stats_mgr.format_size_human(total_bytes))}) all time - "
+        f"{figure(yesterday_files, red)} yesterday, {figure(today_files, red)} today.",
+
+        f"Slots {figure(f'{free_slots}/{config.MAX_DCC_SLOTS}')} free, "
+        f"{figure(queued)} queued. Speed {figure(speed_now)}, "
+        f"record {figure(record)}. Up {figure(_format_uptime(stats_mgr.get_uptime_seconds()))}.",
+    ]
+
+    for line in lines:
+        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n", is_vip=True)
+
+    print(f"[STATS] Sent the stats notice to {user} (asked in {target}).")
+
+
+def _format_uptime(seconds):
+    """Days and hours, or hours and minutes below a day."""
+    seconds = int(max(0, seconds))
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def handle_top_request(s, user, target):
+    """Answer "@<nick>-top" with the most-requested files and albums."""
+    oserve = sys.modules.get('oserve')
+    if not oserve:
+        return
+
+    import announce
+
+    bold, green, red, reset = (config.C_BOLD, config.C_GREEN,
+                               config.C_RED, config.C_RESET)
+
+    # What the envelope costs, so the entries are measured against what is
+    # actually left of the line.
+    envelope = len(f"NOTICE {user} :\r\n".encode("utf-8"))
+
+    def section(label, rows):
+        """As many rows as fit, in order.
+
+        Clamping each name is not enough on its own: five clamped names plus
+        five counts plus a label is still a sum, and a sum of things that each
+        fit does not have to fit.
+        """
+        parts = []
+        for position, row in enumerate(rows, 1):
+            parts.append(f"{bold}{red}{position}.{reset} {_clamp_name(row['name'])} "
+                         f"{bold}{green}({row['count']}){reset}")
+            candidate = f"{label}: " + "  ".join(parts)
+            if envelope + len(candidate.encode("utf-8")) > announce.IRC_LINE_BUDGET:
+                parts.pop()
+                break
+        return f"{label}: " + "  ".join(parts) if parts else ""
+
+    try:
+        files = db.top_downloads(limit=TOP_ROWS, kind="file")
+        # Albums are counted whether or not folder packing is on - the counter
+        # records what was sent, and turning !rar off later does not unsend it.
+        # They are only OFFERED here when the bot will still pack one: a list
+        # of albums nobody can request reads as a menu, which is the mistake
+        # #153 took out of the album list.
+        albums = (db.top_downloads(limit=TOP_ROWS, kind="album")
+                  if getattr(config, "RAR_ENABLED", True) else [])
+    except Exception as err:
+        print(f"[COMMANDS] Could not read the download counts for {user}: {err}")
+        files, albums = [], []
+
+    lines = [line for line in (section("Most requested files", files),
+                               section("Most requested albums", albums)) if line]
+    if not lines:
+        lines.append(
+            f"Nothing has been requested yet - the counter starts at the first "
+            f"send. Get my list with {bold}{red}@{config.NICKNAME}{reset}.")
+
+    for line in lines:
+        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n", is_vip=True)
+
+    print(f"[TOP] Sent the most-requested notice to {user} (asked in {target}).")
