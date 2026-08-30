@@ -26,7 +26,8 @@
     download:  { title: "Download",   sub: "Bulk-paste \"!<bot> <filename>\" requests and track their progress." },
     filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
     tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." },
-    settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." }
+    settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." },
+    stats:     { title: "Stats",      sub: "Everything this bot knows about itself." }
   };
 
   var state = {
@@ -72,6 +73,23 @@
     filelistsExpandAll:   document.getElementById("filelists-expand-all"),
     filelistsCollapseAll: document.getElementById("filelists-collapse-all"),
     filelistsDownloadSelectedBtn: document.getElementById("filelists-download-selected-btn"),
+    stSpeed:               document.getElementById("st-speed"),
+    stRecord:              document.getElementById("st-record"),
+    stSending:             document.getElementById("st-sending"),
+    stQueued:              document.getElementById("st-queued"),
+    stQueuedLabel:         document.getElementById("st-queued-label"),
+    stUptime:              document.getElementById("st-uptime"),
+    stSentTotal:           document.getElementById("st-sent-total"),
+    stSentToday:           document.getElementById("st-sent-today"),
+    stSentYesterday:       document.getElementById("st-sent-yesterday"),
+    stSentTotalFiles:      document.getElementById("st-sent-total-files"),
+    stSentTodayFiles:      document.getElementById("st-sent-today-files"),
+    stSentYesterdayFiles:  document.getElementById("st-sent-yesterday-files"),
+    stFiles:               document.getElementById("st-files"),
+    stSize:                document.getElementById("st-size"),
+    stAlbums:              document.getElementById("st-albums"),
+    stBuilt:               document.getElementById("st-built"),
+    stFoot:                document.getElementById("st-foot"),
     themeDark:    document.getElementById("theme-dark"),
     themeLight:   document.getElementById("theme-light"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
@@ -138,6 +156,7 @@
       if (!state.filelistsLoaded) { loadFilelists(); }
     }
     if (name === "settings" && !state.settingsLoaded) { loadSettings(); }
+    if (name === "stats") { loadStats(); }
   }
 
   el.navItems.forEach(function (btn) {
@@ -1340,11 +1359,68 @@
   // reasoning as the sidebar status card above.
   setInterval(loadDownloads, DOWNLOADS_POLL_MS);
 
+  // Only while Stats is the view on screen. Speed now and the queue counters
+  // move second to second; the rest of the page does not, and polling a view
+  // nobody is looking at is the 401 storm in miniature.
+  setInterval(function () {
+    if (state.active === "stats") { loadStats(); }
+  }, REFRESH_MS);
+
   // A list-fetch (Download tab, or the File Lists fetch box) can complete
   // while the operator is on any other view - keep the switcher's options
   // fresh regardless of which tab is showing, same reasoning as above.
   setInterval(pollFilelistsBots, FILELISTS_BOTS_POLL_MS);
   pollFilelistsBots();
+
+  // ---------------------------------------------------------------- Stats
+
+  function setStat(node, value) {
+    if (node) { node.textContent = value; }
+  }
+
+  function renderStats(data) {
+    var t = data.transfer || {};
+    var s = data.sent || {};
+    var lib = data.library || {};
+
+    // Every figure is rendered server-side by the same helpers the channel
+    // advert and the admin console use, so the page cannot disagree with the
+    // advert about how the same number reads. The raw values are in the
+    // payload too, for anything that is not this page.
+    setStat(el.stSpeed, t.speed_now_text || "0k/s");
+    setStat(el.stRecord, t.record_text || "0k/s");
+    setStat(el.stSending, (t.sending || 0) + " / " + (t.slots || 0));
+    setStat(el.stQueued, (t.queued_files || 0).toLocaleString());
+    setStat(el.stQueuedLabel,
+            "Queued" + (t.queued_users ? " · " + t.queued_users + " user" +
+                        (t.queued_users === 1 ? "" : "s") : ""));
+    setStat(el.stUptime, t.uptime_text || "0 Min");
+
+    setStat(el.stSentTotal, s.total_text || "0B");
+    setStat(el.stSentToday, s.today_text || "0B");
+    setStat(el.stSentYesterday, s.yesterday_text || "0B");
+    setStat(el.stSentTotalFiles, "Total · " + (s.total_files || 0).toLocaleString() + " files");
+    setStat(el.stSentTodayFiles, "Today · " + (s.today_files || 0).toLocaleString() + " files");
+    setStat(el.stSentYesterdayFiles,
+            "Yesterday · " + (s.yesterday_files || 0).toLocaleString() + " files");
+
+    setStat(el.stFiles, (lib.files || 0).toLocaleString());
+    setStat(el.stSize, lib.size || "0B");
+    // null means "no RAR list has been built", which is not the same claim as
+    // "this bot offers no albums" - so it shows as unknown rather than zero.
+    setStat(el.stAlbums, lib.rar_folders === null || lib.rar_folders === undefined
+            ? "—" : lib.rar_folders.toLocaleString());
+    setStat(el.stBuilt, lib.list_date || "—");
+
+    setStat(el.stFoot, data.version || "");
+  }
+
+  function loadStats() {
+    fetchJson("/api/stats").then(function (data) {
+      markConnection(true);
+      renderStats(data);
+    }).catch(function () { markConnection(false); });
+  }
 
   // ---------------------------------------------------------------- Theme
   //

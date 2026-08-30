@@ -194,6 +194,139 @@ def reject_if_unsafe_for_irc_line(value, field_name):
 # Pure data-building functions - no Flask, unit tested directly.
 # ==========================================================================
 
+def count_rar_album_folders():
+    """How many album folders the RAR list offers, or None if there is no list.
+
+    The file update_list.py writes opens with three lines of explanation and
+    then one "!<nick> !rar <path>" row per folder, so the rows are exactly the
+    lines starting with "!". Counting those rather than the file's length is
+    what keeps the header out of the total.
+
+    None rather than 0 when there is no list at all: a bot whose first list has
+    not been built yet has an unknown album count, and zero is a different
+    claim - it would read on the page as "this bot offers no albums".
+    """
+    import io
+
+    directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
+    prefix = f"{getattr(config, 'LIST_BASE_NAME', 'DCCore')}-RAR-"
+    try:
+        names = sorted(name for name in os.listdir(directory)
+                       if name.startswith(prefix) and name.endswith(".txt"))
+    except OSError:
+        return None
+    if not names:
+        return None
+
+    try:
+        with io.open(os.path.join(directory, names[-1]), encoding="utf-8",
+                     errors="ignore") as handle:
+            return sum(1 for line in handle if line.startswith("!"))
+    except OSError:
+        return None
+
+
+def build_stats_payload():
+    """Everything the Stats view shows, in one request.
+
+    Every figure comes twice: the raw number, and the daemon's own rendering of
+    it. The raw one is for anything that is not this page - a script, a future
+    CTCP reply - which should not have to parse "1.21TB" back into an integer.
+    The rendered one uses stats_mgr.format_speed(), format_size_human() and
+    adminchat.format_uptime(), which are what the channel advert and the admin
+    console already print, so the dashboard cannot disagree with the advert
+    about how the same number reads.
+
+    Nothing here takes a lock, matching build_queue_payload(): a shallow copy of
+    the live containers is good enough for a status display and cannot deadlock
+    against the daemon's own queue processing.
+
+    Every source is guarded individually. This is a read-only status page and a
+    missing stats file, an unbuilt list or a permissions error on lists/ must
+    cost the tile that needs it and nothing else - a dashboard that 500s
+    because one counter is unreadable is worse than one showing a gap.
+    """
+    # Imported here, not at module scope. tests/test_import_graph.py pins that
+    # importing webserver.py pulls in none of the daemon, so that
+    # tests/test_webserver.py can exercise every route without one running -
+    # and db/list/stats_mgr are named in that test explicitly. Same reason the
+    # File Lists payload imports `list` inside its own function.
+    import db
+    import list as list_mod
+    import stats_mgr
+
+    active = list(getattr(config, "active_transfers", []))
+    queue = dict(getattr(config, "dcc_queue", {}))
+
+    try:
+        speed_now = int(stats_mgr.live_speed())
+    except Exception:
+        speed_now = 0
+
+    try:
+        record = int(db.get_speed_record())
+    except Exception:
+        record = 0
+
+    try:
+        uptime = int(stats_mgr.get_uptime_seconds())
+    except Exception:
+        uptime = 0
+
+    # The 7-column row: total files, total bytes, yesterday's pair, today's
+    # pair, and the date the day last rolled over. Read through
+    # load_advanced_stats_rolled(), which rolls a COPY, so a bot that has sent
+    # nothing since midnight does not show yesterday's figures labelled Today -
+    # and so answering a GET does not write to disk.
+    sent = {"total_files": 0, "total_bytes": 0, "today_files": 0,
+            "today_bytes": 0, "yesterday_files": 0, "yesterday_bytes": 0}
+    try:
+        row = db.load_advanced_stats_rolled()
+        names = ("total_files", "total_bytes", "yesterday_files",
+                 "yesterday_bytes", "today_files", "today_bytes")
+        for index, name in enumerate(names):
+            try:
+                sent[name] = int(str(row[index]).strip())
+            except (IndexError, TypeError, ValueError):
+                pass
+    except Exception:
+        pass
+
+    library = {"files": 0, "size": None, "raw_bytes": 0, "list_date": None,
+               "rar_folders": None}
+    try:
+        files, list_date, size, raw_bytes = list_mod.get_file_count_date_size_and_raw_bytes()
+        library.update({"files": int(files or 0), "list_date": list_date or None,
+                        "size": size or None, "raw_bytes": int(raw_bytes or 0)})
+    except Exception:
+        pass
+    try:
+        library["rar_folders"] = count_rar_album_folders()
+    except Exception:
+        pass
+
+    for name in ("total", "today", "yesterday"):
+        sent[name + "_text"] = stats_mgr.format_size_human(sent[name + "_bytes"])
+
+    return {
+        "transfer": {
+            "speed_now": speed_now,
+            "speed_now_text": stats_mgr.format_speed(speed_now),
+            "record": record,
+            "record_text": stats_mgr.format_speed(record),
+            "sending": len(active),
+            "slots": int(getattr(config, "MAX_DCC_SLOTS", 0) or 0),
+            "queued_files": sum(len(entries) for entries in queue.values()),
+            "queued_users": len(queue),
+            "uptime_seconds": uptime,
+            "uptime_text": adminchat.format_uptime(uptime),
+        },
+        "sent": sent,
+        "library": library,
+        "version": str(getattr(config, "SCRIPT_VERSION", "")),
+    }
+
+
 def build_queue_payload(user=None):
     """The Queue view's data.
 
@@ -1081,6 +1214,10 @@ if HAVE_FLASK:
         @app.route("/api/queue")
         def api_queue():
             return jsonify(build_queue_payload(user=request.args.get("user")))
+
+        @app.route("/api/stats")
+        def api_stats():
+            return jsonify(build_stats_payload())
 
         @app.route("/api/search")
         def api_search():

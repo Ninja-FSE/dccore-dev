@@ -417,6 +417,34 @@ html, body {
   color: var(--text-dim);
 }
 
+/* ------------------------------------------------------------------ Stats */
+
+/* The Queue view's .stat-row is a fixed three columns, which is right for its
+   three cards. Stats has groups of three, four and five, so it gets a modifier
+   that flows instead - rather than changing the shared class underneath a view
+   that is already laid out around it. */
+.stat-row.is-wide {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.stat-group-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+
+/* A date is not a measurement, so it does not get the numeric display size. */
+.stat-value-sm { font-size: 18px; }
+
+.stat-foot {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin: 0;
+}
+
 /* ------------------------------------------------------------------ Table */
 
 .table-wrap {

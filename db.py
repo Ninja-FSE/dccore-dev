@@ -292,6 +292,32 @@ def save_advanced_stats(stats):
         print(f"[DB ERROR] Could not save to stats.txt: {e}")
 
 
+def load_advanced_stats_rolled():
+    """The stats row as it stands TODAY, without writing anything.
+
+    check_and_rotate_day() is the writer: it rotates and saves, and the daemon
+    calls it when a transfer completes. This is the reader's version, for a
+    status display that must not write to disk to answer a GET.
+
+    It matters because the daemon only rotates when something finishes. A bot
+    that has sent nothing since midnight still has yesterday's figures sitting
+    in the Today columns, and a dashboard reading the row raw would label them
+    Today - wrong, and wrong in the direction that flatters the bot.
+
+    Rolling through _rotate_day_unlocked() keeps one definition of what "a new
+    day" means. Duplicating that comparison here is the second-list problem
+    this codebase keeps getting bitten by.
+
+    Mutating the row in place is safe because _load_advanced_stats_unlocked()
+    builds a fresh list on every call - there is no shared row to corrupt, and
+    a defensive copy here would be guarding nothing.
+    """
+    with _disk_lock:
+        stats = _load_advanced_stats_unlocked()
+    _rotate_day_unlocked(stats)
+    return stats
+
+
 def check_and_rotate_day():
     """Roll Today into Yesterday at midnight. Returns the current row.
 

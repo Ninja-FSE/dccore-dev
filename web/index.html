@@ -54,6 +54,9 @@
       <button class="nav-item" data-view="settings">
         <span class="nav-icon">&#9998;</span> Settings
       </button>
+      <button class="nav-item" data-view="stats">
+        <span class="nav-icon">&#9673;</span> Stats
+      </button>
     </nav>
 
     <div class="status-card">
@@ -300,6 +303,34 @@
           <p class="settings-note" id="settings-save-error" style="display:none;"></p>
         </div>
       </div>
+    </section>
+
+    <section class="view" id="view-stats">
+      <div class="stat-group-label">Transfer</div>
+      <div class="stat-row is-wide">
+        <div class="stat-card"><div class="stat-value" id="st-speed">&mdash;</div><div class="stat-label">Speed now</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-record">&mdash;</div><div class="stat-label">Record</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-sending">&mdash;</div><div class="stat-label">Sending</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-queued">&mdash;</div><div class="stat-label" id="st-queued-label">Queued</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-uptime">&mdash;</div><div class="stat-label">Uptime</div></div>
+      </div>
+
+      <div class="stat-group-label">Sent</div>
+      <div class="stat-row is-wide">
+        <div class="stat-card"><div class="stat-value" id="st-sent-total">&mdash;</div><div class="stat-label" id="st-sent-total-files">Total</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-sent-today">&mdash;</div><div class="stat-label" id="st-sent-today-files">Today</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-sent-yesterday">&mdash;</div><div class="stat-label" id="st-sent-yesterday-files">Yesterday</div></div>
+      </div>
+
+      <div class="stat-group-label">Library</div>
+      <div class="stat-row is-wide">
+        <div class="stat-card"><div class="stat-value" id="st-files">&mdash;</div><div class="stat-label">Files shared</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-size">&mdash;</div><div class="stat-label">Size</div></div>
+        <div class="stat-card"><div class="stat-value" id="st-albums">&mdash;</div><div class="stat-label">Album folders (!rar)</div></div>
+        <div class="stat-card"><div class="stat-value stat-value-sm" id="st-built">&mdash;</div><div class="stat-label">List built</div></div>
+      </div>
+
+      <p class="stat-foot" id="st-foot"></p>
     </section>
 
   </div>
