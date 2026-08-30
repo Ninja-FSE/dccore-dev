@@ -67,6 +67,9 @@
 
 #FILE_DIRECTORY = /mnt/nfs-musik
 
+# Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected
+#RAR_ENABLED = true
+
 # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 #RAR_BINARY = 
 

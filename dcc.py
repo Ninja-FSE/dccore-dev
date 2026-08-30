@@ -718,7 +718,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # ---------------------------------------------------------------------
         if requested_file.lower().startswith("!rar "):
             import announce as announce_mod
-            
+
+            if not getattr(config, 'RAR_ENABLED', True):
+                announce_mod.send_dcc_error(user, "rar_disabled")
+                return
+
             raw_win_path = requested_file[5:].strip()
             
             # Trim any leftovers, in case somebody pasted an old row

@@ -41,6 +41,7 @@ BROADCAST_SEARCH_CHANNEL: str = None
 # ---------------------------------------------------------------------
 PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
 FILE_DIRECTORY: str   = "/mnt/nfs-musik"
+RAR_ENABLED: bool     = True        # Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected
 RAR_BINARY: str       = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 TMP_ZIP_DIR: str      = "./data/tmp_zips"
 LOCAL_LIST_DIR: str   = "./lists"

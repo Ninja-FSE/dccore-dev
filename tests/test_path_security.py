@@ -291,6 +291,26 @@ class RarRequestTraversalTests(PathSecurityBase):
         # And the queue worker really was woken for it.
         self.assertIn("check_queue_and_send", self.dispatched_names())
 
+    def test_rar_disabled_refuses_the_request_before_touching_the_path(self):
+        """RAR_ENABLED = False refuses every !rar request outright, before any
+        traversal check, path resolution, or queueing runs - a legitimate
+        album request must be turned away exactly like a hostile one."""
+        self.set_config(RAR_ENABLED=False)
+
+        self.request("Metallica/Black Album (1991)")
+
+        self.assertNothingQueued("Metallica/Black Album (1991)")
+        self.assertIn("error", [kind for kind, _a in self.notices])
+
+    def test_rar_enabled_by_default(self):
+        """Defect guard: an operator who never sets RAR_ENABLED must keep
+        !rar working exactly as before this setting existed."""
+        self.assertTrue(config.RAR_ENABLED)
+
+        self.request("Metallica/Black Album (1991)")
+
+        self.assertIn("dave", config.dcc_queue)
+
     def test_bracket_tags_are_kept_so_autoq_can_match_the_archive_name(self):
         """Defect guard: AutoQ.mrc's own completion check de-underscores the
         received filename and compares it to the basename of the folder path
