@@ -94,6 +94,14 @@ fetched_bot_lists        = {}  # Parsed lists fetched FROM other bots, keyed by 
 _channel_users_lock = threading.Lock()
 
 
+# Live transfer rate ---------------------------------------------------------
+# Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
+# !rehash cannot reset it, and so readers that must not import the daemon can
+# still see it. webserver.py reads these two directly for the dashboard.
+live_speed_bps = 0        # bytes/sec across every sending transfer
+live_speed_sampled_at = 0.0
+
+
 def channel_users_lock():
     """The lock every read and write of channel_users must hold.
 

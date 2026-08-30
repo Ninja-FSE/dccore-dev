@@ -1,6 +1,9 @@
 # stats_mgr.py - Size formatting, transfer speed and uptime figures
 import time
+
+import config
 import db
+import runtime
 
 # The bot's start time is kept here.
 #
@@ -108,6 +111,78 @@ def update_speed_record(bytes_per_sec, duration=None):
 
     db.save_speed_record(speed)
     return speed
+
+
+# The shortest window a sample may be measured over, and so also the most often
+# one is taken. Two things want this number to be the same:
+#
+#   * A rate needs a window. bytes_sent is a LIFETIME counter, so the figure is
+#     bytes moved since the previous observation over the time since it - and a
+#     window of a few milliseconds either reports nothing or, if a pass happens
+#     to straddle a second, something wildly inflated.
+#   * More than one caller now wants this number. Sampling consumes the window:
+#     if the advert and the dashboard each took their own, each would see part
+#     of the movement and both would be wrong. Caching the result for the same
+#     second means any number of callers can ask as often as they like and all
+#     get the same, correct answer.
+MIN_SAMPLE_SECONDS = 1.0
+
+
+def live_speed(now=None):
+    """Aggregate bytes/sec across the transfers currently sending.
+
+    Cached for MIN_SAMPLE_SECONDS: a call inside that window returns the last
+    figure rather than taking a second sample that would measure a fraction of
+    the movement and report a fraction of the speed.
+
+    The value is also left in runtime.live_speed_bps for readers that must not
+    import the daemon - webserver.py in particular, which imports `list` lazily
+    for exactly that reason and has a test pinning that it stays light.
+    """
+    now = time.time() if now is None else now
+
+    if now - runtime.live_speed_sampled_at < MIN_SAMPLE_SECONDS:
+        return runtime.live_speed_bps
+
+    # Imported here rather than at module scope: dcc imports stats_mgr itself,
+    # and this module is small enough to be pulled in by things that must not
+    # drag the daemon along behind it.
+    import dcc
+
+    total = 0
+    contributors = 0
+
+    # dcc.queue_lock, not config.queue_lock - every append and removal on
+    # config.active_transfers throughout dcc.py holds dcc's own module-level
+    # lock. They are different objects, and guarding the same list with two of
+    # them is guarding it with neither.
+    with dcc.queue_lock:
+        for tx in config.active_transfers:
+            sent = tx.get("bytes_sent", 0)
+            previous_bytes = tx.get("_speed_bytes")
+            previous_time = tx.get("_speed_time")
+            tx["_speed_bytes"] = sent
+            tx["_speed_time"] = now
+
+            if previous_time is None:
+                continue                      # first sighting: no window yet
+
+            window = now - previous_time
+            if window < MIN_SAMPLE_SECONDS:
+                continue
+
+            moved = sent - previous_bytes
+            if moved > 0:
+                total += int(moved / window)
+                contributors += 1
+
+    # Averaged across the transfers that actually contributed, not across every
+    # active slot: one skipped for lack of a window must not drag the mean down.
+    value = int(total / contributors) if contributors else 0
+
+    runtime.live_speed_bps = value
+    runtime.live_speed_sampled_at = now
+    return value
 
 
 def get_uptime_seconds():
