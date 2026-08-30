@@ -801,7 +801,7 @@ def irc_loop():
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         )
         config.MY_IP_OR_DOCK = urllib.request.urlopen(req, timeout=5.0).read().decode("utf-8").strip()
-        print(f"[IP CHECK] IP-identifiering klar! DCC IP satt till: {config.MY_IP_OR_DOCK}")
+        print(f"[IP CHECK] Address detected. DCC IP set to: {config.MY_IP_OR_DOCK}")
     except Exception as e:
         print(f"[WARNING] Could not reach the ipify API ({e}). Falling back to 127.0.0.1")
         config.MY_IP_OR_DOCK = "127.0.0.1"
