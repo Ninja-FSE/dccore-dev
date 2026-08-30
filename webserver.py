@@ -800,9 +800,19 @@ def build_fetch_delete_result(request_id):
     Never builds the on-disk path from request_id or anything else attacker-
     reachable - request_id only selects the row, and the row's own
     stored_filename (set by dcc_fetch.py after running the offer's filename
-    through dcc.is_safe_path()) is what actually gets removed, same as
-    api_fetch_download()'s identical guarantee.
+    through dcc.is_safe_path()) is what actually gets removed.
+
+    That upstream check is real, but this route used to lean on it alone: a
+    plain os.path.join() has no protection against an absolute or
+    "../"-laden stored_filename the way api_fetch_download()'s
+    send_from_directory() does (it performs its own safe join and raises
+    NotFound on anything that escapes `directory`) - so download was
+    protected twice and delete, the destructive one, only once. re-checks
+    with the exact same dcc.is_safe_path() dcc_fetch.py's write path already
+    uses, rather than trusting that stored_filename can never be anything
+    else, forever, everywhere it is read.
     """
+    import dcc
     import dcc_fetch
     with dcc_fetch._fetch_lock():
         row = getattr(config, "fetch_queue", {}).get(request_id)
@@ -816,6 +826,9 @@ def build_fetch_delete_result(request_id):
     if stored_filename:
         directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
         target = os.path.join(directory, stored_filename)
+        if not dcc.is_safe_path(directory, target):
+            print(f"[WEBUI] Refused to delete {stored_filename!r}: outside FETCHED_FILES_DIR.")
+            return 500, {"error": "Refused: the stored path is outside the fetch directory."}
         try:
             os.remove(platform_compat.long_path(target))
         except FileNotFoundError:

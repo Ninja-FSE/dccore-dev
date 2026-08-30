@@ -711,6 +711,32 @@ class FetchDeleteResultTests(DCCoreTestCase):
         self.assertEqual(status, 200)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
 
+    def test_a_stored_filename_escaping_fetched_files_dir_is_refused_not_removed(self):
+        """chchatzop's PR #150 review finding: unlike api_fetch_download()
+        (Flask's send_from_directory() does its own safe join and raises
+        NotFound on anything that escapes `directory`), this route used to
+        trust stored_filename with a plain os.path.join() and no re-check of
+        its own - fine while _resolve_destination_path() remains the only
+        writer of that field, but the delete itself had no independent
+        guarantee if that ever stopped being true. Not reachable through the
+        normal enqueue path today; this pins the defence-in-depth re-check
+        directly, the same way the write path already enforces it."""
+        import shutil
+        import tempfile
+        outside_dir = tempfile.mkdtemp(prefix="dccore-outside-fetched-")
+        self.addCleanup(lambda: shutil.rmtree(outside_dir, ignore_errors=True))
+        victim = os.path.join(outside_dir, "important.txt")
+        with open(victim, "w") as f:
+            f.write("do not delete me")
+        escaping_stored_filename = os.path.relpath(victim, self.tmp)
+
+        self._put_row("r7", state="complete", stored_filename=escaping_stored_filename)
+        status, result = webserver.build_fetch_delete_result("r7")
+
+        self.assertEqual(status, 500)
+        self.assertIn("error", result)
+        self.assertTrue(os.path.exists(victim), "must never remove a path outside FETCHED_FILES_DIR")
+
     def test_deleting_a_row_removes_it_from_persisted_history_immediately(self):
         """Not up to 2s later on check_fetch_queue()'s own polling tick - a
         crash in that window would otherwise bring the just-deleted row back
