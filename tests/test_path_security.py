@@ -300,7 +300,8 @@ class RarRequestTraversalTests(PathSecurityBase):
         self.request("Metallica/Black Album (1991)")
 
         self.assertNothingQueued("Metallica/Black Album (1991)")
-        self.assertIn("error", [kind for kind, _a in self.notices])
+        self.assertIn(("error", ("dave", "rar_disabled")), self.notices,
+                      "refused, but not for the reason this test is pinning")
 
     def test_rar_enabled_by_default(self):
         """Defect guard: an operator who never sets RAR_ENABLED must keep
