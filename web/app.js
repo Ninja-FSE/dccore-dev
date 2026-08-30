@@ -575,6 +575,14 @@
       var filenameDisplay = row.filename;
       if (!filenameDisplay && row.request_type === "list") {
         filenameDisplay = row.bot + "’s file list";
+      } else if (row.request_type === "folder" && row.filename &&
+                 row.filename === row.requested_filename) {
+        // Not yet claimed: dcc_fetch.py's "folder" rows start with
+        // filename === the literal "!rar <folder>" request text
+        // (requested_filename, set once at creation) and only get the real
+        // advertised .rar name once the other bot answers - show something
+        // more readable than the raw wire command until then.
+        filenameDisplay = row.filename.replace(/^!rar\s+/, "") + " (packing…)";
       }
       return "<tr>" +
         "<td class=\"col-mono\">" + escapeHtml(row.bot) + "</td>" +
@@ -772,6 +780,19 @@
     // holds rather than only what fitted on the page.
     function folderHeadingHtml(group, index) {
       var count = group.count || 0;
+      // Packing a whole folder as .rar only makes sense against another
+      // bot's list - browsing our own is direct filesystem access already,
+      // same gate folderFilesHtml() already applies to the per-file
+      // checkbox column.
+      var fetchable = (state.filelistsSource || "__own__") !== "__own__";
+      // data-folder-index is safe to string-concatenate: it is this group's
+      // own position in the internal `groups` array (an internal loop
+      // index), not untrusted content - unlike the bot/folder values
+      // attachFilelistsFolderRarData() sets below via .dataset assignment.
+      var rarButton = fetchable
+        ? "<button type=\"button\" class=\"btn btn-small folder-rar-btn\"" +
+          " data-folder-index=\"" + index + "\">Get folder as .rar</button>"
+        : "";
       return "<tr class=\"folder-row\">" +
         "<td colspan=\"5\">" +
           "<button type=\"button\" class=\"folder-toggle\" aria-expanded=\"false\"" +
@@ -782,6 +803,7 @@
             "<span class=\"folder-count\">" + count.toLocaleString() +
               (count === 1 ? " file" : " files") + "</span>" +
           "</button>" +
+          rarButton +
         "</td></tr>";
     }
 
@@ -851,10 +873,14 @@
     // would have to be re-attached each time.
     el.filelistsBody.addEventListener("click", function (evt) {
       var toggle = evt.target.closest ? evt.target.closest(".folder-toggle") : null;
-      if (!toggle) { return; }
-      var expanded = toggle.getAttribute("aria-expanded") === "true";
-      toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
-      setFolderExpanded(toggle.getAttribute("data-folder-index"), !expanded);
+      if (toggle) {
+        var expanded = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+        setFolderExpanded(toggle.getAttribute("data-folder-index"), !expanded);
+        return;
+      }
+      var rarBtn = evt.target.closest ? evt.target.closest(".folder-rar-btn") : null;
+      if (rarBtn) { requestFolderRar(rarBtn); }
     });
 
     el.filelistsExpandAll.addEventListener("click", function () { setAllFolders(true); });
@@ -895,6 +921,48 @@
           boxes[i].dataset.filename = row.title;
           i += 1;
         });
+      });
+    }
+
+    // Same reasoning and same pattern as attachFilelistsCheckboxData() right
+    // above: state.filelistsSource/group.folder must NEVER be
+    // string-concatenated into an HTML attribute (escapeHtml() does not
+    // encode `"`, so a malicious folder name could break out of one - see
+    // BroadcastRenderingXssRegressionTests for the bug class this avoids).
+    // Each button already carries its own group's index via
+    // data-folder-index (safe - an internal loop index, set in
+    // folderHeadingHtml() above), so this just looks that index back up in
+    // `groups` and sets the real bot/folder via .dataset property
+    // assignment instead.
+    function attachFilelistsFolderRarData(groups) {
+      var buttons = el.filelistsBody.querySelectorAll(".folder-rar-btn");
+      for (var i = 0; i < buttons.length; i++) {
+        var button = buttons[i];
+        var index = parseInt(button.dataset.folderIndex, 10);
+        var group = groups[index];
+        if (!group) { continue; }
+        button.dataset.bot = state.filelistsSource;
+        button.dataset.folder = group.folder;
+      }
+    }
+
+    function requestFolderRar(button) {
+      var bot = button.dataset.bot;
+      var folder = button.dataset.folder;
+      if (!bot || !folder) { return; }
+      button.disabled = true;
+      postJson("/api/filelists/fetch-folder-rar", { bot: bot, folder: folder }).then(function (res) {
+        if (!res.ok) {
+          showFilelistsFetchStatus(res.data.error || ("HTTP " + res.status), true);
+          button.disabled = false;
+          return;
+        }
+        showFilelistsFetchStatus(
+          "Requested " + bot + "’s folder as .rar - track its progress on the Download tab.");
+        loadDownloads();
+      }).catch(function (err) {
+        showFilelistsFetchStatus("Request failed: " + err.message, true);
+        button.disabled = false;
       });
     }
 
@@ -965,6 +1033,7 @@
             return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
           }).join("");
           attachFilelistsCheckboxData(groups);
+          attachFilelistsFolderRarData(groups);
           updateFilelistsDownloadSelectedState();
         })
         .catch(function (err) {
