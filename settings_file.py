@@ -43,6 +43,8 @@ clearly which line it ignored.
 import configparser
 import io
 import os
+import re
+import tempfile
 
 # Where the file lives, unless DCCORE_SETTINGS_FILE points somewhere else.
 # The environment variable exists for tests and for running two instances off
@@ -236,3 +238,335 @@ def _log_summary(report, path, log):
             f"recognises. Check the spelling against settings.conf.sample.")
     for key, why in report["bad"]:
         log(f"[CONFIG] {name}: ignoring {key} - {why}. Keeping the default.")
+
+
+# ---------------------------------------------------------------------------
+# Writing the file back
+# ---------------------------------------------------------------------------
+#
+# Everything above reads. save() exists so the web dashboard can offer a
+# settings page instead of asking an operator to edit a file by hand, and
+# because config.py ends with apply_to(globals()), a save followed by the
+# rehash the admin console already has picks the new values up live.
+#
+# THE FILE IS THE OPERATOR'S, NOT OURS
+#
+# settings.conf starts life as a copy of settings.conf.sample: every setting
+# present, commented out, under section headers, with the explanation for each
+# one above it. An operator uncomments the few they care about and often adds
+# notes of their own. A writer that rebuilt the file from a dict of values
+# would throw all of that away on the first save.
+#
+# So this edits lines rather than rewriting files. A setting already present
+# has its value replaced in place; a setting present only as its commented-out
+# default is uncommented where it stands, keeping the explanation above it;
+# and only a setting that appears nowhere at all is appended. Every other byte
+# of the file is left exactly as it was.
+#
+# ONE MISTAKE HERE BREAKS EVERY SETTING, NOT ONE
+#
+# parse() refuses a file where a key appears twice, on purpose - silently
+# keeping one of two conflicting values is the quiet wrongness this module
+# exists to avoid. But that refusal is all-or-nothing: it raises for the whole
+# file, apply_to() catches it, and the daemon starts with every setting back at
+# its default. So a writer that appended a key already present would not break
+# that setting, it would break all fifty-one of them, at the next restart,
+# with nothing to connect the two events.
+#
+# That is why nothing here is written on the strength of having got the edit
+# right. The finished text is parsed and coerced BEFORE it reaches the disk,
+# and unless it reads back as exactly the values that were asked for, the file
+# on disk is not touched at all.
+
+_ASSIGNMENT_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<comment>#[ \t]*)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)"
+    r"(?P<gap>[ \t]*)(?P<sep>[=:])(?P<rest>.*)$")
+
+
+class SettingsWriteError(Exception):
+    """The file was not written, and the reason why.
+
+    Raised before anything reaches the disk. A caller that sees this knows the
+    file on disk is exactly as it was.
+    """
+
+
+def render(value):
+    """A Python value as the text settings.conf would carry for it.
+
+    The same shapes gen_settings_sample.py writes, so a value saved here and a
+    default shown in the sample look alike.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ", ".join(str(part) for part in value)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _check_writable(name, value, namespace, types):
+    """The text to write for `value`, and the value it will read back as.
+
+    Returns (text, value). Refuses, with the reason, anything that would be
+    written happily and read back as something else - which is worse than
+    refusing, because the operator would see it saved and the daemon would run
+    with something different.
+    """
+    if name not in namespace or not is_overridable(name, namespace[name]):
+        raise SettingsWriteError(
+            f"{name!r} is not a setting this version recognises, so writing it "
+            f"would put a line in the file that nothing ever reads.")
+
+    # config.py's annotation is what makes a name a SETTING rather than just an
+    # uppercase attribute. The daemon and the test harness both assign names to
+    # config at runtime - ORIGINAL_NICK, MY_IP_OR_DOCK - which look exactly like
+    # settings from vars(config) and are not: MY_IP_OR_DOCK is the address
+    # detected at startup, and writing it into the file would freeze one
+    # session's answer in place for every session after it. apply_to() would
+    # then dutifully apply it, and the detection would never run again.
+    if name not in types:
+        raise SettingsWriteError(
+            f"{name} is not declared as a setting in config.py, so it is "
+            f"something the daemon sets while it runs rather than something an "
+            f"operator configures. Writing it would make one run's value "
+            f"permanent.")
+
+    # A web form sends strings for everything, including the 23 settings that
+    # are not strings. A string is therefore taken as the text an operator
+    # typed and read the same way the file would read it - which for a setting
+    # that IS a string returns it unchanged, so a caller holding real Python
+    # values can pass those instead and both callers get the same answer.
+    if isinstance(value, str):
+        try:
+            value = coerce(name, value, namespace[name], types.get(name))
+        except ValueError as err:
+            raise SettingsWriteError(f"{name}: {err}") from None
+
+    text = render(value)
+
+    if "\n" in text or "\r" in text:
+        raise SettingsWriteError(
+            f"{name}: a value cannot contain a line break - the file is one "
+            f"setting per line, and the rest would be read as a new setting.")
+
+    if text != text.strip():
+        raise SettingsWriteError(
+            f"{name}: leading or trailing spaces are stripped when the file is "
+            f"read, so this would not come back as it went in.")
+
+    if isinstance(value, list) and any("," in str(part) for part in value):
+        raise SettingsWriteError(
+            f"{name}: list entries are separated by commas, so an entry "
+            f"containing one would come back as two.")
+
+    # The general case, rather than a list of specific traps: write it, read it,
+    # and see whether it is still the same value.
+    try:
+        back = coerce(name, text, namespace[name], types.get(name))
+    except ValueError as err:
+        raise SettingsWriteError(f"{name}: {err}") from None
+    if back != value:
+        raise SettingsWriteError(
+            f"{name}: {value!r} would be read back as {back!r}.")
+
+    return text, value
+
+
+def _rewrite(existing, wanted):
+    """The new text, editing lines in place and appending only what is missing.
+
+    Returns (text, edited, added). `wanted` is {NAME: rendered text}.
+
+    Two passes on purpose. The first only looks: for each setting it notes the
+    line already setting it, if any, and separately the first commented-out
+    default for it. The second edits exactly one line per setting.
+
+    Doing both in one pass edits the commented default first and then the
+    active line as well, which leaves the file setting the same key twice - and
+    a file that sets a key twice is one parse() refuses in its entirety, taking
+    all fifty other settings down with it.
+    """
+    lines = existing.split("\n")
+    active_at, commented_at, seen_active = {}, {}, {}
+
+    for index, line in enumerate(lines):
+        found = _ASSIGNMENT_RE.match(line)
+        if not found:
+            continue
+        key = found.group("key").upper()
+        active = found.group("comment") is None
+
+        if active:
+            if key in seen_active:
+                # The file was already broken before this save - parse() would
+                # refuse it too. Say so plainly rather than editing one of the
+                # two and leaving the other behind.
+                raise SettingsWriteError(
+                    f"{key} appears twice in the file already, on lines "
+                    f"{seen_active[key] + 1} and {index + 1}. The daemon cannot "
+                    f"read this file as it stands; remove one of the two first.")
+            seen_active[key] = index
+
+        if key not in wanted:
+            continue
+
+        # An ACTIVE line is anything configparser would read, "=" or ":", so a
+        # line already setting this key is always found and never duplicated. A
+        # COMMENTED line only counts as the sample's own commented-out default,
+        # which always uses "=" - otherwise a prose comment like
+        # "# MAX_DCC_SLOTS: how many at once" would be rewritten into a live
+        # setting and the sentence lost.
+        if active:
+            active_at[key] = (index, found)
+        elif found.group("sep") == "=" and key not in commented_at:
+            commented_at[key] = (index, found)
+
+    edited = {}
+    for key in wanted:
+        # The active line wins. Editing the commented default instead would
+        # leave the operator's own uncommented value still in force, so the
+        # dashboard would report a change that did not happen.
+        where = active_at.get(key) or commented_at.get(key)
+        if not where:
+            continue
+        index, found = where
+        lines[index] = "%s%s%s= %s" % (
+            found.group("indent"), found.group("key"),
+            found.group("gap") or " ", wanted[key])
+        edited[key] = index
+
+    missing = [name for name in wanted if name not in edited]
+    if missing:
+        tail = [] if existing.endswith("\n") or not existing else [""]
+        tail.append("")
+        tail.append("# Added by DCCore because these settings were not already")
+        tail.append("# in this file. Section headers are cosmetic; a setting")
+        tail.append("# works wherever it appears.")
+        for name in missing:
+            tail.append("%s = %s" % (name, wanted[name]))
+        lines.extend(tail)
+
+    return "\n".join(lines), sorted(edited), sorted(missing)
+
+def _atomic_write(path, text):
+    """Write `text` to `path` atomically, so a reader sees the whole old file
+    or the whole new one and never a half-written one.
+
+    The same temp-file-then-os.replace() db.py uses for every state file, and
+    written out again here rather than imported: db.py imports config.py, and
+    config.py imports this module, so reaching for it would close a cycle.
+    """
+    path = os.path.abspath(path)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+
+    handle, tmp_path = tempfile.mkstemp(dir=directory, prefix=".tmp_", suffix=".conf")
+    try:
+        # newline="": write exactly the bytes given, so the caller's
+        # choice of line ending is what lands on disk.
+        with os.fdopen(handle, "w", encoding="utf-8", newline="") as out:
+            out.write(text)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def shadowed_by_local_config(names):
+    """Which of `names` local_config.py also sets.
+
+    Not an error and not blocked - config.py applies local_config.py first and
+    this file second, so saving here is what takes effect. But an operator who
+    keeps their real values in local_config.py should be told that this is the
+    point where that stops being true for a setting, rather than discovering it
+    the next time they edit the Python file and nothing happens.
+    """
+    try:
+        import local_config
+    except Exception:
+        return []
+    return sorted(name for name in names if hasattr(local_config, name))
+
+
+def save(namespace, changes, path=None, log=print):
+    """Write `changes` into the settings file, editing it rather than
+    replacing it.
+
+    `namespace` is config.py's globals(), the same as apply_to() takes - it
+    supplies both the list of real settings and each one's type. `changes` is
+    {NAME: value} with values already in their Python types.
+
+    Returns a report dict. Raises SettingsWriteError, before touching the disk,
+    if any value could not be written and read back unchanged - so a caller
+    that catches it knows the file is exactly as it was.
+    """
+    path = path or settings_path()
+    if not changes:
+        return {"path": path, "written": [], "added": [], "shadowed": []}
+
+    types = declared_types(namespace)
+    checked = {name: _check_writable(name, value, namespace, types)
+               for name, value in changes.items()}
+    wanted = {name: text for name, (text, _value) in checked.items()}
+    expected = {name: value for name, (_text, value) in checked.items()}
+
+    existing, ending = "", "\n"
+    if os.path.exists(path):
+        try:
+            with io.open(path, "rb") as handle:
+                raw = handle.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as err:
+            raise SettingsWriteError(
+                f"could not read the existing {os.path.basename(path)} to edit "
+                f"it: {err}") from None
+        # Read as bytes on purpose: text mode turns CRLF into LF on the
+        # way in, so writing back would quietly rewrite every line of a
+        # file somebody last edited in Notepad. Work in "\n" throughout
+        # and put the file's own ending back at the very end.
+        if "\r\n" in raw:
+            ending = "\r\n"
+        existing = raw.replace("\r\n", "\n")
+
+    text, edited, added = _rewrite(existing, wanted)
+
+    # Nothing is written on the strength of having got the edit right. Read the
+    # finished text back the way the daemon will, and check it says what was
+    # asked for - a duplicated key raises here, and so does a value that was
+    # written into a line that turned out not to mean what it looked like.
+    try:
+        entries = parse(text)
+    except SettingsError as err:
+        raise SettingsWriteError(
+            f"the edited file would not be readable ({err}), so it was not "
+            f"written and {os.path.basename(path)} is unchanged.") from None
+
+    for name, value in expected.items():
+        if name not in entries:
+            raise SettingsWriteError(
+                f"{name} did not survive the edit, so nothing was written.")
+        try:
+            back = coerce(name, entries[name], namespace[name], types.get(name))
+        except ValueError as err:
+            raise SettingsWriteError(f"{name} would not read back: {err}") from None
+        if back != value:
+            raise SettingsWriteError(
+                f"{name} would read back as {back!r} rather than {value!r}, so "
+                f"nothing was written.")
+
+    _atomic_write(path, text if ending == "\n"
+                  else text.replace("\n", ending))
+
+    shadowed = shadowed_by_local_config(changes)
+    name = os.path.basename(path)
+    log(f"[CONFIG] Wrote {len(changes)} setting(s) to {name}.")
+    for setting in shadowed:
+        log(f"[CONFIG] {name} now sets {setting}, which local_config.py also "
+            f"sets. This file is applied second, so this file wins from now on.")
+
+    return {"path": path, "written": sorted(changes), "added": added,
+            "shadowed": shadowed}
