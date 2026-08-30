@@ -10,6 +10,7 @@ Flask happens to be installed in the environment running this file.
 """
 
 import ast
+import importlib
 import io
 import os
 import sys
@@ -25,8 +26,10 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
 import adminchat  # noqa: E402
+import commands  # noqa: E402
 import config  # noqa: E402
 import list as list_mod  # noqa: E402
+import settings_file  # noqa: E402
 import webserver  # noqa: E402
 
 from tests.support import DCCoreTestCase, queue_row  # noqa: E402
@@ -70,6 +73,23 @@ def write_master_list(lists_dir, base_name, folders):
             for filename, size in files:
                 f.write(f"!{base_name} {filename}  ::INFO:: {size}\n")
     return path
+
+
+def _quiet_reload_config():
+    """importlib.reload(config), with its own "[CONFIG] Applied N setting(s)"
+    print() suppressed - the same pattern tests/test_runtime_state.py uses
+    for the same call. Used below as a safe, config.py-only stand-in for what
+    a real rehash would do to pick a freshly-saved setting.conf value back up
+    (real commands.handle_rehash_request() additionally reloads dcc/announce/
+    security/db/stats_mgr, none of which any test in this suite reloads for
+    real - this suite's only precedent, test_runtime_state.py, reloads
+    config.py alone too, for the same reason), and again in cleanup to put
+    every setting back at its tracked default once the temp settings.conf
+    that changed it is gone (DCCoreTestCase.tearDown() deletes it before any
+    addCleanup callback runs, so a reload at that point sees no override file
+    at all)."""
+    with redirect_stdout(io.StringIO()):
+        importlib.reload(config)
 
 
 class QueuePayloadTests(DCCoreTestCase):
@@ -1912,6 +1932,233 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
             f"{', '.join(self.SOURCES)}; the scan has probably stopped "
             f"recognising the shape rather than the code having stopped using it")
         self.assertIn("WEBUI_ENABLED", [name for _f, _l, name, _d in found])
+
+
+class SettingsPayloadTests(DCCoreTestCase):
+    """webserver.build_settings_payload()/apply_settings_changes()/
+    build_password_change_result() - the pure logic behind
+    GET/POST /api/settings and POST /api/settings/password. No Flask
+    required; see the module docstring."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings_path = os.path.join(self.make_tree().root, "settings.conf")
+        os.environ["DCCORE_SETTINGS_FILE"] = self.settings_path
+        self.addCleanup(os.environ.pop, "DCCORE_SETTINGS_FILE", None)
+        # Every successful apply_settings_changes()/build_password_change_result()
+        # call below dispatches commands.handle_rehash_request() on its own
+        # thread (see apply_settings_changes()'s docstring) - unmocked, that
+        # is the REAL production rehash: it reloads config/dcc/announce/
+        # security/db/stats_mgr for real, on a thread this test does not wait
+        # for, which then races the NEXT test in this process. Defaulting it
+        # to a no-op here keeps every test in this class isolated; the two
+        # tests that actually need to observe rehash behaviour install their
+        # own function on top of this one, and this cleanup (registered
+        # first, so it runs LAST) always puts the true original back.
+        real_rehash = commands.handle_rehash_request
+        commands.handle_rehash_request = lambda *a, **kw: None
+        self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
+
+    def test_admin_password_hash_never_appears_as_a_field(self):
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash("x", iterations=1000))
+        payload = webserver.build_settings_payload()
+        names = {f["name"] for c in payload["categories"] for f in c["fields"]}
+        self.assertNotIn("ADMIN_PASSWORD_HASH", names)
+
+    def test_admin_password_set_reflects_an_empty_hash(self):
+        self.set_config(ADMIN_PASSWORD_HASH="")
+        payload = webserver.build_settings_payload()
+        self.assertFalse(payload["admin_password_set"])
+
+    def test_admin_password_set_reflects_a_real_hash(self):
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash("x", iterations=1000))
+        payload = webserver.build_settings_payload()
+        self.assertTrue(payload["admin_password_set"])
+
+    def test_every_declared_overridable_setting_appears_in_exactly_one_category(self):
+        """Completeness guard against SETTINGS_CATEGORIES going stale: every
+        setting config.py declares and settings_file.is_overridable() accepts
+        - other than ADMIN_PASSWORD_HASH, which deliberately never appears as
+        a field - must be slotted into exactly one category. A setting that
+        fell through would either be silently missing from the page, or land
+        twice if a name were copy-pasted into two categories by mistake."""
+        types = settings_file.declared_types(vars(config))
+        expected = {name for name in types
+                    if name != "ADMIN_PASSWORD_HASH"
+                    and settings_file.is_overridable(name, getattr(config, name, None))}
+
+        payload = webserver.build_settings_payload()
+        seen = [f["name"] for c in payload["categories"] for f in c["fields"]]
+
+        self.assertEqual(sorted(seen), sorted(set(seen)), "a setting appears in more than one category")
+        self.assertEqual(set(seen), expected)
+        self.assertNotIn("other", [c["id"] for c in payload["categories"]],
+                          "a real setting fell through to the catch-all category - "
+                          "add it to webserver.SETTINGS_CATEGORIES")
+
+    def test_a_runtime_only_name_never_appears(self):
+        self.set_config(ORIGINAL_NICK="X")
+        payload = webserver.build_settings_payload()
+        names = {f["name"] for c in payload["categories"] for f in c["fields"]}
+        self.assertNotIn("ORIGINAL_NICK", names)
+
+    def test_apply_settings_changes_writes_and_returns_200(self):
+        status, result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["rehash"], "started")
+        self.assertIn("MAX_DCC_SLOTS", result["written"])
+        with io.open(self.settings_path, encoding="utf-8") as handle:
+            entries = settings_file.parse(handle.read())
+        self.assertEqual(entries["MAX_DCC_SLOTS"], "9")
+
+    def test_apply_settings_changes_does_not_wait_for_the_rehash_thread(self):
+        """Same shape as BroadcastSearchTests.test_it_never_blocks_the_caller_
+        for_the_window_duration: commands.handle_rehash_request() must run on
+        its own thread, not the request thread, or a save would freeze the
+        dashboard for as long as the real rehash (socket I/O, several
+        importlib.reload()s) takes."""
+        real_rehash = commands.handle_rehash_request
+        finished = threading.Event()
+
+        def slow_rehash(*_args, **_kwargs):
+            time.sleep(0.3)
+            finished.set()
+
+        commands.handle_rehash_request = slow_rehash
+        self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
+
+        started = time.time()
+        status, _result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
+        elapsed = time.time() - started
+
+        self.assertEqual(status, 200)
+        self.assertLess(elapsed, 0.1)
+        self.assertFalse(finished.is_set(), "the calling thread must return before the rehash finishes")
+        self.assertTrue(finished.wait(timeout=2), "the dispatched rehash thread never actually ran")
+
+    def test_apply_settings_changes_rejects_the_password_hash_directly(self):
+        status, result = webserver.apply_settings_changes({"ADMIN_PASSWORD_HASH": "x"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", result)
+        self.assertFalse(os.path.exists(self.settings_path))
+
+    def test_apply_settings_changes_rejects_an_unknown_setting(self):
+        status, result = webserver.apply_settings_changes({"NOT_A_REAL_SETTING": "x"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", result)
+
+    def test_webui_port_is_flagged_as_restart_required(self):
+        status, result = webserver.apply_settings_changes({"WEBUI_PORT": "9000"})
+        self.assertEqual(status, 200)
+        self.assertIn("WEBUI_PORT", result["restart_required"])
+
+    def test_nickname_is_not_flagged_as_restart_required(self):
+        status, result = webserver.apply_settings_changes({"NICKNAME": "X"})
+        self.assertEqual(status, 200)
+        self.assertNotIn("NICKNAME", result["restart_required"])
+
+    def test_password_change_rejects_an_empty_password(self):
+        status, result = webserver.build_password_change_result("", "")
+        self.assertEqual(status, 400)
+        self.assertIn("error", result)
+
+    def test_password_change_rejects_a_mismatched_confirmation(self):
+        status, result = webserver.build_password_change_result("newpass1", "newpass2")
+        self.assertEqual(status, 400)
+        self.assertIn("error", result)
+
+    def test_password_change_applies_after_the_dispatched_rehash_runs(self):
+        """settings_file.save() only writes settings.conf - it never touches
+        config's own attributes (see its docstring's "THE FILE IS THE
+        OPERATOR'S, NOT OURS" section) - so ADMIN_PASSWORD_HASH only actually
+        changes once a rehash re-reads the file. See _quiet_reload_config()'s
+        docstring for why this patches in a config-only reload rather than
+        letting the real commands.handle_rehash_request() run."""
+        real_rehash = commands.handle_rehash_request
+        done = threading.Event()
+
+        def reload_config_only(*_args, **_kwargs):
+            _quiet_reload_config()
+            done.set()
+
+        commands.handle_rehash_request = reload_config_only
+        self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
+        self.addCleanup(_quiet_reload_config)
+
+        status, result = webserver.build_password_change_result("newpass1", "newpass1")
+        self.assertEqual(status, 200)
+        self.assertTrue(done.wait(timeout=2), "the dispatched rehash never ran")
+        self.assertTrue(adminchat.verify_password(config.ADMIN_PASSWORD_HASH, "newpass1"))
+
+
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
+                                            "CI never installs it, this class only runs when it "
+                                            "happens to be available locally")
+class SettingsHttpRouteTests(DCCoreTestCase):
+    """GET/POST /api/settings and POST /api/settings/password, end to end
+    through the real Flask app - same setUp shape as
+    FilelistsHttpPaginationTests."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings_path = os.path.join(self.make_tree().root, "settings.conf")
+        os.environ["DCCORE_SETTINGS_FILE"] = self.settings_path
+        self.addCleanup(os.environ.pop, "DCCORE_SETTINGS_FILE", None)
+        # See SettingsPayloadTests.setUp()'s comment: unmocked, a successful
+        # save dispatches the REAL commands.handle_rehash_request() on its
+        # own thread, which this test does not wait for and would otherwise
+        # race every test that runs after it in this process.
+        real_rehash = commands.handle_rehash_request
+        commands.handle_rehash_request = lambda *a, **kw: None
+        self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(
+            WEBUI_TEST_PASSWORD, iterations=1000))
+        self.app = webserver.create_app()
+        self.client = self.app.test_client()
+        log_in_test_client(self.client)
+
+    def test_get_settings_returns_the_expected_shape(self):
+        resp = self.client.get("/api/settings")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertIn("categories", body)
+        self.assertTrue(body["admin_password_set"])
+        names = {f["name"] for c in body["categories"] for f in c["fields"]}
+        self.assertIn("MAX_DCC_SLOTS", names)
+        self.assertNotIn("ADMIN_PASSWORD_HASH", names)
+
+    def test_post_settings_writes_the_real_file_end_to_end(self):
+        resp = self.client.post("/api/settings", json={"MAX_DCC_SLOTS": "7"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["rehash"], "started")
+        self.assertIn("MAX_DCC_SLOTS", body["written"])
+        with io.open(self.settings_path, encoding="utf-8") as handle:
+            entries = settings_file.parse(handle.read())
+        self.assertEqual(entries["MAX_DCC_SLOTS"], "7")
+
+    def test_post_settings_password_then_logs_in_with_the_new_password(self):
+        real_rehash = commands.handle_rehash_request
+        done = threading.Event()
+
+        def reload_config_only(*_args, **_kwargs):
+            _quiet_reload_config()
+            done.set()
+
+        commands.handle_rehash_request = reload_config_only
+        self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
+        self.addCleanup(_quiet_reload_config)
+
+        resp = self.client.post("/api/settings/password", json={
+            "new_password": "newpass1", "confirm_password": "newpass1",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(done.wait(timeout=2), "the dispatched rehash never ran")
+
+        webserver._web_bad_ips.clear()
+        fresh_client = self.app.test_client()
+        login_resp = fresh_client.post("/login", data={"password": "newpass1"})
+        self.assertEqual(login_resp.status_code, 302)
 
 
 if __name__ == "__main__":

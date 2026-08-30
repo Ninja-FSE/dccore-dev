@@ -693,6 +693,180 @@ def build_verify_list_payload():
 
 
 # ==========================================================================
+# Settings (mutating - behind the same login as every other route). Pure
+# logic here, same reasoning as every other build_*_payload()/apply_*()
+# function in this module: no Flask import, fully unit testable.
+# ==========================================================================
+
+# Hand-written UX grouping of every setting config.py annotates (see
+# declared_types() below) except ADMIN_PASSWORD_HASH, which never appears as
+# a field - only the "admin_password_set" boolean does (see
+# build_settings_payload()). Every name here is checked against config.py's
+# actual annotations by SettingsPayloadTests' completeness guard, so a
+# setting added to config.py later and never slotted in here fails a test
+# instead of silently never showing up on the page.
+SETTINGS_CATEGORIES = (
+    ("identity",      "Identity & network",   ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME",
+                                                "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL"]),
+    ("slots-queue",   "Slots & queue",         ["MAX_DCC_SLOTS", "MAX_USER_QUEUE", "MAX_GLOBAL_QUEUE",
+                                                "MAX_SEARCH_RESULTS", "MSG_DELAY", "DEBUG_MSG_DELAY",
+                                                "DCC_PORT_START", "DCC_PORT_END", "MAX_FETCH_SLOTS",
+                                                "MAX_FETCH_FILE_SIZE", "FETCH_TRANSFER_TIMEOUT",
+                                                "FETCH_OFFER_TIMEOUT"]),
+    ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
+                                                "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
+                                                "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
+                                                "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "LIST_SIZE_FILE",
+                                                "LIST_RAWBYTES_FILE"]),
+    ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
+                                                "BROADCAST_SEARCH_COOLDOWN"]),
+    ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME",
+                                                "MAX_SEND_FAILS", "RAR_TIMEOUT"]),
+    ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
+                                                "ADMIN_CHANNEL_COMMANDS"]),
+    ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"]),
+    ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE",
+                                                "SCRIPT_VERSION"]),
+)
+
+
+def build_settings_payload():
+    """GET /api/settings payload: every editable setting, grouped for the
+    Settings view's category rail, plus whether an admin password is set.
+
+    Filters through settings_file.declared_types(vars(config)) - names
+    config.py itself annotates - rather than vars(config) directly, so a
+    runtime-only name (ORIGINAL_NICK, MY_IP_OR_DOCK, ...) can never appear
+    here even before settings_file.save() would refuse to write it.
+
+    ADMIN_PASSWORD_HASH never appears as a field's raw value anywhere - only
+    the boolean admin_password_set at the top level. A "leftover" category is
+    appended for any declared+overridable setting SETTINGS_CATEGORIES above
+    forgot to mention, so a config.py addition that nobody categorised is
+    still reachable rather than silently missing from the page (see
+    SettingsPayloadTests' completeness guard, which currently keeps this at
+    zero entries by keeping SETTINGS_CATEGORIES exhaustive).
+    """
+    import settings_file
+    types = settings_file.declared_types(vars(config))
+    categories = []
+    seen = set()
+    for cat_id, label, names in SETTINGS_CATEGORIES:
+        fields = []
+        for name in names:
+            if name not in types:
+                continue
+            value = getattr(config, name, None)
+            if not settings_file.is_overridable(name, value):
+                continue
+            fields.append({"name": name, "type": types[name].__name__, "value": value})
+            seen.add(name)
+        categories.append({"id": cat_id, "label": label, "fields": fields})
+
+    leftover = [n for n in types if n not in seen and n != "ADMIN_PASSWORD_HASH"
+                and settings_file.is_overridable(n, getattr(config, n, None))]
+    if leftover:
+        categories.append({"id": "other", "label": "Other", "fields": [
+            {"name": n, "type": types[n].__name__, "value": getattr(config, n, None)}
+            for n in sorted(leftover)]})
+
+    return {
+        "categories": categories,
+        "admin_password_set": bool(getattr(config, "ADMIN_PASSWORD_HASH", "")),
+    }
+
+
+# The rehash the settings save route dispatches is attributed to this rather
+# than an operator nick: nobody is logged into IRC as "WEB-DASHBOARD", so this
+# can never collide with (or impersonate) a real admin nick in a log line or
+# in commands.handle_rehash_request's own messaging.
+WEB_REHASH_SOURCE = "WEB-DASHBOARD"
+
+# Settings that only take effect on a full daemon restart - webserver.py owns
+# a live listening socket and is deliberately excluded from
+# commands.py's modules_to_reload, so a rehash after saving one of these three
+# cannot apply it live. Surfaced in the save response's "restart_required" so
+# the frontend can tell the operator, rather than implying "rehash" fixed it.
+SETTINGS_RESTART_ONLY = {"WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"}
+
+
+def _save_settings_and_rehash(changes):
+    """Write `changes` to settings.conf and dispatch a rehash on its own
+    daemon thread. The shared tail of apply_settings_changes() (POST
+    /api/settings) and build_password_change_result() (POST
+    /api/settings/password): a plain function call does not skip a caller's
+    own `if` checks, so build_password_change_result reaches this directly
+    rather than through apply_settings_changes() - going through that
+    function instead would always hit its own ADMIN_PASSWORD_HASH rejection,
+    which exists to stop the *general* settings endpoint from being used to
+    change the password, not to block the password endpoint's own write of
+    the one setting it exists to change.
+
+    The rehash runs detached rather than inline: commands.handle_rehash_request()
+    does real socket I/O and importlib.reload()s several modules, which would
+    freeze this request for its duration - the same reason adminchat.py's own
+    _cmd_rehash wraps the identical call in _run_detached(). This module
+    already has the same shape for a different slow/async action; see
+    start_broadcast_search()'s threading.Thread(target=_close_window, ...).
+
+    Returns (http_status, payload_dict).
+    """
+    import settings_file
+    try:
+        result = settings_file.save(vars(config), changes)
+    except settings_file.SettingsWriteError as err:
+        return 400, {"error": str(err)}
+
+    # Imported lazily, exactly like `list`/`dcc_fetch` above - see the module
+    # docstring and tests/test_import_graph.py: `commands` must never load at
+    # module scope, only from inside a handler that actually needs it.
+    import commands
+    threading.Thread(
+        target=commands.handle_rehash_request,
+        args=(WEB_REHASH_SOURCE, WEB_REHASH_SOURCE),
+        kwargs={"authorised": True},
+        daemon=True,
+    ).start()
+
+    restart_required = sorted(set(result["written"]) & SETTINGS_RESTART_ONLY)
+    return 200, dict(result, rehash="started", restart_required=restart_required)
+
+
+def apply_settings_changes(changes):
+    """POST /api/settings's pure logic: validate `changes` (a flat
+    {SETTING: "string value"} object - settings_file.save() coerces each
+    value the same way settings.conf itself would be read), then hand off to
+    _save_settings_and_rehash() for the actual write + dispatched rehash.
+
+    Returns (http_status, payload_dict).
+    """
+    if not isinstance(changes, dict) or not changes:
+        return 400, {"error": "Expected a non-empty object of {SETTING: value}."}
+    if "ADMIN_PASSWORD_HASH" in changes:
+        return 400, {"error": "Use POST /api/settings/password to change the "
+                               "admin password."}
+
+    return _save_settings_and_rehash(changes)
+
+
+def build_password_change_result(new_password, confirm_password):
+    """POST /api/settings/password's pure logic: validate the pair, hash the
+    new password the same way `python adminchat.py` does, and write it
+    through _save_settings_and_rehash() - the same save-then-dispatch-rehash
+    tail apply_settings_changes() uses, without its ADMIN_PASSWORD_HASH
+    rejection (see that helper's docstring for why this cannot go through
+    apply_settings_changes() itself).
+    """
+    if not new_password:
+        return 400, {"error": "Password cannot be empty."}
+    if new_password != confirm_password:
+        return 400, {"error": "Passwords do not match."}
+
+    new_hash = adminchat.make_password_hash(new_password)
+    return _save_settings_and_rehash({"ADMIN_PASSWORD_HASH": new_hash})
+
+
+# ==========================================================================
 # Flask app - only built/used when Flask is actually installed.
 # ==========================================================================
 
@@ -906,6 +1080,23 @@ if HAVE_FLASK:
             return send_from_directory(
                 directory, stored_filename, as_attachment=True,
                 download_name=download_name)
+
+        @app.route("/api/settings")
+        def api_settings():
+            return jsonify(build_settings_payload())
+
+        @app.route("/api/settings", methods=["POST"])
+        def api_settings_save():
+            body = json_object(request.get_json(silent=True))
+            status, result = apply_settings_changes(body)
+            return jsonify(result), status
+
+        @app.route("/api/settings/password", methods=["POST"])
+        def api_settings_password():
+            body = json_object(request.get_json(silent=True))
+            status, result = build_password_change_result(
+                body.get("new_password", ""), body.get("confirm_password", ""))
+            return jsonify(result), status
 
         return app
 

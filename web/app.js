@@ -25,13 +25,16 @@
     queue:     { title: "Queue",      sub: "Who is waiting, who is sending, right now." },
     download:  { title: "Download",   sub: "Bulk-paste \"!<bot> <filename>\" requests and track their progress." },
     filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
-    tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." }
+    tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." },
+    settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." }
   };
 
   var state = {
     active: "search", filelistsLoaded: false, filelistsSource: "__own__",
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
-    filelistsHistory: []
+    filelistsHistory: [],
+    settingsLoaded: false, settingsCategories: [], settingsActiveCategory: null,
+    settingsBaseline: {}, settingsDirty: {}, settingsAdminPasswordSet: false
   };
 
   var el = {
@@ -72,7 +75,13 @@
     themeLight:   document.getElementById("theme-light"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
     verifyStatus:         document.getElementById("verify-status"),
-    verifyResults:        document.getElementById("verify-results")
+    verifyResults:        document.getElementById("verify-results"),
+    settingsRail:         document.getElementById("settings-rail"),
+    settingsFields:       document.getElementById("settings-fields"),
+    settingsSaveBtn:      document.getElementById("settings-save-btn"),
+    settingsSavebarText:  document.getElementById("settings-savebar-text"),
+    settingsRestartNote:  document.getElementById("settings-restart-note"),
+    settingsSaveStatus:   document.getElementById("settings-save-error")
   };
 
   function escapeHtml(value) {
@@ -127,6 +136,7 @@
       pollFilelistsBots();
       if (!state.filelistsLoaded) { loadFilelists(); }
     }
+    if (name === "settings" && !state.settingsLoaded) { loadSettings(); }
   }
 
   el.navItems.forEach(function (btn) {
@@ -952,6 +962,272 @@
       })
       .then(function () {
         el.verifyRunBtn.disabled = false;
+      });
+  });
+
+  // ------------------------------------------------------------- Settings
+
+  // Values arrive from GET /api/settings already in their real Python types
+  // (bool/int/float/list/str/null); every value POSTed back must be a
+  // string (settings_file.save() coerces it the same way settings.conf
+  // itself would be read) - this turns a loaded value, or nothing at all if
+  // the field is still dirty, into the string a fresh baseline comparison
+  // needs.
+  function settingsValueToString(value) {
+    if (typeof value === "boolean") { return value ? "true" : "false"; }
+    if (Array.isArray(value)) { return value.join(", "); }
+    if (value === null || value === undefined) { return ""; }
+    return String(value);
+  }
+
+  function settingsFieldHtml(field) {
+    var isDirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
+    var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
+    var control;
+
+    if (field.type === "bool") {
+      var checked = isDirty ? state.settingsDirty[field.name] === "true" : !!field.value;
+      control = '<input type="checkbox" data-setting="' + escapeHtml(field.name) + '"' +
+        (checked ? " checked" : "") + ">";
+    } else if (field.type === "int" || field.type === "float") {
+      var numValue = isDirty ? state.settingsDirty[field.name] : settingsValueToString(field.value);
+      control = '<input type="number" step="' + (field.type === "float" ? "any" : "1") +
+        '" data-setting="' + escapeHtml(field.name) + '" value="' + escapeHtml(numValue) + '">';
+    } else {
+      var strValue = isDirty ? state.settingsDirty[field.name] : settingsValueToString(field.value);
+      control = '<input type="text" autocomplete="off" data-setting="' + escapeHtml(field.name) +
+        '" value="' + escapeHtml(strValue) + '">';
+    }
+
+    return '<div class="settings-field-row">' +
+      '<span class="' + nameClass + '">' + escapeHtml(field.name) + '</span>' +
+      '<span class="settings-field-control">' + control + '</span>' +
+      "</div>";
+  }
+
+  // Classes, not ids, for everything below - this markup is injected by
+  // renderSettingsCategory() every time the operator switches category, and
+  // the two listeners it is wired to (added once, further down, on the
+  // static el.settingsFields container) are event-delegated for exactly that
+  // reason: an id-based document.getElementById() lookup would have nothing
+  // to find until the injection has happened at least once, and re-wiring
+  // fresh listeners after every re-render would leak the old ones. Same
+  // pattern el.filelistsBody's folder-toggle delegation already uses.
+  function settingsPasswordSectionHtml() {
+    var statusText = "Admin password: " + (state.settingsAdminPasswordSet ? "set" : "not set");
+    return (
+      '<div class="settings-password-row">' +
+        '<span class="settings-password-status">' + escapeHtml(statusText) + "</span>" +
+        '<button type="button" class="btn btn-small settings-password-toggle">Change password</button>' +
+      "</div>" +
+      '<form class="settings-password-form" style="display:none;">' +
+        '<input type="password" class="settings-new-password" placeholder="New password" autocomplete="new-password">' +
+        '<input type="password" class="settings-confirm-password" placeholder="Confirm new password" autocomplete="new-password">' +
+        '<button type="submit" class="btn btn-accent btn-small">Set password</button>' +
+      "</form>" +
+      '<p class="settings-note settings-password-note" style="display:none;"></p>'
+    );
+  }
+
+  function onSettingsFieldChange(evt) {
+    var input = evt.target;
+    var name = input.dataset.setting;
+    if (!name) { return; }
+
+    var newValue = (input.type === "checkbox") ? (input.checked ? "true" : "false") : input.value;
+    var baselineStr = settingsValueToString(state.settingsBaseline[name]);
+
+    if (newValue === baselineStr) {
+      delete state.settingsDirty[name];
+    } else {
+      state.settingsDirty[name] = newValue;
+    }
+
+    var row = input.closest(".settings-field-row");
+    var label = row && row.querySelector(".settings-field-name");
+    if (label) {
+      label.classList.toggle("is-dirty", Object.prototype.hasOwnProperty.call(state.settingsDirty, name));
+    }
+    updateSettingsSaveBar();
+  }
+
+  function updateSettingsSaveBar() {
+    var count = Object.keys(state.settingsDirty).length;
+    el.settingsSaveBtn.disabled = count === 0;
+    el.settingsSavebarText.classList.toggle("is-dirty", count > 0);
+    el.settingsSavebarText.textContent = count === 0
+      ? "All changes saved"
+      : (count + (count === 1 ? " unsaved change" : " unsaved changes"));
+  }
+
+  function renderSettingsCategory() {
+    var category = (state.settingsCategories || []).filter(function (c) {
+      return c.id === state.settingsActiveCategory;
+    })[0];
+
+    if (!category) {
+      el.settingsFields.innerHTML = '<p class="tool-status">No settings to show.</p>';
+      return;
+    }
+
+    var html = '<h2 class="settings-category-title">' + escapeHtml(category.label) + "</h2>" +
+      category.fields.map(settingsFieldHtml).join("");
+    if (category.id === "admin-console") {
+      html += settingsPasswordSectionHtml();
+    }
+    el.settingsFields.innerHTML = html;
+
+    el.settingsFields.querySelectorAll("[data-setting]").forEach(function (input) {
+      input.addEventListener(input.type === "checkbox" ? "change" : "input", onSettingsFieldChange);
+    });
+  }
+
+  function renderSettingsRail() {
+    var categories = state.settingsCategories || [];
+    if (!categories.length) {
+      el.settingsRail.innerHTML = '<div class="settings-rail-empty">No settings available.</div>';
+      return;
+    }
+    el.settingsRail.innerHTML = categories.map(function (category) {
+      var active = category.id === state.settingsActiveCategory;
+      return '<button type="button" class="settings-rail-item' + (active ? " is-active" : "") +
+        '" data-category="' + escapeHtml(category.id) + '">' + escapeHtml(category.label) + "</button>";
+    }).join("");
+
+    el.settingsRail.querySelectorAll("[data-category]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        state.settingsActiveCategory = btn.dataset.category;
+        renderSettingsRail();
+        renderSettingsCategory();
+      });
+    });
+  }
+
+  function showSettingsStatus(el_, message, isError) {
+    el_.textContent = message;
+    el_.className = "settings-note " + (isError ? "is-error" : "is-success");
+    el_.style.display = "block";
+  }
+
+  // `preserveDirty` is true on the reload that follows a successful save:
+  // the just-written values become the new baseline, but any OTHER field the
+  // operator was mid-edit on (a save sends only the dirty set, not the whole
+  // form) must not be reloaded out from under them.
+  function loadSettings(preserveDirty) {
+    if (!preserveDirty) {
+      el.settingsFields.innerHTML = '<p class="tool-status">Loading…</p>';
+    }
+    fetchJson("/api/settings")
+      .then(function (payload) {
+        markConnection(true);
+        state.settingsLoaded = true;
+        state.settingsCategories = payload.categories || [];
+        state.settingsAdminPasswordSet = !!payload.admin_password_set;
+
+        var baseline = {};
+        state.settingsCategories.forEach(function (category) {
+          category.fields.forEach(function (field) { baseline[field.name] = field.value; });
+        });
+        state.settingsBaseline = baseline;
+        if (!preserveDirty) { state.settingsDirty = {}; }
+
+        var stillValid = state.settingsCategories.some(function (c) {
+          return c.id === state.settingsActiveCategory;
+        });
+        if (!stillValid) {
+          state.settingsActiveCategory = state.settingsCategories.length
+            ? state.settingsCategories[0].id : null;
+        }
+
+        renderSettingsRail();
+        renderSettingsCategory();
+        updateSettingsSaveBar();
+      })
+      .catch(function (err) {
+        markConnection(false);
+        el.settingsFields.innerHTML =
+          '<p class="tool-status is-error">Could not load settings: ' + escapeHtml(err.message) + "</p>";
+      });
+  }
+
+  // Delegated on the static container, once - see settingsPasswordSectionHtml()'s
+  // comment for why (the toggle/form/note only exist after the admin-console
+  // category has actually been rendered at least once).
+  el.settingsFields.addEventListener("click", function (evt) {
+    var toggle = evt.target.closest(".settings-password-toggle");
+    if (!toggle) { return; }
+    var form = el.settingsFields.querySelector(".settings-password-form");
+    if (form) { form.style.display = (form.style.display === "none") ? "flex" : "none"; }
+  });
+
+  el.settingsFields.addEventListener("submit", function (evt) {
+    var form = evt.target.closest(".settings-password-form");
+    if (!form) { return; }
+    evt.preventDefault();
+
+    var newPasswordInput = form.querySelector(".settings-new-password");
+    var confirmPasswordInput = form.querySelector(".settings-confirm-password");
+    var note = el.settingsFields.querySelector(".settings-password-note");
+    var newPassword = newPasswordInput.value;
+    var confirmPassword = confirmPasswordInput.value;
+
+    postJson("/api/settings/password", {
+      new_password: newPassword, confirm_password: confirmPassword
+    }).then(function (res) {
+      // Cleared unconditionally, success or not - a plaintext password must
+      // never sit in the DOM a moment longer than it has to.
+      newPasswordInput.value = "";
+      confirmPasswordInput.value = "";
+      note.style.display = "block";
+      if (res.ok) {
+        note.textContent = "Password changed. Rehashing…";
+        note.className = "settings-note settings-password-note is-success";
+        state.settingsAdminPasswordSet = true;
+        form.style.display = "none";
+        loadSettings(true);
+      } else {
+        note.textContent = (res.data && res.data.error) || "Could not change the password.";
+        note.className = "settings-note settings-password-note is-error";
+      }
+    }).catch(function () {
+      newPasswordInput.value = "";
+      confirmPasswordInput.value = "";
+      note.style.display = "block";
+      note.textContent = "Could not reach the dashboard.";
+      note.className = "settings-note settings-password-note is-error";
+    });
+  });
+
+  el.settingsSaveBtn.addEventListener("click", function () {
+    var dirty = state.settingsDirty;
+    if (!Object.keys(dirty).length) { return; }
+
+    el.settingsSaveBtn.disabled = true;
+    el.settingsSaveStatus.style.display = "none";
+    el.settingsRestartNote.style.display = "none";
+    el.settingsSavebarText.textContent = "Saving…";
+
+    postJson("/api/settings", dirty)
+      .then(function (res) {
+        if (res.ok) {
+          state.settingsDirty = {};
+          showSettingsStatus(el.settingsSaveStatus,
+            "Saved " + Object.keys(dirty).length +
+            (Object.keys(dirty).length === 1 ? " setting" : " settings") + ". Rehash started.", false);
+          if (res.data.restart_required && res.data.restart_required.length) {
+            showSettingsStatus(el.settingsRestartNote,
+              "Restart required to apply: " + res.data.restart_required.join(", ") + ".", true);
+          }
+          loadSettings(true);
+        } else {
+          showSettingsStatus(el.settingsSaveStatus,
+            (res.data && res.data.error) || "Could not save settings.", true);
+          updateSettingsSaveBar();
+        }
+      })
+      .catch(function () {
+        showSettingsStatus(el.settingsSaveStatus, "Could not reach the dashboard.", true);
+        updateSettingsSaveBar();
       });
   });
 

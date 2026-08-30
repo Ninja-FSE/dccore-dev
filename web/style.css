@@ -749,6 +749,9 @@ html, body {
   .stat-row {
     grid-template-columns: 1fr;
   }
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* --------------------------------------------------------------- Tools view */
@@ -983,4 +986,198 @@ html, body {
   padding-left: 34px;
   color: var(--status-frozen);
   font-size: 12px;
+}
+
+/* ------------------------------------------------------------ Settings view */
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.settings-rail-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.settings-rail-item:hover {
+  background: var(--bg-inset);
+  color: var(--text);
+}
+
+.settings-rail-item.is-active {
+  background: var(--accent-dim);
+  color: var(--accent-strong);
+}
+
+.settings-rail-empty {
+  padding: 10px 12px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.settings-panel {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+}
+
+.settings-category-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.settings-field-row:last-of-type {
+  border-bottom: none;
+}
+
+.settings-field-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.settings-field-name.is-dirty::after {
+  content: " *";
+  color: var(--accent-strong);
+}
+
+.settings-field-control {
+  flex: 0 0 auto;
+  width: 260px;
+  max-width: 50%;
+}
+
+.settings-field-control input[type="text"],
+.settings-field-control input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+
+.settings-field-control input[type="text"]:focus,
+.settings-field-control input[type="number"]:focus {
+  border-color: var(--accent);
+}
+
+.settings-field-control input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.settings-savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.settings-savebar-text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.settings-savebar-text.is-dirty {
+  color: var(--accent-strong);
+}
+
+.settings-note {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.settings-note.is-error {
+  color: var(--danger);
+}
+
+.settings-note.is-success {
+  color: var(--accent-strong);
+}
+
+.settings-password-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+}
+
+.settings-password-status {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.settings-password-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 14px;
+}
+
+.settings-password-form input[type="password"] {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  outline: none;
+  min-width: 200px;
+  transition: border-color 0.12s ease;
+}
+
+.settings-password-form input[type="password"]:focus {
+  border-color: var(--accent);
 }
