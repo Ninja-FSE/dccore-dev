@@ -8,6 +8,22 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script>
+  // Runs before the body exists, on purpose: a stored choice has to be on the
+  // root element before the first paint, or the page renders in the operating
+  // system's theme and then swaps to the chosen one - a flash on every single
+  // load for anyone whose choice differs from their machine's.
+  //
+  // No stored choice means no attribute, which is the state style.css leaves
+  // to prefers-color-scheme. localStorage throws rather than returning null in
+  // a browser set to block site data, so this cannot be an unguarded read.
+  try {
+    var saved = localStorage.getItem("dccore-theme");
+    if (saved === "dark" || saved === "light") {
+      document.documentElement.setAttribute("data-theme", saved);
+    }
+  } catch (e) { /* no stored preference is a perfectly good answer */ }
+</script>
 </head>
 <body>
 
@@ -57,6 +73,14 @@
 
     <div class="sidebar-foot">
       Logged in &middot; LAN only
+      <div class="theme-switch" role="group" aria-label="Colour theme">
+        <button type="button" class="theme-btn" id="theme-dark" data-theme-choice="dark">
+          &#9790; Dark
+        </button>
+        <button type="button" class="theme-btn" id="theme-light" data-theme-choice="light">
+          &#9788; Light
+        </button>
+      </div>
       <form method="post" action="/logout">
         <button type="submit" class="logout-btn">Log out</button>
       </form>
