@@ -877,14 +877,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
         requested_file = str(requested_file).lstrip("/")
 
-        if requested_file.endswith(".zip") and config.LIST_BASE_NAME in requested_file:
+        # The master list lives in LOCAL_LIST_DIR, everything else in the
+        # music directory. Matched on the names the list builder writes rather
+        # than on ".zip" plus the base name appearing anywhere: with .rar now
+        # a list format too, a shared library file called
+        # "Someone - DCCore Sessions.rar" would otherwise be looked for among
+        # the lists and never found.
+        if list_mod.is_list_artifact_name(requested_file):
             base_directory = os.path.abspath(config.LOCAL_LIST_DIR)
             full_path = os.path.join(base_directory, requested_file)
         else:
             base_directory = os.path.abspath(config.FILE_DIRECTORY)
             full_path = os.path.join(base_directory, requested_file)
 
-        is_master_zip = requested_file.endswith(".zip") and config.LIST_BASE_NAME in requested_file
+        is_master_zip = list_mod.is_list_artifact_name(requested_file)
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
             latest_list_path = list_mod.find_latest_list()
             if latest_list_path and os.path.exists(latest_list_path):

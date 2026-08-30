@@ -25,15 +25,92 @@ def rawbytes_file_path():
 # exclude the "-RAR-" album list, so had it ever become the live one the bot would have
 # served the album list as its master list. Removed so they cannot diverge again.
 
-def find_latest_zip():
-    """Find the newest .zip, for when somebody types the bot's nickname."""
+# The three ways the master list can be handed over, in the order they are
+# tried when the configured one has not been built yet.
+LIST_FORMATS = ("zip", "rar", "txt")
+
+# The delivered text list is a file of its own rather than the master index,
+# and this marks it. The index is what @find and the file count read, and the
+# album rows would be matched by both if the two were ever the same file: a
+# search for "dolch" would offer an album row as though it were a track, and
+# the advert would count the albums as files.
+FULL_LIST_MARKER = "-FULL-"
+
+
+def list_format():
+    """The configured delivery format, normalised.
+
+    An unrecognised value serves .zip rather than nothing. settings_file
+    refuses one at the point of saving, but local_config.py assigns straight
+    onto config and answers to nobody, so this is the last place a typo can be
+    caught before it costs the bot its list.
+    """
+    raw = getattr(config, "LIST_FORMAT", "zip")
+    chosen = str(raw or "").strip().lower()
+    if chosen in LIST_FORMATS:
+        return chosen
+    print(f"[LIST] LIST_FORMAT={raw!r} is not one of {sorted(LIST_FORMATS)} "
+          f"- handing out the .zip instead.")
+    return "zip"
+
+
+def list_artifact_name(fmt, date_str):
+    """What the artifact for `fmt` is called on the date given."""
+    if fmt == "txt":
+        return f"{config.LIST_BASE_NAME}{FULL_LIST_MARKER}{date_str}.txt"
+    return f"{config.LIST_BASE_NAME}-{date_str}.{fmt}"
+
+
+def is_list_artifact(filename, fmt):
+    """True if `filename` is a delivered master list in `fmt`.
+
+    Matched on the name the builder actually writes, not on the extension
+    alone: people share .zip and .rar files out of their library too, and a
+    file called "Someone - DCCore Sessions.rar" must not be looked for in the
+    lists directory instead of the music directory.
+    """
+    name = os.path.basename(str(filename))
+    if fmt == "txt":
+        return (name.startswith(config.LIST_BASE_NAME + FULL_LIST_MARKER)
+                and name.endswith(".txt"))
+    return name.startswith(config.LIST_BASE_NAME + "-") and name.endswith("." + fmt)
+
+
+def is_list_artifact_name(filename):
+    """True if this names a delivered master list in any of the three formats."""
+    return any(is_list_artifact(filename, fmt) for fmt in LIST_FORMATS)
+
+
+def find_latest_list_file():
+    """The artifact to send when somebody types the bot's nickname.
+
+    The configured format first. If it has not been built yet - the operator
+    changed LIST_FORMAT and the next rebuild has not run - this falls back to
+    another format rather than answering "list missing". Handing somebody a
+    .zip when the setting now says .rar is a far smaller thing than the bot
+    having no list at all until the weekly update comes round, which is the
+    failure the atomic-publish rewrite exists to prevent.
+    """
     if not os.path.exists(config.LOCAL_LIST_DIR):
         return None
-    files = [f for f in os.listdir(config.LOCAL_LIST_DIR) if f.startswith(config.LIST_BASE_NAME) and f.endswith(".zip")]
-    if not files:
+    try:
+        entries = os.listdir(config.LOCAL_LIST_DIR)
+    except OSError as err:
+        print(f"[LIST ERROR] Could not read {config.LOCAL_LIST_DIR}: {err}")
         return None
-    files.sort(reverse=True)
-    return os.path.join(config.LOCAL_LIST_DIR, files[0])
+
+    wanted = list_format()
+    order = (wanted,) + tuple(f for f in LIST_FORMATS if f != wanted)
+    for fmt in order:
+        files = [f for f in entries if is_list_artifact(f, fmt)]
+        if not files:
+            continue
+        files.sort(reverse=True)
+        if fmt != wanted:
+            print(f"[LIST] No .{wanted} list has been built yet - sending {files[0]}. "
+                  f"The next list update will build the .{wanted}.")
+        return os.path.join(config.LOCAL_LIST_DIR, files[0])
+    return None
 
 def get_file_count_date_size_and_raw_bytes():
     """The EXACT number of music files, counting only lines that start with the trigger."""
@@ -130,8 +207,14 @@ def find_latest_list():
     """
     try:
         all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.LIST_BASE_NAME}-*.txt")))
-        # Keep the RAR list out of the search, so only the master list is scanned
-        true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
+        # Keep the RAR list out of the search, so only the master list is scanned.
+        # FULL_LIST_MARKER keeps the DELIVERED text list out too: that one is a
+        # copy of this file with the album rows appended, and which of the two
+        # sorts last is an accident of punctuation. If it ever won, @find would
+        # offer album rows as though they were tracks and the advert would count
+        # the albums as files.
+        true_master_lists = [f for f in all_txt_files
+                             if "-RAR-" not in f and FULL_LIST_MARKER not in f]
         if true_master_lists:
             return true_master_lists[-1]
     except Exception as e:
@@ -612,10 +695,10 @@ def send_file_list(irc_sock, user, channel):
         oserve.queue_message(user, msg)
         return
 
-    current_zip_path = find_latest_zip()
+    current_zip_path = find_latest_list_file()
     
     if not current_zip_path or not os.path.exists(current_zip_path):
-        oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}Error{config.C_RESET}: ZIP file missing. {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n")
+        oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}Error{config.C_RESET}: List file missing. {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n")
         return
         
     zip_filename = os.path.basename(current_zip_path)
