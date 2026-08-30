@@ -228,5 +228,93 @@ class TheEntryPointStillWiresItUp(unittest.TestCase):
         self.assertIn("global irc_connection, bot_joined_channel", body)
 
 
+class TheCrossBotFetchDispatcherIsStarted(BootCase):
+    """The other background worker startup() launches, and until now the only
+    one nothing checked.
+
+    queue_mgr.queue_worker has had test_it_starts_exactly_one_queue_worker
+    since this file was written. dcc_fetch.fetch_dispatcher_worker sits eleven
+    lines below it in oserve.py, does the same kind of job, and had nothing.
+
+    The asymmetry matters because of what the worker does. It is the only thing
+    that ever calls check_fetch_queue(), which is what moves a fetch from
+    "pending" to "offered" to "receiving". Delete the thread and every function
+    it drives still passes its own tests - check_fetch_queue() has plenty - and
+    the daemon still boots, still answers the dashboard, still serves files.
+    Cross-bot fetches simply sit at "pending" forever, and nothing anywhere
+    says why.
+
+    That is the shape of #119: a correct, well-tested function that no live
+    path reached, so the speed record read zero for the life of the daemon.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import dcc_fetch
+        self.dcc_fetch = dcc_fetch
+        # Stubbed like the queue worker above, and for the same reason: the
+        # real one is a while True loop, and the suite would accumulate one
+        # live thread per test that boots.
+        self.dispatchers = []
+        self._real_dispatcher = dcc_fetch.fetch_dispatcher_worker
+        dcc_fetch.fetch_dispatcher_worker = lambda: self.dispatchers.append(1)
+        self.addCleanup(setattr, dcc_fetch, "fetch_dispatcher_worker",
+                        self._real_dispatcher)
+
+    def _wait_for_dispatchers(self):
+        """The thread is real even though its target is stubbed."""
+        for _ in range(200):
+            if self.dispatchers:
+                break
+            threading.Event().wait(0.01)
+        return self.dispatchers
+
+    def test_it_starts_exactly_one_dispatcher(self):
+        self.boot()
+
+        self.assertEqual(
+            len(self._wait_for_dispatchers()), 1,
+            "nothing is driving check_fetch_queue(), so a cross-bot fetch "
+            "would be accepted and then sit at 'pending' for ever")
+
+    def test_it_starts_alongside_the_queue_worker_not_instead_of_it(self):
+        """They are deliberately separate loops - queue_mgr paces outbound
+        socket writes one at a time and is already dense; this one only touches
+        config.fetch_queue and never blocks on the network. A refactor that
+        folded one into the other would show up here."""
+        self.boot()
+        self._wait_for_dispatchers()
+
+        for _ in range(200):
+            if self.workers:
+                break
+            threading.Event().wait(0.01)
+
+        self.assertEqual(len(self.workers), 1)
+        self.assertEqual(len(self.dispatchers), 1)
+
+    def test_a_dispatcher_that_cannot_be_started_does_not_stop_the_daemon(self):
+        """oserve wraps the import and the start in try/except on purpose.
+        Cross-bot fetch is an optional feature; serving files is not, and a
+        daemon that refuses to boot because an optional worker could not start
+        is the worse of the two failures.
+
+        Broken at the IMPORT, which is where the guard actually is. Raising
+        inside the worker instead would prove nothing: that happens on the new
+        thread, after start() has already returned, so the try/except in
+        startup() never sees it.
+        """
+        self.addCleanup(sys.modules.__setitem__, "dcc_fetch", self.dcc_fetch)
+        sys.modules["dcc_fetch"] = None      # makes `import dcc_fetch` raise
+
+        output = self.boot()
+
+        self.assertIn(config.SCRIPT_VERSION, output,
+                      "the daemon did not finish booting")
+        self.assertIn("Could not start fetch dispatcher", output,
+                      "the failure was swallowed with nothing said - an "
+                      "operator would see fetches hang and have no reason why")
+
+
 if __name__ == "__main__":
     unittest.main()
