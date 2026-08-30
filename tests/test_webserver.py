@@ -1996,6 +1996,21 @@ class SettingsPayloadTests(DCCoreTestCase):
                           "a real setting fell through to the catch-all category - "
                           "add it to webserver.SETTINGS_CATEGORIES")
 
+    def test_every_categorised_setting_has_a_human_readable_label(self):
+        """Completeness guard against SETTINGS_LABELS going stale, same
+        reasoning as the category guard above: every field the page actually
+        renders must carry a label that is not just its own raw config.py
+        name, or an operator sees MAX_DCC_SLOTS on the form instead of "Max
+        simultaneous sends"."""
+        payload = webserver.build_settings_payload()
+        fields = [f for c in payload["categories"] for f in c["fields"]]
+
+        for field in fields:
+            self.assertIn("label", field, f"{field['name']} has no label key at all")
+            self.assertNotEqual(field["label"], field["name"],
+                               f"{field['name']} has no entry in webserver.SETTINGS_LABELS "
+                               f"and is falling back to its raw name")
+
     def test_a_runtime_only_name_never_appears(self):
         self.set_config(ORIGINAL_NICK="X")
         payload = webserver.build_settings_payload()
