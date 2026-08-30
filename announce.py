@@ -328,7 +328,8 @@ def announce_worker():
                 # importing the daemon to get at dcc.queue_lock. It caches for a
                 # second, which is what stops two callers stealing each other's
                 # measurement window - see its docstring.
-                speed_str = stats_mgr.format_speed(stats_mgr.live_speed())
+                speed_bytes_per_sec = stats_mgr.live_speed()
+                speed_str = stats_mgr.format_speed(speed_bytes_per_sec)
 
                 for chan in channels_to_spam:
                     chan = chan.strip()
