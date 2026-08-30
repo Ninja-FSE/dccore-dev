@@ -491,7 +491,12 @@ def _capture_channel_advert(user, target, msg, now=None):
     if not user or not target or not target.startswith("#"):
         return
     if msg and msg.startswith("\x01"):
-        return                      # CTCP, not channel text
+        # Not channel text, and never eligible for the stitch below - but
+        # it is where the exact library size lives. See
+        # parse_advert_slots() for why it cannot be read by position.
+        _capture_advert_slots(user, target, msg,
+                              time.time() if now is None else now)
+        return
 
     now = time.time() if now is None else now
     key = user.lower()
@@ -556,6 +561,125 @@ def _flush_known_bots(now=None, force=False):
     except Exception as err:
         print(f"[ADVERT] Could not save the bot registry: {err}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# The CTCP a bot sends a few seconds after its advert
+# ---------------------------------------------------------------------------
+#
+# Every OmenServe-family bot follows its channel advert with a CTCP, and it is
+# the only place the EXACT size of a bot's library is published. announce.py
+# builds ours a few hundred lines away:
+#
+#   SLOTS 10 10 NOW 0 999 0 719041 3894929430520 0 1786359244 25511 OmenServe v2.73
+#                             ^files  ^bytes = 3.54 TB
+#
+# We have been sending that line for as long as the daemon has existed and
+# never once read anyone else's. 27 of the 33 bots in the capture send one.
+#
+# READING IT BY POSITION DOES NOT WORK
+#
+# There are at least three layouts in one channel:
+#
+#   24 bots    14 fields, count at 7, bytes at 8
+#   fallguyf00 13 fields - one shorter, so count at 6 and bytes at 7
+#   SPQR       8 fields, count LAST, no byte figure at all
+#
+# Index 7 on fallguyf00's line is 14,247,378,895,149 - which as a file count
+# is fourteen trillion files, and would have gone straight into the registry
+# and onto the dashboard. Nothing in the line says which layout it is.
+#
+# SO IT IS NOT READ BY POSITION
+#
+# The advert already told us how many files that bot has. So: find the field
+# that equals that number, and the size is the field beside it. The layout
+# does not have to be known, only self-consistent - and a line that does not
+# agree with the bot's own advert is refused rather than guessed at.
+#
+# That also means the CTCP is only ever read for a bot that has already
+# advertised and passed the sender check in _capture_channel_advert(). A CTCP
+# on its own registers nobody: without an advert there is no count to
+# calibrate against, which is exactly the case where a wrong reading would go
+# unnoticed.
+
+# A library larger than this is a misread, not a library. The largest in the
+# captured channel is 24 TB; ten petabytes is far past any of them and still
+# far below the fourteen-trillion-file misreading above.
+SLOTS_MAX_PLAUSIBLE_BYTES = 10 ** 16
+
+
+def parse_advert_slots(text, known_files):
+    """Size and software out of a bot's CTCP SLOTS line, calibrated against the
+    file count its own advert already published.
+
+    Returns {"list_bytes", "software"}, both optional - so {} is a real answer,
+    and the one SPQR gives: its line agrees with the advert and simply carries
+    nothing beyond the count. None is the other answer, and a different one:
+    this is not a SLOTS line, or it does not agree with `known_files` and
+    therefore cannot be read at all. Callers treat both as "record nothing";
+    they are kept apart because "published nothing" and "could not be trusted"
+    are not the same fact about a bot.
+
+    See this section's comment for why nothing here is read by position.
+    """
+    if not text or not known_files:
+        return None
+
+    payload = text.strip("\x01").strip()
+    if not payload.upper().startswith("SLOTS"):
+        return None
+
+    fields = payload.split()
+    at = [i for i, field in enumerate(fields) if field == str(known_files)]
+    if len(at) != 1:
+        # Nothing matched, or the count is ambiguous because some other field
+        # happens to carry the same number. Either way there is no way to tell
+        # which neighbour is the size, and a guess here is a wrong size on the
+        # dashboard rather than a missing one.
+        return None
+
+    found = {}
+    index = at[0] + 1
+    if index < len(fields) and fields[index].isdigit():
+        size = int(fields[index])
+        # A library cannot hold fewer bytes than it holds files. SPQR's line
+        # ends at the count and has no size at all, which lands here too.
+        if known_files <= size < SLOTS_MAX_PLAUSIBLE_BYTES:
+            found["list_bytes"] = size
+
+    # The version string is whatever trails the numbers - "OmenServe v2.73",
+    # "DCCore v1.10.0-RC4", and for one bot a truncated "OmeNServE v". Read as
+    # a suffix rather than an index, so a layout with more or fewer numeric
+    # fields makes no difference.
+    software = []
+    for field in reversed(fields):
+        if field.isdigit():
+            break
+        software.append(field)
+    if software:
+        found["software"] = " ".join(reversed(software))
+
+    return found
+
+
+def _capture_advert_slots(user, target, msg, now):
+    """Fold a bot's CTCP SLOTS line into the registry entry its advert built.
+
+    Silent for a bot that has not advertised: the count that makes this line
+    readable comes from the advert, so without one there is nothing to check
+    the numbers against.
+    """
+    entry = runtime.known_bots.get(user.lower())
+    if not entry:
+        return
+
+    extra = parse_advert_slots(msg, entry.get("files"))
+    if not extra:
+        return
+
+    entry.update(extra)
+    entry["last_seen"] = now
+    _flush_known_bots()
 
 
 def _capture_broadcast_search_reply(user, target, msg):

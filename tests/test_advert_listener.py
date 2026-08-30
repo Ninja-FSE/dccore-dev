@@ -53,6 +53,9 @@ from tests.support import DCCoreTestCase  # noqa: E402
 # explicit `now`, so none of this depends on how fast the suite runs.
 T0 = 1000000.0
 
+# CTCP messages are wrapped in this byte.
+CTCP = chr(1)
+
 
 # Captured from #Mp3Passion on 2026-08-29 - 392 lines, 33 bots. Verbatim,
 # save for the bytes the socket's errors="ignore" decode drops before the
@@ -467,6 +470,67 @@ RAR_ADVERTS = [
     ('ValMp3', VALMP3_RAR),
 ]
 
+# The CTCP every OmenServe-family bot sends a few seconds after its advert.
+# 27 of the 33 send one; the payload only, without its  wrapper.
+
+TJSERV_SLOTS = 'SLOTS 6 6 NOW 0 999 0 77018 10134698994329 0 1788010070 24063 OmenServe v2.71'
+ABUEIO_SLOTS = 'SLOTS 3 2 NOW 4 999 0 150623 10762353186689 0 1783537564 216072 OmeNServE v2.60'
+ADIROMAN_SLOTS = 'SLOTS 4 4 NOW 0 999 0 184437 1874763496619 0 1787931200 25861 OmenServe v2.73'
+ALY_SLOTS = 'SLOTS 2 2 NOW 1 999 0 389136 1456773738862 0 1781954554 23166 OmeNServE v2.60'
+BIGTRUCK_SLOTS = 'SLOTS 7 7 NOW 0 216 4788600 19527'
+BOBRRT_SLOTS = 'SLOTS 5 0 NOW 0 999 0 32119 133054739706 0 1787075324 11 OmeNServE v2.60'
+BSK_SLOTS = 'SLOTS 10 10 NOW 0 999 0 719041 3894929430520 0 1786359244 25511 OmenServe v2.73'
+CAV_SLOTS = 'SLOTS 4 4 NOW 0 999 0 10965 80635194448 0 1788036122 23463 OmeNServE v2.60'
+D_F_D_SLOTS = 'SLOTS 2 2 NOW 0 999 0 127312 1034287370931 0 1787959965 16873 OmeNServE v2.60'
+DCCORE_SLOTS = 'SLOTS 3 3 NOW 0 999 0 61101 2021971462739 0 260125 272760943592 DCCore v1.10.0-RC3'
+DCCOREWEB_SLOTS = 'SLOTS 3 3 NOW 0 999 0 61156 2023511524108 0 776 813728345 DCCore v1.10.0-RC4'
+DCCOREWIN_SLOTS = 'SLOTS 3 3 NOW 0 999 0 36208 1329784322257 0 833 873601452 DCCore v1.10.0-RC4'
+DEEPDIVER_SLOTS = 'SLOTS 6 6 NOW 0 999 0 288090 1531544257110 0 1777482551 24071 OmeNServE v2.50'
+DJVIRTUAL_SLOTS = 'SLOTS 20 20 NOW 0 999 0 101736 645115089833 0 1787664011 90972 OmenServe v2.71'
+FALLGUYF00_SLOTS = 'SLOTS 2 2 NOW 0 999 39659 14247378895149 1 1788018913 105071 OmeNServE v'
+FIREHORSESSS_SLOTS = 'SLOTS 3 3 NOW 0 999 0 308738 2581183482308 0 1787571558 24075 OmeNServE v2.60'
+FLACME_SLOTS = 'SLOTS 2 2 NOW 0 999 0 313435 5270296864663 1 1767385035 24364 OmeNServE v2.60'
+FONEBONE_SLOTS = 'SLOTS 1 1 NOW 0 999 0 147636 13007675907209 0 1787914117 145300 OmeNServE v2.60'
+FUKUSHIMA_SLOTS = 'SLOTS 5 5 NOW 0 999 0 96371 3199307179383 2 1785333363 99911 OmeNServE v2.60'
+HEYWOOD_SLOTS = 'SLOTS 3 3 NOW 0 999 0 34842 237341768286 0 1785522128 334871 OmeNServE v2.60'
+KARAOKE_DUDE_SLOTS = 'SLOTS 4 4 NOW 0 999 0 475128 1913546153330 2 1787144654 23773 OmeNServE v2.60'
+LMELGHT_SLOTS = 'SLOTS 3 3 NOW 0 999 0 242558 2715497806325 0 1786660191 87967 OmenServe v2.71'
+MQ_NZ_SLOTS = 'SLOTS 5 5 NOW 0 999 0 82388 589109188453 0 1759308895 35471 OmenServe v2.71'
+PROSPECT_SLOTS = 'SLOTS 5 5 NOW 0 95 6557000 36342'
+SAMOTH_SLOTS = 'SLOTS 2 2 NOW 0 999 0 47418 1363377847376 0 1787833259 24061 OmeNServE v2.60'
+VA23BOAM_SLOTS = 'SLOTS 8 8 NOW 0 999 0 95747 26457270004846 0 1786926708 24364 OmeNServE v2.60'
+VIBESSONO_SLOTS = 'SLOTS 25 25 NOW 9 999 0 718005 6760435525369 0 1787698644 270671 OmeNServE v2.60'
+
+ALL_SLOTS = [
+    ('[tjserv]', TJSERV_SLOTS),
+    ('AbueIo', ABUEIO_SLOTS),
+    ('adiroman', ADIROMAN_SLOTS),
+    ('Aly', ALY_SLOTS),
+    ('BigTruck', BIGTRUCK_SLOTS),
+    ('bobrrt', BOBRRT_SLOTS),
+    ('Bsk', BSK_SLOTS),
+    ('Cav', CAV_SLOTS),
+    ('D_F_D', D_F_D_SLOTS),
+    ('DCCore', DCCORE_SLOTS),
+    ('DCCoreWeb', DCCOREWEB_SLOTS),
+    ('DCCoreWin', DCCOREWIN_SLOTS),
+    ('Deepdiver', DEEPDIVER_SLOTS),
+    ('DJVirtual', DJVIRTUAL_SLOTS),
+    ('fallguyf00', FALLGUYF00_SLOTS),
+    ('FireHorsesss', FIREHORSESSS_SLOTS),
+    ('FlacMe', FLACME_SLOTS),
+    ('FoneBone', FONEBONE_SLOTS),
+    ('Fukushima', FUKUSHIMA_SLOTS),
+    ('Heywood', HEYWOOD_SLOTS),
+    ('karaoke_dude', KARAOKE_DUDE_SLOTS),
+    ('Lmelght', LMELGHT_SLOTS),
+    ('mq-nz', MQ_NZ_SLOTS),
+    ('prospect', PROSPECT_SLOTS),
+    ('Samoth', SAMOTH_SLOTS),
+    ('va23boam-', VA23BOAM_SLOTS),
+    ('Vibessono', VIBESSONO_SLOTS),
+]
+
 
 class CaptureTestCase(DCCoreTestCase):
     """The registry and the continuation buffer are process-wide. A test that
@@ -871,6 +935,198 @@ class ASecondListOfRarFolders(CaptureTestCase):
                 self.assertEqual(advert["nick"], nick)
                 self.assertEqual(advert["rar_trigger"], nick + "^")
                 self.assertGreater(advert["rar_folders"], 0)
+
+
+class TheExactSizeComesFromTheCtcp(CaptureTestCase):
+    """Every OmenServe-family bot follows its advert with a CTCP SLOTS line,
+    and it is the only place the exact size of a library is published. We have
+    been sending ours since the daemon existed and never read anyone else's.
+
+    READING IT BY POSITION DOES NOT WORK
+
+    Three layouts in one channel. fallguyf00's line is one field shorter than
+    everyone else's, so the index that holds 719,041 files for Bsk holds
+    14,247,378,895,149 for fallguyf00 - which as a file count is fourteen
+    trillion files, and would have gone onto the dashboard as one.
+
+    So the count the bot's own advert already gave is used to find the field,
+    and the size is whatever sits beside it. The layout never has to be known,
+    only self-consistent.
+    """
+
+    def test_the_common_layout(self):
+        found = irc.parse_advert_slots(BSK_SLOTS, 719041)
+
+        self.assertEqual(found["list_bytes"], 3894929430520)      # 3.54 TB
+        self.assertEqual(found["software"], "OmenServe v2.73")
+
+    def test_the_layout_that_is_one_field_short(self):
+        """fallguyf00, and the whole reason nothing here counts fields. Its
+        size sits where every other bot puts its file count."""
+        found = irc.parse_advert_slots(FALLGUYF00_SLOTS, 39659)
+
+        self.assertEqual(found["list_bytes"], 14247378895149)     # 12.96 TB
+
+    def test_the_number_a_positional_read_would_have_believed(self):
+        """The defect stated as a value: 14 trillion is what index 7 holds on
+        that line, and it is not a file count."""
+        fields = FALLGUYF00_SLOTS.split()
+
+        self.assertEqual(fields[7], "14247378895149")
+        self.assertEqual(fields[6], "39659", "the count is at 6, not 7")
+
+    def test_spqr_publishes_no_size_and_none_is_invented(self):
+        """BigTruck's line ends at the file count. There is no field beside it,
+        so there is no size - not a zero, and not whatever came before."""
+        found = irc.parse_advert_slots(BIGTRUCK_SLOTS, 19527)
+
+        self.assertNotIn("list_bytes", found)
+
+    def test_understood_but_empty_is_not_the_same_as_unreadable(self):
+        """SPQR's line agrees with the advert and carries nothing else, which
+        is a fact about that bot. A line that does not agree is a fact about
+        the line. Both mean "record nothing" and they are still not the same,
+        so one is {} and the other is None."""
+        self.assertEqual(irc.parse_advert_slots(BIGTRUCK_SLOTS, 19527), {})
+        self.assertIsNone(irc.parse_advert_slots(BIGTRUCK_SLOTS, 999))
+
+    def test_a_line_that_disagrees_with_the_advert_is_refused(self):
+        """If the count is not in the line at all, nothing in it can be located
+        with confidence, so none of it is used."""
+        self.assertIsNone(irc.parse_advert_slots(BSK_SLOTS, 12345))
+
+    def test_an_ambiguous_count_is_refused(self):
+        """Two fields carrying the same number means two candidate neighbours.
+        A guess here is a wrong size on the dashboard rather than a missing
+        one, so it is refused."""
+        self.assertIsNone(irc.parse_advert_slots("SLOTS 7 7 NOW 0 999 0 7 12345", 7))
+
+    def test_a_size_smaller_than_the_file_count_is_refused(self):
+        """A library cannot hold fewer bytes than it holds files."""
+        found = irc.parse_advert_slots(
+            "SLOTS 3 3 NOW 0 999 0 500000 400 0 1 2 Thing v1", 500000)
+
+        self.assertNotIn("list_bytes", found)
+
+    def test_an_implausible_size_is_refused(self):
+        """The ceiling is what stops a misread landing on the dashboard as a
+        real number. The largest library in the captured channel is 24 TB."""
+        huge = "SLOTS 3 3 NOW 0 999 0 500000 %d 0 1 2 Thing v1" % (10 ** 17)
+
+        self.assertNotIn("list_bytes", irc.parse_advert_slots(huge, 500000))
+
+    def test_a_bot_with_no_files_yet_reads_nothing(self):
+        """A count of zero is not something to calibrate on. Three of the 27
+        captured lines carry exactly one "0" field, so a bot whose list is
+        still empty - a fresh install, which is every install once - would
+        match it and read the field beside it as its library size. BigTruck's
+        line would make that 216 bytes.
+        """
+        self.assertIsNone(irc.parse_advert_slots(BIGTRUCK_SLOTS, 0))
+        self.assertIsNone(irc.parse_advert_slots(BIGTRUCK_SLOTS, None))
+
+    def test_a_file_offer_is_not_a_slots_line(self):
+        """Serving bots send CTCPs other than SLOTS. fallguyf00 offers
+        individual files to the channel between its adverts:
+
+            MP3 House Party 3 (1994)-DVDRIp-AC3-Xvid-THC.avi
+
+        Filenames carry numbers - years, bitrates, track counts - so without
+        checking what kind of message this is first, a bot with 1,994 files
+        would read the next token of a filename as its library size.
+        """
+        offer = "MP3 Best of 1994 320 kbps.mp3"
+
+        self.assertIsNone(irc.parse_advert_slots(offer, 1994))
+
+    def test_something_that_is_not_a_slots_line(self):
+        self.assertIsNone(irc.parse_advert_slots("MP3 Some Song.mp3", 719041))
+        self.assertIsNone(irc.parse_advert_slots("", 719041))
+
+    def test_nothing_is_read_without_a_count_to_check_against(self):
+        """The calibration IS the safety check, so a bot that has not
+        advertised gets nothing read from its CTCP."""
+        self.assertIsNone(irc.parse_advert_slots(BSK_SLOTS, None))
+        self.assertIsNone(irc.parse_advert_slots(BSK_SLOTS, 0))
+
+    def test_the_software_version_is_read_as_a_suffix(self):
+        """Read as whatever trails the numbers rather than at an index, so the
+        short layout and the truncated one both work."""
+        self.assertEqual(
+            irc.parse_advert_slots(DCCOREWIN_SLOTS, 36208)["software"],
+            "DCCore v1.10.0-RC4")
+        self.assertEqual(
+            irc.parse_advert_slots(FALLGUYF00_SLOTS, 39659)["software"],
+            "OmeNServE v")
+
+    def test_spqr_sends_no_version_and_none_is_invented(self):
+        self.assertNotIn("software", irc.parse_advert_slots(BIGTRUCK_SLOTS, 19527))
+
+    def test_a_bot_that_has_not_advertised_gets_nothing_recorded(self):
+        """Through the capture path: a CTCP on its own registers nobody."""
+        self.capture("Bsk", CTCP + BSK_SLOTS + CTCP)
+
+        self.assertEqual(runtime.known_bots, {})
+
+    def test_the_advert_and_the_ctcp_together(self):
+        self.capture("Bsk", BSK, now=T0)
+        self.capture("Bsk", CTCP + BSK_SLOTS + CTCP, now=T0 + 5)
+
+        entry = self.entry("Bsk")
+        self.assertEqual(entry["files"], 719041)
+        self.assertEqual(entry["list_date"], "Aug 10th")
+        self.assertEqual(entry["list_bytes"], 3894929430520)
+        self.assertEqual(entry["software"], "OmenServe v2.73")
+
+    def test_a_stranger_cannot_resize_a_bot_s_library(self):
+        """The CTCP is looked up by SENDER, so someone else's SLOTS line finds
+        no entry of that bot's to write into."""
+        self.capture("Bsk", BSK, now=T0)
+        forged = BSK_SLOTS.replace("3894929430520", "9000000000000")
+        self.capture("randomuser", CTCP + forged + CTCP, now=T0 + 5)
+
+        self.assertNotIn("list_bytes", self.entry("Bsk"))
+
+    def test_every_captured_slots_line_reads_or_refuses(self):
+        """The whole sample. Every one of the 27 either yields a size that
+        agrees with the bot's own advert, or yields none - never a number that
+        is not a size."""
+        for nick, text in ALL_CAPTURED:
+            self.capture(nick, text)
+
+        read = 0
+        for nick, payload in ALL_SLOTS:
+            with self.subTest(nick=nick):
+                entry = runtime.known_bots.get(nick.lower())
+                if not entry:
+                    continue
+                self.capture(nick, CTCP + payload + CTCP)
+                size = entry.get("list_bytes")
+                if size is None:
+                    continue
+                read += 1
+                self.assertGreaterEqual(size, entry["files"])
+                self.assertLess(size, irc.SLOTS_MAX_PLAUSIBLE_BYTES)
+
+        self.assertGreaterEqual(read, 24,
+                                "the calibration stopped finding the count")
+
+    def test_the_exact_size_agrees_with_the_advertised_one(self):
+        """Cross-check against the bots that publish a size in words as well.
+        If the field beside the count were the wrong field, these would not
+        line up to two decimal places."""
+        for nick, advert, payload, expected in (
+                ("DCCoreWin", DCCOREWIN, DCCOREWIN_SLOTS, "1.21TB"),
+                ("DCCore", DCCORE, DCCORE_SLOTS, "1.84TB")):
+            with self.subTest(nick=nick):
+                runtime.known_bots.clear()
+                self.capture(nick, advert, now=T0)
+                self.capture(nick, CTCP + payload + CTCP, now=T0 + 5)
+
+                entry = self.entry(nick)
+                as_tb = entry["list_bytes"] / (1024.0 ** 4)
+                self.assertEqual("%.2fTB" % as_tb, expected)
+                self.assertEqual(entry["list_size"], expected)
 
 
 class NotAnAdvert(unittest.TestCase):
