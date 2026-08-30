@@ -533,5 +533,52 @@ class TestStatsAndBansRoundTrip(PersistenceTestCase):
         self.assertEqual(_tmp_residue(self._dir), [])
 
 
+class TestFetchHistoryRoundTrip(DCCoreTestCase):
+    """db.load_fetch_history()/save_fetch_history() - the same JSON-file
+    round trip as db.load_known_bots()/db.load_fetched_bot_lists(), applied
+    to a finished cross-bot fetch's own row (see dcc_fetch.py's
+    _persist_fetch_history_locked() for the caller)."""
+
+    def setUp(self):
+        super().setUp()
+        self._dir = tempfile.mkdtemp(prefix="dccore-fetch-history-")
+        self._saved_file = db.FETCH_HISTORY_FILE
+        db.FETCH_HISTORY_FILE = os.path.join(self._dir, "fetch_history.json")
+        db.print = lambda *a, **k: None
+
+    def tearDown(self):
+        db.FETCH_HISTORY_FILE = self._saved_file
+        db.__dict__.pop("print", None)
+        shutil.rmtree(self._dir, ignore_errors=True)
+        super().tearDown()
+
+    def test_missing_file_loads_as_empty(self):
+        self.assertEqual(db.load_fetch_history(), {})
+
+    def test_save_then_load_returns_the_same_rows(self):
+        rows = {
+            "r1": {"bot": "goodbot", "filename": "Song.flac", "state": "complete",
+                   "stored_filename": "r1_Song.flac"},
+            "r2": {"bot": "otherbot", "filename": "!rar Album", "state": "failed",
+                   "reason": "no response"},
+        }
+        db.save_fetch_history(rows)
+        self.assertEqual(db.load_fetch_history(), rows)
+
+    def test_a_corrupt_file_loads_as_empty_rather_than_raising(self):
+        with open(db.FETCH_HISTORY_FILE, "w", encoding="utf-8") as f:
+            f.write("{not valid json")
+        self.assertEqual(db.load_fetch_history(), {})
+
+    def test_a_json_value_that_is_not_an_object_loads_as_empty(self):
+        with open(db.FETCH_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(["not", "a", "dict"], f)
+        self.assertEqual(db.load_fetch_history(), {})
+
+    def test_save_leaves_no_tmp_residue(self):
+        db.save_fetch_history({"r1": {"bot": "goodbot", "state": "complete"}})
+        self.assertEqual(_tmp_residue(self._dir), [])
+
+
 if __name__ == "__main__":
     unittest.main()

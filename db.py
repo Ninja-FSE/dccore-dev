@@ -21,6 +21,8 @@ SPEED_RECORD_FILE = getattr(config, "SPEED_RECORD_FILE", os.path.join("data", "s
 KNOWN_BOTS_FILE = getattr(config, "KNOWN_BOTS_FILE", os.path.join("data", "known_bots.json"))
 FETCHED_BOT_LISTS_FILE = getattr(config, "FETCHED_BOT_LISTS_FILE",
                                  os.path.join("data", "fetched_bot_lists.json"))
+FETCH_HISTORY_FILE = getattr(config, "FETCH_HISTORY_FILE",
+                              os.path.join("data", "fetch_history.json"))
 
 
 def _atomic_write(path, text):
@@ -554,6 +556,40 @@ def save_fetched_bot_lists(registry):
                           json.dumps(registry, indent=1, sort_keys=True, ensure_ascii=False))
     except Exception as err:
         print(f"[DB ERROR] Could not save the fetched-lists registry: {err}")
+
+
+def load_fetch_history():
+    """Every 'complete'/'failed' cross-bot fetch row from disk, or {} if
+    there is none yet.
+
+    Same posture as load_known_bots()/load_fetched_bot_lists(): a file that
+    fails to parse costs an empty Downloads table until the next fetch
+    finishes, not a refusal to start. The files these rows point at (via
+    stored_filename) were never touched by a restart in the first place,
+    only the daemon's memory of which fetch produced each one.
+    """
+    if not os.path.exists(FETCH_HISTORY_FILE):
+        return {}
+    try:
+        with io.open(FETCH_HISTORY_FILE, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the fetch history, starting empty: {err}")
+        return {}
+
+
+def save_fetch_history(rows):
+    """Write the finished-fetch history, atomically. Called from
+    dcc_fetch.py's dispatcher tick (every 2s, skipped when nothing changed)
+    and immediately on a dashboard delete, so a row disappears from disk
+    right away rather than only up to one tick later."""
+    try:
+        with _disk_lock:
+            _atomic_write(FETCH_HISTORY_FILE,
+                          json.dumps(rows, indent=1, sort_keys=True, ensure_ascii=False))
+    except Exception as err:
+        print(f"[DB ERROR] Could not save the fetch history: {err}")
 
 
 def save_dcc_queue():

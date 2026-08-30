@@ -67,6 +67,7 @@ import time
 
 import adminchat
 import config
+import platform_compat
 
 try:
     from flask import Flask, jsonify, redirect, request, send_from_directory, session
@@ -876,6 +877,66 @@ def build_fetch_status_payload():
     return rows
 
 
+def build_fetch_delete_result(request_id):
+    """DELETE /api/fetch/<request_id>: forget a finished fetch and remove its
+    file from FETCHED_FILES_DIR, if it has one.
+
+    Refuses anything still in flight (pending/offered/listening/receiving) -
+    there is no cancellation path for a transfer thread already running, so
+    dropping the row out from under it would just let the thread keep writing
+    to a file nothing in the UI can see or ever clean up again. Only
+    "complete" (this includes a rejected list archive - see
+    build_fetch_status_payload()'s caller for that distinction, it is still
+    state == "complete" here) and "failed" rows are deletable.
+
+    Never builds the on-disk path from request_id or anything else attacker-
+    reachable - request_id only selects the row, and the row's own
+    stored_filename (set by dcc_fetch.py after running the offer's filename
+    through dcc.is_safe_path()) is what actually gets removed.
+
+    That upstream check is real, but this route used to lean on it alone: a
+    plain os.path.join() has no protection against an absolute or
+    "../"-laden stored_filename the way api_fetch_download()'s
+    send_from_directory() does (it performs its own safe join and raises
+    NotFound on anything that escapes `directory`) - so download was
+    protected twice and delete, the destructive one, only once. re-checks
+    with the exact same dcc.is_safe_path() dcc_fetch.py's write path already
+    uses, rather than trusting that stored_filename can never be anything
+    else, forever, everywhere it is read.
+    """
+    import dcc
+    import dcc_fetch
+    with dcc_fetch._fetch_lock():
+        row = getattr(config, "fetch_queue", {}).get(request_id)
+        if row is None:
+            return 404, {"error": "Unknown fetch request."}
+        if row.get("state") not in ("complete", "failed"):
+            return 409, {"error": "Only a completed or failed fetch can be deleted."}
+        stored_filename = row.get("stored_filename")
+        del config.fetch_queue[request_id]
+
+    if stored_filename:
+        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+        target = os.path.join(directory, stored_filename)
+        if not dcc.is_safe_path(directory, target):
+            print(f"[WEBUI] Refused to delete {stored_filename!r}: outside FETCHED_FILES_DIR.")
+            return 500, {"error": "Refused: the stored path is outside the fetch directory."}
+        try:
+            os.remove(platform_compat.long_path(target))
+        except FileNotFoundError:
+            pass
+        except OSError as remove_err:
+            print(f"[WEBUI] Could not delete fetched file {stored_filename!r}: {remove_err}")
+
+    # Right away, not up to 2s later on check_fetch_queue()'s own polling
+    # tick (dcc_fetch._persist_fetch_history_locked()) - a crash in that
+    # window would otherwise bring this just-deleted row back on the next
+    # boot, pointing at a file that no longer exists.
+    dcc_fetch.persist_fetch_history()
+
+    return 200, {"deleted": request_id}
+
+
 def build_verify_list_payload():
     """GET /api/tools/verify-list payload: filenames the master list carries
     under more than one folder.
@@ -943,7 +1004,7 @@ SETTINGS_CATEGORIES = (
                                                 "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
-                                                "DOWNLOAD_COUNTS_FILE",
+                                                "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE"]),
     ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN"]),
@@ -1001,6 +1062,7 @@ SETTINGS_LABELS = {
     "KNOWN_BOTS_FILE": "Known bots file",
     "DOWNLOAD_COUNTS_FILE": "Download counts file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
+    "FETCH_HISTORY_FILE": "Fetch history file",
     "LIST_SIZE_FILE": "List size file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
 
@@ -1406,6 +1468,11 @@ if HAVE_FLASK:
             return send_from_directory(
                 directory, stored_filename, as_attachment=True,
                 download_name=download_name)
+
+        @app.route("/api/fetch/<request_id>/delete", methods=["POST"])
+        def api_fetch_delete(request_id):
+            status, result = build_fetch_delete_result(request_id)
+            return jsonify(result), status
 
         @app.route("/api/settings")
         def api_settings():

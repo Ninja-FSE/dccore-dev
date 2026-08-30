@@ -68,6 +68,7 @@ import time
 import uuid
 
 import config
+import db
 import dcc
 import list as list_mod
 import platform_compat
@@ -311,6 +312,56 @@ def _mark_failed_locked(row, reason):
     row["reason"] = reason
 
 
+# The set of request ids last written to FETCH_HISTORY_FILE, purely to skip a
+# redundant write when nothing has changed - check_fetch_queue() calls
+# _persist_fetch_history_locked() on every tick (every 2s, forever), and
+# nothing else marks this dirty.
+_last_persisted_terminal_ids = frozenset()
+
+
+def _persist_fetch_history_locked(queue):
+    """Snapshot every 'complete'/'failed' row and write it to disk, if the
+    set of such rows has changed since the last snapshot. Must be called
+    with the fetch lock already held - queue is read directly, not copied
+    under a lock of its own.
+
+    Without this, config.fetch_queue was in-memory only: a finished fetch's
+    row (the only thing the dashboard's Downloads table and its Delete
+    button have to point at) vanished on every restart even though the file
+    itself sat untouched on disk under FETCHED_FILES_DIR the whole time -
+    same shape as the bug config.fetched_bot_lists persistence already
+    fixed for a fetched LIST's registry entry, applied here to an
+    individual fetch's own row.
+
+    Deliberately excludes every in-flight state (pending/offered/listening/
+    receiving) - none of those can mean anything after a restart (the
+    socket/thread that would have driven them to completion is gone with
+    the old process), so there is nothing worth persisting for them; they
+    simply do not exist after a restart, same as before this change.
+    """
+    global _last_persisted_terminal_ids
+    terminal = {rid: dict(row) for rid, row in queue.items()
+                if row.get("state") in ("complete", "failed")}
+    current_ids = frozenset(terminal)
+    if current_ids == _last_persisted_terminal_ids:
+        return
+    _last_persisted_terminal_ids = current_ids
+    db.save_fetch_history(terminal)
+
+
+def persist_fetch_history():
+    """Same as _persist_fetch_history_locked(), for a caller that does not
+    already hold the fetch lock - webserver.py's delete route, most notably:
+    it needs a just-deleted row gone from disk immediately, not up to 2s
+    later on check_fetch_queue()'s own polling tick, or a crash in that
+    window would bring the deleted row back on the next boot even though
+    its file is already gone.
+    """
+    queue = _ensure_fetch_queue()
+    with _fetch_lock():
+        _persist_fetch_history_locked(queue)
+
+
 # Substrings (lowercased) a private NOTICE must ALL contain before it is
 # treated as a "!rar is disabled here" refusal rather than routine chatter -
 # see handle_refusal_notice()'s own docstring for why both are required
@@ -421,6 +472,14 @@ def check_fetch_queue():
             if row.get("state") == "listening" and row.get("listening_since") is not None:
                 if (now - row["listening_since"]) > listen_timeout:
                     _mark_failed_locked(row, "listening row expired without a resolution")
+
+        # After applying both expiry sweeps above (so a row that just timed
+        # out this very tick is captured too) and before the free-slots
+        # check below, which can return early - a completed transfer or any
+        # other failure reached from outside this function (_run_transfer(),
+        # handle_incoming_offer()) also lands here on the very next tick,
+        # since both write into this same queue.
+        _persist_fetch_history_locked(queue)
 
         active = count_active_fetches(queue)
         free_slots = max_slots - active

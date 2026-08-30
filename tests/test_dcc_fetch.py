@@ -25,6 +25,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import config  # noqa: E402
+import db  # noqa: E402
 import dcc  # noqa: E402
 import dcc_fetch  # noqa: E402
 
@@ -1830,6 +1831,86 @@ class ListFetchDispatcherTests(DCCoreTestCase):
         sent_user, sent_msg, _is_vip = self.oserve.queued[0]
         self.assertEqual(sent_user, "goodbot")
         self.assertIn("!goodbot !rar Artist/Album (2020)", sent_msg)
+
+
+class FetchHistoryPersistenceTests(DCCoreTestCase):
+    """config.fetch_queue was in-memory only: a finished fetch's row - the
+    only thing the dashboard's Downloads table and its Delete button have to
+    point at - vanished on every restart even though the file itself sat on
+    disk under FETCHED_FILES_DIR untouched. check_fetch_queue() now snapshots
+    every 'complete'/'failed' row to db.FETCH_HISTORY_FILE on each tick it
+    runs; tests/support.py's DCCoreTestCase redirects that path to a
+    per-test tmp dir, so these tests read db.FETCH_HISTORY_FILE directly
+    rather than the real repository path."""
+
+    def test_a_completed_row_is_persisted_on_the_next_tick(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac")
+        config.fetch_queue[rid]["state"] = "complete"
+        config.fetch_queue[rid]["stored_filename"] = f"{rid}_Song.flac"
+
+        dcc_fetch.check_fetch_queue()
+
+        history = db.load_fetch_history()
+        self.assertIn(rid, history)
+        self.assertEqual(history[rid]["state"], "complete")
+
+    def test_a_failed_row_is_persisted_on_the_next_tick(self):
+        rid = dcc_fetch.enqueue_fetch("silentbot", "Ghost.flac")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time() - 61
+        self.set_config(FETCH_OFFER_TIMEOUT=60)
+
+        dcc_fetch.check_fetch_queue()
+
+        history = db.load_fetch_history()
+        self.assertIn(rid, history)
+        self.assertEqual(history[rid]["state"], "failed")
+
+    def test_in_flight_rows_are_never_persisted(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac")  # stays "pending"
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(db.load_fetch_history(), {})
+
+    def test_an_unchanged_terminal_set_does_not_rewrite_the_file(self):
+        """Runs forever, every 2s, from fetch_dispatcher_worker() - rewriting
+        an unchanged file on every single tick would be needless disk I/O."""
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac")
+        config.fetch_queue[rid]["state"] = "complete"
+        dcc_fetch.check_fetch_queue()
+
+        real_save = db.save_fetch_history
+        calls = []
+        db.save_fetch_history = lambda rows: (calls.append(rows), real_save(rows))[-1]
+        self.addCleanup(setattr, db, "save_fetch_history", real_save)
+
+        dcc_fetch.check_fetch_queue()  # nothing changed since the first tick
+
+        self.assertEqual(calls, [])
+
+    def test_a_row_deleted_from_the_queue_drops_out_of_history_on_the_next_tick(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac")
+        config.fetch_queue[rid]["state"] = "complete"
+        dcc_fetch.check_fetch_queue()
+        self.assertIn(rid, db.load_fetch_history())
+
+        del config.fetch_queue[rid]
+        dcc_fetch.check_fetch_queue()
+
+        self.assertNotIn(rid, db.load_fetch_history())
+
+    def test_persist_fetch_history_is_safe_to_call_without_the_lock_already_held(self):
+        """The public (non-"_locked") entry point webserver.py's delete route
+        uses - must acquire the fetch lock itself rather than assuming a
+        caller already holds it."""
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac")
+        config.fetch_queue[rid]["state"] = "failed"
+        config.fetch_queue[rid]["reason"] = "timeout"
+
+        dcc_fetch.persist_fetch_history()
+
+        self.assertIn(rid, db.load_fetch_history())
 
 
 class DispatcherSecondLayerCtcpGuardTests(DCCoreTestCase):
