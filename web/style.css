@@ -25,9 +25,125 @@
   --status-queued: #7aa2f7;
   --status-empty:  #5b6875;
   --danger:        #f06a6a;
+  --on-accent:     #04201d;
   --radius:        10px;
   --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* -----------------------------------------------------------------------
+   Light theme
+   -----------------------------------------------------------------------
+   Every colour on this page already came from a token, so a second theme is
+   the same sixteen names with different values and not one component rule
+   changes. The one exception was .btn-accent's dark-on-teal text, which was
+   the only literal left in the file and is now --on-accent below.
+
+   THE VIEWER HAS THREE STATES, NOT TWO
+
+   Somebody who has never touched the toggle has chosen nothing, and the root
+   element carries no data-theme at all - so that state is decided by the
+   operating system and nothing else. An explicit choice stamps
+   data-theme="dark" or data-theme="light" and must beat the operating system
+   in BOTH directions: dark on a machine set to light, and light on a machine
+   set to dark.
+
+   Hence the two blocks rather than one. The media query is guarded with
+   :not([data-theme="dark"]) so that somebody who picked dark on a light
+   machine keeps it, and the [data-theme="light"] block repeats the palette so
+   that picking light on a dark machine works as well.
+
+   Only the tokens are redefined here. A colour written directly inside either
+   block would apply in one state and not the other, which is the whole class
+   of bug this arrangement exists to avoid.
+
+   THE LIGHT GROUND IS GREY
+
+   #dfe3e8, not white: cards are the lighter surface and have to read as
+   raised against something. Every value below was measured rather than
+   picked - text 15.1:1 on a card, dim text 6.3, and the semantic colours 4.9
+   to 6.5. The teal needed darkening three steps from the dark theme's
+   #2dd4c8, which sits at 1.5:1 on a light ground and is effectively
+   invisible there; the amber needed the same treatment.                     */
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:            #dfe3e8;
+    --bg-raised:     #eceff2;
+    --bg-inset:      #d5dae1;
+    --border:        #c3cad2;
+    --border-soft:   #d7dce2;
+    --text:          #151a21;
+    --text-dim:      #4d5866;
+    --text-faint:    #78838f;
+    --accent:        #0a6f68;
+    --accent-strong: #08544f;
+    --accent-dim:    rgba(10, 111, 104, 0.12);
+    --on-accent:     #ffffff;
+    --status-sending:#0a6f68;
+    --status-frozen: #8a5f00;
+    --status-queued: #2f4fa8;
+    --status-empty:  #78838f;
+    --danger:        #b83a3a;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg:            #dfe3e8;
+  --bg-raised:     #eceff2;
+  --bg-inset:      #d5dae1;
+  --border:        #c3cad2;
+  --border-soft:   #d7dce2;
+  --text:          #151a21;
+  --text-dim:      #4d5866;
+  --text-faint:    #78838f;
+  --accent:        #0a6f68;
+  --accent-strong: #08544f;
+  --accent-dim:    rgba(10, 111, 104, 0.12);
+  --on-accent:     #ffffff;
+  --status-sending:#0a6f68;
+  --status-frozen: #8a5f00;
+  --status-queued: #2f4fa8;
+  --status-empty:  #78838f;
+  --danger:        #b83a3a;
+}
+
+/* The switch itself, in the sidebar foot beside "Log out". Two buttons rather
+   than one that toggles: a single button has to say either what the theme IS
+   or what it would BECOME, and every reader guesses the other one. */
+
+.theme-switch {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.theme-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.theme-btn:hover {
+  color: var(--text-dim);
+  border-color: var(--text-faint);
+}
+
+.theme-btn.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.theme-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 * { box-sizing: border-box; }
@@ -268,7 +384,7 @@ html, body {
 .btn-accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #04201d;
+  color: var(--on-accent);
 }
 
 /* ----------------------------------------------------------------- Stats */

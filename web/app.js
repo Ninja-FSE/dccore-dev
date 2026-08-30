@@ -68,6 +68,8 @@
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
     filelistsExpandAll:   document.getElementById("filelists-expand-all"),
     filelistsCollapseAll: document.getElementById("filelists-collapse-all"),
+    themeDark:    document.getElementById("theme-dark"),
+    themeLight:   document.getElementById("theme-light"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
     verifyStatus:         document.getElementById("verify-status"),
     verifyResults:        document.getElementById("verify-results")
@@ -982,6 +984,93 @@
   // fresh regardless of which tab is showing, same reasoning as above.
   setInterval(pollFilelistsBots, FILELISTS_BOTS_POLL_MS);
   pollFilelistsBots();
+
+  // ---------------------------------------------------------------- Theme
+  //
+  // The stored choice is already on the root element by the time this runs -
+  // index.html sets it in the head, before the first paint, so the page never
+  // renders in one theme and swaps to the other. All this does is keep the two
+  // buttons in step with it and write the choice down.
+  //
+  // Per browser, not per bot: which theme suits a screen is a fact about the
+  // person looking at it, and the same daemon gets looked at from a phone in a
+  // dark room and a desktop by a window. Nothing about it goes to the server.
+
+  var THEME_KEY = "dccore-theme";
+
+  function storedTheme() {
+    // Browsers set to block site data throw on access rather than returning
+    // null, so this cannot be an unguarded read.
+    try {
+      var saved = localStorage.getItem(THEME_KEY);
+      return (saved === "dark" || saved === "light") ? saved : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function currentTheme() {
+    // No stored choice means no attribute, and the operating system decides -
+    // so ask it the same question the stylesheet's media query asks, rather
+    // than assuming dark and lighting up the wrong button.
+    var chosen = document.documentElement.getAttribute("data-theme");
+    if (chosen === "dark" || chosen === "light") {
+      return chosen;
+    }
+    return (window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: light)").matches)
+      ? "light" : "dark";
+  }
+
+  function markThemeButtons() {
+    var active = currentTheme();
+    [el.themeDark, el.themeLight].forEach(function (button) {
+      if (!button) {
+        return;
+      }
+      var mine = button.getAttribute("data-theme-choice") === active;
+      button.classList.toggle("is-active", mine);
+      button.setAttribute("aria-pressed", mine ? "true" : "false");
+    });
+  }
+
+  function chooseTheme(name) {
+    document.documentElement.setAttribute("data-theme", name);
+    try {
+      localStorage.setItem(THEME_KEY, name);
+    } catch (err) {
+      // A private window cannot remember it. The page still changes now, which
+      // is what was asked for; it simply starts over on the next load.
+    }
+    markThemeButtons();
+  }
+
+  [el.themeDark, el.themeLight].forEach(function (button) {
+    if (button) {
+      button.addEventListener("click", function () {
+        chooseTheme(button.getAttribute("data-theme-choice"));
+      });
+    }
+  });
+
+  // Somebody who has never picked follows their machine, so follow it when it
+  // changes too - a laptop switching to dark at sunset should take the
+  // dashboard with it. An explicit choice is left alone.
+  if (window.matchMedia) {
+    var watcher = window.matchMedia("(prefers-color-scheme: light)");
+    var onSystemChange = function () {
+      if (!storedTheme()) {
+        markThemeButtons();
+      }
+    };
+    if (watcher.addEventListener) {
+      watcher.addEventListener("change", onSystemChange);
+    } else if (watcher.addListener) {
+      watcher.addListener(onSystemChange);      // Safari before 14
+    }
+  }
+
+  markThemeButtons();
 
   activateView("search");
 })();
