@@ -245,11 +245,25 @@ def _rotate_day_unlocked(stats):
     UnicodeEncodeError on any console whose code page cannot encode them, which
     is exactly how this was found.
     """
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    now = datetime.datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
     if stats[6] == today_str:
         return False
-    stats[2] = stats[4]   # Yesterday files = Today files
-    stats[3] = stats[5]   # Yesterday bytes = Today bytes
+
+    # Only a one-day gap makes the Today columns yesterday's. Longer than that
+    # and they are from whenever the bot last sent something - a bot idle for a
+    # week would otherwise report last Tuesday's traffic as "Yesterday", which
+    # is the same misdating one step further out.
+    #
+    # A date that will not parse, or one from the future after a clock or
+    # timezone change, lands here too. Zeroing is the safe direction: it
+    # under-claims where the shift over-claimed.
+    if stats[6] == (now - datetime.timedelta(days=1)).strftime("%Y-%m-%d"):
+        stats[2] = stats[4]   # Yesterday files = Today files
+        stats[3] = stats[5]   # Yesterday bytes = Today bytes
+    else:
+        stats[2] = 0
+        stats[3] = 0
     stats[4] = 0
     stats[5] = 0
     stats[6] = today_str
