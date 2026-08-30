@@ -51,6 +51,9 @@
       <button class="nav-item" data-view="tools">
         <span class="nav-icon">&#9881;</span> Tools
       </button>
+      <button class="nav-item" data-view="settings">
+        <span class="nav-icon">&#9998;</span> Settings
+      </button>
     </nav>
 
     <div class="status-card">
@@ -276,6 +279,24 @@
         </p>
         <p class="tool-status" id="verify-status"></p>
         <div class="verify-results" id="verify-results"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-settings">
+      <div class="settings-layout">
+        <nav class="settings-rail" id="settings-rail">
+          <div class="settings-rail-empty">Loading&hellip;</div>
+        </nav>
+        <div class="settings-panel">
+          <div class="settings-fields" id="settings-fields"></div>
+
+          <div class="settings-savebar">
+            <span class="settings-savebar-text" id="settings-savebar-text">All changes saved</span>
+            <button type="button" class="btn btn-accent" id="settings-save-btn" disabled>Save &amp; rehash</button>
+          </div>
+          <p class="settings-note" id="settings-restart-note" style="display:none;"></p>
+          <p class="settings-note" id="settings-save-error" style="display:none;"></p>
+        </div>
       </div>
     </section>
 
