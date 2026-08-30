@@ -714,7 +714,7 @@ SETTINGS_CATEGORIES = (
                                                 "MAX_FETCH_FILE_SIZE", "FETCH_TRANSFER_TIMEOUT",
                                                 "FETCH_OFFER_TIMEOUT"]),
     ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
-                                                "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
+                                                "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "LIST_SIZE_FILE",
                                                 "LIST_RAWBYTES_FILE"]),
