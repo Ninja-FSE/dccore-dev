@@ -85,11 +85,19 @@ class ThemedPathCase(DCCoreTestCase):
                      "w", encoding="utf-8") as handle:
             handle.write("head\n!DCCoreTest Metallica - Enter Sandman.flac  ::INFO:: 4.0MB\n")
 
-        # These templates stamp the time. A capture taken a minute later differs
-        # for a reason that is not the code.
+        # These templates stamp the time, so a capture taken a minute later
+        # differs for a reason that is not the code.
+        #
+        # gmtime, not localtime: freezing the EPOCH alone is not enough,
+        # because the templates render it in the machine's zone. The first
+        # version of this froze the timestamp and rendered it locally, which
+        # baked the author's UTC+2 into the golden file and failed on CI at
+        # UTC - on all four platforms, which is at least how it announced
+        # itself. time.tzset() would fix it on POSIX and does not exist on
+        # Windows, so the conversion is pinned instead of the environment.
         real = time.strftime
         self.addCleanup(setattr, time, "strftime", real)
-        time.strftime = lambda fmt, t=None: real(fmt, time.localtime(FROZEN))
+        time.strftime = lambda fmt, t=None: real(fmt, time.gmtime(FROZEN))
 
         # list.py bound `oserve` at import, so replacing sys.modules is not
         # enough for the paths that use the module global rather than a
@@ -136,6 +144,25 @@ class TheLookDidNotChange(ThemedPathCase):
         for label in PATHS:
             with self.subTest(path=label):
                 self.assertEqual(self.drive(label), GOLDEN[label])
+
+    def test_the_golden_file_carries_no_timezone(self):
+        """The failure that reached CI on all four platforms.
+
+        Freezing the epoch is not enough: these templates render it in the
+        machine's zone, so the first version of this file baked the author's
+        UTC+2 into the fixture and every platform at UTC disagreed. The harness
+        pins the CONVERSION now, and this says so - so an edit that goes back
+        to localtime fails here, on the machine that made it, rather than
+        twenty minutes later on somebody else's.
+        """
+        stamped = [line for lines in GOLDEN.values() for line in lines
+                   if "as of " in line]
+        self.assertTrue(stamped, "no fixture line carries a timestamp any more")
+
+        expected = time.strftime("%I:%M %p", time.gmtime(FROZEN)).lower().lstrip("0")
+        for line in stamped:
+            self.assertIn(expected, line,
+                          "the golden file was captured in a local timezone")
 
     def test_the_fixture_covers_every_path_that_reads_the_palette(self):
         """Control. A golden file that quietly lost an entry would let a change
