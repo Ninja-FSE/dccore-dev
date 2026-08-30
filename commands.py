@@ -263,6 +263,24 @@ PRESERVE_RUNTIME = (
 )
 
 
+def rehash_nick_change_line(old_baseline_nick, new_nickname):
+    """The raw "NICK <new>\\r\\n" line to send live if a rehash just renamed
+    the bot in config.py, or None if the nickname did not actually change.
+
+    Pulled out of handle_rehash_request() as a pure function purely so this
+    one decision is unit-testable: that function does a real
+    importlib.reload() of half the daemon's modules, which nothing else in
+    this suite calls directly either, for the same reason - rebinding
+    module-level objects (a fresh threading.Lock(), a fresh {}) out from
+    under a shared test process is exactly the class of bug PRESERVE_RUNTIME
+    exists to guard against in the running daemon, and running it for real
+    here would risk the identical thing happening to test state instead.
+    """
+    if old_baseline_nick and str(new_nickname).lower() != old_baseline_nick.lower():
+        return f"NICK {new_nickname}\r\n"
+    return None
+
+
 def handle_rehash_request(user, target_chan, authorised=False):
     """Reload the modules live, in memory, without reading anything back from disk."""
     import importlib
@@ -412,6 +430,30 @@ def handle_rehash_request(user, target_chan, authorised=False):
             _cfg.ORIGINAL_NICK = _cfg.NICKNAME
             print(f"[REHASH RAM] config.py changed the nickname to {_cfg.NICKNAME!r}; "
                   f"re-baselined, still answering to {baseline_nick!r}.")
+
+            # Also change it LIVE, right now, over the connection that is
+            # already open - the same live-sync treatment a CHANNEL edit
+            # already gets a few lines below. Without this, a rename saved
+            # through the web dashboard's Settings page (or a plain !rehash)
+            # only re-baselined bookkeeping and did nothing to the actual
+            # on-the-wire nick until some UNRELATED reconnect happened to
+            # occur next - which could be minutes away, or days. An operator
+            # watching the change happen in the dashboard has every reason to
+            # expect the bot to answer to the new name immediately, the way
+            # a channel add/remove already does.
+            _nick_line = rehash_nick_change_line(baseline_nick, _cfg.NICKNAME)
+            if _nick_line:
+                _oserve_for_nick = sys.modules.get('oserve')
+                _live_sock_for_nick = getattr(_oserve_for_nick, 'irc_connection', None) if _oserve_for_nick else None
+                if _live_sock_for_nick:
+                    try:
+                        _live_sock_for_nick.send(_nick_line.encode())
+                        print(f"[REHASH NICK] Sent a live NICK change to {_cfg.NICKNAME!r}.")
+                    except Exception as _nick_err:
+                        print(f"[REHASH NICK ERROR] Could not send the live nick change: {_nick_err}")
+                else:
+                    print("[REHASH NICK] No live socket available; the new nickname "
+                          "will take effect on the next reconnect instead.")
 
         import announce as _ann
         # Only reinstate the token if nothing newer claimed it. A reconnect completing inside

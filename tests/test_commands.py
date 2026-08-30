@@ -566,3 +566,42 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
 
         self.assertEqual(config.fetch_queue["abc123"]["state"], "receiving")
         self.assertEqual(config.fetched_bot_lists["somebot"]["entries"], [1, 2, 3])
+
+
+class RehashNickChangeGoesLive(unittest.TestCase):
+    """A NICKNAME edit picked up by a rehash used to only re-baseline internal
+    bookkeeping and defer the actual rename to whatever reconnect happened to
+    occur next - which could be minutes away, or days. Reported live: an
+    operator changed the nickname through the web dashboard's Settings page,
+    watched the bot answer to the OLD name until an unrelated disconnect
+    happened to occur, and only then saw the new one - looking exactly like
+    the rehash had crashed the connection to apply itself, when really it had
+    just silently deferred.
+
+    handle_rehash_request() itself is not called here - nothing else in this
+    suite calls it directly either, since it does a real importlib.reload()
+    of half the daemon and rebinding module-level objects (a fresh
+    threading.Lock(), a fresh {}) out from under a shared test process risks
+    corrupting state for every other test that runs afterwards. These test
+    the extracted pure decision (commands.rehash_nick_change_line()) instead.
+    """
+
+    def test_a_real_rename_produces_the_nick_line(self):
+        self.assertEqual(
+            commands.rehash_nick_change_line("DCCore", "DCCoreWeb"),
+            "NICK DCCoreWeb\r\n")
+
+    def test_case_only_difference_is_not_a_rename(self):
+        """IRC nicks are case-insensitive; the server would reject this NICK
+        as pointless (or worse, treat it as a fresh collision check) for a
+        rename that never actually happened."""
+        self.assertIsNone(commands.rehash_nick_change_line("DCCore", "dccore"))
+
+    def test_no_baseline_yet_sends_nothing(self):
+        """baseline_nick is None on a fresh daemon's very first rehash before
+        ORIGINAL_NICK has ever been set - nothing to compare against, so no
+        NICK line, not a crash."""
+        self.assertIsNone(commands.rehash_nick_change_line(None, "DCCore"))
+
+    def test_unchanged_nickname_sends_nothing(self):
+        self.assertIsNone(commands.rehash_nick_change_line("DCCore", "DCCore"))
