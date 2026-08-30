@@ -1000,7 +1000,7 @@
     }
 
     return '<div class="settings-field-row">' +
-      '<span class="' + nameClass + '">' + escapeHtml(field.name) + '</span>' +
+      '<span class="' + nameClass + '">' + escapeHtml(field.label || field.name) + '</span>' +
       '<span class="settings-field-control">' + control + '</span>' +
       "</div>";
   }

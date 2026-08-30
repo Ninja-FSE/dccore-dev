@@ -729,6 +729,74 @@ SETTINGS_CATEGORIES = (
                                                 "SCRIPT_VERSION"]),
 )
 
+# A human-readable label per setting, since the raw config.py name
+# (MAX_DCC_SLOTS, DCC_PORT_START, ...) is what an operator edits in a text
+# file, not what they expect to read on a form. Checked against
+# SETTINGS_CATEGORIES by SettingsPayloadTests' completeness guard, same
+# reasoning as that list itself: a setting added to config.py and slotted
+# into a category but never given a label here would otherwise silently show
+# its raw name instead of failing a test.
+SETTINGS_LABELS = {
+    "SERVER": "IRC server",
+    "PORT": "Port",
+    "NICKNAME": "Nickname",
+    "ALT_NICKNAME": "Alt nickname",
+    "ADMIN_NICK": "Admin nick(s)",
+    "CHANNEL": "Channels",
+    "DEBUG_CHANNEL": "Debug channel",
+
+    "MAX_DCC_SLOTS": "Max simultaneous sends",
+    "MAX_USER_QUEUE": "Max queue per user",
+    "MAX_GLOBAL_QUEUE": "Max global queue",
+    "MAX_SEARCH_RESULTS": "Max search results",
+    "MSG_DELAY": "Message delay (seconds)",
+    "DEBUG_MSG_DELAY": "Debug message delay (seconds)",
+    "DCC_PORT_START": "DCC port range start",
+    "DCC_PORT_END": "DCC port range end",
+    "MAX_FETCH_SLOTS": "Max fetch slots",
+    "MAX_FETCH_FILE_SIZE": "Max fetch file size (bytes)",
+    "FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",
+    "FETCH_OFFER_TIMEOUT": "Fetch offer timeout (seconds)",
+
+    "LIST_BASE_NAME": "List base name",
+    "PAUSE_ON_UPDATE": "Pause sharing during !update",
+    "FILE_DIRECTORY": "Music directory",
+    "RAR_ENABLED": "Enable !rar folder packing",
+    "RAR_BINARY": "RAR binary path",
+    "TMP_ZIP_DIR": "Temp archive directory",
+    "LOCAL_LIST_DIR": "Master list directory",
+    "FETCHED_FILES_DIR": "Fetched files directory",
+    "BANS_FILE": "Bans file",
+    "STATS_FILE": "Stats file",
+    "HARD_BANS_FILE": "Hard bans file",
+    "KNOWN_BOTS_FILE": "Known bots file",
+    "LIST_SIZE_FILE": "List size file",
+    "LIST_RAWBYTES_FILE": "List raw bytes file",
+
+    "ANNOUNCE_INTERVAL": "Advert interval (seconds)",
+    "BROADCAST_SEARCH_CHANNEL": "Broadcast search channel",
+    "BROADCAST_SEARCH_COOLDOWN": "Broadcast search cooldown (seconds)",
+
+    "MAX_REQUESTS": "Max requests per window",
+    "REQUEST_WINDOW": "Request window (seconds)",
+    "MUTE_TIME": "Mute duration (seconds)",
+    "MAX_SEND_FAILS": "Max send failures",
+    "RAR_TIMEOUT": "RAR pack timeout (seconds)",
+
+    "ADMIN_HOSTMASKS": "Admin hostmasks",
+    "ADMIN_CHAT_MODE": "DCC chat connection mode",
+    "ADMIN_CHANNEL_COMMANDS": "Allow admin commands in channel",
+
+    "WEBUI_ENABLED": "Enable web dashboard",
+    "WEBUI_HOST": "Host",
+    "WEBUI_PORT": "Port",
+
+    "DEBUG_MODE": "Debug mode",
+    "DEBUG_TO_CHANNEL": "Send debug lines to channel",
+    "DEBUG_TO_CONSOLE": "Send debug lines to admin console",
+    "SCRIPT_VERSION": "Script version",
+}
+
 
 def build_settings_payload():
     """GET /api/settings payload: every editable setting, grouped for the
@@ -759,15 +827,22 @@ def build_settings_payload():
             value = getattr(config, name, None)
             if not settings_file.is_overridable(name, value):
                 continue
-            fields.append({"name": name, "type": types[name].__name__, "value": value})
+            fields.append({"name": name, "label": SETTINGS_LABELS.get(name, name),
+                           "type": types[name].__name__, "value": value})
             seen.add(name)
         categories.append({"id": cat_id, "label": label, "fields": fields})
 
+    # A leftover has no entry in SETTINGS_LABELS either - by construction, it
+    # was never in SETTINGS_CATEGORIES, and SETTINGS_LABELS only ever gets a
+    # name added alongside slotting it into a category. Falls back to the raw
+    # name rather than raising, matching how it already reaches the page at
+    # all despite being uncategorised.
     leftover = [n for n in types if n not in seen and n != "ADMIN_PASSWORD_HASH"
                 and settings_file.is_overridable(n, getattr(config, n, None))]
     if leftover:
         categories.append({"id": "other", "label": "Other", "fields": [
-            {"name": n, "type": types[n].__name__, "value": getattr(config, n, None)}
+            {"name": n, "label": SETTINGS_LABELS.get(n, n),
+             "type": types[n].__name__, "value": getattr(config, n, None)}
             for n in sorted(leftover)]})
 
     return {
