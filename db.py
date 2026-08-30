@@ -19,6 +19,8 @@ _disk_lock = threading.Lock()
 DCC_QUEUE_FILE = getattr(config, "DCC_QUEUE_FILE", os.path.join("data", "dcc_queue.txt"))
 SPEED_RECORD_FILE = getattr(config, "SPEED_RECORD_FILE", os.path.join("data", "speed_record.txt"))
 KNOWN_BOTS_FILE = getattr(config, "KNOWN_BOTS_FILE", os.path.join("data", "known_bots.json"))
+FETCHED_BOT_LISTS_FILE = getattr(config, "FETCHED_BOT_LISTS_FILE",
+                                 os.path.join("data", "fetched_bot_lists.json"))
 
 
 def _atomic_write(path, text):
@@ -385,6 +387,39 @@ def save_known_bots(registry):
                           json.dumps(registry, indent=1, sort_keys=True, ensure_ascii=False))
     except Exception as err:
         print(f"[DB ERROR] Could not save the bot registry: {err}")
+
+
+def load_fetched_bot_lists():
+    """The fetched-bot-lists registry from disk, or {} if there is none yet.
+
+    Same posture as load_known_bots(): a file that fails to parse costs an
+    empty File Lists switcher until the next fetch, not a refusal to start.
+    The entries this restores are references (bot/fetched_at/list_path/
+    entry_count/source_zip), not parsed list content - the actual extracted
+    files under FETCHED_FILES_DIR were never touched by a restart in the
+    first place, only the daemon's memory of which bots they belong to.
+    """
+    if not os.path.exists(FETCHED_BOT_LISTS_FILE):
+        return {}
+    try:
+        with io.open(FETCHED_BOT_LISTS_FILE, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the fetched-lists registry, starting empty: {err}")
+        return {}
+
+
+def save_fetched_bot_lists(registry):
+    """Write the fetched-bot-lists registry, atomically. Called once per
+    completed list fetch (list_fetch.py), not on a timer - unlike the bot
+    registry above, nothing updates this often enough to need throttling."""
+    try:
+        with _disk_lock:
+            _atomic_write(FETCHED_BOT_LISTS_FILE,
+                          json.dumps(registry, indent=1, sort_keys=True, ensure_ascii=False))
+    except Exception as err:
+        print(f"[DB ERROR] Could not save the fetched-lists registry: {err}")
 
 
 def save_dcc_queue():

@@ -1241,6 +1241,57 @@ class BroadcastRenderingXssRegressionTests(unittest.TestCase):
         self.assertNotIn('data-filename="', self.source)
 
 
+class FilelistsDownloadCheckboxTests(unittest.TestCase):
+    """The File Lists view's per-file "Download selected" checkboxes -
+    row.source/row.title come from another bot's fetched-and-extracted list
+    file, exactly as attacker-controlled as entry.bot/entry.filename in
+    BroadcastRenderingXssRegressionTests above, and the same BUG 2 shape
+    applies. attachFilelistsCheckboxData() exists specifically so
+    folderFilesHtml()'s HTML string never carries either value in an
+    attribute - it sets both via .dataset once the markup is already in the
+    DOM, after the fact."""
+
+    @classmethod
+    def setUpClass(cls):
+        app_js_path = os.path.join(REPO_ROOT, "web", "app.js")
+        with open(app_js_path, "r", encoding="utf-8") as f:
+            cls.source = f.read()
+
+    def _extract_function(self, name):
+        start = self.source.index(f"function {name}(")
+        return self.source[start:start + 2500]
+
+    def test_folder_files_html_does_not_build_the_attributes_via_string_concat(self):
+        body = self._extract_function("folderFilesHtml")
+        self.assertNotIn('data-bot="', body)
+        self.assertNotIn('data-filename="', body)
+
+    def test_attach_checkbox_data_uses_dataset_assignment(self):
+        body = self._extract_function("attachFilelistsCheckboxData")
+        self.assertIn(".dataset.bot = row.source", body)
+        self.assertIn(".dataset.filename = row.title", body)
+
+    def test_the_checkbox_column_is_wired_into_the_render_and_load_paths(self):
+        self.assertIn('el.filelistsBody.innerHTML = groups.map(function (group, index)', self.source)
+        # attachFilelistsCheckboxData() must run AFTER the innerHTML write it
+        # depends on, or it finds no .filelists-check elements yet to attach
+        # to - order matters here in a way a plain "is it called somewhere"
+        # check would miss.
+        render_call = self.source.index('el.filelistsBody.innerHTML = groups.map(function (group, index)')
+        # The trailing ";" (rather than a bare substring match) is what tells
+        # this apart from "function attachFilelistsCheckboxData(groups) {" -
+        # the definition itself, which necessarily sits ABOVE its own call
+        # site in the file and would otherwise make this assertion pass or
+        # fail for the wrong reason depending on which one .index() found.
+        attach_call = self.source.index("attachFilelistsCheckboxData(groups);")
+        self.assertGreater(attach_call, render_call,
+                           "attachFilelistsCheckboxData() runs before the checkboxes exist")
+
+    def test_download_selected_button_is_wired_up(self):
+        self.assertIn(
+            'el.filelistsDownloadSelectedBtn.addEventListener("click"', self.source)
+
+
 class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
     """New user-supplied text surfaces added alongside the Download tab
     (bot/filename pairs parsed out of the bulk-paste textarea) and the File
