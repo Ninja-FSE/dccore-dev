@@ -94,6 +94,15 @@ fetched_bot_lists        = {}  # Parsed lists fetched FROM other bots, keyed by 
 _channel_users_lock = threading.Lock()
 
 
+# Other bots advertising in our channels ------------------------------------
+# nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",
+#                  "last_seen"}, built from the periodic advert every
+# file-serving bot sends. Here rather than in config.py for the reason this
+# module exists: a !rehash re-executes config.py's body and would empty it.
+# Persisted to data/known_bots.json by irc._flush_known_bots().
+known_bots = {}
+known_bots_flushed_at = 0.0
+
 # Live transfer rate ---------------------------------------------------------
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can

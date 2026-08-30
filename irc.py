@@ -13,6 +13,7 @@ import urllib.request
 # The bot's own modules
 import config
 import platform_compat
+import runtime
 import list
 import dcc
 import runtime
@@ -236,6 +237,451 @@ def parse_search_header(text):
         stats["sending"] = _as_int(sending.group(1))
 
     return stats or None
+
+
+# ---------------------------------------------------------------------------
+# Reading the periodic advert other bots send to the channel
+# ---------------------------------------------------------------------------
+#
+# Every file-serving bot on this network announces itself on a timer. Captured
+# from #Mp3Passion on 2026-08-29: 392 lines, 31 bots with a readable advert,
+# in four different wordings and no two decorated alike. The capture is the
+# specification, and every line of it is a fixture in
+# tests/test_advert_listener.py.
+#
+# THE ADVERT IS NOT ALWAYS ONE MESSAGE
+#
+# Five of the thirty-one split their advert across two PRIVMSGs, because it
+# does not fit IRC's 512-byte line limit. The break lands wherever the bot ran
+# out of room, mid-field and sometimes mid-value:
+#
+#   Vibessono, line 1:  ... Served: 16,399 <> List:
+#   Vibessono, line 2:  Aug 25th <> Search: ON <> Mode: Normal <>
+#
+# Read on its own, line 1 says the bot published no list date and line 2 is not
+# an advert at all. Both are wrong, and "no date" is the answer that matters -
+# it is the whole freshness signal. So a line that is not an advert, from a bot
+# that advertised moments ago, is stitched onto what it sent before and the
+# pair is re-read as one. See _capture_channel_advert().
+#
+# THREE WORDINGS, PLUS OUR OWN
+#
+#   OmenServe / OmenTweak / DCCore - 28 of the 31, the "Type: @nick" wording:
+#     Type: @Bsk For My List Of: 719,041 Files <> Slots: 10/10 <> Queued: 0
+#     <> Speed: 0cps <> Served: 3,456,016 <> List: Aug 10th <> Mode: Normal
+#
+#   SPQR - BigTruck and prospect, a different sentence entirely, and the only
+#   family that puts a size in the PRIVMSG advert:
+#     For My List(19527files:163812MB) and DCC Status, type @BigTruck and
+#     @BigTruck-stats. [(0/7) Slots (0/216) Ques Taken]
+#
+#   RAR folders - a SECOND, separate list some bots serve beside their loose
+#   files, under a "^"-suffixed trigger, with its own count and its own size:
+#     Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+#   Bsk publishes both: 719,041 loose files AND 39,454 RAR folders. They are
+#   two different lists and are kept apart in the registry for that reason.
+#
+# WHAT THE SAMPLE SETTLES
+#
+#   * The LABELS are stable, the layout is not. Across the sample the field
+#     separator is a yen sign, a tilde, a colon, a copyright sign, a registered
+#     sign, an asterisk, a control character, plain spacing, or - for five bots
+#     - a byte that is not valid UTF-8 and so never survives the socket's
+#     errors="ignore" decode at all. Nothing here keys on position or on what
+#     sits between fields.
+#   * Preamble is normal. Bots open with an album count, a sentence of French,
+#     a note about an OP. The advert is not the whole line and cannot be
+#     anchored to its start.
+#   * Nicks can carry brackets and backticks - @[tjserv], @`Stryder - so a
+#     word-characters-only pattern would miss them.
+#   * A list DATE is published by every bot in the OmenServe family. A list
+#     SIZE is published only by SPQR, by the RAR-folder advert, and by DCCore
+#     itself - so nothing may depend on a size being there.
+#
+# Same rule as parse_search_header() above: return whatever that bot actually
+# published and treat every field as optional. A missing key means "this bot
+# did not say", never zero.
+
+# How long after an advert a following line may still be its continuation.
+# Every split in the sample arrived within 3 seconds; the window is wider than
+# that so a lagged server does not lose the tail, and short enough that a bot's
+# ordinary chatter minutes later is never mistaken for one.
+ADVERT_CONTINUATION_SECONDS = 15.0
+
+# A stitched advert cannot grow without bound: a bot that chats steadily would
+# otherwise accumulate every line it sends inside the window.
+ADVERT_MAX_STITCHED_CHARS = 1200
+
+KNOWN_BOTS_FLUSH_SECONDS = 30.0
+
+_ADVERT_NICK_RE = re.compile(r"Type:\s*@(\S+)", re.IGNORECASE)
+_ADVERT_COUNT_RE = re.compile(
+    r"For\s+My\s+List\s+Of:?\s*([\d,]+)\s*Files", re.IGNORECASE)
+_ADVERT_SIZE_RE = re.compile(r"Files\s*\(([^)]{1,20})\)", re.IGNORECASE)
+_ADVERT_DATE_RE = re.compile(
+    r"(?:List:|Date:|created)\s*([A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?)",
+    re.IGNORECASE)
+
+# SPQR: "For My List(19527files:163812MB) ... type @BigTruck and @BigTruck-stats."
+_SPQR_LIST_RE = re.compile(
+    r"For\s+My\s+List\s*\(\s*([\d,]+)\s*files\s*:\s*([\d,.]+\s*[KMGT]?B)\s*\)", re.IGNORECASE)
+_SPQR_NICK_RE = re.compile(r"type\s+@(\S+)", re.IGNORECASE)
+
+# The separate RAR-folder list: "Type @Bsk^ to get my list of 39,454 (5.48 TB)
+# RAR folders". The trigger carries a "^" the bot's own nick does not.
+_RAR_RE = re.compile(
+    r"Type\s+@(\S+?)\^\s+to\s+get\s+my\s+list\s+of\s+([\d,]+)\s*\(([^)]{1,20})\)\s*RAR\s+folders",
+    re.IGNORECASE)
+
+# nick.lower() -> [first_seen, text_so_far] for an advert that may still be
+# continued on a following line. Module level rather than in runtime.py because
+# it is worth seconds and nothing else: !rehash reloads dcc/config/oserve/
+# queue_mgr/list and not this module, and even if that changed, losing this
+# costs one advert cycle's continuation and nothing more.
+_advert_tails = {}
+
+
+def _parse_omenserve_advert(clean):
+    """The "Type: @nick For My List Of: n Files" wording - OmenServe, OmenTweak
+    and DCCore, 28 of the 31 bots in the sample.
+
+    Identified by the trigger and the count TOGETHER. Either alone is ordinary
+    chatter: an op telling a newcomer what to type writes the trigger exactly
+    as a bot would.
+    """
+    nick = _ADVERT_NICK_RE.search(clean)
+    count = _ADVERT_COUNT_RE.search(clean)
+    if not nick or not count:
+        return None
+
+    advert = {
+        "family": "omenserve",
+        "nick": nick.group(1),
+        "files": _as_int(count.group(1).replace(",", "")),
+    }
+
+    size = _ADVERT_SIZE_RE.search(clean)
+    if size:
+        advert["list_size"] = size.group(1).strip()
+
+    date = _ADVERT_DATE_RE.search(clean)
+    if date:
+        advert["list_date"] = re.sub(r"\s+", " ", date.group(1)).strip()
+
+    return advert
+
+
+def _parse_spqr_advert(clean):
+    """SPQR's wording: "For My List(19527files:163812MB) ... type @BigTruck".
+
+    No colon after "Type", no "Of:", and the count and size share one
+    parenthesis - so none of the patterns above see it, and both bots running
+    it were invisible to this daemon until it was added. It publishes no list
+    date, which is exactly why absent has to mean "did not say".
+    """
+    listing = _SPQR_LIST_RE.search(clean)
+    if not listing:
+        return None
+
+    nick = _SPQR_NICK_RE.search(clean)
+    if not nick:
+        return None
+
+    return {
+        "family": "spqr",
+        "nick": nick.group(1),
+        "files": _as_int(listing.group(1).replace(",", "")),
+        "list_size": re.sub(r"\s+", "", listing.group(2)),
+    }
+
+
+def _parse_rar_folder_advert(clean):
+    """The separate RAR-folder list: "Type @Bsk^ to get my list of 39,454
+    (5.48 TB) RAR folders".
+
+    A different list from the same bot, not a different bot - Bsk advertises
+    719,041 loose files in one message and 39,454 RAR folders in another. The
+    "^" belongs to the trigger, not to the nick, so it is stripped before the
+    sender check: Bsk sends this, "Bsk^" does not exist.
+    """
+    found = _RAR_RE.search(clean)
+    if not found:
+        return None
+
+    return {
+        "family": "rar",
+        "nick": found.group(1),
+        "rar_trigger": found.group(1) + "^",
+        "rar_folders": _as_int(found.group(2).replace(",", "")),
+        "rar_size": re.sub(r"\s+", "", found.group(3)),
+    }
+
+
+# Order matters only in that each wording is distinct enough not to overlap:
+# SPQR has no "Of:", the RAR advert has no colon after "Type" and no "For".
+_ADVERT_PARSERS = (_parse_omenserve_advert, _parse_spqr_advert, _parse_rar_folder_advert)
+
+# What each family is entitled to write into a registry entry. A bot's RAR
+# advert must not overwrite the count of its loose-file list, and the other way
+# round - they are two lists and Bsk publishes both.
+_ADVERT_FIELDS = {
+    "omenserve": ("files", "list_date", "list_size"),
+    "spqr": ("files", "list_size"),
+    "rar": ("rar_folders", "rar_size", "rar_trigger"),
+}
+
+
+def parse_channel_advert(text):
+    """Stats out of another bot's channel advert, or None if it is not one.
+
+    Returns {"family", "nick", ...} where every key but those two is optional -
+    absent means the bot did not publish it. See _ADVERT_FIELDS for what each
+    family can carry.
+    """
+    if not text:
+        return None
+
+    clean = list.strip_control_codes(text)
+    for parser in _ADVERT_PARSERS:
+        advert = parser(clean)
+        if advert:
+            return advert
+    return None
+
+
+def _record_bot(key, user, target, advert, now):
+    """Merge one parsed advert into the registry entry for `user`."""
+    entry = dict(runtime.known_bots.get(key) or {})
+    entry.update({
+        "nick": user,
+        "channel": target,
+        "last_seen": now,
+    })
+    for field in _ADVERT_FIELDS.get(advert.get("family"), ()):
+        if field in advert:
+            entry[field] = advert[field]
+    runtime.known_bots[key] = entry
+
+
+def _capture_channel_advert(user, target, msg, now=None):
+    """Record another bot's periodic advert in runtime.known_bots.
+
+    Observational only: it never dispatches, never replies, and never gates
+    anything. Called from the channel PRIVMSG path beside the broadcast
+    capture, and for the same reason - a foreign bot advertising in a channel
+    we sit in is not subject to our ban list and has nothing for a ban to
+    meaningfully gate.
+
+    THE SENDER IS THE AUTHORITY ON IDENTITY, NOT THE TEXT
+
+    "Type: @Someone" is just characters in a message, and any user can type
+    them. Registering what the text claims would let anyone impersonate any
+    bot - and the whole point of this registry is deciding whether the list we
+    hold for a nick is current, so a poisoned entry means showing a list as
+    that bot's current one when it was never theirs.
+
+    So an advert whose claimed nick does not match the nick that sent it is
+    dropped. All 31 bots captured from #Mp3Passion agree with their own sender,
+    so nothing legitimate is lost.
+
+    A CONTINUATION IS TRUSTED ONLY AFTER THAT CHECK HAS PASSED
+
+    The stitching below only ever appends to text a verified advert from that
+    same sender left behind, so a stranger cannot feed a tail to someone else's
+    advert: the buffer is keyed by sender and written only on a matching one.
+    """
+    if not user or not target or not target.startswith("#"):
+        return
+    if msg and msg.startswith("\x01"):
+        # Not channel text, and never eligible for the stitch below - but
+        # it is where the exact library size lives. See
+        # parse_advert_slots() for why it cannot be read by position.
+        _capture_advert_slots(user, target, msg,
+                              time.time() if now is None else now)
+        return
+
+    now = time.time() if now is None else now
+    key = user.lower()
+    _prune_advert_tails(now)
+
+    advert = parse_channel_advert(msg)
+    if advert:
+        if advert["nick"].lower() != key:
+            print(f"[ADVERT] {user} advertised as {advert['nick']!r} - ignoring; "
+                  f"the sender is the authority on who a bot is.")
+            return
+        _advert_tails[key] = [now, list.strip_control_codes(msg)]
+        _record_bot(key, user, target, advert, now)
+        _flush_known_bots()
+        return
+
+    # Not an advert on its own. It may be the rest of one - see this section's
+    # comment on Vibessono, whose date arrives here and nowhere else.
+    pending = _advert_tails.get(key)
+    if not pending:
+        return
+
+    started, so_far = pending
+    stitched = (so_far + " " + list.strip_control_codes(msg)).strip()
+    if len(stitched) > ADVERT_MAX_STITCHED_CHARS:
+        del _advert_tails[key]
+        return
+
+    merged = parse_channel_advert(stitched)
+    if not merged or merged["nick"].lower() != key:
+        return
+
+    # Keep the ORIGINAL timestamp: a bot that talks steadily must not be able
+    # to walk the window forward one line at a time.
+    _advert_tails[key] = [started, stitched]
+    _record_bot(key, user, target, merged, now)
+    _flush_known_bots()
+
+
+def _prune_advert_tails(now):
+    """Forget adverts too old to still be continued."""
+    for key in [k for k, (when, _text) in _advert_tails.items()
+                if now - when > ADVERT_CONTINUATION_SECONDS]:
+        del _advert_tails[key]
+
+
+def _flush_known_bots(now=None, force=False):
+    """Persist the registry, at most once per KNOWN_BOTS_FLUSH_SECONDS.
+
+    Written on an interval rather than on every advert: with fifty bots
+    announcing every few minutes this fires dozens of times a minute, and
+    nothing reads the file until a dashboard is opened.
+    """
+    now = time.time() if now is None else now
+    if not force and now - runtime.known_bots_flushed_at < KNOWN_BOTS_FLUSH_SECONDS:
+        return False
+    try:
+        import db
+        db.save_known_bots(runtime.known_bots)
+        runtime.known_bots_flushed_at = now
+        return True
+    except Exception as err:
+        print(f"[ADVERT] Could not save the bot registry: {err}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# The CTCP a bot sends a few seconds after its advert
+# ---------------------------------------------------------------------------
+#
+# Every OmenServe-family bot follows its channel advert with a CTCP, and it is
+# the only place the EXACT size of a bot's library is published. announce.py
+# builds ours a few hundred lines away:
+#
+#   SLOTS 10 10 NOW 0 999 0 719041 3894929430520 0 1786359244 25511 OmenServe v2.73
+#                             ^files  ^bytes = 3.54 TB
+#
+# We have been sending that line for as long as the daemon has existed and
+# never once read anyone else's. 27 of the 33 bots in the capture send one.
+#
+# READING IT BY POSITION DOES NOT WORK
+#
+# There are at least three layouts in one channel:
+#
+#   24 bots    14 fields, count at 7, bytes at 8
+#   fallguyf00 13 fields - one shorter, so count at 6 and bytes at 7
+#   SPQR       8 fields, count LAST, no byte figure at all
+#
+# Index 7 on fallguyf00's line is 14,247,378,895,149 - which as a file count
+# is fourteen trillion files, and would have gone straight into the registry
+# and onto the dashboard. Nothing in the line says which layout it is.
+#
+# SO IT IS NOT READ BY POSITION
+#
+# The advert already told us how many files that bot has. So: find the field
+# that equals that number, and the size is the field beside it. The layout
+# does not have to be known, only self-consistent - and a line that does not
+# agree with the bot's own advert is refused rather than guessed at.
+#
+# That also means the CTCP is only ever read for a bot that has already
+# advertised and passed the sender check in _capture_channel_advert(). A CTCP
+# on its own registers nobody: without an advert there is no count to
+# calibrate against, which is exactly the case where a wrong reading would go
+# unnoticed.
+
+# A library larger than this is a misread, not a library. The largest in the
+# captured channel is 24 TB; ten petabytes is far past any of them and still
+# far below the fourteen-trillion-file misreading above.
+SLOTS_MAX_PLAUSIBLE_BYTES = 10 ** 16
+
+
+def parse_advert_slots(text, known_files):
+    """Size and software out of a bot's CTCP SLOTS line, calibrated against the
+    file count its own advert already published.
+
+    Returns {"list_bytes", "software"}, both optional - so {} is a real answer,
+    and the one SPQR gives: its line agrees with the advert and simply carries
+    nothing beyond the count. None is the other answer, and a different one:
+    this is not a SLOTS line, or it does not agree with `known_files` and
+    therefore cannot be read at all. Callers treat both as "record nothing";
+    they are kept apart because "published nothing" and "could not be trusted"
+    are not the same fact about a bot.
+
+    See this section's comment for why nothing here is read by position.
+    """
+    if not text or not known_files:
+        return None
+
+    payload = text.strip("\x01").strip()
+    if not payload.upper().startswith("SLOTS"):
+        return None
+
+    fields = payload.split()
+    at = [i for i, field in enumerate(fields) if field == str(known_files)]
+    if len(at) != 1:
+        # Nothing matched, or the count is ambiguous because some other field
+        # happens to carry the same number. Either way there is no way to tell
+        # which neighbour is the size, and a guess here is a wrong size on the
+        # dashboard rather than a missing one.
+        return None
+
+    found = {}
+    index = at[0] + 1
+    if index < len(fields) and fields[index].isdigit():
+        size = int(fields[index])
+        # A library cannot hold fewer bytes than it holds files. SPQR's line
+        # ends at the count and has no size at all, which lands here too.
+        if known_files <= size < SLOTS_MAX_PLAUSIBLE_BYTES:
+            found["list_bytes"] = size
+
+    # The version string is whatever trails the numbers - "OmenServe v2.73",
+    # "DCCore v1.10.0-RC4", and for one bot a truncated "OmeNServE v". Read as
+    # a suffix rather than an index, so a layout with more or fewer numeric
+    # fields makes no difference.
+    software = []
+    for field in reversed(fields):
+        if field.isdigit():
+            break
+        software.append(field)
+    if software:
+        found["software"] = " ".join(reversed(software))
+
+    return found
+
+
+def _capture_advert_slots(user, target, msg, now):
+    """Fold a bot's CTCP SLOTS line into the registry entry its advert built.
+
+    Silent for a bot that has not advertised: the count that makes this line
+    readable comes from the advert, so without one there is nothing to check
+    the numbers against.
+    """
+    entry = runtime.known_bots.get(user.lower())
+    if not entry:
+        return
+
+    extra = parse_advert_slots(msg, entry.get("files"))
+    if not extra:
+        return
+
+    entry.update(extra)
+    entry["last_seen"] = now
+    _flush_known_bots()
 
 
 def _capture_broadcast_search_reply(user, target, msg):
@@ -870,6 +1316,12 @@ def irc_loop():
                         # this never dispatches anything of its own for a ban
                         # to meaningfully gate.
                         _capture_broadcast_search_reply(user, target_chan, msg)
+
+                        # Bot registry, same placement and the same reasoning:
+                        # observational, dispatches nothing, and a foreign bot
+                        # advertising in a channel we sit in is not subject to
+                        # our ban list.
+                        _capture_channel_advert(user, target_chan, msg)
 
                         if not security.check_user_status(user):
                             continue

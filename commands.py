@@ -256,6 +256,10 @@ PRESERVE_RUNTIME = (
     'fetched_bot_lists',  # every fetched cross-bot list, each one a real multi-MB DCC
                           # transfer from another bot. Losing it empties the Download
                           # tab with no log line saying why.
+    'known_bots',         # every other bot seen advertising. Rebuilds itself, but only
+                          # at the pace those bots advertise - five minutes or more per
+                          # entry, in advert order - so a rehash would empty the
+                          # dashboard's bot list and refill it a stranger at a time.
 )
 
 

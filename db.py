@@ -1,4 +1,6 @@
 # db.py - Central state storage for DCCore
+import io
+import json
 import os
 import time
 import datetime
@@ -16,6 +18,7 @@ _disk_lock = threading.Lock()
 # One constant now, built with os.path.join so it is correct on Windows too.
 DCC_QUEUE_FILE = getattr(config, "DCC_QUEUE_FILE", os.path.join("data", "dcc_queue.txt"))
 SPEED_RECORD_FILE = getattr(config, "SPEED_RECORD_FILE", os.path.join("data", "speed_record.txt"))
+KNOWN_BOTS_FILE = getattr(config, "KNOWN_BOTS_FILE", os.path.join("data", "known_bots.json"))
 
 
 def _atomic_write(path, text):
@@ -351,6 +354,38 @@ def save_speed_record(new_record):
             _atomic_write(SPEED_RECORD_FILE, str(int(new_record)))
     except Exception as e:
         print(f"[DB ERROR] Could not save the speed record: {e}")
+
+
+def load_known_bots():
+    """The bot registry from disk, or {} if there is none yet.
+
+    A registry that will not parse is not a reason to refuse to start - it is
+    rebuilt from adverts within a few minutes of connecting, so a corrupt or
+    hand-edited file costs an empty sidebar until then and nothing else. Same
+    posture as load_advanced_stats(), which returns defaults rather than
+    raising.
+    """
+    if not os.path.exists(KNOWN_BOTS_FILE):
+        return {}
+    try:
+        with io.open(KNOWN_BOTS_FILE, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the bot registry, starting empty: {err}")
+        return {}
+
+
+def save_known_bots(registry):
+    """Write the bot registry, atomically, through the same lock and the same
+    temp-file-then-replace the other state files use."""
+    try:
+        with _disk_lock:
+            _atomic_write(KNOWN_BOTS_FILE,
+                          json.dumps(registry, indent=1, sort_keys=True, ensure_ascii=False))
+    except Exception as err:
+        print(f"[DB ERROR] Could not save the bot registry: {err}")
+
 
 def save_dcc_queue():
     """Persist the DCC queue, dropping users whose list is now empty.

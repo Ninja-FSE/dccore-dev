@@ -117,6 +117,17 @@ def startup():
     # Read every saved queue slot back from disk at boot.
     db.load_dcc_queue()
 
+    # Other bots we have seen advertising. Rebuilt from channel traffic anyway,
+    # so this only spares the wait: without it the dashboard's bot list is empty
+    # until every bot has advertised again, which on a five-minute advert cycle
+    # is minutes of showing nothing. update() rather than assignment, for the
+    # reason runtime.py exists - rebinding leaves config.known_bots pointing at
+    # the old dict. load_known_bots() returns {} rather than raising on a file
+    # it cannot read, so there is nothing here to catch.
+    config.known_bots.update(db.load_known_bots())
+    if config.known_bots:
+        print(f"[STARTUP] Bot registry: {len(config.known_bots)} bot(s) remembered.")
+
     # ---------------------------------------------------------------------
     # SINGLE START: the queue is started exactly ONCE here, outside every loop,
     # so boot produces exactly one [QUEUE] line.
