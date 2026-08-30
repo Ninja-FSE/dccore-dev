@@ -418,6 +418,25 @@ VIBESSONO_TAIL = (
     '\x0312,07Mode: \x0300,07Normal \x0314,07'
 )
 
+# r0ck was in the very first capture and this file did not have it, because the
+# sample was built by keeping the lines that PARSED - so the one bot whose
+# wording defeated the parser was filtered out by the parser it defeats. It
+# turned up when a second capture, from three channels these fixtures had never
+# seen, was replayed and the senders that registered NOTHING were read by hand.
+R0CK = (
+    ' Type: @r0ck For My List Of 116,828 Files (1.82TB) Date: May 4th '
+    '\xa4 Slots: 2/2 Queued: 0 Speed: 0KB/s (Avg: 6.52MB/s) Search: ON '
+    'Mode: Normal \xa4 Served: 1,489,107 Since: Sep 2006 '
+)
+
+# QNet Advanced DCC File Server, from the same second capture. Deliberately not
+# supported - see TheShapesThisDoesNotRead below.
+QNET = (
+    '>-< QNet Advanced DCC File Server >-< @ruprecht-audio @ruprecht-movies '
+    '@ruprecht-tv for access >-< @ruprecht-help for info and options >-< '
+    'Sharing 2.72TB of stuff! >-<'
+)
+
 ALL_CAPTURED = [
     ('[tjserv]', TJSERV),
     ('`Stryder', STRYDER),
@@ -452,6 +471,7 @@ ALL_CAPTURED = [
     ('va23boam-', VA23BOAM),
     ('ValMp3', VALMP3),
     ('Vibessono', VIBESSONO),
+    ('r0ck', R0CK),
 ]
 
 # The five bots whose advert does not fit one line: (nick, first, tail).
@@ -1127,6 +1147,98 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
                 as_tb = entry["list_bytes"] / (1024.0 ** 4)
                 self.assertEqual("%.2fTB" % as_tb, expected)
                 self.assertEqual(entry["list_size"], expected)
+
+
+class TheWordingVariesMoreThanOneChannelShows(CaptureTestCase):
+    """r0ck, and how it was found.
+
+    These fixtures came from one twenty-minute window in one channel, and the
+    sample was assembled by keeping the lines that PARSED. That is a filter
+    with an obvious hole in hindsight: a bot whose wording defeats the parser
+    is invisible to a sample the parser selected. r0ck sat in the very first
+    capture the whole time.
+
+    It turned up when a second capture - three channels these fixtures had
+    never seen - was replayed through the real capture path and the senders
+    that registered NOTHING were read by hand. Everything else in that capture
+    was a trivia game, a greeter, or people talking. r0ck was a file server
+    with 116,828 files and nobody was listening to it.
+
+    Two differences, both small, both fatal on their own:
+
+      * "For My List Of 116,828 Files" - no colon after "Of"
+      * "Date: May 4th" where the rest of the family says "List:"
+    """
+
+    def test_the_count_survives_a_missing_colon(self):
+        advert = irc.parse_channel_advert(R0CK)
+
+        self.assertIsNotNone(advert, "the whole advert was unreadable")
+        self.assertEqual(advert["nick"], "r0ck")
+        self.assertEqual(advert["files"], 116828)
+
+    def test_a_third_way_of_writing_the_date(self):
+        """"List:", "created", and now "Date:". The date is the entire
+        freshness signal, so a label this family uses and the parser does not
+        know reads as "never published one"."""
+        self.assertEqual(irc.parse_channel_advert(R0CK)["list_date"], "May 4th")
+
+    def test_it_publishes_a_size_as_well(self):
+        self.assertEqual(irc.parse_channel_advert(R0CK)["list_size"], "1.82TB")
+
+    def test_it_reaches_the_registry(self):
+        self.capture("r0ck", R0CK)
+
+        entry = self.entry("r0ck")
+        self.assertEqual(entry["files"], 116828)
+        self.assertEqual(entry["list_date"], "May 4th")
+
+    def test_the_looser_count_still_needs_a_trigger(self):
+        """Dropping the colon widens the pattern, so the half that keeps it
+        honest is worth re-checking: a sentence about somebody's list is still
+        not an advert."""
+        self.assertIsNone(irc.parse_channel_advert(
+            "he told me For My List Of 500 Files just wait"))
+
+
+class TheShapesThisDoesNotRead(unittest.TestCase):
+    """Recorded rather than forgotten.
+
+    The second capture turned up one more file server, running software this
+    parser has no answer for. It is written down here so the next person meets
+    a decision rather than a silence.
+    """
+
+    def test_qnet_is_not_read(self):
+        """QNet Advanced DCC File Server:
+
+            >-< QNet Advanced DCC File Server >-< @ruprecht-audio
+            @ruprecht-movies @ruprecht-tv for access >-< Sharing 2.72TB <
+
+        It does not fit the registry as it stands, and not because of wording.
+        It advertises THREE lists under three triggers, and publishes no file
+        count for any of them - only a total size. Every entry here is keyed on
+        one nick with one count, and the CTCP that carries exact bytes is
+        calibrated against that count, so there is nothing to check its numbers
+        against either.
+
+        Supporting it means deciding what a bot with several lists and no
+        counts looks like in the sidebar, which is a design question for #133
+        rather than a pattern to widen. One bot in sixty-one, so the cost of
+        waiting is knowing about one server and not listing it.
+        """
+        self.assertIsNone(irc.parse_channel_advert(QNET))
+
+    def test_a_per_file_offer_is_still_not_a_list_advert(self):
+        """GaBriely boasts about its library in prose and offers one file at a
+        time under "!" rather than "@". The numbers are there, in European
+        notation, and they are not a list advert - the same call already made
+        for fallguyf00's file offers."""
+        self.assertIsNone(irc.parse_channel_advert(
+            "  86.994  Songs in English, Spanish, Dutch, German, French, "
+            "Italian, Russian, etc...  Also   3.665  Christmas Songs  &  "
+            "12.902 Instrumentals! Type: !GaBriely Matt Monro - No Puedo "
+            "Quitar Mis Ojos De Ti.mp3 To Get This  3.17MB 3m28s MP3"))
 
 
 class NotAnAdvert(unittest.TestCase):

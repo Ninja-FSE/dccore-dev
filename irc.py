@@ -315,10 +315,12 @@ ADVERT_MAX_STITCHED_CHARS = 1200
 KNOWN_BOTS_FLUSH_SECONDS = 30.0
 
 _ADVERT_NICK_RE = re.compile(r"Type:\s*@(\S+)", re.IGNORECASE)
-_ADVERT_COUNT_RE = re.compile(r"For\s+My\s+List\s+Of:\s*([\d,]+)\s*Files", re.IGNORECASE)
+_ADVERT_COUNT_RE = re.compile(
+    r"For\s+My\s+List\s+Of:?\s*([\d,]+)\s*Files", re.IGNORECASE)
 _ADVERT_SIZE_RE = re.compile(r"Files\s*\(([^)]{1,20})\)", re.IGNORECASE)
 _ADVERT_DATE_RE = re.compile(
-    r"(?:List:|created)\s*([A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?)", re.IGNORECASE)
+    r"(?:List:|Date:|created)\s*([A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?)",
+    re.IGNORECASE)
 
 # SPQR: "For My List(19527files:163812MB) ... type @BigTruck and @BigTruck-stats."
 _SPQR_LIST_RE = re.compile(
