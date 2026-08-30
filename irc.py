@@ -1296,9 +1296,23 @@ def irc_loop():
                     notice_match = re.match(r"^:([^!]+)!.* NOTICE ([#\w\-]+) :(.+)$", line)
                     if notice_match:
                         notice_user = notice_match.group(1)
+                        notice_target = notice_match.group(2)
+                        notice_text = notice_match.group(3).strip()
                         if notice_user.lower() != config.NICKNAME.lower():
                             _capture_broadcast_search_reply(
-                                notice_user, notice_match.group(2), notice_match.group(3).strip())
+                                notice_user, notice_target, notice_text)
+                            if notice_target.lower() == config.NICKNAME.lower():
+                                # A private NOTICE addressed to us, from
+                                # another bot - the shape a foreign bot's own
+                                # "!rar is disabled here" refusal takes (see
+                                # dcc_fetch.handle_refusal_notice()'s own
+                                # docstring). Read-only here too: this only
+                                # ever fails a "folder" row that would
+                                # otherwise sit "offered" for the full
+                                # FETCH_FOLDER_OFFER_TIMEOUT against one of
+                                # only MAX_FETCH_SLOTS fetch slots.
+                                import dcc_fetch
+                                dcc_fetch.handle_refusal_notice(notice_user, notice_text)
 
                     match = re.match(r"^:([^!]+)!.* PRIVMSG ([#\w\-]+) :(.+)$", line)
                     if match:
@@ -1337,6 +1351,7 @@ def irc_loop():
                         # gating them here would only meter the operator against themselves.
                         is_bot_command = (
                             msg_lower == f"@{config.NICKNAME.lower()}"
+                            or msg_lower == f"@{config.NICKNAME.lower()}-help"
                             or msg_lower == f"@{config.NICKNAME.lower()}-que"
                             or msg_lower == f"@{config.NICKNAME.lower()}-remove"
                             or msg.startswith("@find ")
@@ -1391,6 +1406,9 @@ def irc_loop():
                                     continue
                             elif msg_lower == f"@{config.NICKNAME.lower()}":
                                 threading.Thread(target=list.send_file_list, args=(s, user, target_chan)).start()
+                            elif msg_lower == f"@{config.NICKNAME.lower()}-help":
+                                threading.Thread(target=commands.handle_help_request, args=(s, user, target_chan), daemon=True).start()
+                                continue
                             elif msg_lower == f"@{config.NICKNAME.lower()}-que":
                                 threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
                                 continue

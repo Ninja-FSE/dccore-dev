@@ -104,6 +104,16 @@ def generate_master_list():
     zip_path = os.path.join(config.LOCAL_LIST_DIR, zip_filename)
     rar_path = os.path.join(config.LOCAL_LIST_DIR, rar_filename)
     
+    # config.RAR_ENABLED (#140) refuses every !rar request. Building an album
+    # list anyway, and shipping it inside the zip every user downloads, hands
+    # people a file whose every line is an instruction to use a command this
+    # bot will refuse - they paste one, get "Folder packing is disabled", and
+    # reasonably conclude the bot is broken rather than that the feature is
+    # off. Raised on #140 and left as a follow-up there.
+    serve_albums = bool(getattr(config, "RAR_ENABLED", True))
+    if not serve_albums:
+        print("[LIST-GEN] RAR_ENABLED is off - skipping the album list entirely.")
+
     SIZE_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, config.LIST_SIZE_FILE)
     RAWBYTES_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, config.LIST_RAWBYTES_FILE)
 
@@ -176,9 +186,10 @@ def generate_master_list():
             f.write(f"List of {total_files_count:,} Files ({formatted_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n")
             f.write(f"To request a file, copy/paste to the channel... !{config.NICKNAME} FILENAME eg. !{config.NICKNAME} Songname.flac\n\n\n")
 
-            f_rar.write(f"List of Entire Album Folders (!rar) for !{config.NICKNAME} generated on {date_header_str}\n")
-            f_rar.write(f"To request an entire album, copy/paste the line... eg. !{config.NICKNAME} !rar D:\\MUSIC\\Album\\\n")
-            f_rar.write("="*90 + "\n\n")
+            if serve_albums:
+                f_rar.write(f"List of Entire Album Folders (!rar) for !{config.NICKNAME} generated on {date_header_str}\n")
+                f_rar.write(f"To request an entire album, copy/paste the line... eg. !{config.NICKNAME} !rar D:\\MUSIC\\Album\\\n")
+                f_rar.write("="*90 + "\n\n")
 
             current_folder = None
             written_rar_folders = set()  # Keeps the !rar list free of duplicate rows
@@ -207,7 +218,7 @@ def generate_master_list():
                     f.write(f"{folder_rule}\n")
                     
                     # Strip multi-disc suffixes, for the !rar album list ONLY
-                    if folder:
+                    if folder and serve_albums:
                         rar_folder_clean = folder
                         lowered_rar = rar_folder_clean.lower()
                         for box_word in ['\\cd', '\\disc', '\\volume', '\\digital media', '\\media', '/cd', '/disc', '/volume', '/digital media', '/media']:
@@ -228,7 +239,8 @@ def generate_master_list():
                 f.write(f"!{config.NICKNAME} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
 
         print(f"[LIST-GEN] Text list created: {tmp_txt_path}")
-        print(f"[LIST-GEN] RAR album list created: {tmp_rar_path}")
+        if serve_albums:
+            print(f"[LIST-GEN] RAR album list created: {tmp_rar_path}")
         
         # The size and rawbytes side files used to be published here. They are now
         # written with the lists in the finalise section below - see the comment
@@ -284,13 +296,21 @@ def generate_master_list():
         db._atomic_write(RAWBYTES_FILE_PATH, str(total_bytes))
 
         os.replace(tmp_txt_path, txt_path)
-        os.replace(tmp_rar_path, rar_path)
+        if serve_albums:
+            os.replace(tmp_rar_path, rar_path)
+        else:
+            # Not published, and not left behind either: an empty album list
+            # in lists/ reads as "this bot offers no albums" to anything
+            # counting the file, which is a different claim from "it does
+            # not offer them at all".
+            _discard_temp_lists(tmp_rar_path)
         os.replace(tmp_zip_path, zip_path)
         print(f"[LIST-GEN] New lists activated: {os.path.basename(txt_path)}")
 
-        _prune_superseded_lists(keep={os.path.basename(txt_path),
-                                      os.path.basename(rar_path),
-                                      os.path.basename(zip_path)})
+        keep = {os.path.basename(txt_path), os.path.basename(zip_path)}
+        if serve_albums:
+            keep.add(os.path.basename(rar_path))
+        _prune_superseded_lists(keep=keep)
         return True
             
     except Exception as e:

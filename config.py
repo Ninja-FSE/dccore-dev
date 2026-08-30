@@ -64,6 +64,12 @@ HARD_BANS_FILE: str = "./data/hard_bans.txt"
 # columns is exactly the shape that turns "add a field" into a migration.
 KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 
+# One row per thing this bot has ever sent, {relative path or archive name ->
+# {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not
+# bounded on purpose: a bot can only send what it shares, so the row count is
+# capped by the library itself.
+DOWNLOAD_COUNTS_FILE: str = "./data/download_counts.json"
+
 # Which bots we hold a fetched list for, and where it lives on disk - one
 # small entry per bot ("bot", "fetched_at", "list_path", "entry_count",
 # "source_zip"), not the parsed list itself. Without this, the extracted
@@ -190,6 +196,22 @@ MAX_FETCH_SLOTS: int        = 3        # Max simultaneous in-flight/offered fetc
 MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
 FETCH_TRANSFER_TIMEOUT: int = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
 FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
+
+# A "folder" request_type row (dcc_fetch.py) asks another bot to pack a whole
+# folder/album as .rar via its own "!rar" convention and shares the same
+# MAX_FETCH_SLOTS pool as every other fetch - it gets its own, separate
+# timeout and size cap instead, below.
+#
+# FETCH_FOLDER_OFFER_TIMEOUT: how long a "folder" row waits for the other
+# bot's DCC SEND before failing - much longer than FETCH_OFFER_TIMEOUT
+# because the other bot has to run its own !rar packing pipeline first.
+# config.fetch_queue is in-memory only (not persisted across a restart), so a
+# folder row waiting this long is lost on restart same as any other
+# offered/listening row - just for longer.
+FETCH_FOLDER_OFFER_TIMEOUT: int = 1800
+# MAX_FETCH_FOLDER_FILE_SIZE: 2GB - separate, larger cap than
+# MAX_FETCH_FILE_SIZE for a whole packed album/discography archive.
+MAX_FETCH_FOLDER_FILE_SIZE: int = 2147483648
 
 # How often a new @find broadcast (POST /api/search/broadcast) is allowed to
 # start. Independent of the UI - courtesy to other bots/operators on a shared

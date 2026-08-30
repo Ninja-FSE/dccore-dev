@@ -875,45 +875,76 @@ class FetchStatusPayloadConcurrencyTests(DCCoreTestCase):
                          f"observed {len(torn)} torn read(s) of state=='offered' with "
                          f"offered_at still None, despite the shared lock: {torn[:5]}")
 
-    def test_without_the_lock_the_same_workload_produces_a_torn_pair(self):
-        """Control: the identical promote/revert workload, with the read
-        left unlocked (the pre-fix shape of build_fetch_status_payload()),
-        reliably observes the torn pair - proving the test above is not
-        vacuously passing.
+    def test_the_torn_pair_is_real_and_visible_without_the_lock(self):
+        """Control for the test above: the promotion really does pass through
+        a state where `state` is already "offered" and `offered_at` is still
+        None, and a reader that does not take the lock really can be looking
+        at that instant. Without this, the test above could be passing because
+        the torn state does not exist rather than because the lock prevents it.
 
-        sys.setswitchinterval() is turned down for this test only, forcing
-        far more frequent thread switches - the default 5ms interval
-        otherwise lets the whole promote-then-revert workload finish inside
-        one timeslice often enough that this control can pass by luck even
-        though nothing here is actually synchronised.
+        Shown by standing at that instant rather than racing to catch it. The
+        two statements are the ones check_fetch_queue() runs under the lock;
+        between them the row IS torn, and what an unlocked reader would get is
+        simply read there.
+
+        The earlier version of this ran two threads for 5000 rounds with
+        sys.setswitchinterval() turned down and asserted the race was
+        observed. That is a coin toss the interpreter is free to lose - it
+        failed on windows-latest / Python 3.10 with "the unlocked control
+        workload never observed a torn pair", and passing meant the scheduler
+        cooperated, not that the code was right.
         """
-        old_interval = sys.getswitchinterval()
-        sys.setswitchinterval(1e-6)
-        self.addCleanup(sys.setswitchinterval, old_interval)
+        import dcc_fetch
+        row = config.fetch_queue[self.rid]
 
-        stop = threading.Event()
-        torn = []
+        with dcc_fetch._fetch_lock():
+            row["state"] = "offered"
+            # Standing between the two statements. An unlocked reader running
+            # now sees exactly this - a shallow copy is what
+            # build_fetch_status_payload() would have taken.
+            unlocked_view = [dict(other) for other in config.fetch_queue.values()]
+            row["offered_at"] = time.time()
 
-        def unlocked_reader():
-            while not stop.is_set():
-                queue = dict(getattr(config, "fetch_queue", {}) or {})
-                for row in queue.values():
-                    row_out = dict(row)
-                    if row_out["state"] == "offered" and row_out["offered_at"] is None:
-                        torn.append(row_out)
+        torn = [entry for entry in unlocked_view
+                if entry["state"] == "offered" and entry["offered_at"] is None]
 
-        writer_thread = threading.Thread(target=self._promote_and_revert, args=(stop,), daemon=True)
-        reader_thread = threading.Thread(target=unlocked_reader, daemon=True)
-        writer_thread.start()
-        reader_thread.start()
-        writer_thread.join(timeout=30)
-        stop.set()
+        self.assertTrue(
+            torn,
+            "the promotion no longer passes through a torn state, so the "
+            "locked test above is not proving anything - if the two writes "
+            "have been made atomic some other way, that test should be "
+            "rewritten around whatever now guarantees it")
+
+    def test_the_locked_reader_cannot_stand_at_that_instant(self):
+        """The other half, and the reason the lock is what fixes it: a reader
+        that takes the same lock cannot execute between those two statements
+        at all, because the writer is holding it. Asserted by trying, from
+        another thread, while the torn state is held."""
+        import dcc_fetch
+        row = config.fetch_queue[self.rid]
+        read_done = threading.Event()
+        observed = []
+
+        def locked_reader():
+            observed.extend(webserver.build_fetch_status_payload())
+            read_done.set()
+
+        with dcc_fetch._fetch_lock():
+            row["state"] = "offered"
+            reader_thread = threading.Thread(target=locked_reader, daemon=True)
+            reader_thread.start()
+            # It cannot get in while this block holds the lock. If it could,
+            # it would see the torn pair the test above just demonstrated.
+            self.assertFalse(read_done.wait(timeout=0.5),
+                             "a reader completed a read while the row was torn")
+            row["offered_at"] = time.time()
+
+        self.assertTrue(read_done.wait(timeout=10), "the reader never finished")
         reader_thread.join(timeout=10)
-
-        self.assertTrue(len(torn) > 0,
-                        "the unlocked control workload never observed a torn pair - "
-                        "this test would no longer prove the fix prevents anything; "
-                        "it needs a heavier workload")
+        self.assertEqual(
+            [entry for entry in observed
+             if entry["state"] == "offered" and entry["offered_at"] is None], [],
+            "the locked reader still came back with a torn pair")
 
 
 class ListFetchRoutesTests(DCCoreTestCase):
@@ -1162,6 +1193,32 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         })
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(config.fetch_queue, {})
+
+    def test_filelists_fetch_folder_rar_bot_with_crlf_is_rejected_via_http(self):
+        resp = self.client.post("/api/filelists/fetch-folder-rar", json={
+            "bot": "victimbot\r\nQUIT :pwned-by-webhook\r\nJOIN #secretadmin",
+            "folder": "Artist/Album",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_filelists_fetch_folder_rar_folder_with_crlf_is_rejected_via_http(self):
+        """Unlike "list", a "folder" request's `folder` argument has real
+        attacker-reachable content that reaches an outbound IRC line - see
+        FolderRarFetchRouteTests.test_folder_with_embedded_crlf_is_rejected_not_queued."""
+        resp = self.client.post("/api/filelists/fetch-folder-rar", json={
+            "bot": "goodbot",
+            "folder": "Artist/Album\r\nQUIT :pwned-by-webhook",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_clean_filelists_fetch_folder_rar_still_works_via_http(self):
+        resp = self.client.post("/api/filelists/fetch-folder-rar", json={
+            "bot": "goodbot", "folder": "Artist/Album",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.get_json()["created"]), 1)
 
     def test_filelists_fetch_bot_with_ctcp_delimiter_is_rejected_via_http(self):
         resp = self.client.post("/api/filelists/fetch", json={
@@ -1425,6 +1482,12 @@ class BroadcastRenderingXssRegressionTests(unittest.TestCase):
         class in the first place."""
         self.assertNotIn('data-bot="', self.source)
         self.assertNotIn('data-filename="', self.source)
+        # Extended for the "Get folder as .rar" button (see
+        # FolderRarButtonTests below): state.filelistsSource/group.folder are
+        # exactly as attacker-controlled as everything else checked above,
+        # and must never be string-concatenated into a data-folder="..."
+        # attribute either.
+        self.assertNotIn('data-folder="', self.source)
 
 
 class FilelistsDownloadCheckboxTests(unittest.TestCase):
@@ -1476,6 +1539,70 @@ class FilelistsDownloadCheckboxTests(unittest.TestCase):
     def test_download_selected_button_is_wired_up(self):
         self.assertIn(
             'el.filelistsDownloadSelectedBtn.addEventListener("click"', self.source)
+
+
+class FolderRarButtonTests(unittest.TestCase):
+    """The File Lists view's "Get folder as .rar" button - group.folder and
+    state.filelistsSource are exactly as attacker-controlled as row.source/
+    row.title in FilelistsDownloadCheckboxTests above (another bot's fetched
+    list data), so the same BUG 2 shape applies: attachFilelistsFolderRarData()
+    exists specifically so folderHeadingHtml()'s HTML string never carries
+    either value in an attribute - it sets both via .dataset once the markup
+    is already in the DOM, after the fact, mirroring
+    attachFilelistsCheckboxData()'s exact pattern."""
+
+    @classmethod
+    def setUpClass(cls):
+        app_js_path = os.path.join(REPO_ROOT, "web", "app.js")
+        with open(app_js_path, "r", encoding="utf-8") as f:
+            cls.source = f.read()
+
+    def _extract_function(self, name):
+        start = self.source.index(f"function {name}(")
+        return self.source[start:start + 2500]
+
+    def test_folder_heading_html_does_not_build_the_attributes_via_string_concat(self):
+        body = self._extract_function("folderHeadingHtml")
+        self.assertNotIn('data-bot="', body)
+        self.assertNotIn('data-folder="', body)
+
+    def test_attach_folder_rar_data_uses_dataset_assignment(self):
+        body = self._extract_function("attachFilelistsFolderRarData")
+        self.assertIn(".dataset.bot = state.filelistsSource", body)
+        self.assertIn(".dataset.folder = group.folder", body)
+
+    def test_attach_folder_rar_data_is_called_alongside_the_checkbox_attach(self):
+        """Per the brief: wired in right alongside attachFilelistsCheckboxData(),
+        same place, same after-innerHTML timing - not a second, independent
+        call site that could drift out of sync with it."""
+        checkbox_call = self.source.index("attachFilelistsCheckboxData(groups);")
+        rar_call = self.source.index("attachFilelistsFolderRarData(groups);")
+        self.assertGreater(rar_call, checkbox_call)
+        # No render call, no unrelated code, in between the two - they run
+        # back to back.
+        between = self.source[
+            checkbox_call + len("attachFilelistsCheckboxData(groups);"):rar_call]
+        self.assertNotIn("innerHTML", between)
+
+    def test_folder_rar_click_handler_is_delegated_alongside_the_folder_toggle(self):
+        """Reuses the existing delegated click listener on el.filelistsBody
+        (the one that already handles .folder-toggle) rather than adding a
+        second, competing listener."""
+        self.assertIn('el.filelistsBody.addEventListener("click"', self.source)
+        click_start = self.source.index('el.filelistsBody.addEventListener("click"')
+        click_body = self.source[click_start:click_start + 1200]
+        self.assertIn(".folder-toggle", click_body)
+        self.assertIn(".folder-rar-btn", click_body)
+
+    def test_folder_rar_request_posts_to_the_new_route(self):
+        self.assertIn('"/api/filelists/fetch-folder-rar"', self.source)
+
+    def test_folder_rar_button_only_rendered_for_another_bots_list(self):
+        """Same gate folderFilesHtml() already applies to the per-file
+        checkbox column - packing a folder as .rar only makes sense against
+        another bot's list, never our own."""
+        body = self._extract_function("folderHeadingHtml")
+        self.assertIn('(state.filelistsSource || "__own__") !== "__own__"', body)
 
 
 class FetchDeleteButtonRegressionTests(unittest.TestCase):
@@ -1549,6 +1676,7 @@ class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
         fixed once (BUG 2, see BroadcastRenderingXssRegressionTests above)."""
         self.assertNotIn('data-bot="', self.source)
         self.assertNotIn('data-filename="', self.source)
+        self.assertNotIn('data-folder="', self.source)
 
     def test_bulk_fetch_form_is_wired_up(self):
         self.assertIn('el.bulkFetchForm.addEventListener("submit"', self.source)
@@ -1896,6 +2024,15 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
         self.assertIn("FETCHED_FILES_DIR", result["error"])
         self.assertEqual(config.fetch_queue, {})
 
+    def test_a_folder_rar_fetch_is_refused_rather_than_queued(self):
+        config.fetch_feature_disabled = True
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 503)
+        self.assertIn("FETCHED_FILES_DIR", result["error"])
+        self.assertEqual(config.fetch_queue, {})
+
     def test_a_multi_item_request_creates_none_of_them(self):
         """The bulk shape has its own path through the validator, so it gets
         its own check: partial acceptance would be worse than refusal."""
@@ -1922,15 +2059,24 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
 
     def test_both_routes_still_work_when_the_feature_is_on(self):
         """Control. reset_config() leaves the flag False, which is the normal
-        running state - these must not have been broken by the gate."""
+        running state - these must not have been broken by the gate.
+
+        Three different bots, deliberately: "goodbot" for both the "list"
+        and "folder" request would now be refused with 409 (they collide -
+        see webserver.BOT_ALONE_FETCH_CONFLICT_ERROR and
+        dcc_fetch.has_outstanding_bot_alone_request()) - that conflict is
+        its own test elsewhere; this one is purely a control that all three
+        routes work when the feature is on."""
         config.fetch_feature_disabled = False
 
         file_status, _f = webserver.build_fetch_enqueue_result(
             {"bot": "goodbot", "filename": "Song.flac"})
-        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        list_status, _l = webserver.build_list_fetch_enqueue_result("listbot")
+        folder_status, _r = webserver.build_folder_rar_fetch_enqueue_result("folderbot", "Artist/Album")
 
-        self.assertEqual((file_status, list_status), (200, 200))
-        self.assertEqual(len(config.fetch_queue), 2)
+        self.assertEqual((file_status, list_status, folder_status), (200, 200, 200))
+        self.assertEqual(len(config.fetch_queue), 3)
+
 
     def test_the_flag_being_absent_counts_as_off(self):
         """The reason the read is `getattr(..., True)` rather than the
@@ -1974,6 +2120,159 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
                          "reads as disabled")
 
 
+class FolderRarFetchRouteTests(DCCoreTestCase):
+    """build_folder_rar_fetch_enqueue_result() - the pure logic behind
+    POST /api/filelists/fetch-folder-rar. Mirrors ListFetchRoutesTests'
+    structure for build_list_fetch_enqueue_result(), extended with the
+    second attacker-reachable argument ("folder") that "list" fetches never
+    had - see the function's own docstring for why both fields are validated
+    here, not just "bot"."""
+
+    def test_a_clean_bot_and_folder_are_accepted_and_create_a_pending_folder_row(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album (2020)")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        rid = result["created"][0]
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["bot"], "goodbot")
+        self.assertEqual(row["request_type"], "folder")
+        self.assertEqual(row["state"], "pending")
+        self.assertEqual(row["filename"], "!rar Artist/Album (2020)")
+        self.assertEqual(row["requested_filename"], "!rar Artist/Album (2020)")
+
+    def test_an_empty_or_blank_bot_is_rejected(self):
+        for bad in ("", "   "):
+            status, result = webserver.build_folder_rar_fetch_enqueue_result(bad, "Artist/Album")
+            self.assertEqual(status, 400, f"bot={bad!r}")
+            self.assertIn("error", result)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_an_empty_or_blank_folder_is_rejected(self):
+        for bad in ("", "   "):
+            status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", bad)
+            self.assertEqual(status, 400, f"folder={bad!r}")
+            self.assertIn("error", result)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_non_string_bot_is_rejected_not_silently_coerced(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result({"nested": "dict"}, "Artist/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_non_string_folder_is_rejected_not_silently_coerced(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", 12345)
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_bot_with_embedded_crlf_is_rejected_not_queued(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "victimbot\r\nQUIT :pwned-by-webhook\r\nJOIN #secretadmin", "Artist/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_bot_with_a_ctcp_delimiter_is_rejected(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "evilbot\x01ACTION pwned\x01", "Artist/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_folder_with_embedded_crlf_is_rejected_not_queued(self):
+        """Unlike "list" (no filename argument at all), a "folder" request's
+        `folder` argument becomes real content on the outbound wire line
+        ("!<bot> !rar <folder>") - an embedded CRLF here is just as much an
+        injection vector as bot/filename already are for /api/fetch/enqueue."""
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "goodbot", "Artist/Album\r\nQUIT :pwned-by-webhook")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_folder_with_a_ctcp_delimiter_is_rejected(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "goodbot", "Artist\x01/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+
+class BotAloneFetchConflictRouteTests(DCCoreTestCase):
+    """POST /api/filelists/fetch and POST /api/filelists/fetch-folder-rar
+    both refuse a "list"/"folder" request for a bot that already has one of
+    either type outstanding - see dcc_fetch.has_outstanding_bot_alone_
+    request()'s docstring for why: both request_types match an incoming DCC
+    SEND offer on bot alone (neither convention's response filename is
+    predictable ahead of time), so letting two of them race for the same bot
+    could make a real transfer get silently misattributed to the wrong row.
+
+    dcc_fetch.py's own EnqueueTimeBotAloneCollisionTests covers the
+    underlying enqueue_fetch() check in isolation; these tests confirm the
+    two HTTP-facing routes surface it as a clean 409 and, critically, still
+    create no row at all when refused."""
+
+    def test_folder_request_refused_with_409_when_a_list_request_is_outstanding(self):
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 409)
+        self.assertIn("error", result)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_list_request_refused_with_409_when_a_folder_request_is_outstanding(self):
+        folder_status, _r = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+        self.assertEqual(folder_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual(status, 409)
+        self.assertIn("error", result)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_a_second_list_request_for_the_same_bot_is_also_refused_with_409(self):
+        first_status, _ = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(first_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual(status, 409)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_a_folder_request_for_a_different_bot_still_succeeds(self):
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("otherbot", "Artist/Album")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_new_request_succeeds_once_the_outstanding_one_has_resolved(self):
+        list_status, list_result = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+        list_rid = list_result["created"][0]
+        config.fetch_queue[list_rid]["state"] = "complete"
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_file_fetch_is_never_blocked_by_an_outstanding_list_request(self):
+        """'file' rows (POST /api/fetch/enqueue) use exact-match admission
+        control and were never ambiguous with 'list'/'folder' - this
+        conflict check must not touch that route."""
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "goodbot", "filename": "Song.flac"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(config.fetch_queue), 2)
 
 
 class TheDashboardSwitchFailsClosed(unittest.TestCase):
@@ -2303,23 +2602,36 @@ class SettingsPayloadTests(DCCoreTestCase):
         dashboard for as long as the real rehash (socket I/O, several
         importlib.reload()s) takes."""
         real_rehash = commands.handle_rehash_request
+        entered = threading.Event()
+        release = threading.Event()
         finished = threading.Event()
 
-        def slow_rehash(*_args, **_kwargs):
-            time.sleep(0.3)
+        def blocking_rehash(*_args, **_kwargs):
+            entered.set()
+            release.wait(timeout=10)
             finished.set()
 
-        commands.handle_rehash_request = slow_rehash
+        commands.handle_rehash_request = blocking_rehash
+        self.addCleanup(release.set)
         self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
 
-        started = time.time()
         status, _result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
-        elapsed = time.time() - started
 
+        # Nothing has released the rehash yet. If the save had waited for it,
+        # the call above could not have returned at all - which is the whole
+        # property, stated without measuring anything.
+        #
+        # This used to assert the call took under 0.1s. That is not the
+        # property, it is a proxy for it, and on a loaded CI runner a call
+        # that blocks on nothing at all still took 0.316s - so the test failed
+        # for a reason it was never about.
         self.assertEqual(status, 200)
-        self.assertLess(elapsed, 0.1)
-        self.assertFalse(finished.is_set(), "the calling thread must return before the rehash finishes")
-        self.assertTrue(finished.wait(timeout=2), "the dispatched rehash thread never actually ran")
+        self.assertTrue(entered.wait(timeout=10), "the rehash thread never started")
+        self.assertFalse(finished.is_set(),
+                         "the calling thread waited for the rehash to finish")
+
+        release.set()
+        self.assertTrue(finished.wait(timeout=10), "the dispatched rehash never completed")
 
     def test_apply_settings_changes_rejects_the_password_hash_directly(self):
         status, result = webserver.apply_settings_changes({"ADMIN_PASSWORD_HASH": "x"})

@@ -444,6 +444,15 @@ html, body {
 /* A date is not a measurement, so it does not get the numeric display size. */
 .stat-value-sm { font-size: 18px; }
 
+/* Counts line up under each other, so they are read as a column of numbers
+   rather than as text that happens to be digits. */
+.col-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .stat-foot {
   color: var(--text-faint);
   font-size: 12px;
