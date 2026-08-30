@@ -383,15 +383,38 @@ class TestConcurrentSaves(PersistenceTestCase):
         """Defect: concurrent saves interleaved inside one truncated file handle and left
         a mangled half-and-half file that the next boot threw away. Serialised atomic
         writes must always leave one complete, parseable JSON object behind."""
-        config.dcc_queue = {}
+        workers, rounds = 6, 15
         errors = []
-        barrier = threading.Barrier(6)
+        barrier = threading.Barrier(workers)
+
+        # The budget is measured, not guessed. This test performs
+        # workers * rounds serialised atomic writes, and an atomic write is a
+        # temp file, an fsync and an os.replace - about 3ms on a local SSD, and
+        # hundreds of milliseconds on a CI runner whose virus scanner inspects
+        # every file created in the temp directory. A flat 20 seconds was a bet
+        # that one write would never exceed 220ms, and windows-latest/3.10
+        # collected on it.
+        #
+        # What this test is for is in its own docstring: serialised atomic
+        # writes leave one complete, parseable JSON object behind. The clock
+        # was scaffolding, and scaffolding that fails on a slow machine reports
+        # a defect that is not there. Same correction as #152.
+        config.dcc_queue = {"probe": [queue_row(user="probe")]}
+        probe_start = time.time()
+        db.save_dcc_queue()
+        one_write = max(time.time() - probe_start, 0.001)
+        config.dcc_queue = {}
+
+        # Four times the measured serial cost, because the writes contend, and
+        # never below the old 20 seconds. Capped, so a genuine deadlock still
+        # fails the run instead of hanging the suite.
+        budget = min(300.0, max(20.0, one_write * workers * rounds * 4))
 
         def worker(index):
             try:
                 user = "user%02d" % index
-                barrier.wait(timeout=5.0)
-                for round_no in range(15):
+                barrier.wait(timeout=budget)
+                for round_no in range(rounds):
                     config.dcc_queue[user] = [
                         queue_row(user=user, filename="track-%d-%d.flac" % (index, round_no))
                     ]
@@ -399,12 +422,20 @@ class TestConcurrentSaves(PersistenceTestCase):
             except Exception as err:
                 errors.append(err)
 
-        threads = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(6)]
+        threads = [threading.Thread(target=worker, args=(i,), daemon=True)
+                   for i in range(workers)]
         for thread in threads:
             thread.start()
+        deadline = time.time() + budget
         for thread in threads:
-            thread.join(timeout=20.0)
-            self.assertFalse(thread.is_alive(), "a saving thread never finished")
+            # One shared deadline rather than one per thread: the threads run
+            # at the same time, so six 20-second joins were never six chances
+            # to be slow. They were one, and the arithmetic read otherwise.
+            thread.join(timeout=max(0.0, deadline - time.time()))
+            self.assertFalse(
+                thread.is_alive(),
+                f"a saving thread never finished within {budget:.1f}s "
+                f"(one write measured {one_write * 1000:.0f}ms)")
 
         self.assertEqual(errors, [])
         loaded = json.loads(self.read_queue_file())
