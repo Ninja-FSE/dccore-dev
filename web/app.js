@@ -556,6 +556,27 @@
     }).catch(function () { markConnection(false); });
   }
 
+  // Delegated: renderDownloads() rebuilds the table's innerHTML on every
+  // poll, which would silently drop a listener attached to any one row.
+  el.downloadsBody.addEventListener("click", function (evt) {
+    var btn = evt.target.closest ? evt.target.closest(".fetch-delete-btn") : null;
+    if (!btn) { return; }
+    var requestId = decodeURIComponent(btn.dataset.requestId);
+    if (!window.confirm("Delete this fetched file? This cannot be undone.")) { return; }
+    btn.disabled = true;
+    postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", {}).then(function (res) {
+      if (!res.ok) {
+        window.alert("Could not delete: " + (res.data && res.data.error || ("HTTP " + res.status)));
+        btn.disabled = false;
+        return;
+      }
+      loadDownloads();
+    }).catch(function (err) {
+      window.alert("Could not delete: " + err.message);
+      btn.disabled = false;
+    });
+  });
+
   function renderDownloads(rows) {
     if (!rows.length) {
       el.downloadsBody.innerHTML = emptyRow(5, "Nothing queued yet.");
@@ -577,13 +598,20 @@
         : (row.bytes_received ? row.bytes_received + " B" : "—");
       // Order matters: a rejected row is also state === "complete", so it has
       // to be tested first or it gets the Download button anyway.
+      // A finished row (complete or failed) is always deletable - there is
+      // no cancellation path for one still in flight, so that button simply
+      // does not exist for pending/offered/listening/receiving.
+      var deleteBtn = (state === "complete" || state === "failed")
+        ? "<button type=\"button\" class=\"btn btn-small btn-danger fetch-delete-btn\" data-request-id=\"" +
+          encodeURIComponent(row.id) + "\">Delete</button>"
+        : "";
       var action;
       if (rejected) {
-        action = "<span class=\"col-dim\">" + escapeHtml(row.list_processing_error) + "</span>";
+        action = "<span class=\"col-dim\">" + escapeHtml(row.list_processing_error) + "</span> " + deleteBtn;
       } else if (state === "complete") {
-        action = "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a>";
+        action = "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a> " + deleteBtn;
       } else if (state === "failed") {
-        action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span>";
+        action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + deleteBtn;
       } else {
         action = "";
       }

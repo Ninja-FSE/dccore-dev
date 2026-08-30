@@ -387,6 +387,11 @@ html, body {
   color: var(--on-accent);
 }
 
+.btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 /* ----------------------------------------------------------------- Stats */
 
 .stat-row {

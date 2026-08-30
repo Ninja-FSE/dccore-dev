@@ -67,6 +67,7 @@ import time
 
 import adminchat
 import config
+import platform_compat
 
 try:
     from flask import Flask, jsonify, redirect, request, send_from_directory, session
@@ -784,6 +785,47 @@ def build_fetch_status_payload():
     return rows
 
 
+def build_fetch_delete_result(request_id):
+    """DELETE /api/fetch/<request_id>: forget a finished fetch and remove its
+    file from FETCHED_FILES_DIR, if it has one.
+
+    Refuses anything still in flight (pending/offered/listening/receiving) -
+    there is no cancellation path for a transfer thread already running, so
+    dropping the row out from under it would just let the thread keep writing
+    to a file nothing in the UI can see or ever clean up again. Only
+    "complete" (this includes a rejected list archive - see
+    build_fetch_status_payload()'s caller for that distinction, it is still
+    state == "complete" here) and "failed" rows are deletable.
+
+    Never builds the on-disk path from request_id or anything else attacker-
+    reachable - request_id only selects the row, and the row's own
+    stored_filename (set by dcc_fetch.py after running the offer's filename
+    through dcc.is_safe_path()) is what actually gets removed, same as
+    api_fetch_download()'s identical guarantee.
+    """
+    import dcc_fetch
+    with dcc_fetch._fetch_lock():
+        row = getattr(config, "fetch_queue", {}).get(request_id)
+        if row is None:
+            return 404, {"error": "Unknown fetch request."}
+        if row.get("state") not in ("complete", "failed"):
+            return 409, {"error": "Only a completed or failed fetch can be deleted."}
+        stored_filename = row.get("stored_filename")
+        del config.fetch_queue[request_id]
+
+    if stored_filename:
+        directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
+        target = os.path.join(directory, stored_filename)
+        try:
+            os.remove(platform_compat.long_path(target))
+        except FileNotFoundError:
+            pass
+        except OSError as remove_err:
+            print(f"[WEBUI] Could not delete fetched file {stored_filename!r}: {remove_err}")
+
+    return 200, {"deleted": request_id}
+
+
 def build_verify_list_payload():
     """GET /api/tools/verify-list payload: filenames the master list carries
     under more than one folder.
@@ -1302,6 +1344,11 @@ if HAVE_FLASK:
             return send_from_directory(
                 directory, stored_filename, as_attachment=True,
                 download_name=download_name)
+
+        @app.route("/api/fetch/<request_id>/delete", methods=["POST"])
+        def api_fetch_delete(request_id):
+            status, result = build_fetch_delete_result(request_id)
+            return jsonify(result), status
 
         @app.route("/api/settings")
         def api_settings():

@@ -621,6 +621,151 @@ class FetchRoutesTests(DCCoreTestCase):
         self.assertEqual(webserver.build_fetch_status_payload(), [])
 
 
+class FetchDeleteResultTests(DCCoreTestCase):
+    """build_fetch_delete_result() - the pure logic behind
+    POST /api/fetch/<request_id>/delete."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-fetch-delete-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+
+    def _put_row(self, request_id, **overrides):
+        row = {
+            "bot": "goodbot", "filename": "Song.flac", "request_type": "file",
+            "state": "complete", "requested_at": 1.0, "offered_at": 1.0,
+            "bytes_received": 10, "total_size": 10, "reason": "",
+            "stored_filename": None,
+        }
+        row.update(overrides)
+        config.fetch_queue[request_id] = row
+        return row
+
+    def test_unknown_request_id_is_a_404_and_changes_nothing(self):
+        status, result = webserver.build_fetch_delete_result("nosuchid")
+        self.assertEqual(status, 404)
+        self.assertIn("error", result)
+
+    def test_a_completed_row_with_no_file_is_removed_from_the_queue(self):
+        self._put_row("r1", state="complete", stored_filename=None)
+        status, result = webserver.build_fetch_delete_result("r1")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["deleted"], "r1")
+        self.assertNotIn("r1", config.fetch_queue)
+
+    def test_a_completed_row_deletes_its_file_from_fetched_files_dir(self):
+        stored = "r2_Song.flac"
+        with open(os.path.join(self.tmp, stored), "w") as f:
+            f.write("data")
+        self._put_row("r2", state="complete", stored_filename=stored)
+        status, result = webserver.build_fetch_delete_result("r2")
+        self.assertEqual(status, 200)
+        self.assertNotIn("r2", config.fetch_queue)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
+
+    def test_a_failed_row_is_removed_even_with_no_file_on_disk(self):
+        """dcc_fetch.py's own failure path already removes any partial file -
+        a failed row's stored_filename may point at nothing at all, which
+        must not turn a delete into a 500."""
+        self._put_row("r3", state="failed", stored_filename="never_existed.flac", reason="timeout")
+        status, result = webserver.build_fetch_delete_result("r3")
+        self.assertEqual(status, 200)
+        self.assertNotIn("r3", config.fetch_queue)
+
+    def test_a_rejected_list_archive_is_still_state_complete_and_deletable(self):
+        """A rejected list zip (see build_fetch_status_payload()'s own
+        comment on list_processing_error) is state == "complete" under the
+        hood - the frontend's "Rejected" label is cosmetic, so this must be
+        deletable exactly like any other complete row, file included."""
+        stored = "r4_list.zip"
+        with open(os.path.join(self.tmp, stored), "w") as f:
+            f.write("zip bytes")
+        self._put_row("r4", state="complete", stored_filename=stored,
+                       list_processing_error="zip-slip entry refused")
+        status, result = webserver.build_fetch_delete_result("r4")
+        self.assertEqual(status, 200)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
+
+    def test_in_flight_states_are_refused_not_deleted(self):
+        for state in ("pending", "offered", "listening", "receiving"):
+            with self.subTest(state=state):
+                rid = f"r-{state}"
+                self._put_row(rid, state=state, stored_filename=None)
+                status, result = webserver.build_fetch_delete_result(rid)
+                self.assertEqual(status, 409)
+                self.assertIn(rid, config.fetch_queue)
+
+    def test_the_on_disk_path_is_built_from_the_rows_own_stored_filename_only(self):
+        """The request_id itself must never end up in the path being removed -
+        only the row's own stored_filename, exactly like api_fetch_download()'s
+        identical guarantee. A path-traversal-looking request_id must not
+        reach the filesystem at all."""
+        stored = "r5_Song.flac"
+        with open(os.path.join(self.tmp, stored), "w") as f:
+            f.write("data")
+        self._put_row("../../../etc/r5", state="complete", stored_filename=stored)
+        status, result = webserver.build_fetch_delete_result("../../../etc/r5")
+        self.assertEqual(status, 200)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
+
+
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
+                                            "CI never installs it, this class only runs when it "
+                                            "happens to be available locally")
+class FetchDeleteRouteTests(DCCoreTestCase):
+    """POST /api/fetch/<request_id>/delete through the real Flask app."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-fetch-delete-route-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(
+            WEBUI_TEST_PASSWORD, iterations=1000))
+        self.app = webserver.create_app()
+        self.client = self.app.test_client()
+        log_in_test_client(self.client)
+
+    def test_deleting_an_unknown_id_is_a_404_via_http(self):
+        resp = self.client.post("/api/fetch/nosuchid/delete")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_deleting_a_completed_fetch_removes_the_row_and_the_file_via_http(self):
+        stored = "rid_Song.flac"
+        with open(os.path.join(self.tmp, stored), "w") as f:
+            f.write("data")
+        config.fetch_queue["rid"] = {
+            "bot": "goodbot", "filename": "Song.flac", "request_type": "file",
+            "state": "complete", "requested_at": 1.0, "offered_at": 1.0,
+            "bytes_received": 4, "total_size": 4, "reason": "",
+            "stored_filename": stored,
+        }
+        resp = self.client.post("/api/fetch/rid/delete")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["deleted"], "rid")
+        self.assertNotIn("rid", config.fetch_queue)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
+
+    def test_deleting_an_in_flight_fetch_is_refused_via_http(self):
+        config.fetch_queue["rid"] = {
+            "bot": "goodbot", "filename": "Song.flac", "request_type": "file",
+            "state": "receiving", "requested_at": 1.0, "offered_at": 1.0,
+            "bytes_received": 4, "total_size": 10, "reason": "",
+            "stored_filename": None,
+        }
+        resp = self.client.post("/api/fetch/rid/delete")
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("rid", config.fetch_queue)
+
+    def test_the_route_sits_behind_the_login_gate(self):
+        self.client.post("/logout")
+        resp = self.client.post("/api/fetch/rid/delete")
+        self.assertEqual(resp.status_code, 401)
+
+
 class FetchStatusPayloadConcurrencyTests(DCCoreTestCase):
     """build_fetch_status_payload() used to read config.fetch_queue with no
     lock at all, while dcc_fetch.check_fetch_queue() has always promoted a
@@ -1290,6 +1435,39 @@ class FilelistsDownloadCheckboxTests(unittest.TestCase):
     def test_download_selected_button_is_wired_up(self):
         self.assertIn(
             'el.filelistsDownloadSelectedBtn.addEventListener("click"', self.source)
+
+
+class FetchDeleteButtonRegressionTests(unittest.TestCase):
+    """The Downloads table's per-row "Delete" button.
+
+    Unlike BUG 2's bot/filename attributes, row.id is never attacker-
+    controlled - it is dcc_fetch.enqueue_fetch()'s own uuid4().hex[:12], not
+    anything read back from a foreign bot - so string-concatenating it into
+    data-request-id="..." does not reopen that bug class. These tests confirm
+    that stays true (row.id is the only value concatenated into the button's
+    markup) and that the button is actually wired to a confirmation prompt
+    and the delete endpoint, not just present in the DOM."""
+
+    @classmethod
+    def setUpClass(cls):
+        app_js_path = os.path.join(REPO_ROOT, "web", "app.js")
+        with open(app_js_path, "r", encoding="utf-8") as f:
+            cls.source = f.read()
+
+    def test_delete_button_markup_only_carries_the_servers_own_request_id(self):
+        self.assertIn('data-request-id=\\"" +', self.source)
+        self.assertNotIn('data-bot="', self.source)
+        self.assertNotIn('data-filename="', self.source)
+        self.assertNotIn('data-folder="', self.source)
+
+    def test_delete_click_handler_confirms_before_calling_the_delete_route(self):
+        start = self.source.index('el.downloadsBody.addEventListener("click"')
+        body = self.source[start:start + 1200]
+        self.assertIn("window.confirm(", body)
+        self.assertIn('"/api/fetch/" + encodeURIComponent(requestId) + "/delete"', body)
+        # The confirm() call must gate the request, not just precede it in
+        # the source - i.e. still inside the same guard clause/early return.
+        self.assertLess(body.index("window.confirm("), body.index("postJson("))
 
 
 class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
