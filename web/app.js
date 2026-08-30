@@ -90,6 +90,11 @@
     stAlbums:              document.getElementById("st-albums"),
     stBuilt:               document.getElementById("st-built"),
     stFoot:                document.getElementById("st-foot"),
+    stTopFiles:            document.getElementById("st-top-files"),
+    stTopAlbums:           document.getElementById("st-top-albums"),
+    stTopAlbumsWrap:       document.getElementById("st-top-albums-wrap"),
+    stTopAlbumsLabel:      document.getElementById("st-top-albums-label"),
+    stTopAlbumsOff:        document.getElementById("st-top-albums-off"),
     themeDark:    document.getElementById("theme-dark"),
     themeLight:   document.getElementById("theme-light"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
@@ -1378,6 +1383,35 @@
     if (node) { node.textContent = value; }
   }
 
+  function renderTopTable(node, rows, emptyText) {
+    if (!node) { return; }
+    if (!rows || !rows.length) {
+      node.innerHTML = emptyRow(2, emptyText);
+      return;
+    }
+    node.innerHTML = rows.map(function (row) {
+      return "<tr><td>" + escapeHtml(row.name) +
+             "</td><td class=\"col-num\">" + escapeHtml(String(row.count)) + "</td></tr>";
+    }).join("");
+  }
+
+  function renderTopDownloads(top) {
+    top = top || {};
+    renderTopTable(el.stTopFiles, top.files, "Nothing sent yet.");
+
+    // With folder packing off no album can ever be sent, so an empty table
+    // would sit there for ever explaining nothing. Counts from before it was
+    // switched off are still shown - they are history.
+    var haveAlbums = top.albums && top.albums.length;
+    var show = top.albums_enabled !== false || haveAlbums;
+    if (el.stTopAlbumsWrap) { el.stTopAlbumsWrap.style.display = show ? "" : "none"; }
+    if (el.stTopAlbumsLabel) { el.stTopAlbumsLabel.style.display = show ? "" : "none"; }
+    if (el.stTopAlbumsOff) { el.stTopAlbumsOff.style.display = show ? "none" : ""; }
+    if (show) {
+      renderTopTable(el.stTopAlbums, top.albums, "No album sent yet.");
+    }
+  }
+
   function renderStats(data) {
     var t = data.transfer || {};
     var s = data.sent || {};
@@ -1412,6 +1446,7 @@
             ? "—" : lib.rar_folders.toLocaleString());
     setStat(el.stBuilt, lib.list_date || "—");
 
+    renderTopDownloads(data.top);
     setStat(el.stFoot, data.version || "");
   }
 

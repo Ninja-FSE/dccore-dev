@@ -384,6 +384,114 @@ def save_speed_record(new_record):
         print(f"[DB ERROR] Could not save the speed record: {e}")
 
 
+DOWNLOAD_COUNTS_FILE = getattr(config, "DOWNLOAD_COUNTS_FILE",
+                               os.path.join("data", "download_counts.json"))
+
+
+def _load_download_counts_unlocked():
+    """Parse download_counts.json. Caller must hold _disk_lock."""
+    if not os.path.exists(DOWNLOAD_COUNTS_FILE):
+        return {}
+    try:
+        with io.open(DOWNLOAD_COUNTS_FILE, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the download counts, starting empty: {err}")
+        return {}
+
+
+def load_download_counts():
+    """Every {key: {name, kind, count}} row from disk, or {} if there is none.
+
+    Same posture as load_known_bots(): a file that will not parse costs an
+    empty "most downloaded" table, not a refusal to start. These counters
+    describe history and nothing else reads them, so losing them is a cosmetic
+    failure - which is exactly why it must not be a loud one.
+    """
+    with _disk_lock:
+        return _load_download_counts_unlocked()
+
+
+def record_download(key, name, kind):
+    """Count one completed send against `key`, and save.
+
+    The whole load-increment-save runs under ONE _disk_lock acquisition, for
+    the same reason update_stats_on_complete() does: MAX_DCC_SLOTS transfers
+    finish concurrently, and a load here, a mutate here and a separate save
+    here let whichever thread saved second discard the other's increment -
+    permanently, because nothing ever recomputes these counters.
+
+    `key` identifies the thing; `name` is what a person should read. They are
+    different on purpose. Two albums can hold a track with the same filename -
+    see #110, where exactly that ambiguity sent the wrong file - so a file is
+    keyed by its path relative to the library and only DISPLAYED by its
+    basename. Collapsing them would inflate one row with another file's
+    downloads and quietly claim a track is popular when two different tracks
+    are.
+
+    Not bounded, and it does not need to be: a bot can only send what it
+    shares, so the row count is capped by the size of the library itself.
+    """
+    if not key:
+        return
+    with _disk_lock:
+        counts = _load_download_counts_unlocked()
+        row = counts.get(key)
+        if not isinstance(row, dict):
+            row = {"name": name, "kind": kind, "count": 0}
+        row["name"] = name or row.get("name") or key
+        row["kind"] = kind or row.get("kind") or "file"
+        try:
+            row["count"] = int(row.get("count", 0)) + 1
+        except (TypeError, ValueError):
+            row["count"] = 1
+        counts[key] = row
+        try:
+            _atomic_write(DOWNLOAD_COUNTS_FILE,
+                          json.dumps(counts, indent=1, sort_keys=True, ensure_ascii=False))
+        except Exception as err:
+            print(f"[DB ERROR] Could not save the download counts: {err}")
+        return row["count"]
+
+
+def top_downloads(limit=10, kind=None):
+    """The most-sent items, highest first, as [{name, kind, count}].
+
+    `kind` filters to "file" or "album". They are counted together and
+    reported apart on purpose: a 700 MB album and a 4 MB track are not
+    comparable, and one merged table would simply rank by whichever kind the
+    bot happens to send more of, which says more about the library than about
+    what people want.
+
+    Ties break on name so the order is stable between calls - a table that
+    reshuffles equal rows on every poll looks like it is changing when it is
+    not.
+    """
+    rows = []
+    for key, row in load_download_counts().items():
+        if not isinstance(row, dict):
+            continue
+        try:
+            count = int(row.get("count", 0))
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        row_kind = str(row.get("kind") or "file")
+        if kind is not None and row_kind != kind:
+            continue
+        rows.append({"name": str(row.get("name") or key),
+                     "kind": row_kind,
+                     "count": count})
+    rows.sort(key=lambda entry: (-entry["count"], entry["name"].lower()))
+    try:
+        limit = max(0, int(limit))
+    except (TypeError, ValueError):
+        limit = 10
+    return rows[:limit]
+
+
 def load_known_bots():
     """The bot registry from disk, or {} if there is none yet.
 

@@ -36,6 +36,37 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
     # as part of "/mnt/nfs-musik", because the string happens to begin the same way.
     return matchpath == base or matchpath.startswith(base + os.sep)
 
+def download_count_identity(file_path, file_name):
+    """(key, display name, kind) for one completed send, for db.record_download().
+
+    Split out of start_dcc_send() so it can be tested without a socket: the
+    rules below are the whole reason the "most downloaded" tables mean
+    anything, and they were previously buried in the middle of a transfer.
+
+    An ALBUM goes out as a packed archive from TMP_ZIP_DIR whose name this
+    module built from the folder, so the archive's own name is already the
+    readable one and identifies the album on its own.
+
+    A FILE is keyed by its path relative to the library and only DISPLAYED by
+    its basename. Two albums can hold a track with the same filename - #110 is
+    the bug where exactly that ambiguity sent the wrong file - so keying on the
+    basename would credit one track with another's downloads and report a
+    popularity that belongs to neither.
+    """
+    if _is_temp_zip_cache_file(file_path):
+        name = file_name[:-4] if str(file_name).lower().endswith(".rar") else file_name
+        return file_name, name, "album"
+
+    try:
+        key = os.path.relpath(file_path, config.FILE_DIRECTORY)
+    except ValueError:
+        # A different drive on Windows: relpath refuses rather than returning
+        # something wrong. The full path still identifies the file uniquely,
+        # which is all a key has to do.
+        key = file_path
+    return key, file_name, "file"
+
+
 def _is_temp_zip_cache_file(path):
     """Is `path` one of the packed .rar archives in TMP_ZIP_DIR - eligible for
     the "delete once nothing else needs it" cleanup in start_dcc_send()?
@@ -1163,6 +1194,21 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # day, so a transfer completing after midnight is counted correctly.
             stats = db.update_stats_on_complete(file_size)
             print(f"[DB COUNTER] Statistics updated on disk. (Files sent: {stats[0]})")
+
+            # And count the item itself, for the Stats page's "Most
+            # downloaded". A SEPARATE _disk_lock acquisition, after the one
+            # above has been released: threading.Lock is not reentrant, and
+            # this file is not the stats row - see db.py's note on why every
+            # public entry point there takes the lock exactly once.
+            #
+            # An album goes out as a packed archive from TMP_ZIP_DIR whose
+            # name dcc.py built from the folder, so the archive's own name is
+            # already the readable one. A single file is keyed by its path
+            # relative to the library and only displayed by its basename:
+            # two albums can hold a track with the same filename (#110), and
+            # collapsing them would credit one track with another's
+            # downloads.
+            db.record_download(*download_count_identity(file_path, file_name))
         except Exception as db_err:
             print(f"[DB ERROR] Could not increment the sharing statistics through the db module: {db_err}")
         # ---------------------------------------------------------------------

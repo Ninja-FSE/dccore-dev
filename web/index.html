@@ -330,6 +330,26 @@
         <div class="stat-card"><div class="stat-value stat-value-sm" id="st-built">&mdash;</div><div class="stat-label">List built</div></div>
       </div>
 
+
+      <div class="stat-group-label">Most downloaded &mdash; files</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th class="col-num">Times sent</th></tr></thead>
+          <tbody id="st-top-files"></tbody>
+        </table>
+      </div>
+
+      <div class="stat-group-label" id="st-top-albums-label">Most downloaded &mdash; album folders</div>
+      <div class="table-wrap" id="st-top-albums-wrap">
+        <table>
+          <thead><tr><th>Album</th><th class="col-num">Times sent</th></tr></thead>
+          <tbody id="st-top-albums"></tbody>
+        </table>
+      </div>
+      <p class="stat-foot" id="st-top-albums-off" style="display:none;">
+        Folder packing is off (<code>RAR_ENABLED</code>), so no album can be sent.
+      </p>
+
       <p class="stat-foot" id="st-foot"></p>
     </section>
 

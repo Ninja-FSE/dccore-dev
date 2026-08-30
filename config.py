@@ -64,6 +64,12 @@ HARD_BANS_FILE: str = "./data/hard_bans.txt"
 # columns is exactly the shape that turns "add a field" into a migration.
 KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 
+# One row per thing this bot has ever sent, {relative path or archive name ->
+# {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not
+# bounded on purpose: a bot can only send what it shares, so the row count is
+# capped by the library itself.
+DOWNLOAD_COUNTS_FILE: str = "./data/download_counts.json"
+
 # Which bots we hold a fetched list for, and where it lives on disk - one
 # small entry per bot ("bot", "fetched_at", "list_path", "entry_count",
 # "source_zip"), not the parsed list itself. Without this, the extracted
