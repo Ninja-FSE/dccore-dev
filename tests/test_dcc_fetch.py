@@ -1673,6 +1673,120 @@ class EnqueueTimeBotAloneCollisionTests(DCCoreTestCase):
         self.assertEqual(len(config.fetch_queue), 2)
 
 
+class RefusalNoticeFastFailTests(DCCoreTestCase):
+    """dcc_fetch.handle_refusal_notice() - irc.py's NOTICE handler calls this
+    for any private NOTICE addressed to us, so a peer's own "!rar is
+    disabled here" reply fails the matching "folder" row immediately
+    instead of waiting out the full FETCH_FOLDER_OFFER_TIMEOUT."""
+
+    def _offered_folder_row(self, bot="goodbot", folder="!rar Artist/Album"):
+        rid = dcc_fetch.enqueue_fetch(bot, folder, request_type="folder")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+        return rid
+
+    def test_a_dccore_style_refusal_fails_the_matching_folder_row(self):
+        rid = self._offered_folder_row()
+
+        dcc_fetch.handle_refusal_notice(
+            "goodbot", "Error: Folder packing (!rar) is disabled on this bot.")
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("disabled", row["reason"])
+
+    def test_an_omenserve_style_refusal_also_matches(self):
+        rid = self._offered_folder_row()
+
+        dcc_fetch.handle_refusal_notice("goodbot", "Rar Server is currently disabled.")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "failed")
+
+    def test_case_is_ignored_in_both_markers(self):
+        rid = self._offered_folder_row()
+
+        dcc_fetch.handle_refusal_notice("goodbot", "RAR SERVER IS CURRENTLY DISABLED.")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "failed")
+
+    def test_a_notice_missing_one_marker_never_touches_the_row(self):
+        """Requires BOTH markers together - "disabled" alone is exactly the
+        kind of word an unrelated NOTICE could plausibly contain, and a
+        false match here would fail a row a moment before its real DCC SEND
+        arrived, with no way back."""
+        rid = self._offered_folder_row()
+
+        dcc_fetch.handle_refusal_notice("goodbot", "This feature is currently disabled.")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+
+    def test_an_unrelated_notice_never_touches_the_row(self):
+        rid = self._offered_folder_row()
+
+        dcc_fetch.handle_refusal_notice("goodbot", "Thanks for stopping by!")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+
+    def test_a_refusal_from_the_wrong_bot_is_ignored(self):
+        rid = self._offered_folder_row(bot="goodbot")
+
+        dcc_fetch.handle_refusal_notice("someotherbot", "Rar Server is currently disabled.")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+
+    def test_a_file_row_is_never_touched_by_a_refusal_notice(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Song.flac", request_type="file")
+        config.fetch_queue[rid]["state"] = "offered"
+
+        dcc_fetch.handle_refusal_notice("goodbot", "Rar Server is currently disabled.")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+
+    def test_a_list_row_is_never_touched_by_a_refusal_notice(self):
+        """This wording is specific to !rar - a "list" row's own refusal (if
+        that ever happens) is not this shape and is left to its own
+        timeout."""
+        rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "offered"
+
+        dcc_fetch.handle_refusal_notice("goodbot", "Rar Server is currently disabled.")
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+
+    def test_a_row_not_currently_offered_is_never_touched(self):
+        for state in ("pending", "receiving", "complete", "failed"):
+            with self.subTest(state=state):
+                rid = dcc_fetch.enqueue_fetch(f"bot-{state}", "!rar Album", request_type="folder")
+                config.fetch_queue[rid]["state"] = state
+
+                dcc_fetch.handle_refusal_notice(f"bot-{state}", "Rar Server is currently disabled.")
+
+                self.assertEqual(config.fetch_queue[rid]["state"], state)
+
+    def test_no_outstanding_row_for_the_bot_is_a_silent_no_op(self):
+        dcc_fetch.handle_refusal_notice("nobodyaskedbot", "Rar Server is currently disabled.")  # must not raise
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_multiple_candidates_the_oldest_is_failed(self):
+        """Defence-in-depth only - enqueue_fetch() already refuses a second
+        outstanding "folder"/"list" request for the same bot, so this uses
+        insert_row_bypassing_enqueue_guard() (see its own docstring) to
+        still exercise the tie-break, mirroring
+        _claim_matching_offer_locked()'s identical oldest-wins fallback for
+        the same reason: not assumed impossible."""
+        older_rid = insert_row_bypassing_enqueue_guard("goodbot", "!rar Album", request_type="folder")
+        config.fetch_queue[older_rid]["state"] = "offered"
+        config.fetch_queue[older_rid]["requested_at"] = 1.0
+        newer_rid = insert_row_bypassing_enqueue_guard("goodbot", "!rar Other", request_type="folder")
+        config.fetch_queue[newer_rid]["state"] = "offered"
+        config.fetch_queue[newer_rid]["requested_at"] = 2.0
+
+        dcc_fetch.handle_refusal_notice("goodbot", "Rar Server is currently disabled.")
+
+        self.assertEqual(config.fetch_queue[older_rid]["state"], "failed")
+        self.assertEqual(config.fetch_queue[newer_rid]["state"], "offered")
+
+
 class ListFetchDispatcherTests(DCCoreTestCase):
     """check_fetch_queue() sends a bare "@<bot>" (irc.py's own list trigger,
     per list.send_file_list()) for a request_type="list" row, instead of the

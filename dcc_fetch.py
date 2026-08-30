@@ -311,6 +311,60 @@ def _mark_failed_locked(row, reason):
     row["reason"] = reason
 
 
+# Substrings (lowercased) a private NOTICE must ALL contain before it is
+# treated as a "!rar is disabled here" refusal rather than routine chatter -
+# see handle_refusal_notice()'s own docstring for why both are required
+# together. Covers this bot's own wording (dcc.py's handle_download_request()
+# -> announce.send_dcc_error(user, "rar_disabled"): "Error: Folder packing
+# (!rar) is disabled on this bot.") and the OmenServe-family wording
+# ("Rar Server is currently disabled.") - both contain "rar" and "disabled".
+_RAR_REFUSAL_MARKERS = ("disabled", "rar")
+
+
+def handle_refusal_notice(bot, notice_text):
+    """Called from irc.py's NOTICE handler for any private NOTICE addressed
+    to us, from any other bot. Turns a peer's own "!rar is disabled here"
+    reply into an immediate failure for the matching "folder" row, instead
+    of waiting out the full FETCH_FOLDER_OFFER_TIMEOUT (1800s, see
+    config.py) against one of only MAX_FETCH_SLOTS fetch slots for a request
+    the peer already refused in its first second - "refused immediately"
+    and "still packing a 40-minute discography" otherwise look identical to
+    us, both sitting "offered" for the same half hour.
+
+    Matches on bot alone, exactly like _claim_matching_offer_locked()'s own
+    "folder" branch - the whole point of this hook is that a refused
+    request never gets a DCC SEND, and therefore never gets a filename to
+    match on either. Deliberately narrow in two ways: only "folder" rows
+    still "offered" are eligible (a "list" refusal, if that ever happens,
+    is not this wording and is left to its own timeout), and the notice
+    text must contain every marker in _RAR_REFUSAL_MARKERS - a false match
+    here would fail a row a moment before its real DCC SEND arrived, with
+    no way back for that request.
+    """
+    text_lower = str(notice_text).lower()
+    if not all(marker in text_lower for marker in _RAR_REFUSAL_MARKERS):
+        return
+    wanted_bot = str(bot).strip().lower()
+    queue = _ensure_fetch_queue()
+    with _fetch_lock():
+        candidates = [
+            row for row in queue.values()
+            if row.get("state") == "offered"
+            and row.get("request_type") == "folder"
+            and str(row.get("bot", "")).strip().lower() == wanted_bot
+        ]
+        if not candidates:
+            return
+        # Oldest wins, same defence-in-depth tie-break
+        # _claim_matching_offer_locked() uses - unreachable in the normal
+        # case (enqueue_fetch() already refuses a second outstanding
+        # "folder"/"list" request for the same bot), kept for the same
+        # reason that guard's own tie-break is kept: not assumed impossible.
+        row = min(candidates, key=lambda r: r.get("requested_at", 0))
+        _mark_failed_locked(row, f"refused: {notice_text}".strip())
+    print(f"[FETCH] {bot} refused a folder-rar request: {notice_text}")
+
+
 def check_fetch_queue():
     """Dispatcher: expire stale offers, then promote pending rows while a slot
     is free. Mirrors dcc.py's check_queue_and_send() claim-before-dispatch
