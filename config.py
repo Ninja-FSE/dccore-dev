@@ -186,6 +186,22 @@ MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer be
 FETCH_TRANSFER_TIMEOUT: int = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
 FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
 
+# A "folder" request_type row (dcc_fetch.py) asks another bot to pack a whole
+# folder/album as .rar via its own "!rar" convention and shares the same
+# MAX_FETCH_SLOTS pool as every other fetch - it gets its own, separate
+# timeout and size cap instead, below.
+#
+# FETCH_FOLDER_OFFER_TIMEOUT: how long a "folder" row waits for the other
+# bot's DCC SEND before failing - much longer than FETCH_OFFER_TIMEOUT
+# because the other bot has to run its own !rar packing pipeline first.
+# config.fetch_queue is in-memory only (not persisted across a restart), so a
+# folder row waiting this long is lost on restart same as any other
+# offered/listening row - just for longer.
+FETCH_FOLDER_OFFER_TIMEOUT: int = 1800
+# MAX_FETCH_FOLDER_FILE_SIZE: 2GB - separate, larger cap than
+# MAX_FETCH_FILE_SIZE for a whole packed album/discography archive.
+MAX_FETCH_FOLDER_FILE_SIZE: int = 2147483648
+
 # How often a new @find broadcast (POST /api/search/broadcast) is allowed to
 # start. Independent of the UI - courtesy to other bots/operators on a shared
 # public channel, not just a UI detail.

@@ -502,6 +502,12 @@ def fetch_feature_error():
     return None
 
 
+BOT_ALONE_FETCH_CONFLICT_ERROR = (
+    "A list or folder request is already in progress for this bot - wait "
+    "for it to finish before starting another."
+)
+
+
 def build_list_fetch_enqueue_result(bot_raw):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
@@ -522,7 +528,14 @@ def build_list_fetch_enqueue_result(bot_raw):
 
     Returns (http_status, payload_dict) with "created" (the new request id,
     as a one-element list, so the frontend can treat this the same shape as
-    the file-fetch enqueue response).
+    the file-fetch enqueue response) - or 409 if this bot already has a
+    "list" or "folder" request outstanding (see
+    dcc_fetch.has_outstanding_bot_alone_request()'s docstring for why the
+    two request_types can never safely coexist for the same bot: neither
+    convention's response filename is predictable ahead of time, so both
+    match incoming DCC SEND offers on bot alone, and a second one racing the
+    first would create an offer no admission-control branch could correctly
+    attribute).
     """
 
     unavailable = fetch_feature_error()
@@ -538,7 +551,68 @@ def build_list_fetch_enqueue_result(bot_raw):
     if not bot:
         return 400, {"error": "'bot' is required."}
 
+    if dcc_fetch.has_outstanding_bot_alone_request(bot):
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+
     request_id = dcc_fetch.enqueue_fetch(bot, "", request_type="list")
+    if request_id is None:
+        # Defense in depth: enqueue_fetch() enforces this same invariant
+        # itself (see its docstring), so this should be unreachable given
+        # the pre-check just above - but never surface it as a fabricated
+        # success if some future race or caller change makes it reachable.
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+    return 200, {"created": [request_id]}
+
+
+def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
+    """POST /api/filelists/fetch-folder-rar's pure logic: validate the bot
+    nick and folder path, then enqueue a request_type="folder" row asking
+    that bot to pack the whole folder/album as a .rar via its own "!rar"
+    convention (see dcc.py's own "!rar" handler, which this mirrors - the
+    same wire syntax this bot itself answers to on its own nick) and receive
+    it back through the exact same fetch-queue admission control, dispatcher,
+    size cap and transfer code every other cross-bot fetch already goes
+    through (see dcc_fetch.py).
+
+    Unlike build_list_fetch_enqueue_result()'s `bot_raw` alone, this route
+    has a second attacker-reachable argument - `folder_raw` becomes real
+    content on the wire ("!<bot> !rar <folder>"), not an absent filename like
+    "list" - so both fields are run through reject_if_unsafe_for_irc_line()
+    here, the same as build_fetch_enqueue_result()'s bot/filename pair.
+
+    Returns (http_status, payload_dict) with "created" (the new request id,
+    as a one-element list, matching the same response shape every other
+    fetch-enqueue route already returns) - or 409 if this bot already has a
+    "list" or "folder" request outstanding (see build_list_fetch_enqueue_
+    result()'s docstring and dcc_fetch.has_outstanding_bot_alone_request()
+    for why).
+    """
+
+    unavailable = fetch_feature_error()
+    if unavailable:
+        return 503, {"error": unavailable}
+    import dcc_fetch
+
+    bot_err = reject_if_unsafe_for_irc_line(bot_raw, "bot")
+    if bot_err:
+        return 400, {"error": bot_err}
+    folder_err = reject_if_unsafe_for_irc_line(folder_raw, "folder")
+    if folder_err:
+        return 400, {"error": folder_err}
+
+    bot = bot_raw.strip()
+    folder = folder_raw.strip()
+    if not bot or not folder:
+        return 400, {"error": "Both 'bot' and 'folder' are required."}
+
+    if dcc_fetch.has_outstanding_bot_alone_request(bot):
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
+
+    request_id = dcc_fetch.enqueue_fetch(bot, f"!rar {folder}", request_type="folder")
+    if request_id is None:
+        # Defense in depth - see build_list_fetch_enqueue_result()'s
+        # identical comment above.
+        return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
     return 200, {"created": [request_id]}
 
 
@@ -863,7 +937,8 @@ SETTINGS_CATEGORIES = (
                                                 "MAX_SEARCH_RESULTS", "MSG_DELAY", "DEBUG_MSG_DELAY",
                                                 "DCC_PORT_START", "DCC_PORT_END", "MAX_FETCH_SLOTS",
                                                 "MAX_FETCH_FILE_SIZE", "FETCH_TRANSFER_TIMEOUT",
-                                                "FETCH_OFFER_TIMEOUT"]),
+                                                "FETCH_OFFER_TIMEOUT", "FETCH_FOLDER_OFFER_TIMEOUT",
+                                                "MAX_FETCH_FOLDER_FILE_SIZE"]),
     ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
                                                 "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
@@ -909,6 +984,8 @@ SETTINGS_LABELS = {
     "MAX_FETCH_FILE_SIZE": "Max fetch file size (bytes)",
     "FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",
     "FETCH_OFFER_TIMEOUT": "Fetch offer timeout (seconds)",
+    "FETCH_FOLDER_OFFER_TIMEOUT": "Folder (.rar) fetch offer timeout (seconds)",
+    "MAX_FETCH_FOLDER_FILE_SIZE": "Max folder (.rar) fetch size (bytes)",
 
     "LIST_BASE_NAME": "List base name",
     "PAUSE_ON_UPDATE": "Pause sharing during !update",
@@ -1284,6 +1361,13 @@ if HAVE_FLASK:
         def api_filelists_fetch():
             body = json_object(request.get_json(silent=True))
             status, result = build_list_fetch_enqueue_result(body.get("bot", ""))
+            return jsonify(result), status
+
+        @app.route("/api/filelists/fetch-folder-rar", methods=["POST"])
+        def api_filelists_fetch_folder_rar():
+            body = json_object(request.get_json(silent=True))
+            status, result = build_folder_rar_fetch_enqueue_result(
+                body.get("bot", ""), body.get("folder", ""))
             return jsonify(result), status
 
         @app.route("/api/filelists/bots")

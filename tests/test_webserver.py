@@ -1008,6 +1008,32 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(config.fetch_queue, {})
 
+    def test_filelists_fetch_folder_rar_bot_with_crlf_is_rejected_via_http(self):
+        resp = self.client.post("/api/filelists/fetch-folder-rar", json={
+            "bot": "victimbot\r\nQUIT :pwned-by-webhook\r\nJOIN #secretadmin",
+            "folder": "Artist/Album",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_filelists_fetch_folder_rar_folder_with_crlf_is_rejected_via_http(self):
+        """Unlike "list", a "folder" request's `folder` argument has real
+        attacker-reachable content that reaches an outbound IRC line - see
+        FolderRarFetchRouteTests.test_folder_with_embedded_crlf_is_rejected_not_queued."""
+        resp = self.client.post("/api/filelists/fetch-folder-rar", json={
+            "bot": "goodbot",
+            "folder": "Artist/Album\r\nQUIT :pwned-by-webhook",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_clean_filelists_fetch_folder_rar_still_works_via_http(self):
+        resp = self.client.post("/api/filelists/fetch-folder-rar", json={
+            "bot": "goodbot", "folder": "Artist/Album",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.get_json()["created"]), 1)
+
     def test_filelists_fetch_bot_with_ctcp_delimiter_is_rejected_via_http(self):
         resp = self.client.post("/api/filelists/fetch", json={
             "bot": "evilbot\x01ACTION pwned\x01",
@@ -1270,6 +1296,12 @@ class BroadcastRenderingXssRegressionTests(unittest.TestCase):
         class in the first place."""
         self.assertNotIn('data-bot="', self.source)
         self.assertNotIn('data-filename="', self.source)
+        # Extended for the "Get folder as .rar" button (see
+        # FolderRarButtonTests below): state.filelistsSource/group.folder are
+        # exactly as attacker-controlled as everything else checked above,
+        # and must never be string-concatenated into a data-folder="..."
+        # attribute either.
+        self.assertNotIn('data-folder="', self.source)
 
 
 class FilelistsDownloadCheckboxTests(unittest.TestCase):
@@ -1323,6 +1355,70 @@ class FilelistsDownloadCheckboxTests(unittest.TestCase):
             'el.filelistsDownloadSelectedBtn.addEventListener("click"', self.source)
 
 
+class FolderRarButtonTests(unittest.TestCase):
+    """The File Lists view's "Get folder as .rar" button - group.folder and
+    state.filelistsSource are exactly as attacker-controlled as row.source/
+    row.title in FilelistsDownloadCheckboxTests above (another bot's fetched
+    list data), so the same BUG 2 shape applies: attachFilelistsFolderRarData()
+    exists specifically so folderHeadingHtml()'s HTML string never carries
+    either value in an attribute - it sets both via .dataset once the markup
+    is already in the DOM, after the fact, mirroring
+    attachFilelistsCheckboxData()'s exact pattern."""
+
+    @classmethod
+    def setUpClass(cls):
+        app_js_path = os.path.join(REPO_ROOT, "web", "app.js")
+        with open(app_js_path, "r", encoding="utf-8") as f:
+            cls.source = f.read()
+
+    def _extract_function(self, name):
+        start = self.source.index(f"function {name}(")
+        return self.source[start:start + 2500]
+
+    def test_folder_heading_html_does_not_build_the_attributes_via_string_concat(self):
+        body = self._extract_function("folderHeadingHtml")
+        self.assertNotIn('data-bot="', body)
+        self.assertNotIn('data-folder="', body)
+
+    def test_attach_folder_rar_data_uses_dataset_assignment(self):
+        body = self._extract_function("attachFilelistsFolderRarData")
+        self.assertIn(".dataset.bot = state.filelistsSource", body)
+        self.assertIn(".dataset.folder = group.folder", body)
+
+    def test_attach_folder_rar_data_is_called_alongside_the_checkbox_attach(self):
+        """Per the brief: wired in right alongside attachFilelistsCheckboxData(),
+        same place, same after-innerHTML timing - not a second, independent
+        call site that could drift out of sync with it."""
+        checkbox_call = self.source.index("attachFilelistsCheckboxData(groups);")
+        rar_call = self.source.index("attachFilelistsFolderRarData(groups);")
+        self.assertGreater(rar_call, checkbox_call)
+        # No render call, no unrelated code, in between the two - they run
+        # back to back.
+        between = self.source[
+            checkbox_call + len("attachFilelistsCheckboxData(groups);"):rar_call]
+        self.assertNotIn("innerHTML", between)
+
+    def test_folder_rar_click_handler_is_delegated_alongside_the_folder_toggle(self):
+        """Reuses the existing delegated click listener on el.filelistsBody
+        (the one that already handles .folder-toggle) rather than adding a
+        second, competing listener."""
+        self.assertIn('el.filelistsBody.addEventListener("click"', self.source)
+        click_start = self.source.index('el.filelistsBody.addEventListener("click"')
+        click_body = self.source[click_start:click_start + 1200]
+        self.assertIn(".folder-toggle", click_body)
+        self.assertIn(".folder-rar-btn", click_body)
+
+    def test_folder_rar_request_posts_to_the_new_route(self):
+        self.assertIn('"/api/filelists/fetch-folder-rar"', self.source)
+
+    def test_folder_rar_button_only_rendered_for_another_bots_list(self):
+        """Same gate folderFilesHtml() already applies to the per-file
+        checkbox column - packing a folder as .rar only makes sense against
+        another bot's list, never our own."""
+        body = self._extract_function("folderHeadingHtml")
+        self.assertIn('(state.filelistsSource || "__own__") !== "__own__"', body)
+
+
 class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
     """New user-supplied text surfaces added alongside the Download tab
     (bot/filename pairs parsed out of the bulk-paste textarea) and the File
@@ -1361,6 +1457,7 @@ class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
         fixed once (BUG 2, see BroadcastRenderingXssRegressionTests above)."""
         self.assertNotIn('data-bot="', self.source)
         self.assertNotIn('data-filename="', self.source)
+        self.assertNotIn('data-folder="', self.source)
 
     def test_bulk_fetch_form_is_wired_up(self):
         self.assertIn('el.bulkFetchForm.addEventListener("submit"', self.source)
@@ -1708,6 +1805,15 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
         self.assertIn("FETCHED_FILES_DIR", result["error"])
         self.assertEqual(config.fetch_queue, {})
 
+    def test_a_folder_rar_fetch_is_refused_rather_than_queued(self):
+        config.fetch_feature_disabled = True
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 503)
+        self.assertIn("FETCHED_FILES_DIR", result["error"])
+        self.assertEqual(config.fetch_queue, {})
+
     def test_a_multi_item_request_creates_none_of_them(self):
         """The bulk shape has its own path through the validator, so it gets
         its own check: partial acceptance would be worse than refusal."""
@@ -1734,15 +1840,24 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
 
     def test_both_routes_still_work_when_the_feature_is_on(self):
         """Control. reset_config() leaves the flag False, which is the normal
-        running state - these must not have been broken by the gate."""
+        running state - these must not have been broken by the gate.
+
+        Three different bots, deliberately: "goodbot" for both the "list"
+        and "folder" request would now be refused with 409 (they collide -
+        see webserver.BOT_ALONE_FETCH_CONFLICT_ERROR and
+        dcc_fetch.has_outstanding_bot_alone_request()) - that conflict is
+        its own test elsewhere; this one is purely a control that all three
+        routes work when the feature is on."""
         config.fetch_feature_disabled = False
 
         file_status, _f = webserver.build_fetch_enqueue_result(
             {"bot": "goodbot", "filename": "Song.flac"})
-        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        list_status, _l = webserver.build_list_fetch_enqueue_result("listbot")
+        folder_status, _r = webserver.build_folder_rar_fetch_enqueue_result("folderbot", "Artist/Album")
 
-        self.assertEqual((file_status, list_status), (200, 200))
-        self.assertEqual(len(config.fetch_queue), 2)
+        self.assertEqual((file_status, list_status, folder_status), (200, 200, 200))
+        self.assertEqual(len(config.fetch_queue), 3)
+
 
     def test_the_flag_being_absent_counts_as_off(self):
         """The reason the read is `getattr(..., True)` rather than the
@@ -1786,6 +1901,159 @@ class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
                          "reads as disabled")
 
 
+class FolderRarFetchRouteTests(DCCoreTestCase):
+    """build_folder_rar_fetch_enqueue_result() - the pure logic behind
+    POST /api/filelists/fetch-folder-rar. Mirrors ListFetchRoutesTests'
+    structure for build_list_fetch_enqueue_result(), extended with the
+    second attacker-reachable argument ("folder") that "list" fetches never
+    had - see the function's own docstring for why both fields are validated
+    here, not just "bot"."""
+
+    def test_a_clean_bot_and_folder_are_accepted_and_create_a_pending_folder_row(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album (2020)")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        rid = result["created"][0]
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["bot"], "goodbot")
+        self.assertEqual(row["request_type"], "folder")
+        self.assertEqual(row["state"], "pending")
+        self.assertEqual(row["filename"], "!rar Artist/Album (2020)")
+        self.assertEqual(row["requested_filename"], "!rar Artist/Album (2020)")
+
+    def test_an_empty_or_blank_bot_is_rejected(self):
+        for bad in ("", "   "):
+            status, result = webserver.build_folder_rar_fetch_enqueue_result(bad, "Artist/Album")
+            self.assertEqual(status, 400, f"bot={bad!r}")
+            self.assertIn("error", result)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_an_empty_or_blank_folder_is_rejected(self):
+        for bad in ("", "   "):
+            status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", bad)
+            self.assertEqual(status, 400, f"folder={bad!r}")
+            self.assertIn("error", result)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_non_string_bot_is_rejected_not_silently_coerced(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result({"nested": "dict"}, "Artist/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_a_non_string_folder_is_rejected_not_silently_coerced(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", 12345)
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_bot_with_embedded_crlf_is_rejected_not_queued(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "victimbot\r\nQUIT :pwned-by-webhook\r\nJOIN #secretadmin", "Artist/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_bot_with_a_ctcp_delimiter_is_rejected(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "evilbot\x01ACTION pwned\x01", "Artist/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_folder_with_embedded_crlf_is_rejected_not_queued(self):
+        """Unlike "list" (no filename argument at all), a "folder" request's
+        `folder` argument becomes real content on the outbound wire line
+        ("!<bot> !rar <folder>") - an embedded CRLF here is just as much an
+        injection vector as bot/filename already are for /api/fetch/enqueue."""
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "goodbot", "Artist/Album\r\nQUIT :pwned-by-webhook")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_folder_with_a_ctcp_delimiter_is_rejected(self):
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(
+            "goodbot", "Artist\x01/Album")
+        self.assertEqual(status, 400)
+        self.assertEqual(config.fetch_queue, {})
+
+
+class BotAloneFetchConflictRouteTests(DCCoreTestCase):
+    """POST /api/filelists/fetch and POST /api/filelists/fetch-folder-rar
+    both refuse a "list"/"folder" request for a bot that already has one of
+    either type outstanding - see dcc_fetch.has_outstanding_bot_alone_
+    request()'s docstring for why: both request_types match an incoming DCC
+    SEND offer on bot alone (neither convention's response filename is
+    predictable ahead of time), so letting two of them race for the same bot
+    could make a real transfer get silently misattributed to the wrong row.
+
+    dcc_fetch.py's own EnqueueTimeBotAloneCollisionTests covers the
+    underlying enqueue_fetch() check in isolation; these tests confirm the
+    two HTTP-facing routes surface it as a clean 409 and, critically, still
+    create no row at all when refused."""
+
+    def test_folder_request_refused_with_409_when_a_list_request_is_outstanding(self):
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 409)
+        self.assertIn("error", result)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_list_request_refused_with_409_when_a_folder_request_is_outstanding(self):
+        folder_status, _r = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+        self.assertEqual(folder_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual(status, 409)
+        self.assertIn("error", result)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_a_second_list_request_for_the_same_bot_is_also_refused_with_409(self):
+        first_status, _ = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(first_status, 200)
+        before = len(config.fetch_queue)
+
+        status, result = webserver.build_list_fetch_enqueue_result("goodbot")
+
+        self.assertEqual(status, 409)
+        self.assertEqual(len(config.fetch_queue), before)
+
+    def test_a_folder_request_for_a_different_bot_still_succeeds(self):
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("otherbot", "Artist/Album")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_new_request_succeeds_once_the_outstanding_one_has_resolved(self):
+        list_status, list_result = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+        list_rid = list_result["created"][0]
+        config.fetch_queue[list_rid]["state"] = "complete"
+
+        status, result = webserver.build_folder_rar_fetch_enqueue_result("goodbot", "Artist/Album")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["created"]), 1)
+        self.assertEqual(len(config.fetch_queue), 2)
+
+    def test_a_file_fetch_is_never_blocked_by_an_outstanding_list_request(self):
+        """'file' rows (POST /api/fetch/enqueue) use exact-match admission
+        control and were never ambiguous with 'list'/'folder' - this
+        conflict check must not touch that route."""
+        list_status, _l = webserver.build_list_fetch_enqueue_result("goodbot")
+        self.assertEqual(list_status, 200)
+
+        status, result = webserver.build_fetch_enqueue_result(
+            {"bot": "goodbot", "filename": "Song.flac"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(config.fetch_queue), 2)
 
 
 class TheDashboardSwitchFailsClosed(unittest.TestCase):

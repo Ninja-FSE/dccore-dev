@@ -47,6 +47,15 @@ request id. webserver.py's /api/fetch/* routes are the only thing that
 creates `pending` rows (POST /api/fetch/enqueue); check_fetch_queue() below
 promotes them to `offered`; handle_incoming_offer() (dispatched from irc.py's
 CTCP branch) takes it from there.
+
+A `"folder"` row (a whole album/discography, requested as another bot's own
+"!<bot> !rar <folder>" packing convention) walks this exact same state
+machine as `"file"`/`"list"` - the only differences are which
+_claim_matching_offer_locked() branch admits it (bot-alone, like `"list"`,
+since we cannot know what the target bot will name the resulting .rar), a
+longer FETCH_FOLDER_OFFER_TIMEOUT (packing a whole album takes real time on
+the other end), and a larger MAX_FETCH_FOLDER_FILE_SIZE cap (a packed
+archive is bigger than any single file).
 """
 
 import ipaddress
@@ -163,18 +172,31 @@ def new_fetch_row(bot, filename, now=None, request_type="file"):
     config.fetch_queue expects. Does not insert it - callers decide the key.
 
     request_type is "file" (default - existing behaviour: admission control
-    requires an exact bot+filename match, see _claim_matching_offer_locked())
-    or "list" (a cross-bot list fetch: we send a bare "@<bot>", per irc.py's
-    own @<nick> trigger, and cannot know in advance what the target bot will
-    name its list zip - admission control for these rows matches on bot
-    alone). Every existing call site that does not pass request_type keeps
-    getting "file" rows, so nothing about today's behaviour changes.
+    requires an exact bot+filename match, see _claim_matching_offer_locked()),
+    "list" (a cross-bot list fetch: we send a bare "@<bot>", per irc.py's own
+    @<nick> trigger, and cannot know in advance what the target bot will name
+    its list zip - admission control for these rows matches on bot alone), or
+    "folder" (a cross-bot folder-as-rar fetch: we send "!<bot> !rar <folder
+    path>" - the same convention this bot's own dcc.py "!rar" handler answers
+    on its own nick - and, just like "list", cannot know in advance what the
+    target bot will name the resulting .rar, so admission control for these
+    rows also matches on bot alone). Every existing call site that does not
+    pass request_type keeps getting "file" rows, so nothing about today's
+    behaviour changes.
+
+    "requested_filename" is set once here, to the same (stripped) value as
+    `filename`, and never touched again - it preserves the original request
+    text (e.g. "!rar Artist/Album") since _claim_matching_offer_locked() will
+    later overwrite row["filename"] with whatever name the responding bot
+    actually sends, exactly as it already does for "list" rows.
     """
     now = time.time() if now is None else now
+    clean_filename = str(filename).strip()
     return {
         "bot": str(bot).strip(),
-        "filename": str(filename).strip(),
-        "request_type": request_type if request_type in ("file", "list") else "file",
+        "filename": clean_filename,
+        "requested_filename": clean_filename,
+        "request_type": request_type if request_type in ("file", "list", "folder") else "file",
         "state": "pending",
         "requested_at": now,
         "offered_at": None,
@@ -185,16 +207,84 @@ def new_fetch_row(bot, filename, now=None, request_type="file"):
     }
 
 
+_UNRESOLVED_FETCH_STATES = ("pending", "offered", "listening", "receiving")
+
+
+def _has_outstanding_bot_alone_request_locked(queue, bot):
+    """True if `queue` already has an unresolved "list" or "folder" row for
+    `bot`. Caller must hold _fetch_lock(). See has_outstanding_bot_alone_
+    request() below for why this check exists at all.
+
+    Bot comparison is stripped/lower-cased, the exact normalisation
+    _claim_matching_offer_locked() already uses for the same field - two
+    rows that would later collide at claim time must also collide here.
+    """
+    wanted_bot = str(bot).strip().lower()
+    return any(
+        row.get("request_type") in ("list", "folder")
+        and row.get("state") in _UNRESOLVED_FETCH_STATES
+        and str(row.get("bot", "")).strip().lower() == wanted_bot
+        for row in queue.values()
+    )
+
+
+def has_outstanding_bot_alone_request(bot):
+    """True if a "list" or "folder" fetch is already outstanding for `bot`
+    (any state other than "complete"/"failed").
+
+    "list" and "folder" rows both use bot-alone admission control (see
+    _claim_matching_offer_locked()'s docstring) because neither convention's
+    response filename is knowable ahead of time. That means a DCC SEND
+    offer arriving while both a "list" row and a "folder" row are
+    outstanding for the SAME bot cannot be told apart on receipt - whichever
+    branch _claim_matching_offer_locked() checks first would claim it, even
+    if it actually answers the other request. Rather than try to guess
+    right at claim time, the ambiguity is refused at its source: only ever
+    let one bot-alone row be outstanding for a given bot, checked here
+    BEFORE a second one is created (see enqueue_fetch() and webserver.py's
+    build_list_fetch_enqueue_result()/build_folder_rar_fetch_enqueue_
+    result(), which call this to turn the conflict into a clear 409 instead
+    of a silently misattributed transfer).
+
+    Public (no leading underscore) so it is directly unit-testable and so
+    webserver.py can call it to build a friendly error message before ever
+    calling enqueue_fetch() itself.
+    """
+    queue = _ensure_fetch_queue()
+    with _fetch_lock():
+        return _has_outstanding_bot_alone_request_locked(queue, bot)
+
+
 def enqueue_fetch(bot, filename, request_type="file"):
-    """Append one `pending` row to config.fetch_queue and return its id.
+    """Append one `pending` row to config.fetch_queue and return its id, or
+    None if the request was refused (see below) - callers must check for
+    None, they can no longer assume this always succeeds.
 
     Does NOT dispatch anything - check_fetch_queue() (the background
     dispatcher) is what promotes pending rows, so this is safe to call from
     a Flask request thread without blocking on IRC pacing.
+
+    A "list" or "folder" request_type is refused (returns None, no row is
+    created) if a "list" or "folder" row is already outstanding for the
+    same bot - see has_outstanding_bot_alone_request()'s docstring for why.
+    This check is enforced HERE, not only in webserver.py's two callers, so
+    the invariant holds no matter what calls this function in the future
+    (defense in depth, the same reasoning this feature's CTCP-safety check
+    already applies by recurring at both webserver enqueue-time and
+    dcc_fetch dispatch-time - see check_fetch_queue()'s own comment on
+    that). webserver.py still calls has_outstanding_bot_alone_request()
+    itself first, so it can return a clear 409 instead of just observing
+    None come back from here.
+
+    "file" rows are never affected - they use exact bot+filename admission
+    control and were never ambiguous (see _claim_matching_offer_locked()).
     """
     queue = _ensure_fetch_queue()
+    normalized_type = request_type if request_type in ("file", "list", "folder") else "file"
     request_id = uuid.uuid4().hex[:12]
     with _fetch_lock():
+        if normalized_type in ("list", "folder") and _has_outstanding_bot_alone_request_locked(queue, bot):
+            return None
         while request_id in queue:  # practically never, but be certain
             request_id = uuid.uuid4().hex[:12]
         queue[request_id] = new_fetch_row(bot, filename, request_type=request_type)
@@ -221,6 +311,60 @@ def _mark_failed_locked(row, reason):
     row["reason"] = reason
 
 
+# Substrings (lowercased) a private NOTICE must ALL contain before it is
+# treated as a "!rar is disabled here" refusal rather than routine chatter -
+# see handle_refusal_notice()'s own docstring for why both are required
+# together. Covers this bot's own wording (dcc.py's handle_download_request()
+# -> announce.send_dcc_error(user, "rar_disabled"): "Error: Folder packing
+# (!rar) is disabled on this bot.") and the OmenServe-family wording
+# ("Rar Server is currently disabled.") - both contain "rar" and "disabled".
+_RAR_REFUSAL_MARKERS = ("disabled", "rar")
+
+
+def handle_refusal_notice(bot, notice_text):
+    """Called from irc.py's NOTICE handler for any private NOTICE addressed
+    to us, from any other bot. Turns a peer's own "!rar is disabled here"
+    reply into an immediate failure for the matching "folder" row, instead
+    of waiting out the full FETCH_FOLDER_OFFER_TIMEOUT (1800s, see
+    config.py) against one of only MAX_FETCH_SLOTS fetch slots for a request
+    the peer already refused in its first second - "refused immediately"
+    and "still packing a 40-minute discography" otherwise look identical to
+    us, both sitting "offered" for the same half hour.
+
+    Matches on bot alone, exactly like _claim_matching_offer_locked()'s own
+    "folder" branch - the whole point of this hook is that a refused
+    request never gets a DCC SEND, and therefore never gets a filename to
+    match on either. Deliberately narrow in two ways: only "folder" rows
+    still "offered" are eligible (a "list" refusal, if that ever happens,
+    is not this wording and is left to its own timeout), and the notice
+    text must contain every marker in _RAR_REFUSAL_MARKERS - a false match
+    here would fail a row a moment before its real DCC SEND arrived, with
+    no way back for that request.
+    """
+    text_lower = str(notice_text).lower()
+    if not all(marker in text_lower for marker in _RAR_REFUSAL_MARKERS):
+        return
+    wanted_bot = str(bot).strip().lower()
+    queue = _ensure_fetch_queue()
+    with _fetch_lock():
+        candidates = [
+            row for row in queue.values()
+            if row.get("state") == "offered"
+            and row.get("request_type") == "folder"
+            and str(row.get("bot", "")).strip().lower() == wanted_bot
+        ]
+        if not candidates:
+            return
+        # Oldest wins, same defence-in-depth tie-break
+        # _claim_matching_offer_locked() uses - unreachable in the normal
+        # case (enqueue_fetch() already refuses a second outstanding
+        # "folder"/"list" request for the same bot), kept for the same
+        # reason that guard's own tie-break is kept: not assumed impossible.
+        row = min(candidates, key=lambda r: r.get("requested_at", 0))
+        _mark_failed_locked(row, f"refused: {notice_text}".strip())
+    print(f"[FETCH] {bot} refused a folder-rar request: {notice_text}")
+
+
 def check_fetch_queue():
     """Dispatcher: expire stale offers, then promote pending rows while a slot
     is free. Mirrors dcc.py's check_queue_and_send() claim-before-dispatch
@@ -244,16 +388,22 @@ def check_fetch_queue():
     queue = _ensure_fetch_queue()
     max_slots = int(getattr(config, "MAX_FETCH_SLOTS", 3))
     offer_timeout = float(getattr(config, "FETCH_OFFER_TIMEOUT", 60))
+    folder_offer_timeout = float(getattr(config, "FETCH_FOLDER_OFFER_TIMEOUT", 1800))
     now = time.time()
 
     to_dispatch = []
     with _fetch_lock():
         # Expire offers nobody ever answered. A row stuck in "offered" forever
         # would otherwise hold a slot open permanently and starve every other
-        # pending request behind it.
+        # pending request behind it. A "folder" row gets its own, much longer
+        # timeout (folder_offer_timeout) - the other bot has to run its own
+        # !rar packing pipeline before it can even start the DCC SEND, which
+        # plain file/list fetches never have to wait on.
         for row in queue.values():
             if row.get("state") == "offered" and row.get("offered_at") is not None:
-                if (now - row["offered_at"]) > offer_timeout:
+                this_timeout = (folder_offer_timeout
+                                 if row.get("request_type") == "folder" else offer_timeout)
+                if (now - row["offered_at"]) > this_timeout:
                     _mark_failed_locked(row, "no response")
 
         # Independent safety net for "listening" rows (passive DCC SEND).
@@ -326,6 +476,13 @@ def check_fetch_queue():
             # for how admission control handles that).
             message = f"PRIVMSG {channel} :@{bot}\r\n"
             log_desc = f"{bot}'s file list"
+        elif request_type == "folder":
+            # filename is already the literal string "!rar <folder path>" at
+            # this point (see webserver.build_folder_rar_fetch_enqueue_result()),
+            # so it falls into the same wire line the plain "file" branch below
+            # builds - only the log line differs, purely cosmetic.
+            message = f"PRIVMSG {channel} :!{bot} {filename}\r\n"
+            log_desc = f"{filename!r} (folder pack) from {bot}"
         else:
             message = f"PRIVMSG {channel} :!{bot} {filename}\r\n"
             log_desc = f"{filename!r} from {bot}"
@@ -486,7 +643,7 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
     acted on.
 
     Branches on the candidate row's request_type, which is the ONLY thing
-    that differs between the two - everything else (size cap, path
+    that differs between the three - everything else (size cap, path
     containment, passive-vs-active handling) runs identically afterwards in
     handle_incoming_offer(), regardless of which branch matched here:
 
@@ -495,18 +652,32 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
         existed.
       * "list": bot alone - we sent a bare "@<bot>" (see check_fetch_queue())
         and cannot know ahead of time what the target bot will name its list
-        zip, so any filename from the right bot is acceptable. If more than
-        one "list" row somehow ends up outstanding for the same bot at once
-        (not the normal case, but not assumed impossible either), the OLDEST
-        one is claimed - the same requested_at tie-break the dispatcher
-        itself already uses when promoting pending rows.
+        zip, so any filename from the right bot is acceptable.
+        enqueue_fetch() now refuses to create a second "list"/"folder" row
+        for a bot that already has one outstanding (see
+        has_outstanding_bot_alone_request()), specifically so this branch
+        and the "folder" branch below can never end up racing to claim the
+        same ambiguous offer - but the queue is still just a dict any code
+        could in principle mutate directly, so if more than one "list" row
+        somehow ends up outstanding for the same bot anyway, the OLDEST one
+        is claimed - the same requested_at tie-break the dispatcher itself
+        already uses when promoting pending rows.
+      * "folder": bot alone, identical reasoning and identical oldest-wins
+        tie-break to "list" - we sent "!<bot> !rar <folder path>" and cannot
+        know ahead of time what the target bot will name the resulting .rar
+        either. On a match, row["filename"] is overwritten with the real
+        advertised name (row["requested_filename"], set once at creation, is
+        left untouched - see new_fetch_row()).
 
     The exact-match "file" check runs FIRST and independently of the "list"
-    check below it (not as an either/or on the same row) - a "file" row can
-    only ever be satisfied by an exact filename match, and a "list" row can
-    only ever be satisfied by the bot-alone match; neither branch can
-    accidentally satisfy the other's requirement for a DIFFERENT row, because
-    each loop only ever looks at rows of its own request_type.
+    and "folder" checks below it (not as an either/or on the same row) - a
+    "file" row can only ever be satisfied by an exact filename match, and a
+    "list"/"folder" row can only ever be satisfied by its own bot-alone
+    match; no branch can accidentally satisfy another request_type's
+    requirement for a DIFFERENT row, because each loop only ever looks at
+    rows of its own request_type - a "folder" row must never satisfy a
+    "list" row's match (or vice versa) any more than either can satisfy a
+    "file" row's, and vice versa.
     """
     wanted_bot = str(from_nick).strip().lower()
     wanted_name = _normalize_filename_for_match(filename)
@@ -534,6 +705,25 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
         # Record the actual advertised filename now that we know it - the row
         # was created with filename="" (see webserver.build_list_fetch_enqueue_result()),
         # since it genuinely was not knowable before this moment.
+        row["filename"] = filename
+        row["state"] = "receiving"
+        return rid, row
+
+    folder_candidates = [
+        (rid, row) for rid, row in queue.items()
+        if row.get("state") == "offered"
+        and row.get("request_type") == "folder"
+        and str(row.get("bot", "")).strip().lower() == wanted_bot
+    ]
+    if folder_candidates:
+        rid, row = min(folder_candidates, key=lambda pair: pair[1].get("requested_at", 0))
+        # Same reasoning as the "list" branch above: the row was created with
+        # filename="!rar <folder path>" (see
+        # webserver.build_folder_rar_fetch_enqueue_result()), the literal
+        # request text, not the name the target bot will actually give its
+        # packed .rar - that is only known now. row["requested_filename"] was
+        # set once at creation (new_fetch_row()) and is left untouched here,
+        # so the original request text survives even after this overwrite.
         row["filename"] = filename
         row["state"] = "receiving"
         return rid, row
@@ -615,9 +805,18 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
                   f"no matching pending request.")
             return
 
-        max_size = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
+        # A "folder" row packs a whole album/discography into one .rar, which
+        # routinely dwarfs any single file - MAX_FETCH_FILE_SIZE (default
+        # 200MB) would make this feature fail on its very first real use, so
+        # it gets its own, larger cap instead.
+        if row.get("request_type") == "folder":
+            max_size = int(getattr(config, "MAX_FETCH_FOLDER_FILE_SIZE", 2147483648))
+            cap_name = "MAX_FETCH_FOLDER_FILE_SIZE"
+        else:
+            max_size = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
+            cap_name = "MAX_FETCH_FILE_SIZE"
         if offer["size"] > max_size:
-            _mark_failed_locked(row, f"declared size {offer['size']} exceeds MAX_FETCH_FILE_SIZE ({max_size})")
+            _mark_failed_locked(row, f"declared size {offer['size']} exceeds {cap_name} ({max_size})")
             print(f"[FETCH] Rejected oversized offer from {from_nick}: "
                   f"{offer['size']} > {max_size}. Never connected.")
             return
