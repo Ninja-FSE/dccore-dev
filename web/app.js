@@ -71,6 +71,7 @@
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
     filelistsExpandAll:   document.getElementById("filelists-expand-all"),
     filelistsCollapseAll: document.getElementById("filelists-collapse-all"),
+    filelistsDownloadSelectedBtn: document.getElementById("filelists-download-selected-btn"),
     themeDark:    document.getElementById("theme-dark"),
     themeLight:   document.getElementById("theme-light"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
@@ -772,7 +773,7 @@
     function folderHeadingHtml(group, index) {
       var count = group.count || 0;
       return "<tr class=\"folder-row\">" +
-        "<td colspan=\"4\">" +
+        "<td colspan=\"5\">" +
           "<button type=\"button\" class=\"folder-toggle\" aria-expanded=\"false\"" +
                  " data-folder-index=\"" + index + "\">" +
             "<span class=\"folder-caret\" aria-hidden=\"true\"></span>" +
@@ -786,8 +787,26 @@
 
     function folderFilesHtml(group, index) {
       var entries = group.entries || [];
+      // A file is only fetchable when it belongs to someone ELSE's list -
+      // browsing our own is direct filesystem access already, and
+      // /api/fetch/enqueue exists to reach another bot over IRC, not this one.
+      var fetchable = (state.filelistsSource || "__own__") !== "__own__";
       var rows = entries.map(function (row) {
+        // No data-bot/data-filename attribute here, and no bot/filename text
+        // anywhere in this markup fragment: `row.source`/`row.title` come
+        // from another bot's fetched list file - attacker-controlled the
+        // same way the broadcast table's entry.bot/entry.filename were (see
+        // BroadcastRenderingXssRegressionTests) - and escapeHtml() does not
+        // encode `"`, so string-concatenating either into an HTML attribute
+        // value is exactly BUG 2 again. attachFilelistsCheckboxData(), called
+        // right after this HTML lands in the DOM, sets both via .dataset
+        // instead, which the browser assigns as a property with no
+        // HTML-parsing step for the value to break out through.
+        var checkCell = fetchable
+          ? "<td class=\"col-check\"><input type=\"checkbox\" class=\"filelists-check\"></td>"
+          : "<td class=\"col-check\"></td>";
         return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
+          checkCell +
           "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + "</td>" +
           "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
           "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
@@ -800,7 +819,7 @@
       if (group.truncated) {
         rows.push(
           "<tr class=\"file-row folder-truncated is-hidden\" data-folder-index=\"" +
-          index + "\"><td colspan=\"4\">Showing the first " +
+          index + "\"><td colspan=\"5\">Showing the first " +
           entries.length.toLocaleString() + " of " +
           (group.count || 0).toLocaleString() +
           " files in this folder.</td></tr>");
@@ -841,6 +860,68 @@
     el.filelistsExpandAll.addEventListener("click", function () { setAllFolders(true); });
     el.filelistsCollapseAll.addEventListener("click", function () { setAllFolders(false); });
 
+    // Delegated for the same reason as the folder-toggle listener above: the
+    // checkboxes are rebuilt from scratch on every page/source change, so a
+    // listener attached per-checkbox would need re-attaching every time.
+    el.filelistsBody.addEventListener("change", function (evt) {
+      if (evt.target.classList && evt.target.classList.contains("filelists-check")) {
+        updateFilelistsDownloadSelectedState();
+      }
+    });
+
+    function updateFilelistsDownloadSelectedState() {
+      var checked = el.filelistsBody.querySelectorAll(".filelists-check:checked");
+      el.filelistsDownloadSelectedBtn.disabled = checked.length === 0;
+    }
+
+    // Sets each checkbox's bot/filename via .dataset - a property assignment
+    // the browser stores as-is, with no HTML-attribute-parsing step for
+    // either value to break out through - rather than string-concatenating
+    // them into the markup folderFilesHtml() already built (see that
+    // function's comment, and BroadcastRenderingXssRegressionTests, for why
+    // that would reopen BUG 2). Walks `groups` in the exact order
+    // folderFilesHtml() rendered it in, so the Nth checkbox in the DOM lines
+    // up with the Nth fetchable row here - true because every row in one
+    // render shares the same `fetchable` value, so a render either produces
+    // zero checkboxes or exactly one per row, never a mix to line up against.
+    function attachFilelistsCheckboxData(groups) {
+      var boxes = el.filelistsBody.querySelectorAll(".filelists-check");
+      if (!boxes.length) { return; }
+      var i = 0;
+      groups.forEach(function (group) {
+        (group.entries || []).forEach(function (row) {
+          if (i >= boxes.length) { return; }
+          boxes[i].dataset.bot = row.source;
+          boxes[i].dataset.filename = row.title;
+          i += 1;
+        });
+      });
+    }
+
+    el.filelistsDownloadSelectedBtn.addEventListener("click", function () {
+      var checked = el.filelistsBody.querySelectorAll(".filelists-check:checked");
+      var items = Array.prototype.map.call(checked, function (box) {
+        return { bot: box.dataset.bot, filename: box.dataset.filename };
+      });
+      if (!items.length) { return; }
+      el.filelistsDownloadSelectedBtn.disabled = true;
+      postJson("/api/fetch/enqueue", items).then(function (res) {
+        if (!res.ok && !(res.data && res.data.created && res.data.created.length)) {
+          showFilelistsFetchStatus("Could not queue the download: " +
+            (res.data.error || (res.data.errors && res.data.errors[0] && res.data.errors[0].error) || ("HTTP " + res.status)), true);
+        } else {
+          showFilelistsFetchStatus(
+            "Queued " + res.data.created.length + " file(s) for fetch - see Queue → Downloads.", false);
+          Array.prototype.forEach.call(checked, function (box) { box.checked = false; });
+        }
+        updateFilelistsDownloadSelectedState();
+        loadDownloads();
+      }).catch(function (err) {
+        showFilelistsFetchStatus("Could not queue the download: " + err.message, true);
+        updateFilelistsDownloadSelectedState();
+      });
+    });
+
     // Accepts the older flat shapes as well as the folder one: a bare array,
     // or a payload carrying `entries`, both become a single unnamed folder
     // rather than a blank table. That is the same defensive unwrap this did
@@ -857,7 +938,7 @@
     }
 
     function loadFilelists() {
-      el.filelistsBody.innerHTML = emptyRow(4, "Loading…");
+      el.filelistsBody.innerHTML = emptyRow(5, "Loading…");
       var source = state.filelistsSource || "__own__";
       var offset = state.filelistsOffset || 0;
       var base = (source === "__own__")
@@ -876,16 +957,20 @@
           renderFilelistsPager(Array.isArray(payload)
             ? payload.length : (payload.total_files || 0));
           if (!groups.length) {
-            el.filelistsBody.innerHTML = emptyRow(4, "No files published yet.");
+            el.filelistsBody.innerHTML = emptyRow(5, "No files published yet.");
+            updateFilelistsDownloadSelectedState();
             return;
           }
           el.filelistsBody.innerHTML = groups.map(function (group, index) {
             return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
           }).join("");
+          attachFilelistsCheckboxData(groups);
+          updateFilelistsDownloadSelectedState();
         })
         .catch(function (err) {
           markConnection(false);
-          el.filelistsBody.innerHTML = emptyRow(4, "Could not load file lists: " + err.message);
+          el.filelistsBody.innerHTML = emptyRow(5, "Could not load file lists: " + err.message);
+          updateFilelistsDownloadSelectedState();
         });
     }
 
