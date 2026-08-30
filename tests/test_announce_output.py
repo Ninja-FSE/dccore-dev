@@ -423,50 +423,93 @@ class TransferSpeedLockUsesDccQueueLock(unittest.TestCase):
     doing: two different locks "protecting" the same list is the same as
     no lock at all between the two sides.
 
-    Reads announce.py's own source rather than re-typing the condition, so
-    an edit that reintroduces config.queue_lock (or a bare fallback
-    threading.Lock()) here fails this test instead of silently reopening
-    the race - the same discipline test_irc_dispatch.py already uses for
-    its own dispatch-chain conditions.
+    Reads the daemon's own source rather than re-typing the condition, so an
+    edit that reintroduces config.queue_lock (or a bare fallback
+    threading.Lock()) fails this test instead of silently reopening the race -
+    the same discipline test_irc_dispatch.py already uses for its own
+    dispatch-chain conditions.
+
+    Written for announce.py, where the scan used to live. It now lives in
+    stats_mgr.live_speed(), because the dashboard wants the same figure and
+    sampling it twice would have each caller measure a fraction of the
+    movement. So these look for the scan WHEREVER it is rather than in one
+    named file: the property is that this loop is guarded, not that it sits in
+    a particular module, and pinning the location would have to be rewritten
+    every time it moves.
     """
 
-    def setUp(self):
-        source_path = os.path.abspath(announce.__file__)
-        if source_path.endswith(".pyc"):  # pragma: no cover - defensive
-            source_path = source_path[:-1]
-        with open(source_path, "r", encoding="utf-8") as handle:
-            self.lines = handle.read().splitlines()
+    # Only the modules that SAMPLE the rate. dcc.py has its own scan of the
+    # same list at the bottom of start_dcc_send(), updating a transfer's own
+    # bytes_sent as chunks go out - unrelated bookkeeping that happens to share
+    # the loop's shape, and including it here would make this test fail on
+    # something it is not about.
+    SOURCES = ("announce.py", "stats_mgr.py")
 
-    def _code_lines_containing(self, fragment):
-        """Lines containing `fragment`, excluding comments - so this module's
-        own explanatory comments about the historical bug do not trip the
-        very tests written to guard against it."""
-        return [line.strip() for line in self.lines
+    def setUp(self):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.by_file = {}
+        for name in self.SOURCES:
+            path = os.path.join(repo_root, name)
+            if not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as handle:
+                self.by_file[name] = handle.read().splitlines()
+        self.lines = self.by_file.get("announce.py", [])
+
+    def _code_lines_containing(self, fragment, lines=None):
+        """Lines containing `fragment`, excluding comments - so a module's own
+        explanatory comments about the historical bug do not trip the very
+        tests written to guard against it."""
+        return [line.strip() for line in (self.lines if lines is None else lines)
                 if fragment in line and not line.strip().startswith("#")]
 
+    def _scans(self):
+        """[(file, index)] for every live scan of config.active_transfers."""
+        found = []
+        for name, lines in sorted(self.by_file.items()):
+            for index, line in enumerate(lines):
+                if ("for tx in config.active_transfers:" in line
+                        and not line.strip().startswith("#")):
+                    found.append((name, index))
+        return found
+
     def test_the_active_transfers_scan_is_guarded_by_dcc_queue_lock(self):
-        matches = self._code_lines_containing("for tx in config.active_transfers:")
-        self.assertEqual(len(matches), 1,
-                         f"expected exactly one active_transfers scan, found {len(matches)}")
+        scans = self._scans()
+
+        self.assertEqual(
+            len(scans), 1,
+            "expected exactly one active_transfers scan across the daemon, "
+            "found %d: %s. More than one means the sampling was copied rather "
+            "than shared, and copies steal each other's measurement window."
+            % (len(scans), ", ".join("%s:%d" % (f, i + 1) for f, i in scans)))
 
     def test_config_queue_lock_is_never_referenced(self):
-        matches = self._code_lines_containing("config.queue_lock")
-        self.assertEqual(matches, [],
-                         "config.queue_lock reappeared in announce.py - it is a "
-                         "different lock object than dcc.queue_lock, which is what "
-                         "actually guards config.active_transfers; see dcc.py's and "
-                         "oserve.py's comments on this exact mistake")
+        offenders = []
+        for name, lines in sorted(self.by_file.items()):
+            if name == "oserve.py":
+                continue          # allocates it; nothing should USE it
+            offenders += ["%s: %s" % (name, line)
+                          for line in self._code_lines_containing("config.queue_lock", lines)]
+
+        self.assertEqual(
+            offenders, [],
+            "config.queue_lock reappeared - it is a different lock object than "
+            "dcc.queue_lock, which is what actually guards "
+            "config.active_transfers; see dcc.py's and oserve.py's comments on "
+            "this exact mistake: " + "; ".join(offenders))
 
     def test_the_scan_is_preceded_by_a_with_dcc_queue_lock_line(self):
-        for index, line in enumerate(self.lines):
-            if "for tx in config.active_transfers:" in line:
-                preceding = "\n".join(self.lines[max(0, index - 6):index])
-                self.assertIn("with dcc.queue_lock:", preceding,
-                             "the active_transfers scan is no longer guarded by "
-                             "dcc.queue_lock - the same lock dcc.py holds for every "
-                             "append/removal on that list")
-                return
-        self.fail("could not locate the active_transfers scan to check its guard")
+        scans = self._scans()
+        self.assertTrue(scans, "could not locate the active_transfers scan to check its guard")
+
+        for name, index in scans:
+            lines = self.by_file[name]
+            preceding = "\n".join(lines[max(0, index - 8):index])
+            self.assertIn(
+                "with dcc.queue_lock:", preceding,
+                "%s's active_transfers scan is no longer guarded by "
+                "dcc.queue_lock - the same lock dcc.py holds for every "
+                "append/removal on that list" % name)
 
 
 def _rmtree(path):

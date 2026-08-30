@@ -4,6 +4,7 @@ import sys
 import builtins
 import socket
 import config
+import stats_mgr
 
 # The ordinary flood-protection queue
 config.send_queue = {}
@@ -103,5 +104,18 @@ def queue_worker():
         except Exception as queue_err:
             print(f"[ERROR] Error inside queue worker loop: {queue_err}")
             time.sleep(1)
+
+        # Keep the live transfer rate current. The advert used to be the only
+        # thing sampling it, and it fires every ANNOUNCE_INTERVAL - 300 seconds
+        # by default - which is fine for a channel line and useless for a
+        # dashboard tile. This loop is the daemon's heartbeat, so sampling from
+        # here keeps the figure about a second old for every reader.
+        #
+        # Nearly free: live_speed() caches for a second, so all but one call per
+        # second is a timestamp comparison and a return.
+        try:
+            stats_mgr.live_speed()
+        except Exception as speed_err:
+            print(f"[QUEUE] Live speed sample failed: {speed_err}")
 
         time.sleep(0.1)
