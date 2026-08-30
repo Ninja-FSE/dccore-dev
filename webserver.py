@@ -789,15 +789,6 @@ WEB_REHASH_SOURCE = "WEB-DASHBOARD"
 # the frontend can tell the operator, rather than implying "rehash" fixed it.
 SETTINGS_RESTART_ONLY = {"WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"}
 
-# Guards the read-modify-write cycle inside settings_file.save(): that
-# function reads the existing settings.conf, computes the edited text, then
-# atomically replaces the file - but two overlapping callers would each read
-# the same starting file and each write back a version containing only their
-# own change, silently losing whichever one lost the race. Same pattern as
-# _web_bad_ips_lock above: a module-level threading.Lock() held for the whole
-# critical section, not just the final write.
-_settings_save_lock = threading.Lock()
-
 
 def _save_settings_and_rehash(changes):
     """Write `changes` to settings.conf and dispatch a rehash on its own
@@ -818,21 +809,20 @@ def _save_settings_and_rehash(changes):
     already has the same shape for a different slow/async action; see
     start_broadcast_search()'s threading.Thread(target=_close_window, ...).
 
-    The settings_file.save() call itself is held under _settings_save_lock
-    (see its own comment above) so two concurrent saves cannot race each
-    other's read-modify-write of settings.conf. Both settings_file.
-    SettingsWriteError (save()'s own validation failures) and a plain OSError
-    (e.g. an unwritable settings directory - the underlying atomic write can
-    raise this too) are caught here and turned into a clean 400 JSON error;
-    letting an OSError escape would surface as an unhandled 500 with a
-    non-JSON body, which the frontend's postJson() cannot parse.
+    settings_file.save() holds its own lock around the read-modify-write of
+    settings.conf, so two concurrent saves from here cannot race each other -
+    see that function's docstring. Both settings_file.SettingsWriteError
+    (save()'s own validation failures) and a plain OSError (e.g. an
+    unwritable settings directory - the underlying atomic write can raise
+    this too) are caught here and turned into a clean 400 JSON error; letting
+    an OSError escape would surface as an unhandled 500 with a non-JSON body,
+    which the frontend's postJson() cannot parse.
 
     Returns (http_status, payload_dict).
     """
     import settings_file
     try:
-        with _settings_save_lock:
-            result = settings_file.save(vars(config), changes)
+        result = settings_file.save(vars(config), changes)
     except (settings_file.SettingsWriteError, OSError) as err:
         return 400, {"error": str(err)}
 

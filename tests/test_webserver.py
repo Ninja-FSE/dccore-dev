@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -2064,9 +2064,10 @@ class SettingsPayloadTests(DCCoreTestCase):
         read-modify-write cycle: each reads the same starting settings.conf,
         computes text containing only its own change, and whichever atomic
         replace() lands last wins - silently discarding the other caller's
-        change even though both callers got a 200. _settings_save_lock
-        (webserver.py) now serialises the whole settings_file.save() call,
-        so this must not happen regardless of timing.
+        change even though both callers got a 200. settings_file._save_lock
+        now serialises the whole read-modify-write cycle from inside save()
+        itself, so this must not happen regardless of timing or which caller
+        reaches it.
 
         A real save() completes fast enough that two threads rarely actually
         overlap inside the danger window on their own, so this widens that
@@ -2112,20 +2113,26 @@ class SettingsPayloadTests(DCCoreTestCase):
                           "NICKNAME was lost to the concurrent save race")
 
     def test_without_the_lock_concurrent_saves_can_lose_a_change(self):
-        """Control for the test above: the identical concurrent workload,
-        calling settings_file.save() directly rather than going through
-        webserver's locked _save_settings_and_rehash(), reliably loses one
-        of the two changes - proving the passing test above depends on
-        _settings_save_lock actually being held, rather than being
-        incapable of ever catching a regression here."""
+        """Control for the test above: with settings_file._save_lock itself
+        replaced by a no-op, the identical concurrent workload reliably
+        loses one of the two changes - proving the passing test above
+        depends on that lock actually being held, rather than being
+        incapable of ever catching a regression here. Disabling the lock
+        directly (rather than routing around it through some other,
+        unlocked entry point) is the only way to write this control now
+        that the lock lives inside save() itself: every caller goes through
+        the same guarded critical section, by design."""
         real_atomic_write = settings_file._atomic_write
+        real_lock = settings_file._save_lock
 
         def slow_atomic_write(path, text):
             time.sleep(0.2)
             real_atomic_write(path, text)
 
         settings_file._atomic_write = slow_atomic_write
+        settings_file._save_lock = nullcontext()
         self.addCleanup(setattr, settings_file, "_atomic_write", real_atomic_write)
+        self.addCleanup(setattr, settings_file, "_save_lock", real_lock)
 
         def call(name, value):
             settings_file.save(vars(config), {name: value})

@@ -45,11 +45,23 @@ import io
 import os
 import re
 import tempfile
+import threading
 
 # Where the file lives, unless DCCORE_SETTINGS_FILE points somewhere else.
 # The environment variable exists for tests and for running two instances off
 # one checkout; ordinary installs never set it.
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.conf")
+
+# Guards save()'s read-modify-write cycle: it reads the existing file,
+# computes the edited text, then atomically replaces it - but two overlapping
+# calls would each read the same starting file and each write back a version
+# containing only their own change, silently losing whichever one lost the
+# race. Lives here rather than in each caller, same as db.py's own
+# _disk_lock: the invariant ("no two saves interleave") belongs to the
+# function doing the read-modify-write, not to whichever module happens to
+# call it first - a second caller (a setup-mode writer, an adminchat command)
+# should not have to know this lock exists to be safe.
+_save_lock = threading.Lock()
 
 # configparser insists on sections. The file is allowed to use them purely to
 # group things for a human reader - they are flattened away on read, so no
@@ -504,6 +516,13 @@ def save(namespace, changes, path=None, log=print):
     Returns a report dict. Raises SettingsWriteError, before touching the disk,
     if any value could not be written and read back unchanged - so a caller
     that catches it knows the file is exactly as it was.
+
+    The read-modify-write cycle below (read the existing file, compute the
+    edited text, verify it, write it back) is held under _save_lock for its
+    whole duration, not just the final write - two overlapping calls would
+    otherwise each read the same starting file and each write back a version
+    containing only their own change, silently losing whichever one lost the
+    race even though each individual write is atomic on its own.
     """
     path = path or settings_path()
     if not changes:
@@ -515,51 +534,53 @@ def save(namespace, changes, path=None, log=print):
     wanted = {name: text for name, (text, _value) in checked.items()}
     expected = {name: value for name, (_text, value) in checked.items()}
 
-    existing, ending = "", "\n"
-    if os.path.exists(path):
+    with _save_lock:
+        existing, ending = "", "\n"
+        if os.path.exists(path):
+            try:
+                with io.open(path, "rb") as handle:
+                    raw = handle.read().decode("utf-8")
+            except (OSError, UnicodeDecodeError) as err:
+                raise SettingsWriteError(
+                    f"could not read the existing {os.path.basename(path)} to edit "
+                    f"it: {err}") from None
+            # Read as bytes on purpose: text mode turns CRLF into LF on the
+            # way in, so writing back would quietly rewrite every line of a
+            # file somebody last edited in Notepad. Work in "\n" throughout
+            # and put the file's own ending back at the very end.
+            if "\r\n" in raw:
+                ending = "\r\n"
+            existing = raw.replace("\r\n", "\n")
+
+        text, edited, added = _rewrite(existing, wanted)
+
+        # Nothing is written on the strength of having got the edit right. Read
+        # the finished text back the way the daemon will, and check it says
+        # what was asked for - a duplicated key raises here, and so does a
+        # value that was written into a line that turned out not to mean what
+        # it looked like.
         try:
-            with io.open(path, "rb") as handle:
-                raw = handle.read().decode("utf-8")
-        except (OSError, UnicodeDecodeError) as err:
+            entries = parse(text)
+        except SettingsError as err:
             raise SettingsWriteError(
-                f"could not read the existing {os.path.basename(path)} to edit "
-                f"it: {err}") from None
-        # Read as bytes on purpose: text mode turns CRLF into LF on the
-        # way in, so writing back would quietly rewrite every line of a
-        # file somebody last edited in Notepad. Work in "\n" throughout
-        # and put the file's own ending back at the very end.
-        if "\r\n" in raw:
-            ending = "\r\n"
-        existing = raw.replace("\r\n", "\n")
+                f"the edited file would not be readable ({err}), so it was not "
+                f"written and {os.path.basename(path)} is unchanged.") from None
 
-    text, edited, added = _rewrite(existing, wanted)
+        for name, value in expected.items():
+            if name not in entries:
+                raise SettingsWriteError(
+                    f"{name} did not survive the edit, so nothing was written.")
+            try:
+                back = coerce(name, entries[name], namespace[name], types.get(name))
+            except ValueError as err:
+                raise SettingsWriteError(f"{name} would not read back: {err}") from None
+            if back != value:
+                raise SettingsWriteError(
+                    f"{name} would read back as {back!r} rather than {value!r}, "
+                    f"so nothing was written.")
 
-    # Nothing is written on the strength of having got the edit right. Read the
-    # finished text back the way the daemon will, and check it says what was
-    # asked for - a duplicated key raises here, and so does a value that was
-    # written into a line that turned out not to mean what it looked like.
-    try:
-        entries = parse(text)
-    except SettingsError as err:
-        raise SettingsWriteError(
-            f"the edited file would not be readable ({err}), so it was not "
-            f"written and {os.path.basename(path)} is unchanged.") from None
-
-    for name, value in expected.items():
-        if name not in entries:
-            raise SettingsWriteError(
-                f"{name} did not survive the edit, so nothing was written.")
-        try:
-            back = coerce(name, entries[name], namespace[name], types.get(name))
-        except ValueError as err:
-            raise SettingsWriteError(f"{name} would not read back: {err}") from None
-        if back != value:
-            raise SettingsWriteError(
-                f"{name} would read back as {back!r} rather than {value!r}, so "
-                f"nothing was written.")
-
-    _atomic_write(path, text if ending == "\n"
-                  else text.replace("\n", ending))
+        _atomic_write(path, text if ending == "\n"
+                      else text.replace("\n", ending))
 
     shadowed = shadowed_by_local_config(changes)
     name = os.path.basename(path)
