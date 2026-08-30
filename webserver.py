@@ -308,7 +308,25 @@ def build_stats_payload():
     for name in ("total", "today", "yesterday"):
         sent[name + "_text"] = stats_mgr.format_size_human(sent[name + "_bytes"])
 
+    # Counted together, reported apart. A 700 MB album and a 4 MB track are not
+    # comparable, so one merged table would rank by whichever kind this bot
+    # happens to send more of - a fact about the library, not about demand.
+    #
+    # albums_enabled is config.RAR_ENABLED (#140). With folder packing off no
+    # album can ever be sent, so the page says that instead of showing a table
+    # that would stay empty for ever with no explanation. Any counts from
+    # before it was switched off are still returned - they are history, and
+    # deciding they never happened would be the wrong kind of tidy.
+    top = {"files": [], "albums": [],
+           "albums_enabled": bool(getattr(config, "RAR_ENABLED", True))}
+    try:
+        top["files"] = db.top_downloads(limit=10, kind="file")
+        top["albums"] = db.top_downloads(limit=10, kind="album")
+    except Exception:
+        pass
+
     return {
+        "top": top,
         "transfer": {
             "speed_now": speed_now,
             "speed_now_text": stats_mgr.format_speed(speed_now),
@@ -850,6 +868,7 @@ SETTINGS_CATEGORIES = (
                                                 "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
+                                                "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE"]),
     ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN"]),
@@ -903,6 +922,7 @@ SETTINGS_LABELS = {
     "STATS_FILE": "Stats file",
     "HARD_BANS_FILE": "Hard bans file",
     "KNOWN_BOTS_FILE": "Known bots file",
+    "DOWNLOAD_COUNTS_FILE": "Download counts file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "LIST_SIZE_FILE": "List size file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
