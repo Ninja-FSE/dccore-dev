@@ -2153,17 +2153,26 @@ class SettingsPayloadTests(DCCoreTestCase):
         _save_settings_and_rehash() must catch that too, or it propagates out
         of the Flask route as an unhandled 500 with a non-JSON body - which
         the frontend's postJson() cannot parse, since it calls res.json()
-        unconditionally on the response."""
-        unwritable_dir = os.path.join(self.make_tree().root, "readonly")
-        os.makedirs(unwritable_dir)
-        os.chmod(unwritable_dir, 0o555)
-        self.addCleanup(lambda: os.path.isdir(unwritable_dir) and os.chmod(unwritable_dir, 0o755))
-        os.environ["DCCORE_SETTINGS_FILE"] = os.path.join(unwritable_dir, "settings.conf")
+        unconditionally on the response.
 
-        try:
-            status, result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
-        finally:
-            os.chmod(unwritable_dir, 0o755)  # restore before tearDown's tree cleanup runs
+        Faked with a monkeypatch rather than a chmod'd directory: POSIX file
+        permission bits are not what actually gates writability on Windows
+        (NTFS ACLs are a different mechanism entirely), so a real "make this
+        directory read-only" fixture is not portable to the Windows leg of
+        CI - this bit exactly that way the first time it was tried. Raising
+        directly from _atomic_write() exercises the same except clause
+        deterministically on every platform.
+        """
+        import settings_file
+        real_atomic_write = settings_file._atomic_write
+
+        def _raise(*_a, **_k):
+            raise OSError("simulated: settings directory is not writable")
+
+        settings_file._atomic_write = _raise
+        self.addCleanup(setattr, settings_file, "_atomic_write", real_atomic_write)
+
+        status, result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
 
         self.assertEqual(status, 400)
         self.assertIn("error", result)
@@ -2268,17 +2277,21 @@ class SettingsHttpRouteTests(DCCoreTestCase):
         settings_directory_returns_a_clean_error_not_a_crash: through the
         real Flask route, an unwritable settings directory must come back
         as a JSON 400, not an unhandled 500 whose body isn't JSON at all
-        (which is what the frontend's postJson() would choke on)."""
-        unwritable_dir = os.path.join(self.make_tree().root, "readonly")
-        os.makedirs(unwritable_dir)
-        os.chmod(unwritable_dir, 0o555)
-        self.addCleanup(lambda: os.path.isdir(unwritable_dir) and os.chmod(unwritable_dir, 0o755))
-        os.environ["DCCORE_SETTINGS_FILE"] = os.path.join(unwritable_dir, "settings.conf")
+        (which is what the frontend's postJson() would choke on).
 
-        try:
-            resp = self.client.post("/api/settings", json={"MAX_DCC_SLOTS": "9"})
-        finally:
-            os.chmod(unwritable_dir, 0o755)  # restore before tearDown's tree cleanup runs
+        Faked with a monkeypatch rather than a chmod'd directory - see the
+        pure-logic version of this test for why a real read-only directory
+        does not port to Windows CI."""
+        import settings_file
+        real_atomic_write = settings_file._atomic_write
+
+        def _raise(*_a, **_k):
+            raise OSError("simulated: settings directory is not writable")
+
+        settings_file._atomic_write = _raise
+        self.addCleanup(setattr, settings_file, "_atomic_write", real_atomic_write)
+
+        resp = self.client.post("/api/settings", json={"MAX_DCC_SLOTS": "9"})
 
         self.assertEqual(resp.status_code, 400)
         body = resp.get_json()
