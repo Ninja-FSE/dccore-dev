@@ -205,7 +205,26 @@ def check_user_status(user, hostmask=None):
 
                     # BREADTH GUARD: a pattern made only of stars would lock out
                     # the whole channel. Skip it and say so loudly in the log.
-                    if not pattern.replace("*", ""):
+                    # Strips the MASK SEPARATORS as well as the stars, and
+                    # that is not pedantry - it is the difference between
+                    # this guard working and not.
+                    #
+                    # The check was "is anything left after removing '*'",
+                    # which is correct where it was first written:
+                    # adminchat.is_admin_host() matches a HOST pattern, and a
+                    # host contains no "!" or "@", so "*" is the only way to
+                    # spell "everything".
+                    #
+                    # Here a pattern can be a full hostmask, and #168 made
+                    # those actually match for the first time. "*!*@*" leaves
+                    # the residue "!@" - truthy, so it sailed through and
+                    # banned every user on the network. So did "*!*", "*@*"
+                    # and "*!*@*.*". Before #168 they were harmless only
+                    # because hostmask patterns matched nothing at all.
+                    residue = pattern
+                    for separator in "*!@.":
+                        residue = residue.replace(separator, "")
+                    if not residue:
                         print(f"[SECURITY WARNING] Ignored an over-broad pattern in {hard_file}: {pattern!r}")
                         continue
 

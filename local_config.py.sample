@@ -99,5 +99,5 @@ WEBUI_ENABLED = True
 #   stop someone who shares the network segment from reading the password
 #   or the session cookie off the wire - there is no TLS here. DO NOT put
 #   this host on any network you do not trust.
-WEBUI_HOST = "0.0.0.0"
+WEBUI_HOST = "127.0.0.1"
 WEBUI_PORT = 8420
