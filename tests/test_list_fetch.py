@@ -209,6 +209,47 @@ class SafeExtractionTests(DCCoreTestCase):
         self.assertNotIn("bigbot", config.fetched_bot_lists)
         self.assertFalse(os.path.exists(list_fetch.list_extract_dir("bigbot")))
 
+    def test_an_oversized_zip_on_disk_is_rejected_before_it_is_opened(self):
+        """#162 finding #10, belt-to-braces half: MAX_LIST_ZIP_ENTRIES and the
+        declared-size guard both run on zf.infolist(), which zipfile.ZipFile()
+        has ALREADY eagerly parsed (one ZipInfo per entry, before anything can
+        refuse it) by the time either can act - the cost they exist to
+        prevent is paid before they can prevent it. dcc_fetch.py's own
+        MAX_FETCH_LIST_FILE_SIZE admission cap is what actually stops an
+        oversized zip from ever reaching disk; this checks the belt this
+        module keeps for itself regardless - a stat() on the file already
+        sitting on disk, before opening it at all."""
+        self.set_config(MAX_FETCH_LIST_FILE_SIZE=100)
+        big_txt = _list_txt() + ("!OtherBot Filler.flac  ::INFO:: 1.0MB\n" * 50)
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", big_txt)])
+        self.assertGreater(os.path.getsize(self.zip_path), 100)
+
+        real_zipfile_open = __import__("zipfile").ZipFile
+
+        def fail_if_opened(*a, **kw):
+            self.fail("an oversized zip must be rejected before ZipFile() ever opens it")
+
+        import zipfile as zipfile_module
+        zipfile_module.ZipFile = fail_if_opened
+        self.addCleanup(setattr, zipfile_module, "ZipFile", real_zipfile_open)
+
+        ok, reason = list_fetch.process_fetched_list_zip("bigbot", self.zip_path)
+
+        self.assertFalse(ok)
+        self.assertIn("MAX_FETCH_LIST_FILE_SIZE", reason)
+        self.assertNotIn("bigbot", config.fetched_bot_lists)
+        self.assertFalse(os.path.exists(list_fetch.list_extract_dir("bigbot")))
+
+    def test_a_zip_within_the_size_cap_is_not_rejected_by_it(self):
+        """Control: a genuinely small list zip must not be caught by the new
+        pre-open check just because it exists."""
+        self.set_config(MAX_FETCH_LIST_FILE_SIZE=1_000_000)
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt())])
+
+        ok, reason = list_fetch.process_fetched_list_zip("smallbot", self.zip_path)
+
+        self.assertTrue(ok, reason)
+
     def test_too_many_entries_is_rejected(self):
         members = [(f"file{i}.txt", "x") for i in range(list_fetch.MAX_LIST_ZIP_ENTRIES + 1)]
         _write_zip(self.zip_path, members)

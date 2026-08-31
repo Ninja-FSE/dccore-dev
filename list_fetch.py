@@ -317,6 +317,26 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
     except OSError as err:
         return None, f"could not prepare the extraction directory: {err}"
 
+    # #162 finding #10: the entry-count/size guards below all run on
+    # zf.infolist(), which zipfile.ZipFile() has ALREADY eagerly built (one
+    # ZipInfo per entry, plus a NameToInfo dict) by the time this code can see
+    # it - the cost those guards exist to prevent is paid before they can
+    # refuse anything. dcc_fetch.handle_incoming_offer() now refuses an
+    # oversized "list" offer before ever connecting (MAX_FETCH_LIST_FILE_SIZE),
+    # which is what actually prevents this; this is the belt to that braces -
+    # a cheap check on the file already sitting on disk, before opening it,
+    # in case that admission-time cap is ever bypassed or misconfigured.
+    try:
+        on_disk_size = os.path.getsize(platform_compat.long_path(zip_path))
+    except OSError as err:
+        return None, f"could not stat the fetched zip: {err}"
+    list_zip_cap = int(getattr(config, "MAX_FETCH_LIST_FILE_SIZE", 10 * 1024 * 1024))
+    if on_disk_size > list_zip_cap:
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        return None, (f"fetched zip is {on_disk_size} bytes, more than "
+                       f"MAX_FETCH_LIST_FILE_SIZE ({list_zip_cap}) - refusing "
+                       f"to open it")
+
     try:
         with zipfile.ZipFile(platform_compat.long_path(zip_path), "r") as zf:
             infolist = zf.infolist()

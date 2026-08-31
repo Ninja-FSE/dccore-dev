@@ -688,6 +688,58 @@ class RestorePreservedRuntimeTests(unittest.TestCase):
         self.assertEqual(commands.restore_preserved_runtime(cfg, {}), set())
 
 
+class ReattachDebugSinksTests(unittest.TestCase):
+    """#162 finding #14: importlib.reload(announce) re-executes
+    `_debug_sinks = []`, and unlike an explicit remove_debug_sink() call the
+    promoted console session is never told - it keeps accepting commands
+    but silently stops hearing back from any of them. Tests the extracted
+    pure function against a throwaway stand-in module rather than the real
+    announce module, for the same reload-safety reason
+    RehashNickChangeGoesLive below does not call handle_rehash_request()
+    directly."""
+
+    class FakeAnnounce:
+        def __init__(self, sinks=None):
+            import threading
+            self._debug_sinks = list(sinks) if sinks else []
+            self._debug_sinks_lock = threading.Lock()
+
+    def test_a_live_sink_is_reattached(self):
+        fake = self.FakeAnnounce()
+        sink = lambda msg: None
+
+        reattached = commands.reattach_debug_sinks(fake, [sink])
+
+        self.assertEqual(reattached, [sink])
+        self.assertIn(sink, fake._debug_sinks)
+
+    def test_no_live_sinks_reattaches_nothing(self):
+        fake = self.FakeAnnounce()
+
+        self.assertEqual(commands.reattach_debug_sinks(fake, []), [])
+        self.assertEqual(fake._debug_sinks, [])
+
+    def test_a_sink_already_present_is_not_duplicated(self):
+        """Defensive: a reload always resets the list to [] today, but the
+        function must not double-add if that ever stopped being true."""
+        sink = lambda msg: None
+        fake = self.FakeAnnounce(sinks=[sink])
+
+        reattached = commands.reattach_debug_sinks(fake, [sink])
+
+        self.assertEqual(reattached, [])
+        self.assertEqual(fake._debug_sinks, [sink])
+
+    def test_multiple_consoles_are_all_reattached(self):
+        fake = self.FakeAnnounce()
+        sink_a, sink_b = (lambda msg: None), (lambda msg: None)
+
+        reattached = commands.reattach_debug_sinks(fake, [sink_a, sink_b])
+
+        self.assertEqual(reattached, [sink_a, sink_b])
+        self.assertEqual(fake._debug_sinks, [sink_a, sink_b])
+
+
 class RehashNickChangeGoesLive(unittest.TestCase):
     """A NICKNAME edit picked up by a rehash used to only re-baseline internal
     bookkeeping and defer the actual rename to whatever reconnect happened to
@@ -758,3 +810,106 @@ class SubprocessFailureMessageTests(unittest.TestCase):
         stdout = "[LIST-GEN ERROR] Failed: disk full\n\n\n"
         msg = commands.subprocess_failure_message("", stdout)
         self.assertEqual(msg, "[LIST-GEN ERROR] Failed: disk full")
+
+
+class _SyncThread:
+    """Stand-in for threading.Thread that runs its target immediately,
+    synchronously, on the calling thread - so a test can observe what the
+    background function did without a race against a real thread."""
+
+    def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def start(self):
+        if self._target:
+            self._target(*self._args, **self._kwargs)
+
+
+class ListUpdateTimeoutTests(DCCoreTestCase):
+    """#162 finding #17: subprocess.run(..., timeout=None) waited forever
+    for update_list.py, while config.search_inprogress / update_inprogress
+    stayed set the whole time - and the except subprocess.TimeoutExpired
+    handler beside it was dead code, unreachable with timeout=None and
+    naming a 90-second limit that appeared nowhere else in the repo.
+
+    threading.Thread is patched to _SyncThread so async_list_updater() runs
+    synchronously and its effects on config are observable without a real
+    background thread or a real update_list.py subprocess."""
+
+    def setUp(self):
+        super().setUp()
+        self.debug = silence_debug(announce)
+        import threading
+        real_thread_cls = threading.Thread
+        threading.Thread = _SyncThread
+        self.addCleanup(setattr, threading, "Thread", real_thread_cls)
+        # async_list_updater() sleeps 2.0s on the success path for NFS/disk
+        # sync - real for the daemon, pure cost here since _SyncThread makes
+        # it run inline on the test thread.
+        import time
+        real_sleep = time.sleep
+        time.sleep = lambda *_a, **_k: None
+        self.addCleanup(setattr, time, "sleep", real_sleep)
+
+    def test_the_subprocess_is_given_the_configured_timeout_not_none(self):
+        import subprocess
+        seen_kwargs = {}
+        real_run = subprocess.run
+
+        def fake_run(cmd, **kwargs):
+            seen_kwargs.update(kwargs)
+            import types
+            return types.SimpleNamespace(returncode=0, stdout="List of 1 Files\n", stderr="")
+
+        subprocess.run = fake_run
+        self.addCleanup(setattr, subprocess, "run", real_run)
+
+        commands.handle_list_update_request("admin", "#chan", authorised=True)
+
+        self.assertEqual(seen_kwargs.get("timeout"), config.LIST_UPDATE_TIMEOUT)
+        self.assertIsNotNone(seen_kwargs.get("timeout"),
+                             "a hung update_list.py must not be able to wedge "
+                             "search_inprogress/update_inprogress forever")
+
+    def test_a_real_timeout_reports_the_configured_limit_not_a_stale_90(self):
+        """The dead handler used to claim '90 seconds' unconditionally,
+        regardless of what timeout was actually (not) applied."""
+        import subprocess
+
+        def fake_run(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+        real_run = subprocess.run
+        subprocess.run = fake_run
+        self.addCleanup(setattr, subprocess, "run", real_run)
+
+        commands.handle_list_update_request("admin", "#chan", authorised=True)
+
+        messages = [msg for _cat, msg in self.debug]
+        self.assertTrue(
+            any(str(config.LIST_UPDATE_TIMEOUT) in msg and "timed out" in msg
+                for msg in messages),
+            f"no timeout message named the real {config.LIST_UPDATE_TIMEOUT}s limit: {messages}")
+        self.assertFalse(any("90 seconds" in msg for msg in messages),
+                         "the stale hardcoded 90-second claim must be gone")
+        # finally: block must still clear both flags even on a timeout
+        self.assertFalse(config.search_inprogress)
+        self.assertFalse(config.update_inprogress)
+
+    def test_a_second_update_is_refused_while_one_is_running_even_with_pause_off(self):
+        """#162 finding #17's re-entrancy half: with PAUSE_ON_UPDATE=False the
+        search_inprogress guard never runs at all, so this used to be the ONE
+        config that let !update stack concurrent subprocesses - three in a
+        row all writing the same .new temp paths. update_inprogress is set
+        unconditionally regardless of PAUSE_ON_UPDATE, so it must gate here
+        too."""
+        self.set_config(PAUSE_ON_UPDATE=False, update_inprogress=True)
+
+        commands.handle_list_update_request("admin", "#chan", authorised=True)
+
+        messages = [msg for _cat, msg in self.debug]
+        self.assertTrue(any("already running" in msg for msg in messages), messages)
+        # Nothing was (re)started - the flag this test seeded is untouched.
+        self.assertTrue(config.update_inprogress)

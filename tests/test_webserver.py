@@ -481,6 +481,37 @@ class BroadcastSearchTests(DCCoreTestCase):
         payload = webserver.build_broadcast_status_payload()
         self.assertFalse(payload["listening"])
 
+    def test_an_oversized_term_is_rejected_not_queued(self):
+        """#162 finding #13: reject_if_unsafe_for_irc_line() checked bytes
+        only, never length - a 5000-char search term used to queue a
+        5029-byte outbound line with no cap anywhere. Now rejected at the
+        boundary, before anything is queued."""
+        huge_term = "x" * (webserver.IRC_LINE_FIELD_MAX_LEN + 1)
+        status, result = webserver.start_broadcast_search(huge_term)
+        self.assertEqual(status, 400)
+        self.assertIn("error", result)
+        self.assertFalse(config.broadcast_search_inprogress)
+        self.assertEqual(self.oserve.queued, [])
+
+    def test_a_term_at_exactly_the_cap_is_not_rejected_by_it(self):
+        term = "x" * webserver.IRC_LINE_FIELD_MAX_LEN
+        status, _result = webserver.start_broadcast_search(term)
+        self.assertEqual(status, 200)
+
+    def test_the_queued_line_never_exceeds_the_real_wire_budget(self):
+        """Belt-and-braces half: even a term right at IRC_LINE_FIELD_MAX_LEN
+        (300 chars) must still produce a line fit_irc_line() would consider
+        safe - proving the emit site does not simply trust the boundary cap
+        blindly. Uses non-ASCII so byte length (what actually matters on the
+        wire) is exercised, not just character count."""
+        import announce
+        term = "å" * webserver.IRC_LINE_FIELD_MAX_LEN  # 2 bytes each in UTF-8
+        webserver.start_broadcast_search(term)
+        self.assertEqual(len(self.oserve.queued), 1)
+        _key, sent_msg, _is_vip = self.oserve.queued[0]
+        self.assertLessEqual(len(sent_msg.encode("utf-8")), announce.IRC_LINE_BUDGET,
+                             "fit_irc_line() measures the full line, \\r\\n included")
+
 
 class FetchRoutesTests(DCCoreTestCase):
     """build_fetch_enqueue_result()/build_fetch_status_payload() - the pure
@@ -577,6 +608,28 @@ class FetchRoutesTests(DCCoreTestCase):
         status, result = webserver.build_fetch_enqueue_result({
             "bot": "goodbot",
             "filename": "Song\x01.mp3",
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(result["created"], [])
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_an_oversized_filename_is_rejected_not_queued(self):
+        """#162 finding #13: no route capped filename's length - a 3000-char
+        filename used to dispatch a 3032-byte PRIVMSG and leave its own row
+        stuck at 'offered' until timeout with no indication why. Now
+        rejected at the enqueue boundary."""
+        status, result = webserver.build_fetch_enqueue_result({
+            "bot": "goodbot",
+            "filename": "x" * (webserver.IRC_LINE_FIELD_MAX_LEN + 1),
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(result["created"], [])
+        self.assertEqual(config.fetch_queue, {})
+
+    def test_an_oversized_bot_is_rejected_not_queued(self):
+        status, result = webserver.build_fetch_enqueue_result({
+            "bot": "x" * (webserver.IRC_LINE_FIELD_MAX_LEN + 1),
+            "filename": "Song.flac",
         })
         self.assertEqual(status, 400)
         self.assertEqual(result["created"], [])

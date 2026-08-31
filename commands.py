@@ -351,6 +351,33 @@ def rehash_nick_change_line(old_baseline_nick, new_nickname):
     return None
 
 
+def reattach_debug_sinks(announce_module, live_sinks):
+    """Re-add every debug sink that was live right before a rehash's
+    importlib.reload(announce) reset announce._debug_sinks to []. Returns
+    the sinks actually appended (skipping any reload already re-added,
+    which cannot happen today but costs nothing to guard).
+
+    Pulled out of handle_rehash_request() for the same reason
+    rehash_nick_change_line() and restore_preserved_runtime() above were:
+    unit-testable without the real reload the rest of that function does.
+
+    A sink is a promoted admin console session's send_debug-bound method -
+    the ONLY channel _cmd_ban/_cmd_rehash/_cmd_update etc. report their
+    result through (adminchat.py's Session.close() is what normally calls
+    remove_debug_sink(); a rehash must not be indistinguishable from that).
+    Losing it silently left an authenticated operator's console accepting
+    further commands while never hearing back from any of them again,
+    including this very rehash's own "Rehash completed!" line.
+    """
+    reattached = []
+    with announce_module._debug_sinks_lock:
+        for sink in live_sinks:
+            if sink not in announce_module._debug_sinks:
+                announce_module._debug_sinks.append(sink)
+                reattached.append(sink)
+    return reattached
+
+
 def restore_preserved_runtime(cfg, preserved_runtime):
     """Merge `preserved_runtime` (captured from `cfg` right before a reload)
     back into `cfg`'s current attributes - MUTATING each container in
@@ -487,6 +514,14 @@ def handle_rehash_request(user, target_chan, authorised=False):
     # until the next reconnect - so !rehash silently stopped all channel advertising.
     live_worker_id = getattr(announce, 'current_worker_id', None)
 
+    # announce._debug_sinks is how a promoted admin console session receives every command's
+    # result (send_debug is its ONLY channel - see _cmd_ban/_cmd_rehash/_cmd_update). Reload
+    # resets it to [], and unlike an explicit remove_debug_sink() call, the session is never
+    # told: it keeps accepting commands, just silently stops hearing back from any of them,
+    # including this very rehash's own "Rehash completed!" line.
+    with announce._debug_sinks_lock:
+        live_debug_sinks = list(announce._debug_sinks)
+
     try:
         # 2. REHASH: reload every core module live, in memory
         modules_to_reload = ['config', 'list', 'dcc', 'announce', 'security', 'db', 'stats_mgr']
@@ -577,7 +612,13 @@ def handle_rehash_request(user, target_chan, authorised=False):
             print("[REHASH RAM] Advert worker kept alive across the reload.")
             print("[REHASH NOTE] announce_worker's own code is NOT re-entered by a rehash; "
                   "restart the daemon to pick up changes to the advert loop itself.")
-        
+
+        # Reinstate every console session's debug sink - see reattach_debug_sinks()'s
+        # docstring for why this is not optional.
+        _reattached_sinks = reattach_debug_sinks(_ann, live_debug_sinks)
+        if _reattached_sinks:
+            print(f"[REHASH RAM] Reattached {len(_reattached_sinks)} admin console debug sink(s).")
+
         # Read the freshly reloaded config
         import config
         import announce
@@ -840,6 +881,16 @@ def handle_list_update_request(user, target_chan, authorised=False):
         print(f"[SECURITY] Unauthorised user {user} tried to run !update.")
         return
 
+    # #162 finding #17: this used to be the ONLY re-entrancy guard, and it lived
+    # inside the PAUSE_ON_UPDATE branch below - with PAUSE_ON_UPDATE=False there was
+    # no guard at all, and three consecutive !update calls launched three concurrent
+    # subprocesses all writing the same .new temp paths. config.update_inprogress is
+    # set unconditionally a few lines down and cleared only in async_list_updater's
+    # finally, regardless of PAUSE_ON_UPDATE, so it is the right flag to gate on here.
+    if getattr(config, 'update_inprogress', False) is True:
+        announce.send_debug(f"List update request from {user} denied: An update is already running.", category="INFO")
+        return
+
     # The global maintenance lock is only taken if the switch is True in config
     if getattr(config, 'PAUSE_ON_UPDATE', True) is True:
         if getattr(config, 'search_inprogress', False) is True:
@@ -894,8 +945,14 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
                 return
                 
-            # 2. Threaded run, waiting for the process without a blind time limit
-            process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=None)
+            # 2. Threaded run, bounded by LIST_UPDATE_TIMEOUT (default 1800s, shaped
+            # like dcc.py's RAR_TIMEOUT) rather than waiting forever. A full NFS walk
+            # legitimately takes minutes, so this is generous rather than tight - the
+            # point is only that a hung mount cannot wedge config.search_inprogress /
+            # config.update_inprogress permanently. subprocess.run() kills the child
+            # itself when the timeout fires.
+            list_update_timeout = getattr(config, 'LIST_UPDATE_TIMEOUT', 1800)
+            process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=list_update_timeout)
             
             if process.returncode == 0:
                 # ---------------------------------------------------------------------
@@ -926,7 +983,9 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
                 
         except subprocess.TimeoutExpired:
-            announce.send_debug("List update FAILED: Script execution timed out after 90 seconds.", category="INFO")
+            announce.send_debug(
+                f"List update FAILED: Script execution timed out after {list_update_timeout} seconds.",
+                category="INFO")
         except Exception as e:
             print(f"[UPDATE ERROR] The list update could not be run: {e}")
             announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")

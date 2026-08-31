@@ -152,7 +152,21 @@ def parse_pagination_params(raw_offset, raw_limit):
     return offset, limit
 
 
-def reject_if_unsafe_for_irc_line(value, field_name):
+# #162 finding #13: reject_if_unsafe_for_irc_line() checked bytes only, never
+# length - no route added its own cap either (start_broadcast_search enforces a
+# MINIMUM term length and no maximum; the fetch-enqueue builders capped neither
+# bot, filename nor folder). Every one of these values is eventually
+# interpolated into a single raw outbound IRC line, and announce.IRC_LINE_BUDGET
+# (420 bytes, the whole line) already exists as the real ceiling - a 5000-char
+# search term queued a 5029-byte line; a 3000-char filename dispatched a
+# 3032-byte PRIVMSG and left its own row stuck at "offered" until timeout with
+# no indication why. Generous relative to any real value (a real IRC nick, file
+# list entry or search phrase), and comfortably below IRC_LINE_BUDGET even
+# before whatever fixed template text surrounds it at the actual emit site.
+IRC_LINE_FIELD_MAX_LEN = 300
+
+
+def reject_if_unsafe_for_irc_line(value, field_name, max_len=IRC_LINE_FIELD_MAX_LEN):
     """Return an error string if `value` is not safe to interpolate into an
     outbound raw IRC line, or None if it is safe.
 
@@ -168,6 +182,13 @@ def reject_if_unsafe_for_irc_line(value, field_name):
     CTCP wrapper early, past whatever single line/CTCP the route intended to
     send. All are rejected here, at the boundary, before the value goes
     anywhere near an outbound message.
+
+    Also rejects a value longer than `max_len` - see IRC_LINE_FIELD_MAX_LEN's
+    own comment for why an unbounded field is its own, separate bug: with no
+    cap, a value long enough could make the actual emit site build a raw line
+    that overflows the wire (the server truncates it, silently corrupting
+    whatever trailing colour-reset code was there) or simply queue a request
+    that can never succeed.
 
     The actual byte check is dcc_fetch.contains_unsafe_ctcp_bytes() - THE
     single canonical definition of "which bytes are unsafe for an outbound
@@ -185,6 +206,8 @@ def reject_if_unsafe_for_irc_line(value, field_name):
     """
     if not isinstance(value, str):
         return f"'{field_name}' must be a string."
+    if len(value) > max_len:
+        return f"'{field_name}' must be at most {max_len} characters."
     import dcc_fetch
     if dcc_fetch.contains_unsafe_ctcp_bytes(value):
         return f"'{field_name}' must not contain line breaks or control characters."
@@ -781,7 +804,15 @@ def start_broadcast_search(term):
     config.broadcast_search_results.clear()
     config.last_broadcast_search_at = now
 
-    oserve.queue_message(channel, f"PRIVMSG {channel} :@find {clean_term}\r\n")
+    # reject_if_unsafe_for_irc_line() above already caps clean_term's length
+    # (IRC_LINE_FIELD_MAX_LEN), so this is belt-and-braces: fit_irc_line()
+    # shrinks against the real wire budget (announce.IRC_LINE_BUDGET) rather
+    # than trusting that the boundary cap alone guarantees the built line
+    # fits, the same defense-in-depth posture dcc_fetch.py's own dispatch
+    # loop takes for the enqueue-time bot/filename check (#162 finding #13).
+    import announce
+    line = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :@find {v}\r\n", clean_term)
+    oserve.queue_message(channel, line)
 
     def _close_window(expected_deadline=deadline):
         # Runs on its own daemon thread so the request thread returns
@@ -999,7 +1030,8 @@ SETTINGS_CATEGORIES = (
                                                 "DCC_PORT_START", "DCC_PORT_END", "MAX_FETCH_SLOTS",
                                                 "MAX_FETCH_FILE_SIZE", "FETCH_TRANSFER_TIMEOUT",
                                                 "FETCH_OFFER_TIMEOUT", "FETCH_FOLDER_OFFER_TIMEOUT",
-                                                "MAX_FETCH_FOLDER_FILE_SIZE"]),
+                                                "MAX_FETCH_FOLDER_FILE_SIZE", "MAX_FETCH_LIST_FILE_SIZE",
+                                                "FETCH_FOLDER_TRANSFER_TIMEOUT"]),
     ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
                                                 "LIST_FORMAT", "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
@@ -1009,7 +1041,7 @@ SETTINGS_CATEGORIES = (
     ("advertising",   "Advertising & search",  ["THEME", "ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN"]),
     ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME",
-                                                "MAX_SEND_FAILS", "RAR_TIMEOUT"]),
+                                                "MAX_SEND_FAILS", "RAR_TIMEOUT", "LIST_UPDATE_TIMEOUT"]),
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"]),
@@ -1047,6 +1079,8 @@ SETTINGS_LABELS = {
     "FETCH_OFFER_TIMEOUT": "Fetch offer timeout (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT": "Folder (.rar) fetch offer timeout (seconds)",
     "MAX_FETCH_FOLDER_FILE_SIZE": "Max folder (.rar) fetch size (bytes)",
+    "MAX_FETCH_LIST_FILE_SIZE": "Max fetched master-list zip size (bytes)",
+    "FETCH_FOLDER_TRANSFER_TIMEOUT": "Folder (.rar) fetch transfer timeout (seconds)",
 
     "LIST_BASE_NAME": "List base name",
     "PAUSE_ON_UPDATE": "Pause sharing during !update",
@@ -1077,6 +1111,7 @@ SETTINGS_LABELS = {
     "MUTE_TIME": "Mute duration (seconds)",
     "MAX_SEND_FAILS": "Max send failures",
     "RAR_TIMEOUT": "RAR pack timeout (seconds)",
+    "LIST_UPDATE_TIMEOUT": "List update timeout (seconds)",
 
     "ADMIN_HOSTMASKS": "Admin hostmasks",
     "ADMIN_CHAT_MODE": "DCC chat connection mode",

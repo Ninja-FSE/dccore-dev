@@ -554,6 +554,26 @@ class TestStatsAndBansRoundTrip(PersistenceTestCase):
         with open(self.bans_file, "r") as handle:
             self.assertEqual(handle.read(), "")
 
+    def test_a_malformed_line_only_costs_itself(self):
+        """#162 finding #12: the whole per-line loop used to be inside one
+        try/except, so one bad expiry timestamp aborted the load with
+        earlier entries already committed - a silent partial load that the
+        very next save() would then persist as the permanent truncated
+        state, with no command anywhere able to restore what was skipped.
+        Matches the posture _read_hard_bans_unlocked already has: skip the
+        bad line, keep every other one."""
+        with open(self.bans_file, "w") as handle:
+            handle.write("good1!*@* 1111.0\n")
+            handle.write("# a stray comment line, no space-split possible\n")
+            handle.write("badexpiry!*@* not-a-float\n")
+            handle.write("good2!*@* 2222.0\n")
+
+        db.load_bans_from_file()
+
+        self.assertEqual(sorted(config.banned_users), ["good1!*@*", "good2!*@*"])
+        self.assertAlmostEqual(config.banned_users["good1!*@*"], 1111.0, places=6)
+        self.assertAlmostEqual(config.banned_users["good2!*@*"], 2222.0, places=6)
+
     def test_speed_record_round_trip(self):
         """save_speed_record() writes atomically to the shared module constant - both
         halves of the pair must agree on the path - and leaves no residue."""
