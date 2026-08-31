@@ -33,6 +33,6 @@ GOLDEN = {
         'PRIVMSG dave :\x0304,05 \x0310,10 \x0301,00 Search Result: \x02\x0303ON\x02 \x0310,10 \x0304,05 \x0301,00 Found: \x02\x03043\x02 Match(es) For \x02\x0303metallica\x02 \x0310,10 \x0304,05 \x0301,00 Sending: \x02\x03043\x02 \x0310,10 \x0304,05 \x0301,00 Slots: \x02\x03035/5\x02 Free \x0310,10 \x0304,05 \x0301,00 Queued: \x02\x03030\x02 \x0310,10 \x0304,05 \r\n',
     ],
     'send_transfer_complete': [
-        'PRIVMSG #mp3passion :\x0304,05 \x0310,10 \x0301,00 \x02\x0303Sent\x02\x0301,00: \x02Enter Sandman.flac\x02 \x0310,10 \x0304,05 \x0301,00 To: \x02\x0303dave\x02 \x0310,10 \x0304,05 \x0301,00 Total Sent: \x02\x0303100 Files (200.0B)\x02 \x0310,10 \x0304,05 \x0301,00 Yesterday: \x02\x03043 Files\x02 \x0310,10 \x0304,05 \x0301,00 Today: \x02\x03045 Files\x02 \x0312[as of 10:13 pm] \x0310,10 \x0304,05 \x0301,00 Speed: \x02\x0303500.0k/s\x02 \x0310,10 \x0304,05 \r\n',
+        'PRIVMSG #mp3passion :\x0304,05 \x0310,10 \x0301,00 \x02\x0303Sent\x02\x0301,00: \x02Enter Sandman.flac\x02 \x0310,10 \x0304,05 \x0301,00 To: \x02\x0303dave\x02 \x0310,10 \x0304,05 \x0301,00 Total Sent: \x02\x0303100 Files (200.0B)\x02 \x0310,10 \x0304,05 \x0301,00 Yesterday: \x02\x03040 Files\x02 \x0310,10 \x0304,05 \x0301,00 Today: \x02\x03040 Files\x02 \x0312[as of 10:13 pm] \x0310,10 \x0304,05 \x0301,00 Speed: \x02\x0303500.0k/s\x02 \x0310,10 \x0304,05 \r\n',
     ],
 }
