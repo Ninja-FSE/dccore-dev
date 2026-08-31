@@ -1,6 +1,7 @@
 # update_list.py - OmenServe-style layout, generating both lists (part 1 of 2)
 import os
 import io
+import re
 import sys
 import shutil
 import datetime
@@ -10,6 +11,14 @@ import zipfile
 import time
 import config
 import platform_compat
+
+# Multi-disc/box-set container names the !rar album list truncates at - see
+# generate_master_list()'s own comment on the box-word block for why this
+# has to match a whole PATH SEGMENT, not a substring anywhere in the path.
+# An optional trailing number covers "CD1", "Disc 2", "Volume III" (digits
+# only - "III" survives as part of the folder name, same as before this fix).
+_BOX_WORD_RE = re.compile(
+    r'^(cd|disc|disk|volume|digital media|media)\s*\d*$', re.IGNORECASE)
 
 def format_size_human(bytes_size):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -40,8 +49,18 @@ def _one_line(text):
     this is robustness rather than a security boundary. Replacing with a space
     keeps the entry visible and the file structurally sound; such a track is
     already unrequestable, because the request parser splits on whitespace too.
+
+    Also sanitises non-UTF-8 bytes. os.walk() on POSIX decodes filenames with
+    the "surrogateescape" error handler by default, so a name with bytes that
+    are not valid UTF-8 (a CP1252 rip, a bad extraction, a FAT copy) comes back
+    as a lone surrogate codepoint - not itself a control character, but not
+    valid UTF-8 either, and this text is about to be written with a strict
+    UTF-8 encoder. Sanitised here rather than left to fail at the write: one
+    bad name in a library of thousands now costs a mangled-but-valid name in
+    the list, not the entire rebuild.
     """
-    return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in str(text))
+    text = str(text).encode("utf-8", "replace").decode("utf-8")
+    return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in text)
 
 
 def _discard_temp_lists(*paths):
@@ -270,11 +289,36 @@ def generate_master_list():
     tmp_all_paths = tmp_index_paths + tmp_artifact_paths
 
     print(f"[LIST-GEN] Scanning the library in {config.FILE_DIRECTORY}...")
-    
+
     all_files_data = []
     total_bytes = 0
 
-    for root, dirs, files in os.walk(config.FILE_DIRECTORY):
+    # long_path()-wrapped so a deeply-nested path (a real hazard in a music
+    # library: "Artist\Album Name (Year)\CD2\12 - A Long Classical Track
+    # Title.flac" nests past Windows' 260-char MAX_PATH without trying)
+    # does not just vanish from the scan the way the per-file getsize() a
+    # few lines down was already protected against. The SAME wrapped value
+    # is used as os.path.relpath()'s base below - wrapping only the walk
+    # root and comparing it against the unwrapped config.FILE_DIRECTORY
+    # would be worse than not wrapping at all: mixing a "\\?\"-prefixed
+    # root with an unprefixed base raises ValueError on Windows, turning a
+    # silent omission into a hard crash of the entire !update.
+    scan_root = platform_compat.long_path(config.FILE_DIRECTORY)
+
+    # Every subtree os.walk() could not read (a stale NFS handle, EIO, a
+    # revoked ACL) used to be skipped in total silence under the default
+    # onerror=None - total_files_count came out non-zero, so the zero-files
+    # guard further down never caught it, and a truncated index was
+    # published over the previous good one. Collected here and checked
+    # once the walk finishes, so one bad subtree costs the whole run
+    # (keeping the previous index) rather than a silent partial one.
+    walk_errors = []
+
+    def _on_walk_error(err):
+        walk_errors.append(err)
+        print(f"[LIST-GEN ERROR] Could not read {err.filename!r} during the scan: {err}")
+
+    for root, dirs, files in os.walk(scan_root, onerror=_on_walk_error):
         # Keep every track under its exact, complete path on disk
         for file in files:
             if file.lower().endswith(('.mp3', '.flac')):
@@ -285,10 +329,15 @@ def generate_master_list():
                     total_bytes += file_bytes
                 except:
                     pass
-                rel_dir = os.path.relpath(root, config.FILE_DIRECTORY)
+                rel_dir = os.path.relpath(root, scan_root)
                 if rel_dir == ".":
                     rel_dir = ""
                 all_files_data.append((rel_dir, file, file_bytes))
+
+    if walk_errors:
+        print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
+              "read - keeping the previous index rather than publishing a truncated one.")
+        return False
 
     # Sort by the real folder and file names
     all_files_data.sort(key=lambda x: (str(x[0]).lower(), str(x[1]).lower()))
@@ -355,17 +404,42 @@ def generate_master_list():
                     f.write(f"{folder_line}\n")
                     f.write(f"{folder_rule}\n")
                     
-                    # Strip multi-disc suffixes, for the !rar album list ONLY
+                    # Strip multi-disc suffixes, for the !rar album list ONLY.
+                    #
+                    # Matched as a whole PATH SEGMENT (split on the same
+                    # separators the folder can carry), not a substring
+                    # anywhere in the path - a substring match let "\disc"
+                    # fire on "\Discography" and "\media" fire on "\Media
+                    # Markt Hits", collapsing a real album folder to the
+                    # ARTIST root, which dcc.py refuses outright ("Artist
+                    # root folders cannot be requested"). The album then had
+                    # no requestable row at all: written_rar_folders
+                    # deduplicates on the truncated (wrong) string.
+                    #
+                    # Also requires the truncation to leave at least two
+                    # segments below FILE_DIRECTORY - i.e. never collapse to
+                    # the artist root - and finds the EARLIEST matching
+                    # segment by walking the path in order, rather than the
+                    # old "first box word in LIST order" behaviour, which
+                    # made the truncation point depend on the order this
+                    # list happened to be written in.
                     if folder and serve_albums:
-                        rar_folder_clean = folder
-                        lowered_rar = rar_folder_clean.lower()
-                        for box_word in ['\\cd', '\\disc', '\\volume', '\\digital media', '\\media', '/cd', '/disc', '/volume', '/digital media', '/media']:
-                            if box_word in lowered_rar:
-                                idx = lowered_rar.find(box_word)
-                                if idx != -1:
-                                    rar_folder_clean = rar_folder_clean[:idx]
+                        folder_segments = re.split(r'[\\/]', folder)
+                        truncate_at = None
+                        for seg_index, segment in enumerate(folder_segments):
+                            if _BOX_WORD_RE.match(segment.strip()):
+                                truncate_at = seg_index
                                 break
-                                
+                        if truncate_at is not None and truncate_at >= 2:
+                            rar_folder_clean = "/".join(folder_segments[:truncate_at])
+                        else:
+                            # Truncating here would collapse to the artist
+                            # root (or nothing) - offering the untruncated
+                            # real path, box word and all, is still a
+                            # request dcc.py will actually serve; the
+                            # refused artist root is not.
+                            rar_folder_clean = folder
+
                         raw_rar_str = f"D:\\MUSIC\\{rar_folder_clean}\\"
                         display_rar_folder = raw_rar_str.replace("/", "\\")
                         
@@ -435,16 +509,6 @@ def generate_master_list():
         # ones. os.replace overwrites atomically on both POSIX and Windows, where os.rename
         # would raise because the destination already exists.
         #
-        # The two side files are published HERE, with the lists, and atomically. They
-        # used to be written much earlier, before the guards above - so a scan that
-        # found nothing kept the previous index and then overwrote its published size
-        # with 0B and its byte count with 0 anyway. And a plain open(..., "w")
-        # truncates first, so an interruption left a readable but EMPTY file, which
-        # is unparseable and used to cost the caller the file count and the list date
-        # as well as the size.
-        db._atomic_write(SIZE_FILE_PATH, formatted_size)
-        db._atomic_write(RAWBYTES_FILE_PATH, str(total_bytes))
-
         os.replace(tmp_txt_path, txt_path)
         if serve_albums:
             os.replace(tmp_rar_path, rar_path)
@@ -455,6 +519,20 @@ def generate_master_list():
             # not offer them at all".
             _discard_temp_lists(tmp_rar_path)
         os.replace(tmp_artifact_path, artifact_path)
+
+        # The two side files are published HERE, AFTER every swap above has
+        # already succeeded, and atomically. They used to be written before
+        # the swaps - so a failure partway through (a Windows os.replace can
+        # raise PermissionError if something else has the destination open)
+        # rolled the list itself back to the previous index while the size
+        # and byte count it wears had already been overwritten with the new
+        # scan's numbers: an old index publishing a new scan's size. And a
+        # plain open(..., "w") truncates first, so an interruption left a
+        # readable but EMPTY file, which is unparseable and used to cost the
+        # caller the file count and the list date as well as the size.
+        db._atomic_write(SIZE_FILE_PATH, formatted_size)
+        db._atomic_write(RAWBYTES_FILE_PATH, str(total_bytes))
+
         print(f"[LIST-GEN] New lists activated: {os.path.basename(txt_path)} "
               f"(download: {os.path.basename(artifact_path)})")
 

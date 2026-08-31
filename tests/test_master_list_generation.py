@@ -230,6 +230,90 @@ class TheAlbumList(MasterListCase):
         with open(self.rar_path(), encoding="utf-8") as handle:
             self.assertIn("!rar", handle.read())
 
+    def test_multidisc_truncation_still_works(self):
+        """Defect guard for the segment-anchored rewrite: the ordinary
+        "CD1"/"CD2" case must keep working exactly as before."""
+        self.add("Metallica/Black Album/CD1/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_text = handle.read()
+        self.assertIn("Black Album", rar_text)
+        self.assertNotIn("CD1", rar_text,
+                         "the disc subfolder must still be stripped from the row")
+
+    def test_discography_is_not_mistaken_for_disc(self):
+        """#162 finding #16, the headline repro: a substring match let
+        "\\disc" fire on "\\Discography", collapsing the row to the ARTIST
+        root - which dcc.py refuses outright - and leaving the real album
+        with no requestable row at all (written_rar_folders deduplicates
+        on the wrong, truncated string)."""
+        self.add("Pink Floyd/Discography 1967-2014/The Wall/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_text = handle.read()
+        self.assertIn("The Wall", rar_text,
+                     "the specific album must still be offered, not collapsed "
+                     "to the artist root")
+        # The old bug's own row - the refused artist root alone - must not
+        # appear as a substitute for the real one.
+        rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
+        self.assertNotIn("!DCCore !rar D:\\MUSIC\\Pink Floyd\\", rar_lines)
+
+    def test_a_media_markt_style_folder_is_not_mistaken_for_media(self):
+        """The same substring bug, the "\\media" box word this time."""
+        self.add("Various Artists/Media Markt Hits/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_text = handle.read()
+        self.assertIn("Media Markt Hits", rar_text)
+
+    def test_a_genre_first_library_still_offers_the_specific_album(self):
+        """The audit's own 'aggravating variant': on a genre-first layout
+        the truncated row had exactly two segments and was ACCEPTED by
+        dcc.py, packing the whole discography instead of the one album -
+        worse than the plain artist-root case, because nothing about it
+        looked refused."""
+        self.add("Rock/Pink Floyd/Discography/The Wall/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_text = handle.read()
+        self.assertIn("The Wall", rar_text)
+        rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
+        self.assertNotIn("!DCCore !rar D:\\MUSIC\\Rock\\Pink Floyd\\", rar_lines,
+                         "must not collapse to the whole-discography folder")
+
+    def test_truncation_never_collapses_to_the_artist_root(self):
+        """A folder shaped like "Artist/CD1" (no album subfolder at all)
+        would collapse to the single-segment artist root if truncated -
+        exactly what dcc.py refuses. Must be left untruncated instead."""
+        self.add("SomeArtist/CD1/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_text = handle.read()
+        rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
+        self.assertNotIn("!DCCore !rar D:\\MUSIC\\SomeArtist\\", rar_lines,
+                         "must never offer the bare artist root")
+
+    def test_earliest_matching_segment_wins_not_list_order(self):
+        """Defect: the old code tried box words in a fixed LIST order
+        ('cd' before 'disc') and truncated at whichever one it found
+        first IN THAT LIST, anywhere in the string - not whichever one
+        appears earliest in the actual path. A folder with "Disc 1" before
+        a later "CD 2" used to truncate at the LATER "CD 2" (because "cd"
+        is checked first), keeping the wrong, more specific-looking folder
+        instead of the actual, earlier album boundary."""
+        self.add("Artist/Album/Disc 1/CD 2/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_text = handle.read()
+        rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
+        # "Disc 1" is the earliest matching segment (index 2) - truncating
+        # there leaves "Artist/Album" (two segments, the real album).
+        self.assertIn("!DCCore !rar D:\\MUSIC\\Artist\\Album\\", rar_lines)
+        self.assertNotIn("!DCCore !rar D:\\MUSIC\\Artist\\Album\\Disc 1\\", rar_lines,
+                         "must not stop at the later 'CD' match instead of "
+                         "the earlier 'Disc' one")
+
 
 class PruningSupersededLists(MasterListCase):
     """_prune_superseded_lists deletes files, so what it spares matters."""
@@ -313,6 +397,97 @@ class TheSwapLeavesNothingBehind(MasterListCase):
         for name in names:
             with self.subTest(name=name):
                 self.assertFalse(name.endswith(".new"))
+
+
+class UnreadableSubtreeKeepsThePreviousIndex(MasterListCase):
+    """#162 finding #15: os.walk()'s default onerror=None silently skips a
+    subtree it cannot read (a stale NFS handle, EIO, a revoked ACL) - the
+    scan's own file count comes out non-zero regardless, so the "0 files
+    found" guard never catches it, and a TRUNCATED index gets published
+    over a good one with no error anywhere.
+
+    A real unreadable directory needs real broken permissions, which chmod
+    cannot portably simulate in CI (Windows, and this suite runs as root in
+    some environments) - so os.walk() is stubbed to call its own onerror
+    callback, exactly as a genuinely unreadable subtree would, without
+    touching real filesystem permissions at all."""
+
+    def walk_erroring(self, err):
+        real_walk = os.walk
+
+        def fake_walk(top, *args, **kwargs):
+            onerror = kwargs.get("onerror")
+            if onerror is not None:
+                onerror(err)
+            yield from real_walk(top, *args, **kwargs)
+
+        os.walk = fake_walk
+        self.addCleanup(lambda: setattr(os, "walk", real_walk))
+
+    def test_a_walk_error_refuses_to_publish(self):
+        self.add("Metallica/Black Album/01.flac")
+        self.assertTrue(self.generate())
+        old_list = self.read_list()
+
+        # Would change the published list's contents if the run went
+        # through - proves the refusal, not just an unlucky no-op.
+        self.add("Metallica/New Album/02.flac")
+        self.walk_erroring(OSError(5, "Input/output error", "/some/unreadable/subtree"))
+
+        result = self.generate()
+
+        self.assertFalse(result)
+        self.assertEqual(self.read_list(), old_list,
+                         "a partial scan must never overwrite a good index")
+
+    def test_no_walk_error_still_publishes_normally(self):
+        """Control: the onerror wiring itself must not refuse a clean scan."""
+        self.add("Metallica/Black Album/01.flac")
+        self.assertTrue(self.generate())
+
+
+class SideFilesOnlyPublishAfterTheSwap(MasterListCase):
+    """#162 finding #32: the size/rawbytes side files used to be written
+    BEFORE the os.replace() calls that actually publish the new list, so a
+    failed swap rolled the list back to the previous index while the side
+    files had already been overwritten with the new (unpublished) scan's
+    numbers - an old index wearing a new scan's size."""
+
+    def _side_file_contents(self):
+        size_path = os.path.join(self.tree.lists, config.LIST_SIZE_FILE)
+        rawbytes_path = os.path.join(self.tree.lists, config.LIST_RAWBYTES_FILE)
+        with open(size_path, encoding="utf-8") as handle:
+            size = handle.read()
+        with open(rawbytes_path, encoding="utf-8") as handle:
+            rawbytes = handle.read()
+        return size, rawbytes
+
+    def test_a_failed_swap_never_touches_the_side_files(self):
+        self.add("Metallica/Black Album/01.flac")
+        self.assertTrue(self.generate())
+        old_side_files = self._side_file_contents()
+        old_list = self.read_list()
+
+        # A bigger scan, so the side files WOULD visibly change if this
+        # reached the write - proves the ordering, not an unlucky no-op.
+        self.add("Metallica/New Album/02.flac", data=b"\x00" * 999999)
+
+        real_replace = os.replace
+
+        def failing_replace(src, dst):
+            raise OSError("simulated replace failure")
+
+        os.replace = failing_replace
+        self.addCleanup(lambda: setattr(os, "replace", real_replace))
+
+        result = self.generate()
+
+        self.assertFalse(result)
+        self.assertEqual(self.read_list(), old_list,
+                         "the previous index must survive a failed swap")
+        self.assertEqual(self._side_file_contents(), old_side_files,
+                         "the side files must never run ahead of a swap "
+                         "that never actually happened")
 
 
 class DiscardingTempLists(MasterListCase):
@@ -455,6 +630,17 @@ class FlatteningIsWiredIntoTheWriter(MasterListCase):
                     self.assertFalse("::INFO::" in stripped,
                                      "a size marker outside a request line is an orphan")
 
+    def test_a_non_utf8_filename_does_not_abort_the_whole_rebuild(self):
+        """#162 finding #4, the filesystem-independent half: the exact
+        surrogateescape shape os.walk() hands back for a non-UTF-8 name on
+        a real library, exercised through the real writer - not just
+        _one_line() in isolation."""
+        self.walk_yielding("Bj\udcf6rk.flac", "normal.flac")
+        self.assertTrue(self.generate())
+        lines = self.request_lines()
+        self.assertEqual(len(lines), 2, "both files must survive the scan")
+        self.assertIn("normal.flac", self.read_list())
+
 
 class FlatteningNamesForOneLinePerEntry(unittest.TestCase):
     """_one_line, tested directly so BOTH platforms verify it.
@@ -498,6 +684,34 @@ class FlatteningNamesForOneLinePerEntry(unittest.TestCase):
                 flattened = update_list._one_line(name)
                 self.assertNotIn("\n", flattened)
                 self.assertNotIn("\r", flattened)
+
+    def test_a_non_utf8_byte_does_not_raise(self):
+        """#162 finding #4. os.walk() on POSIX decodes a filename with
+        non-UTF-8 bytes (a CP1252 rip, a bad extraction, a FAT copy) using
+        the "surrogateescape" error handler - a lone surrogate codepoint,
+        not itself a control character, but not valid UTF-8 either. The
+        exact reported repro: '\\udcf6' embedded in an otherwise normal
+        name. Before this fix, writing it with a strict UTF-8 encoder
+        raised UnicodeEncodeError and abandoned the entire list rebuild."""
+        flattened = update_list._one_line("Bj\udcf6rk.flac")
+        # Must not raise, and the result must itself be safely UTF-8
+        # encodable - the whole point, since this text is about to be
+        # written with io.open(..., encoding="utf-8").
+        flattened.encode("utf-8")
+
+    def test_a_non_utf8_byte_becomes_a_visible_placeholder_not_silence(self):
+        flattened = update_list._one_line("Bj\udcf6rk.flac")
+        self.assertNotIn("\udcf6", flattened)
+        self.assertIn("Bj", flattened)
+        self.assertIn("rk.flac", flattened)
+
+    def test_valid_unicode_is_unaffected_by_the_utf8_sanitisation(self):
+        """The sanitisation step must not itself mangle a perfectly good
+        name - it is a round-trip through UTF-8, and every one of these
+        already IS valid UTF-8."""
+        for name in ("Jóga.flac", "Björk.mp3", "Sigur Rós - Svefn-g-englar.flac"):
+            with self.subTest(name=name):
+                self.assertEqual(update_list._one_line(name), name)
 
 
 if __name__ == "__main__":
