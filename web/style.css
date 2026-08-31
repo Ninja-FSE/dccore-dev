@@ -9,6 +9,18 @@
  */
 
 :root {
+  /* How tall a table's scrolling region may get. Leaves room for the sticky
+     topbar, the per-view controls above the table, and a little breathing
+     space, so the controls stay on screen instead of being pushed off by a
+     long table. */
+  --table-max-h: calc(100vh - 300px);
+
+  /* .panel-bar is INSIDE .table-wrap, so it scrolls with the rows unless it
+     is pinned too - and once it is, the column headings have to sit below
+     it rather than under it. Derived from the rules themselves rather than
+     eyeballed: 12px padding top and bottom, around a .btn of 11px padding
+     top and bottom on a 14px line, plus the 1px bottom border. */
+  --panel-bar-h: 67px;
   --bg:            #0b0f14;
   --bg-raised:     #10161d;
   --bg-inset:      #0d1319;
@@ -163,6 +175,26 @@ html, body {
   min-height: 100vh;
 }
 
+/* ------------------------------------------------------- Fixed chrome
+ *
+ * Three things must not scroll away: the nav, the page title, and a
+ * table's column headings. Scroll into a 300-file folder and losing all
+ * three at once is what this fixes.
+ *
+ * The sidebar is sticky rather than fixed so it keeps its place in the
+ * flex row - fixed would take it out of flow and the main column would
+ * slide under it. Its own overflow-y is for a viewport shorter than the
+ * nav itself.
+ */
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
 /* ---------------------------------------------------------------- Sidebar */
 
 .sidebar {
@@ -314,8 +346,17 @@ html, body {
   padding: 28px 36px 40px;
 }
 
+/* Every view renders its title through this one header, so pinning it here
+   pins it on all seven rather than seven times. The background is not
+   decoration: a transparent sticky bar lets rows scroll visibly underneath
+   it. */
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   margin-bottom: 22px;
+  padding: 4px 0 10px;
+  background: var(--bg);
 }
 
 .topbar-title {
@@ -461,11 +502,21 @@ html, body {
 
 /* ------------------------------------------------------------------ Table */
 
+/* overflow-x: auto already made this a scroll container in BOTH axes -
+   CSS computes an "auto" on one axis into "auto" on the other - so a
+   sticky thead inside it stuck to a box that never scrolled vertically
+   and therefore did nothing at all. Bounding the height is what turns it
+   into a region that really scrolls, which is what the sticky heading
+   below then has to stick to.
+
+   The rows scroll; the controls above them and the headings do not. */
 .table-wrap {
   background: var(--bg-raised);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
+  max-height: var(--table-max-h);
   overflow-x: auto;
+  overflow-y: auto;
 }
 
 .data-table {
@@ -475,7 +526,15 @@ html, body {
   min-width: 560px;
 }
 
+/* Sticky against .table-wrap's scrollport, not the page - which is why the
+   wrapper had to gain a bounded height first. The background is required:
+   the default is transparent and rows would scroll visibly through the
+   headings. */
 .data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-raised);
   text-align: left;
   font-size: 11.5px;
   text-transform: uppercase;
@@ -572,12 +631,26 @@ html, body {
   margin-bottom: 20px;
 }
 
+/* Pinned for the same reason as the headings below it: it carries a control
+   ("Download selected"), and a control that scrolls out of reach the moment
+   you look for something to select is not much of a control. */
 .panel-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
+  background: var(--bg-raised);
   border-bottom: 1px solid var(--border);
+}
+
+/* Only the tables that follow a panel bar need the offset; the rest keep
+   top: 0. A sibling selector rather than a modifier class, so adding a panel
+   bar to another table cannot forget to bring the offset with it. */
+.panel-bar + .data-table thead th {
+  top: var(--panel-bar-h);
 }
 
 .panel-bar-label {
