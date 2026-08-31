@@ -589,11 +589,20 @@ class FlatteningIsWiredIntoTheWriter(MasterListCase):
     def walk_yielding(self, *names):
         """Make the scan see `names` in the album folder, whatever is on disk."""
         real_walk = os.walk
-        album = self.tree.album
+        album = os.path.abspath(self.tree.album)
 
         def fake_walk(top, *args, **kwargs):
             for root, dirs, files in real_walk(top, *args, **kwargs):
-                if os.path.abspath(root) == os.path.abspath(album):
+                # generate_master_list() now calls os.walk() against a
+                # platform_compat.long_path()-wrapped root (#162 finding
+                # #21), which on Windows prefixes every yielded `root`
+                # with "\\?\" - os.path.abspath() does not strip that, so
+                # comparing against the unwrapped `album` below would
+                # never match again without stripping it here too.
+                root_compare = os.path.abspath(root)
+                if root_compare.startswith("\\\\?\\"):
+                    root_compare = root_compare[4:]
+                if root_compare == album:
                     yield root, dirs, list(names)
                 else:
                     yield root, dirs, files
