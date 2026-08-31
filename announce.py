@@ -265,12 +265,21 @@ def send_dcc_sending_notice(user, file_name):
     # ---------------------------------------------------------------------
     BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
     
-    msg = (
-        f"NOTICE {user} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Sending: {B}{file_name}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Status: {B}{V}Active Transfer Started{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
-    )
+    # Through fit_irc_line, like send_transfer_complete's sibling notice three
+    # functions up. The filename is the only variable part and it comes off the
+    # operator's own disk, so this is not attacker-reachable - but a long
+    # classical track name still pushes the line past the budget, and the
+    # server's cut lands inside a colour code, smearing the background to the
+    # end of every reader's line. #162 finding #31.
+    def _build(shown_name):
+        return (
+            f"NOTICE {user} :"
+            f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Sending: {B}{shown_name}{B} "
+            f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Status: {B}{V}Active Transfer Started{B} "
+            f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
+        )
+
+    msg = fit_irc_line(_build, file_name)
     
     if oserve:
         oserve.queue_message(user, msg, is_vip=True)
@@ -455,10 +464,14 @@ def send_dcc_queue_notice(user, file_name, position):
         BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
         
         # Build the message in the colour-block style
-        text_content = f"Added {file_name} to your personal queue at position #{position} of 100."
-        block_msg = f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {text_content}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
-        
-        result_msg = f"NOTICE {user} :{block_msg}\r\n"
+        def _build(shown_name):
+            text_content = (f"Added {shown_name} to your personal queue at "
+                            f"position #{position} of 100.")
+            block_msg = (f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} "
+                         f"{text_content}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} ")
+            return f"NOTICE {user} :{block_msg}\r\n"
+
+        result_msg = fit_irc_line(_build, file_name)
         oserve.queue_message(user, result_msg)
 
 

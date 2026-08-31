@@ -355,6 +355,23 @@ ADVERT_MAX_STITCHED_CHARS = 1200
 
 KNOWN_BOTS_FLUSH_SECONDS = 30.0
 
+# The registry is filled from unauthenticated channel text: anyone can create an
+# entry by advertising once under a nick nobody has used, and a nick-change loop
+# creates one per change. Measured at 20,000 distinct nicks: 20,000 entries,
+# 1.7 MB, and 29ms of json.dumps on every flush - and it is persisted, so it
+# comes back after a restart.
+#
+# The sibling buffer in the same capture path, _advert_tails, has been
+# time-pruned since it was written. This one collected the timestamp to prune
+# by - "last_seen" - and never used it.
+#
+# A week, because a bot that has not advertised in seven days is not one this
+# bot is going to be asked about, and because the interesting case (a channel
+# full of servers you might fetch a list from) refreshes every few minutes. The
+# cap is the backstop for a burst that arrives faster than the TTL retires it.
+KNOWN_BOTS_TTL_SECONDS = 7 * 24 * 60 * 60
+KNOWN_BOTS_MAX = 2000
+
 _ADVERT_NICK_RE = re.compile(r"Type:\s*@(\S+)", re.IGNORECASE)
 _ADVERT_COUNT_RE = re.compile(
     r"For\s+My\s+List\s+Of:?\s*([\d,]+)\s*Files", re.IGNORECASE)
@@ -502,6 +519,7 @@ def _record_bot(key, user, target, advert, now):
         if field in advert:
             entry[field] = advert[field]
     runtime.known_bots[key] = entry
+    _prune_known_bots(now)
 
 
 def never_breaks_the_read_loop(capture):
@@ -608,6 +626,30 @@ def _capture_channel_advert(user, target, msg, now=None):
     _advert_tails[key] = [started, stitched]
     _record_bot(key, user, target, merged, now)
     _flush_known_bots()
+
+
+def _prune_known_bots(now):
+    """Forget bots not seen inside the TTL, then cap what is left.
+
+    Eviction is by last_seen ascending, so a burst of one-off nicks is what
+    goes and the bots that actually advertise are what stays - the opposite of
+    dropping whatever the dict happened to hold last.
+
+    An entry with no last_seen at all (an older file, a hand edit) is treated
+    as infinitely old rather than kept for ever: the field is written on every
+    single capture, so a missing one means the entry predates this and is not
+    being refreshed.
+    """
+    registry = runtime.known_bots
+    for key in [k for k, entry in registry.items()
+                if now - float((entry or {}).get("last_seen") or 0) > KNOWN_BOTS_TTL_SECONDS]:
+        del registry[key]
+
+    if len(registry) > KNOWN_BOTS_MAX:
+        by_age = sorted(registry.items(),
+                        key=lambda kv: float((kv[1] or {}).get("last_seen") or 0))
+        for key, _entry in by_age[:len(registry) - KNOWN_BOTS_MAX]:
+            del registry[key]
 
 
 def _prune_advert_tails(now):
