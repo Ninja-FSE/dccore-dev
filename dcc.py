@@ -727,6 +727,22 @@ def check_queue_and_send(irc_sock, completed_user):
 def handle_download_request(irc_sock, user, requested_file, target_chan):
     """Runs when somebody requests a file, or a whole folder via !rar."""
     # ---------------------------------------------------------------------
+    # target_chan becomes this request's queue row "channel" a few lines
+    # down, and that stored value is what announce.py later builds an
+    # outbound "PRIVMSG {channel} :Sent: ..." line from on completion - so
+    # it is re-validated here, at the one place it gets persisted, even
+    # though irc.py's own PRIVMSG parser is already anchored so target_chan
+    # can only ever be the literal wire target of this message. It must be
+    # a channel we are actually configured to be in, or our own nick (a
+    # private request); anything else can only mean a parsing bug
+    # upstream, and is refused rather than trusted with a real advert line.
+    configured_channels = {c.strip().lower() for c in str(getattr(config, 'CHANNEL', '')).split(',') if c.strip()}
+    if (str(target_chan).lower() not in configured_channels
+            and str(target_chan).lower() != str(getattr(config, 'NICKNAME', '')).lower()):
+        print(f"[SECURITY] Refused a download request from {user}: "
+              f"target_chan {target_chan!r} is not a channel this bot is in.")
+        return
+    # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------
     if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'search_inprogress', False) is True:

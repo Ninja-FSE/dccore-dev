@@ -98,6 +98,46 @@ def event_source_host(line):
     return match.group(1).lower() if match else None
 
 
+def parse_privmsg(line):
+    """(nick, ident_host, target, message) for a well-formed PRIVMSG line,
+    or None.
+
+    Pulled out of irc_loop() so this parsing itself is unit-testable
+    without the real socket loop - matching is_user_event()'s own reason
+    for existing as a standalone function above.
+
+    Anchored the same way is_user_event()/event_source_nick() already are,
+    for the same two reasons: `[^!\\s]+` for the nick (a server numeric's
+    prefix has no "!" but does have spaces, and an unanchored nick group
+    ran straight across them into the numeric's own text - the reported
+    repro was a 332 topic line parsing as
+    user='irc.undernet.org 332 DCCore #chan :Welcome'); and a `\\S*\\s+`
+    bridge to the literal "PRIVMSG" instead of a greedy `.* ` (which let a
+    PRIVMSG's own free-text BODY containing a second
+    " PRIVMSG <target> :" be matched instead of the real one - `\\S*` can
+    never cross the whitespace before the real command word, so it cannot
+    skip forward looking for a second, attacker-supplied match).
+
+    `ident_host` is the raw "ident@host" between "!" and the command word,
+    for security.check_user_status()'s hostmask-pattern matching - not the
+    same as event_source_host(), which strips the ident and lowercases.
+    """
+    match = re.match(r"^:([^!\s]+)!(\S*)\s+PRIVMSG\s+([#\w\-]+)\s+:(.+)$", line)
+    if not match:
+        return None
+    return match.group(1), match.group(2), match.group(3), match.group(4)
+
+
+def parse_notice(line):
+    """(nick, target, message) for a well-formed NOTICE line, or None. See
+    parse_privmsg()'s docstring for why the anchoring matters - the same
+    greedy-`.* ` and unanchored-nick problems applied here identically."""
+    match = re.match(r"^:([^!\s]+)!\S*\s+NOTICE\s+([#\w\-]+)\s+:(.+)$", line)
+    if not match:
+        return None
+    return match.group(1), match.group(2), match.group(3)
+
+
 # Anchored to the START of the line, deliberately.
 #
 # Every bot that answers an @find replies with a header line and then one
@@ -1354,11 +1394,13 @@ def irc_loop():
                     # be before the branch below existed. Read-only: this never
                     # dispatches a command, so it needs none of the PRIVMSG
                     # branch's ban/flood/dispatch machinery.
-                    notice_match = re.match(r"^:([^!]+)!.* NOTICE ([#\w\-]+) :(.+)$", line)
-                    if notice_match:
-                        notice_user = notice_match.group(1)
-                        notice_target = notice_match.group(2)
-                        notice_text = notice_match.group(3).strip()
+                    #
+                    # See parse_notice()'s own docstring (top of this file)
+                    # for why the anchoring matters.
+                    notice_parsed = parse_notice(line)
+                    if notice_parsed:
+                        notice_user, notice_target, notice_text = notice_parsed
+                        notice_text = notice_text.strip()
                         if notice_user.lower() != config.NICKNAME.lower():
                             _capture_broadcast_search_reply(
                                 notice_user, notice_target, notice_text)
@@ -1375,11 +1417,14 @@ def irc_loop():
                                 import dcc_fetch
                                 dcc_fetch.handle_refusal_notice(notice_user, notice_text)
 
-                    match = re.match(r"^:([^!]+)!.* PRIVMSG ([#\w\-]+) :(.+)$", line)
-                    if match:
-                        user = match.group(1)
-                        target_chan = match.group(2)
-                        msg = match.group(3).strip()
+                    # See parse_privmsg()'s own docstring (top of this file)
+                    # for why the anchoring matters, and what user_host is
+                    # for (security.check_user_status()'s hostmask-pattern
+                    # matching, a few lines below).
+                    privmsg_parsed = parse_privmsg(line)
+                    if privmsg_parsed:
+                        user, user_host, target_chan, msg = privmsg_parsed
+                        msg = msg.strip()
                         if user.lower() == config.NICKNAME.lower():
                             continue
 
@@ -1398,7 +1443,7 @@ def irc_loop():
                         # our ban list.
                         _capture_channel_advert(user, target_chan, msg)
 
-                        if not security.check_user_status(user):
+                        if not security.check_user_status(user, hostmask=user_host):
                             continue
                             
                         msg_lower = msg.lower()

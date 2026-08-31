@@ -344,6 +344,52 @@ class RarRequestTraversalTests(PathSecurityBase):
         self.assertNothingQueued("Metallica")
 
 
+class DownloadRequestChannelValidationTests(PathSecurityBase):
+    """#162 finding #5's second half: target_chan becomes this request's
+    queue row "channel" - what announce.py later replays into an outbound
+    "Sent: ..." advert line on completion - so it is re-validated at the
+    one place it gets persisted, even though irc.py's own PRIVMSG parser
+    is now anchored so target_chan can only ever be the literal wire
+    target of the message (see irc.parse_privmsg()). Must be a channel
+    this bot is actually configured to be in, or its own nick (a private
+    request)."""
+
+    def request(self, target_chan, user="dave"):
+        with quiet():
+            dcc.handle_download_request(
+                self.sock, user, "!rar Metallica/Black Album (1991)", target_chan)
+
+    def test_the_configured_channel_is_accepted(self):
+        self.assertIn("#mp3passion", config.CHANNEL.split(","))
+        self.request("#mp3passion")
+        self.assertIn("dave", config.dcc_queue)
+
+    def test_a_second_configured_channel_is_accepted(self):
+        self.set_config(CHANNEL="#mp3passion,#mp3country")
+        self.request("#mp3country")
+        self.assertIn("dave", config.dcc_queue)
+
+    def test_the_bots_own_nick_is_accepted_a_private_request(self):
+        self.request(config.NICKNAME)
+        self.assertIn("dave", config.dcc_queue)
+
+    def test_channel_matching_is_case_insensitive(self):
+        self.request("#MP3PASSION")
+        self.assertIn("dave", config.dcc_queue)
+
+    def test_a_channel_this_bot_is_not_in_is_refused(self):
+        self.request("#not-our-channel")
+        self.assertEqual(config.dcc_queue, {},
+                         "a target_chan outside config.CHANNEL must never "
+                         "reach the queue")
+
+    def test_an_arbitrary_nick_is_refused(self):
+        """The exact shape #5's own repro described: an attacker-forged
+        target_chan naming another user, not a channel or this bot."""
+        self.request("SomeVictim")
+        self.assertEqual(config.dcc_queue, {})
+
+
 class PoisonedQueueRowTests(PathSecurityBase):
     """inline_rar_packer's second line of defence, reached via check_queue_and_send.
 

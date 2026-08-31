@@ -229,6 +229,61 @@ class BanEnforcementTests(DCCoreTestCase):
         self.assertEqual(len(self.notices), 1)
 
 
+class HostmaskBanPatternTests(BanEnforcementTests):
+    """#162 finding #3: a nick can never contain "!" or "@", so a pattern
+    written in hostmask form - exactly what adminchat.py's own !ban usage
+    line has always told operators to type, e.g. "*!*@spammer.net" - could
+    never match check_user_status(nick)'s bare-nick-only comparison. It was
+    accepted, written to hard_bans.txt, confirmed, and listed forever by
+    the console - and matched nothing, ever.
+
+    Reuses BanEnforcementTests' setUp/write_hard_bans exactly - only the
+    call under test differs, so this subclasses it rather than duplicating
+    the fixture."""
+
+    def check_with_host(self, nick, hostmask):
+        """Same as check(), but also supplies the sender's ident@host, the
+        way irc.py's PRIVMSG dispatch now does via parse_privmsg()."""
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = security.check_user_status(nick, hostmask=hostmask)
+        self.last_stdout = buffer.getvalue()
+        return result
+
+    def test_a_hostmask_pattern_denies_when_the_host_is_supplied(self):
+        """The exact usage-line example, working end to end."""
+        self.write_hard_bans("*!*@spammer.net")
+        self.assertFalse(self.check_with_host("mallory", "ident@spammer.net"))
+
+    def test_a_hostmask_pattern_is_case_insensitive(self):
+        self.write_hard_bans("*!*@SPAMMER.NET")
+        self.assertFalse(self.check_with_host("mallory", "ident@spammer.net"))
+
+    def test_a_hostmask_pattern_can_also_pin_the_nick(self):
+        self.write_hard_bans("mallory!*@spammer.net")
+        self.assertFalse(self.check_with_host("mallory", "ident@spammer.net"))
+        self.assertTrue(self.check_with_host("someoneelse", "ident@spammer.net"),
+                        "the nick half of the mask must still be honoured")
+
+    def test_a_hostmask_pattern_without_a_host_still_denies_nothing(self):
+        """Without `hostmask` (an older/other caller), a hostmask-shaped
+        pattern falls back to nick-only matching - same as before this
+        parameter existed - so it correctly matches nobody rather than
+        raising."""
+        self.write_hard_bans("*!*@spammer.net")
+        self.assertTrue(self.check("mallory"))
+
+    def test_a_clean_host_is_not_denied_by_an_unrelated_hostmask_pattern(self):
+        self.write_hard_bans("*!*@spammer.net")
+        self.assertTrue(self.check_with_host("dave", "ident@example.com"))
+
+    def test_a_plain_nick_pattern_still_matches_the_bare_nick_with_a_host_present(self):
+        """Supplying a host must not stop an ordinary nick-only pattern
+        from working exactly as it always has."""
+        self.write_hard_bans("lidx_*")
+        self.assertFalse(self.check_with_host("lidx_abc", "ident@example.com"))
+
+
 if __name__ == "__main__":
     unittest.main()
 

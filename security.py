@@ -107,8 +107,18 @@ _ban_notified = _NotifiedNicks()
 _hard_bans_missing_warned = False
 
 
-def check_user_status(user):
+def check_user_status(user, hostmask=None):
     """Check the user against the timed bans in memory and against hard_bans.txt.
+
+    `hostmask`, if given, is the sender's "ident@host" straight off the
+    wire (irc.py's PRIVMSG regex now captures it) - not the nick, not the
+    "!". A hard-ban pattern containing "!" or "@" is hostmask-shaped and is
+    matched against "<nick>!<hostmask>" lowercased instead of the bare
+    nick: a nick can never contain "!" or "@", so a pattern like
+    "*!*@spammer.net" - the exact form _cmd_ban's own usage line has
+    always told operators to type - was unmatchable by construction until
+    this parameter existed. Without `hostmask` (the default), every
+    pattern still falls back to nick-only matching, exactly as before.
 
     Returns False if the user should be ignored entirely, otherwise True.
     """
@@ -119,6 +129,7 @@ def check_user_status(user):
     import announce
 
     user_lower = user.lower()
+    full_mask_lower = f"{user_lower}!{hostmask.lower()}" if hostmask else None
 
     def _deny(reason, category):
         """Always logs to the console, but sends ONE debug notice per nick."""
@@ -182,7 +193,15 @@ def check_user_status(user):
                         continue
 
                     regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
-                    if re.match(regex_pattern, user_lower):
+                    # A nick can never contain "!" or "@", so a pattern
+                    # containing either is a hostmask form and must be
+                    # matched against the full mask, not the bare nick -
+                    # falls back to the nick if no hostmask was supplied
+                    # (an older/other caller), same as before this existed.
+                    is_hostmask_pattern = "!" in pattern or "@" in pattern
+                    candidate = (full_mask_lower if is_hostmask_pattern and full_mask_lower
+                                 else user_lower)
+                    if re.match(regex_pattern, candidate):
                         return _deny(f"matched banned pattern '{pattern}'", "BAN")
             hard_check_ok = True
         except Exception as e:
