@@ -308,22 +308,36 @@ def count_active_fetches(queue=None):
 
 
 def _mark_failed_locked(row, reason):
-    row["state"] = "failed"
-    row["reason"] = reason
+    # One update(), not two statements - a caller reading row["state"] must
+    # never observe "failed" with the old reason (or no reason) still on it.
+    row.update(state="failed", reason=reason)
 
 
-# The set of request ids last written to FETCH_HISTORY_FILE, purely to skip a
-# redundant write when nothing has changed - check_fetch_queue() calls
-# _persist_fetch_history_locked() on every tick (every 2s, forever), and
+# The full content of every terminal row last written to FETCH_HISTORY_FILE,
+# purely to skip a redundant write when nothing has changed - check_fetch_queue()
+# calls _persist_fetch_history_locked() on every tick (every 2s, forever), and
 # nothing else marks this dirty.
-_last_persisted_terminal_ids = frozenset()
+#
+# #162 finding #9: this used to be just the SET of terminal ids. _run_transfer()
+# sets row["state"] = "complete" and only THEN calls _handle_completed_list_fetch(),
+# which is what sets row["list_processing_error"] when a fetched list zip is
+# refused (zip-slip, zip-bomb, ...). A dispatcher tick landing between those two
+# lines saw the id already in the terminal set - "nothing changed" - and skipped
+# the write, so the annotation that says the archive is refused never reached
+# disk. After a restart the row came back exactly as it looked at "state=complete"
+# with no list_processing_error, and web/app.js derives "Rejected" solely from
+# that field - so a refused hostile archive rendered as a clean, downloadable
+# "Complete" fetch. Comparing full row CONTENT, not just which ids are present,
+# closes that window: the annotation being added between two consecutive ticks is
+# now itself a content change the dirty check sees.
+_last_persisted_terminal_snapshot = {}
 
 
 def _persist_fetch_history_locked(queue):
     """Snapshot every 'complete'/'failed' row and write it to disk, if the
-    set of such rows has changed since the last snapshot. Must be called
-    with the fetch lock already held - queue is read directly, not copied
-    under a lock of its own.
+    CONTENT of that snapshot has changed since the last one written. Must be
+    called with the fetch lock already held - queue is read directly, not
+    copied under a lock of its own.
 
     Without this, config.fetch_queue was in-memory only: a finished fetch's
     row (the only thing the dashboard's Downloads table and its Delete
@@ -339,13 +353,12 @@ def _persist_fetch_history_locked(queue):
     the old process), so there is nothing worth persisting for them; they
     simply do not exist after a restart, same as before this change.
     """
-    global _last_persisted_terminal_ids
+    global _last_persisted_terminal_snapshot
     terminal = {rid: dict(row) for rid, row in queue.items()
                 if row.get("state") in ("complete", "failed")}
-    current_ids = frozenset(terminal)
-    if current_ids == _last_persisted_terminal_ids:
+    if terminal == _last_persisted_terminal_snapshot:
         return
-    _last_persisted_terminal_ids = current_ids
+    _last_persisted_terminal_snapshot = terminal
     db.save_fetch_history(terminal)
 
 
@@ -540,10 +553,18 @@ def check_fetch_queue():
             # this point (see webserver.build_folder_rar_fetch_enqueue_result()),
             # so it falls into the same wire line the plain "file" branch below
             # builds - only the log line differs, purely cosmetic.
-            message = f"PRIVMSG {channel} :!{bot} {filename}\r\n"
+            #
+            # webserver.reject_if_unsafe_for_irc_line() already caps filename's
+            # length at enqueue time (IRC_LINE_FIELD_MAX_LEN); fit_irc_line()
+            # here is belt-and-braces against the real wire budget, same
+            # posture as the contains_unsafe_ctcp_bytes() re-check just above
+            # (#162 finding #13).
+            import announce
+            message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{bot} {v}\r\n", filename)
             log_desc = f"{filename!r} (folder pack) from {bot}"
         else:
-            message = f"PRIVMSG {channel} :!{bot} {filename}\r\n"
+            import announce
+            message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{bot} {v}\r\n", filename)
             log_desc = f"{filename!r} from {bot}"
         if oserve and hasattr(oserve, "queue_message"):
             oserve.queue_message(bot, message)
@@ -867,10 +888,18 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         # A "folder" row packs a whole album/discography into one .rar, which
         # routinely dwarfs any single file - MAX_FETCH_FILE_SIZE (default
         # 200MB) would make this feature fail on its very first real use, so
-        # it gets its own, larger cap instead.
+        # it gets its own, larger cap instead. A "list" row is the opposite
+        # case: a master-list zip is a small text index, never a real
+        # download, and letting it use the general 200MB cap is what let
+        # zipfile.ZipFile() eagerly parse a huge central directory before any
+        # guard in list_fetch.py could refuse it (#162 finding #10) - refused
+        # here, before we even connect, same as the other two.
         if row.get("request_type") == "folder":
             max_size = int(getattr(config, "MAX_FETCH_FOLDER_FILE_SIZE", 2147483648))
             cap_name = "MAX_FETCH_FOLDER_FILE_SIZE"
+        elif row.get("request_type") == "list":
+            max_size = int(getattr(config, "MAX_FETCH_LIST_FILE_SIZE", 10 * 1024 * 1024))
+            cap_name = "MAX_FETCH_LIST_FILE_SIZE"
         else:
             max_size = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
             cap_name = "MAX_FETCH_FILE_SIZE"
@@ -1148,6 +1177,22 @@ def _handle_completed_list_fetch(row, zip_path):
         print(f"[FETCH] Unexpected error processing {row.get('bot')}'s fetched list zip: {err!r}")
 
 
+def _fetch_transfer_timeout(request_type):
+    """The wall-clock ceiling (seconds) _run_transfer() gives a fetch of
+    `request_type`, pulled out as a pure function so the decision itself is
+    unit-testable without running a real transfer.
+
+    #162 finding #11: FETCH_TRANSFER_TIMEOUT is sized for the 200MB
+    MAX_FETCH_FILE_SIZE cap. A "folder" row's own MAX_FETCH_FOLDER_FILE_SIZE
+    is 10x larger but used to inherit that SAME wall clock, so a legitimately
+    slow transfer of a large discography could be aborted (no resume - every
+    retry identical) well before it had any chance to finish.
+    """
+    if request_type == "folder":
+        return getattr(config, "FETCH_FOLDER_TRANSFER_TIMEOUT", 3600)
+    return getattr(config, "FETCH_TRANSFER_TIMEOUT", 600)
+
+
 def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     """The actual bounded socket transfer. `row` has already been claimed
     ('receiving') and validated by handle_incoming_offer(); this just moves
@@ -1171,7 +1216,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     """
     total_size = offer["size"]
     dest_path = os.path.join(dest_dir, stored_name)
-    wall_deadline = time.time() + float(getattr(config, "FETCH_TRANSFER_TIMEOUT", 600))
+    wall_deadline = time.time() + float(_fetch_transfer_timeout(row.get("request_type")))
 
     try:
         os.makedirs(platform_compat.long_path(dest_dir), exist_ok=True)

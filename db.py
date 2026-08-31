@@ -127,9 +127,13 @@ def load_bans_from_file():
         with open(config.BANS_FILE, "r") as f:
             for line in f:
                 line = line.strip()
-                if " " in line:
-                    user_key, expire_ts = line.split(" ", 1)
+                if " " not in line:
+                    continue
+                user_key, expire_ts = line.split(" ", 1)
+                try:
                     config.banned_users[user_key.lower()] = float(expire_ts)
+                except ValueError:
+                    print(f"[DB ERROR] Skipping malformed line in {config.BANS_FILE}: {line!r}")
         print(f"[DB] Loaded bans from {config.BANS_FILE}")
     except Exception as e:
         print(f"[DB ERROR] Could not read {config.BANS_FILE}: {e}")

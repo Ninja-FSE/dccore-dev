@@ -336,7 +336,7 @@ class DCCoreTestCase(unittest.TestCase):
         self._fetch_history_dir = tempfile.mkdtemp(prefix="dccore-fetch-history-")
         self._real_fetch_history_file = db.FETCH_HISTORY_FILE
         db.FETCH_HISTORY_FILE = os.path.join(self._fetch_history_dir, "fetch_history.json")
-        dcc_fetch._last_persisted_terminal_ids = frozenset()
+        dcc_fetch._last_persisted_terminal_snapshot = {}
 
     def tearDown(self):
         restore_daemon_functions()

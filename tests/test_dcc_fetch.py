@@ -445,6 +445,69 @@ class SizeCapTests(DCCoreTestCase):
         self.assertIn("exceeds", row["reason"])
         self.assertIn("MAX_FETCH_FOLDER_FILE_SIZE", row["reason"])
 
+    def test_a_list_offer_above_the_list_cap_is_rejected_before_connecting(self):
+        """#162 finding #10: a request_type='list' row used to fall through
+        to the general MAX_FETCH_FILE_SIZE cap (200MB default) - a master-
+        list zip is a small text index, never a real download, and letting
+        it through that far meant zipfile.ZipFile() (in list_fetch.py, once
+        the transfer completed) had already eagerly parsed a huge central
+        directory before any of its own guards could refuse anything. Now
+        rejected here, before a socket is ever opened, against the smaller
+        MAX_FETCH_LIST_FILE_SIZE cap."""
+        self.set_config(MAX_FETCH_FILE_SIZE=200_000_000, MAX_FETCH_LIST_FILE_SIZE=1000)
+        rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+
+        real_socket = socket.socket
+        socket.socket = lambda *a, **kw: self.fail(
+            "an oversized list offer must be rejected before a socket is ever opened")
+        self.addCleanup(lambda: setattr(socket, "socket", real_socket))
+
+        dcc_fetch.handle_incoming_offer(
+            None, "goodbot", "DCC SEND list.zip 2130706433 55000 5000")
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("exceeds", row["reason"])
+        self.assertIn("MAX_FETCH_LIST_FILE_SIZE", row["reason"])
+
+    def test_a_list_offer_within_the_list_cap_is_not_rejected_by_it(self):
+        """Control: a small, genuine list offer must not be caught by the
+        new, tighter list-specific cap just because it exists."""
+        self.set_config(MAX_FETCH_FILE_SIZE=200_000_000, MAX_FETCH_LIST_FILE_SIZE=1_000_000)
+        rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+
+        dcc_fetch.handle_incoming_offer(
+            None, "goodbot", "DCC SEND list.zip 2130706433 55000 500000")
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["total_size"], 500000,
+                         "500000 is below MAX_FETCH_LIST_FILE_SIZE, so this "
+                         "offer must pass the size cap, not be rejected at it")
+        self.assertNotIn("exceeds", row.get("reason", ""))
+
+
+class FolderTransferTimeoutTests(DCCoreTestCase):
+    """#162 finding #11: a 'folder' row's transfer used to inherit
+    FETCH_TRANSFER_TIMEOUT, sized for the 200MB MAX_FETCH_FILE_SIZE cap, even
+    though it has its own 10x-larger MAX_FETCH_FOLDER_FILE_SIZE cap - a large,
+    legitimately slow discography transfer could be aborted (no resume, so
+    every retry identical) well before it had any chance to finish."""
+
+    def test_a_folder_row_gets_its_own_longer_wall_clock(self):
+        self.set_config(FETCH_TRANSFER_TIMEOUT=600, FETCH_FOLDER_TRANSFER_TIMEOUT=3600)
+        self.assertEqual(dcc_fetch._fetch_transfer_timeout("folder"), 3600)
+        self.assertEqual(dcc_fetch._fetch_transfer_timeout("file"), 600)
+        self.assertEqual(dcc_fetch._fetch_transfer_timeout("list"), 600,
+                         "only 'folder' gets the longer ceiling")
+
+    def test_falls_back_to_sane_defaults_when_unconfigured(self):
+        self.assertEqual(dcc_fetch._fetch_transfer_timeout("folder"), 3600)
+        self.assertEqual(dcc_fetch._fetch_transfer_timeout("file"), 600)
+
 
 class FallbackLockIsShared(DCCoreTestCase):
     """_fetch_lock() falls back to a module-level lock when oserve.py has not
@@ -1278,8 +1341,11 @@ class RequestTypeAdmissionControlTests(DCCoreTestCase):
         """Force rejection at the (unrelated) size cap so admission control
         can be observed in isolation, with no real socket involved - same
         idiom AdmissionControlTests.test_matching_offer_is_claimed_underscore_space_equivalence
-        already uses above."""
-        self.set_config(MAX_FETCH_FILE_SIZE=10)
+        already uses above. Sets every size cap (a "list" row is checked
+        against MAX_FETCH_LIST_FILE_SIZE, not MAX_FETCH_FILE_SIZE - see
+        #162 finding #10) so this helper stays request_type-agnostic."""
+        self.set_config(MAX_FETCH_FILE_SIZE=10, MAX_FETCH_LIST_FILE_SIZE=10,
+                        MAX_FETCH_FOLDER_FILE_SIZE=10)
         dcc_fetch.handle_incoming_offer(
             None, bot, f"DCC SEND {filename} 2130706433 55000 999999")
 
@@ -1900,6 +1966,37 @@ class FetchHistoryPersistenceTests(DCCoreTestCase):
 
         self.assertNotIn(rid, db.load_fetch_history())
 
+    def test_a_content_change_on_an_already_terminal_row_is_still_persisted(self):
+        """#162 finding #9. The dirty check used to compare only the SET of
+        terminal row ids, not their content. _run_transfer() sets
+        state="complete" and only THEN calls _handle_completed_list_fetch(),
+        which is what sets row["list_processing_error"] when a fetched list
+        zip is refused (zip-slip, a zip bomb, ...) - so a dispatcher tick
+        landing between those two writes persisted "complete" with no error
+        annotation, and because the id was already in the "last persisted"
+        set, the annotation arriving a moment later was treated as nothing
+        having changed and silently never written. After a restart the row
+        came back looking like a clean success, and the dashboard's
+        Download button (web/app.js derives "Rejected" solely from that
+        field) offered a hostile archive as a normal completed fetch."""
+        rid = dcc_fetch.enqueue_fetch("evilbot", "", request_type="list")
+        config.fetch_queue[rid]["state"] = "complete"
+        dcc_fetch.check_fetch_queue()  # tick 1: persists "complete", no error yet
+
+        history = db.load_fetch_history()
+        self.assertNotIn("list_processing_error", history[rid])
+
+        # The annotation _handle_completed_list_fetch() would have added,
+        # landing on the SAME row - the id was already terminal before and
+        # after, only the content changed.
+        config.fetch_queue[rid]["list_processing_error"] = "zip-slip: refused"
+        dcc_fetch.check_fetch_queue()  # tick 2
+
+        history = db.load_fetch_history()
+        self.assertEqual(history[rid].get("list_processing_error"), "zip-slip: refused",
+                         "a content-only change on an already-terminal row "
+                         "must still reach disk")
+
     def test_persist_fetch_history_is_safe_to_call_without_the_lock_already_held(self):
         """The public (non-"_locked") entry point webserver.py's delete route
         uses - must acquire the fetch lock itself rather than assuming a
@@ -1995,6 +2092,42 @@ class DispatcherSecondLayerCtcpGuardTests(DCCoreTestCase):
         self.assertEqual(config.fetch_queue[file_rid]["state"], "offered")
         self.assertEqual(config.fetch_queue[list_rid]["state"], "offered")
         self.assertEqual(len(self.oserve.queued), 2)
+
+
+class DispatchLineLengthGuardTests(DCCoreTestCase):
+    """#162 finding #13, dispatch-site belt-and-braces half:
+    webserver.reject_if_unsafe_for_irc_line() now caps filename's length at
+    enqueue time (IRC_LINE_FIELD_MAX_LEN), but check_fetch_queue() is the one
+    call site that actually builds the outbound PRIVMSG line - it must not
+    simply trust that cap, same posture as
+    DispatcherSecondLayerCtcpGuardTests above takes for the byte check.
+    enqueue_fetch() itself performs no validation, so a filename this long
+    reaching dispatch is exactly how a bypass of the web boundary would
+    surface."""
+
+    def test_a_very_long_filename_still_produces_a_line_within_budget(self):
+        import announce
+        long_filename = "x" * 3000  # the audit's own repro length
+        rid = dcc_fetch.enqueue_fetch("goodbot", long_filename, request_type="file")
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+        self.assertEqual(len(self.oserve.queued), 1)
+        _key, sent_msg, _is_vip = self.oserve.queued[0]
+        self.assertLessEqual(len(sent_msg.encode("utf-8")), announce.IRC_LINE_BUDGET)
+
+    def test_a_very_long_folder_argument_still_produces_a_line_within_budget(self):
+        import announce
+        long_folder = "!rar " + "x" * 3000
+        rid = dcc_fetch.enqueue_fetch("goodbot", long_folder, request_type="folder")
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(config.fetch_queue[rid]["state"], "offered")
+        self.assertEqual(len(self.oserve.queued), 1)
+        _key, sent_msg, _is_vip = self.oserve.queued[0]
+        self.assertLessEqual(len(sent_msg.encode("utf-8")), announce.IRC_LINE_BUDGET)
 
 
 class ListFetchEndToEndTests(DCCoreTestCase):
