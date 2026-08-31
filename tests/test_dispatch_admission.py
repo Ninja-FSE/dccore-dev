@@ -421,16 +421,33 @@ class DispatchAdmissionTests(DCCoreTestCase):
         """Control for the test above: the new capacity check must not
         refuse a folder pack that genuinely has room.
 
-        Checked WITHOUT settle()-ing first, deliberately: the capacity
-        check and the interlock claim both happen synchronously, inside
-        queue_lock, before the packer thread is even started - the packer
-        thread itself will go on to fail (queue_row()'s fake
-        "/mnt/nfs-musik/..." path is not really inside FILE_DIRECTORY) and
-        release the interlocks again moments later, which is exactly what
-        would flake this assertion if it settled first. What is under
-        test here is only that the capacity check itself let the claim
-        through.
+        The packer thread itself is prevented from actually running: its
+        real target would fail against queue_row()'s fake
+        "/mnt/nfs-musik/..." path (not really inside FILE_DIRECTORY) and
+        release the interlocks again moments later, in a background
+        thread racing this assertion - not a hypothetical, CI itself hit
+        this the first time this test was written, on whichever run
+        happened to schedule that thread early. What is under test here
+        is only the synchronous capacity-check-and-claim inside
+        queue_lock, before any thread is even started - so threading.Thread
+        itself is patched to record the target without running it,
+        exactly as this file's own CapturedDispatch/fake_start_dcc_send
+        pattern already does for the send side.
         """
+        import threading as real_threading
+        real_thread_cls = real_threading.Thread
+        scheduled = []
+
+        class NoOpThread:
+            def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+                scheduled.append(target)
+
+            def start(self):
+                pass
+
+        real_threading.Thread = NoOpThread
+        self.addCleanup(setattr, real_threading, "Thread", real_thread_cls)
+
         self.in_channel("dave")
         config.dcc_queue["dave"] = [queue_row(user="dave", filename="Album.rar",
                                               is_unpacked_rar_folder=True,
@@ -441,14 +458,8 @@ class DispatchAdmissionTests(DCCoreTestCase):
         self.assertTrue(getattr(config, "rar_inprogress", False),
                         "a folder pack with a free slot must still be able to start")
         self.assertIn("dave", config.user_processing_lock)
-
-        # Let the (fake-path, deliberately doomed) packer thread finish and
-        # release the interlocks itself before this test returns - config's
-        # runtime containers are shared, mutated-in-place objects (see
-        # runtime.py's own docstring), so a straggler thread still running
-        # after this method returns would go on to mutate them during a
-        # LATER test instead, exactly the class of flake this avoids.
-        self.settle()
+        self.assertEqual(len(scheduled), 1,
+                         "the packer thread should have been scheduled exactly once")
 
 
 if __name__ == "__main__":
