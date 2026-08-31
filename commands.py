@@ -803,6 +803,27 @@ def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
     else:
         announce.send_debug(f"Pattern {pattern} was not found in hard_bans.txt.", category="INFO")
 
+def subprocess_failure_message(stderr, stdout):
+    """The best available explanation for a failed subprocess run.
+
+    Pulled out as a pure function so this is unit-testable without mocking
+    subprocess.run() itself - matching rehash_nick_change_line()'s own
+    reason for existing as a standalone function.
+
+    #162 finding #4: update_list.py's own error handling prints via plain
+    print() - stdout, not stderr - so a script-level failure (a directory
+    walk that raised, a write that failed) left stderr empty, and the
+    admin saw "Unknown script error" with no filename and no reason at
+    all. Falls back to stdout, and takes its LAST line - where
+    update_list.py's own "[LIST-GEN ERROR] ..." summary lands - mirroring
+    how update_list.py's own _write_rar_artifact() already reports a
+    subprocess failure.
+    """
+    output = (stderr or stdout or "").strip()
+    lines = output.splitlines()
+    return lines[-1] if lines else "Unknown script error"
+
+
 def handle_list_update_request(user, target_chan, authorised=False):
     """Run update_list.py, wait for it, and read the file count from line 1 of the list."""
     import subprocess
@@ -901,7 +922,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 )
 
             else:
-                error_msg = process.stderr.strip() if process.stderr else "Unknown script error"
+                error_msg = subprocess_failure_message(process.stderr, process.stdout)
                 announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
                 
         except subprocess.TimeoutExpired:

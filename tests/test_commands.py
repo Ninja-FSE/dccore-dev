@@ -725,3 +725,36 @@ class RehashNickChangeGoesLive(unittest.TestCase):
 
     def test_unchanged_nickname_sends_nothing(self):
         self.assertIsNone(commands.rehash_nick_change_line("DCCore", "DCCore"))
+
+
+class SubprocessFailureMessageTests(unittest.TestCase):
+    """commands.subprocess_failure_message() - #162 finding #4's second
+    half. update_list.py's own error handling prints via plain print() -
+    stdout, not stderr - so a script-level failure used to leave stderr
+    empty and the admin saw "Unknown script error" with no filename and no
+    reason at all, from the exact line this now replaces."""
+
+    def test_stderr_wins_when_present(self):
+        msg = commands.subprocess_failure_message(
+            "Traceback...\nValueError: boom", "some stdout noise")
+        self.assertEqual(msg, "ValueError: boom")
+
+    def test_falls_back_to_the_last_line_of_stdout_when_stderr_is_empty(self):
+        """The exact gap this fixes: update_list.py's own error handler
+        prints its summary to stdout, not stderr."""
+        stdout = ("[LIST-GEN] Scanning the library in /music...\n"
+                  "[LIST-GEN ERROR] Failed to generate the lists: "
+                  "[Errno 13] Permission denied\n"
+                  "[LIST-GEN] The previous list was left untouched and is still in use.")
+        msg = commands.subprocess_failure_message("", stdout)
+        self.assertEqual(
+            msg, "[LIST-GEN] The previous list was left untouched and is still in use.")
+
+    def test_no_stderr_and_no_stdout_says_so_rather_than_nothing(self):
+        self.assertEqual(commands.subprocess_failure_message("", ""), "Unknown script error")
+        self.assertEqual(commands.subprocess_failure_message(None, None), "Unknown script error")
+
+    def test_blank_lines_at_the_end_of_stdout_do_not_hide_the_real_message(self):
+        stdout = "[LIST-GEN ERROR] Failed: disk full\n\n\n"
+        msg = commands.subprocess_failure_message("", stdout)
+        self.assertEqual(msg, "[LIST-GEN ERROR] Failed: disk full")
