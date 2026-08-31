@@ -26,6 +26,17 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(REPO_ROOT, "web")
 
 
+def is_colour(value):
+    """Whether a token's value is a colour, from the value itself.
+
+    Every palette entry is a hex literal or an rgba()/rgb()/hsl() call; a
+    layout token is a length, a calc() or a font stack. Asking the value
+    means a new non-colour token needs no edit here at all.
+    """
+    text = str(value).strip().lower()
+    return text.startswith("#") or text.startswith(("rgb(", "rgba(", "hsl(", "hsla("))
+
+
 def read(name):
     with io.open(os.path.join(WEB, name), encoding="utf-8") as handle:
         return handle.read()
@@ -169,12 +180,40 @@ class BothThemesDefineTheSameNames(unittest.TestCase):
                                 "the palette shrank - are these still tokens?")
 
     def test_the_light_theme_redefines_every_colour(self):
-        colours = {name for name in self.dark
-                   if not name.startswith(("--radius", "--font"))}
+        """Which tokens are colours is decided by their VALUE, not by a list
+        of name prefixes.
+
+        It was a prefix list - "--radius" and "--font" - and that is the same
+        shape as every other check in this repo built from a list: it finds
+        what is on the list. The first layout token added to the palette block
+        that did not happen to start with one of those two names failed this
+        test for being the wrong KIND of thing rather than for being wrong,
+        and the fix would have been to lengthen the list again.
+        """
+        colours = {name for name, value in self.dark.items() if is_colour(value)}
 
         self.assertEqual(colours - set(self.light), set(),
                          "token(s) with no light value, so they stay dark on a "
                          "light page")
+
+    def test_the_colour_test_actually_recognises_the_palette(self):
+        """Control. A classifier that called nothing a colour would let the
+        test above pass on a palette with no light theme at all."""
+        colours = {name for name, value in self.dark.items() if is_colour(value)}
+
+        self.assertGreaterEqual(len(colours), 15, sorted(self.dark))
+        self.assertNotIn("--radius", colours)
+        self.assertNotIn("--font-sans", colours)
+
+    def test_and_it_recognises_each_form_the_palette_actually_uses(self):
+        for value in ("#0b0f14", "#fff", "rgba(45, 212, 200, 0.12)", "rgb(1,2,3)",
+                      "hsl(200 10% 5%)"):
+            with self.subTest(value=value):
+                self.assertTrue(is_colour(value))
+
+        for value in ("10px", "calc(100vh - 300px)", "67px", '"IBM Plex Sans", sans-serif'):
+            with self.subTest(value=value):
+                self.assertFalse(is_colour(value))
 
     def test_the_two_light_blocks_agree(self):
         """One is for an operating system set to light, the other for an
