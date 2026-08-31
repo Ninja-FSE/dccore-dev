@@ -201,10 +201,19 @@ class UnconfiguredRequiredTests(unittest.TestCase):
         drops one of these fails with an obvious message rather than a
         generic one - same reasoning test_commands.py's
         test_the_fetch_containers_are_in_the_preserved_list already uses for
-        PRESERVE_RUNTIME."""
+        PRESERVE_RUNTIME.
+
+        SERVER and DEBUG_CHANNEL are deliberately absent - chchatzop's
+        review of the first version of this (a real test-run against the
+        live install) found that keeping either REQUIRED made its own
+        correct, intended value permanently unusable, since the gate refuses
+        a value equal to its shipped default and "irc.undernet.org"/
+        "#dccore-debug" are correct-by-default for virtually every operator,
+        not somebody else's identity to avoid. See REQUIRED's own comment in
+        settings_file.py."""
         self.assertEqual(
             settings_file.REQUIRED,
-            {"NICKNAME", "SERVER", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK", "DEBUG_CHANNEL"})
+            {"NICKNAME", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK"})
 
 
 class ApplyingTheFile(unittest.TestCase):

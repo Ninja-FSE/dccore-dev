@@ -16,15 +16,26 @@ LIST_BASE_NAME: str = "DCCore"
 # ---------------------------------------------------------------------
 # 2. IRC NETWORK AND CHANNEL SETTINGS
 # ---------------------------------------------------------------------
+# SERVER keeps a real, working default on purpose - "irc.undernet.org" is
+# correct for essentially every operator of an Undernet file server, not one
+# operator's identity to avoid. It is NOT in settings_file.REQUIRED for
+# exactly that reason - see REQUIRED's own comment.
 SERVER: str        = "irc.undernet.org"
 PORT: int          = 6667
-NICKNAME: str      = "DCCore"
+# NICKNAME, ADMIN_NICK, CHANNEL and FILE_DIRECTORY (below) are None - not a
+# real value - because they ARE in settings_file.REQUIRED: oserve.startup()
+# refuses to boot while any of them is still blank, so there is no shipped
+# value here for a copy-paste install to silently inherit and run under
+# somebody else's identity. See REQUIRED's own comment in settings_file.py
+# for the full reasoning, and RAR_BINARY above for the same "None means
+# unset" convention this already used before REQUIRED existed.
+NICKNAME: str      = None
 ALT_NICKNAME: str  = "DCCore_"
-ADMIN_NICK: str    = "FLAC,Samoth"
-CHANNEL: str       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
-# Not one operator's own channel. A shipped default is what an install that
-# never touches this joins, so leaving "#flac-serv" here would point every new
-# bot's debug output at somebody else's channel.
+ADMIN_NICK: str    = None
+CHANNEL: str       = None
+# Not one operator's own channel. #171's default of "#dccore-debug" is a fine
+# thing for ANY bot to use unmodified - unlike NICKNAME/CHANNEL/ADMIN_NICK
+# above, it is not in settings_file.REQUIRED, and keeps its own real default.
 DEBUG_CHANNEL: str = "#dccore-debug"
 
 # The single channel a "search all bots" broadcast (@find) goes into - see
@@ -43,7 +54,13 @@ BROADCAST_SEARCH_CHANNEL: str = None
 # 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
 PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
-FILE_DIRECTORY: str   = "/mnt/nfs-musik"
+# None, not a real path - FILE_DIRECTORY is in settings_file.REQUIRED (see its
+# own comment): oserve.startup() already refuses to boot on a directory that
+# does not exist, but a shipped literal path would let a copy-paste install
+# reach that check with somebody else's actual music folder path, not "not
+# configured at all". Blank makes the REQUIRED gate catch it first, with a
+# clearer message.
+FILE_DIRECTORY: str   = None
 RAR_ENABLED: bool     = True        # Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected
 RAR_BINARY: str       = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 TMP_ZIP_DIR: str      = "./data/tmp_zips"
@@ -502,6 +519,12 @@ settings_file.apply_to(globals())
 # channel of the shipped default, a real public channel they may not even be
 # in.
 #
-# Only an unset value is derived, so an explicit choice always wins.
-if not BROADCAST_SEARCH_CHANNEL:
+# Only an unset value is derived, so an explicit choice always wins. CHANNEL
+# itself may also still be unset here - #170's RFC made it one of
+# settings_file.REQUIRED, shipped blank rather than a real tracked default
+# (see CHANNEL's own comment) - so this must not crash simply importing
+# config.py on a fresh, not-yet-configured install. oserve.startup()'s
+# REQUIRED gate is what actually refuses to boot in that case; this just
+# has nothing to derive from yet, and stays unset itself.
+if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
     BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()

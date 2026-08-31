@@ -394,7 +394,7 @@ def banner_lines():
     """
     return [
         "",
-        f"Welcome to {getattr(config, 'NICKNAME', 'DCCore')}",
+        f"Welcome to {getattr(config, 'NICKNAME', None)}",
         f"{getattr(config, 'SCRIPT_VERSION', '')} - {platform_compat.describe()}",
         "",
     ]

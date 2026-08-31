@@ -32,13 +32,21 @@
 
 #LIST_BASE_NAME = DCCore
 
-
-[irc network and channel settings]
-# REQUIRED - the daemon refuses to start until this is set.
-#SERVER = 
+# SERVER keeps a real, working default on purpose - "irc.undernet.org" is
+# correct for essentially every operator of an Undernet file server, not one
+# operator's identity to avoid. It is NOT in settings_file.REQUIRED for
+# exactly that reason - see REQUIRED's own comment.
+#SERVER = irc.undernet.org
 
 #PORT = 6667
 
+# NICKNAME, ADMIN_NICK, CHANNEL and FILE_DIRECTORY (below) are None - not a
+# real value - because they ARE in settings_file.REQUIRED: oserve.startup()
+# refuses to boot while any of them is still blank, so there is no shipped
+# value here for a copy-paste install to silently inherit and run under
+# somebody else's identity. See REQUIRED's own comment in settings_file.py
+# for the full reasoning, and RAR_BINARY above for the same "None means
+# unset" convention this already used before REQUIRED existed.
 # REQUIRED - the daemon refuses to start until this is set.
 #NICKNAME = 
 
@@ -50,11 +58,10 @@
 # REQUIRED - the daemon refuses to start until this is set.
 #CHANNEL = 
 
-# Not one operator's own channel. A shipped default is what an install that
-# never touches this joins, so leaving "#flac-serv" here would point every new
-# bot's debug output at somebody else's channel.
-# REQUIRED - the daemon refuses to start until this is set.
-#DEBUG_CHANNEL = 
+# Not one operator's own channel. #171's default of "#dccore-debug" is a fine
+# thing for ANY bot to use unmodified - unlike NICKNAME/CHANNEL/ADMIN_NICK
+# above, it is not in settings_file.REQUIRED, and keeps its own real default.
+#DEBUG_CHANNEL = #dccore-debug
 
 # The single channel a "search all bots" broadcast (@find) goes into - see
 # webserver.py's POST /api/search/broadcast. Deliberately ONE channel, never
@@ -73,6 +80,12 @@
 # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
 #PAUSE_ON_UPDATE = true
 
+# None, not a real path - FILE_DIRECTORY is in settings_file.REQUIRED (see its
+# own comment): oserve.startup() already refuses to boot on a directory that
+# does not exist, but a shipped literal path would let a copy-paste install
+# reach that check with somebody else's actual music folder path, not "not
+# configured at all". Blank makes the REQUIRED gate catch it first, with a
+# clearer message.
 # REQUIRED - the daemon refuses to start until this is set.
 #FILE_DIRECTORY = 
 

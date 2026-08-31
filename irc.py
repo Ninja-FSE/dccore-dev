@@ -904,7 +904,7 @@ def irc_loop():
     
     # Set HERE before anything else, so the variable always exists in memory
     if not hasattr(config, 'ORIGINAL_NICK'):
-        config.ORIGINAL_NICK = getattr(config, 'NICKNAME', 'DCCore')
+        config.ORIGINAL_NICK = getattr(config, 'NICKNAME', None)
 
     # Per-connection epoch. Threads spawned for one connection must not act on a later
     # one; they compare this token before touching any shared state.

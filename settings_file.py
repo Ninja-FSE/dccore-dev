@@ -80,8 +80,25 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting
 # "can derive from NICKNAME rather than being asked for at all" once NICKNAME
 # itself is required; nothing does that derivation yet, so today it is simply
 # not force-blanked.
+#
+# SERVER and DEBUG_CHANNEL are deliberately NOT here, even though the RFC
+# discussion's own first pass included them. chchatzop caught the reason
+# during a real test-run against the live install: the gate below refuses a
+# name whose CURRENT value equals its SHIPPED default - correct for an
+# identity setting (leaving NICKNAME/CHANNEL/ADMIN_NICK/FILE_DIRECTORY at
+# their shipped values means impersonating the upstream operator), but
+# "irc.undernet.org" is not somebody else's identity to avoid - it is the
+# correct server for essentially every operator of an Undernet file server,
+# and "#dccore-debug" (the default since #171) is a perfectly reasonable
+# debug channel for a new bot. Keeping either REQUIRED would make its own
+# correct, intended value permanently unusable: an operator who explicitly
+# writes SERVER = "irc.undernet.org" is refused for exactly the same reason
+# as one who never touched it at all, because the gate cannot tell those two
+# apart by value alone. Dropping both from REQUIRED - rather than special-
+# casing the comparison for just these two - keeps the mechanism one simple
+# rule ("blank means never configured") instead of a rule with exceptions.
 REQUIRED = frozenset({
-    "NICKNAME", "SERVER", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK", "DEBUG_CHANNEL",
+    "NICKNAME", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK",
 })
 
 

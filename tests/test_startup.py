@@ -148,11 +148,14 @@ class StartupRunsOnThisPlatform(BootCase):
             self.boot()
         self.assertEqual(caught.exception.code, 1)
 
-    def test_a_value_that_merely_resembles_the_default_is_not_flagged(self):
-        """Only an EXACT match with the shipped default counts - a nickname
-        that happens to also start with "DCCore" is a real, deliberate
-        operator choice, not an untouched default."""
-        self.set_config(NICKNAME=config.SHIPPED_DEFAULTS["NICKNAME"] + "Web")
+    def test_a_value_that_merely_resembles_the_upstream_brand_is_not_flagged(self):
+        """The gate only ever checks blank-vs-not (NICKNAME's shipped
+        default is None, not a real value - see config.py's own comment on
+        why). A nickname that happens to still contain "DCCore" - like this
+        install's own real "DCCoreWeb" - is a real, deliberate operator
+        choice, not an untouched default; only scripts/setup_check.py's
+        separate UPSTREAM_NICKS check cares about the brand name itself."""
+        self.set_config(NICKNAME="DCCoreWeb")
         output = self.boot()  # must not raise
         self.assertIn(config.SCRIPT_VERSION, output)
 
