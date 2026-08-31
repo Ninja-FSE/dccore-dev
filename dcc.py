@@ -67,6 +67,56 @@ def download_count_identity(file_path, file_name):
     return key, file_name, "file"
 
 
+def _sanitize_rar_leaf_name(folder_leaf):
+    """The single, shared sanitiser for a packed album's LEAF folder name -
+    used both to build the queue row's visible filename (what a user's
+    client sees, and what AutoQ.mrc's own reconciliation matches) and the
+    packer's own archive name. #162 finding #7: these used to be two
+    independent regexes that disagreed - one deleted a disallowed
+    character outright, the other replaced it with "_"; one kept square
+    brackets, the other stripped them; one was ASCII-only (a-zA-Z0-9),
+    silently mangling a non-ASCII album name the other left alone. The
+    packer had grown a special-case "does the real folder name have an
+    apostrophe the cleaned name lost? re-derive from scratch" workaround
+    for exactly this kind of divergence - one shared function makes that
+    workaround unnecessary, because the two call sites can no longer
+    disagree in the first place.
+
+    Preserves parentheses, brackets and apostrophes - real album tags use
+    all three ("[WEB] [192K]", "A Winter's Tale") - and \\w (Unicode-aware
+    in Python 3, unlike a literal a-zA-Z0-9 class) keeps real non-ASCII
+    library names intact. Everything else, spaces included, becomes "_".
+    """
+    cleaned = re.sub(r"[^\w\-\.\(\)\[\]']", "_", str(folder_leaf))
+    return cleaned.replace(" ", "_")
+
+
+def _rar_archive_disk_name(source_dir):
+    """Where a packed album's archive actually lives in TMP_ZIP_DIR - built
+    from the path RELATIVE TO FILE_DIRECTORY (sanitised), not just the leaf
+    folder name. #162 finding #7: two different artists' albums that
+    happen to share a leaf name ("Greatest Hits") used to collide into the
+    SAME disk filename - and `rar a` ADDS to an existing archive rather
+    than replacing it, so the second requester silently received both
+    albums packed together.
+
+    Deliberately NOT the same name a user's client sees over DCC (see
+    _sanitize_rar_leaf_name() for that, built from the leaf alone and
+    unchanged by this fix) - AutoQ.mrc's own reconciliation compares the
+    received (de-underscored) name against the QUEUED FOLDER'S OWN
+    BASENAME, so changing what the user is offered would silently break
+    that matching for every existing deployment. Only WHERE the bytes
+    live on disk changes; what a user is offered does not.
+    """
+    try:
+        rel = os.path.relpath(source_dir, config.FILE_DIRECTORY)
+    except ValueError:
+        rel = os.path.basename(str(source_dir).rstrip("/\\"))
+    rel = rel.replace("\\", "/").strip("/")
+    segments = [_sanitize_rar_leaf_name(part) for part in rel.split("/") if part]
+    return f"{'_'.join(segments) or 'album'}.rar"
+
+
 def _is_temp_zip_cache_file(path):
     """Is `path` one of the packed .rar archives in TMP_ZIP_DIR - eligible for
     the "delete once nothing else needs it" cleanup in start_dcc_send()?
@@ -349,6 +399,19 @@ def check_queue_and_send(irc_sock, completed_user):
                 # folder for the same user. Mirror the plain-file fix: check and claim both
                 # interlocks atomically under queue_lock.
                 with queue_lock:
+                    # #162 finding #23: this branch had no capacity check at
+                    # all, unlike the plain-file branch a few lines below,
+                    # which already re-checks capacity inside this same
+                    # lock. rar_inprogress bounds concurrent PACKS to one,
+                    # but a pack's own SEND afterwards is a normal DCC slot
+                    # like any other - with no check here, that one send
+                    # could still push active_transfers one past
+                    # MAX_DCC_SLOTS. Same check, same message, as the sibling
+                    # plain-file branch below already has.
+                    if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
+                        print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, leaving queued for the next trigger.")
+                        return
+
                     user_already_locked = (
                         hasattr(config, 'user_processing_lock')
                         and completed_user.lower() in config.user_processing_lock
@@ -399,7 +462,6 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 def _inline_rar_packer_body(sock):
                     true_source_dir = next_file['path']
-                    raw_filename = next_file['file']
 
                     # SECOND LINE OF DEFENCE: queue entries survive restarts via dcc_queue.txt,
                     # so a poisoned row queued BEFORE the traversal guard existed would otherwise
@@ -420,34 +482,50 @@ def check_queue_and_send(irc_sock, completed_user):
                             category="HARDBAN")
                         return
 
-                    # 1. Strip any stale .rar suffix from the string
-                    clean_name = re.sub(r'(?:\.rar)+$', '', raw_filename, flags=re.IGNORECASE)
-                    
-                    # 2. If the folder on disk contains an apostrophe, restore it here.
-                    # That is what lets AutoQ match the filename in every case.
+                    # The DCC-visible name: recomputed fresh from the folder
+                    # leaf on disk, with the SAME sanitiser
+                    # handle_download_request() used when this row was
+                    # queued (see _sanitize_rar_leaf_name()'s own docstring).
+                    # One shared function is what makes the apostrophe-
+                    # recovery special case this replaced unnecessary - the
+                    # two call sites can no longer disagree in the first
+                    # place, so there is nothing left to detect and patch
+                    # over here.
                     folder_leaf = os.path.basename(true_source_dir.rstrip('/\\'))
-                    if "'" in folder_leaf and "'" not in clean_name:
-                        # If the original has an apostrophe and the name does not, put it back in
-                    # place of the matching underscore
-                        # by matching the structure of the folder on disk
-                        clean_name = folder_leaf.replace(' ', '_')
-                        clean_name = re.sub(r'[^a-zA-Z0-9\s\(\)\-_\']', '_', clean_name)
-                    else:
-                        # The ordinary cleanup, when no apostrophe clash was found
-                        clean_name = clean_name.replace(' ', '_')
-                        clean_name = re.sub(r'[^a-zA-Z0-9\s\(\)\-_\']', '_', clean_name)
-                        
-                    # 3. Settle on the complete, apostrophe-safe .rar filename
-                    rar_filename = f"{clean_name}.rar"
-                    target_rar_path = os.path.normpath(os.path.join(config.TMP_ZIP_DIR, rar_filename))
+                    rar_filename = f"{_sanitize_rar_leaf_name(folder_leaf)}.rar"
 
-                    
+                    # #162 finding #7: the archive's DISK location is
+                    # collision-resistant - built from the path RELATIVE TO
+                    # FILE_DIRECTORY, not the leaf alone - so two different
+                    # artists' albums sharing a leaf name ("Greatest Hits")
+                    # can no longer collide into the same file. Deliberately
+                    # NOT the same string as rar_filename above; see
+                    # _rar_archive_disk_name()'s own docstring for why
+                    # changing what the user is OFFERED would break
+                    # AutoQ.mrc's reconciliation.
+                    target_rar_path = os.path.normpath(
+                        os.path.join(config.TMP_ZIP_DIR, _rar_archive_disk_name(true_source_dir)))
+
                     if not os.path.exists(config.TMP_ZIP_DIR):
                         os.makedirs(config.TMP_ZIP_DIR, exist_ok=True)
-                        
+
                     # Strip any hidden line breaks (\n) out of the path
                     if isinstance(true_source_dir, str):
                         true_source_dir = true_source_dir.strip()
+
+                    # `rar a` ADDS to an existing archive rather than
+                    # replacing it - a stale file left behind by an earlier
+                    # crashed run would otherwise silently have the new
+                    # album packed on TOP of whatever was already there.
+                    # Removed first so a fresh pack always starts from
+                    # nothing, regardless of what used to be at this path.
+                    long_target = platform_compat.long_path(target_rar_path)
+                    if os.path.exists(long_target):
+                        try:
+                            os.remove(long_target)
+                        except OSError as unlink_err:
+                            print(f"[LINEAR RAR] Could not remove a stale archive at "
+                                  f"{target_rar_path}: {unlink_err}")
 
                     print(f"[LINEAR RAR] Starting to pack: {true_source_dir} -> {target_rar_path}")
 
@@ -855,8 +933,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 # the request stayed listed as outstanding in AutoQ's queue
                 # window forever, even though the transfer itself completed
                 # correctly every time.
-                clean_folder_name = re.sub(r'[^\w\-_\. \(\)\[\]]', '', folder_name).replace(" ", "_")
-                
+                #
+                # _sanitize_rar_leaf_name() is the SAME function the packer
+                # itself now uses (see its own docstring) - one definition,
+                # so the name queued here and the name the packer eventually
+                # produces can no longer silently disagree.
+                clean_folder_name = _sanitize_rar_leaf_name(folder_name)
+
                 master_rar_filename = f"{clean_folder_name}.rar"
 
 
@@ -1089,8 +1172,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except: 
             pass
             
-        # Clear the locks and wait three seconds, to stay well clear of Excess Flood
-        config.rar_inprogress = False
+        # Clear the locks and wait three seconds, to stay well clear of Excess Flood.
+        # Only clear rar_inprogress if THIS send owns it - a plain audio file never
+        # did, and clearing a flag another user's pack is holding is how the
+        # interlock leaks (see the identical guard a few lines down, at the port-
+        # exhaustion branch, which already got this right).
+        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+            config.rar_inprogress = False
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
             
@@ -1141,10 +1229,18 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             config.rar_inprogress = False
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
-        if (isinstance(next_file, dict) and next_file.get('is_temporary_zip') is True
-                and not next_file.get('is_unpacked_rar_folder') and os.path.exists(platform_compat.long_path(file_path))):
-            try: os.remove(file_path)
-            except OSError: pass
+        # #162 finding #8: this branch's own comment above says the row
+        # stays queued for the next completion trigger - deleting the
+        # archive it still points at contradicted that in the same breath.
+        # A second user's row pointing at the SAME shared archive (see
+        # discard_orphaned_temp_archives()'s own comment on why two users
+        # requesting the same real album share one file) was left dangling,
+        # and the retry 45s later hit the file_size == 0 critical abort,
+        # which classifies a consumed temporary archive as non-retryable
+        # and drops the row - the album was lost by the one branch whose
+        # stated purpose was not to lose it. Nothing is removed here now;
+        # if the artifact is being preserved, the file backing it must be
+        # too.
 
         # The row stays queued and is not charged a failure, but on an otherwise idle bot
         # nothing else would ever wake it. One bounded delayed retry, no tight spin.
@@ -1355,8 +1451,15 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except Exception as pop_err:
             print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
 
-        # 6. Release the memory lock and rule out duplicate threads
-        config.rar_inprogress = False
+        # 6. Release the memory lock and rule out duplicate threads.
+        # #162 finding #6: a plain audio file never owned rar_inprogress - this ran
+        # unconditionally on EVERY transfer's completion, so bob's ordinary MP3
+        # finishing could clear the flag while alice's pack (queued as a separate
+        # slot, holding the interlock for the whole duration of its own pack) was
+        # still running, losing packer serialisation. Same guard as the critical-
+        # abort and port-exhaustion branches above.
+        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+            config.rar_inprogress = False
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
 

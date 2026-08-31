@@ -386,6 +386,81 @@ class DispatchAdmissionTests(DCCoreTestCase):
         self.assertEqual(config.dcc_queue["dave"], [row], "queue must be left untouched")
         self.assertNotIn("dave", config.user_processing_lock)
 
+    def test_a_folder_pack_also_respects_max_dcc_slots(self):
+        """#162 finding #23: the folder-pack (is_unpacked_rar_folder) half of
+        section A had NO capacity check at all, unlike its sibling plain-file
+        branch a few lines below, which already re-checks capacity inside
+        the same lock. rar_inprogress bounds concurrent PACKS to one, but a
+        pack's own send afterwards is an ordinary DCC slot like any other -
+        with every slot already busy, starting one more pack (which will
+        itself need a slot once packing finishes) must still be refused,
+        exactly like test_max_dcc_slots_is_respected already proves for the
+        plain-file case.
+        """
+        self.in_channel("dave", "amy", "bob", "cid")
+        config.dcc_queue["dave"] = [queue_row(user="dave", filename="Album.rar",
+                                              is_unpacked_rar_folder=True,
+                                              is_temporary_zip=True)]
+        for name in ("amy", "bob", "cid"):
+            config.active_transfers.append(self.busy_slot(name))
+        self.assertEqual(len(config.active_transfers), config.MAX_DCC_SLOTS)
+
+        dcc.check_queue_and_send(self.sock, "dave")
+        self.settle()
+
+        self.assertEqual(self.notices, [],
+                         "started packing a folder with every slot already busy")
+        self.assertFalse(getattr(config, "rar_inprogress", False),
+                         "must never claim the pack interlock if it is about "
+                         "to be refused for capacity anyway")
+        self.assertNotIn("dave", config.user_processing_lock)
+        self.assertEqual(len(config.active_transfers), config.MAX_DCC_SLOTS,
+                         "active_transfers overshot MAX_DCC_SLOTS")
+
+    def test_a_folder_pack_still_starts_with_a_free_slot(self):
+        """Control for the test above: the new capacity check must not
+        refuse a folder pack that genuinely has room.
+
+        The packer thread itself is prevented from actually running: its
+        real target would fail against queue_row()'s fake
+        "/mnt/nfs-musik/..." path (not really inside FILE_DIRECTORY) and
+        release the interlocks again moments later, in a background
+        thread racing this assertion - not a hypothetical, CI itself hit
+        this the first time this test was written, on whichever run
+        happened to schedule that thread early. What is under test here
+        is only the synchronous capacity-check-and-claim inside
+        queue_lock, before any thread is even started - so threading.Thread
+        itself is patched to record the target without running it,
+        exactly as this file's own CapturedDispatch/fake_start_dcc_send
+        pattern already does for the send side.
+        """
+        import threading as real_threading
+        real_thread_cls = real_threading.Thread
+        scheduled = []
+
+        class NoOpThread:
+            def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+                scheduled.append(target)
+
+            def start(self):
+                pass
+
+        real_threading.Thread = NoOpThread
+        self.addCleanup(setattr, real_threading, "Thread", real_thread_cls)
+
+        self.in_channel("dave")
+        config.dcc_queue["dave"] = [queue_row(user="dave", filename="Album.rar",
+                                              is_unpacked_rar_folder=True,
+                                              is_temporary_zip=True)]
+
+        dcc.check_queue_and_send(self.sock, "dave")
+
+        self.assertTrue(getattr(config, "rar_inprogress", False),
+                        "a folder pack with a free slot must still be able to start")
+        self.assertIn("dave", config.user_processing_lock)
+        self.assertEqual(len(scheduled), 1,
+                         "the packer thread should have been scheduled exactly once")
+
 
 if __name__ == "__main__":
     unittest.main()
