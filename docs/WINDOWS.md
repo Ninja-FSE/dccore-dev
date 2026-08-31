@@ -49,6 +49,16 @@ Set at minimum:
 | `ADMIN_NICK` | your nick |
 | `FILE_DIRECTORY` | your music folder — start with a small one |
 
+`local_config.py.sample` has commented-out placeholders for all seven, in a
+section near the top.
+
+**Prefer plain text?** Every setting above can also go in `settings.conf`
+instead (copy `settings.conf.sample` to `settings.conf`) — no Python syntax,
+and it's what the web dashboard's Settings page writes to as well. The setup
+check in step 2 accepts either file; `local_config.py` still owns
+`ADMIN_HOSTMASKS`/`ADMIN_PASSWORD_HASH` most naturally, since those come from
+running `python adminchat.py`, but they work in `settings.conf` too.
+
 ### 2. Check the setup
 
 ```

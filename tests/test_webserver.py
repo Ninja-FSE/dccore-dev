@@ -363,8 +363,10 @@ class PaginationParamParsingTests(unittest.TestCase):
 class BroadcastSearchTests(DCCoreTestCase):
     """start_broadcast_search()/build_broadcast_status_payload() - the pure
     logic behind POST /api/search/broadcast and its /status counterpart.
-    NO AUTHENTICATION on either route (see webserver.py's module docstring);
-    these tests are about the mutation/validation logic itself, not auth."""
+    Both routes are login-gated like every other one (see webserver.py's
+    module docstring); these pure functions are exercised directly, below
+    the Flask route, so this test class is about the mutation/validation
+    logic itself, not the login gate."""
 
     def setUp(self):
         super().setUp()

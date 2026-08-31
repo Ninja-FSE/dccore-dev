@@ -231,6 +231,81 @@ class TestFailedWriteKeepsPreviousFile(PersistenceTestCase):
             self.assertEqual(handle.read(), "hello")
 
 
+class ReplaceWithRetryTests(unittest.TestCase):
+    """db._replace_with_retry() in isolation - #162 finding #25's write-side
+    half. The real failure mode (os.replace() raising PermissionError
+    because another handle, e.g. security.check_user_status() reading
+    hard_bans.txt, has the destination open) is Windows-only and cannot be
+    triggered for real here, so os.replace() itself is stubbed to fail a
+    controlled number of times before succeeding."""
+
+    def setUp(self):
+        self._real_replace = os.replace
+        self._real_sleep = time.sleep
+        self.sleeps = []
+        time.sleep = lambda seconds: self.sleeps.append(seconds)
+
+    def tearDown(self):
+        os.replace = self._real_replace
+        time.sleep = self._real_sleep
+
+    def test_succeeds_immediately_when_the_first_attempt_works(self):
+        calls = []
+        os.replace = lambda src, dst: calls.append((src, dst))
+
+        db._replace_with_retry("a", "b")
+
+        self.assertEqual(calls, [("a", "b")])
+        self.assertEqual(self.sleeps, [])
+
+    def test_retries_after_permission_errors_and_then_succeeds(self):
+        attempts = {"n": 0}
+
+        def flaky_replace(src, dst):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise PermissionError("[WinError 5] Access is denied")
+
+        os.replace = flaky_replace
+
+        db._replace_with_retry("a", "b")
+
+        self.assertEqual(attempts["n"], 3)
+        # Two failures before the third, successful attempt - two backoff sleeps.
+        self.assertEqual(len(self.sleeps), 2)
+        # Backoff, not a fixed delay.
+        self.assertLess(self.sleeps[0], self.sleeps[1])
+
+    def test_gives_up_after_the_bounded_number_of_attempts(self):
+        def always_fails(src, dst):
+            raise PermissionError("[WinError 5] Access is denied")
+
+        os.replace = always_fails
+
+        with self.assertRaises(PermissionError):
+            db._replace_with_retry("a", "b", attempts=3, base_delay=0.001)
+
+        self.assertEqual(len(self.sleeps), 2, "2 sleeps between 3 attempts")
+
+    def test_a_non_permission_error_is_not_retried(self):
+        """Only the collision this exists for (PermissionError) is retried -
+        any other failure must surface immediately, exactly as a bare
+        os.replace() would have."""
+        calls = []
+
+        def wrong_kind_of_failure(src, dst):
+            calls.append(1)
+            raise OSError("disk gone")
+
+        os.replace = wrong_kind_of_failure
+
+        with self.assertRaises(OSError):
+            db._replace_with_retry("a", "b")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.sleeps, [])
+
+
 class TestCorruptQueueFile(PersistenceTestCase):
 
     def test_corrupt_file_is_preserved_as_corrupt_and_queue_starts_empty(self):

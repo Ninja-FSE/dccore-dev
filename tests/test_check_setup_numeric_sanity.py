@@ -101,19 +101,53 @@ class DccPortRangeSanityTests(unittest.TestCase):
         self.assertNotIn("is greater than DCC_PORT_END", result.stdout)
 
 
+class AdminNickSanityTests(unittest.TestCase):
+    """#162 finding #20: NICKNAME still being upstream is a hard FAIL with a
+    careful rationale; ADMIN_NICK used to be printed with a plain "ok" and
+    compared against nothing at all - a config the check declared "Ready to
+    start" could still hand the upstream operator's nick full control of
+    !ban/!rehash/!update/!clearqueue on the new operator's bot."""
+
+    def test_the_bare_upstream_admin_nick_is_reported_as_a_failure(self):
+        result = _run_with_local_config("ADMIN_NICK = 'FLAC,Samoth'\n")
+        self.assertIn("ADMIN_NICK is still", result.stdout)
+        self.assertEqual(result.returncode, 1)
+
+    def test_one_upstream_name_among_several_still_fails(self):
+        """ADMIN_NICK is comma-separated - a new operator who ADDS their own
+        nick without removing the upstream one is still exposed."""
+        result = _run_with_local_config("ADMIN_NICK = 'Samoth,MyOwnNick'\n")
+        self.assertIn("ADMIN_NICK is still", result.stdout)
+        self.assertIn("samoth", result.stdout)
+        self.assertEqual(result.returncode, 1)
+
+    def test_case_and_whitespace_do_not_evade_the_check(self):
+        result = _run_with_local_config("ADMIN_NICK = ' Flac , samoth '\n")
+        self.assertIn("ADMIN_NICK is still", result.stdout)
+        self.assertEqual(result.returncode, 1)
+
+    def test_a_genuinely_different_admin_nick_is_not_flagged(self):
+        result = _run_with_local_config("ADMIN_NICK = 'MyOwnOperatorNick'\n")
+        self.assertNotIn("ADMIN_NICK is still", result.stdout)
+        self.assertIn("ok     admin nick MyOwnOperatorNick", result.stdout)
+
+
 class CleanConfigurationPassesEndToEnd(unittest.TestCase):
     """Control: a configuration with nothing wrong except (an artifact of
     how this test injects overrides, not a real misconfiguration - see
-    _run_with_local_config's docstring) the literal
-    <repo>/local_config.py existence check reports only THAT one problem,
-    proving the two new checks above do not false-positive on ordinary,
-    valid values."""
+    _run_with_local_config's docstring) the literal <repo>/local_config.py
+    and <repo>/settings.conf existence check (#162 finding #19: neither
+    exists in a fresh checkout, and check-setup.py now only fails when
+    BOTH are absent - see scripts/setup_check.py's own comment) reports
+    only THAT one problem, proving the two new checks above do not
+    false-positive on ordinary, valid values."""
 
     def test_only_the_unrelated_local_config_path_check_fires(self):
         tmp_dir = tempfile.mkdtemp(prefix="dccore-checksetup-music-")
         try:
             result = _run_with_local_config(
                 "NICKNAME = 'TotallyNotUpstream'\n"
+                "ADMIN_NICK = 'TotallyNotUpstreamEither'\n"
                 f"FILE_DIRECTORY = {tmp_dir!r}\n"
                 "MAX_DCC_SLOTS = 3\n"
                 "DCC_PORT_START = 55000\n"
@@ -132,7 +166,44 @@ class CleanConfigurationPassesEndToEnd(unittest.TestCase):
         # of them happens to be busy) is pre-existing, unrelated behaviour of
         # the bind-probing loop this PR does not touch, so it is not asserted
         # on either way here.
-        self.assertIn("no local_config.py", result.stdout)
+        self.assertIn("no local_config.py and no settings.conf", result.stdout)
+
+
+class SettingsConfSatisfiesTheConfigurationRequirement(unittest.TestCase):
+    """#162 finding #19's core claim, exercised for real: settings.conf ALONE,
+    with no local_config.py at all, must satisfy check-setup.py's "you
+    configured something" requirement. It used to hard-fail unconditionally
+    whenever local_config.py was absent, even though the daemon starts fine
+    from settings.conf alone (config.py's settings_file.apply_to() applies it
+    the same way regardless of which file provided it) - contradicting the
+    check's own "Applied N setting(s)" line on the very same run."""
+
+    def test_settings_conf_alone_satisfies_the_check(self):
+        tmp_dir = tempfile.mkdtemp(prefix="dccore-checksetup-settingsconf-")
+        music_dir = tempfile.mkdtemp(prefix="dccore-checksetup-music-")
+        try:
+            settings_conf = os.path.join(tmp_dir, "settings.conf")
+            with open(settings_conf, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "NICKNAME = TotallyNotUpstream\n"
+                    f"FILE_DIRECTORY = {music_dir}\n"
+                )
+            env = dict(os.environ)
+            env["DCCORE_SETTINGS_FILE"] = settings_conf
+            result = subprocess.run(
+                [sys.executable, CHECK_SETUP],
+                cwd=REPO_ROOT, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=30, text=True,
+            )
+        finally:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            shutil.rmtree(music_dir, ignore_errors=True)
+
+        self.assertNotIn("no local_config.py and no settings.conf", result.stdout)
+        self.assertIn("configured via settings.conf (no local_config.py)", result.stdout)
+        self.assertIn("Applied", result.stdout)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,10 @@
  * them: POST /api/search/broadcast, GET /api/search/broadcast/status,
  * POST /api/fetch/enqueue, GET /api/fetch/status, GET /api/fetch/<id>/download,
  * POST /api/filelists/fetch, GET /api/filelists/bots, GET /api/filelists/bot/<nick>.
- * See webserver.py - NONE of these routes require authentication, including
- * the mutating ones this file calls.
+ * See webserver.py's module docstring - EVERY route requires a login,
+ * including static assets, shared with the DCC CHAT admin console's
+ * password. This file only ever runs after that login has already
+ * succeeded (index.html itself is behind require_login()).
  */
 (function () {
   "use strict";

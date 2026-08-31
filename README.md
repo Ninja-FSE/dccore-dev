@@ -53,6 +53,9 @@ The one optional extra is the web dashboard, which needs Flask and is opt-in - t
 ### Local overrides
 Copy [`local_config.py.sample`](local_config.py.sample) to `local_config.py` (gitignored) to set machine-specific values - such as the admin console's `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH` - without editing a tracked file. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) for the full admin console setup guide.
 
+### settings.conf
+Copy `settings.conf.sample` to `settings.conf` (also gitignored) to set the same kind of machine-specific values in a plain text file instead - no Python syntax required. It is what the web dashboard's Settings page and the admin console's CLI both write to, and `config.py` applies it *after* `local_config.py`, so a value set in both places takes its value from `settings.conf`. The daemon starts fine from `settings.conf` alone, with no `local_config.py` at all; use whichever fits how you prefer to configure things, or both.
+
 ### First-time setup
 Before the first real start, verify the setup without connecting to IRC. This catches the two mistakes that actually cause trouble: a music directory that does not exist, and a config still carrying the upstream nickname or channels - which would put a near-identical second bot into the production bot's live channels.
 
