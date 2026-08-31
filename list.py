@@ -604,7 +604,7 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
 def execute_search(irc_sock, user, search_term, channel):
     """Search the list file, sending the matching rows exactly as they are stored."""
         # MAINTENANCE GATE: block the search while an update is running, if config says so
-    if getattr(config, 'PAUSE_ON_UPDATE', False) is True and getattr(config, 'search_inprogress', False) is True:
+    if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'search_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Search engine is temporarily paused during MasterList rebuild. Please wait a moment.\r\n")

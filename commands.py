@@ -35,7 +35,17 @@ def is_admin(user):
     """
     import config
 
-    raw = getattr(config, 'ADMIN_NICK', 'FLAC') or ''
+    # The fallback is '' and not a nick, deliberately. This function's own
+    # docstring above records removing `or user.lower() == "flac"` because it
+    # "made the literal nick flac an admin regardless of what config.ADMIN_NICK
+    # was set to - an undocumented second account nobody could turn off". A
+    # default of 'FLAC' four lines later was the same account through a
+    # different door: with the setting absent for any reason, that nick - which
+    # anyone on Undernet can simply take - would hold every admin command.
+    #
+    # An authorisation check has one safe direction when it does not know the
+    # answer, and it is to refuse.
+    raw = getattr(config, 'ADMIN_NICK', '') or ''
     allowed = {n.strip().lower() for n in str(raw).split(',') if n.strip()}
     return str(user).lower() in allowed
 
@@ -657,7 +667,12 @@ def handle_rehash_request(user, target_chan, authorised=False):
             
             for chan in old_chans:
                 if chan not in new_chans:
-                    debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-debug').lower()
+                    # Not a channel name. config.py declares DEBUG_CHANNEL as
+                    # "#flac-serv", so a literal "#flac-debug" here was a second
+                    # source of truth that disagreed with the first - and the
+                    # one place it would have been consulted is the one place it
+                    # decides whether to PART a channel.
+                    debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').lower()
                     if chan != debug_chan:
                         irc_sock.send(f"PART {chan} :Removed from DDCore\r\n".encode())
                         announce.send_debug(f"Parting channel {chan} due to new configuration layout!", category="PART")
@@ -805,7 +820,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
         return
 
     # The global maintenance lock is only taken if the switch is True in config
-    if getattr(config, 'PAUSE_ON_UPDATE', False) is True:
+    if getattr(config, 'PAUSE_ON_UPDATE', True) is True:
         if getattr(config, 'search_inprogress', False) is True:
             announce.send_debug(f"List update request from {user} denied: Another system scan is already running.", category="INFO")
             return

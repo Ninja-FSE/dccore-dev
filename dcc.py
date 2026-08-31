@@ -729,7 +729,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
     # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------
-    if getattr(config, 'PAUSE_ON_UPDATE', False) is True and getattr(config, 'search_inprogress', False) is True:
+    if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'search_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: MasterList is currently rebuilding. File requests temporarily paused. Please wait 1-2 minutes.\r\n")
