@@ -200,10 +200,17 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     total_sent_str = f"{total_sent} Files ({stats_mgr.format_size_human(total_sent_bytes)})"
 
     # Yesterday's and today's figures. Guarded so the name cannot collide with list.py
+    #
+    # _rolled, not the raw row: the daemon only rotates the day when a transfer
+    # COMPLETES, so a bot that has sent nothing since midnight still has
+    # yesterday's numbers sitting in the Today columns. Reading them raw
+    # announced yesterday's total as today's, and the day before's as
+    # yesterday's - both wrong, in the direction that flatters the bot, into
+    # every channel. The dashboard has read them rolled since #144.
     yesterday_str = "0 Files"
     today_str = "0 Files"
     try:
-        stats = db.load_advanced_stats()
+        stats = db.load_advanced_stats_rolled()
         # type(stats) == list is used deliberately, to avoid colliding with the list module
         if (type(stats) == list or type(stats).__name__ == 'list') and len(stats) > 6:
             yesterday_str = f"{str(stats[2])} Files"
@@ -277,11 +284,17 @@ def send_dcc_sending_notice(user, file_name):
     print(f"[ANNOUNCE] Sent custom block notice to {user} for '{file_name}'")
 
 def get_formatted_stats_strings():
-    """Read-only: takes the values from stats.txt for the advert, without rotating."""
+    """The advert's figures, read from stats.txt without writing to it.
+
+    _rolled rolls a COPY, so this is still read-only - it must not touch the
+    dates on disk, and it does not. What it does fix is the labels: the day is
+    only rotated on disk when a transfer completes, so a bot idle since
+    midnight had yesterday's figures under Today and the day before's under
+    Yesterday. Every five minutes, in every channel.
+    """
     oserve = sys.modules.get('oserve')
     
-    # This only READS from the store; it must not touch the dates
-    stats = db.load_advanced_stats()
+    stats = db.load_advanced_stats_rolled()
     
     # Index 1 = Total bytes
     total_bytes_count = stats[1]
