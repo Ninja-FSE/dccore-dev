@@ -386,6 +386,70 @@ class DispatchAdmissionTests(DCCoreTestCase):
         self.assertEqual(config.dcc_queue["dave"], [row], "queue must be left untouched")
         self.assertNotIn("dave", config.user_processing_lock)
 
+    def test_a_folder_pack_also_respects_max_dcc_slots(self):
+        """#162 finding #23: the folder-pack (is_unpacked_rar_folder) half of
+        section A had NO capacity check at all, unlike its sibling plain-file
+        branch a few lines below, which already re-checks capacity inside
+        the same lock. rar_inprogress bounds concurrent PACKS to one, but a
+        pack's own send afterwards is an ordinary DCC slot like any other -
+        with every slot already busy, starting one more pack (which will
+        itself need a slot once packing finishes) must still be refused,
+        exactly like test_max_dcc_slots_is_respected already proves for the
+        plain-file case.
+        """
+        self.in_channel("dave", "amy", "bob", "cid")
+        config.dcc_queue["dave"] = [queue_row(user="dave", filename="Album.rar",
+                                              is_unpacked_rar_folder=True,
+                                              is_temporary_zip=True)]
+        for name in ("amy", "bob", "cid"):
+            config.active_transfers.append(self.busy_slot(name))
+        self.assertEqual(len(config.active_transfers), config.MAX_DCC_SLOTS)
+
+        dcc.check_queue_and_send(self.sock, "dave")
+        self.settle()
+
+        self.assertEqual(self.notices, [],
+                         "started packing a folder with every slot already busy")
+        self.assertFalse(getattr(config, "rar_inprogress", False),
+                         "must never claim the pack interlock if it is about "
+                         "to be refused for capacity anyway")
+        self.assertNotIn("dave", config.user_processing_lock)
+        self.assertEqual(len(config.active_transfers), config.MAX_DCC_SLOTS,
+                         "active_transfers overshot MAX_DCC_SLOTS")
+
+    def test_a_folder_pack_still_starts_with_a_free_slot(self):
+        """Control for the test above: the new capacity check must not
+        refuse a folder pack that genuinely has room.
+
+        Checked WITHOUT settle()-ing first, deliberately: the capacity
+        check and the interlock claim both happen synchronously, inside
+        queue_lock, before the packer thread is even started - the packer
+        thread itself will go on to fail (queue_row()'s fake
+        "/mnt/nfs-musik/..." path is not really inside FILE_DIRECTORY) and
+        release the interlocks again moments later, which is exactly what
+        would flake this assertion if it settled first. What is under
+        test here is only that the capacity check itself let the claim
+        through.
+        """
+        self.in_channel("dave")
+        config.dcc_queue["dave"] = [queue_row(user="dave", filename="Album.rar",
+                                              is_unpacked_rar_folder=True,
+                                              is_temporary_zip=True)]
+
+        dcc.check_queue_and_send(self.sock, "dave")
+
+        self.assertTrue(getattr(config, "rar_inprogress", False),
+                        "a folder pack with a free slot must still be able to start")
+        self.assertIn("dave", config.user_processing_lock)
+
+        # Let the (fake-path, deliberately doomed) packer thread finish and
+        # release the interlocks itself before this test returns - config's
+        # runtime containers are shared, mutated-in-place objects (see
+        # runtime.py's own docstring), so a straggler thread still running
+        # after this method returns would go on to mutate them during a
+        # LATER test instead, exactly the class of flake this avoids.
+        self.settle()
+
 
 if __name__ == "__main__":
     unittest.main()
