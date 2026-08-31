@@ -341,6 +341,62 @@ def rehash_nick_change_line(old_baseline_nick, new_nickname):
     return None
 
 
+def restore_preserved_runtime(cfg, preserved_runtime):
+    """Merge `preserved_runtime` (captured from `cfg` right before a reload)
+    back into `cfg`'s current attributes - MUTATING each container in
+    place, never rebinding it. Returns the set of keys actually restored,
+    for the caller's log line.
+
+    Pulled out of handle_rehash_request() for the same reason
+    rehash_nick_change_line() above was: so this one decision is
+    unit-testable without the real importlib.reload() the rest of that
+    function does.
+
+    Why mutate rather than assign: config.py's runtime containers
+    (dcc_queue, active_transfers, fetch_queue, ...) are bound to the SAME
+    objects runtime.py holds - see runtime.py's own docstring - and
+    importlib.reload(config) just re-executes those binding statements, so
+    `getattr(cfg, key)` before and after a reload is normally the identical
+    object, not a fresh empty one the old "reload rebinds to a fresh empty
+    container" assumption this function used to carry along with it.
+    `setattr(cfg, key, merged)` here would rebind cfg's name to a brand-new
+    container, silently detaching it from runtime.py's object forever -
+    every other module that reads cfg.<key> would keep seeing this one
+    frozen snapshot while the real object drifted on, unnoticed, until the
+    next full process restart. Reproduced exactly that way: a transfer's
+    removal from active_transfers on completion never reached the detached
+    copy, and came back as a permanent phantom DCC slot on the very next
+    rehash - two rehashes in a row is all it took.
+
+    Kept general rather than assuming `value is current` always holds (true
+    today for every name in PRESERVE_RUNTIME, since all of them are
+    runtime.py-bound) - if a future preserved key ever is NOT bound that
+    way, reload really would hand back a fresh, empty container, and the
+    merge below still produces the right content; only the final write
+    changes, from rebind to in-place mutation.
+    """
+    restored = set()
+    for key, value in preserved_runtime.items():
+        current = getattr(cfg, key, None)
+        if isinstance(value, dict) and isinstance(current, dict):
+            merged = dict(value)
+            merged.update(current)      # window writes win
+            current.clear()
+            current.update(merged)
+            restored.add(key)
+        elif isinstance(value, list) and isinstance(current, list):
+            merged = list(value)
+            for row in current:
+                if row not in merged:
+                    merged.append(row)
+            current[:] = merged
+            restored.add(key)
+        else:
+            setattr(cfg, key, value)
+            restored.add(key)
+    return restored
+
+
 def handle_rehash_request(user, target_chan, authorised=False):
     """Reload the modules live, in memory, without reading anything back from disk."""
     import importlib
@@ -437,35 +493,22 @@ def handle_rehash_request(user, target_chan, authorised=False):
         # explicit dcc_queue / channel_users restores further down still run afterwards and
         # win for those two keys, so this does not fight them.
         #
-        # MERGE rather than overwrite. reload(config) rebinds each of these to a fresh empty
-        # container, so anything another thread wrote during the reload landed there and a
-        # blind setattr would discard it. The reload window is only the few milliseconds of
-        # eight module reloads, but a transfer finishing inside it is exactly the case that
-        # matters: its removal from active_transfers would be undone and the finished entry
-        # would come back as a phantom holding a DCC slot.
+        # MERGE rather than overwrite - see restore_preserved_runtime()'s own docstring for
+        # why it mutates each container in place instead of ever rebinding config's name to
+        # a new one. The reload window is only the few milliseconds of eight module reloads,
+        # but a transfer finishing inside it is exactly the case that matters: its removal
+        # from active_transfers would otherwise be undone and the finished entry would come
+        # back as a phantom holding a DCC slot.
         import config as _cfg
-        for _key, _value in preserved_runtime.items():
-            during_reload = getattr(_cfg, _key, None)
-            if isinstance(_value, dict) and isinstance(during_reload, dict) and during_reload:
-                merged = dict(_value)
-                merged.update(during_reload)      # window writes win
-                setattr(_cfg, _key, merged)
-            elif isinstance(_value, list) and isinstance(during_reload, list) and during_reload:
-                merged = list(_value)
-                for _row in during_reload:
-                    if _row not in merged:
-                        merged.append(_row)
-                setattr(_cfg, _key, merged)
-            else:
-                setattr(_cfg, _key, _value)
+        restored = restore_preserved_runtime(_cfg, preserved_runtime)
 
-        if preserved_runtime:
-            print(f"[REHASH RAM] Restored {len(preserved_runtime)} live runtime structures "
-                  f"({', '.join(sorted(preserved_runtime))}).")
+        if restored:
+            print(f"[REHASH RAM] Restored {len(restored)} live runtime structures "
+                  f"({', '.join(sorted(restored))}).")
 
-        # Name the restored slots explicitly. A phantom left by the window above is rare and
-        # self-clears the next time that nick is promoted, but an operator staring at "3/3
-        # slots busy" with nothing moving needs to be able to see whose they are.
+        # Name the restored slots explicitly - purely diagnostic. An operator
+        # staring at "3/3 slots busy" with nothing moving needs to be able to
+        # see whose they are, and this is the only place that prints it.
         if getattr(_cfg, 'active_transfers', None):
             _holders = ', '.join(sorted({str(t.get('user', '?')) for t in _cfg.active_transfers}))
             print(f"[REHASH RAM] {len(_cfg.active_transfers)} DCC slot(s) still held by: {_holders}")

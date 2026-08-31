@@ -553,25 +553,139 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
 
     def test_preserved_containers_survive_a_config_reload(self):
         """The behaviour itself, not just the list: values put in before a
-        reload are still there afterwards."""
+        reload are still there afterwards, and the container stays the SAME
+        object runtime.py holds the whole way through - never rebound to a
+        detached copy.
+
+        That identity check is the point of this test, and the old version
+        of it could never have made it: it seeded data with
+        `config.fetch_queue = {...}` - a REBIND - which detached config's
+        name from runtime.py's object before the code under test ever ran,
+        exactly the bug commands.restore_preserved_runtime() exists to
+        prevent. Every assertion below "passed" against that broken
+        fixture for the wrong reason. Mutating in place here instead is
+        what lets this test actually exercise runtime.py-bound behaviour.
+        """
         import importlib
-        config.fetch_queue = {"abc123": {"state": "receiving", "bot": "somebot"}}
-        config.fetched_bot_lists = {"somebot": {"bot": "somebot", "entries": [1, 2, 3]}}
+        import runtime
+        config.fetch_queue.update({"abc123": {"state": "receiving", "bot": "somebot"}})
+        config.fetched_bot_lists.update({"somebot": {"bot": "somebot", "entries": [1, 2, 3]}})
 
         preserved = {k: getattr(config, k) for k in commands.PRESERVE_RUNTIME
                      if hasattr(config, k)}
         importlib.reload(config)
         self.addCleanup(importlib.reload, config)
 
-        # The reload wipes them - that is the whole point of the rescue.
-        self.assertEqual(config.fetch_queue, {},
-                         "fixture invariant: the reload should have emptied this")
+        # The reload does NOT wipe these - they are bound to runtime.py's own
+        # objects, which a reload of config.py never touches (see runtime.py's
+        # docstring). This is the current, correct behaviour: a container
+        # added here that this assertion still called "the reload should have
+        # emptied this" would be asserting the stale pre-runtime.py model.
+        self.assertIs(config.fetch_queue, runtime.fetch_queue)
+        self.assertEqual(config.fetch_queue,
+                         {"abc123": {"state": "receiving", "bot": "somebot"}})
 
-        for key, value in preserved.items():
-            setattr(config, key, value)
+        commands.restore_preserved_runtime(config, preserved)
 
+        self.assertIs(config.fetch_queue, runtime.fetch_queue,
+                      "restore must mutate in place, never rebind config's name")
         self.assertEqual(config.fetch_queue["abc123"]["state"], "receiving")
         self.assertEqual(config.fetched_bot_lists["somebot"]["entries"], [1, 2, 3])
+
+    def test_two_consecutive_rehashes_do_not_resurrect_a_completed_transfer(self):
+        """The audit's own reproduction, run against the real preserve/reload/
+        restore sequence handle_rehash_request() performs (short of the
+        importlib.reload() itself, for the reason RehashNickChangeGoesLive's
+        docstring gives): alice's transfer completes and is removed from
+        active_transfers BETWEEN two rehashes - it must not come back."""
+        import runtime
+        config.active_transfers.append({"user": "alice", "file": "a.flac"})
+
+        # First rehash: preserve, (a real reload would happen here), restore.
+        preserved_1 = {k: getattr(config, k) for k in commands.PRESERVE_RUNTIME
+                       if hasattr(config, k)}
+        commands.restore_preserved_runtime(config, preserved_1)
+        self.assertIs(config.active_transfers, runtime.active_transfers)
+        self.assertEqual(config.active_transfers, [{"user": "alice", "file": "a.flac"}])
+
+        # alice's transfer completes for real, in the SAME shared object -
+        # exactly what dcc.py's own completion path does.
+        config.active_transfers.remove({"user": "alice", "file": "a.flac"})
+        self.assertEqual(config.active_transfers, [])
+
+        # Second rehash: preserved_2 is captured from config right before
+        # this reload, i.e. AFTER alice's removal - so it is already empty.
+        preserved_2 = {k: getattr(config, k) for k in commands.PRESERVE_RUNTIME
+                       if hasattr(config, k)}
+        commands.restore_preserved_runtime(config, preserved_2)
+
+        self.assertEqual(config.active_transfers, [],
+                         "alice's already-completed transfer must not "
+                         "resurrect as a phantom DCC slot")
+
+
+class RestorePreservedRuntimeTests(unittest.TestCase):
+    """commands.restore_preserved_runtime() in isolation, against plain fake
+    objects rather than the real config/runtime modules - the merge/mutate
+    logic itself is what broke, and it needs no reload machinery to test."""
+
+    class FakeCfg:
+        pass
+
+    def test_a_dict_container_is_mutated_in_place_not_rebound(self):
+        cfg = self.FakeCfg()
+        shared = {"alice": "row"}
+        cfg.active_transfers_map = shared
+
+        restored = commands.restore_preserved_runtime(
+            cfg, {"active_transfers_map": {"bob": "row"}})
+
+        self.assertIs(cfg.active_transfers_map, shared,
+                      "must mutate the existing object, never rebind cfg's name")
+        self.assertEqual(shared, {"alice": "row", "bob": "row"})
+        self.assertEqual(restored, {"active_transfers_map"})
+
+    def test_a_list_container_is_mutated_in_place_not_rebound(self):
+        cfg = self.FakeCfg()
+        shared = [{"user": "alice"}]
+        cfg.active_transfers = shared
+
+        commands.restore_preserved_runtime(cfg, {"active_transfers": [{"user": "bob"}]})
+
+        self.assertIs(cfg.active_transfers, shared)
+        self.assertCountEqual(shared, [{"user": "alice"}, {"user": "bob"}])
+
+    def test_current_state_wins_over_the_preserved_snapshot_on_a_conflicting_key(self):
+        """'Window writes win': a change made DURING the reload window is
+        newer information than the snapshot taken before it started."""
+        cfg = self.FakeCfg()
+        cfg.banned_users = {"dave": "extended"}  # written during the window
+
+        commands.restore_preserved_runtime(cfg, {"banned_users": {"dave": "original"}})
+
+        self.assertEqual(cfg.banned_users, {"dave": "extended"})
+
+    def test_a_non_container_value_falls_back_to_setattr(self):
+        cfg = self.FakeCfg()
+        cfg.some_flag = None
+
+        commands.restore_preserved_runtime(cfg, {"some_flag": "value"})
+
+        self.assertEqual(cfg.some_flag, "value")
+
+    def test_a_key_absent_from_current_falls_back_to_setattr(self):
+        """If cfg genuinely has nothing to mutate (the attribute is missing
+        entirely), the preserved value must still land somewhere rather than
+        being silently dropped."""
+        cfg = self.FakeCfg()
+
+        commands.restore_preserved_runtime(cfg, {"gone": {"a": 1}})
+
+        self.assertEqual(cfg.gone, {"a": 1})
+
+    def test_an_empty_preserved_dict_restores_nothing(self):
+        cfg = self.FakeCfg()
+        self.assertEqual(commands.restore_preserved_runtime(cfg, {}), set())
 
 
 class RehashNickChangeGoesLive(unittest.TestCase):

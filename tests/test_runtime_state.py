@@ -146,13 +146,30 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
         """Fixture invariant - an empty file list would pass vacuously."""
         self.assertGreater(len(self._production_modules()), 5)
 
+    def _config_aliases(self, tree):
+        """Every local name this file's `import config`/`import config as X`
+        statements bind - not scoped per-function, since a whole-file "any
+        alias found anywhere counts" is precise enough for a lint-style
+        check and does not need real scope resolution. `commands.py`'s own
+        `import config as _cfg` inside handle_rehash_request is exactly why
+        this exists: the plain-"config" check alone missed it entirely."""
+        aliases = {"config"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "config":
+                        aliases.add(alias.asname or alias.name)
+        return aliases
+
     def test_no_module_rebinds_a_container(self):
         offenders = []
         for filename in self._production_modules():
             path = os.path.join(REPO_ROOT, filename)
             with io.open(path, encoding="utf-8") as handle:
                 source = handle.read()
-            for node in ast.walk(ast.parse(source)):
+            tree = ast.parse(source)
+            config_aliases = self._config_aliases(tree)
+            for node in ast.walk(tree):
                 targets = []
                 if isinstance(node, ast.Assign):
                     targets = node.targets
@@ -161,10 +178,28 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
                 for target in targets:
                     if (isinstance(target, ast.Attribute)
                             and isinstance(target.value, ast.Name)
-                            and target.value.id == "config"
+                            and target.value.id in config_aliases
                             and target.attr in CONTAINERS):
                         offenders.append(f"{filename}:{node.lineno} "
-                                         f"config.{target.attr}")
+                                         f"{target.value.id}.{target.attr}")
+
+                # setattr(config, "dcc_queue", ...) rebinds exactly the same
+                # way a literal `config.dcc_queue = ...` does, and an alias
+                # (`_cfg = config` via `import config as _cfg`) is invisible
+                # to the plain-attribute check above - this is what caught
+                # handle_rehash_request()'s own restore loop reverting to
+                # setattr() on `_cfg`.
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "setattr"
+                        and len(node.args) >= 2
+                        and isinstance(node.args[0], ast.Name)
+                        and node.args[0].id in config_aliases
+                        and isinstance(node.args[1], ast.Constant)
+                        and node.args[1].value in CONTAINERS):
+                    offenders.append(f"{filename}:{node.lineno} "
+                                     f"setattr({node.args[0].id}, "
+                                     f"{node.args[1].value!r}, ...)")
 
         self.assertEqual(
             offenders, [],
