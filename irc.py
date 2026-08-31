@@ -1212,9 +1212,16 @@ def irc_loop():
                             time.sleep(5)
                             try:
                                 socket_conn.send(f"JOIN {channels}\r\n".encode())
-                                debug_chan = getattr(config, 'DEBUG_CHANNEL', '#flac-serv')
-                                socket_conn.send(f"JOIN {debug_chan}\r\n".encode())
-                                print(f"[JOIN] Joined the main channels and the debug channel: {debug_chan}")
+                                # An empty fallback rather than a channel name, and then an
+                                # actual check: "JOIN \r\n" is a malformed line, and joining
+                                # some channel the operator never configured is worse than
+                                # joining none at all.
+                                debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').strip()
+                                if debug_chan:
+                                    socket_conn.send(f"JOIN {debug_chan}\r\n".encode())
+                                    print(f"[JOIN] Joined the main channels and the debug channel: {debug_chan}")
+                                else:
+                                    print("[JOIN] Joined the main channels. No DEBUG_CHANNEL is set, so none was joined.")
                                 # NEW (issue #9): start the watchdog HERE, right after the JOIN
                                 # has actually been sent, so the timeout starts from the right moment.
                                 threading.Thread(target=activation_watchdog, daemon=True).start()

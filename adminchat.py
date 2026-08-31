@@ -395,7 +395,7 @@ def banner_lines():
     return [
         "",
         f"Welcome to {getattr(config, 'NICKNAME', 'DCCore')}",
-        f"{getattr(config, 'SCRIPT_VERSION', 'DCCore')} - {platform_compat.describe()}",
+        f"{getattr(config, 'SCRIPT_VERSION', '')} - {platform_compat.describe()}",
         "",
     ]
 
@@ -427,7 +427,7 @@ def _uptime_seconds():
 # --------------------------------------------------------------------------
 
 def _cmd_version(session, args):
-    session.send(getattr(config, "SCRIPT_VERSION", "DCCore"))
+    session.send(getattr(config, "SCRIPT_VERSION", ""))
     session.send(platform_compat.describe())
 
 
@@ -480,7 +480,7 @@ def _cmd_status(session, args):
     import list as list_mod
 
     transfers = getattr(config, "active_transfers", [])
-    session.send(f"{getattr(config, 'SCRIPT_VERSION', 'DCCore')} - "
+    session.send(f"{getattr(config, 'SCRIPT_VERSION', '')} - "
                  f"running {format_uptime(_uptime_seconds())}")
     session.send(f"Nick        : {getattr(config, 'NICKNAME', '?')}")
     session.send(f"Slots       : {len(transfers)}/{getattr(config, 'MAX_DCC_SLOTS', 0)} in use")
