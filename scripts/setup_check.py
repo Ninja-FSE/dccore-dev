@@ -48,6 +48,14 @@ UPSTREAM_CHANNELS = ("#mp3passion", "#mp3servers", "#mp3-best-of",
                      "#mp3country", "#mp3albums4u", "#mp3download")
 UPSTREAM_NICKS = ("dccore", "dccore_")
 
+# #162 finding #20: NICKNAME still being upstream is a hard FAIL below, with
+# exactly this reasoning - ADMIN_NICK deserves the same treatment. It grants
+# every !ban/!rehash/!update/!clearqueue command (commands.is_admin() is a
+# plain nick comparison, comma-separated for multiple admins - see its own
+# docstring), so a config that never overrode it silently hands the upstream
+# operator's nick full control of the new operator's bot.
+UPSTREAM_ADMIN_NICKS = ("flac", "samoth")
+
 
 class Platform:
     """The handful of strings that genuinely differ between the two hosts.
@@ -144,9 +152,31 @@ def main(platform):
     print()
     print("Configuration")
 
-    if not os.path.exists(os.path.join(REPO, "local_config.py")):
-        fail("no local_config.py - copy local_config.py.sample and fill it in, "
-             "or the daemon will use the upstream defaults")
+    # #162 finding #19: settings.conf is fully first-class - config.py applies
+    # it SECOND (so it wins over local_config.py on a shared key), the daemon
+    # starts fine from it alone, and every setting an operator would otherwise
+    # put in local_config.py (including ADMIN_HOSTMASKS/ADMIN_PASSWORD_HASH -
+    # see settings_file.is_overridable()) can live there instead. This used to
+    # hard-fail whenever local_config.py was absent, even when settings.conf
+    # alone had already configured everything - contradicting this check's own
+    # later "Applied N setting(s)" output on the very same run.
+    local_config_present = os.path.exists(os.path.join(REPO, "local_config.py"))
+    try:
+        import settings_file
+        settings_conf_present = os.path.exists(settings_file.settings_path())
+    except Exception:
+        settings_conf_present = os.path.exists(os.path.join(REPO, "settings.conf"))
+
+    if not local_config_present and not settings_conf_present:
+        fail("no local_config.py and no settings.conf - copy local_config.py.sample "
+             "to local_config.py, or settings.conf.sample to settings.conf, and fill "
+             "one of them in, or the daemon will use the upstream defaults")
+    elif not local_config_present:
+        ok("configured via settings.conf (no local_config.py)")
+    elif not settings_conf_present:
+        ok("configured via local_config.py")
+    else:
+        ok("configured via local_config.py and settings.conf")
 
     try:
         import config
@@ -206,7 +236,22 @@ def main(platform):
         ok(f"max DCC slots {max_slots}")
 
     ok(f"debug channel {getattr(config, 'DEBUG_CHANNEL', '?')}")
-    ok(f"admin nick {getattr(config, 'ADMIN_NICK', '?')}")
+
+    # Same comma-split-and-lowercase ADMIN_NICK gets in commands.is_admin() -
+    # a substring/exact-string comparison against the raw value would miss
+    # "FLAC,Samoth" containing "flac" as one of several names, or false-flag
+    # an operator's own nick that merely contains "flac" as a substring.
+    admin_nick_raw = str(getattr(config, "ADMIN_NICK", ""))
+    admin_nicks = {n.strip().lower() for n in admin_nick_raw.split(",") if n.strip()}
+    still_upstream = admin_nicks & set(UPSTREAM_ADMIN_NICKS)
+    if still_upstream:
+        fail(f"ADMIN_NICK is still {admin_nick_raw!r} - "
+             f"{', '.join(sorted(still_upstream))} is the upstream operator's own "
+             f"admin nick and would grant full control of your bot's "
+             f"!ban/!rehash/!update/!clearqueue commands. Set your own in "
+             f"local_config.py or settings.conf.")
+    else:
+        ok(f"admin nick {admin_nick_raw}")
 
     # --- paths --------------------------------------------------------------
     print()

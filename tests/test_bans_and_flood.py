@@ -125,6 +125,47 @@ class BanEnforcementTests(DCCoreTestCase):
         self.assertFalse(os.path.exists(self.hard_bans))
         self.assertTrue(self.check("dave"))
 
+    def test_the_file_handle_is_closed_before_the_deny_notice_is_sent(self):
+        """#162 finding #25: a match used to be reported (return _deny(...),
+        which prints and calls announce.send_debug()) from INSIDE the `with
+        open(hard_bans.txt)` block, holding the handle open across that work.
+        On Windows, db._atomic_write()'s os.replace() during a concurrent
+        !ban/!unban raises PermissionError against any handle still open on
+        the same path - so the longer this handle stayed open past the point
+        where the match was already known, the likelier a write collided with
+        it. The handle must be fully closed before send_debug() (the deny
+        notice) is ever called."""
+        self.write_hard_bans("lidx_*")
+
+        real_open = open
+        opened_handle = {}
+
+        def tracking_open(path, *args, **kwargs):
+            handle = real_open(path, *args, **kwargs)
+            if os.path.abspath(path) == os.path.abspath(self.hard_bans):
+                opened_handle["handle"] = handle
+            return handle
+
+        closed_at_notify_time = []
+
+        def fake_send_debug(*_a, **_kw):
+            handle = opened_handle.get("handle")
+            closed_at_notify_time.append(handle.closed if handle else None)
+
+        import builtins
+        real_builtin_open = builtins.open
+        builtins.open = tracking_open
+        self.addCleanup(setattr, builtins, "open", real_builtin_open)
+        announce.send_debug = fake_send_debug
+        self.addCleanup(setattr, announce, "send_debug", self._real_send_debug)
+
+        result = security.check_user_status("lidx_abc")
+
+        self.assertFalse(result)
+        self.assertEqual(closed_at_notify_time, [True],
+                         "the hard_bans.txt handle must already be closed by "
+                         "the time the deny notice is sent")
+
     def test_missing_hard_ban_file_warns_once_not_every_message(self):
         """Defect: failing open used to do so silently, every single time this
         runs - which is every message, since this is a hot path. A wrong

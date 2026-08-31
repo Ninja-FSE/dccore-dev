@@ -9,6 +9,26 @@
 # ones actually meant to live here - see docs/ADMIN-CONSOLE.md for the full
 # setup guide.
 
+# ---------------------------------------------------------------------
+# YOUR IDENTITY - CHANGE ALL OF THESE FIRST
+# ---------------------------------------------------------------------
+# config.py ships with the upstream operator's live channel, nickname and
+# admin nick. Starting the daemon without overriding them joins his trading
+# channel as a second bot with a near-identical name - that reads as a clone
+# and can get both of you banned - and, separately, leaves his ADMIN_NICK in
+# control of your !ban/!rehash/!update/!clearqueue commands (is_admin() is a
+# plain nick comparison). Uncomment and fill in every line below; these can
+# also be set in settings.conf instead (see settings.conf.sample) if you
+# prefer configuring them from the web dashboard or CLI rather than by hand.
+#
+# NICKNAME = "YourBotName"
+# ALT_NICKNAME = "YourBotName_"
+# CHANNEL = "#your-test-channel"
+# DEBUG_CHANNEL = "#your-debug-channel"
+# ADMIN_NICK = "YourNick"
+# LIST_BASE_NAME = "YourBotName"
+# FILE_DIRECTORY = "D:\\Music"          # start with a small test folder
+
 # Empty list = console disabled, and every DCC CHAT request is ignored.
 #
 # Each entry is a HOST pattern - the part after the last "@" of an IRC
@@ -59,17 +79,25 @@ DEBUG_TO_CONSOLE = True
 # ---------------------------------------------------------------------
 # WEB DASHBOARD
 # ---------------------------------------------------------------------
-# A read-only status page (search / queue / file lists) served by webserver.py.
-# Flask is optional - if it is not installed, the dashboard logs a line and
-# stays off; it never stops the daemon from starting.
+# A status page (search / queue / file lists / cross-bot fetch) served by
+# webserver.py. Flask is optional - if it is not installed, the dashboard
+# logs a line and stays off; it never stops the daemon from starting.
 WEBUI_ENABLED = True
 
-# NO AUTHENTICATION IS PROVIDED. Every /api/* route on this port is open,
-# read-only, to anyone who can reach it - no login, no token, no password.
-# "0.0.0.0" is the tracked default and makes it reachable from anywhere on
-# your LAN (phone, laptop). DO NOT change this to a public/WAN-facing address
-# and DO NOT port-forward this port to the internet - there is nothing here to
-# stop a stranger from reading it. Set this to "127.0.0.1" instead to restrict
-# the dashboard to this machine only.
+# EVERY ROUTE REQUIRES A LOGIN, including static assets - see webserver.py's
+# module docstring for the detail. The password is the same one
+# ADMIN_PASSWORD_HASH above uses for the DCC CHAT console (generate it with
+# `python adminchat.py`); start() refuses to run at all while that hash is
+# empty, so there is no window where the dashboard is reachable
+# unauthenticated.
+#
+# "127.0.0.1" is the tracked default: safe out of the box, reachable only
+# from this machine. Set this to "0.0.0.0" here if you want it reachable
+# from other devices on your LAN (phone, laptop).
+#
+#   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. A login gate does not
+#   stop someone who shares the network segment from reading the password
+#   or the session cookie off the wire - there is no TLS here. DO NOT put
+#   this host on any network you do not trust.
 WEBUI_HOST = "0.0.0.0"
 WEBUI_PORT = 8420

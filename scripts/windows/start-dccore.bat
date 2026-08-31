@@ -44,12 +44,16 @@ if /i "%~1"=="check" (
 )
 
 rem --- refuse to start without a local config ---------------------------
-if not exist "local_config.py" (
+rem  settings.conf is fully first-class (see scripts/setup_check.py's own
+rem  note) - the daemon starts fine from it alone, so this only refuses
+rem  when NEITHER override exists.
+if not exist "local_config.py" if not exist "settings.conf" (
     echo.
-    echo   No local_config.py found.
+    echo   No local_config.py and no settings.conf found.
     echo.
-    echo   Copy local_config.py.sample to local_config.py and fill it in.
-    echo   Without it the daemon uses the defaults in config.py, which
+    echo   Copy local_config.py.sample to local_config.py, or
+    echo   settings.conf.sample to settings.conf, and fill one in.
+    echo   Without either the daemon uses the defaults in config.py, which
     echo   point at somebody else's live bot and channels.
     echo.
     pause

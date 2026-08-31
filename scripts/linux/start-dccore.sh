@@ -41,12 +41,16 @@ if [ "$1" = "check" ]; then
 fi
 
 # --- refuse to start without a local config --------------------------------
-if [ ! -f "local_config.py" ]; then
+# settings.conf is fully first-class (see scripts/setup_check.py's own note) -
+# the daemon starts fine from it alone, so this only refuses when NEITHER
+# override exists.
+if [ ! -f "local_config.py" ] && [ ! -f "settings.conf" ]; then
     echo
-    echo "  No local_config.py found."
+    echo "  No local_config.py and no settings.conf found."
     echo
-    echo "  Copy local_config.py.sample to local_config.py and fill it in."
-    echo "  Without it the daemon uses the defaults in config.py, which"
+    echo "  Copy local_config.py.sample to local_config.py, or"
+    echo "  settings.conf.sample to settings.conf, and fill one in."
+    echo "  Without either the daemon uses the defaults in config.py, which"
     echo "  point at somebody else's live bot and channels."
     echo
     exit 1

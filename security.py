@@ -178,8 +178,25 @@ def check_user_status(user, hostmask=None):
     # Tracks whether the hard-ban list was actually READ. If the file is missing or the
     # read raised, this stays False and we must not treat "no match" as "definitely clean".
     hard_check_ok = False
-    if os.path.exists(hard_file):
+    matched_pattern = None
+    hard_file_existed = os.path.exists(hard_file)
+    if hard_file_existed:
         try:
+            # #162 finding #25: the match used to be reported (return _deny(...),
+            # which prints and calls announce.send_debug()) from INSIDE this
+            # `with` block, holding the file handle open across that work. On
+            # Windows, db._atomic_write()'s os.replace() during an admin's
+            # concurrent !ban/!unban raises PermissionError against any handle
+            # still open on this same path - so the longer this one stayed open,
+            # the likelier a write landed inside that window. During exactly
+            # that window, hard_check_ok below would end up False (the read that
+            # is happening right now would itself fail on its NEXT open, not
+            # this one - see the loop below) and a hard-banned nick would be
+            # admitted for that one message: this scan fails OPEN by design (see
+            # hard_check_ok's own comment), so any read failure - not just a
+            # missing file - takes that path. Closing the handle (leaving the
+            # `with` block) before ever calling _deny() shrinks that window to
+            # exactly the file read itself, nothing more.
             with open(hard_file, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     pattern = line.strip().lower()
@@ -202,11 +219,16 @@ def check_user_status(user, hostmask=None):
                     candidate = (full_mask_lower if is_hostmask_pattern and full_mask_lower
                                  else user_lower)
                     if re.match(regex_pattern, candidate):
-                        return _deny(f"matched banned pattern '{pattern}'", "BAN")
+                        matched_pattern = pattern
+                        break
             hard_check_ok = True
         except Exception as e:
             print(f"[SECURITY ERROR] Could not read {hard_file}: {e}")
-    else:
+
+    if matched_pattern is not None:
+        return _deny(f"matched banned pattern '{matched_pattern}'", "BAN")
+
+    if not hard_file_existed:
         # Fails open (see the comment on hard_check_ok above) - and previously
         # did so silently. This path is relative, so it also degrades this way
         # if the daemon is ever started from the wrong working directory, not
