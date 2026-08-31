@@ -24,7 +24,7 @@ GOLDEN = {
         'NOTICE dave :\x0304,05 \x0310,10 \x0301,00 Sending: \x02Enter Sandman.flac\x02 \x0310,10 \x0304,05 \x0301,00 Status: \x02\x0303Active Transfer Started\x02 \x0310,10 \x0304,05 \r\n',
     ],
     'send_debug': [
-        'PRIVMSG #flac-serv :\x0304,05 \x0310,10 \x0301,00 [22:13:20] \x02DEBUG\x02 \x0310,10 \x0304,05 \x0301,00 \x02Category\x02: \x0314[INFO]\x0f\x0301,00 \x0310,10 \x0304,05 \x0301,00 Log: a debug line \x0310,10 \x0304,05 \x0f\r\n',
+        'PRIVMSG #dccore-debug :\x0304,05 \x0310,10 \x0301,00 [22:13:20] \x02DEBUG\x02 \x0310,10 \x0304,05 \x0301,00 \x02Category\x02: \x0314[INFO]\x0f\x0301,00 \x0310,10 \x0304,05 \x0301,00 Log: a debug line \x0310,10 \x0304,05 \x0f\r\n',
     ],
     'send_pack_error_notice': [
         'NOTICE dave :\x0304,05 \x0310,10 \x0301,00 DCC-PACK: \x02Access Denied\x02 \x0310,10 \x0304,05 \x0301,00 Error: \x02Artist root folders cannot be requested. Please select a specific album sub-folder.\x02 \x0310,10 \x0304,05 \r\n',

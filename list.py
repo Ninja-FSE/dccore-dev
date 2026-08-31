@@ -8,7 +8,6 @@ import dcc
 import announce
 import theme
 
-LIST_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv.txt")
 
 
 # Resolved per call rather than once at import. LOCAL_LIST_DIR is a config value,

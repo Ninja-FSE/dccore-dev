@@ -98,6 +98,11 @@ def startup():
         print(f"[CRITICAL] Missing directory: {config.FILE_DIRECTORY}")
         sys.exit(1)
 
+    # Before anything reads the side files: carry them across from the old
+    # flac-serv-* names if this install predates the rename. A no-op on every
+    # run after the first, and on any install that never had them.
+    db.migrate_legacy_side_files()
+
     latest_list = list.find_latest_list()
     if not latest_list:
         print("[WARNING] No file list found in lists/ yet.")

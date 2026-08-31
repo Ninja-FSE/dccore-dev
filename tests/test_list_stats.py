@@ -47,9 +47,9 @@ class SideFilePaths(DCCoreTestCase):
             source = open(os.path.join(REPO_ROOT, f"{module.__name__}.py"),
                           encoding="utf-8").read()
             with self.subTest(module=module.__name__):
-                self.assertFalse('"flac-serv-size.txt"' in source,
+                self.assertFalse('"dccore.size.txt"' in source,
                                  "name the side files once, in config")
-                self.assertFalse('"flac-serv-rawbytes.txt"' in source,
+                self.assertFalse('"dccore.rawbytes.txt"' in source,
                                  "name the side files once, in config")
 
     def test_the_paths_follow_a_changed_list_directory(self):
@@ -60,8 +60,16 @@ class SideFilePaths(DCCoreTestCase):
 
     def test_the_historical_filenames_are_unchanged(self):
         """Renaming would orphan the stats on every live deployment until !update."""
-        self.assertEqual(config.LIST_SIZE_FILE, "flac-serv-size.txt")
-        self.assertEqual(config.LIST_RAWBYTES_FILE, "flac-serv-rawbytes.txt")
+        # Renamed off one operator's server name. The DOT separator is load
+        # bearing: find_latest_list() globs LIST_BASE_NAME + "-*.txt", so a
+        # dash here would make "dccore-size.txt" match "DCCore-*.txt" on a
+        # case-insensitive filesystem and sort after the dated list - the
+        # daemon would serve its own size file as the master list.
+        self.assertEqual(config.LIST_SIZE_FILE, "dccore.size.txt")
+        self.assertEqual(config.LIST_RAWBYTES_FILE, "dccore.rawbytes.txt")
+        for name in (config.LIST_SIZE_FILE, config.LIST_RAWBYTES_FILE):
+            self.assertFalse(name.lower().startswith(config.LIST_BASE_NAME.lower() + "-"),
+                             f"{name} would be picked up by the master-list glob")
 
 
 class ReadingBrokenSideFiles(DCCoreTestCase):

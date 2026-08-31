@@ -111,7 +111,7 @@ class WithFolderPackingOff(ListBuildCase):
         self.build(rar_enabled=False)
 
         # By the list's own prefix: LOCAL_LIST_DIR also holds the two side
-        # files (flac-serv-size.txt and -rawbytes.txt), which are .txt too.
+        # files (dccore.size.txt and dccore.rawbytes.txt), which are .txt too.
         text_lists = [name for name in self.lists_dir()
                       if name.startswith(config.LIST_BASE_NAME + "-")
                       and name.endswith(".txt") and "-RAR-" not in name]
