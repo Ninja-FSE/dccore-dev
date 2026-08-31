@@ -22,7 +22,10 @@ NICKNAME: str      = "DCCore"
 ALT_NICKNAME: str  = "DCCore_"
 ADMIN_NICK: str    = "FLAC,Samoth"
 CHANNEL: str       = "#mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download"
-DEBUG_CHANNEL: str = "#flac-serv"
+# Not one operator's own channel. A shipped default is what an install that
+# never touches this joins, so leaving "#flac-serv" here would point every new
+# bot's debug output at somebody else's channel.
+DEBUG_CHANNEL: str = "#dccore-debug"
 
 # The single channel a "search all bots" broadcast (@find) goes into - see
 # webserver.py's POST /api/search/broadcast. Deliberately ONE channel, never
@@ -191,10 +194,21 @@ DEBUG_TO_CONSOLE: bool = True
 # update_list.py: that split literal is the same shape as issue #34, where the
 # reader and the writer of speed_record.txt agreed only by coincidence.
 #
-# The "flac-serv" prefix is historical and deliberately kept. Renaming it would
-# orphan the stats on every existing deployment until the next successful !update.
-LIST_SIZE_FILE: str     = "flac-serv-size.txt"
-LIST_RAWBYTES_FILE: str = "flac-serv-rawbytes.txt"
+# The "flac-serv" prefix these carried was one operator's server name, and it
+# was kept because renaming alone would orphan the stats on every existing
+# deployment until the next successful !update - the advert would publish "0B"
+# and @<nick>-que would report no size in the meantime.
+#
+# So it is not a rename. db.migrate_legacy_side_files() moves the old files to
+# these names at startup, and only when the setting is still at the default
+# below, so an operator who chose their own name is left alone.
+# A DOT and not a dash, which is not cosmetic: find_latest_list() globs
+# LIST_BASE_NAME + "-*.txt", and on a case-insensitive filesystem
+# "dccore-size.txt" matches "DCCore-*.txt" and sorts AFTER the dated list - so
+# the daemon would have picked its own size file as the master list. Caught by
+# tests/test_long_paths.py, which read "15.59KB" where a track should have been.
+LIST_SIZE_FILE: str     = "dccore.size.txt"
+LIST_RAWBYTES_FILE: str = "dccore.rawbytes.txt"
 
 DCC_PORT_START: int = 55000
 DCC_PORT_END: int   = 55010

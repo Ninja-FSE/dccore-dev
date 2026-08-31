@@ -60,6 +60,65 @@ def _atomic_write(path, text):
 # SECTION 1: BANS.TXT (banned users)
 # =================================================================----
 
+# What the two list side files were called before they were named after the
+# program rather than after one operator's server. Only these exact names are
+# migrated: anything else is a name somebody chose.
+LEGACY_SIDE_FILES = {
+    "dccore.size.txt": "flac-serv-size.txt",
+    "dccore.rawbytes.txt": "flac-serv-rawbytes.txt",
+}
+
+
+def migrate_legacy_side_files(log=print):
+    """Carry the old flac-serv-* side files across to their new names.
+
+    Renaming the settings alone would have orphaned these on every existing
+    deployment: update_list.py would start writing the new names, list.py would
+    start reading them, and until the next SUCCESSFUL !update neither exists -
+    so the advert publishes "0B" and @<nick>-que reports no size. On a bot whose
+    list is rebuilt weekly that is a week of wrong numbers in public, for a
+    cosmetic change.
+
+    Deliberately narrow, because a migration that guesses is worse than none:
+
+      * only when the setting still holds the new default. An operator who
+        chose their own filename gets left alone - their file is not "the old
+        one", it is theirs.
+      * only when the new file does not already exist. A rebuild that has
+        already happened wins over anything left on disk.
+      * os.replace, so an interrupted run leaves one intact file rather than
+        two halves; and a failure is logged and swallowed, because a daemon
+        that will not start over a cosmetic rename is a worse outcome than the
+        rename not happening.
+
+    Returns the list of (old, new) basenames actually moved, for the tests and
+    for the startup log.
+    """
+    directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
+    moved = []
+    for new_default, legacy_name in LEGACY_SIDE_FILES.items():
+        setting = "LIST_SIZE_FILE" if "size" in new_default else "LIST_RAWBYTES_FILE"
+        configured = str(getattr(config, setting, new_default))
+        if configured != new_default:
+            continue
+
+        new_path = os.path.join(directory, configured)
+        legacy_path = os.path.join(directory, legacy_name)
+        if os.path.exists(new_path) or not os.path.exists(legacy_path):
+            continue
+        try:
+            os.replace(legacy_path, new_path)
+            moved.append((legacy_name, configured))
+        except OSError as err:
+            log(f"[MIGRATE] Could not rename {legacy_name} to {configured}: {err}. "
+                f"The figure it holds will be republished by the next list update.")
+
+    if moved:
+        for legacy_name, configured in moved:
+            log(f"[MIGRATE] Renamed {legacy_name} to {configured}.")
+    return moved
+
+
 def load_bans_from_file():
     """Load the active bans from bans.txt into memory."""
     if not os.path.exists(config.BANS_FILE):

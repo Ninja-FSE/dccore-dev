@@ -263,7 +263,7 @@ class DebugPumpTests(QuietTestCase):
         self.assertIsNone(self.oserve.irc_connection)
         announce._debug_queue.clear()
         self.addCleanup(announce._debug_queue.clear)
-        self.config.DEBUG_CHANNEL = "#flac-serv"
+        self.config.DEBUG_CHANNEL = "#dccore-debug"
 
     def last_line(self):
         self.assertTrue(announce._debug_queue, "send_debug queued nothing")
@@ -344,10 +344,10 @@ class DebugPumpTests(QuietTestCase):
 
     def test_line_is_addressed_to_the_debug_channel(self):
         """The pump must still produce a well-formed PRIVMSG to DEBUG_CHANNEL."""
-        self.config.DEBUG_CHANNEL = "#flac-serv"
+        self.config.DEBUG_CHANNEL = "#dccore-debug"
         announce.send_debug("hello")
         line = self.last_line()
-        self.assertTrue(line.startswith("PRIVMSG #flac-serv :"))
+        self.assertTrue(line.startswith("PRIVMSG #dccore-debug :"))
         self.assertTrue(line.endswith("\r\n"))
 
 
