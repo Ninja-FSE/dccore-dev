@@ -143,6 +143,70 @@ class WhatMayBeOverridden(unittest.TestCase):
         self.assertFalse(settings_file.is_overridable("active_transfers", []))
 
 
+class UnconfiguredRequiredTests(unittest.TestCase):
+    """settings_file.unconfigured_required() in isolation - #170's RFC. The
+    real gate (oserve.startup() refusing to boot) is exercised end-to-end in
+    tests/test_startup.py; this is the pure decision on its own, against
+    plain dicts rather than the real config module."""
+
+    def test_a_name_still_equal_to_its_shipped_default_is_reported(self):
+        """Every OTHER REQUIRED name is given a real, distinct, non-blank
+        value - only NICKNAME is left untouched - so this also proves a
+        name that IS configured does not get swept up alongside it."""
+        namespace = {name: f"configured-{name}" for name in settings_file.REQUIRED}
+        shipped = {name: f"shipped-{name}" for name in settings_file.REQUIRED}
+        namespace["NICKNAME"] = "DCCore"
+        shipped["NICKNAME"] = "DCCore"
+
+        self.assertEqual(settings_file.unconfigured_required(namespace, shipped), ["NICKNAME"])
+
+    def test_a_name_that_differs_from_its_shipped_default_is_not_reported(self):
+        namespace = dict.fromkeys(settings_file.REQUIRED, "something else entirely")
+        shipped = {name: "DCCore" for name in settings_file.REQUIRED}
+        self.assertEqual(settings_file.unconfigured_required(namespace, shipped), [])
+
+    def test_a_blank_value_is_reported_even_if_it_differs_from_the_shipped_default(self):
+        """A fresh install that uncommented a REQUIRED line in
+        settings.conf.sample but left it blank - not "never touched", but
+        still not usable."""
+        namespace = {name: "" for name in settings_file.REQUIRED}
+        shipped = {name: "DCCore" for name in settings_file.REQUIRED}
+        self.assertEqual(set(settings_file.unconfigured_required(namespace, shipped)),
+                         set(settings_file.REQUIRED))
+
+    def test_a_whitespace_only_value_counts_as_blank(self):
+        namespace = {"CHANNEL": "   "}
+        shipped = {"CHANNEL": "#mp3passion"}
+        self.assertIn("CHANNEL", settings_file.unconfigured_required(namespace, shipped))
+
+    def test_a_name_missing_from_the_shipped_snapshot_is_judged_on_blankness_alone(self):
+        """Defensive: if REQUIRED and SHIPPED_DEFAULTS were ever captured out
+        of step (they cannot be today - see config.py's own comment on why
+        SHIPPED_DEFAULTS is derived FROM REQUIRED), a present, non-blank
+        value must not be flagged just because there is nothing to compare
+        it against."""
+        namespace = {name: f"configured-{name}" for name in settings_file.REQUIRED}
+        shipped = {}  # nothing to compare ANY of them against
+
+        self.assertEqual(settings_file.unconfigured_required(namespace, shipped), [])
+
+    def test_result_order_is_sorted_for_a_stable_message(self):
+        namespace = {name: "" for name in settings_file.REQUIRED}
+        shipped = {}
+        self.assertEqual(settings_file.unconfigured_required(namespace, shipped),
+                         sorted(settings_file.REQUIRED))
+
+    def test_the_required_set_matches_what_170s_rfc_agreed_on(self):
+        """Named explicitly, not just derived, so a future edit that quietly
+        drops one of these fails with an obvious message rather than a
+        generic one - same reasoning test_commands.py's
+        test_the_fetch_containers_are_in_the_preserved_list already uses for
+        PRESERVE_RUNTIME."""
+        self.assertEqual(
+            settings_file.REQUIRED,
+            {"NICKNAME", "SERVER", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK", "DEBUG_CHANNEL"})
+
+
 class ApplyingTheFile(unittest.TestCase):
 
     def setUp(self):
@@ -317,6 +381,23 @@ class TheSampleStaysInStepWithConfig(unittest.TestCase):
             actual, expected,
             "settings.conf.sample is out of step with config.py. Run:\n"
             "    python scripts/gen_settings_sample.py")
+
+    def test_required_settings_are_blank_not_the_real_shipped_value(self):
+        """#170's RFC: a REQUIRED name must never show its real value here -
+        that is exactly what let a copy-paste install run with somebody
+        else's identity. Checked against the committed file directly, not
+        gen_settings_sample.build()'s own output, so a bug in build() that
+        forgot to blank one out would still be caught here rather than both
+        this test and the drift check agreeing on the same wrong answer."""
+        with io.open(os.path.join(REPO_ROOT, "settings.conf.sample"),
+                     encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+
+        for name in sorted(settings_file.REQUIRED):
+            matches = [line for line in lines if line.startswith(f"#{name} =")]
+            self.assertEqual(len(matches), 1, f"{name} should appear exactly once")
+            self.assertEqual(matches[0], f"#{name} = ",
+                             f"{name} is REQUIRED but the sample shows a real value")
 
     def test_every_overridable_setting_is_documented(self):
         with io.open(os.path.join(REPO_ROOT, "settings.conf.sample"),

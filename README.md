@@ -59,6 +59,8 @@ Copy `settings.conf.sample` to `settings.conf` (also gitignored) to set the same
 ### First-time setup
 Before the first real start, verify the setup without connecting to IRC. This catches the two mistakes that actually cause trouble: a music directory that does not exist, and a config still carrying the upstream nickname or channels - which would put a near-identical second bot into the production bot's live channels.
 
+The daemon itself backstops this too: `oserve.startup()` refuses to boot while `NICKNAME`, `SERVER`, `CHANNEL`, `ADMIN_NICK`, `DEBUG_CHANNEL` or `FILE_DIRECTORY` still resolves to its shipped default or is blank (`settings_file.REQUIRED`), regardless of how the daemon is started - the check below is the friendlier, earlier warning.
+
 **Linux:**
 ```bash
 ./scripts/linux/start-dccore.sh check

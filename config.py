@@ -288,13 +288,25 @@ LIST_UPDATE_TIMEOUT: int = 1800  # Longest a !update / update_list.py run may ta
 THEME: str = "classic"        # classic, midnight, forest, orchid, plain
 
 # Override individual roles on top of the chosen preset, for an operator who
-# would rather be unique than pick from a list:
+# would rather be unique than pick from a list - each is a raw mIRC code
+# string like "\x0306,06", or None (the default) to leave that role at
+# whatever the chosen THEME preset already says.
 #
-#     CUSTOM_THEME = {"border": "\x0306,06", "value": "\x0311"}
-#
-# A dict, so it lives here or in local_config.py rather than on the settings
-# page - settings.conf holds primitives. Unknown role names are ignored.
-CUSTOM_THEME: dict = {}
+# #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
+# dict, CUSTOM_THEME, which is why it lived here or in local_config.py rather
+# than settings.conf - settings_file.is_overridable() takes only primitives.
+# Six plain strings are primitives, so this is now settings.conf/dashboard
+# configurable too, the same as every other setting - "one file, one format".
+# The trade-off named out loud in that discussion: a future new theme ROLE
+# still needs a new key here, a generator update and a theme.py change - the
+# old dict form could have accepted an unknown role name for free. That loss
+# is accepted; concrete uniformity now outweighs a hypothetical future role.
+CUSTOM_THEME_BORDER: str    = None
+CUSTOM_THEME_SEPARATOR: str = None
+CUSTOM_THEME_TEXTBOX: str   = None
+CUSTOM_THEME_VALUE: str     = None
+CUSTOM_THEME_ALERT: str     = None
+CUSTOM_THEME_ACCENT: str    = None
 
 C_WHITE        = "\x0300"
 C_BLACK        = "\x0301"
@@ -451,13 +463,27 @@ WEBUI_PORT: int = 8420
 # being actively edited is the one that takes effect. See settings_file.py for
 # why the defaults above stay as Python literals rather than moving into the
 # text file as well.
+import settings_file
+
+# The exact value each name in settings_file.REQUIRED had BEFORE either
+# override mechanism below gets a chance to touch it - i.e. what a fresh
+# install that changes nothing would still be running. oserve.startup()
+# compares the FINAL resolved value (after both overrides apply, a few lines
+# down) against this snapshot via settings_file.unconfigured_required() to
+# decide whether the daemon may boot. Snapshotting the values themselves,
+# rather than re-reading config.py's source at startup the way
+# scripts/setup_check.py's UPSTREAM_NICKS-style checks do, means a rehash's
+# importlib.reload(config) re-executes this exact line and gets the same
+# answer back - one definition, not two that could disagree.
+SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
+                    if name in globals()}
+
 try:
     from local_config import *  # noqa: F401,F403
     print('[CONFIG] Applied overrides from local_config.py')
 except ImportError:
     pass
 
-import settings_file
 settings_file.apply_to(globals())
 
 # ---------------------------------------------------------------------

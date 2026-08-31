@@ -94,6 +94,23 @@ def startup():
     assert the SystemExit instead.
     """
     print(f"--- {config.SCRIPT_VERSION} is starting up ---")
+
+    # The hard backstop for #170's RFC: scripts/setup_check.py's UPSTREAM_*
+    # checks are a friendlier, EARLIER warning an operator can choose to run
+    # (or a launcher runs for them) - this is what actually stops the daemon
+    # itself from ever joining somebody else's channels under their nickname
+    # with their admin nick in control, regardless of how it was started.
+    import settings_file
+    unconfigured = settings_file.unconfigured_required(vars(config), config.SHIPPED_DEFAULTS)
+    if unconfigured:
+        print("[CRITICAL] The following required setting(s) are still unconfigured "
+              "(blank, or still the shipped default):")
+        for name in unconfigured:
+            print(f"[CRITICAL]   {name}")
+        print("[CRITICAL] Set them in local_config.py or settings.conf before starting - "
+              "see local_config.py.sample / settings.conf.sample.")
+        sys.exit(1)
+
     if not os.path.exists(config.FILE_DIRECTORY):
         print(f"[CRITICAL] Missing directory: {config.FILE_DIRECTORY}")
         sys.exit(1)

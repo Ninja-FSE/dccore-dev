@@ -52,6 +52,73 @@ import threading
 # one checkout; ordinary installs never set it.
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.conf")
 
+# The settings a fresh install MUST change before oserve.startup() will boot -
+# see unconfigured_required()'s own docstring for the mechanism, and issue
+# #162 findings #18/#20 (chchatzop's audit-followup RFC in #170's discussion)
+# for why this exists at all: a bot that never touches these joins the
+# upstream operator's live channels under his nickname, reports its debug
+# output into his channel, and grants HIS admin nicks full control.
+#
+# One list, feeding three consumers, so they cannot drift apart the way
+# PRESERVE_RUNTIME and the two hand-maintained check-setup.py copies both
+# did before this codebase learned that lesson twice already:
+#   - scripts/gen_settings_sample.py renders these blank in settings.conf.sample
+#     instead of showing the real shipped value, so there is nothing to
+#     accidentally copy-paste-and-keep.
+#   - oserve.startup() refuses to boot (sys.exit(1)) while any of these still
+#     resolves to its shipped default, or is blank - see
+#     unconfigured_required() below.
+#   - scripts/setup_check.py's pre-flight UPSTREAM_NICKS/UPSTREAM_CHANNELS/
+#     UPSTREAM_ADMIN_NICKS checks remain as an EARLIER, friendlier warning
+#     (a full diagnostic report, not just a refusal) - this set is the same
+#     underlying knowledge, checked a second, later time as the daemon's own
+#     hard backstop, not a second place that could disagree about WHICH
+#     settings matter.
+#
+# LIST_BASE_NAME is deliberately not here even though setup_check.py has
+# historically cared about it too - chchatzop's RFC comment on #170 notes it
+# "can derive from NICKNAME rather than being asked for at all" once NICKNAME
+# itself is required; nothing does that derivation yet, so today it is simply
+# not force-blanked.
+REQUIRED = frozenset({
+    "NICKNAME", "SERVER", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK", "DEBUG_CHANNEL",
+})
+
+
+def unconfigured_required(namespace, shipped_defaults):
+    """Which names in REQUIRED are still exactly their shipped default, or
+    blank, in `namespace` - i.e. genuinely never overridden by this install.
+
+    `shipped_defaults` is config.SHIPPED_DEFAULTS: a snapshot config.py takes
+    of its own REQUIRED literals BEFORE local_config.py or settings.conf ever
+    apply. Comparing against that snapshot, not against config.py's source
+    freshly re-read, is what lets a rehash's importlib.reload(config)
+    re-execute the same snapshot line and get the identical values back
+    every time - there is exactly one place these can be defined, so unlike
+    the old UPSTREAM_NICKS/UPSTREAM_CHANNELS tuples scripts/setup_check.py
+    hand-maintains, this can never itself drift out of step with config.py.
+
+    A name is reported as unconfigured when its CURRENT value (after both
+    override mechanisms have already applied) is blank, or is identical to
+    what config.py shipped before either one ran. An install that set a
+    REQUIRED name to something new - even something that happens to collide
+    with another operator's own choice - is not flagged: this only catches
+    "never touched it", not "touched it to something someone else also
+    picked".
+
+    Returns names in REQUIRED's own sorted order, for a stable, readable
+    startup message.
+    """
+    unconfigured = []
+    for name in sorted(REQUIRED):
+        current = namespace.get(name)
+        if not str(current or "").strip():
+            unconfigured.append(name)
+            continue
+        if name in shipped_defaults and current == shipped_defaults[name]:
+            unconfigured.append(name)
+    return unconfigured
+
 # Guards save()'s read-modify-write cycle: it reads the existing file,
 # computes the edited text, then atomically replaces it - but two overlapping
 # calls would each read the same starting file and each write back a version

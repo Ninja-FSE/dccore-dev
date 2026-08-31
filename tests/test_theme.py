@@ -75,7 +75,7 @@ class ThemedPathCase(DCCoreTestCase):
         self.set_config(LOCAL_LIST_DIR=self.tree.lists, LIST_BASE_NAME="DCCoreTest",
                         NICKNAME="DCCoreTest", SCRIPT_VERSION="vTest", MAX_DCC_SLOTS=5,
                         STATS_FILE=os.path.join(self.tree.root, "stats.txt"),
-                        THEME="classic", CUSTOM_THEME={})
+                        THEME="classic")
         self.addCleanup(setattr, db, "SPEED_RECORD_FILE", db.SPEED_RECORD_FILE)
         db.SPEED_RECORD_FILE = os.path.join(self.tree.root, "speed.txt")
         with io.open(config.STATS_FILE, "w", encoding="utf-8") as handle:
@@ -364,41 +364,68 @@ class AThemeNameThatIsNotOne(ThemedPathCase):
 
 
 class OverridingOneRole(ThemedPathCase):
-    """config.CUSTOM_THEME, for an operator who would rather be unique than
-    pick from a list."""
+    """config.CUSTOM_THEME_<ROLE>, for an operator who would rather be unique
+    than pick from a list. #170's RFC flattened this from a single
+    CUSTOM_THEME dict into six plain strings, one per role - see config.py's
+    own comment on that change for why."""
 
     def test_it_changes_only_the_role_it_names(self):
-        self.set_config(THEME="classic", CUSTOM_THEME={"border": "\x0306,06"})
+        self.set_config(THEME="classic", CUSTOM_THEME_BORDER="\x0306,06")
         palette = theme.palette()
 
         self.assertEqual(palette["border"], "\x0306,06")
         self.assertEqual(palette["separator"], theme.CLASSIC["separator"])
 
     def test_it_reaches_the_wire(self):
-        self.set_config(THEME="classic", CUSTOM_THEME={"border": "\x0306,06"})
+        self.set_config(THEME="classic", CUSTOM_THEME_BORDER="\x0306,06")
 
         self.assertIn("\x0306,06", self.drive("send_transfer_complete")[0])
 
-    def test_a_misspelled_role_is_ignored_rather_than_added(self):
-        """"boarder" would otherwise sit in the palette doing nothing while the
-        role it was meant to set silently kept the preset's value - which looks
-        exactly like the setting not working, with no way to tell why."""
-        self.set_config(CUSTOM_THEME={"boarder": "\x0306,06"})
+    def test_every_role_has_its_own_setting(self):
+        """All six, not just border - each name maps to exactly the role
+        theme.palette() reads it back into."""
+        overrides = {
+            "CUSTOM_THEME_BORDER": "\x0306,06",
+            "CUSTOM_THEME_SEPARATOR": "\x0313,13",
+            "CUSTOM_THEME_TEXTBOX": "\x0301,00",
+            "CUSTOM_THEME_VALUE": "\x0304",
+            "CUSTOM_THEME_ALERT": "\x0307",
+            "CUSTOM_THEME_ACCENT": "\x0308",
+        }
+        self.set_config(THEME="classic", **overrides)
         palette = theme.palette()
 
-        self.assertNotIn("boarder", palette)
-        self.assertEqual(palette["border"], theme.CLASSIC["border"])
+        self.assertEqual(palette["border"], overrides["CUSTOM_THEME_BORDER"])
+        self.assertEqual(palette["separator"], overrides["CUSTOM_THEME_SEPARATOR"])
+        self.assertEqual(palette["textbox"], overrides["CUSTOM_THEME_TEXTBOX"])
+        self.assertEqual(palette["value"], overrides["CUSTOM_THEME_VALUE"])
+        self.assertEqual(palette["alert"], overrides["CUSTOM_THEME_ALERT"])
+        self.assertEqual(palette["accent"], overrides["CUSTOM_THEME_ACCENT"])
 
-    def test_a_non_string_value_is_ignored(self):
-        """It goes straight into an f-string on the wire."""
-        self.set_config(CUSTOM_THEME={"border": 6})
+    def test_the_default_of_none_keeps_the_presets_own_value(self):
+        """None (the shipped default of every CUSTOM_THEME_<ROLE> setting) is
+        "not overridden", not "set to nothing" - the same convention
+        RAR_BINARY already uses for "unset means look on PATH"."""
+        self.set_config(THEME="classic")
+
+        self.assertEqual(theme.palette(), dict(theme.CLASSIC))
+
+    def test_an_empty_string_also_keeps_the_presets_own_value(self):
+        """A settings.conf line uncommented and left blank coerces to "" for
+        a str-typed setting whose default is None - see coerce()'s own
+        handling of that case - so this must behave the same as never having
+        set it, not as "blank this role out"."""
+        self.set_config(THEME="classic", CUSTOM_THEME_BORDER="")
 
         self.assertEqual(theme.palette()["border"], theme.CLASSIC["border"])
 
-    def test_something_that_is_not_a_dict_at_all_is_ignored(self):
-        self.set_config(CUSTOM_THEME="border=6")
+    def test_a_non_string_value_is_ignored(self):
+        """It goes straight into an f-string on the wire. Only reachable via
+        local_config.py (Python) - settings.conf's coerce() always produces a
+        string or None for a str-typed setting."""
+        self.set_config(CUSTOM_THEME_BORDER=6)
 
-        self.assertEqual(theme.palette(), dict(theme.CLASSIC))
+        self.assertEqual(theme.palette()["border"], theme.CLASSIC["border"])
 
 
 if __name__ == "__main__":

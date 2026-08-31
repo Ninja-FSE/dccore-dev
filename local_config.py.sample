@@ -21,6 +21,13 @@
 # also be set in settings.conf instead (see settings.conf.sample) if you
 # prefer configuring them from the web dashboard or CLI rather than by hand.
 #
+# NICKNAME, CHANNEL, ADMIN_NICK, DEBUG_CHANNEL and FILE_DIRECTORY are not
+# just recommended - oserve.startup() refuses to boot (sys.exit(1), naming
+# every one still unconfigured) while any of them is still blank or still
+# exactly what config.py ships. See settings_file.REQUIRED if you want the
+# full, authoritative list; SERVER joins them there but rarely needs
+# changing, since irc.undernet.org is correct for almost every install.
+#
 # NICKNAME = "YourBotName"
 # ALT_NICKNAME = "YourBotName_"
 # CHANNEL = "#your-test-channel"

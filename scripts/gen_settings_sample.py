@@ -160,7 +160,15 @@ def build():
 
             for line in _doc_lines(lines, node):
                 out.append(f"# {line}\n")
-            out.append(f"#{name} = {_render(default)}\n\n")
+            # settings_file.REQUIRED (issue #170's RFC): shipping a real value
+            # here is exactly the defect this exists to close - a copy-paste
+            # install that never edits a REQUIRED line still gets a working,
+            # wrong bot (somebody else's channel, nickname, admin authority).
+            # Blank leaves nothing to accidentally rely on.
+            shown = "" if name in settings_file.REQUIRED else _render(default)
+            if name in settings_file.REQUIRED:
+                out.append(f"# REQUIRED - the daemon refuses to start until this is set.\n")
+            out.append(f"#{name} = {shown}\n\n")
 
     return "".join(out).rstrip("\n") + "\n"
 
