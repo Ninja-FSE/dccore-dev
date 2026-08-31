@@ -10,6 +10,7 @@ import list
 import dcc
 import db
 import stats_mgr
+import theme
 
 is_ready = False
 
@@ -224,21 +225,17 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     # ---------------------------------------------------------------------
     # The central block theme, an exact copy of the channel advert's framing.
     # ---------------------------------------------------------------------
-    BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-    BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
-    BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
-    R = "\x0f"                  # Full reset after each section
-    B = "\x02"                  # Bold, for live figures and triggers
+    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
     
     def _build(shown_name):
         return (
         f"PRIVMSG {channel} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {B}{config.C_GREEN}Sent{B}{BG_TEXT_BOX}: {B}{shown_name}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} To: {B}{config.C_GREEN}{user}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {B}{config.C_GREEN}{total_sent_str}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Yesterday: {B}{config.C_RED}{yesterday_str}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Today: {B}{config.C_RED}{today_str}{B} {config.C_ROYAL_BLUE}[as of {current_time_str}] "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {B}{config.C_GREEN}{speed_str}{B} "
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {B}{V}Sent{B}{BG_TEXT_BOX}: {B}{shown_name}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} To: {B}{V}{user}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {B}{V}{total_sent_str}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Yesterday: {B}{A}{yesterday_str}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Today: {B}{A}{today_str}{B} {X}[as of {current_time_str}] "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {B}{V}{speed_str}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
         )
     
@@ -266,16 +263,12 @@ def send_dcc_sending_notice(user, file_name):
     # ---------------------------------------------------------------------
     # Private notice block, framed exactly like the channel one
     # ---------------------------------------------------------------------
-    BG_RED_BLOCK  = "\x0304,05" 
-    BG_CYAN_BLOCK = "\x0310,10" 
-    BG_TEXT_BOX   = "\x0301,00" 
-    R = "\x0f"                  
-    B = "\x02"                  
+    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
     
     msg = (
         f"NOTICE {user} :"
         f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Sending: {B}{file_name}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Status: {B}{config.C_GREEN}Active Transfer Started{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Status: {B}{V}Active Transfer Started{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
     )
     
@@ -370,20 +363,16 @@ def announce_worker():
                     raw_record = db.get_speed_record()
                     record_str = stats_mgr.format_speed(raw_record) if raw_record > 0 else "0k/s"
 
-                    BG_RED_BLOCK  = "\x0304,05"
-                    BG_CYAN_BLOCK = "\x0310,10"
-                    BG_TEXT_BOX   = "\x0301,00"
-                    R = "\x0f"
-                    B = "\x02"
+                    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
 
                     announce_msg = (
                         f"PRIVMSG {chan} :"
-                        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Type: {B}{config.C_GREEN}@{config.NICKNAME}{R}{BG_TEXT_BOX} For My List Of: {B}{config.C_RED}{formatted_count}{R}{BG_TEXT_BOX} Files ({total_size}) created {config.C_GREEN}{list_date} "
+                        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Type: {B}{V}@{config.NICKNAME}{R}{BG_TEXT_BOX} For My List Of: {B}{A}{formatted_count}{R}{BG_TEXT_BOX} Files ({total_size}) created {V}{list_date} "
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {slots_str} "
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {queued_str} "
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {speed_str} / Record: {record_str} "
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {total_sent_str} "
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {B}{config.C_GREEN}ON{R}{BG_TEXT_BOX} "
+                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {B}{V}ON{R}{BG_TEXT_BOX} "
                         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {config.SCRIPT_VERSION} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
                     )
 
@@ -420,20 +409,16 @@ def send_search_result_header(user, search_term, match_count, channel):
     sending_count = min(match_count, config.MAX_SEARCH_RESULTS)
     
     # The block theme with the white text box.
-    BG_RED_BLOCK  = "\x0304,05" 
-    BG_CYAN_BLOCK = "\x0310,10" 
-    BG_TEXT_BOX   = "\x0301,00"  # The white background plate
-    R = "\x0f"                  
-    B = "\x02"                  
+    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
     
     def _build(shown_term):
         return (
         f"PRIVMSG {user} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Search Result: {B}{config.C_GREEN}ON{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Found: {B}{config.C_RED}{match_count}{B} Match(es) For {B}{config.C_GREEN}{shown_term}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Sending: {B}{config.C_RED}{sending_count}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {B}{config.C_GREEN}{free_slots}/{config.MAX_DCC_SLOTS}{B} Free "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {B}{config.C_GREEN}{queued_count}{B} "
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Search Result: {B}{V}ON{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Found: {B}{A}{match_count}{B} Match(es) For {B}{V}{shown_term}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Sending: {B}{A}{sending_count}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {B}{V}{free_slots}/{config.MAX_DCC_SLOTS}{B} Free "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {B}{V}{queued_count}{B} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
         )
     
@@ -467,10 +452,7 @@ def send_dcc_queue_notice(user, file_name, position):
     oserve = sys.modules.get('oserve')
     if oserve:
         # The mIRC colour blocks and separators
-        BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-        BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
-        BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
-        R = "\x0f"                  # Full reset
+        BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
         
         # Build the message in the colour-block style
         text_content = f"Added {file_name} to your personal queue at position #{position} of 100."
@@ -491,27 +473,23 @@ def send_debug(msg_text, category="INFO"):
     # ---------------------------------------------------------------------
     # The extended block theme: bright white background, guarded against colour clashes
     # ---------------------------------------------------------------------
-    BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-    BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
-    BG_TEXT_BOX   = "\x0301,00"  # Black text on a bright white background
-    R = "\x0f"                  # Full reset
-    B = "\x02"                  # Bold
+    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
     
     # 1. The opening block: the timestamp, framed in white
     msg = f"PRIVMSG {config.DEBUG_CHANNEL} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} [{current_time}] {B}DEBUG{B} "
     
     # 2. The tag block, colour-coded by event
     if category.upper() == "SENT":
-        tag_str = f"{config.C_GREEN}[SENT]{R}{BG_TEXT_BOX}"
+        tag_str = f"{V}[SENT]{R}{BG_TEXT_BOX}"
     elif category.upper() == "PART":
-        tag_str = f"{config.C_RED}[PART]{R}{BG_TEXT_BOX}"
+        tag_str = f"{A}[PART]{R}{BG_TEXT_BOX}"
     elif category.upper() == "QUIT":
         tag_str = f"{config.C_PURPLE}[QUIT]{R}{BG_TEXT_BOX}"
     elif category.upper() == "JOIN":
         tag_str = f"{config.C_CYAN}[JOIN]{R}{BG_TEXT_BOX}"
     elif category.upper() == "BAN":
         # A red block label for PERMANENT bans
-        tag_str = f"{config.C_RED}[HARDBAN]{R}{BG_TEXT_BOX}"
+        tag_str = f"{A}[HARDBAN]{R}{BG_TEXT_BOX}"
     elif category.upper() == "HARDBAN":
         # dcc.py raises this for a blocked path traversal and for a poisoned queue entry -
         # the two most serious alerts the daemon can produce. Without this branch they fell
@@ -521,7 +499,7 @@ def send_debug(msg_text, category="INFO"):
         # Labelled [SECURITY], not [HARDBAN]: the "BAN" category above already renders
         # [HARDBAN], and that one is an admin confirming a !ban. These two must not look
         # alike - one is routine administration, the other is someone probing the filesystem.
-        tag_str = f"{config.C_RED}[SECURITY]{R}{BG_TEXT_BOX}"
+        tag_str = f"{A}[SECURITY]{R}{BG_TEXT_BOX}"
     elif category.upper() == "TBAN":
         # A purple block label for TEMPORARY day-bans
         tag_str = f"{config.C_PURPLE}[TEMPBAN]{R}{BG_TEXT_BOX}"
@@ -591,10 +569,7 @@ def send_pack_error_notice(irc_sock, user):
     import sys
     
     # Take the colour codes from the existing structure
-    BG_RED_BLOCK  = "\x0304,05" 
-    BG_CYAN_BLOCK = "\x0310,10" 
-    BG_TEXT_BOX   = "\x0301,00" 
-    B = "\x02"                  
+    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
     
     # Build the message inside the standard frame
     msg = (

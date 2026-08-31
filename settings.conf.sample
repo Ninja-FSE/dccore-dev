@@ -281,8 +281,18 @@
 # Longest a rar packing run may take, in seconds, before it is abandoned
 #RAR_TIMEOUT = 1800
 
+# How everything this bot says in a channel or a notice is coloured. One name
+# selects a palette that all eight outbound message paths read - see theme.py
+# for the roles and the presets.
+# 
+# This is not decoration. In a busy channel a dozen bots advertise at once and
+# the palette is how a person tells them apart at a glance, so two DCCore
+# operators who both took the default are indistinguishable. "classic" is the
+# look DCCore has always had, and stays the default so that no existing
+# install silently changes identity.
+# classic, midnight, forest, orchid, plain
+#THEME = classic
 
-[mirc colour codes and control characters (irc standard)]
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
 # a network-facing surface should never be on just because someone pulled and
 # restarted. Opt in from local_config.py, not here.

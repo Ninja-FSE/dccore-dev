@@ -6,6 +6,7 @@ import config
 import oserve
 import dcc
 import announce
+import theme
 
 LIST_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, "flac-serv.txt")
 
@@ -579,10 +580,7 @@ def execute_search(irc_sock, user, search_term, channel):
             
             oserve = sys.modules.get('oserve')
             if oserve:
-                BG_RED_BLOCK  = "\x0304,05"  # Dark red border
-                BG_CYAN_BLOCK = "\x0310,10"  # Cyan border
-                BG_TEXT_BOX   = "\x0301,00"  # Black text on a WHITE background
-                R = "\x0f"                  # Full reset
+                BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
                 
                 for match in matches: 
                     # Wrap the row in the colour-block frame and send it raw to the user
@@ -601,7 +599,7 @@ def execute_search(irc_sock, user, search_term, channel):
         print(f"[SEARCH-FINISHED] The search for {user} finished and the lock was released cleanly.")
 
 def send_list_trigger_info(irc_sock, user):
-    msg = f"List trigger(s): {config.C_RED}@{config.NICKNAME}{config.C_RESET} {config.SCRIPT_VERSION}{config.C_RESET}\r\n"
+    msg = f"List trigger(s): {theme.palette()['alert']}@{config.NICKNAME}{config.C_RESET} {config.SCRIPT_VERSION}{config.C_RESET}\r\n"
     oserve.queue_message(user, f"NOTICE {user} :{msg}")
 
 def send_file_list(irc_sock, user, channel):

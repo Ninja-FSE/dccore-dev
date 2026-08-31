@@ -444,6 +444,12 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
 
     # Excluded on purpose. Each entry is a claim about WHY losing it is fine.
     NOT_PRESERVED = {
+        "CUSTOM_THEME":
+            "a setting, not runtime state: the operator's per-role colour "
+            "overrides, read from config.py or local_config.py. Losing it on a "
+            "rehash is not a loss - re-reading it is the point, the same way "
+            "ADMIN_HOSTMASKS below is meant to be re-read.",
+
         "ADMIN_HOSTMASKS":
             "a setting read from local_config.py, not runtime state - it is "
             "SUPPOSED to be re-read from the file on a rehash",
