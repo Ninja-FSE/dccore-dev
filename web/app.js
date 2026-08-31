@@ -1191,7 +1191,17 @@
     var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
     var control;
 
-    if (field.type === "bool") {
+    if (field.choices) {
+      // A fixed few, not free text. The three list formats are the first: a
+      // typed "ZIP" or "tar" would be refused by the save with a reason, but
+      // being refused is a worse way to find out than never being offered it.
+      var chosen = isDirty ? state.settingsDirty[field.name] : settingsValueToString(field.value);
+      var options = field.choices.map(function (choice) {
+        return '<option value="' + escapeHtml(choice) + '"' +
+          (choice === chosen ? " selected" : "") + ">" + escapeHtml(choice) + "</option>";
+      }).join("");
+      control = '<select data-setting="' + escapeHtml(field.name) + '">' + options + "</select>";
+    } else if (field.type === "bool") {
       var checked = isDirty ? state.settingsDirty[field.name] === "true" : !!field.value;
       control = '<input type="checkbox" data-setting="' + escapeHtml(field.name) + '"' +
         (checked ? " checked" : "") + ">";
@@ -1284,7 +1294,10 @@
     el.settingsFields.innerHTML = html;
 
     el.settingsFields.querySelectorAll("[data-setting]").forEach(function (input) {
-      input.addEventListener(input.type === "checkbox" ? "change" : "input", onSettingsFieldChange);
+      // "input" for anything typed into, so the save bar tracks a keystroke at
+      // a time; "change" for the controls that have no intermediate state.
+      var discrete = input.type === "checkbox" || input.tagName === "SELECT";
+      input.addEventListener(discrete ? "change" : "input", onSettingsFieldChange);
     });
   }
 

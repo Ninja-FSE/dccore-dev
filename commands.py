@@ -66,12 +66,14 @@ def handle_help_request(s, user, target):
     if not oserve:
         return
 
+    import list as list_mod
+
     nick = config.NICKNAME
     bold, red, reset = config.C_BOLD, config.C_RED, config.C_RESET
 
     lines = [
         f"I am a file server. To see what I have, type: {bold}{red}@{nick}{reset} "
-        f"- I will send you my list as a zip.",
+        f"- I will send you my list as a {list_mod.list_format()} file.",
         f"To request a file, paste a line from that list, for example: "
         f"{bold}{red}!{nick} Artist - Song.mp3{reset}",
     ]
@@ -79,7 +81,7 @@ def handle_help_request(s, user, target):
     if getattr(config, "RAR_ENABLED", True):
         lines.append(
             f"To request a whole album packed as one .rar, use the album list "
-            f"in the same zip: {bold}{red}!{nick} !rar D:\\MUSIC\\Artist\\Album\\{reset}")
+            f"that came with it: {bold}{red}!{nick} !rar D:\\MUSIC\\Artist\\Album\\{reset}")
 
     lines.append(
         f"What I have and what I have sent: {bold}{red}@{nick}-stats{reset}. "

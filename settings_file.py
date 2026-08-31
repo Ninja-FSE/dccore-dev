@@ -71,6 +71,18 @@ _SYNTHETIC_SECTION = "__dccore__"
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
+# Settings whose value is one of a fixed few, rather than free text. A plain
+# string field takes anything, and "ZIP" or "tar" would be written happily,
+# read back unchanged, and then match nothing at the point of use - the bot
+# would go on running and quietly stop serving a list. Naming the choices here
+# turns that into a refusal at the point of saving, with the reason, and into a
+# "kept the default" line in the startup log for a hand-edited settings.conf.
+#
+# Case is not part of the choice: an operator typing "ZIP" means "zip".
+CHOICES = {
+    "LIST_FORMAT": ("txt", "zip", "rar"),
+}
+
 
 class SettingsError(Exception):
     """The file could not be parsed at all. Individual bad values do not
@@ -159,6 +171,17 @@ def coerce(name, raw, default, declared=None):
     """
     text = raw.strip()
     kind = declared if declared is not None else type(default)
+
+    # Before any type conversion: a choice setting is only ever one of a few
+    # strings, and the point of checking here is that every path into config -
+    # settings.conf at startup, the settings form, apply_settings_changes -
+    # comes through coerce().
+    if name in CHOICES:
+        lowered = text.lower()
+        if lowered not in CHOICES[name]:
+            raise ValueError(
+                f"expected one of {list(CHOICES[name])}, got {raw!r}")
+        return lowered
 
     if default is None and not text:
         # A setting whose default is None is "unset unless you say otherwise"

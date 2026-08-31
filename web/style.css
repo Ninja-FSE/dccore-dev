@@ -1199,6 +1199,7 @@ html, body {
   max-width: 50%;
 }
 
+.settings-field-control select,
 .settings-field-control input[type="text"],
 .settings-field-control input[type="number"] {
   width: 100%;
@@ -1214,6 +1215,7 @@ html, body {
   transition: border-color 0.12s ease;
 }
 
+.settings-field-control select:focus,
 .settings-field-control input[type="text"]:focus,
 .settings-field-control input[type="number"]:focus {
   border-color: var(--accent);

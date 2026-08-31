@@ -77,6 +77,21 @@
 
 #LOCAL_LIST_DIR = ./lists
 
+# How the master list is handed to somebody who types "@<nick>": as the plain
+# text file, packed into a .zip, or packed into a .rar. OmenServe has offered
+# the same three for years and people's clients differ in what they open
+# without complaint, which is the whole reason it is a choice.
+# 
+# All three are always available. This is NOT tied to RAR_ENABLED: that switch
+# governs whether the bot will pack an album folder on request, and packing the
+# list is the operator's own machine doing one small job at build time.
+# 
+# "rar" needs a rar binary (see RAR_BINARY). If none can be found the build
+# falls back to .zip and says so, rather than leaving the bot with no list to
+# serve at all.
+# "txt", "zip" or "rar"
+#LIST_FORMAT = zip
+
 # Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
 # separate from FILE_DIRECTORY: that directory is the served library, scanned
 # by update_list.py and offered to everyone via @find/!<nick> - fetched files

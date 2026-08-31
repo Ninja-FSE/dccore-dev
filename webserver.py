@@ -1001,7 +1001,7 @@ SETTINGS_CATEGORIES = (
                                                 "FETCH_OFFER_TIMEOUT", "FETCH_FOLDER_OFFER_TIMEOUT",
                                                 "MAX_FETCH_FOLDER_FILE_SIZE"]),
     ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
-                                                "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
+                                                "LIST_FORMAT", "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
@@ -1051,6 +1051,7 @@ SETTINGS_LABELS = {
     "LIST_BASE_NAME": "List base name",
     "PAUSE_ON_UPDATE": "Pause sharing during !update",
     "FILE_DIRECTORY": "Music directory",
+    "LIST_FORMAT": "List delivery format",
     "RAR_ENABLED": "Enable !rar folder packing",
     "RAR_BINARY": "RAR binary path",
     "TMP_ZIP_DIR": "Temp archive directory",
@@ -1092,6 +1093,22 @@ SETTINGS_LABELS = {
 }
 
 
+def _settings_field(name, declared, value):
+    """One field for the settings form.
+
+    "choices" is present only for a setting that has a fixed few - LIST_FORMAT
+    is the first. It carries the same tuple settings_file.CHOICES validates
+    against, so the page cannot offer a value the save would then refuse, and
+    an operator picks a format instead of typing one of three words correctly.
+    """
+    import settings_file
+    field = {"name": name, "label": SETTINGS_LABELS.get(name, name),
+             "type": declared.__name__, "value": value}
+    if name in settings_file.CHOICES:
+        field["choices"] = list(settings_file.CHOICES[name])
+    return field
+
+
 def build_settings_payload():
     """GET /api/settings payload: every editable setting, grouped for the
     Settings view's category rail, plus whether an admin password is set.
@@ -1121,8 +1138,7 @@ def build_settings_payload():
             value = getattr(config, name, None)
             if not settings_file.is_overridable(name, value):
                 continue
-            fields.append({"name": name, "label": SETTINGS_LABELS.get(name, name),
-                           "type": types[name].__name__, "value": value})
+            fields.append(_settings_field(name, types[name], value))
             seen.add(name)
         categories.append({"id": cat_id, "label": label, "fields": fields})
 
@@ -1135,8 +1151,7 @@ def build_settings_payload():
                 and settings_file.is_overridable(n, getattr(config, n, None))]
     if leftover:
         categories.append({"id": "other", "label": "Other", "fields": [
-            {"name": n, "label": SETTINGS_LABELS.get(n, n),
-             "type": types[n].__name__, "value": getattr(config, n, None)}
+            _settings_field(n, types[n], getattr(config, n, None))
             for n in sorted(leftover)]})
 
     return {
