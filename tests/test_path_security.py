@@ -4,7 +4,7 @@ These guard the directory-traversal fix: without it any channel user could type
 "!rar ../../root/.ssh" and have that folder packed and DCC'd to them, and the
 first version of the containment check used a bare ``startswith`` that also let
 a sibling directory sharing the music root's string prefix through
-("/mnt/nfs-musik-backup" vs "/mnt/nfs-musik").
+("/srv/library-backup" vs "/srv/library").
 
 Everything here is stdlib-only and runs against real temp directories, because
 the behaviour under test is about how the filesystem resolves paths.
@@ -215,7 +215,7 @@ class RarRequestTraversalTests(PathSecurityBase):
 
     def request(self, spec, user="dave"):
         with quiet():
-            dcc.handle_download_request(self.sock, user, "!rar " + spec, "#mp3passion")
+            dcc.handle_download_request(self.sock, user, "!rar " + spec, "#dccore-test")
 
     def assertNothingQueued(self, spec):
         self.assertEqual(
@@ -296,7 +296,7 @@ class RarRequestTraversalTests(PathSecurityBase):
         # Parentheses are kept so AutoQ.mrc can still match the archive name.
         self.assertEqual(row["file"], "Black_Album_(1991).rar")
         self.assertTrue(row["is_unpacked_rar_folder"])
-        self.assertEqual(row["channel"], "#mp3passion")
+        self.assertEqual(row["channel"], "#dccore-test")
         self.assertEqual(row["user_raw"], "dave")
         # And the queue worker really was woken for it.
         self.assertIn("check_queue_and_send", self.dispatched_names())
@@ -370,13 +370,13 @@ class DownloadRequestChannelValidationTests(PathSecurityBase):
                 self.sock, user, "!rar Metallica/Black Album (1991)", target_chan)
 
     def test_the_configured_channel_is_accepted(self):
-        self.assertIn("#mp3passion", config.CHANNEL.split(","))
-        self.request("#mp3passion")
+        self.assertIn("#dccore-test", config.CHANNEL.split(","))
+        self.request("#dccore-test")
         self.assertIn("dave", config.dcc_queue)
 
     def test_a_second_configured_channel_is_accepted(self):
-        self.set_config(CHANNEL="#mp3passion,#mp3country")
-        self.request("#mp3country")
+        self.set_config(CHANNEL="#dccore-test,#dccore-test3")
+        self.request("#dccore-test3")
         self.assertIn("dave", config.dcc_queue)
 
     def test_the_bots_own_nick_is_accepted_a_private_request(self):
@@ -384,7 +384,7 @@ class DownloadRequestChannelValidationTests(PathSecurityBase):
         self.assertIn("dave", config.dcc_queue)
 
     def test_channel_matching_is_case_insensitive(self):
-        self.request("#MP3PASSION")
+        self.request("#DCCORE-TEST")
         self.assertIn("dave", config.dcc_queue)
 
     def test_a_channel_this_bot_is_not_in_is_refused(self):
@@ -409,7 +409,7 @@ class PoisonedQueueRowTests(PathSecurityBase):
 
     def setUp(self):
         super().setUp()
-        config.channel_users = {"#mp3passion": {"dave"}}
+        config.channel_users = {"#dccore-test": {"dave"}}
         config.bot_joined_channel = True
 
         # Stub the packer engine: reaching it at all is the failure this class
@@ -447,7 +447,7 @@ class PoisonedQueueRowTests(PathSecurityBase):
         return {
             "file": "Loot.rar",
             "path": path,
-            "channel": "#mp3passion",
+            "channel": "#dccore-test",
             "user_raw": "dave",
             "is_unpacked_rar_folder": True,
             "is_temporary_zip": True,
@@ -530,7 +530,7 @@ class FileDirectoryUnsetRequestTests(PathSecurityBase):
 
     def test_a_plain_file_request_gets_an_actionable_notice_not_silence(self):
         with quiet():
-            dcc.handle_download_request(self.sock, "dave", "Song.flac", "#mp3passion")
+            dcc.handle_download_request(self.sock, "dave", "Song.flac", "#dccore-test")
 
         self.assertIn(("error", ("dave", "not_configured")), self.notices)
         self.assertEqual(config.dcc_queue, {})
@@ -539,7 +539,7 @@ class FileDirectoryUnsetRequestTests(PathSecurityBase):
     def test_a_rar_request_gets_an_actionable_notice_not_silence(self):
         with quiet():
             dcc.handle_download_request(
-                self.sock, "dave", "!rar Metallica/Black Album (1991)", "#mp3passion")
+                self.sock, "dave", "!rar Metallica/Black Album (1991)", "#dccore-test")
 
         self.assertIn(("error", ("dave", "not_configured")), self.notices)
         self.assertEqual(config.dcc_queue, {})
@@ -555,7 +555,7 @@ class FileDirectoryUnsetRequestTests(PathSecurityBase):
             handle.write(b"not a real zip, just bytes")
 
         with quiet():
-            dcc.handle_download_request(self.sock, "dave", name, "#mp3passion")
+            dcc.handle_download_request(self.sock, "dave", name, "#dccore-test")
 
         self.assertNotIn(("error", ("dave", "not_configured")), self.notices)
         self.assertIn("sending", [kind for kind, _a in self.notices])

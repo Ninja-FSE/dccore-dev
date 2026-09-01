@@ -12,10 +12,10 @@ BROADCAST_SEARCH_CHANNEL was exactly that. Its own comment promised it
 "defaults to the first entry of CHANNEL", and it did - to the first entry of
 the SHIPPED default, not the operator's. So an operator running on their own
 channel still had a dashboard broadcast search fire its @find into
-#mp3passion, a real public channel they may not even be in:
+#dccore-default, a real public channel they may not even be in:
 
     operator set CHANNEL      = #dccore-test
-    BROADCAST_SEARCH_CHANNEL  = #mp3passion
+    BROADCAST_SEARCH_CHANNEL  = #dccore-default
 
 webserver.start_broadcast_search() prefers BROADCAST_SEARCH_CHANNEL over
 CHANNEL, so the stale value is the one that gets used.

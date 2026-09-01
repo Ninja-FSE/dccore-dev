@@ -73,7 +73,7 @@ class TheBotRegistryIsBounded(DCCoreTestCase):
 
     def advertise(self, nick, now=T0):
         irc._capture_channel_advert(
-            nick, "#mp3passion", f"Type: @{nick} For My List Of: 5 Files", now=now)
+            nick, "#dccore-test", f"Type: @{nick} For My List Of: 5 Files", now=now)
 
     def test_a_flood_of_one_off_nicks_cannot_grow_it_without_limit(self):
         for index in range(irc.KNOWN_BOTS_MAX + 500):
@@ -359,14 +359,14 @@ class EveryUserVisibleLineFitsTheBudget(DCCoreTestCase):
         senders = {
             "send_transfer_complete":
                 lambda name: announce.send_transfer_complete(
-                    "#mp3passion", "dave", name, 4096, time.time() - 2, 512000),
+                    "#dccore-test", "dave", name, 4096, time.time() - 2, 512000),
             "send_dcc_sending_notice":
                 lambda name: announce.send_dcc_sending_notice("dave", name),
             "send_dcc_queue_notice":
                 lambda name: announce.send_dcc_queue_notice("dave", name, 3),
             "send_search_result_header":
                 lambda name: announce.send_search_result_header(
-                    "dave", name, 3, "#mp3passion"),
+                    "dave", name, 3, "#dccore-test"),
         }
         from tests.support import silence_debug
         silence_debug(announce)

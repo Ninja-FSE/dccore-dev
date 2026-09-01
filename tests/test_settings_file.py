@@ -176,7 +176,7 @@ class UnconfiguredRequiredTests(unittest.TestCase):
 
     def test_a_whitespace_only_value_counts_as_blank(self):
         namespace = {"CHANNEL": "   "}
-        shipped = {"CHANNEL": "#mp3passion"}
+        shipped = {"CHANNEL": "#dccore-test"}
         self.assertIn("CHANNEL", settings_file.unconfigured_required(namespace, shipped))
 
     def test_a_name_missing_from_the_shipped_snapshot_is_judged_on_blankness_alone(self):
@@ -503,7 +503,7 @@ class AHashInsideAValueIsNotAComment(unittest.TestCase):
     `_doc_lines()` found a setting's inline comment by splitting the source
     line on "#", which cuts inside the string literal for
 
-        CHANNEL = "#mp3passion,#mp3servers,..."
+        CHANNEL = "#dccore-test,#dccore-test2,..."
 
     inventing a comment out of the value's own text. It shipped, above both
     CHANNEL and DEBUG_CHANNEL.
@@ -517,7 +517,7 @@ class AHashInsideAValueIsNotAComment(unittest.TestCase):
         return gen_settings_sample._doc_lines([source], ast.parse(source).body[0])
 
     def test_a_hash_in_the_value_produces_no_comment(self):
-        self.assertEqual(self._doc_lines('CHANNEL = "#mp3passion,#mp3servers"'), [])
+        self.assertEqual(self._doc_lines('CHANNEL = "#dccore-test,#dccore-test2"'), [])
 
     def test_a_real_inline_comment_is_still_found(self):
         """Control. The fix must not stop finding genuine comments, which are

@@ -34,7 +34,7 @@ class HelpCase(DCCoreTestCase):
         super().setUp()
         self.set_config(NICKNAME="DCCoreWin", RAR_ENABLED=True)
 
-    def ask(self, user="dave", target="#mp3passion"):
+    def ask(self, user="dave", target="#dccore-test"):
         self.oserve.queued.clear()
         commands.handle_help_request(None, user, target)
         return [message for _user, message, _vip in self.oserve.queued]
@@ -61,9 +61,9 @@ class ItAnswersThePersonNotTheChannel(HelpCase):
                 self.assertTrue(line.startswith("NOTICE dave :"), line)
 
     def test_nothing_is_sent_to_the_channel(self):
-        for line in self.ask(target="#mp3passion"):
+        for line in self.ask(target="#dccore-test"):
             with self.subTest(line=line[:40]):
-                self.assertNotIn("#mp3passion", line)
+                self.assertNotIn("#dccore-test", line)
 
     def test_it_is_addressed_to_whoever_asked(self):
         self.assertTrue(all(line.startswith("NOTICE someoneelse :")

@@ -70,7 +70,7 @@ class CommandCase(DCCoreTestCase):
         with io.open(db.DOWNLOAD_COUNTS_FILE, "w", encoding="utf-8") as handle:
             handle.write(json.dumps(counts))
 
-    def ask(self, handler, user="dave", target="#mp3passion"):
+    def ask(self, handler, user="dave", target="#dccore-test"):
         self.oserve.queued.clear()
         handler(None, user, target)
         return [message for _user, message, _vip in self.oserve.queued]
@@ -91,18 +91,18 @@ class CommandCase(DCCoreTestCase):
 class ItAnswersThePersonNotTheChannel(CommandCase):
 
     def test_stats_goes_only_to_the_asker(self):
-        for line in self.stats(user="dave", target="#mp3passion"):
+        for line in self.stats(user="dave", target="#dccore-test"):
             with self.subTest(line=line[:40]):
                 self.assertTrue(line.startswith("NOTICE dave :"), line)
-                self.assertNotIn("#mp3passion", line)
+                self.assertNotIn("#dccore-test", line)
 
     def test_top_goes_only_to_the_asker(self):
         self.write_counts()
 
-        for line in self.top(user="dave", target="#mp3passion"):
+        for line in self.top(user="dave", target="#dccore-test"):
             with self.subTest(line=line[:40]):
                 self.assertTrue(line.startswith("NOTICE dave :"), line)
-                self.assertNotIn("#mp3passion", line)
+                self.assertNotIn("#dccore-test", line)
 
     def test_both_go_out_on_the_vip_lane(self):
         """Same lane as -help and -que: an answer to a direct question should

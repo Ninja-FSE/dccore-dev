@@ -140,7 +140,7 @@ def reset_config(**overrides):
     # world behaviour on any machine that is not the operator's own NAS, and
     # tests/test_startup.py's BootCase (and anything else that needs a real,
     # existing directory) already overrides this via make_tree().
-    config.CHANNEL = "#mp3passion"
+    config.CHANNEL = "#dccore-test"
     config.FILE_DIRECTORY = "/nonexistent-dccore-test-directory"
     for stale in ("PREVIOUS_NICK",):
         if hasattr(config, stale):
@@ -236,8 +236,8 @@ def queue_row(user="dave", filename="Song.flac", **extra):
     """Build a dcc_queue entry in the shape dcc.py actually creates."""
     row = {
         "file": filename,
-        "path": "/mnt/nfs-musik/Artist/Album/" + filename,
-        "channel": "#mp3passion",
+        "path": "/srv/library/Artist/Album/" + filename,
+        "channel": "#dccore-test",
         "user_raw": user,
         "is_temporary_zip": False,
     }

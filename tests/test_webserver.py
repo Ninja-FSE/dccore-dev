@@ -175,7 +175,7 @@ class SearchAndFilelistsPayloadTests(DCCoreTestCase):
         config.LOCAL_LIST_DIR = self.tree.lists
         config.LIST_BASE_NAME = "DCCore"
         config.NICKNAME = "DCCore"
-        config.CHANNEL = "#mp3passion, #mp3servers"
+        config.CHANNEL = "#dccore-test, #dccore-test2"
         write_master_list(self.tree.lists, "DCCore", [
             ("D:\\MUSIC\\Metallica\\Black Album (1991)\\", [
                 ("01 - Enter Sandman.flac", "42.31MB"),
@@ -199,7 +199,7 @@ class SearchAndFilelistsPayloadTests(DCCoreTestCase):
 
     def test_search_channel_is_the_full_joined_channel_list(self):
         rows = webserver.build_search_payload("fuel")
-        self.assertEqual(rows[0]["channel"], "#mp3passion, #mp3servers")
+        self.assertEqual(rows[0]["channel"], "#dccore-test, #dccore-test2")
 
     def test_search_is_case_insensitive_and_matches_all_words(self):
         self.assertEqual(len(webserver.build_search_payload("SANDMAN")), 1)
@@ -259,7 +259,7 @@ class SearchAndFilelistsPayloadTests(DCCoreTestCase):
         announce.send_search_result_header = fake_header
         self.addCleanup(lambda: setattr(announce, "send_search_result_header", real_header))
 
-        list_mod.execute_search(None, "someuser", "sandman", "#mp3passion")
+        list_mod.execute_search(None, "someuser", "sandman", "#dccore-test")
 
         self.assertEqual(headers, [1])
         self.assertEqual(len(self.oserve.queued), 1)
@@ -273,7 +273,7 @@ class SearchAndFilelistsPayloadTests(DCCoreTestCase):
         that strips down to zero search words (e.g. "---") has always matched
         nothing, even though find_matching_entries([]) itself now means
         "match everything" for build_filelists_payload()'s benefit."""
-        list_mod.execute_search(None, "someuser", "---", "#mp3passion")
+        list_mod.execute_search(None, "someuser", "---", "#dccore-test")
         self.assertEqual(self.oserve.queued, [])
 
 
@@ -372,8 +372,8 @@ class BroadcastSearchTests(DCCoreTestCase):
     def setUp(self):
         super().setUp()
         self.oserve.irc_connection = "fake-connected-socket"
-        config.CHANNEL = "#mp3passion,#mp3servers"
-        config.BROADCAST_SEARCH_CHANNEL = "#mp3passion"
+        config.CHANNEL = "#dccore-test,#dccore-test2"
+        config.BROADCAST_SEARCH_CHANNEL = "#dccore-test"
 
     def test_a_short_term_is_rejected(self):
         status, result = webserver.start_broadcast_search("ab")
@@ -391,7 +391,7 @@ class BroadcastSearchTests(DCCoreTestCase):
 
         self.assertEqual(len(self.oserve.queued), 1)
         _key, sent_msg, _is_vip = self.oserve.queued[0]
-        self.assertEqual(sent_msg, "PRIVMSG #mp3passion :@find sandman\r\n")
+        self.assertEqual(sent_msg, "PRIVMSG #dccore-test :@find sandman\r\n")
 
     def test_it_never_blocks_the_caller_for_the_window_duration(self):
         real_window = webserver.BROADCAST_SEARCH_WINDOW
@@ -1274,8 +1274,8 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
     def setUp(self):
         super().setUp()
         self.oserve.irc_connection = "fake-connected-socket"
-        config.CHANNEL = "#mp3passion,#mp3servers"
-        config.BROADCAST_SEARCH_CHANNEL = "#mp3passion"
+        config.CHANNEL = "#dccore-test,#dccore-test2"
+        config.BROADCAST_SEARCH_CHANNEL = "#dccore-test"
         self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(
             WEBUI_TEST_PASSWORD, iterations=1000))
         self.app = webserver.create_app()

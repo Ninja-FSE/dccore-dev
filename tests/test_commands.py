@@ -197,19 +197,19 @@ class HardBanFileDurability(DCCoreTestCase):
 
     def test_a_non_admin_cannot_add_a_ban(self):
         self.write("alpha*\n")
-        commands.handle_hard_ban_request("dave", "#mp3passion", "!ban *!*@victim.net")
+        commands.handle_hard_ban_request("dave", "#dccore-test", "!ban *!*@victim.net")
         self.assertEqual(db.load_hard_bans(), ["alpha*"])
 
     def test_a_non_admin_cannot_remove_a_ban(self):
         """The dangerous direction: unbanning is how a spammer would get back in."""
         self.write("alpha*\n")
-        commands.handle_hard_unban_request("dave", "#mp3passion", "!unban alpha*")
+        commands.handle_hard_unban_request("dave", "#dccore-test", "!unban alpha*")
         self.assertEqual(db.load_hard_bans(), ["alpha*"])
 
     def test_the_admin_can_add_and_remove(self):
-        commands.handle_hard_ban_request("SysOp", "#mp3passion", "!ban *!*@spammer.net")
+        commands.handle_hard_ban_request("SysOp", "#dccore-test", "!ban *!*@spammer.net")
         self.assertEqual(db.load_hard_bans(), ["*!*@spammer.net"])
-        commands.handle_hard_unban_request("SysOp", "#mp3passion", "!unban *!*@spammer.net")
+        commands.handle_hard_unban_request("SysOp", "#dccore-test", "!unban *!*@spammer.net")
         self.assertEqual(db.load_hard_bans(), [])
 
     def test_ban_with_no_pattern_changes_nothing(self):
@@ -242,7 +242,7 @@ class QueueRemoveCleansTempArchives(DCCoreTestCase):
 
     def packed_row(self, path, user="dave"):
         """A row as it looks AFTER inline_rar_packer completes: path is the .rar."""
-        return {"file": os.path.basename(path), "path": path, "channel": "#mp3passion",
+        return {"file": os.path.basename(path), "path": path, "channel": "#dccore-test",
                 "user_raw": user, "is_temporary_zip": True, "is_unpacked_rar_folder": False}
 
     # --- the bug -----------------------------------------------------------
@@ -251,7 +251,7 @@ class QueueRemoveCleansTempArchives(DCCoreTestCase):
         path = self.archive()
         config.dcc_queue = {"dave": [self.packed_row(path)]}
 
-        commands.handle_queue_remove(self.sock, "dave", "#mp3passion")
+        commands.handle_queue_remove(self.sock, "dave", "#dccore-test")
 
         self.assertFalse(os.path.exists(path),
                          "the archive is orphaned the moment the row naming it is dropped")
@@ -261,7 +261,7 @@ class QueueRemoveCleansTempArchives(DCCoreTestCase):
         config.dcc_queue = {"dave": [self.packed_row(self.archive())]}
         config.frozen_queues = {"dave": 1234.0}
 
-        commands.handle_queue_remove(self.sock, "dave", "#mp3passion")
+        commands.handle_queue_remove(self.sock, "dave", "#dccore-test")
 
         self.assertNotIn("dave", config.dcc_queue)
         self.assertNotIn("dave", config.frozen_queues)

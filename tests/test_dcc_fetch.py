@@ -125,17 +125,18 @@ class PassiveOfferParsingTests(unittest.TestCase):
     passive DCC CHAT."""
 
     def test_the_reported_offer_parses(self):
-        """Exact reproduction from tonight's logs."""
+        """Reproduction of a real passive offer's shape - the claimed IP is a
+        TEST-NET-3 address (RFC 5737), not the real one originally logged."""
         offer = dcc_fetch.parse_dcc_send_offer(
             "DCC SEND [Metallica]_-_72_Seasons_-_01-72_Seasons.mp3 "
-            "1279781699 0 3359600 11124")
+            "3405803818 0 3359600 11124")
         self.assertEqual(offer, {
             "filename": "[Metallica]_-_72_Seasons_-_01-72_Seasons.mp3",
             "ip": None,
             "port": 0,
             "size": 3359600,
             "token": "11124",
-            "claimed_ip": "76.71.235.67",
+            "claimed_ip": "203.0.113.42",
         })
 
     def test_a_different_token_and_size_also_parses(self):

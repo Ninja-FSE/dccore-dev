@@ -122,7 +122,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
         config.bot_joined_channel = False
         # channel_users can even carry stale members from before the split; the
         # decisive fact is that the bot itself has not finished joining.
-        config.channel_users = {"#mp3passion": {"someone_else"}}
+        config.channel_users = {"#dccore-test": {"someone_else"}}
 
         with no_threads(), quiet():
             dcc.check_queue_and_send(self.sock, "dave")
@@ -190,7 +190,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
     def test_absent_user_is_frozen_and_queue_retained(self):
         """Guards the real freeze path: synced bot plus a genuinely absent user."""
         config.bot_joined_channel = True
-        config.channel_users = {"#mp3passion": {"someone_else", "OpGuy"}}
+        config.channel_users = {"#dccore-test": {"someone_else", "OpGuy"}}
 
         with no_threads() as spawned, quiet():
             dcc.check_queue_and_send(self.sock, "dave")
@@ -205,7 +205,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
     def test_repeated_calls_do_not_restart_the_countdown(self):
         """Defect: every trigger re-stamped frozen_queues, so the timer never expired."""
         config.bot_joined_channel = True
-        config.channel_users = {"#mp3passion": {"someone_else"}}
+        config.channel_users = {"#dccore-test": {"someone_else"}}
 
         with no_threads(), quiet():
             dcc.check_queue_and_send(self.sock, "dave")
@@ -229,7 +229,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
     def test_freeze_inside_the_timeout_keeps_the_queue(self):
         """Guards retention: a fresh freeze must survive the sweep untouched."""
         config.bot_joined_channel = True
-        config.channel_users = {"#mp3passion": {"someone_else"}}
+        config.channel_users = {"#dccore-test": {"someone_else"}}
         recent = time.time() - 100.0
         config.frozen_queues["dave"] = recent
 
@@ -243,7 +243,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
         """Defect: a user back in channel_users still lost their queue at timeout."""
         config.bot_joined_channel = True
         # Mixed case on purpose - IRC nicks come back from NAMES in any case.
-        config.channel_users = {"#mp3passion": {"Dave", "OpGuy"}}
+        config.channel_users = {"#dccore-test": {"Dave", "OpGuy"}}
         config.frozen_queues["dave"] = time.time() - (FREEZE_TIMEOUT + 60)
 
         with CapturedDispatch(dcc) as dispatch, quiet():
@@ -258,7 +258,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
     def test_thaw_applies_to_a_third_party_in_the_sweep(self):
         """Defect: the thaw must cover every frozen user the sweep visits, not just the caller."""
         config.bot_joined_channel = True
-        config.channel_users = {"#mp3passion": {"erin"}}
+        config.channel_users = {"#dccore-test": {"erin"}}
         config.dcc_queue["erin"] = [queue_row(user="erin", filename="Erin.flac")]
         config.frozen_queues["erin"] = time.time() - (FREEZE_TIMEOUT + 600)
 
@@ -276,7 +276,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
     def test_stale_freeze_deletes_queue_when_user_is_really_gone(self):
         """Control: synced bot, absent user, freeze older than 300s -> queue erased."""
         config.bot_joined_channel = True
-        config.channel_users = {"#mp3passion": {"OpGuy"}}
+        config.channel_users = {"#dccore-test": {"OpGuy"}}
         config.frozen_queues["dave"] = time.time() - (FREEZE_TIMEOUT + 1)
 
         with no_threads(), quiet():
@@ -295,7 +295,7 @@ class ReconnectQueueSurvivalTests(DCCoreTestCase):
             handle.write(b"RAR!")
 
         config.bot_joined_channel = True
-        config.channel_users = {"#mp3passion": {"OpGuy"}}
+        config.channel_users = {"#dccore-test": {"OpGuy"}}
         config.dcc_queue["dave"] = [queue_row(user="dave", filename="Black_Album.rar",
                                               path=archive, is_temporary_zip=True)]
         config.frozen_queues["dave"] = time.time() - (FREEZE_TIMEOUT + 1)
@@ -370,14 +370,14 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
     def test_worker_holds_messages_while_socket_is_none(self):
         """Defect: both lanes popped before testing the socket, so a reconnect ate them."""
         self.oserve.irc_connection = None
-        config.vip_queue.append("PRIVMSG #mp3passion :vip line\r\n")
+        config.vip_queue.append("PRIVMSG #dccore-test :vip line\r\n")
         config.send_queue["dave"] = ["NOTICE dave :held line\r\n"]
 
         self.start_worker()
         # Long enough for many loop iterations at the capped sleep length.
         time.sleep(0.4)
 
-        self.assertEqual(config.vip_queue, ["PRIVMSG #mp3passion :vip line\r\n"],
+        self.assertEqual(config.vip_queue, ["PRIVMSG #dccore-test :vip line\r\n"],
                          "VIP lane must not drain into a void")
         self.assertEqual(config.send_queue.get("dave"), ["NOTICE dave :held line\r\n"],
                          "the standard lane must not drain into a void")
@@ -385,7 +385,7 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
     def test_worker_delivers_held_messages_once_a_socket_returns(self):
         """Defect: messages queued during a reconnect never reached the new socket."""
         self.oserve.irc_connection = None
-        config.vip_queue.append("PRIVMSG #mp3passion :vip line\r\n")
+        config.vip_queue.append("PRIVMSG #dccore-test :vip line\r\n")
         config.send_queue["dave"] = ["NOTICE dave :held line\r\n"]
 
         self.start_worker()
@@ -408,7 +408,7 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
     def test_worker_survives_a_dead_socket_and_flushes_on_the_next_one(self):
         """Defect: a socket.error used to `break` the loop and kill the pump for good."""
         self.oserve.irc_connection = DeadSocket()
-        config.vip_queue.append("PRIVMSG #mp3passion :lost vip\r\n")
+        config.vip_queue.append("PRIVMSG #dccore-test :lost vip\r\n")
         config.send_queue["dave"] = ["NOTICE dave :second line\r\n"]
 
         self.start_worker()
@@ -416,7 +416,7 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
 
         sock = RecordingSocket()
         self.oserve.irc_connection = sock
-        config.vip_queue.append("PRIVMSG #mp3passion :fresh vip\r\n")
+        config.vip_queue.append("PRIVMSG #dccore-test :fresh vip\r\n")
 
         self.assertTrue(self.wait_until(lambda: "fresh vip" in sock.text()),
                         "the worker thread must still be pumping after a broken pipe")

@@ -421,7 +421,7 @@ class WhatTheHelpNoticeSays(ListFormatCase):
     def notice(self):
         import commands
         self.oserve.queued.clear()
-        commands.handle_help_request(None, "dave", "#mp3passion")
+        commands.handle_help_request(None, "dave", "#dccore-test")
         return " ".join(message for _user, message, _vip in self.oserve.queued)
 
     def test_it_names_the_format_that_will_actually_arrive(self):

@@ -86,7 +86,7 @@ class AuthorisedBypassesTheNickCheck(DCCoreTestCase):
 
     def test_the_channel_path_still_checks_the_nick(self):
         """Default is authorised=False, so nothing changes for channel callers."""
-        commands.handle_hard_ban_request("SysOp", "#mp3passion", "!ban *!*@spam.net")
+        commands.handle_hard_ban_request("SysOp", "#dccore-test", "!ban *!*@spam.net")
         self.assertEqual(db.load_hard_bans(), [],
                          "a non-admin nick in channel must still be refused")
 

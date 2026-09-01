@@ -404,7 +404,7 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
         self.assertEqual(len(config.broadcast_search_results), 1)
 
     def test_channel_chatter_is_not_captured(self):
-        irc._capture_broadcast_search_reply("SomeUser", "#mp3passion", "just chatting")
+        irc._capture_broadcast_search_reply("SomeUser", "#dccore-test", "just chatting")
         self.assertEqual(config.broadcast_search_results, [])
 
     def test_nothing_is_captured_outside_an_open_window(self):
@@ -522,7 +522,7 @@ class BroadcastRepliesFromRealBots(DCCoreTestCase):
     never does.
     """
 
-    # Verbatim from a broadcast for "Testament Souls" in #mp3passion.
+    # Verbatim from a broadcast for "Testament Souls" in #dccore-test.
     HEADERS = [
         ("Vibessono", "Search Result 1 Match For Testament Souls Copy And Paste "
                       "!Vibessono FILENAME To The Channel To Request. (25/25) "
@@ -626,7 +626,7 @@ class SearchHeaderStats(DCCoreTestCase):
     """irc.parse_search_header() - reading the line a bot sends before its
     matches, so it can become the heading above them instead of a row.
 
-    Every fixture here is verbatim from a live @find in #mp3passion. Two bot
+    Every fixture here is verbatim from a live @find in #dccore-test. Two bot
     families answer in these channels and they report different things, which
     is why nothing below assumes a field is present.
     """
