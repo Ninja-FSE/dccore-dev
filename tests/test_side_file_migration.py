@@ -153,7 +153,7 @@ class TheNameIsGoneFromTheTree(unittest.TestCase):
 
     def test_the_shipped_debug_channel_is_not_one_operators_own(self):
         """A default is what an install that never touches it joins. Shipping
-        "#flac-serv" pointed every new bot's debug output at somebody else's
+        "#example-serv" pointed every new bot's debug output at somebody else's
         channel."""
         self.assertNotIn("flac", config.DEBUG_CHANNEL.lower())
 
