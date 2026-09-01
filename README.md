@@ -41,7 +41,7 @@ An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe a
 ## ⚙️ Installation & Startup
 
 ### Prerequisites
-The script is developed and tested for **Python 3.10+** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox), and runs on Windows as well - the platform differences are isolated in `platform_compat.py` and verified on both operating systems.
+The script is developed and tested for **Python 3.10+** within a Linux environment (e.g., Debian/Ubuntu LXC in Proxmox), and runs on Windows as well - the platform differences are isolated in `platform_compat.py` and covered by CI on both operating systems.
 
 ### Dependencies
 **The daemon itself needs no third-party packages.** Everything it uses to talk to IRC, serve files over DCC, pack albums with `rar`, and run the admin console is in the standard library:

@@ -3,7 +3,7 @@
 This covers the Windows packaging — a launcher and a setup check, in
 `scripts/windows/`, alongside their Linux counterparts in `scripts/linux/`.
 Nothing here changes how the daemon behaves; the platform differences that do
-exist are isolated in `platform_compat.py` and verified on both operating
+exist live in `platform_compat.py` and are covered by CI on both operating
 systems.
 
 The daemon itself already runs on Windows. Its whole boot sequence was verified
@@ -15,8 +15,8 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 ## Before you start
 
 **Python 3.10 or newer.** Install from python.org and tick *Add python.exe to
-PATH*. Nothing else is required — the daemon is stdlib-only, which is why it
-runs on a bare machine with no `pip install` step.
+PATH*. Nothing else is required — the daemon and its test suite are stdlib-only,
+which is why they run on a bare machine with no `pip install` step.
 
 **WinRAR is optional.** Without it, single-file transfers work normally and only
 whole-album (`!rar`) packing fails. If you have it, no configuration is needed:
