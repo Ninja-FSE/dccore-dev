@@ -20,7 +20,7 @@ from tests.support import (DCCoreTestCase, no_disk_writes, silence_debug,
                            RecordingSocket)
 
 import announce
-import config
+import defaults as config
 import db
 import dcc
 
@@ -161,6 +161,16 @@ class IsSafePathTests(DCCoreTestCase):
         self.assertFalse(dcc.is_safe_path(self.tree.music, escaping))
         staying = os.path.join(self.tree.music, "Metallica", "..", "Metallica")
         self.assertTrue(dcc.is_safe_path(self.tree.music, staying))
+
+    def test_a_blank_base_dir_is_rejected_not_raised(self):
+        """chchatzop's review of #184: FILE_DIRECTORY is deliberately not in
+        settings_file.REQUIRED any more, so every caller here can now be
+        handed None. os.path.realpath(None) is a TypeError - this must
+        refuse instead, since every caller is a security boundary where
+        "nothing to check against" has to read as "not safe", not as an
+        unhandled exception."""
+        self.assertFalse(dcc.is_safe_path(None, self.tree.tracks[0]))
+        self.assertFalse(dcc.is_safe_path("", self.tree.tracks[0]))
 
 
 class TempZipCacheFileTests(DCCoreTestCase):
@@ -502,6 +512,53 @@ class PoisonedQueueRowTests(PathSecurityBase):
         self.assertEqual(config.dcc_queue.get("dave", []), [row])
         self.assertEqual(row.get("send_fails"), 1)
         self.assertFalse(getattr(config, "rar_inprogress", False))
+
+
+class FileDirectoryUnsetRequestTests(PathSecurityBase):
+    """chchatzop's review of #184: FILE_DIRECTORY is deliberately not in
+    settings_file.REQUIRED any more (see its own comment) - the daemon can be
+    up, joined and answering requests before an operator has chosen a music
+    directory. Before this fix, a file or !rar request in that state reached
+    os.path.abspath(None)/is_safe_path(None, ...), both TypeErrors, caught by
+    handle_download_request's own bare `except Exception` and printed to the
+    console with no NOTICE of any kind sent back - the requester got no
+    response at all, not even "not found"."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(FILE_DIRECTORY=None)
+
+    def test_a_plain_file_request_gets_an_actionable_notice_not_silence(self):
+        with quiet():
+            dcc.handle_download_request(self.sock, "dave", "Song.flac", "#mp3passion")
+
+        self.assertIn(("error", ("dave", "not_configured")), self.notices)
+        self.assertEqual(config.dcc_queue, {})
+        self.assertEqual(self.dispatched_names(), [])
+
+    def test_a_rar_request_gets_an_actionable_notice_not_silence(self):
+        with quiet():
+            dcc.handle_download_request(
+                self.sock, "dave", "!rar Metallica/Black Album (1991)", "#mp3passion")
+
+        self.assertIn(("error", ("dave", "not_configured")), self.notices)
+        self.assertEqual(config.dcc_queue, {})
+        self.assertEqual(self.dispatched_names(), [])
+
+    def test_a_list_artifact_request_is_unaffected(self):
+        """Control: a request for the master list itself never touches
+        FILE_DIRECTORY (it resolves against LOCAL_LIST_DIR instead), so it
+        must keep working exactly as if FILE_DIRECTORY were set."""
+        name = f"{config.LIST_BASE_NAME}-2026-09-01.zip"
+        path = os.path.join(self.tree.lists, name)
+        with io.open(path, "wb") as handle:
+            handle.write(b"not a real zip, just bytes")
+
+        with quiet():
+            dcc.handle_download_request(self.sock, "dave", name, "#mp3passion")
+
+        self.assertNotIn(("error", ("dave", "not_configured")), self.notices)
+        self.assertIn("sending", [kind for kind, _a in self.notices])
 
 
 if __name__ == "__main__":

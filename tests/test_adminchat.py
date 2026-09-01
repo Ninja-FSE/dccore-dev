@@ -22,7 +22,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
 import adminchat  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import irc  # noqa: E402
 
 ADMIN_LINE = ":FLAC!~flac@FLAC.users.undernet.org PRIVMSG DCCore :\x01DCC CHAT chat 2130706433 55555\x01"
@@ -227,7 +227,7 @@ class PasswordHandling(unittest.TestCase):
                 self.assertFalse(adminchat.verify_password(stored, ""))
 
     def test_a_malformed_stored_value_refuses_rather_than_raising(self):
-        """A mistyped local_config must lock the console, not crash the daemon."""
+        """A mistyped admin_config must lock the console, not crash the daemon."""
         for junk in ("garbage", "pbkdf2_sha256$notanint$aa$bb", "pbkdf2_sha256$1$zz$zz",
                      "bcrypt$1$aa$bb", "$$$", "pbkdf2_sha256$1000$aa"):
             with self.subTest(junk=junk):

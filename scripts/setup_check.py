@@ -1,9 +1,11 @@
 """Verify a DCCore setup WITHOUT connecting to IRC.
 
 Run this before the first real start. It loads the same config the daemon
-will, reports what it resolved, and refuses to pass on the two things that
-actually cause trouble: a music directory that is not there, and a channel
-list still pointing at somebody else's live bot.
+will and reports what it resolved - identity (NICKNAME/CHANNEL/ADMIN_NICK)
+being blank is settings_file.REQUIRED's job, enforced hard by
+oserve.startup() regardless of whether this check ever runs; what this adds
+is everything REQUIRED does not cover: a music directory that is not there,
+DCC port/slot misconfiguration, and the rest of the report below.
 
 It never opens a socket to a server and never joins anything.
 
@@ -40,21 +42,6 @@ import sys
 # shims are one level below that again, and neither needs to know: the paths
 # are computed from THIS file, not from whichever script was invoked.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Channels belonging to the upstream production bot. Inheriting these is the
-# one mistake that can get somebody else banned as well as you: two bots with
-# near-identical names advertising in the same rooms reads as a clone.
-UPSTREAM_CHANNELS = ("#mp3passion", "#mp3servers", "#mp3-best-of",
-                     "#mp3country", "#mp3albums4u", "#mp3download")
-UPSTREAM_NICKS = ("dccore", "dccore_")
-
-# #162 finding #20: NICKNAME still being upstream is a hard FAIL below, with
-# exactly this reasoning - ADMIN_NICK deserves the same treatment. It grants
-# every !ban/!rehash/!update/!clearqueue command (commands.is_admin() is a
-# plain nick comparison, comma-separated for multiple admins - see its own
-# docstring), so a config that never overrode it silently hands the upstream
-# operator's nick full control of the new operator's bot.
-UPSTREAM_ADMIN_NICKS = ("flac", "samoth")
 
 
 class Platform:
@@ -153,33 +140,33 @@ def main(platform):
     print("Configuration")
 
     # #162 finding #19: settings.conf is fully first-class - config.py applies
-    # it SECOND (so it wins over local_config.py on a shared key), the daemon
+    # it SECOND (so it wins over admin_config.py on a shared key), the daemon
     # starts fine from it alone, and every setting an operator would otherwise
-    # put in local_config.py (including ADMIN_HOSTMASKS/ADMIN_PASSWORD_HASH -
+    # put in admin_config.py (including ADMIN_HOSTMASKS/ADMIN_PASSWORD_HASH -
     # see settings_file.is_overridable()) can live there instead. This used to
-    # hard-fail whenever local_config.py was absent, even when settings.conf
+    # hard-fail whenever admin_config.py was absent, even when settings.conf
     # alone had already configured everything - contradicting this check's own
     # later "Applied N setting(s)" output on the very same run.
-    local_config_present = os.path.exists(os.path.join(REPO, "local_config.py"))
+    admin_config_present = os.path.exists(os.path.join(REPO, "admin_config.py"))
     try:
         import settings_file
         settings_conf_present = os.path.exists(settings_file.settings_path())
     except Exception:
         settings_conf_present = os.path.exists(os.path.join(REPO, "settings.conf"))
 
-    if not local_config_present and not settings_conf_present:
-        fail("no local_config.py and no settings.conf - copy local_config.py.sample "
-             "to local_config.py, or settings.conf.sample to settings.conf, and fill "
+    if not admin_config_present and not settings_conf_present:
+        fail("no admin_config.py and no settings.conf - copy admin_config.py.sample "
+             "to admin_config.py, or settings.conf.sample to settings.conf, and fill "
              "one of them in, or the daemon will use the upstream defaults")
-    elif not local_config_present:
-        ok("configured via settings.conf (no local_config.py)")
+    elif not admin_config_present:
+        ok("configured via settings.conf (no admin_config.py)")
     elif not settings_conf_present:
-        ok("configured via local_config.py")
+        ok("configured via admin_config.py")
     else:
-        ok("configured via local_config.py and settings.conf")
+        ok("configured via admin_config.py and settings.conf")
 
     try:
-        import config
+        import defaults as config
     except Exception as err:
         fail(f"config.py did not load: {err}")
         print()
@@ -192,36 +179,11 @@ def main(platform):
     ok(f"nickname {getattr(config, 'NICKNAME', '?')} "
        f"(alt {getattr(config, 'ALT_NICKNAME', '?')})")
 
-    nick = str(getattr(config, "NICKNAME", "")).strip().lower()
-    if nick in UPSTREAM_NICKS:
-        fail(f"NICKNAME is still {config.NICKNAME!r} - it will collide with the "
-             f"production bot. Set your own in local_config.py.")
-
-    # Sharing a channel with the upstream bot is only a problem when the NICK is
-    # also still the default. Two distinct operators in one channel is the entire
-    # point of the network - these channels are full of file servers, and a second
-    # one with its own nick and its own library is an ordinary participant.
-    #
-    # The hazard this guards against is narrower: a copy of the sample config that
-    # nobody edited, putting a second "DCCore" into the live channels. That is a
-    # near-identical twin of the upstream bot, and it can get the OTHER operator
-    # banned, which is why it is worth refusing to start over.
-    #
-    # Failing on the channels alone blocked the legitimate case - an operator
-    # running their own bot, under their own nick, in the channels they trade in.
+    # NICKNAME/CHANNEL being blank at all is caught separately, hard, by
+    # settings_file.REQUIRED (see oserve.startup()) - this check only reports
+    # what is actually configured, it does not compare it against anything.
     channels = str(getattr(config, "CHANNEL", ""))
-    shared = [c for c in UPSTREAM_CHANNELS if c in channels.lower()]
-    if shared and nick in UPSTREAM_NICKS:
-        fail(f"CHANNEL points at the production bot's channels "
-             f"({', '.join(shared)}) AND NICKNAME is still {config.NICKNAME!r}. "
-             f"That is a second copy of the same bot in the live channels - set "
-             f"your own nickname first.")
-    elif shared:
-        warn(f"sharing {', '.join(shared)} with the upstream bot - fine under "
-             f"your own nick ({config.NICKNAME}), just make sure the library and "
-             f"triggers are yours")
-    else:
-        ok(f"channels {channels}")
+    ok(f"channels {channels}")
 
     # From #127. A slot count below 1 makes dcc.py's own gate
     # (len(active_transfers) < MAX_DCC_SLOTS) unsatisfiable, so the bot joins,
@@ -237,32 +199,27 @@ def main(platform):
 
     ok(f"debug channel {getattr(config, 'DEBUG_CHANNEL', '?')}")
 
-    # Same comma-split-and-lowercase ADMIN_NICK gets in commands.is_admin() -
-    # a substring/exact-string comparison against the raw value would miss
-    # "FLAC,Samoth" containing "flac" as one of several names, or false-flag
-    # an operator's own nick that merely contains "flac" as a substring.
     admin_nick_raw = str(getattr(config, "ADMIN_NICK", ""))
-    admin_nicks = {n.strip().lower() for n in admin_nick_raw.split(",") if n.strip()}
-    still_upstream = admin_nicks & set(UPSTREAM_ADMIN_NICKS)
-    if still_upstream:
-        fail(f"ADMIN_NICK is still {admin_nick_raw!r} - "
-             f"{', '.join(sorted(still_upstream))} is the upstream operator's own "
-             f"admin nick and would grant full control of your bot's "
-             f"!ban/!rehash/!update/!clearqueue commands. Set your own in "
-             f"local_config.py or settings.conf.")
-    else:
-        ok(f"admin nick {admin_nick_raw}")
+    ok(f"admin nick {admin_nick_raw}")
 
     # --- paths --------------------------------------------------------------
     print()
     print("Paths")
 
+    # A WARN, not a FAIL, when unset: FILE_DIRECTORY is deliberately not in
+    # settings_file.REQUIRED (see its own comment) - the daemon boots fine
+    # without it chosen yet, specifically so the web dashboard's own
+    # Settings page can be where it gets set. A value that IS set but wrong
+    # stays a hard FAIL - that is a real misconfiguration, not an unmade
+    # choice.
     music = getattr(config, "FILE_DIRECTORY", "")
     if not music:
-        fail("FILE_DIRECTORY is not set")
+        warn("FILE_DIRECTORY is not set yet - the daemon will start, but cannot "
+             "search or serve anything until it is set from the web dashboard's "
+             "Settings page, settings.conf, or admin_config.py.")
     elif not os.path.isdir(music):
         fail(f"FILE_DIRECTORY does not exist: {music}  "
-             f"(the daemon exits at startup if this is missing)")
+             f"(the daemon exits at startup if this is set but missing)")
     else:
         count = 0
         for _root, _dirs, files in os.walk(music):
@@ -306,7 +263,7 @@ def main(platform):
     if start > end:
         fail(f"DCC_PORT_START ({start}) is greater than DCC_PORT_END ({end}) - "
              f"the range is empty, so no DCC transfer can ever open a listening "
-             f"port; check for the two values being swapped in local_config.py")
+             f"port; check for the two values being swapped in admin_config.py")
     else:
         free = 0
         for port in range(start, end + 1):

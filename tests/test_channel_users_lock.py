@@ -26,7 +26,7 @@ import unittest
 
 from tests.support import DCCoreTestCase
 
-import config
+import defaults as config
 import dcc
 import runtime
 

@@ -29,7 +29,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import security  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402

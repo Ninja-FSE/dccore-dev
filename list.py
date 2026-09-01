@@ -2,7 +2,7 @@
 import os
 import time
 import datetime
-import config
+import defaults as config
 import oserve
 import dcc
 import announce
@@ -41,7 +41,7 @@ def list_format():
     """The configured delivery format, normalised.
 
     An unrecognised value serves .zip rather than nothing. settings_file
-    refuses one at the point of saving, but local_config.py assigns straight
+    refuses one at the point of saving, but admin_config.py assigns straight
     onto config and answers to nobody, so this is the last place a typo can be
     caught before it costs the bot its list.
     """
@@ -175,7 +175,7 @@ import os
 import glob
 import re
 import sys
-import config
+import defaults as config
 import announce
 
 _CONTROL_CODE_RE = re.compile(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?')

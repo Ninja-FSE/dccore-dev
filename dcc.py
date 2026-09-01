@@ -9,7 +9,7 @@ import sys
 import re
 import subprocess
 
-import config
+import defaults as config
 import platform_compat
 import list as list_mod
 import announce
@@ -23,7 +23,20 @@ import runtime
 queue_lock = threading.Lock()
 
 def is_safe_path(base_dir, path, follow_symlinks=True):
-    """Safety filter: prevents directory traversal attacks."""
+    """Safety filter: prevents directory traversal attacks.
+
+    A falsy base_dir (chchatzop's review of #184: FILE_DIRECTORY is
+    deliberately not in settings_file.REQUIRED any more, so callers that
+    used to be able to assume it was always set can no longer do so) refuses
+    rather than raising: os.path.realpath(None) is a TypeError, and every
+    caller here is a security boundary, where "there is no base to check
+    against" must read as "nothing is safe", not as an unhandled exception a
+    caller's own except Exception can turn into a silent, unexplained
+    failure.
+    """
+    if not base_dir:
+        return False
+
     if follow_symlinks:
         matchpath = os.path.realpath(path)
     else:
@@ -124,7 +137,7 @@ def _is_temp_zip_cache_file(path):
     Checked against config.TMP_ZIP_DIR's actual configured value, not a
     hardcoded directory name: a literal "tmp_zips" substring check against
     the shipped default meant an operator who renamed the setting (via
-    local_config.py or settings.conf, both documented override points)
+    admin_config.py or settings.conf, both documented override points)
     would have every packed .rar sent successfully and never cleaned up
     afterward - this would simply never be true again, silently.
 
@@ -229,7 +242,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
       * a legacy non-dict row, which has nowhere to store a counter.
     Both are settled on their first failure.
     """
-    import config
+    import defaults as config
     import db
 
     u_key = str(user).lower()
@@ -323,7 +336,7 @@ def check_queue_and_send(irc_sock, completed_user):
     import os
     import re
     import time
-    import config
+    import defaults as config
     import db
     
     user_key = completed_user.lower()
@@ -848,6 +861,18 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 announce_mod.send_dcc_error(user, "rar_disabled")
                 return
 
+            # FILE_DIRECTORY is deliberately not in settings_file.REQUIRED any
+            # more (chchatzop's review of #184) - the daemon can be up and
+            # answering requests before an operator has chosen a music
+            # directory. Every album this branch packs lives under it, so
+            # checked here, explicitly, rather than letting
+            # list_mod.resolve_list_folder()/is_safe_path() below fail on a
+            # None base and fall through to the bare except at the bottom of
+            # this function, which told the requester nothing at all.
+            if not config.FILE_DIRECTORY:
+                announce_mod.send_dcc_error(user, "not_configured")
+                return
+
             raw_win_path = requested_file[5:].strip()
             
             # Trim any leftovers, in case somebody pasted an old row
@@ -986,6 +1011,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             base_directory = os.path.abspath(config.LOCAL_LIST_DIR)
             full_path = os.path.join(base_directory, requested_file)
         else:
+            # Same reasoning as the !rar branch above: FILE_DIRECTORY can
+            # legitimately be unset (chchatzop's review of #184), and an
+            # ordinary track request - unlike a list artifact request, which
+            # never touches FILE_DIRECTORY at all - has nothing to look for
+            # without it. Checked explicitly rather than letting
+            # os.path.abspath(None) raise into the bare except below, which
+            # left the requester with no response of any kind.
+            if not config.FILE_DIRECTORY:
+                announce.send_dcc_error(user, "not_configured")
+                return
             base_directory = os.path.abspath(config.FILE_DIRECTORY)
             full_path = os.path.join(base_directory, requested_file)
 

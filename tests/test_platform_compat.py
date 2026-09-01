@@ -261,12 +261,12 @@ class WiringTests(unittest.TestCase):
         self.assertIn("platform_compat.apply_keepalive", source)
 
     def test_config_supports_a_local_override(self):
-        source = open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8").read()
-        self.assertIn("from local_config import *", source)
+        source = open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8").read()
+        self.assertIn("from admin_config import *", source)
 
-    def test_local_config_is_gitignored(self):
+    def test_admin_config_is_gitignored(self):
         ignored = open(os.path.join(REPO_ROOT, ".gitignore"), encoding="utf-8").read()
-        self.assertIn("local_config.py", ignored)
+        self.assertIn("admin_config.py", ignored)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # commands.py - User commands, mostly queue handling
 import sys
-import config
+import defaults as config
 import db
 import runtime
 
@@ -33,7 +33,7 @@ def is_admin(user):
     means matching ident@host, which irc.py does not currently capture: its PRIVMSG regex
     keeps only the nick. That is a separate change to irc.py plus this file.
     """
-    import config
+    import defaults as config
 
     # The fallback is '' and not a nick, deliberately. This function's own
     # docstring above records removing `or user.lower() == "flac"` because it
@@ -195,7 +195,7 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
     against themselves; this gives the admin the same power over anyone, from
     one line of text, without editing dcc_queue.txt by hand.
     """
-    import config
+    import defaults as config
     import announce
     import db
     import dcc
@@ -247,7 +247,7 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
 def handle_ping_request(irc_sock, user, target_chan):
     """Start the timer and send a unique latency PING to the IRC server."""
     import time
-    import config
+    import defaults as config
     
     # Keep the measurement in shared memory so the pong handler can read it later
     config.ping_start_time = time.time()
@@ -264,7 +264,7 @@ def handle_ping_request(irc_sock, user, target_chan):
 def handle_pong_response(category="INFO"):
     """Catch the server's reply, work out the latency to three decimals, and report it."""
     import time
-    import config
+    import defaults as config
     import announce
     
     start_time = getattr(config, 'ping_start_time', None)
@@ -438,7 +438,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
     """Reload the modules live, in memory, without reading anything back from disk."""
     import importlib
     import sys
-    import config
+    import defaults as config
     import announce
     import copy
     
@@ -462,7 +462,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
     # B. The active DCC slots
     ram_backup_slots = 0
     ram_user_slots = {}
-    for mod_name in ['dcc', 'config', 'oserve']:
+    for mod_name in ['dcc', 'defaults', 'oserve']:
         mod = sys.modules.get(mod_name)
         if mod:
             for attr in ['active_downloads', 'current_sends', 'total_sends']:
@@ -475,7 +475,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
 
     # C. The QUEUE - keep the original objects in memory, never via disk
     ram_backup_queue = {}
-    for mod_name in ['dcc', 'config', 'oserve', 'queue_mgr', 'list']:
+    for mod_name in ['dcc', 'defaults', 'oserve', 'queue_mgr', 'list']:
         mod = sys.modules.get(mod_name)
         if mod:
             for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
@@ -524,7 +524,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
 
     try:
         # 2. REHASH: reload every core module live, in memory
-        modules_to_reload = ['config', 'list', 'dcc', 'announce', 'security', 'db', 'stats_mgr']
+        modules_to_reload = ['defaults', 'list', 'dcc', 'announce', 'security', 'db', 'stats_mgr']
         for mod_name in modules_to_reload:
             if mod_name in sys.modules:
                 importlib.reload(sys.modules[mod_name])
@@ -544,7 +544,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
         # but a transfer finishing inside it is exactly the case that matters: its removal
         # from active_transfers would otherwise be undone and the finished entry would come
         # back as a phantom holding a DCC slot.
-        import config as _cfg
+        import defaults as _cfg
         restored = restore_preserved_runtime(_cfg, preserved_runtime)
 
         if restored:
@@ -620,7 +620,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
             print(f"[REHASH RAM] Reattached {len(_reattached_sinks)} admin console debug sink(s).")
 
         # Read the freshly reloaded config
-        import config
+        import defaults as config
         import announce
         announce.is_ready = True
         
@@ -639,7 +639,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
         print(f"[REHASH RAM] Restored {restored_count} channel list(s) into the new modules.")
 
         # Restore the slots
-        for mod_name in ['dcc', 'config', 'oserve']:
+        for mod_name in ['dcc', 'defaults', 'oserve']:
             mod = sys.modules.get(mod_name)
             if mod:
                 if ram_backup_slots > 0:
@@ -658,7 +658,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
             for k, v in ram_backup_queue.items():
                 combined_queue[k.lower()] = v
                 
-            for mod_name in ['dcc', 'config', 'oserve', 'queue_mgr', 'list']:
+            for mod_name in ['dcc', 'defaults', 'oserve', 'queue_mgr', 'list']:
                 mod = sys.modules.get(mod_name)
                 if mod:
                     for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
@@ -677,7 +677,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
 
 
         # Reset the text queues (send_queue) to empty dicts so they cannot clash
-        for mod_name in ['queue_mgr', 'config', 'oserve', 'irc']:
+        for mod_name in ['queue_mgr', 'defaults', 'oserve', 'irc']:
             mod = sys.modules.get(mod_name)
             if mod:
                 for attr in ['send_queue', 'msg_queue', 'out_queue']:
@@ -763,7 +763,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
 
 def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
     """Add a permanent wildcard pattern to hard_bans.txt, straight from IRC."""
-    import config
+    import defaults as config
     import announce
     
     if not authorised and not is_admin(user):
@@ -801,7 +801,7 @@ def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
 
 def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
     """Remove a permanent wildcard pattern from hard_bans.txt, straight from IRC."""
-    import config
+    import defaults as config
     import announce
     import os
     
@@ -871,7 +871,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
     import sys
     import os
     import re
-    import config
+    import defaults as config
     import announce
     import glob
     import threading

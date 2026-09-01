@@ -47,7 +47,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #   platform_compat        - stdlib wrappers, imported by adminchat
 ALLOWED = {
     "webserver",
-    "config",
+    "defaults",
     "runtime",
     "settings_file",
     "adminchat",

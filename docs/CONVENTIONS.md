@@ -16,7 +16,7 @@ not count: people pull and restart without reading `config.py`, and a default is
 the only thing that protects them.
 
 `adminchat.py` is the pattern. `ADMIN_HOSTMASKS = []` ships empty, so the console
-is inert until somebody opts in from `local_config.py`, and every DCC CHAT
+is inert until somebody opts in from `admin_config.py`, and every DCC CHAT
 request is ignored until then.
 
 **Why it matters here:** the daemon runs 24/7 on machines that are not always

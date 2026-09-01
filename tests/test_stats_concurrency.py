@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tests import support  # noqa: E402
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 
 

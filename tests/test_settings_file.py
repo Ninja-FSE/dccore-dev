@@ -31,7 +31,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import settings_file  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -209,11 +209,19 @@ class UnconfiguredRequiredTests(unittest.TestCase):
         correct, intended value permanently unusable, since the gate refuses
         a value equal to its shipped default and "irc.undernet.org"/
         "#dccore-debug" are correct-by-default for virtually every operator,
-        not somebody else's identity to avoid. See REQUIRED's own comment in
-        settings_file.py."""
+        not somebody else's identity to avoid.
+
+        FILE_DIRECTORY is also absent - added here originally, then found,
+        running setup.py against a real install, to block the daemon from
+        booting at all without a music directory chosen up front, which is
+        the one thing the web dashboard's own Settings page is a genuinely
+        easier place to set - but the dashboard needs the daemon RUNNING to
+        reach it. oserve.startup() still refuses to start on a FILE_
+        DIRECTORY that is set but does not exist; only "not chosen yet" is
+        fine now. See REQUIRED's own comment in settings_file.py."""
         self.assertEqual(
             settings_file.REQUIRED,
-            {"NICKNAME", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK"})
+            {"NICKNAME", "CHANNEL", "ADMIN_NICK"})
 
 
 class ApplyingTheFile(unittest.TestCase):
@@ -301,7 +309,7 @@ class ApplyingTheFile(unittest.TestCase):
 
 
 class ExistingInstallsKeepWorking(DCCoreTestCase):
-    """local_config.py is not deprecated by this and is not removed.
+    """admin_config.py is not deprecated by this and is not removed.
 
     Both the operator's Linux bot and the Windows one have a real one, with a
     nickname, channels, paths and an admin password hash in it. If adding
@@ -309,7 +317,7 @@ class ExistingInstallsKeepWorking(DCCoreTestCase):
     shipped defaults - wrong nick, wrong channels, admin console disabled.
     """
 
-    def _reload_config_with(self, local_config_body=None, settings_body=None):
+    def _reload_config_with(self, admin_config_body=None, settings_body=None):
         tmp = tempfile.mkdtemp(prefix="dccore-cfg-test-")
 
         # addCleanup is LIFO. The final reload has to happen once the temp
@@ -318,14 +326,14 @@ class ExistingInstallsKeepWorking(DCCoreTestCase):
         self.addCleanup(self._quiet_reload)
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         self.addCleanup(lambda: tmp in sys.path and sys.path.remove(tmp))
-        self.addCleanup(sys.modules.pop, "local_config", None)
+        self.addCleanup(sys.modules.pop, "admin_config", None)
         self.addCleanup(os.environ.pop, "DCCORE_SETTINGS_FILE", None)
 
-        # Always write a local_config.py, even an empty one: a developer with
+        # Always write a admin_config.py, even an empty one: a developer with
         # a real one on their machine would otherwise get a different result
         # from CI, which has none.
-        with io.open(os.path.join(tmp, "local_config.py"), "w", encoding="utf-8") as handle:
-            handle.write(local_config_body or "# none\n")
+        with io.open(os.path.join(tmp, "admin_config.py"), "w", encoding="utf-8") as handle:
+            handle.write(admin_config_body or "# none\n")
 
         if settings_body is not None:
             settings_path = os.path.join(tmp, "settings.conf")
@@ -336,7 +344,7 @@ class ExistingInstallsKeepWorking(DCCoreTestCase):
             os.environ["DCCORE_SETTINGS_FILE"] = os.path.join(tmp, "absent.conf")
 
         sys.path.insert(0, tmp)
-        sys.modules.pop("local_config", None)
+        sys.modules.pop("admin_config", None)
         self._quiet_reload()
         return config
 
@@ -344,8 +352,8 @@ class ExistingInstallsKeepWorking(DCCoreTestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             importlib.reload(config)
 
-    def test_local_config_alone_still_works(self):
-        cfg = self._reload_config_with(local_config_body='NICKNAME = "FromPy"\n')
+    def test_admin_config_alone_still_works(self):
+        cfg = self._reload_config_with(admin_config_body='NICKNAME = "FromPy"\n')
         self.assertEqual(cfg.NICKNAME, "FromPy")
 
     def test_settings_conf_alone_works(self):
@@ -356,11 +364,11 @@ class ExistingInstallsKeepWorking(DCCoreTestCase):
         """It is applied second on purpose: during a migration the file being
         actively edited should be the one that takes effect."""
         cfg = self._reload_config_with(
-            local_config_body='NICKNAME = "FromPy"\nPORT = 6667\n',
+            admin_config_body='NICKNAME = "FromPy"\nPORT = 6667\n',
             settings_body="NICKNAME = FromConf\n")
 
         self.assertEqual(cfg.NICKNAME, "FromConf")
-        self.assertEqual(cfg.PORT, 6667, "a setting only local_config.py sets "
+        self.assertEqual(cfg.PORT, 6667, "a setting only admin_config.py sets "
                                          "was lost")
 
     def test_neither_file_leaves_the_shipped_defaults(self):
@@ -418,7 +426,7 @@ class TheSampleStaysInStepWithConfig(unittest.TestCase):
         # (ORIGINAL_NICK, MY_IP_OR_DOCK), which are not settings anybody can
         # put in a file.
         import ast
-        with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         missing = []
         # Both node types: an annotated setting (`MAX_DCC_SLOTS: int = 3`) is
@@ -553,7 +561,7 @@ class ConfigDeclaresEachSettingsType(unittest.TestCase):
         would report them, and would also depend on which tests happened to
         run first.
         """
-        with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
 
         annotated = {node.target.id for node in tree.body

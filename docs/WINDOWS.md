@@ -27,41 +27,55 @@ on PATH, because WinRAR does not add itself to PATH.
 
 ## Setup
 
-### 1. Create `local_config.py`
+### The fast path: `python3 setup.py`
 
-Copy `local_config.py.sample` to `local_config.py` and fill it in. That file is
+Asks nickname, IRC server, channel(s), admin nick, the admin console
+password, the music directory (optional - easier to set from the web
+dashboard once the daemon is running, if you would rather do it there),
+and whether to enable the web dashboard - and writes them to
+`settings.conf` and `admin_config.py` itself. Covers everything below;
+skip to step 2 if you use it. The rest of this section is the manual
+equivalent, for anyone who would rather edit the files by hand.
+
+### 1. Create `admin_config.py`
+
+Copy `admin_config.py.sample` to `admin_config.py` and fill it in. That file is
 gitignored and never leaves your machine.
 
 > **The one line that matters most is `CHANNEL`.**
 >
-> `config.py` ships with the upstream operator's live channels and nickname. If
-> you start the daemon without overriding them, you join his trading channels as
-> a second bot with a near-identical name. That reads as a clone and can get
-> **both** of you banned. Set your own nickname and your own test channel.
+> `NICKNAME`, `CHANNEL` and `ADMIN_NICK` ship blank on purpose - `oserve.startup()`
+> refuses to boot while any of them is still unset, naming every one that is
+> still unconfigured. Set your own nickname and your own test channel here
+> (or in `settings.conf`) before the daemon can start at all.
 >
-> This is no longer just advice: `oserve.startup()` refuses to boot while
-> `NICKNAME`, `CHANNEL`, `ADMIN_NICK` or `FILE_DIRECTORY` is still blank,
-> naming every one that is still unconfigured. `SERVER` and `DEBUG_CHANNEL`
-> are not part of that check - their shipped defaults are already correct
-> for almost every install.
+> `SERVER` and `DEBUG_CHANNEL` are not part of that check - their shipped
+> defaults are already correct for almost every install. Neither is
+> `FILE_DIRECTORY`: requiring it would block the daemon from ever reaching
+> the web dashboard, the one place that is genuinely easier to set it from -
+> a blank one only warns.
 
 Set at minimum:
 
 | setting | why |
 |---|---|
 | `NICKNAME`, `ALT_NICKNAME` | must not collide with the live bot |
-| `LIST_BASE_NAME` | names your generated list files |
 | `CHANNEL`, `DEBUG_CHANNEL` | your own test channel |
 | `ADMIN_NICK` | your nick |
 | `FILE_DIRECTORY` | your music folder — start with a small one |
 
-`local_config.py.sample` has commented-out placeholders for all seven, in a
-section near the top.
+`LIST_BASE_NAME` (names your generated list files) is not in that list -
+it automatically takes NICKNAME's own value once NICKNAME is set, so only
+set it explicitly if you want the list named differently from the bot.
+
+`admin_config.py.sample` has commented-out placeholders for all seven
+(`LIST_BASE_NAME` included, for the rare case you want it), in a section
+near the top.
 
 **Prefer plain text?** Every setting above can also go in `settings.conf`
 instead (copy `settings.conf.sample` to `settings.conf`) — no Python syntax,
 and it's what the web dashboard's Settings page writes to as well. The setup
-check in step 2 accepts either file; `local_config.py` still owns
+check in step 2 accepts either file; `admin_config.py` still owns
 `ADMIN_HOSTMASKS`/`ADMIN_PASSWORD_HASH` most naturally, since those come from
 running `python adminchat.py`, but they work in `settings.conf` too.
 
@@ -73,8 +87,8 @@ scripts\windows\start-dccore.bat check
 
 This loads the same config the daemon will and reports what it resolved. It
 never opens a connection to a server and never joins anything. It fails on a
-missing music directory, and on a config still pointing at the upstream nick or
-channels.
+music directory that is set but does not exist, among other things - see the
+full report it prints for what else it checks.
 
 ### 3. Start it
 
@@ -89,7 +103,7 @@ refuses to start if it fails.
 
 ## Why there is a launcher at all
 
-Every data path in `config.py` is relative — `./data/bans.txt`, `./lists` — so
+Every data path in `defaults.py` is relative — `./data/bans.txt`, `./lists` — so
 they resolve against the **working directory**, not the code. Started from
 anywhere other than the repository folder, the daemon quietly creates an empty
 `data` folder wherever it happened to start and boots with no bans, no queue and
@@ -109,7 +123,7 @@ adding a service wrapper.
 ## Networking
 
 **Forward TCP 55000–55010** to this machine for anyone to download from you.
-That range is `DCC_PORT_START`–`DCC_PORT_END` in `config.py`, and the admin
+That range is `DCC_PORT_START`–`DCC_PORT_END` in `defaults.py`, and the admin
 console borrows a port from it too when it has to listen.
 
 ### Testing a download from your own machine will probably fail
@@ -117,7 +131,7 @@ console borrows a port from it too when it has to listen.
 This is not a bug. The daemon advertises its **public** IP in every DCC offer,
 and most routers will not route a connection from inside the network back to
 themselves. Either test from a second machine or a phone, or set
-`MY_IP_OR_DOCK` to this PC's LAN address in `local_config.py` for local testing
+`MY_IP_OR_DOCK` to this PC's LAN address in `admin_config.py` for local testing
 only — and remove it before real use.
 
 ---

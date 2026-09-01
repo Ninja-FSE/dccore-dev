@@ -1,5 +1,14 @@
 # =====================================================================
-# CONFIG.PY - CENTRAL CONFIGURATION FOR THE DCCORE DAEMON
+# DEFAULTS.PY - CENTRAL CONFIGURATION FOR THE DCCORE DAEMON
+# =====================================================================
+# Renamed from config.py as part of #170's RFC: every module that reads a
+# setting still does `import defaults as config` and reads `config.X` -
+# see any other module's own import line for why the internal name did not
+# change along with the file. This file's own job did not change either: it
+# is the tracked, always-present base and type declaration for every
+# setting (~60 of them), which admin_config.py and settings.conf below then
+# optionally override. Without this file, an operator would have to type
+# out every single setting by hand just to get a working bot.
 # =====================================================================
 # The live in-memory containers this file used to define are in runtime.py
 # now, and are bound below in section 8. See that module's docstring for why:
@@ -11,6 +20,11 @@ import runtime
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False
 SCRIPT_VERSION: str = "DCCore v1.10.0"
+# Names every generated list file ("<LIST_BASE_NAME>-<date>.txt" and its
+# .zip/.rar counterparts). Automatically takes NICKNAME's own value once
+# NICKNAME is set, unless this is given an explicit value of its own first -
+# see the "DERIVED VALUES" section below. Only worth setting here if the
+# list should be named differently from the bot's own nickname.
 LIST_BASE_NAME: str = "DCCore"
 
 # ---------------------------------------------------------------------
@@ -22,13 +36,13 @@ LIST_BASE_NAME: str = "DCCore"
 # exactly that reason - see REQUIRED's own comment.
 SERVER: str        = "irc.undernet.org"
 PORT: int          = 6667
-# NICKNAME, ADMIN_NICK, CHANNEL and FILE_DIRECTORY (below) are None - not a
-# real value - because they ARE in settings_file.REQUIRED: oserve.startup()
-# refuses to boot while any of them is still blank, so there is no shipped
-# value here for a copy-paste install to silently inherit and run under
-# somebody else's identity. See REQUIRED's own comment in settings_file.py
-# for the full reasoning, and RAR_BINARY above for the same "None means
-# unset" convention this already used before REQUIRED existed.
+# NICKNAME, ADMIN_NICK and CHANNEL are None - not a real value - because
+# they ARE in settings_file.REQUIRED: oserve.startup() refuses to boot while
+# any of them is still blank, so there is no shipped value here for a
+# copy-paste install to silently inherit and run under somebody else's
+# identity. See REQUIRED's own comment in settings_file.py for the full
+# reasoning, and RAR_BINARY above for the same "None means unset" convention
+# this already used before REQUIRED existed.
 NICKNAME: str      = None
 ALT_NICKNAME: str  = "DCCore_"
 ADMIN_NICK: str    = None
@@ -43,23 +57,25 @@ DEBUG_CHANNEL: str = "#dccore-debug"
 # all of them: broadcasting into every channel this bot has joined multiplies
 # the disruption to every other operator sharing those channels, for one
 # search. Defaults to the first entry of CHANNEL above; override explicitly
-# here (or in local_config.py) if that is not the right one.
+# here (or in admin_config.py) if that is not the right one.
 # Derived from CHANNEL - but NOT here. See "DERIVED VALUES" at the end of this
 # file: computing it at this point captures the tracked default above and
 # silently ignores an operator's own CHANNEL. None means "derive it below";
-# setting it explicitly, here or in local_config.py, still wins.
+# setting it explicitly, here or in admin_config.py, still wins.
 BROADCAST_SEARCH_CHANNEL: str = None
 
 # ---------------------------------------------------------------------
 # 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
 PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
-# None, not a real path - FILE_DIRECTORY is in settings_file.REQUIRED (see its
-# own comment): oserve.startup() already refuses to boot on a directory that
-# does not exist, but a shipped literal path would let a copy-paste install
-# reach that check with somebody else's actual music folder path, not "not
-# configured at all". Blank makes the REQUIRED gate catch it first, with a
-# clearer message.
+# None, not a real path - a shipped literal path would let a copy-paste
+# install silently inherit somebody else's actual music folder path. Unlike
+# NICKNAME/CHANNEL/ADMIN_NICK, FILE_DIRECTORY is NOT in settings_file.
+# REQUIRED (see its own comment): the daemon boots fine while this is still
+# blank, specifically so the web dashboard's own Settings page can be the
+# place that sets it, rather than needing it typed blind before the
+# dashboard is even reachable. oserve.startup() still refuses to start on a
+# value that IS set but does not exist - only "not chosen yet" is fine.
 FILE_DIRECTORY: str   = None
 RAR_ENABLED: bool     = True        # Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected
 RAR_BINARY: str       = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
@@ -155,7 +171,7 @@ DEBUG_MSG_DELAY: float  = 0.5    # Pause between each line sent to the debug cha
 # with "<your-account>.users.undernet.org", which nobody else can obtain. That
 # host IS the proof of your services login.
 #
-# Put the real values in local_config.py, which is gitignored, NOT here.
+# Put the real values in admin_config.py, which is gitignored, NOT here.
 ADMIN_HOSTMASKS: list = []
 # Generated with:  python adminchat.py
 ADMIN_PASSWORD_HASH: str = ""
@@ -310,7 +326,7 @@ THEME: str = "classic"        # classic, midnight, forest, orchid, plain
 # whatever the chosen THEME preset already says.
 #
 # #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
-# dict, CUSTOM_THEME, which is why it lived here or in local_config.py rather
+# dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard
 # configurable too, the same as every other setting - "one file, one format".
@@ -439,7 +455,7 @@ known_bots = runtime.known_bots
 # ---------------------------------------------------------------------
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
 # a network-facing surface should never be on just because someone pulled and
-# restarted. Opt in from local_config.py, not here.
+# restarted. Opt in from admin_config.py, not here.
 #
 # Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
 # logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
@@ -455,7 +471,7 @@ WEBUI_ENABLED: bool = False
 # is no window where the dashboard is reachable unauthenticated.
 #
 # "127.0.0.1" is the tracked default: safe out of the box, reachable only from
-# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# this machine. Set this to "0.0.0.0" in admin_config.py if you want it
 # reachable from other devices on your LAN (phone, laptop).
 #
 #   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. A login gate does not stop
@@ -470,7 +486,7 @@ WEBUI_PORT: int = 8420
 # ---------------------------------------------------------------------
 # Two mechanisms, both supported, so nothing breaks for an existing install:
 #
-#   local_config.py   the original - Python, `from local_config import *`.
+#   admin_config.py   the original - Python, `from admin_config import *`.
 #                     Still read, still works. Nothing to do if you have one.
 #   settings.conf     plain text, no Python. settings.conf.sample lists every
 #                     setting with its default and what it does.
@@ -488,16 +504,15 @@ import settings_file
 # compares the FINAL resolved value (after both overrides apply, a few lines
 # down) against this snapshot via settings_file.unconfigured_required() to
 # decide whether the daemon may boot. Snapshotting the values themselves,
-# rather than re-reading config.py's source at startup the way
-# scripts/setup_check.py's UPSTREAM_NICKS-style checks do, means a rehash's
+# rather than re-reading config.py's source at startup, means a rehash's
 # importlib.reload(config) re-executes this exact line and gets the same
-# answer back - one definition, not two that could disagree.
+# answer back every time.
 SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
                     if name in globals()}
 
 try:
-    from local_config import *  # noqa: F401,F403
-    print('[CONFIG] Applied overrides from local_config.py')
+    from admin_config import *  # noqa: F401,F403
+    print('[CONFIG] Applied overrides from admin_config.py')
 except ImportError:
     pass
 
@@ -507,14 +522,14 @@ settings_file.apply_to(globals())
 # 10. DERIVED VALUES (computed AFTER local overrides, never before)
 # ---------------------------------------------------------------------
 # Anything whose value is computed from another setting belongs here, below
-# BOTH override mechanisms (local_config.py and settings.conf), not next to
+# BOTH override mechanisms (admin_config.py and settings.conf), not next to
 # the setting it reads.
 #
 # BROADCAST_SEARCH_CHANNEL used to be derived at the top of this file, far
 # above the point where overrides land. Its own comment promised it "defaults
 # to the first entry of CHANNEL" - and it did, but to the first entry of the
 # TRACKED default, not the operator's. So an operator who set
-# CHANNEL = "#their-channel" (in local_config.py OR settings.conf) still had a
+# CHANNEL = "#their-channel" (in admin_config.py OR settings.conf) still had a
 # dashboard broadcast search send its @find into #mp3passion: the first
 # channel of the shipped default, a real public channel they may not even be
 # in.
@@ -528,3 +543,32 @@ settings_file.apply_to(globals())
 # has nothing to derive from yet, and stays unset itself.
 if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
     BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
+
+# LIST_BASE_NAME predicted this exact gap: #170's RFC discussion (chchatzop's
+# comment) noted it "can derive from NICKNAME rather than being asked for at
+# all" once NICKNAME itself is required - see settings_file.py's own comment
+# on why LIST_BASE_NAME is not in REQUIRED. Found live, running setup.py
+# against a real install: NICKNAME came out "DCCoreTest", but the generated
+# list still came out named "DCCore-<date>.zip", because nothing ever did
+# the derivation the RFC predicted.
+#
+# LIST_BASE_NAME's own shipped literal is a real, non-blank value
+# ("DCCore") - unlike BROADCAST_SEARCH_CHANNEL above, `if not LIST_BASE_NAME`
+# would never catch an untouched install here, so "still exactly what
+# shipped" (not "still blank") is what marks it as never explicitly chosen.
+# NICKNAME may itself still be unset here on an install that has not reached
+# oserve.startup()'s REQUIRED gate yet, so there may be nothing to derive
+# from at all.
+#
+# The same value-comparison limitation settings_file.py's own REQUIRED
+# comment documents for SERVER/DEBUG_CHANNEL applies here too, and is
+# accepted for the same reason: comparing the FINAL resolved value against
+# the shipped literal cannot tell "never touched" apart from "deliberately
+# set back to the same value as the shipped default" - an operator who
+# explicitly writes LIST_BASE_NAME = "DCCore" in admin_config.py or
+# settings.conf gets it silently replaced by NICKNAME here, identically to
+# one who never touched it at all. Narrow (it only misfires when the
+# explicit choice is the literal word "DCCore") and no worse than shipping
+# with no derivation at all, which is the alternative.
+if LIST_BASE_NAME == "DCCore" and NICKNAME:
+    LIST_BASE_NAME = NICKNAME

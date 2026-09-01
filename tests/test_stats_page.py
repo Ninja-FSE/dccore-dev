@@ -23,7 +23,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import adminchat  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 import stats_mgr  # noqa: E402
 import webserver  # noqa: E402

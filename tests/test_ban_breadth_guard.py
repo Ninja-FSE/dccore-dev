@@ -28,7 +28,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import security  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -155,13 +155,13 @@ class TheGuardIsRightWhereItWasBorrowedFrom(unittest.TestCase):
 
 
 class TheSampleDoesNotPutTheDashboardOnTheLan(unittest.TestCase):
-    """local_config.py.sample is the file an operator copies. Its own comment
+    """admin_config.py.sample is the file an operator copies. Its own comment
     says "127.0.0.1 is the tracked default: safe out of the box... Set this to
     0.0.0.0 here if you want it reachable from your LAN" - and the line below
     it set 0.0.0.0, doing the thing it had just described as opt-in."""
 
     def sample(self):
-        with io.open(os.path.join(REPO_ROOT, "local_config.py.sample"),
+        with io.open(os.path.join(REPO_ROOT, "admin_config.py.sample"),
                      encoding="utf-8") as handle:
             return handle.read()
 
@@ -187,7 +187,7 @@ class TheSampleDoesNotPutTheDashboardOnTheLan(unittest.TestCase):
         """
         import ast
         declared = {}
-        with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         for node in tree.body:
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):

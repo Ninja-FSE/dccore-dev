@@ -66,7 +66,7 @@ import threading
 import time
 
 import adminchat
-import config
+import defaults as config
 import platform_compat
 
 try:
@@ -1061,6 +1061,51 @@ def build_verify_list_payload():
     }
 
 
+# Attributed nick for admin actions the dashboard dispatches on an operator's
+# behalf - nobody is logged into IRC as "WEB-DASHBOARD", so this can never
+# collide with (or impersonate) a real admin nick in a log line or in
+# commands.py's own messaging. Shared by every such action below (rehash,
+# list update): one identity, not a fresh one invented per route.
+WEB_DASHBOARD_SOURCE = "WEB-DASHBOARD"
+
+
+def build_update_list_status_payload():
+    """GET /api/tools/update-list/status payload: whether a master-list
+    rebuild is running right now. config.update_inprogress is set True just
+    before commands.handle_list_update_request() starts its background
+    thread and cleared in that thread's own `finally`, so this is accurate
+    for a rebuild started here, from !update, or from the admin console."""
+    return {"running": bool(getattr(config, "update_inprogress", False))}
+
+
+def start_list_update():
+    """POST /api/tools/update-list's pure logic: kick off a master-list
+    rebuild, the dashboard's own equivalent of !update - added because
+    FILE_DIRECTORY is deliberately not in settings_file.REQUIRED (see its
+    own comment): an operator who sets it for the first time from this same
+    Settings page had no way at all to then build the list it enables,
+    short of a real IRC client or a CLI already running.
+
+    commands.handle_list_update_request() already starts update_list.py on
+    its own daemon thread and returns immediately - see its own docstring -
+    so this only needs the same re-entrancy guard it makes internally,
+    surfaced as a real HTTP response rather than the debug-channel notice it
+    also sends, which an operator with no IRC client open would never see.
+
+    Returns (http_status, payload_dict).
+    """
+    if bool(getattr(config, "update_inprogress", False)):
+        return 409, {"error": "A list update is already running."}
+    if (bool(getattr(config, "search_inprogress", False))
+            and bool(getattr(config, "PAUSE_ON_UPDATE", True))):
+        return 409, {"error": "Another system scan is already in progress."}
+
+    import commands
+    commands.handle_list_update_request(
+        WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE, authorised=True)
+    return 200, {"update": "started"}
+
+
 # ==========================================================================
 # Settings (mutating - behind the same login as every other route). Pure
 # logic here, same reasoning as every other build_*_payload()/apply_*()
@@ -1256,12 +1301,6 @@ def build_settings_payload():
     }
 
 
-# The rehash the settings save route dispatches is attributed to this rather
-# than an operator nick: nobody is logged into IRC as "WEB-DASHBOARD", so this
-# can never collide with (or impersonate) a real admin nick in a log line or
-# in commands.handle_rehash_request's own messaging.
-WEB_REHASH_SOURCE = "WEB-DASHBOARD"
-
 # Settings that only take effect on a full daemon restart - webserver.py owns
 # a live listening socket and is deliberately excluded from
 # commands.py's modules_to_reload, so a rehash after saving one of these three
@@ -1312,7 +1351,7 @@ def _save_settings_and_rehash(changes):
     import commands
     threading.Thread(
         target=commands.handle_rehash_request,
-        args=(WEB_REHASH_SOURCE, WEB_REHASH_SOURCE),
+        args=(WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE),
         kwargs={"authorised": True},
         daemon=True,
     ).start()
@@ -1531,6 +1570,15 @@ if HAVE_FLASK:
         def api_tools_verify_list():
             return jsonify(build_verify_list_payload())
 
+        @app.route("/api/tools/update-list", methods=["POST"])
+        def api_tools_update_list():
+            status, result = start_list_update()
+            return jsonify(result), status
+
+        @app.route("/api/tools/update-list/status")
+        def api_tools_update_list_status():
+            return jsonify(build_update_list_status_payload())
+
         @app.route("/api/filelists/fetch", methods=["POST"])
         def api_filelists_fetch():
             body = json_object(request.get_json(silent=True))
@@ -1623,7 +1671,7 @@ def start():
     if not adminchat.password_is_configured():
         print("[WEBUI] ADMIN_PASSWORD_HASH is not set; refusing to start the dashboard "
               "without a login. Generate one with `python adminchat.py` and put the "
-              "result in local_config.py or settings.conf.")
+              "result in admin_config.py or settings.conf.")
         return
 
     # 127.0.0.1 when absent, matching config.py. 0.0.0.0 would bind every

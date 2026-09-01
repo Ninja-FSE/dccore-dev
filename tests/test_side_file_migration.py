@@ -25,7 +25,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -168,7 +168,7 @@ class TheNameIsGoneFromTheTree(unittest.TestCase):
         names = ("flac-serv-size", "flac-serv-rawbytes", "flac-serv.txt")
         offenders = []
         for name in sorted(os.listdir(REPO_ROOT)):
-            if not name.endswith(".py") or name in ("local_config.py", "config.py", "db.py"):
+            if not name.endswith(".py") or name in ("admin_config.py", "defaults.py", "db.py"):
                 continue
             for number, line in enumerate(self.source(name).splitlines(), 1):
                 if any(old in line for old in names) and not line.lstrip().startswith("#"):

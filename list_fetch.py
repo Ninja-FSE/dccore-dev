@@ -52,7 +52,7 @@ import threading
 import time
 import zipfile
 
-import config
+import defaults as config
 import db
 import dcc
 import platform_compat

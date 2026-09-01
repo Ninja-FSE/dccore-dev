@@ -67,7 +67,7 @@ import threading
 import time
 import uuid
 
-import config
+import defaults as config
 import db
 import dcc
 import list as list_mod

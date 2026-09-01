@@ -102,7 +102,7 @@ def _modules():
     """Every .py file the daemon itself is built from."""
     out = []
     for name in sorted(os.listdir(REPO_ROOT)):
-        if name.endswith(".py") and name != "local_config.py":
+        if name.endswith(".py") and name != "admin_config.py":
             out.append(os.path.join(REPO_ROOT, name))
     return out
 

@@ -33,10 +33,10 @@ import traceback
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# local_config.py is gitignored, machine-specific and optional. config.py
+# admin_config.py is gitignored, machine-specific and optional. config.py
 # already imports it when present and shrugs when it is not, so importing it
 # here would either duplicate that or fail on every clean checkout.
-SKIP = {"local_config"}
+SKIP = {"admin_config"}
 
 
 def module_names():

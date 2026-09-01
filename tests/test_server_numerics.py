@@ -143,7 +143,10 @@ def _guard_condition_for(marker):
 def _evaluate(condition, line, **names):
     """Evaluate a condition lifted from irc.py against a given raw line."""
     namespace = {"line": line, "irc": irc, "is_server_numeric": irc.is_server_numeric,
-                 "config": __import__("config"), "re": __import__("re")}
+                 # "config" is the NAME the lifted condition text uses (irc.py's own
+                 # `import defaults as config` alias) - the module behind it is
+                 # "defaults" since #170's RFC renamed the file.
+                 "config": __import__("defaults"), "re": __import__("re")}
     namespace.update(names)
     return bool(eval(condition, namespace))  # noqa: S307 - source is our own file
 

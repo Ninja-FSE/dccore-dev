@@ -70,6 +70,10 @@ ISP hostname, `+x` did not take and the console will not let you in.
 
 ### 2. Generate a password hash
 
+`python3 setup.py` does steps 2 and 3 together - the same password prompt as
+below, writing the resulting hash straight into `admin_config.py` - if you
+have not already run it. To do it by hand instead:
+
 From the DCCore directory, on either platform:
 
 ```
@@ -86,13 +90,13 @@ The password itself is never stored — only a salted PBKDF2-SHA256 digest, and 
 is compared in constant time. Two hashes of the same password look different,
 which is the salt doing its job.
 
-### 3. Put both values in `local_config.py`
+### 3. Put both values in `admin_config.py`
 
-Create `local_config.py` next to `config.py` if it does not exist. **It is
-gitignored**, so nothing here reaches GitHub. Do not put these in `config.py`.
+Create `admin_config.py` next to `defaults.py` if it does not exist. **It is
+gitignored**, so nothing here reaches GitHub. Do not put these in `defaults.py`.
 
 ```python
-# local_config.py
+# admin_config.py
 
 ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
 
@@ -125,7 +129,7 @@ whole network and make the gate decorative.
 
 ### 4. Restart the daemon
 
-`local_config.py` is read at import. `!rehash` reloads `config`, so it picks up
+`admin_config.py` is read at import. `!rehash` reloads `config`, so it picks up
 changes too, but a restart is the sure thing while you are setting this up.
 
 ---
@@ -155,7 +159,7 @@ work:
 If the dial fails for any reason — refused, or timed out — the bot falls back to
 path 2 automatically. Nothing is lost except the connect timeout.
 
-`ADMIN_CHAT_MODE` in `local_config.py` controls this:
+`ADMIN_CHAT_MODE` in `admin_config.py` controls this:
 
 | value | behaviour |
 |---|---|
@@ -243,7 +247,7 @@ failures. It has two destinations, both on by default:
 | `DEBUG_TO_CHANNEL` | the coloured line in `DEBUG_CHANNEL`, as always |
 | `DEBUG_TO_CONSOLE` | the plain text in an attached admin console |
 
-Once the console is doing the job, in `local_config.py`:
+Once the console is doing the job, in `admin_config.py`:
 
 ```python
 DEBUG_TO_CHANNEL = False
@@ -267,7 +271,7 @@ listening, and so does a console whose sink raised. Both fall through to stdout.
 a channel. That is deliberate for now — locking yourself out of every admin
 command because a hostmask has a typo in it would be a poor introduction.
 
-Once the console has proved itself, in `local_config.py`:
+Once the console has proved itself, in `admin_config.py`:
 
 ```python
 ADMIN_CHANNEL_COMMANDS = False
@@ -315,7 +319,7 @@ set, or `ADMIN_HOSTMASKS` has a typo.
 [ADMINCHAT] DCC CHAT from an authorised host refused: ADMIN_PASSWORD_HASH is not set.
 ```
 
-Step 2 was skipped, or the value did not reach `local_config.py`. A console with
+Step 2 was skipped, or the value did not reach `admin_config.py`. A console with
 no password refuses everyone rather than letting anyone in.
 
 **The log says the connection to you timed out.**
@@ -376,7 +380,7 @@ Three wrong passwords from that IP. Wait 15 minutes, or restart the daemon — t
 block lives in memory only.
 
 **Locked out entirely.**
-Edit `local_config.py` and restart. Until phase 2 flips the switch, the channel
+Edit `admin_config.py` and restart. Until phase 2 flips the switch, the channel
 commands still work, so you are never without a way in.
 
 ---

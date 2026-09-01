@@ -1,35 +1,37 @@
-# local_config.py.sample - copy this to local_config.py and fill in your own values.
+# admin_config.py.sample - copy this to admin_config.py and fill in your own values.
 #
-# local_config.py is gitignored and imported by config.py at startup via
-# `from local_config import *` (see config.py's "LOCAL OVERRIDES" section), so
+# admin_config.py is gitignored and imported by defaults.py at startup via
+# `from admin_config import *` (see defaults.py's "LOCAL OVERRIDES" section), so
 # anything set here overrides the tracked default of the same name for this one
 # machine, without ever showing up as a diff.
 #
-# Any name from config.py can be overridden this way, but the ones below are the
+# Any name from defaults.py can be overridden this way, but the ones below are the
 # ones actually meant to live here - see docs/ADMIN-CONSOLE.md for the full
 # setup guide.
 
 # ---------------------------------------------------------------------
 # YOUR IDENTITY - CHANGE ALL OF THESE FIRST
 # ---------------------------------------------------------------------
-# config.py ships with the upstream operator's live channel, nickname and
-# admin nick. Starting the daemon without overriding them joins his trading
-# channel as a second bot with a near-identical name - that reads as a clone
-# and can get both of you banned - and, separately, leaves his ADMIN_NICK in
-# control of your !ban/!rehash/!update/!clearqueue commands (is_admin() is a
-# plain nick comparison). Uncomment and fill in every line below; these can
-# also be set in settings.conf instead (see settings.conf.sample) if you
-# prefer configuring them from the web dashboard or CLI rather than by hand.
+# NICKNAME, CHANNEL and ADMIN_NICK ship blank on purpose - nothing here can
+# accidentally join anyone else's channels or hand out control of your own
+# !ban/!rehash/!update/!clearqueue commands (is_admin() is a plain nick
+# comparison), because the daemon simply refuses to start until you pick
+# your own. Uncomment and fill in every line below; these can also be set
+# in settings.conf instead (see settings.conf.sample) if you prefer
+# configuring them from the web dashboard or CLI rather than by hand.
 #
-# NICKNAME, CHANNEL, ADMIN_NICK and FILE_DIRECTORY are not just recommended -
-# oserve.startup() refuses to boot (sys.exit(1), naming every one still
-# unconfigured) while any of them is still blank. See settings_file.REQUIRED
-# if you want the full, authoritative list. SERVER and DEBUG_CHANNEL are NOT
-# in that list even though they matter - their shipped defaults
-# ("irc.undernet.org", "#dccore-debug") are already correct for almost every
-# install, and forcing them blank too would make those correct, intended
-# values impossible to set explicitly (the gate cannot tell "left at
-# default" apart from "deliberately confirmed the default is right").
+# NICKNAME, CHANNEL and ADMIN_NICK are not just recommended - oserve.startup()
+# refuses to boot (sys.exit(1), naming every one still unconfigured) while any
+# of them is still blank. See settings_file.REQUIRED if you want the full,
+# authoritative list. SERVER and DEBUG_CHANNEL are NOT in that list even
+# though they matter - their shipped defaults ("irc.undernet.org",
+# "#dccore-debug") are already correct for almost every install, and forcing
+# them blank too would make those correct, intended values impossible to set
+# explicitly (the gate cannot tell "left at default" apart from "deliberately
+# confirmed the default is right"). FILE_DIRECTORY is also not in that list,
+# deliberately: requiring it would block the daemon from ever reaching the
+# web dashboard, the one place that is genuinely easier to set it from - a
+# blank one only warns, both at boot and from setup.py.
 #
 # NICKNAME = "YourBotName"
 # ALT_NICKNAME = "YourBotName_"

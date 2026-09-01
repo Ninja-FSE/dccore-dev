@@ -19,7 +19,7 @@
 #   * Yes/no settings accept true/false, yes/no, on/off, 1/0.
 #   * List settings are comma-separated.
 #   * A '%' is an ordinary character here; it needs no escaping.
-#   * If you already have a local_config.py it still works exactly as
+#   * If you already have a admin_config.py it still works exactly as
 #     before. This file is applied on top of it, so you can migrate a
 #     few settings at a time, or ignore this file entirely.
 #   * The mIRC colour codes (C_*) are deliberately not listed: they are
@@ -30,6 +30,11 @@
 
 #SCRIPT_VERSION = DCCore v1.10.0
 
+# Names every generated list file ("<LIST_BASE_NAME>-<date>.txt" and its
+# .zip/.rar counterparts). Automatically takes NICKNAME's own value once
+# NICKNAME is set, unless this is given an explicit value of its own first -
+# see the "DERIVED VALUES" section below. Only worth setting here if the
+# list should be named differently from the bot's own nickname.
 #LIST_BASE_NAME = DCCore
 
 # SERVER keeps a real, working default on purpose - "irc.undernet.org" is
@@ -40,13 +45,13 @@
 
 #PORT = 6667
 
-# NICKNAME, ADMIN_NICK, CHANNEL and FILE_DIRECTORY (below) are None - not a
-# real value - because they ARE in settings_file.REQUIRED: oserve.startup()
-# refuses to boot while any of them is still blank, so there is no shipped
-# value here for a copy-paste install to silently inherit and run under
-# somebody else's identity. See REQUIRED's own comment in settings_file.py
-# for the full reasoning, and RAR_BINARY above for the same "None means
-# unset" convention this already used before REQUIRED existed.
+# NICKNAME, ADMIN_NICK and CHANNEL are None - not a real value - because
+# they ARE in settings_file.REQUIRED: oserve.startup() refuses to boot while
+# any of them is still blank, so there is no shipped value here for a
+# copy-paste install to silently inherit and run under somebody else's
+# identity. See REQUIRED's own comment in settings_file.py for the full
+# reasoning, and RAR_BINARY above for the same "None means unset" convention
+# this already used before REQUIRED existed.
 # REQUIRED - the daemon refuses to start until this is set.
 #NICKNAME = 
 
@@ -68,11 +73,11 @@
 # all of them: broadcasting into every channel this bot has joined multiplies
 # the disruption to every other operator sharing those channels, for one
 # search. Defaults to the first entry of CHANNEL above; override explicitly
-# here (or in local_config.py) if that is not the right one.
+# here (or in admin_config.py) if that is not the right one.
 # Derived from CHANNEL - but NOT here. See "DERIVED VALUES" at the end of this
 # file: computing it at this point captures the tracked default above and
 # silently ignores an operator's own CHANNEL. None means "derive it below";
-# setting it explicitly, here or in local_config.py, still wins.
+# setting it explicitly, here or in admin_config.py, still wins.
 #BROADCAST_SEARCH_CHANNEL = 
 
 
@@ -80,13 +85,14 @@
 # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
 #PAUSE_ON_UPDATE = true
 
-# None, not a real path - FILE_DIRECTORY is in settings_file.REQUIRED (see its
-# own comment): oserve.startup() already refuses to boot on a directory that
-# does not exist, but a shipped literal path would let a copy-paste install
-# reach that check with somebody else's actual music folder path, not "not
-# configured at all". Blank makes the REQUIRED gate catch it first, with a
-# clearer message.
-# REQUIRED - the daemon refuses to start until this is set.
+# None, not a real path - a shipped literal path would let a copy-paste
+# install silently inherit somebody else's actual music folder path. Unlike
+# NICKNAME/CHANNEL/ADMIN_NICK, FILE_DIRECTORY is NOT in settings_file.
+# REQUIRED (see its own comment): the daemon boots fine while this is still
+# blank, specifically so the web dashboard's own Settings page can be the
+# place that sets it, rather than needing it typed blind before the
+# dashboard is even reachable. oserve.startup() still refuses to start on a
+# value that IS set but does not exist - only "not chosen yet" is fine.
 #FILE_DIRECTORY = 
 
 # Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected
@@ -197,7 +203,7 @@
 # with "<your-account>.users.undernet.org", which nobody else can obtain. That
 # host IS the proof of your services login.
 # 
-# Put the real values in local_config.py, which is gitignored, NOT here.
+# Put the real values in admin_config.py, which is gitignored, NOT here.
 #ADMIN_HOSTMASKS = 
 
 # Generated with:  python adminchat.py
@@ -370,7 +376,7 @@
 # whatever the chosen THEME preset already says.
 # 
 # #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
-# dict, CUSTOM_THEME, which is why it lived here or in local_config.py rather
+# dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard
 # configurable too, the same as every other setting - "one file, one format".
@@ -392,7 +398,7 @@
 
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
 # a network-facing surface should never be on just because someone pulled and
-# restarted. Opt in from local_config.py, not here.
+# restarted. Opt in from admin_config.py, not here.
 # 
 # Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
 # logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
@@ -408,7 +414,7 @@
 # is no window where the dashboard is reachable unauthenticated.
 # 
 # "127.0.0.1" is the tracked default: safe out of the box, reachable only from
-# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# this machine. Set this to "0.0.0.0" in admin_config.py if you want it
 # reachable from other devices on your LAN (phone, laptop).
 # 
 # DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. A login gate does not stop

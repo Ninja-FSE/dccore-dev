@@ -23,7 +23,7 @@ if REPO_ROOT not in sys.path:
 if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 import irc  # noqa: E402
 import queue_mgr  # noqa: E402
@@ -102,11 +102,25 @@ class StartupRunsOnThisPlatform(BootCase):
         self.assertEqual(len(self.workers), 1)
 
     def test_a_missing_music_directory_stops_the_daemon(self):
-        """sys.exit(1) - unchanged from before the split."""
+        """sys.exit(1) - unchanged from before the split. A SET but wrong
+        FILE_DIRECTORY is a real misconfiguration, unlike simply not having
+        chosen one yet (see the next test)."""
         config.FILE_DIRECTORY = os.path.join(self.tree.root, "not-there")
         with self.assertRaises(SystemExit) as caught:
             self.boot()
         self.assertEqual(caught.exception.code, 1)
+
+    def test_a_blank_music_directory_warns_but_still_boots(self):
+        """FILE_DIRECTORY is deliberately NOT in settings_file.REQUIRED (see
+        its own comment) - found live, running setup.py against a real
+        install: requiring it blocked the daemon from ever reaching the web
+        dashboard, the one place that is genuinely easier to set it from.
+        Blank must not raise (os.path.exists(None) does) and must not exit -
+        only warn."""
+        self.set_config(FILE_DIRECTORY=None)
+        output = self.boot()  # must not raise
+        self.assertIn("[WARNING] No music directory configured yet", output)
+        self.assertIn(config.SCRIPT_VERSION, output)
 
     def test_it_warns_but_continues_with_no_master_list(self):
         """A fresh install has no list yet; that must not stop the boot."""
@@ -153,8 +167,7 @@ class StartupRunsOnThisPlatform(BootCase):
         default is None, not a real value - see config.py's own comment on
         why). A nickname that happens to still contain "DCCore" - like this
         install's own real "DCCoreWeb" - is a real, deliberate operator
-        choice, not an untouched default; only scripts/setup_check.py's
-        separate UPSTREAM_NICKS check cares about the brand name itself."""
+        choice, not an untouched default, so it is never flagged."""
         self.set_config(NICKNAME="DCCoreWeb")
         output = self.boot()  # must not raise
         self.assertIn(config.SCRIPT_VERSION, output)

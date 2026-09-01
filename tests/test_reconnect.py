@@ -26,7 +26,7 @@ from tests.support import (DCCoreTestCase, queue_row, silence_debug,
                            no_disk_writes, CapturedDispatch, RecordingSocket,
                            DeadSocket)
 
-import config
+import defaults as config
 import announce
 import db
 import dcc

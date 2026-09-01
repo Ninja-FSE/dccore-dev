@@ -23,7 +23,7 @@ if REPO_ROOT not in sys.path:
 
 import announce  # noqa: E402
 import commands  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 

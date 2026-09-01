@@ -1,7 +1,7 @@
 # stats_mgr.py - Size formatting, transfer speed and uptime figures
 import time
 
-import config
+import defaults as config
 import db
 import runtime
 

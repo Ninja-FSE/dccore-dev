@@ -40,7 +40,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import commands  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 
@@ -52,7 +52,7 @@ RUNTIME_ASSIGNED = {"ORIGINAL_NICK", "MY_IP_OR_DOCK", "fetch_feature_disabled"}
 
 def modules():
     for name in sorted(os.listdir(REPO_ROOT)):
-        if name.endswith(".py") and name != "local_config.py":
+        if name.endswith(".py") and name != "admin_config.py":
             yield name, os.path.join(REPO_ROOT, name)
     scripts = os.path.join(REPO_ROOT, "scripts")
     for name in sorted(os.listdir(scripts)):
@@ -62,7 +62,7 @@ def modules():
 
 def declared_defaults():
     """Every setting config.py declares, and the value it declares."""
-    with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+    with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     out = {}
     for node in tree.body:
@@ -198,12 +198,17 @@ class TheFallbacksThatMustPointTheSafeWay(unittest.TestCase):
                          "PAUSE_ON_UPDATE falls back to not pausing at: "
                          + ", ".join(offenders))
 
-    def test_all_three_call_sites_are_still_there(self):
+    def test_all_four_call_sites_are_still_there(self):
         """Fixture invariant: the test above passes trivially if the scan stops
-        finding them."""
+        finding them. webserver.py's own PAUSE_ON_UPDATE check (added
+        alongside the dashboard's "Update list" tool, in start_list_update())
+        is the fourth - it decides whether an already-running system scan
+        should block a dashboard-triggered rebuild the same way
+        commands.handle_list_update_request() itself would."""
         sites = [s for _l, _n, s, _v in fallbacks() if s == "PAUSE_ON_UPDATE"]
 
-        self.assertEqual(len(sites), 3, "expected commands.py, dcc.py and list.py")
+        self.assertEqual(len(sites), 4,
+                         "expected commands.py, dcc.py, list.py and webserver.py")
 
 
 class AnAuthorisationCheckRefusesWhenItDoesNotKnow(DCCoreTestCase):

@@ -23,7 +23,7 @@ settings.conf.sample lists every setting with its default and explanation.
 
 NOTHING BREAKS FOR AN EXISTING INSTALL
 
-local_config.py still works exactly as it did. config.py applies it first and
+admin_config.py still works exactly as it did. config.py applies it first and
 then this file on top, so an operator who has one can ignore settings.conf
 entirely, or migrate at their own pace, or use both. Where both set the same
 name, settings.conf wins - it is the one the operator edited most recently by
@@ -68,37 +68,50 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting
 #   - oserve.startup() refuses to boot (sys.exit(1)) while any of these still
 #     resolves to its shipped default, or is blank - see
 #     unconfigured_required() below.
-#   - scripts/setup_check.py's pre-flight UPSTREAM_NICKS/UPSTREAM_CHANNELS/
-#     UPSTREAM_ADMIN_NICKS checks remain as an EARLIER, friendlier warning
-#     (a full diagnostic report, not just a refusal) - this set is the same
-#     underlying knowledge, checked a second, later time as the daemon's own
-#     hard backstop, not a second place that could disagree about WHICH
-#     settings matter.
+#   - scripts/setup_check.py's pre-flight report (run before the first real
+#     start) surfaces the same blank/still-default state as an EARLIER,
+#     friendlier warning - a full diagnostic report, not just a refusal -
+#     reading this same REQUIRED set, not a second, separately maintained
+#     one that could disagree about WHICH settings matter.
 #
 # LIST_BASE_NAME is deliberately not here even though setup_check.py has
 # historically cared about it too - chchatzop's RFC comment on #170 notes it
 # "can derive from NICKNAME rather than being asked for at all" once NICKNAME
-# itself is required; nothing does that derivation yet, so today it is simply
-# not force-blanked.
+# itself is required; defaults.py's own "DERIVED VALUES" section now does
+# exactly that (an untouched LIST_BASE_NAME takes NICKNAME's value once
+# NICKNAME is set), so forcing it blank here too would just be a second,
+# redundant way of demanding the same answer.
 #
 # SERVER and DEBUG_CHANNEL are deliberately NOT here, even though the RFC
 # discussion's own first pass included them. chchatzop caught the reason
 # during a real test-run against the live install: the gate below refuses a
 # name whose CURRENT value equals its SHIPPED default - correct for an
-# identity setting (leaving NICKNAME/CHANNEL/ADMIN_NICK/FILE_DIRECTORY at
-# their shipped values means impersonating the upstream operator), but
-# "irc.undernet.org" is not somebody else's identity to avoid - it is the
-# correct server for essentially every operator of an Undernet file server,
-# and "#dccore-debug" (the default since #171) is a perfectly reasonable
-# debug channel for a new bot. Keeping either REQUIRED would make its own
-# correct, intended value permanently unusable: an operator who explicitly
-# writes SERVER = "irc.undernet.org" is refused for exactly the same reason
-# as one who never touched it at all, because the gate cannot tell those two
-# apart by value alone. Dropping both from REQUIRED - rather than special-
-# casing the comparison for just these two - keeps the mechanism one simple
-# rule ("blank means never configured") instead of a rule with exceptions.
+# identity setting (leaving NICKNAME/CHANNEL/ADMIN_NICK at their shipped
+# values means impersonating the upstream operator), but "irc.undernet.org"
+# is not somebody else's identity to avoid - it is the correct server for
+# essentially every operator of an Undernet file server, and
+# "#dccore-debug" (the default since #171) is a perfectly reasonable debug
+# channel for a new bot. Keeping either REQUIRED would make its own correct,
+# intended value permanently unusable: an operator who explicitly writes
+# SERVER = "irc.undernet.org" is refused for exactly the same reason as one
+# who never touched it at all, because the gate cannot tell those two apart
+# by value alone. Dropping both from REQUIRED - rather than special-casing
+# the comparison for just these two - keeps the mechanism one simple rule
+# ("blank means never configured") instead of a rule with exceptions.
+#
+# FILE_DIRECTORY is ALSO not here, even though an earlier version of this
+# set included it - found live, running setup.py against a real install:
+# requiring it here meant the daemon could not boot at all without a music
+# directory chosen up front, which is the one thing this project's own web
+# dashboard is a genuinely easier place to set (browse-and-confirm, rather
+# than typing a path blind at a prompt) - but the dashboard needs the daemon
+# RUNNING to reach it at all, so requiring FILE_DIRECTORY here made the
+# dashboard's own Settings page unable to be the place that sets it for a
+# fresh install. oserve.startup() still refuses to start with a FILE_
+# DIRECTORY that is set but does not exist (a real misconfiguration, worth
+# catching hard) - only "not chosen yet" no longer blocks booting at all.
 REQUIRED = frozenset({
-    "NICKNAME", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK",
+    "NICKNAME", "CHANNEL", "ADMIN_NICK",
 })
 
 
@@ -107,13 +120,12 @@ def unconfigured_required(namespace, shipped_defaults):
     blank, in `namespace` - i.e. genuinely never overridden by this install.
 
     `shipped_defaults` is config.SHIPPED_DEFAULTS: a snapshot config.py takes
-    of its own REQUIRED literals BEFORE local_config.py or settings.conf ever
+    of its own REQUIRED literals BEFORE admin_config.py or settings.conf ever
     apply. Comparing against that snapshot, not against config.py's source
     freshly re-read, is what lets a rehash's importlib.reload(config)
     re-execute the same snapshot line and get the identical values back
-    every time - there is exactly one place these can be defined, so unlike
-    the old UPSTREAM_NICKS/UPSTREAM_CHANNELS tuples scripts/setup_check.py
-    hand-maintains, this can never itself drift out of step with config.py.
+    every time - there is exactly one place these can be defined, so it can
+    never itself drift out of step with config.py.
 
     A name is reported as unconfigured when its CURRENT value (after both
     override mechanisms have already applied) is blank, or is identical to
@@ -596,20 +608,20 @@ def _atomic_write(path, text):
             os.unlink(tmp_path)
 
 
-def shadowed_by_local_config(names):
-    """Which of `names` local_config.py also sets.
+def shadowed_by_admin_config(names):
+    """Which of `names` admin_config.py also sets.
 
-    Not an error and not blocked - config.py applies local_config.py first and
+    Not an error and not blocked - config.py applies admin_config.py first and
     this file second, so saving here is what takes effect. But an operator who
-    keeps their real values in local_config.py should be told that this is the
+    keeps their real values in admin_config.py should be told that this is the
     point where that stops being true for a setting, rather than discovering it
     the next time they edit the Python file and nothing happens.
     """
     try:
-        import local_config
+        import admin_config
     except Exception:
         return []
-    return sorted(name for name in names if hasattr(local_config, name))
+    return sorted(name for name in names if hasattr(admin_config, name))
 
 
 def save(namespace, changes, path=None, log=print):
@@ -689,11 +701,11 @@ def save(namespace, changes, path=None, log=print):
         _atomic_write(path, text if ending == "\n"
                       else text.replace("\n", ending))
 
-    shadowed = shadowed_by_local_config(changes)
+    shadowed = shadowed_by_admin_config(changes)
     name = os.path.basename(path)
     log(f"[CONFIG] Wrote {len(changes)} setting(s) to {name}.")
     for setting in shadowed:
-        log(f"[CONFIG] {name} now sets {setting}, which local_config.py also "
+        log(f"[CONFIG] {name} now sets {setting}, which admin_config.py also "
             f"sets. This file is applied second, so this file wins from now on.")
 
     return {"path": path, "written": sorted(changes), "added": added,

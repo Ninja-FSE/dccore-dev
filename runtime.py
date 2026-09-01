@@ -120,5 +120,5 @@ def channel_users_lock():
     loaded, so the deferred import just looks config up in sys.modules -
     the standard way to break a cycle like this one.
     """
-    import config
+    import defaults as config
     return getattr(config, "channel_users_lock", None) or _channel_users_lock

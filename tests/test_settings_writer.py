@@ -35,7 +35,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import settings_file  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -507,25 +507,25 @@ class StartingFromTheRealSample(WriterTestCase):
         self.assertEqual(self.read().count("#"), comments_before - 1)
 
 
-class TellingTheOperatorAboutLocalConfig(WriterTestCase):
-    """config.py applies local_config.py first and settings.conf second, so
+class TellingTheOperatorAboutAdminConfig(WriterTestCase):
+    """config.py applies admin_config.py first and settings.conf second, so
     saving here is what takes effect from now on. An operator who keeps their
     real values in the Python file should hear that at the moment it stops
     being true, not the next time they edit it and nothing happens."""
 
-    def test_a_setting_local_config_also_sets_is_reported(self):
-        module = type(sys)("local_config")
+    def test_a_setting_admin_config_also_sets_is_reported(self):
+        module = type(sys)("admin_config")
         module.MAX_DCC_SLOTS = 3
-        self.addCleanup(sys.modules.pop, "local_config", None)
-        sys.modules["local_config"] = module
+        self.addCleanup(sys.modules.pop, "admin_config", None)
+        sys.modules["admin_config"] = module
         self.write("")
 
         report = self.save({"MAX_DCC_SLOTS": 9, "NICKNAME": "DCCoreWin"})
 
         self.assertEqual(report["shadowed"], ["MAX_DCC_SLOTS"])
 
-    def test_no_local_config_is_not_a_problem(self):
-        sys.modules.pop("local_config", None)
+    def test_no_admin_config_is_not_a_problem(self):
+        sys.modules.pop("admin_config", None)
         self.write("")
 
         report = self.save({"MAX_DCC_SLOTS": 9})
