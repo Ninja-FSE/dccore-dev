@@ -45,8 +45,8 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
     base = os.path.realpath(base_dir)
 
     # FIXED: compares per directory step, rather than a plain startswith.
-    # With startswith alone, "/mnt/nfs-musik-backup" would wrongly be accepted
-    # as part of "/mnt/nfs-musik", because the string happens to begin the same way.
+    # With startswith alone, "/srv/library-backup" would wrongly be accepted
+    # as part of "/srv/library", because the string happens to begin the same way.
     return matchpath == base or matchpath.startswith(base + os.sep)
 
 def download_count_identity(file_path, file_name):

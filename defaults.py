@@ -162,11 +162,11 @@ DEBUG_MSG_DELAY: float  = 0.5    # Pause between each line sent to the debug cha
 # ---------------------------------------------------------------------
 # Empty list = console disabled, and every DCC CHAT request is ignored.
 #
-# Each entry is a HOST pattern. It may be written bare ("FLAC.users.undernet.org")
-# or in the familiar IRC form ("*!*@FLAC.users.undernet.org"); either way only the
+# Each entry is a HOST pattern. It may be written bare ("operator.users.undernet.org")
+# or in the familiar IRC form ("*!*@operator.users.undernet.org"); either way only the
 # part after the last "@" is used. The nick and ident halves are discarded on
 # purpose - the ident is supplied by the client and anyone can set theirs to
-# "flac", so constraining it grants nothing. Only the host is issued by the server.
+# "operator", so constraining it grants nothing. Only the host is issued by the server.
 #
 # On Undernet, log into X and set usermode +x. The server then replaces your host
 # with "<your-account>.users.undernet.org", which nobody else can obtain. That
@@ -584,9 +584,8 @@ settings_file.apply_to(globals())
 # to the first entry of CHANNEL" - and it did, but to the first entry of the
 # TRACKED default, not the operator's. So an operator who set
 # CHANNEL = "#their-channel" (in admin_config.py OR settings.conf) still had a
-# dashboard broadcast search send its @find into #mp3passion: the first
-# channel of the shipped default, a real public channel they may not even be
-# in.
+# dashboard broadcast search send its @find into whatever channel the
+# shipped default named: a real public channel they may not even be in.
 #
 # Only an unset value is derived, so an explicit choice always wins. CHANNEL
 # itself may also still be unset here - #170's RFC made it one of

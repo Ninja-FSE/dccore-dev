@@ -366,7 +366,7 @@ def find_matching_entries(search_words, limit=None, list_path=None):
 # library's real location is: update_list.py writes it verbatim (see its
 # raw_folder_str) because the OmenServe listing format has always looked that
 # way. It is a piece of the format, NOT a path - the operator's library may
-# well be at Z:\1 Metal or /mnt/nfs-musik. What follows it is the folder
+# well be at Z:\Music or /srv/library. What follows it is the folder
 # relative to FILE_DIRECTORY, which is what dcc.py joins to resolve a request.
 LIST_FOLDER_PREFIX = "D:\\MUSIC\\"
 
