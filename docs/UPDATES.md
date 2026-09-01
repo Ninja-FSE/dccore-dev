@@ -2,6 +2,29 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟩 v1.10.0 (2026-09-01) - "General Availability"
+RC4 shipped a full changelog entry below; everything after it did not. **66 PRs merged into `beta` over the five weeks since RC4** without a single one getting its own entry here - this release closes that gap with one condensed summary, grouped by theme rather than narrated PR-by-PR. See each PR's own description on GitHub for the full story behind any one line below.
+
+No code changed to make this GA - it is RC4 plus everything below, judged stable. `SCRIPT_VERSION` drops the `-RC4` suffix. 1838 tests, all green on Linux and Windows CI.
+
+### 🔒 The #162 security & reliability audit
+An end-to-end adversarial review of the daemon found 32 issues, worked through in clusters across #166, #168, #169, #171, #172, #173, #174, #175, #176, #179, #180, #182 and #183: `!rehash`'s restore path detaching `config` from `runtime.py`; unanchored PRIVMSG/NOTICE parsing and hostmask bans that never actually matched anything; every runtime fallback that could disagree with `config.py`; the `flac-serv-*` side files renamed with a migration so no existing deployment lost its published size/byte-count; the `update_list.py` and `dcc.py` clusters (findings #4, #6, #7, #8, #15, #16, #21, #23, #32); config/docs drift (#18, #19, #20, #25); a ban pattern (`*!*@*`) that, after #168 made hostmask bans work at all, could ban an entire channel; an unbounded bulk fetch-enqueue with no way to cancel a pending row; and non-ASCII (Greek/Cyrillic/CJK) filenames that could be silently corrupted on read or overflow the DCC SEND handshake on send. #177 tracks the one finding (#30 - unbounded `user_requests`/`muted_until` growth) still open after this release.
+
+### 🌐 Web dashboard
+Grew from the RC4 feature line into a real second interface: a Settings page (#141, #142, #144) that writes `settings.conf` (#136) instead of only reading it, a Stats page (#147, #151, #159), a light theme (#137), login required on every route (#131), per-file downloads and folder-as-`.rar` fetch from the File Lists view (#146, #149, #150), the fetched-lists registry surviving a restart (#145), and the nav/title/columns staying visible while scrolling (#163). `WEBUI_ENABLED` now fails closed rather than open when unset (#116), and a test pins that importing `webserver.py` alone can never drag in the running daemon (#132).
+
+### 📡 List distribution & the wider network
+The master list can now be handed out as `.txt`, `.zip` or `.rar` (#155); live transfer speed is readable outside the advert loop, feeding the dashboard (#134); the daemon parses other bots' channel adverts, so it knows who else is serving files (#135); an operator can turn `!rar` off entirely (#140); and Verify List's overstated duplicate-count claim, plus a `resolve_list_folder()` bug that could drop the library's own base path, are both fixed (#130).
+
+### 🛡️ Correctness & concurrency
+Several shared-state races closed: `config.channel_users` against concurrent JOIN/PART/QUIT/353 (#123), `config.fetch_queue` read under the same lock its writers use (#124), and a wrong-lock bug in `announce.py` alongside `dcc_fetch._fetch_lock()`'s per-call fallback (#125). Elsewhere: temp-archive cleanup keys off the configured directory instead of a literal string (#122), the master-list folder-prefix logic was consolidated into one place instead of several that could disagree (#121), a duplicate filename now resolves using a search result's own `::INFO::` size hint (#128), square brackets survive into packed `.rar` names so AutoQ can match completion (#129), a missing ban file no longer fails silently under the wrong working directory (#120), and two stranger-sent channel lines that could hang the daemon in a reconnect loop are refused (#161).
+
+### 🧹 Setup, tooling & smaller fixes
+One shared setup-check module replaces two hand-maintained copies that had already drifted twice (#117), CI now installs Flask so the dashboard's own HTTP routes actually run under test (#126), two numeric settings that failed silently are now caught by `check-setup.py` (#127), the advert's Record figure (stuck at `0k/s` since the feature shipped) and its day-boundary figures are both fixed (#119, #157), an unclosed CSS rule that silently disabled the whole File Lists folder view is fixed (#118), `@<nick>-help` answers a stranger asking what the bot is (#154), `@<nick>-stats`/`@<nick>-top` answer in private (#159), the mIRC colour palette is defined once instead of eight times (#160), the last Swedish log lines - and the gap in the language guard that let them stay (a docstring the word-scan couldn't see into) - are fixed (#148, #158), and `README.md` no longer points at Windows scripts that were not actually on `beta` yet (#115).
+
+### 🧰 Groundwork for #170
+`settings_file.REQUIRED` and the `CUSTOM_THEME` flattening landed (#178) - the first phase of #170's RFC (`defaults.py`/`admin_config.py`, a guided first-run `setup.py`, and the rest of the mandatory-settings design) is still in progress on a separate branch and is not part of this release.
+
 ## 🟦 v1.10.0-RC4 (2026-08-29) - "The Web Dashboard Release"
 The `beta-web` feature line - a full web dashboard plus a new cross-bot fetch capability, developed as its own branch since RC3 - is merged into `beta`. Everything below either shipped as part of that branch before the merge, or was built directly on `beta` afterward. 995 tests total, all green on Linux and Windows CI.
 
