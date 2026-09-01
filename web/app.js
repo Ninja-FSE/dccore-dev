@@ -15,6 +15,7 @@
 
   var REFRESH_MS = 8000;
   var BROADCAST_POLL_MS = 2000;
+  var UPDATE_LIST_POLL_MS = 3000;
   var DOWNLOADS_POLL_MS = 4000;
   var FILELISTS_BOTS_POLL_MS = 4000;
   // Matches webserver.py's FILELISTS_DEFAULT_PAGE_SIZE - keep the two in
@@ -99,6 +100,8 @@
     stTopAlbumsOff:        document.getElementById("st-top-albums-off"),
     themeDark:    document.getElementById("theme-dark"),
     themeLight:   document.getElementById("theme-light"),
+    updateListRunBtn:     document.getElementById("update-list-run-btn"),
+    updateListStatus:     document.getElementById("update-list-status"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
     verifyStatus:         document.getElementById("verify-status"),
     verifyResults:        document.getElementById("verify-results"),
@@ -1112,9 +1115,67 @@
 
   // ---------------------------------------------------------------- Tools
 
-  // The Tools view runs nothing on its own. Verifying the list re-reads and
-  // re-parses the whole master list, which is work worth doing when the
-  // operator asks for it and not on every tab switch.
+  // Rebuilding the list is the dashboard's own equivalent of !update -
+  // added because FILE_DIRECTORY is deliberately not in
+  // settings_file.REQUIRED (see settings_file.py's own comment): an
+  // operator who sets it for the first time from the Settings page had no
+  // way at all to then build the list it enables, short of a real IRC
+  // client or a CLI already running. A rebuild can take minutes on a real
+  // library, so this polls /status rather than waiting on the POST itself -
+  // the same shape as broadcast search above.
+  var updateList = { pollTimer: null };
+
+  el.updateListRunBtn.addEventListener("click", function () {
+    el.updateListRunBtn.disabled = true;
+    showUpdateListStatus("Starting…", false);
+    postJson("/api/tools/update-list", {}).then(function (res) {
+      if (!res.ok) {
+        el.updateListRunBtn.disabled = false;
+        showUpdateListStatus(res.data.error || ("HTTP " + res.status), true);
+        return;
+      }
+      startUpdateListPolling();
+    }).catch(function (err) {
+      el.updateListRunBtn.disabled = false;
+      showUpdateListStatus("Request failed: " + err.message, true);
+    });
+  });
+
+  function showUpdateListStatus(text, isError) {
+    el.updateListStatus.textContent = text;
+    el.updateListStatus.classList.toggle("is-error", !!isError);
+  }
+
+  function startUpdateListPolling() {
+    if (updateList.pollTimer) { clearInterval(updateList.pollTimer); }
+    pollUpdateListStatus();
+    updateList.pollTimer = setInterval(pollUpdateListStatus, UPDATE_LIST_POLL_MS);
+  }
+
+  function pollUpdateListStatus() {
+    fetchJson("/api/tools/update-list/status").then(function (payload) {
+      markConnection(true);
+      if (payload.running) {
+        showUpdateListStatus("Rebuilding the master list…", false);
+        return;
+      }
+      clearInterval(updateList.pollTimer);
+      updateList.pollTimer = null;
+      el.updateListRunBtn.disabled = false;
+      showUpdateListStatus("Done. Check Stats for the new file count.", false);
+    }).catch(function (err) {
+      markConnection(false);
+      clearInterval(updateList.pollTimer);
+      updateList.pollTimer = null;
+      el.updateListRunBtn.disabled = false;
+      showUpdateListStatus("Lost track of the update: " + err.message, true);
+    });
+  }
+
+  // The Tools view runs nothing on its own beyond the update above.
+  // Verifying the list re-reads and re-parses the whole master list, which
+  // is work worth doing when the operator asks for it and not on every tab
+  // switch.
   function renderVerifyResults(payload) {
     var duplicates = payload.duplicates || [];
     var checked = payload.checked || 0;

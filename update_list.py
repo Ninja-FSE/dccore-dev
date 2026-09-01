@@ -555,6 +555,16 @@ def generate_master_list():
 
 if __name__ == "__main__":
     print("--- Starting the scheduled weekly file-list update ---")
+    # FILE_DIRECTORY is not in settings_file.REQUIRED (see its own comment) -
+    # a blank value is a supported "not chosen yet" state the daemon itself
+    # boots fine with, so os.path.exists(None) here (a TypeError, not a
+    # clean failure) must be guarded against explicitly rather than assuming
+    # a real string ever reaches this point.
+    if not config.FILE_DIRECTORY:
+        print("[CRITICAL] No music directory configured yet - set FILE_DIRECTORY "
+              "from the web dashboard's Settings page, settings.conf, or "
+              "admin_config.py before running this.")
+        sys.exit(1)
     if not os.path.exists(config.FILE_DIRECTORY):
         print(f"[CRITICAL] Missing music directory: {config.FILE_DIRECTORY}")
         sys.exit(1)

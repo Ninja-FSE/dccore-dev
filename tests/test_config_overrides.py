@@ -129,6 +129,40 @@ class AdminConfigOverrideTests(DCCoreTestCase):
 
         self.assertEqual(cfg.BROADCAST_SEARCH_CHANNEL, "#dccore-test")
 
+    def test_a_nickname_override_moves_the_list_base_name(self):
+        """Found live, running setup.py against a real install: NICKNAME came
+        out "DCCoreTest", but the generated list still came out named
+        "DCCore-<date>.zip" - #170's RFC predicted exactly this ("LIST_BASE_NAME
+        can derive from NICKNAME") but nothing did the derivation until now."""
+        cfg = self._reload_with_admin_config('NICKNAME = "DCCoreTest"\n')
+
+        self.assertEqual(cfg.NICKNAME, "DCCoreTest")
+        self.assertEqual(
+            cfg.LIST_BASE_NAME, "DCCoreTest",
+            "the generated list is still named after the shipped default, "
+            "not the bot's own configured nickname")
+
+    def test_an_explicit_list_base_name_still_wins(self):
+        """Control. Deriving the value must not start overwriting an operator
+        who set it on purpose - LIST_BASE_NAME's own comment offers that
+        choice, same as BROADCAST_SEARCH_CHANNEL's above."""
+        cfg = self._reload_with_admin_config(
+            'NICKNAME = "DCCoreTest"\n'
+            'LIST_BASE_NAME = "SomeOtherName"\n')
+
+        self.assertEqual(cfg.LIST_BASE_NAME, "SomeOtherName")
+
+    def test_with_no_overrides_and_no_nickname_there_is_nothing_to_derive(self):
+        """Control: NICKNAME is settings_file.REQUIRED and ships blank - a
+        fresh, not-yet-configured install has nothing for LIST_BASE_NAME to
+        derive FROM, so it stays at its own shipped literal. Importing
+        config.py itself must not raise (see the `and NICKNAME` guard this
+        test pins)."""
+        cfg = self._reload_with_admin_config("# no overrides\n")
+
+        self.assertIsNone(cfg.NICKNAME)
+        self.assertEqual(cfg.LIST_BASE_NAME, "DCCore")
+
 
 class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
     """The general rule, read out of config.py's own source.

@@ -20,6 +20,11 @@ import runtime
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False
 SCRIPT_VERSION: str = "DCCore v1.10.0-RC4"
+# Names every generated list file ("<LIST_BASE_NAME>-<date>.txt" and its
+# .zip/.rar counterparts). Automatically takes NICKNAME's own value once
+# NICKNAME is set, unless this is given an explicit value of its own first -
+# see the "DERIVED VALUES" section below. Only worth setting here if the
+# list should be named differently from the bot's own nickname.
 LIST_BASE_NAME: str = "DCCore"
 
 # ---------------------------------------------------------------------
@@ -31,13 +36,13 @@ LIST_BASE_NAME: str = "DCCore"
 # exactly that reason - see REQUIRED's own comment.
 SERVER: str        = "irc.undernet.org"
 PORT: int          = 6667
-# NICKNAME, ADMIN_NICK, CHANNEL and FILE_DIRECTORY (below) are None - not a
-# real value - because they ARE in settings_file.REQUIRED: oserve.startup()
-# refuses to boot while any of them is still blank, so there is no shipped
-# value here for a copy-paste install to silently inherit and run under
-# somebody else's identity. See REQUIRED's own comment in settings_file.py
-# for the full reasoning, and RAR_BINARY above for the same "None means
-# unset" convention this already used before REQUIRED existed.
+# NICKNAME, ADMIN_NICK and CHANNEL are None - not a real value - because
+# they ARE in settings_file.REQUIRED: oserve.startup() refuses to boot while
+# any of them is still blank, so there is no shipped value here for a
+# copy-paste install to silently inherit and run under somebody else's
+# identity. See REQUIRED's own comment in settings_file.py for the full
+# reasoning, and RAR_BINARY above for the same "None means unset" convention
+# this already used before REQUIRED existed.
 NICKNAME: str      = None
 ALT_NICKNAME: str  = "DCCore_"
 ADMIN_NICK: str    = None
@@ -63,12 +68,14 @@ BROADCAST_SEARCH_CHANNEL: str = None
 # 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
 PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
-# None, not a real path - FILE_DIRECTORY is in settings_file.REQUIRED (see its
-# own comment): oserve.startup() already refuses to boot on a directory that
-# does not exist, but a shipped literal path would let a copy-paste install
-# reach that check with somebody else's actual music folder path, not "not
-# configured at all". Blank makes the REQUIRED gate catch it first, with a
-# clearer message.
+# None, not a real path - a shipped literal path would let a copy-paste
+# install silently inherit somebody else's actual music folder path. Unlike
+# NICKNAME/CHANNEL/ADMIN_NICK, FILE_DIRECTORY is NOT in settings_file.
+# REQUIRED (see its own comment): the daemon boots fine while this is still
+# blank, specifically so the web dashboard's own Settings page can be the
+# place that sets it, rather than needing it typed blind before the
+# dashboard is even reachable. oserve.startup() still refuses to start on a
+# value that IS set but does not exist - only "not chosen yet" is fine.
 FILE_DIRECTORY: str   = None
 RAR_ENABLED: bool     = True        # Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected
 RAR_BINARY: str       = None       # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
@@ -497,10 +504,9 @@ import settings_file
 # compares the FINAL resolved value (after both overrides apply, a few lines
 # down) against this snapshot via settings_file.unconfigured_required() to
 # decide whether the daemon may boot. Snapshotting the values themselves,
-# rather than re-reading config.py's source at startup the way
-# scripts/setup_check.py's UPSTREAM_NICKS-style checks do, means a rehash's
+# rather than re-reading config.py's source at startup, means a rehash's
 # importlib.reload(config) re-executes this exact line and gets the same
-# answer back - one definition, not two that could disagree.
+# answer back every time.
 SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
                     if name in globals()}
 
@@ -537,3 +543,32 @@ settings_file.apply_to(globals())
 # has nothing to derive from yet, and stays unset itself.
 if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
     BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
+
+# LIST_BASE_NAME predicted this exact gap: #170's RFC discussion (chchatzop's
+# comment) noted it "can derive from NICKNAME rather than being asked for at
+# all" once NICKNAME itself is required - see settings_file.py's own comment
+# on why LIST_BASE_NAME is not in REQUIRED. Found live, running setup.py
+# against a real install: NICKNAME came out "DCCoreTest", but the generated
+# list still came out named "DCCore-<date>.zip", because nothing ever did
+# the derivation the RFC predicted.
+#
+# LIST_BASE_NAME's own shipped literal is a real, non-blank value
+# ("DCCore") - unlike BROADCAST_SEARCH_CHANNEL above, `if not LIST_BASE_NAME`
+# would never catch an untouched install here, so "still exactly what
+# shipped" (not "still blank") is what marks it as never explicitly chosen.
+# NICKNAME may itself still be unset here on an install that has not reached
+# oserve.startup()'s REQUIRED gate yet, so there may be nothing to derive
+# from at all.
+#
+# The same value-comparison limitation settings_file.py's own REQUIRED
+# comment documents for SERVER/DEBUG_CHANNEL applies here too, and is
+# accepted for the same reason: comparing the FINAL resolved value against
+# the shipped literal cannot tell "never touched" apart from "deliberately
+# set back to the same value as the shipped default" - an operator who
+# explicitly writes LIST_BASE_NAME = "DCCore" in admin_config.py or
+# settings.conf gets it silently replaced by NICKNAME here, identically to
+# one who never touched it at all. Narrow (it only misfires when the
+# explicit choice is the literal word "DCCore") and no worse than shipping
+# with no derivation at all, which is the alternative.
+if LIST_BASE_NAME == "DCCore" and NICKNAME:
+    LIST_BASE_NAME = NICKNAME

@@ -101,35 +101,54 @@ class DccPortRangeSanityTests(unittest.TestCase):
         self.assertNotIn("is greater than DCC_PORT_END", result.stdout)
 
 
-class AdminNickSanityTests(unittest.TestCase):
-    """#162 finding #20: NICKNAME still being upstream is a hard FAIL with a
-    careful rationale; ADMIN_NICK used to be printed with a plain "ok" and
-    compared against nothing at all - a config the check declared "Ready to
-    start" could still hand the upstream operator's nick full control of
-    !ban/!rehash/!update/!clearqueue on the new operator's bot."""
+class AdminNickIsReportedPlainly(unittest.TestCase):
+    """#162 finding #20 originally added an upstream-identity comparison
+    here (NICKNAME/CHANNEL/ADMIN_NICK against a hardcoded list of the real
+    production bot's own values) - removed again: settings_file.REQUIRED
+    (enforced hard by oserve.startup()) already refuses to boot on a blank
+    NICKNAME/CHANNEL/ADMIN_NICK regardless of whether this check ever runs,
+    which is the load-bearing protection; comparing an operator's own,
+    deliberately-chosen ADMIN_NICK against a fixed list of specific people's
+    real nicks added a second, narrower layer that could not tell "forgot to
+    change it" apart from "this genuinely is that person" - any value here
+    is just reported, never judged."""
 
-    def test_the_bare_upstream_admin_nick_is_reported_as_a_failure(self):
+    def test_any_admin_nick_is_reported_plainly_with_no_judgement(self):
         result = _run_with_admin_config("ADMIN_NICK = 'FLAC,Samoth'\n")
-        self.assertIn("ADMIN_NICK is still", result.stdout)
-        self.assertEqual(result.returncode, 1)
+        self.assertIn("ok     admin nick FLAC,Samoth", result.stdout)
+        self.assertNotIn("WARN   ADMIN_NICK", result.stdout)
+        self.assertNotIn("FAIL   ADMIN_NICK", result.stdout)
 
-    def test_one_upstream_name_among_several_still_fails(self):
-        """ADMIN_NICK is comma-separated - a new operator who ADDS their own
-        nick without removing the upstream one is still exposed."""
-        result = _run_with_admin_config("ADMIN_NICK = 'Samoth,MyOwnNick'\n")
-        self.assertIn("ADMIN_NICK is still", result.stdout)
-        self.assertIn("samoth", result.stdout)
-        self.assertEqual(result.returncode, 1)
 
-    def test_case_and_whitespace_do_not_evade_the_check(self):
-        result = _run_with_admin_config("ADMIN_NICK = ' Flac , samoth '\n")
-        self.assertIn("ADMIN_NICK is still", result.stdout)
-        self.assertEqual(result.returncode, 1)
+class FileDirectorySanityTests(unittest.TestCase):
+    """FILE_DIRECTORY is deliberately NOT in settings_file.REQUIRED (see its
+    own comment) - found live, running setup.py against a real install:
+    requiring it blocked the daemon from ever reaching the web dashboard,
+    the one place that is genuinely easier to set it from. Unset is a WARN
+    here, not a FAIL; a value that IS set but wrong stays a FAIL - that is a
+    real misconfiguration, not an unmade choice."""
 
-    def test_a_genuinely_different_admin_nick_is_not_flagged(self):
-        result = _run_with_admin_config("ADMIN_NICK = 'MyOwnOperatorNick'\n")
-        self.assertNotIn("ADMIN_NICK is still", result.stdout)
-        self.assertIn("ok     admin nick MyOwnOperatorNick", result.stdout)
+    def test_unset_is_a_warning_not_a_failure(self):
+        result = _run_with_admin_config("ADMIN_NICK = 'X'\n")
+        self.assertIn("WARN   FILE_DIRECTORY is not set yet", result.stdout)
+        self.assertNotIn("FAIL   FILE_DIRECTORY", result.stdout)
+
+    def test_a_set_but_missing_directory_is_still_a_failure(self):
+        result = _run_with_admin_config(
+            "ADMIN_NICK = 'X'\nFILE_DIRECTORY = '/definitely/not/a/real/path'\n")
+        self.assertIn("FAIL   FILE_DIRECTORY does not exist", result.stdout)
+
+    def test_a_real_directory_is_ok(self):
+        tmp_dir = tempfile.mkdtemp(prefix="dccore-checksetup-music-")
+        try:
+            result = _run_with_admin_config(
+                f"ADMIN_NICK = 'X'\nFILE_DIRECTORY = {tmp_dir!r}\n")
+        finally:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        self.assertIn(f"ok     music directory {tmp_dir}", result.stdout)
+        self.assertNotIn("WARN   FILE_DIRECTORY", result.stdout)
+        self.assertNotIn("FAIL   FILE_DIRECTORY", result.stdout)
 
 
 class CleanConfigurationPassesEndToEnd(unittest.TestCase):

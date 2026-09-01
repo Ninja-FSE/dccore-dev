@@ -30,6 +30,11 @@
 
 #SCRIPT_VERSION = DCCore v1.10.0-RC4
 
+# Names every generated list file ("<LIST_BASE_NAME>-<date>.txt" and its
+# .zip/.rar counterparts). Automatically takes NICKNAME's own value once
+# NICKNAME is set, unless this is given an explicit value of its own first -
+# see the "DERIVED VALUES" section below. Only worth setting here if the
+# list should be named differently from the bot's own nickname.
 #LIST_BASE_NAME = DCCore
 
 # SERVER keeps a real, working default on purpose - "irc.undernet.org" is
@@ -40,13 +45,13 @@
 
 #PORT = 6667
 
-# NICKNAME, ADMIN_NICK, CHANNEL and FILE_DIRECTORY (below) are None - not a
-# real value - because they ARE in settings_file.REQUIRED: oserve.startup()
-# refuses to boot while any of them is still blank, so there is no shipped
-# value here for a copy-paste install to silently inherit and run under
-# somebody else's identity. See REQUIRED's own comment in settings_file.py
-# for the full reasoning, and RAR_BINARY above for the same "None means
-# unset" convention this already used before REQUIRED existed.
+# NICKNAME, ADMIN_NICK and CHANNEL are None - not a real value - because
+# they ARE in settings_file.REQUIRED: oserve.startup() refuses to boot while
+# any of them is still blank, so there is no shipped value here for a
+# copy-paste install to silently inherit and run under somebody else's
+# identity. See REQUIRED's own comment in settings_file.py for the full
+# reasoning, and RAR_BINARY above for the same "None means unset" convention
+# this already used before REQUIRED existed.
 # REQUIRED - the daemon refuses to start until this is set.
 #NICKNAME = 
 
@@ -80,13 +85,14 @@
 # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
 #PAUSE_ON_UPDATE = true
 
-# None, not a real path - FILE_DIRECTORY is in settings_file.REQUIRED (see its
-# own comment): oserve.startup() already refuses to boot on a directory that
-# does not exist, but a shipped literal path would let a copy-paste install
-# reach that check with somebody else's actual music folder path, not "not
-# configured at all". Blank makes the REQUIRED gate catch it first, with a
-# clearer message.
-# REQUIRED - the daemon refuses to start until this is set.
+# None, not a real path - a shipped literal path would let a copy-paste
+# install silently inherit somebody else's actual music folder path. Unlike
+# NICKNAME/CHANNEL/ADMIN_NICK, FILE_DIRECTORY is NOT in settings_file.
+# REQUIRED (see its own comment): the daemon boots fine while this is still
+# blank, specifically so the web dashboard's own Settings page can be the
+# place that sets it, rather than needing it typed blind before the
+# dashboard is even reachable. oserve.startup() still refuses to start on a
+# value that IS set but does not exist - only "not chosen yet" is fine.
 #FILE_DIRECTORY = 
 
 # Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected

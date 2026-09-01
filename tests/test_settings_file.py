@@ -209,11 +209,19 @@ class UnconfiguredRequiredTests(unittest.TestCase):
         correct, intended value permanently unusable, since the gate refuses
         a value equal to its shipped default and "irc.undernet.org"/
         "#dccore-debug" are correct-by-default for virtually every operator,
-        not somebody else's identity to avoid. See REQUIRED's own comment in
-        settings_file.py."""
+        not somebody else's identity to avoid.
+
+        FILE_DIRECTORY is also absent - added here originally, then found,
+        running setup.py against a real install, to block the daemon from
+        booting at all without a music directory chosen up front, which is
+        the one thing the web dashboard's own Settings page is a genuinely
+        easier place to set - but the dashboard needs the daemon RUNNING to
+        reach it. oserve.startup() still refuses to start on a FILE_
+        DIRECTORY that is set but does not exist; only "not chosen yet" is
+        fine now. See REQUIRED's own comment in settings_file.py."""
         self.assertEqual(
             settings_file.REQUIRED,
-            {"NICKNAME", "CHANNEL", "FILE_DIRECTORY", "ADMIN_NICK"})
+            {"NICKNAME", "CHANNEL", "ADMIN_NICK"})
 
 
 class ApplyingTheFile(unittest.TestCase):

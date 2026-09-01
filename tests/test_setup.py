@@ -3,9 +3,9 @@
 The interactive orchestration (collect_answers()) is exercised end-to-end by
 monkeypatching input()/adminchat._read_password() with canned answers, the
 same idiom used throughout this suite for anything that would otherwise need
-a real terminal. Everything else - the text edit, the write paths, the
-upstream-value warnings - is tested as the pure functions setup.py already
-pulls out for exactly this reason.
+a real terminal. Everything else - the text edit, the write paths - is
+tested as the pure functions setup.py already pulls out for exactly this
+reason.
 """
 
 import contextlib
@@ -143,18 +143,19 @@ class WriteSettingsConfTests(DCCoreTestCase):
         self.assertIn("CHANNEL = #my-channel", written)
         self.assertIn("ADMIN_NICK = MyAdmin", written)
 
-    def test_a_blank_server_answer_is_not_written(self):
-        """SERVER is not in settings_file.REQUIRED - config.py's own real
-        default already covers an operator who accepted it as-is, so
-        writing an explicit line for "the operator typed nothing" would
-        just be noise settings.conf.sample already explains better."""
-        answers = {"NICKNAME": "MyBot", "SERVER": "", "CHANNEL": "#c",
-                  "ADMIN_NICK": "A", "FILE_DIRECTORY": "/tmp/x"}
-        setup.write_settings_conf(answers, path=self.path)
+    def test_writes_exactly_the_dict_it_was_given(self):
+        """No filtering happens at this layer any more - collect_answers()
+        already decided what belongs in `changes` (a blank SERVER, or the
+        dashboard left off, are both simply absent from the dict, never
+        written as an explicit "no"). A key genuinely absent from `changes`
+        must not appear in the file at all."""
+        setup.write_settings_conf({"NICKNAME": "MyBot"}, path=self.path)
 
         with open(self.path, encoding="utf-8") as handle:
             written = handle.read()
+        self.assertIn("NICKNAME = MyBot", written)
         self.assertNotIn("SERVER", written)
+        self.assertNotIn("WEBUI", written)
 
 
 class CurrentValueTests(DCCoreTestCase):
@@ -174,40 +175,6 @@ class CurrentValueTests(DCCoreTestCase):
     def test_falls_back_to_empty_string_when_no_fallback_given(self):
         self.set_config(CHANNEL=None)
         self.assertEqual(setup._current("CHANNEL"), "")
-
-
-class WarnIfUpstreamTests(unittest.TestCase):
-    """Non-blocking warnings for a value copy-pasted straight from the
-    upstream operator's own config - scripts/setup_check.py's UPSTREAM_*
-    tuples reused directly, not duplicated."""
-
-    def test_warns_on_an_upstream_nickname(self):
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            setup._warn_if_upstream("DCCore", setup.setup_check.UPSTREAM_NICKS,
-                                    "NICKNAME", "example")
-        self.assertIn("WARNING", buffer.getvalue())
-
-    def test_case_insensitive(self):
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            setup._warn_if_upstream("DCCORE", setup.setup_check.UPSTREAM_NICKS,
-                                    "NICKNAME", "example")
-        self.assertIn("WARNING", buffer.getvalue())
-
-    def test_no_warning_for_a_real_operator_choice(self):
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            setup._warn_if_upstream("MyRealBot", setup.setup_check.UPSTREAM_NICKS,
-                                    "NICKNAME", "example")
-        self.assertEqual(buffer.getvalue(), "")
-
-    def test_warns_on_an_upstream_admin_nick(self):
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            setup._warn_if_upstream("FLAC", setup.setup_check.UPSTREAM_ADMIN_NICKS,
-                                    "ADMIN_NICK", "example")
-        self.assertIn("WARNING", buffer.getvalue())
 
 
 class CollectAnswersEndToEndTests(DCCoreTestCase):
@@ -249,6 +216,7 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
             "#my-channel",     # channel
             "MyAdmin",         # admin nick
             self.tree.music,   # file directory (exists already via make_tree)
+            "n",               # web dashboard: skip
         ])
 
         self.assertEqual(answers["NICKNAME"], "MyBot")
@@ -256,6 +224,10 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
         self.assertEqual(answers["CHANNEL"], "#my-channel")
         self.assertEqual(answers["ADMIN_NICK"], "MyAdmin")
         self.assertEqual(answers["FILE_DIRECTORY"], self.tree.music)
+        self.assertEqual(answers["WEBUI_ENABLED"], False)
+        self.assertNotIn("WEBUI_HOST", answers,
+                         "WEBUI_HOST must not be written at all when the "
+                         "dashboard was not enabled")
         self.assertTrue(password_hash)
         self.assertTrue(adminchat.verify_password(password_hash, "secret123"))
 
@@ -273,16 +245,35 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
             "#chan",
             "Admin",
             self.tree.music,
+            "n",
         ])
         self.assertEqual(answers["NICKNAME"], "SecondTry")
 
     def test_mismatched_passwords_are_reprompted(self):
         answers, password_hash = self._run_with_answers(
-            ["MyBot", "", "#chan", "Admin", self.tree.music],
+            ["MyBot", "", "#chan", "Admin", self.tree.music, "n"],
             passwords=("first-password", "different-password", "matched", "matched"))
 
         self.assertTrue(adminchat.verify_password(password_hash, "matched"))
         self.assertFalse(adminchat.verify_password(password_hash, "first-password"))
+
+    def test_enabling_the_dashboard_asks_about_lan_access(self):
+        answers, _hash = self._run_with_answers([
+            "MyBot", "", "#chan", "Admin", self.tree.music,
+            "y",   # enable the dashboard
+            "n",   # localhost only
+        ])
+        self.assertEqual(answers["WEBUI_ENABLED"], True)
+        self.assertEqual(answers["WEBUI_HOST"], "127.0.0.1")
+
+    def test_enabling_lan_access_sets_the_lan_host(self):
+        answers, _hash = self._run_with_answers([
+            "MyBot", "", "#chan", "Admin", self.tree.music,
+            "y",   # enable the dashboard
+            "y",   # reachable from the LAN
+        ])
+        self.assertEqual(answers["WEBUI_ENABLED"], True)
+        self.assertEqual(answers["WEBUI_HOST"], "0.0.0.0")
 
 
 if __name__ == "__main__":
