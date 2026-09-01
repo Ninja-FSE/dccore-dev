@@ -77,4 +77,14 @@ CLAUDE.md
 
 # Per-machine config overrides (paths, nick, channels)
 admin_config.py
+# local_config.py is the old, pre-#170 name. Kept ignored permanently, not
+# just during the rename: it is gitignored, so it was never in the
+# repository for git to rename along with config.py -> defaults.py. An
+# operator upgrading a real install keeps their old local_config.py on
+# disk for years after defaults.py's own migration renames it once - see
+# defaults.py's _migrate_local_config_to_admin_config(). An ignore rule
+# for a file the project no longer reads costs nothing; the alternative is
+# a credential file (it can hold ADMIN_PASSWORD_HASH) turning up as an
+# untracked file the moment this line is ever removed.
+local_config.py
 settings.conf

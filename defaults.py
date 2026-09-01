@@ -13,6 +13,7 @@
 # The live in-memory containers this file used to define are in runtime.py
 # now, and are bound below in section 8. See that module's docstring for why:
 # !rehash reloads THIS file, which reset every one of them.
+import os
 import runtime
 
 # ---------------------------------------------------------------------
@@ -509,6 +510,59 @@ import settings_file
 # answer back every time.
 SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
                     if name in globals()}
+
+def _migrate_local_config_to_admin_config(directory=None, log=print):
+    """Carry an existing local_config.py across to admin_config.py's name.
+
+    chchatzop's review of #187, found on the real upgrade path: config.py ->
+    defaults.py is a TRACKED file, so git renames it on every operator's disk
+    automatically on pull. local_config.py -> admin_config.py is NOT - it is
+    gitignored, so it was never in the repository for git to rename. An
+    operator upgrading a real install keeps their old local_config.py,
+    unchanged, sitting right next to a defaults.py that no longer imports it -
+    so NICKNAME/CHANNEL/ADMIN_NICK read as blank (still the shipped default)
+    and oserve.startup()'s REQUIRED gate refuses to boot, even though every
+    one of those settings is correctly filled in, one file over.
+
+    Must run HERE, at module import time before `from admin_config import *`
+    below - not from oserve.startup() the way db.migrate_legacy_side_files()
+    and update_list.migrate_list_base_name() are, both called well after that
+    import has already happened. By the time startup() runs it is too late:
+    the override this function exists to redirect would already have been
+    skipped, and REQUIRED would already see blank.
+
+    Same safety shape as those two: only when admin_config.py does not
+    already exist (an operator who has genuinely started fresh under the new
+    name wins over anything left from before), and os.replace so an
+    interrupted run leaves one intact file rather than two halves.
+
+    `directory` defaults to wherever this file itself lives - the real
+    installation directory admin_config.py/local_config.py actually sit in -
+    and is only ever overridden by a test.
+
+    Returns True if a rename happened, for the tests.
+    """
+    if directory is None:
+        directory = os.path.dirname(os.path.abspath(__file__))
+    admin_config_path = os.path.join(directory, "admin_config.py")
+    local_config_path = os.path.join(directory, "local_config.py")
+
+    if os.path.exists(admin_config_path) or not os.path.exists(local_config_path):
+        return False
+
+    try:
+        os.replace(local_config_path, admin_config_path)
+    except OSError as err:
+        log(f"[MIGRATE] Could not rename local_config.py to admin_config.py: {err}. "
+            f"Rename it yourself, or copy its settings into admin_config.py.")
+        return False
+
+    log("[MIGRATE] Renamed local_config.py to admin_config.py - see admin_config.py.sample "
+        "if you want to know what changed.")
+    return True
+
+
+_migrate_local_config_to_admin_config()
 
 try:
     from admin_config import *  # noqa: F401,F403
