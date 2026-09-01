@@ -448,7 +448,8 @@ def send_dcc_error(user, error_type):
         "file_not_found": "Error: File not found.",
         "global_full": f"Error: The server's global queue is full ({config.MAX_GLOBAL_QUEUE} max).",
         "user_full": f"Error: You have reached your personal queue limit of {config.MAX_USER_QUEUE} files.",
-        "rar_disabled": "Error: Folder packing (!rar) is disabled on this bot."
+        "rar_disabled": "Error: Folder packing (!rar) is disabled on this bot.",
+        "not_configured": "Error: This bot's music library is not configured yet - ask the operator to set it up.",
     }
     msg_text = errors.get(error_type, "Error: Unknown transfer issue.")
     msg = f"NOTICE {user} :{config.C_BOLD}{msg_text}{config.C_RESET}\r\n"

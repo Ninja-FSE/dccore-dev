@@ -106,6 +106,92 @@ def _prune_superseded_lists(keep):
         print(f"[LIST-CLEAN] Removed {removed} superseded list(s).")
 
 
+# The literal shipped default defaults.py derives LIST_BASE_NAME away FROM -
+# see its own comment on why the derivation compares against this same
+# literal rather than a shared constant (a snapshot taken before overrides
+# apply, the way SHIPPED_DEFAULTS does for settings_file.REQUIRED, would
+# need LIST_BASE_NAME added to REQUIRED just to get one, which it deliberately
+# is not).
+_SHIPPED_LIST_BASE_NAME = "DCCore"
+
+
+def migrate_list_base_name(log=print):
+    """Carry existing list files across when LIST_BASE_NAME changed out from
+    under them - chchatzop's review of #184: defaults.py's LIST_BASE_NAME
+    derivation (an untouched value takes NICKNAME's own value once NICKNAME
+    is set) means every existing install's list files, generated before that
+    derivation existed, are sitting on disk as "DCCore-<date>.*" while
+    LIST_BASE_NAME now resolves to the operator's nickname instead.
+
+    Without this, find_latest_list() globs for the NEW base name, finds
+    nothing, and the daemon boots, joins its channels and advertises with no
+    list at all - not because there is no list, but because the one on disk
+    is filed under a name nothing is looking for any more. It stays that way
+    until the next successful !update, which on a weekly rebuild schedule is
+    up to a week of a bot that looks healthy and answers every request with
+    "not found". db.migrate_legacy_side_files()'s own docstring describes
+    this exact failure shape for the flac-serv-* rename; this is the same
+    problem, for a prefix rather than a single filename.
+
+    Deliberately narrow, matching that function's safety properties:
+
+      * only when LIST_BASE_NAME no longer equals what defaults.py ships -
+        an install that never had any "DCCore-*" files (fresh, or one that
+        chose its own LIST_BASE_NAME from the very first run) has nothing to
+        move, and this is a no-op for it.
+      * only a file whose new name does not already exist is moved - a
+        rebuild that has already happened under the new name wins over
+        anything left behind from the old one.
+      * os.replace, so an interrupted run leaves one intact file rather than
+        two halves; a failure is logged and swallowed per file, because a
+        daemon that will not start over a rename is a worse outcome than the
+        rename not happening for one file.
+
+    Returns the list of (old, new) basenames actually moved, for the tests
+    and for the startup log.
+    """
+    if config.LIST_BASE_NAME == _SHIPPED_LIST_BASE_NAME:
+        return []
+
+    directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
+    try:
+        entries = os.listdir(directory)
+    except OSError as err:
+        log(f"[MIGRATE] Could not read {directory}: {err}")
+        return []
+
+    # The "-" is required, not just the bare prefix: every real artifact is
+    # named "DCCore-<date>.ext" or "DCCore-RAR-<date>.ext", always with a
+    # hyphen immediately after the base name. A bare startswith("DCCore")
+    # would also match a file already renamed to the NEW LIST_BASE_NAME when
+    # that name itself happens to start with "DCCore" - e.g. "DCCoreTest" -
+    # corrupting an already-correct file instead of leaving it alone.
+    old_prefix = _SHIPPED_LIST_BASE_NAME + "-"
+
+    moved = []
+    for item in entries:
+        if not item.startswith(old_prefix):
+            continue
+        if not item.endswith((".txt", ".zip", ".rar")):
+            continue
+
+        new_name = config.LIST_BASE_NAME + item[len(_SHIPPED_LIST_BASE_NAME):]
+        old_path = os.path.join(directory, item)
+        new_path = os.path.join(directory, new_name)
+        if os.path.exists(new_path):
+            continue
+        try:
+            os.replace(old_path, new_path)
+            moved.append((item, new_name))
+        except OSError as err:
+            log(f"[MIGRATE] Could not rename {item} to {new_name}: {err}. "
+                f"It will not be found until the next successful !update.")
+
+    for old_name, new_name in moved:
+        log(f"[MIGRATE] Renamed {old_name} to {new_name}.")
+    return moved
+
+
 def _artifact_paths(fmt, date_str):
     """Where the download artifact for `fmt` is published, and staged."""
     import list as list_mod

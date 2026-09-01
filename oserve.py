@@ -41,6 +41,7 @@ if not hasattr(config, 'fetched_bot_lists_lock'):
 import list
 import dcc
 import db
+import update_list
 import announce
 import irc        # The network connection to Undernet
 import queue_mgr  # The flood-protection queue (round-robin)
@@ -132,6 +133,14 @@ def startup():
     # flac-serv-* names if this install predates the rename. A no-op on every
     # run after the first, and on any install that never had them.
     db.migrate_legacy_side_files()
+
+    # Before find_latest_list() below: defaults.py's LIST_BASE_NAME derivation
+    # (an untouched value takes NICKNAME's own value once NICKNAME is set)
+    # means an existing install's list files can be sitting on disk under the
+    # OLD "DCCore-*" name while LIST_BASE_NAME now resolves to something else -
+    # see migrate_list_base_name()'s own docstring. A no-op on every run after
+    # the first, and on any install that never had a "DCCore-*" list.
+    update_list.migrate_list_base_name()
 
     latest_list = list.find_latest_list()
     if not latest_list:
