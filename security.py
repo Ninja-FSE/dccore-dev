@@ -276,6 +276,76 @@ def check_user_status(user, hostmask=None):
     return True  # The user is clear to use the bot
 
 
+# ---------------------------------------------------------------------
+# Flood-tracking state is forgotten once it can no longer change a decision.
+#
+# #162 finding #30. Both dicts below are keyed by a nick anybody can choose,
+# and both grew one PERMANENT entry per distinct nick:
+#
+#   user_requests  the timestamps INSIDE an entry are pruned to REQUEST_WINDOW
+#                  on every call, but the key itself never is - so a nick that
+#                  made one request months ago still owns an empty list.
+#   muted_until    entries ARE deleted when the mute expires, but only on the
+#                  next request FROM THAT SAME NICK. A flooder who is muted and
+#                  does not come back leaves its entry for good - and that is
+#                  the normal case, because the mute is what made them leave.
+#
+# commands.py's PRESERVE_RUNTIME carries both across every !rehash, correctly:
+# dropping them would release live mutes and hand a flooder a clean slate. So
+# a restart has been the only thing that ever cleared them.
+#
+# The expiry needs no new setting and deliberately does not get one. An entry
+# stops being able to affect any decision at a moment the data already defines:
+# a user_requests entry is dead REQUEST_WINDOW seconds after its newest
+# timestamp, because that is the window is_flooding() measures against, and a
+# muted_until entry is dead once its own expiry passes - the same test the code
+# below already applies when it deletes one. This is not a new policy, only the
+# existing one applied to the nicks that never return.
+#
+# No size cap, but for a different reason than _NotifiedNicks above. There a cap
+# was actively harmful. Here it would just be redundant: with REQUEST_WINDOW at
+# 5s and MUTE_TIME at 30s an entry is prunable within seconds of being made, so
+# time alone already bounds this by rate.
+_FLOOD_SWEEP_EVERY = 60.0
+_last_flood_sweep = 0.0
+
+
+def _prune_flood_tracking(now):
+    """Drop flood-tracking entries that can no longer affect a decision.
+
+    Both loops materialise their key list BEFORE deleting anything: mutating a
+    dict while iterating it raises RuntimeError, and this runs on the IRC read
+    thread, where that would take the connection down.
+
+    Returns how many entries were dropped. The tests asserts on that number
+    because a sweep that runs and removes nothing is indistinguishable from
+    outside from one that never ran at all.
+    """
+    window = float(getattr(config, "REQUEST_WINDOW", 5) or 5)
+
+    dropped = 0
+    for nick in [nick for nick, stamps in config.user_requests.items()
+                 if not stamps or now - max(stamps) >= window]:
+        del config.user_requests[nick]
+        dropped += 1
+
+    for nick in [nick for nick, until in config.muted_until.items() if now >= until]:
+        del config.muted_until[nick]
+        dropped += 1
+
+    return dropped
+
+
+def _sweep_flood_tracking_if_due(now):
+    """Throttle. Sweeping on every request would be O(nicks) per message on the
+    read thread; once a minute is ample for windows measured in seconds."""
+    global _last_flood_sweep
+    if now - _last_flood_sweep < _FLOOD_SWEEP_EVERY:
+        return 0
+    _last_flood_sweep = now
+    return _prune_flood_tracking(now)
+
+
 def is_flooding(user):
     """Flood protection: clears the queue on a ban, bans until midnight, and logs it all."""
     import time
@@ -287,6 +357,11 @@ def is_flooding(user):
     now = time.time()
     user_key = user.lower()
     oserve = sys.modules.get('oserve')
+
+    # Before the checks below, not after: a nick whose mute has already expired
+    # should be treated the same whether it is swept here or deleted by the
+    # expiry branch further down. Both paths leave it unmuted.
+    _sweep_flood_tracking_if_due(now)
     
     # ---------------------------------------------------------------------
     # STEP 2: the user kept hammering while muted -> a hard ban until midnight

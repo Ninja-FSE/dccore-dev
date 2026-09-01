@@ -19,7 +19,7 @@ import runtime
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False
-SCRIPT_VERSION: str = "DCCore v1.10.0-RC4"
+SCRIPT_VERSION: str = "DCCore v1.10.0"
 # Names every generated list file ("<LIST_BASE_NAME>-<date>.txt" and its
 # .zip/.rar counterparts). Automatically takes NICKNAME's own value once
 # NICKNAME is set, unless this is given an explicit value of its own first -
