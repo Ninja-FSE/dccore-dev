@@ -8,7 +8,7 @@ on:
   # Long-lived branches only, so a feature branch does not get a push run AND a
   # pull_request run for the same commit.
   push:
-    branches: [main, beta, beta-web, windows]
+    branches: [main]
 
   # Every pull request, whatever it targets.
   #
