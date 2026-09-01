@@ -1,6 +1,6 @@
 # DCCore
 
-**Current version: v1.10.0-RC4**
+**Current version: v1.10.0**
 
 An extremely fast, stable, and tailored IRC DCC file-sharing engine (OmenServe architecture) built in Python 3.10, running on both Linux and Windows for any IRC Network. The script is fully optimized for Proxmox LXC containers, delivering file-sharing notifications, advanced database statistics, and real-time monitoring with mIRC colors at an absolute gold standard.
 

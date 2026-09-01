@@ -28,7 +28,7 @@
 [system and global engine settings]
 #DEBUG_MODE = false
 
-#SCRIPT_VERSION = DCCore v1.10.0-RC4
+#SCRIPT_VERSION = DCCore v1.10.0
 
 #LIST_BASE_NAME = DCCore
 
