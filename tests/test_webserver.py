@@ -745,7 +745,10 @@ class FetchDeleteResultTests(DCCoreTestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
 
     def test_in_flight_states_are_refused_not_deleted(self):
-        for state in ("pending", "offered", "listening", "receiving"):
+        """"pending" is deliberately NOT in this list - see
+        tests/test_fetch_queue_bounds.py, which covers why it is deletable and
+        that the other three still are not."""
+        for state in ("offered", "listening", "receiving"):
             with self.subTest(state=state):
                 rid = f"r-{state}"
                 self._put_row(rid, state=state, stored_filename=None)
@@ -844,6 +847,21 @@ class FetchDeleteRouteTests(DCCoreTestCase):
         self.assertEqual(resp.get_json()["deleted"], "rid")
         self.assertNotIn("rid", config.fetch_queue)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
+
+    def test_deleting_a_pending_fetch_succeeds_via_http(self):
+        """Audit #162 finding 27: this used to 409 like the three states
+        below, which left a mistaken bulk enqueue clearable only by restarting
+        the daemon."""
+        config.fetch_queue["rid"] = {
+            "bot": "goodbot", "filename": "Song.flac", "request_type": "file",
+            "state": "pending", "requested_at": 1.0, "offered_at": None,
+            "bytes_received": 0, "total_size": None, "reason": "",
+            "stored_filename": None,
+        }
+        resp = self.client.post("/api/fetch/rid/delete")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("rid", config.fetch_queue)
 
     def test_deleting_an_in_flight_fetch_is_refused_via_http(self):
         config.fetch_queue["rid"] = {
@@ -1191,6 +1209,19 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertIn("error", resp.get_json())
         self.assertEqual(self.oserve.queued, [])
         self.assertFalse(config.broadcast_search_inprogress)
+
+    def test_an_over_long_enqueue_batch_is_a_413_via_http(self):
+        """Audit #162 finding 27. 413 is not a status this app returns
+        anywhere else, so it is worth confirming Flask ships it rather than
+        coercing it - the pure-function coverage is in
+        tests/test_fetch_queue_bounds.py."""
+        resp = self.client.post("/api/fetch/enqueue", json=[
+            {"bot": "goodbot", "filename": f"S{n}.flac"}
+            for n in range(webserver.FETCH_ENQUEUE_MAX_ITEMS + 1)])
+
+        self.assertEqual(resp.status_code, 413)
+        self.assertIn("error", resp.get_json())
+        self.assertEqual(config.fetch_queue, {})
 
     def test_fetch_enqueue_bot_with_crlf_is_rejected_via_http(self):
         resp = self.client.post("/api/fetch/enqueue", json={

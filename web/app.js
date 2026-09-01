@@ -569,7 +569,12 @@
     var btn = evt.target.closest ? evt.target.closest(".fetch-delete-btn") : null;
     if (!btn) { return; }
     var requestId = decodeURIComponent(btn.dataset.requestId);
-    if (!window.confirm("Delete this fetched file? This cannot be undone.")) { return; }
+    // A queued row has no file yet and can simply be re-queued, so the
+    // finished-row warning would be both wrong and needlessly alarming.
+    var prompt = btn.dataset.pending
+      ? "Remove this queued request? Nothing has been downloaded yet."
+      : "Delete this fetched file? This cannot be undone.";
+    if (!window.confirm(prompt)) { return; }
     btn.disabled = true;
     postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", {}).then(function (res) {
       if (!res.ok) {
@@ -605,12 +610,20 @@
         : (row.bytes_received ? row.bytes_received + " B" : "—");
       // Order matters: a rejected row is also state === "complete", so it has
       // to be tested first or it gets the Download button anyway.
-      // A finished row (complete or failed) is always deletable - there is
-      // no cancellation path for one still in flight, so that button simply
-      // does not exist for pending/offered/listening/receiving.
-      var deleteBtn = (state === "complete" || state === "failed")
+      // A finished row (complete or failed) is deletable, and so is a pending
+      // one: nothing has been dispatched for it yet, so there is nothing to
+      // cancel - only a row to forget. The three genuinely in-flight states
+      // (offered/listening/receiving) still get no button, because there is no
+      // cancellation path for a transfer thread already running.
+      // Without this the server-side fix would be invisible: the queue would
+      // be clearable by API and not by the dashboard that filled it.
+      var deletable = (state === "complete" || state === "failed" || state === "pending");
+      // "Cancel" for a row that has not started - calling it Delete would
+      // suggest a downloaded file is being thrown away when none exists.
+      var deleteBtn = deletable
         ? "<button type=\"button\" class=\"btn btn-small btn-danger fetch-delete-btn\" data-request-id=\"" +
-          encodeURIComponent(row.id) + "\">Delete</button>"
+          encodeURIComponent(row.id) + "\" data-pending=\"" + (state === "pending" ? "1" : "") + "\">" +
+          (state === "pending" ? "Cancel" : "Delete") + "</button>"
         : "";
       var action;
       if (rejected) {
@@ -619,6 +632,8 @@
         action = "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a> " + deleteBtn;
       } else if (state === "failed") {
         action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + deleteBtn;
+      } else if (state === "pending") {
+        action = deleteBtn;
       } else {
         action = "";
       }
