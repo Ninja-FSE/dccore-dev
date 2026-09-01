@@ -122,6 +122,19 @@
 
   function fetchJson(url) {
     return fetch(url, { headers: { Accept: "application/json" } }).then(function (res) {
+      // A 401 is not a failed request, it is an expired session, and every
+      // caller here turned it into "HTTP 401" and rendered the daemon as
+      // unreachable. app.secret_key is os.urandom(32) per process, so EVERY
+      // restart invalidates every cookie - a perfectly healthy bot then reads
+      // as down, for ever, until somebody thinks to reload the page.
+      //
+      // The returned promise is deliberately left pending: navigation is
+      // already under way, and resolving or rejecting it would flash an error
+      // into a page that is about to be replaced.
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return new Promise(function () {});
+      }
       if (!res.ok) { throw new Error("HTTP " + res.status); }
       return res.json();
     });
@@ -1212,10 +1225,8 @@
       // A fixed few, not free text. The three list formats are the first: a
       // typed "ZIP" or "tar" would be refused by the save with a reason, but
       // being refused is a worse way to find out than never being offered it.
-      var chosen = isDirty ? state.settingsDirty[field.name] : settingsValueToString(field.value);
       var options = field.choices.map(function (choice) {
-        return '<option value="' + escapeHtml(choice) + '"' +
-          (choice === chosen ? " selected" : "") + ">" + escapeHtml(choice) + "</option>";
+        return '<option value="' + escapeHtml(choice) + '">' + escapeHtml(choice) + "</option>";
       }).join("");
       control = '<select data-setting="' + escapeHtml(field.name) + '">' + options + "</select>";
     } else if (field.type === "bool") {
@@ -1223,13 +1234,11 @@
       control = '<input type="checkbox" data-setting="' + escapeHtml(field.name) + '"' +
         (checked ? " checked" : "") + ">";
     } else if (field.type === "int" || field.type === "float") {
-      var numValue = isDirty ? state.settingsDirty[field.name] : settingsValueToString(field.value);
       control = '<input type="number" step="' + (field.type === "float" ? "any" : "1") +
-        '" data-setting="' + escapeHtml(field.name) + '" value="' + escapeHtml(numValue) + '">';
+        '" data-setting="' + escapeHtml(field.name) + '">';
     } else {
-      var strValue = isDirty ? state.settingsDirty[field.name] : settingsValueToString(field.value);
-      control = '<input type="text" autocomplete="off" data-setting="' + escapeHtml(field.name) +
-        '" value="' + escapeHtml(strValue) + '">';
+      control = '<input type="text" autocomplete="off" data-setting="' +
+        escapeHtml(field.name) + '">';
     }
 
     return '<div class="settings-field-row">' +
@@ -1310,7 +1319,27 @@
     }
     el.settingsFields.innerHTML = html;
 
+    // Values are assigned as PROPERTIES here, not concatenated into value="…"
+    // in the markup above. escapeHtml() is textContent -> innerHTML, which
+    // encodes & < > and leaves a double quote alone - so a value containing
+    // one closed the attribute early and everything after it became markup.
+    // That is BUG 2 exactly, the shape four other render functions in this
+    // file carry long comments about avoiding, and the same fix they use:
+    // attachFilelistsCheckboxData() assigns via .dataset for the same reason.
+    //
+    // Self-XSS only today - every settings writer is an authenticated
+    // operator and no IRC input reaches these fields - which is an argument
+    // about blast radius, not about the code being right.
+    var byName = {};
+    category.fields.forEach(function (field) { byName[field.name] = field; });
+
     el.settingsFields.querySelectorAll("[data-setting]").forEach(function (input) {
+      var field = byName[input.dataset.setting];
+      if (field && input.type !== "checkbox") {
+        var dirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
+        input.value = dirty ? state.settingsDirty[field.name]
+                            : settingsValueToString(field.value);
+      }
       // "input" for anything typed into, so the save bar tracks a keystroke at
       // a time; "change" for the controls that have no intermediate state.
       var discrete = input.type === "checkbox" || input.tagName === "SELECT";
