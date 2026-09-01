@@ -882,6 +882,41 @@ def get_bot_aliases():
     return aliases
 
 
+def take_complete_lines(buffer, chunk):
+    """Add `chunk` to `buffer` and return (leftover_bytes, [decoded lines]).
+
+    Both the IRC read loop and the pre-auth NICK loop need this, and both used
+    to do it inline as:
+
+        data = s.recv(2048).decode("utf-8", errors="ignore")   # decode FIRST
+        buffer += data                                         # then accumulate
+
+    which is the wrong order for any character that is not ASCII. A UTF-8
+    character is 2-4 bytes and recv() returns whatever the kernel had, so the
+    boundary regularly falls INSIDE one - and a decoder handed half a character
+    can only drop it. The character vanishes, the line arrives one character
+    short, and nothing anywhere reports a problem: a request for a Greek,
+    Cyrillic or CJK filename simply stops matching the library and the user is
+    told the file does not exist. Intermittent by nature, since it depends on
+    where the chunk boundary happened to land.
+
+    Accumulating BYTES and decoding only whole \r\n-terminated lines means the
+    decoder is never shown a partial character. `buffer` is bytes and the
+    returned lines are str.
+
+    "replace" rather than "ignore" for the decode: once only complete lines
+    reach it, a failure means the line really did carry bytes that are not UTF-8
+    (an IRC client sending CP1251, say), which is a different thing from having
+    been cut in half. A visible U+FFFD says something arrived and could not be
+    read; silently dropping the bytes makes it look like nothing was sent. Same
+    choice update_list.py's _sanitise() already documents for filenames.
+    """
+    buffer += chunk
+    raw_lines = buffer.split(b"\r\n")
+    return raw_lines.pop(), [raw.decode("utf-8", errors="replace")
+                             for raw in raw_lines]
+
+
 def irc_loop():
     """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
@@ -944,14 +979,12 @@ def irc_loop():
         try:
             s.send(f"NICK {config.NICKNAME}\r\n".encode())
             
-            auth_buffer = ""
+            auth_buffer = b""
             while True:
-                auth_data = s.recv(1024).decode("utf-8", errors="ignore")
+                auth_data = s.recv(1024)
                 if not auth_data:
                     break
-                auth_buffer += auth_data
-                auth_lines = auth_buffer.split("\r\n")
-                auth_buffer = auth_lines.pop()
+                auth_buffer, auth_lines = take_complete_lines(auth_buffer, auth_data)
                 
                 for a_line in auth_lines:
                     if " 433 " in a_line or "erroneous nickname" in a_line.lower():
@@ -993,7 +1026,8 @@ def irc_loop():
         config.connection_epoch += 1
         my_epoch = config.connection_epoch
 
-        buffer = ""
+        # Bytes - see take_complete_lines() for why this must not be str.
+        buffer = b""
         joined = False
         bot_joined_channel = False
         announce.is_ready = False
@@ -1131,7 +1165,7 @@ def irc_loop():
         while True:
             try:
                 try:
-                    data = s.recv(2048).decode("utf-8", errors="ignore")
+                    data = s.recv(2048)
                 except socket.timeout:
                     now = time.time()
                     quiet_for = now - last_recv_time
@@ -1175,9 +1209,7 @@ def irc_loop():
                     break
                     
                 last_recv_time = time.time()
-                buffer += data
-                lines = buffer.split("\r\n")
-                buffer = lines.pop()
+                buffer, lines = take_complete_lines(buffer, data)
                 
                 for line in lines:
                     if not line.strip():
