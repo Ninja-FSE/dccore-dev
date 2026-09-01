@@ -56,10 +56,10 @@ class GenuinePrivmsgAndNoticeStillParse(unittest.TestCase):
         self.assertEqual(message, "@DCCore-help")
 
     def test_an_admin_style_hostmask_parses(self):
-        line = ":FLAC!flac@Undernet.CoolGuy.Users PRIVMSG DCCore :!rehash"
+        line = ":SysOp!sysop@Undernet.CoolGuy.Users PRIVMSG DCCore :!rehash"
         nick, ident_host, target, message = irc.parse_privmsg(line)
-        self.assertEqual(nick, "FLAC")
-        self.assertEqual(ident_host, "flac@Undernet.CoolGuy.Users")
+        self.assertEqual(nick, "SysOp")
+        self.assertEqual(ident_host, "sysop@Undernet.CoolGuy.Users")
 
     def test_a_channel_notice_parses_correctly(self):
         line = ":goodbot!u@h NOTICE #mp3passion :Search results for metallica"

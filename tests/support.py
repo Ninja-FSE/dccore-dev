@@ -128,7 +128,7 @@ def reset_config(**overrides):
     config.ORIGINAL_NICK = "DCCore"
     config.LIST_BASE_NAME = "DCCore"
     config.ALT_NICKNAME = "DCCore_"
-    config.ADMIN_NICK = "FLAC"
+    config.ADMIN_NICK = "SysOp"
     config.MY_IP_OR_DOCK = "203.0.113.7"
     # #170's RFC: CHANNEL and FILE_DIRECTORY are in settings_file.REQUIRED and
     # ship blank (None) in config.py, same reason NICKNAME/ADMIN_NICK above

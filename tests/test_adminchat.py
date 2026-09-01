@@ -25,7 +25,7 @@ import adminchat  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
 
-ADMIN_LINE = ":FLAC!~flac@FLAC.users.undernet.org PRIVMSG DCCore :\x01DCC CHAT chat 2130706433 55555\x01"
+ADMIN_LINE = ":SysOp!~sysop@SysOp.users.undernet.org PRIVMSG DCCore :\x01DCC CHAT chat 2130706433 55555\x01"
 STRANGER_LINE = ":dave!~d@cpe-91-22-33-44.isp.net PRIVMSG DCCore :\x01DCC CHAT chat 2130706433 55555\x01"
 
 PASSWORD = "correct horse battery staple"
@@ -93,7 +93,7 @@ class HostMatching(unittest.TestCase):
     def setUp(self):
         adminchat.reset_state_for_tests()
         self.addCleanup(adminchat.reset_state_for_tests)
-        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["*!*@SysOp.users.undernet.org"]
 
     def test_the_configured_host_matches(self):
         self.assertTrue(adminchat.is_admin_host(ADMIN_LINE))
@@ -103,7 +103,7 @@ class HostMatching(unittest.TestCase):
 
     def test_a_bare_host_pattern_works_too(self):
         """He may write it either way; both must mean the same thing."""
-        config.ADMIN_HOSTMASKS = ["FLAC.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["SysOp.users.undernet.org"]
         self.assertTrue(adminchat.is_admin_host(ADMIN_LINE))
 
     def test_the_ident_is_ignored(self):
@@ -111,27 +111,27 @@ class HostMatching(unittest.TestCase):
 
         A pattern that appears to pin the ident must not actually pin it - if it
         did, the gate would break the moment his client's ident setting changed,
-        while granting nothing, because anyone can set their ident to 'flac'.
+        while granting nothing, because anyone can set their ident to 'sysop'.
         """
-        config.ADMIN_HOSTMASKS = ["*!flac@FLAC.users.undernet.org"]
-        for ident in ("~flac", "flac", "~anything", "x"):
-            line = f":FLAC!{ident}@FLAC.users.undernet.org PRIVMSG DCCore :hi"
+        config.ADMIN_HOSTMASKS = ["*!sysop@SysOp.users.undernet.org"]
+        for ident in ("~sysop", "sysop", "~anything", "x"):
+            line = f":SysOp!{ident}@SysOp.users.undernet.org PRIVMSG DCCore :hi"
             with self.subTest(ident=ident):
                 self.assertTrue(adminchat.is_admin_host(line))
 
     def test_the_nick_is_ignored(self):
         """Nick theft is the attack this replaces, so the nick cannot be the check."""
-        line = ":SomeoneElse!~x@FLAC.users.undernet.org PRIVMSG DCCore :hi"
+        line = ":SomeoneElse!~x@SysOp.users.undernet.org PRIVMSG DCCore :hi"
         self.assertTrue(adminchat.is_admin_host(line),
                         "the host is the proof; whoever holds it holds the account")
 
     def test_taking_the_admin_nick_from_another_host_gets_nothing(self):
         """The exact scenario the console exists to close."""
-        line = ":FLAC!~flac@cpe-91-22-33-44.isp.net PRIVMSG DCCore :hi"
+        line = ":SysOp!~sysop@cpe-91-22-33-44.isp.net PRIVMSG DCCore :hi"
         self.assertFalse(adminchat.is_admin_host(line))
 
     def test_matching_is_case_insensitive(self):
-        line = ":FLAC!~f@flac.USERS.undernet.ORG PRIVMSG DCCore :hi"
+        line = ":SysOp!~f@sysop.USERS.undernet.ORG PRIVMSG DCCore :hi"
         self.assertTrue(adminchat.is_admin_host(line))
 
     def test_a_wildcard_account_pattern_works(self):
@@ -156,7 +156,7 @@ class HostMatching(unittest.TestCase):
     def test_a_hostmask_in_the_message_body_cannot_forge_it(self):
         """Anchoring, for the same reason event_source_nick is anchored."""
         line = (":dave!~d@isp.net PRIVMSG DCCore :"
-                "look at this FLAC!~flac@FLAC.users.undernet.org")
+                "look at this SysOp!~sysop@SysOp.users.undernet.org")
         self.assertFalse(adminchat.is_admin_host(line))
 
     def test_a_prefixless_line_cannot_donate_a_host_from_its_body(self):
@@ -172,8 +172,8 @@ class HostMatching(unittest.TestCase):
         prefix. This pins the helper's contract rather than the current caller's
         good manners, exactly as the sibling test does for event_source_nick.
         """
-        for line in (":irc.undernet.org 372 DCCore :please mail admin@FLAC.users.undernet.org",
-                     "NOTICE AUTH :checking ident@FLAC.users.undernet.org"):
+        for line in (":irc.undernet.org 372 DCCore :please mail admin@SysOp.users.undernet.org",
+                     "NOTICE AUTH :checking ident@SysOp.users.undernet.org"):
             with self.subTest(line=line):
                 self.assertIsNone(adminchat.source_host(line))
                 self.assertFalse(adminchat.is_admin_host(line))
@@ -186,11 +186,11 @@ class HostMatching(unittest.TestCase):
         """irc.event_source_host is what feeds this; they must not drift."""
         self.assertEqual(irc.event_source_host(ADMIN_LINE),
                          adminchat.source_host(ADMIN_LINE))
-        self.assertEqual(irc.event_source_host(ADMIN_LINE), "flac.users.undernet.org")
+        self.assertEqual(irc.event_source_host(ADMIN_LINE), "sysop.users.undernet.org")
 
     def test_irc_helper_is_anchored_too(self):
         """Same contract, same failure mode, so the same test on both sides."""
-        for line in (":irc.undernet.org 372 DCCore :please mail admin@FLAC.users.undernet.org",
+        for line in (":irc.undernet.org 372 DCCore :please mail admin@SysOp.users.undernet.org",
                      "PING :cookie",
                      ":irc.undernet.org 001 DCCore :Welcome"):
             with self.subTest(line=line):
@@ -269,7 +269,7 @@ class OfferedAddressIsUsable(unittest.TestCase):
 
     Reported from a live run:
 
-        [ADMINCHAT] Could not connect to FLAC at 0.0.0.0:11283
+        [ADMINCHAT] Could not connect to SysOp at 0.0.0.0:11283
         ([Errno 111] Connection refused).
 
     0.0.0.0 is what mIRC sends when its Local Info lookup has not resolved. It
@@ -310,7 +310,7 @@ class OfferedAddressIsUsable(unittest.TestCase):
 class PassiveOfferWithToken(unittest.TestCase):
     """The second field report: a passive offer read as an active one.
 
-        [ADMINCHAT] Unusable DCC CHAT offer from FLAC:
+        [ADMINCHAT] Unusable DCC CHAT offer from SysOp:
         'DCC CHAT chat 3405803861 0 350'
 
     The two forms are different LENGTHS:
@@ -350,7 +350,7 @@ class PassiveOfferWithToken(unittest.TestCase):
         """
         adminchat.reset_state_for_tests()
         self.addCleanup(adminchat.reset_state_for_tests)
-        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["*!*@SysOp.users.undernet.org"]
         config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
         config.MY_IP_OR_DOCK = "127.0.0.1"
 
@@ -363,7 +363,7 @@ class PassiveOfferWithToken(unittest.TestCase):
             sendall = send
 
         self.assertTrue(adminchat.handle_dcc_chat(
-            Recorder(), ADMIN_LINE, "FLAC", "DCC CHAT chat 3405803861 0 350"))
+            Recorder(), ADMIN_LINE, "SysOp", "DCC CHAT chat 3405803861 0 350"))
 
         self.assertTrue(wait_for(lambda: any("DCC CHAT chat" in s for s in sent)),
                         "a passive request must be answered with an offer")
@@ -376,7 +376,7 @@ class PassiveOfferWithToken(unittest.TestCase):
 class ConnectFailureFallsBackToListening(unittest.TestCase):
     """Third field report: a real address that simply does not answer.
 
-        [ADMINCHAT] Could not connect to FLAC at 203.0.113.41:55101 (timed out).
+        [ADMINCHAT] Could not connect to SysOp at 203.0.113.41:55101 (timed out).
 
     A TIMEOUT rather than a refusal means the packets left and nothing came
     back - a VPN exit address with no inbound forwarding, a router not
@@ -391,7 +391,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
     def setUp(self):
         adminchat.reset_state_for_tests()
         self.addCleanup(adminchat.reset_state_for_tests)
-        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["*!*@SysOp.users.undernet.org"]
         config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
         config.MY_IP_OR_DOCK = "127.0.0.1"
         self._mode = getattr(config, "ADMIN_CHAT_MODE", "auto")
@@ -428,7 +428,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
 
     def test_a_refused_dial_falls_back_to_an_offer(self):
         offer = f"DCC CHAT chat 2130706433 {self.dead_port()}"
-        self.assertTrue(adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC", offer))
+        self.assertTrue(adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp", offer))
 
         port = self.offered_port()
         self.assertIsNotNone(port, "a failed dial must be followed by an offer")
@@ -438,7 +438,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
     def test_the_fallback_console_actually_works(self):
         """Not just that an offer was sent - that a session comes up on it."""
         offer = f"DCC CHAT chat 2130706433 {self.dead_port()}"
-        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC", offer)
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp", offer)
         port = self.offered_port()
         self.assertIsNotNone(port)
 
@@ -469,7 +469,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
         socket.create_connection = timeout_once
         self.addCleanup(lambda: setattr(socket, "create_connection", real))
 
-        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp",
                                   "DCC CHAT chat 3405803817 55101")
         self.assertIsNotNone(self.offered_port(),
                              "a timeout must fall back exactly as a refusal does")
@@ -487,7 +487,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
         socket.create_connection = watch
         self.addCleanup(lambda: setattr(socket, "create_connection", real))
 
-        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp",
                                   "DCC CHAT chat 3405803817 55101")
         self.assertIsNotNone(self.offered_port())
         self.assertEqual([a for a in dialled if a[1] == 55101], [],
@@ -518,7 +518,7 @@ class ConnectFailureFallsBackToListening(unittest.TestCase):
         self.addCleanup(lambda: setattr(socket, "create_connection", real_connect))
         self.addCleanup(lambda: setattr(adminchat, "_listen_and_serve", real_listen))
 
-        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC",
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp",
                                   "DCC CHAT chat 2130706433 55555")
 
         self.assertTrue(dial_attempted.wait(5.0), "the dial must at least be attempted")
@@ -620,7 +620,7 @@ class ListenModeEndToEnd(unittest.TestCase):
     def setUp(self):
         adminchat.reset_state_for_tests()
         self.addCleanup(adminchat.reset_state_for_tests)
-        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["*!*@SysOp.users.undernet.org"]
         config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
         config.MY_IP_OR_DOCK = "127.0.0.1"
         self.sent = []
@@ -648,7 +648,7 @@ class ListenModeEndToEnd(unittest.TestCase):
     def test_an_unroutable_offer_makes_the_bot_listen_and_offer_back(self):
         """The whole bug, end to end: 0.0.0.0 in, a working console out."""
         self.assertTrue(adminchat.handle_dcc_chat(
-            self.irc, ADMIN_LINE, "FLAC", "DCC CHAT chat 0 11283"))
+            self.irc, ADMIN_LINE, "SysOp", "DCC CHAT chat 0 11283"))
 
         port = self.offered_port()
         self.assertIsNotNone(port, "the bot must offer a DCC CHAT back")
@@ -675,7 +675,7 @@ class ListenModeEndToEnd(unittest.TestCase):
     def test_the_offer_advertises_the_bots_own_ip(self):
         """His suggestion: use the IP the bot got when it connected to IRC."""
         import dcc
-        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "FLAC", "DCC CHAT chat 0 11283")
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp", "DCC CHAT chat 0 11283")
         self.assertIsNotNone(self.offered_port())
         ctcp = next(line for line in self.sent if "DCC CHAT chat" in line)
         self.assertIn(str(dcc.get_public_ip_long()), ctcp)
@@ -700,7 +700,7 @@ class ListenModeEndToEnd(unittest.TestCase):
         self.addCleanup(lambda: (setattr(config, "DCC_PORT_START", original[0]),
                                  setattr(config, "DCC_PORT_END", original[1])))
 
-        adminchat._listen_and_serve(self.irc, "FLAC", "flac.users.undernet.org")
+        adminchat._listen_and_serve(self.irc, "SysOp", "sysop.users.undernet.org")
 
         self.assertEqual(self.sent, [],
                          "no offer can be sent when there is no port to offer")
@@ -751,7 +751,7 @@ class TheRequestGate(unittest.TestCase):
     def setUp(self):
         adminchat.reset_state_for_tests()
         self.addCleanup(adminchat.reset_state_for_tests)
-        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["*!*@SysOp.users.undernet.org"]
         config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
 
         self.dialled = []
@@ -779,28 +779,28 @@ class TheRequestGate(unittest.TestCase):
         self.assertEqual(sent, [], "must not answer a stranger at all")
 
     def test_an_authorised_host_is_dialled(self):
-        self.assertTrue(adminchat.handle_dcc_chat(None, ADMIN_LINE, "FLAC",
+        self.assertTrue(adminchat.handle_dcc_chat(None, ADMIN_LINE, "SysOp",
                                                   "DCC CHAT chat 2130706433 55555"))
         self.assertEqual(len(self.dialled), 1)
         _irc, nick, host, ip, port, _token = self.dialled[0]
-        self.assertEqual((host, ip, port), ("flac.users.undernet.org", "127.0.0.1", 55555))
+        self.assertEqual((host, ip, port), ("sysop.users.undernet.org", "127.0.0.1", 55555))
 
     def test_no_password_configured_means_no_console(self):
         """Refuse rather than open an unauthenticated console."""
         config.ADMIN_PASSWORD_HASH = ""
-        self.assertFalse(adminchat.handle_dcc_chat(None, ADMIN_LINE, "FLAC",
+        self.assertFalse(adminchat.handle_dcc_chat(None, ADMIN_LINE, "SysOp",
                                                    "DCC CHAT chat 2130706433 55555"))
         self.assertEqual(self.dialled, [])
 
     def test_a_blocked_address_is_refused_even_from_the_right_host(self):
         for _ in range(adminchat.MAX_PASSWORD_ATTEMPTS):
             adminchat.note_bad_ip("127.0.0.1")
-        self.assertFalse(adminchat.handle_dcc_chat(None, ADMIN_LINE, "FLAC",
+        self.assertFalse(adminchat.handle_dcc_chat(None, ADMIN_LINE, "SysOp",
                                                    "DCC CHAT chat 2130706433 55555"))
         self.assertEqual(self.dialled, [])
 
     def test_a_malformed_offer_is_refused(self):
-        self.assertFalse(adminchat.handle_dcc_chat(None, ADMIN_LINE, "FLAC",
+        self.assertFalse(adminchat.handle_dcc_chat(None, ADMIN_LINE, "SysOp",
                                                    "DCC CHAT chat nonsense"))
         self.assertEqual(self.dialled, [])
 
@@ -818,7 +818,7 @@ class OutboxNeverBlocksTheCaller(unittest.TestCase):
         self.addCleanup(adminchat.reset_state_for_tests)
 
     def make_session(self, sock=None):
-        return adminchat.Session(sock or socket.socket(), "127.0.0.1", "FLAC", "h")
+        return adminchat.Session(sock or socket.socket(), "127.0.0.1", "SysOp", "h")
 
     def test_send_does_not_touch_the_socket(self):
         class Exploding:
@@ -877,7 +877,7 @@ class SessionExpiry(unittest.TestCase):
         self.addCleanup(adminchat.reset_state_for_tests)
 
     def session(self):
-        s = adminchat.Session(socket.socket(), "127.0.0.1", "FLAC", "h")
+        s = adminchat.Session(socket.socket(), "127.0.0.1", "SysOp", "h")
         self.addCleanup(s.close, None)
         return s
 
@@ -908,7 +908,7 @@ class EndToEndOverLoopback(unittest.TestCase):
     def setUp(self):
         adminchat.reset_state_for_tests()
         self.addCleanup(adminchat.reset_state_for_tests)
-        config.ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["*!*@SysOp.users.undernet.org"]
         config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
 
         self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -923,7 +923,7 @@ class EndToEndOverLoopback(unittest.TestCase):
 
     def dial(self):
         """Trigger the bot, then accept its incoming connection like mIRC would."""
-        adminchat.handle_dcc_chat(None, ADMIN_LINE, "FLAC", self.offer())
+        adminchat.handle_dcc_chat(None, ADMIN_LINE, "SysOp", self.offer())
         self.listener.settimeout(5.0)
         self.client, _ = self.listener.accept()
         self.client.settimeout(5.0)

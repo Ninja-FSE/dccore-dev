@@ -114,8 +114,8 @@ class AdminNickIsReportedPlainly(unittest.TestCase):
     is just reported, never judged."""
 
     def test_any_admin_nick_is_reported_plainly_with_no_judgement(self):
-        result = _run_with_admin_config("ADMIN_NICK = 'FLAC,Samoth'\n")
-        self.assertIn("ok     admin nick FLAC,Samoth", result.stdout)
+        result = _run_with_admin_config("ADMIN_NICK = 'SysOp,Op2'\n")
+        self.assertIn("ok     admin nick SysOp,Op2", result.stdout)
         self.assertNotIn("WARN   ADMIN_NICK", result.stdout)
         self.assertNotIn("FAIL   ADMIN_NICK", result.stdout)
 

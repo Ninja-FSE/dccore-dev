@@ -43,31 +43,31 @@ class AdminGate(DCCoreTestCase):
     """is_admin decides who may run !ban, !unban, !rehash, !update, !clearqueue."""
 
     def test_the_configured_admin_is_admin(self):
-        config.ADMIN_NICK = "FLAC"
-        self.assertTrue(commands.is_admin("FLAC"))
+        config.ADMIN_NICK = "SysOp"
+        self.assertTrue(commands.is_admin("SysOp"))
 
     def test_the_check_is_case_insensitive(self):
         """IRC nicks are case-insensitive, so the gate has to be too."""
-        config.ADMIN_NICK = "FLAC"
-        for typed in ("flac", "Flac", "fLaC"):
+        config.ADMIN_NICK = "SysOp"
+        for typed in ("sysop", "Sysop", "sYsOp"):
             with self.subTest(typed=typed):
                 self.assertTrue(commands.is_admin(typed))
 
     def test_an_ordinary_user_is_not_admin(self):
-        config.ADMIN_NICK = "FLAC"
+        config.ADMIN_NICK = "SysOp"
         self.assertFalse(commands.is_admin("dave"))
 
     def test_a_comma_separated_list_admits_every_name(self):
-        config.ADMIN_NICK = "FLAC, Neo ,erin"
-        for name in ("FLAC", "neo", "ERIN"):
+        config.ADMIN_NICK = "SysOp, Neo ,erin"
+        for name in ("SysOp", "neo", "ERIN"):
             with self.subTest(name=name):
                 self.assertTrue(commands.is_admin(name))
         self.assertFalse(commands.is_admin("dave"))
 
-    def test_the_hardcoded_flac_fallback_stays_gone(self):
-        """It made the literal nick "flac" an admin whatever ADMIN_NICK said."""
+    def test_the_hardcoded_sysop_fallback_stays_gone(self):
+        """It made the literal nick "sysop" an admin whatever ADMIN_NICK said."""
         config.ADMIN_NICK = "Neo"
-        self.assertFalse(commands.is_admin("flac"),
+        self.assertFalse(commands.is_admin("sysop"),
                          "removing the undocumented second admin account must stay removed")
 
     def test_an_empty_admin_nick_admits_nobody(self):
@@ -87,7 +87,7 @@ class HardBanFileDurability(DCCoreTestCase):
         self.tree = self.make_tree()
         self.bans = os.path.join(self.tree.root, "hard_bans.txt")
         config.HARD_BANS_FILE = self.bans
-        config.ADMIN_NICK = "FLAC"
+        config.ADMIN_NICK = "SysOp"
         self.debug = silence_debug(announce)
 
     def write(self, text):
@@ -207,16 +207,16 @@ class HardBanFileDurability(DCCoreTestCase):
         self.assertEqual(db.load_hard_bans(), ["alpha*"])
 
     def test_the_admin_can_add_and_remove(self):
-        commands.handle_hard_ban_request("FLAC", "#mp3passion", "!ban *!*@spammer.net")
+        commands.handle_hard_ban_request("SysOp", "#mp3passion", "!ban *!*@spammer.net")
         self.assertEqual(db.load_hard_bans(), ["*!*@spammer.net"])
-        commands.handle_hard_unban_request("FLAC", "#mp3passion", "!unban *!*@spammer.net")
+        commands.handle_hard_unban_request("SysOp", "#mp3passion", "!unban *!*@spammer.net")
         self.assertEqual(db.load_hard_bans(), [])
 
     def test_ban_with_no_pattern_changes_nothing(self):
         self.write("alpha*\n")
         for text in ("!ban", "!ban    "):
             with self.subTest(text=text):
-                commands.handle_hard_ban_request("FLAC", "#c", text)
+                commands.handle_hard_ban_request("SysOp", "#c", text)
                 self.assertEqual(db.load_hard_bans(), ["alpha*"])
 
 
@@ -229,7 +229,7 @@ class QueueRemoveCleansTempArchives(DCCoreTestCase):
         self.tmp_zips = os.path.join(self.tree.root, "tmp_zips")
         os.makedirs(self.tmp_zips, exist_ok=True)
         config.TMP_ZIP_DIR = self.tmp_zips
-        config.ADMIN_NICK = "FLAC"
+        config.ADMIN_NICK = "SysOp"
         self.sock = RecordingSocket()
         silence_debug(announce)
         no_disk_writes(db)
@@ -357,7 +357,7 @@ class AdminClearQueueKeptItsBehaviour(DCCoreTestCase):
         self.tmp_zips = os.path.join(self.tree.root, "tmp_zips")
         os.makedirs(self.tmp_zips, exist_ok=True)
         config.TMP_ZIP_DIR = self.tmp_zips
-        config.ADMIN_NICK = "FLAC"
+        config.ADMIN_NICK = "SysOp"
         silence_debug(announce)
         no_disk_writes(db)
 
@@ -375,7 +375,7 @@ class AdminClearQueueKeptItsBehaviour(DCCoreTestCase):
         path = self.archive()
         config.dcc_queue = {"dave": [self.packed_row(path)]}
 
-        commands.handle_admin_clear_queue("FLAC", "#c", "!clearqueue dave")
+        commands.handle_admin_clear_queue("SysOp", "#c", "!clearqueue dave")
 
         self.assertFalse(os.path.exists(path))
         self.assertNotIn("dave", config.dcc_queue)
@@ -385,7 +385,7 @@ class AdminClearQueueKeptItsBehaviour(DCCoreTestCase):
         config.dcc_queue = {"dave": [self.packed_row(path)],
                             "erin": [self.packed_row(path, user="erin")]}
 
-        commands.handle_admin_clear_queue("FLAC", "#c", "!clearqueue dave")
+        commands.handle_admin_clear_queue("SysOp", "#c", "!clearqueue dave")
 
         self.assertTrue(os.path.exists(path))
 
@@ -398,7 +398,7 @@ class AdminClearQueueKeptItsBehaviour(DCCoreTestCase):
 
     def test_clearqueue_without_a_nick_changes_nothing(self):
         config.dcc_queue = {"erin": [self.packed_row(self.archive(), user="erin")]}
-        commands.handle_admin_clear_queue("FLAC", "#c", "!clearqueue")
+        commands.handle_admin_clear_queue("SysOp", "#c", "!clearqueue")
         self.assertIn("erin", config.dcc_queue)
 
 

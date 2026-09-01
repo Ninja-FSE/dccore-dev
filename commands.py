@@ -20,10 +20,10 @@ def is_admin(user):
 
     Two deliberate changes from the copies this replaces:
 
-    * The hardcoded `or user.lower() == "flac"` fallback is gone. It made the literal nick
-      "flac" an admin regardless of what config.ADMIN_NICK was set to - an undocumented
+    * The hardcoded `or user.lower() == "sysop"` fallback is gone. It made the literal nick
+      "sysop" an admin regardless of what config.ADMIN_NICK was set to - an undocumented
       second account nobody could turn off. It is a no-op today because ADMIN_NICK is
-      already "FLAC", so removing it changes nothing until that value is edited.
+      already "SysOp", so removing it changes nothing until that value is edited.
     * ADMIN_NICK may now be a comma-separated list, so a second operator can be added
       without reintroducing a hardcoded name.
 
@@ -36,10 +36,10 @@ def is_admin(user):
     import defaults as config
 
     # The fallback is '' and not a nick, deliberately. This function's own
-    # docstring above records removing `or user.lower() == "flac"` because it
-    # "made the literal nick flac an admin regardless of what config.ADMIN_NICK
+    # docstring above records removing `or user.lower() == "sysop"` because it
+    # "made the literal nick sysop an admin regardless of what config.ADMIN_NICK
     # was set to - an undocumented second account nobody could turn off". A
-    # default of 'FLAC' four lines later was the same account through a
+    # default of 'SysOp' four lines later was the same account through a
     # different door: with the setting absent for any reason, that nick - which
     # anyone on Undernet can simply take - would hold every admin command.
     #
