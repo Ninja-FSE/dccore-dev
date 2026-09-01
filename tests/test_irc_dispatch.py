@@ -440,28 +440,28 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
         differently-formatted bot kept its entire size/branding tail
         attached to the "filename" - meaning the real DCC SEND offer that
         later came back (bearing only the bare filename) never matched it,
-        and the fetch was rejected as unsolicited. These are real examples
-        captured from production, one per real third-party bot on the
+        and the fetch was rejected as unsolicited. These are drawn from
+        genuine observed traffic, one per differently-formatted bot on the
         network, each with its own spacing/branding convention.
         """
         real_world_replies = {
-            "AbueIo": (
-                "!AbueIo Hi-Res Masters 1984 - 38 - Metallica - Ride The "
+            "AvenIo": (
+                "!AvenIo Hi-Res Masters 1984 - 38 - Metallica - Ride The "
                 "Lightning (Remastered).flac ::INFO:: 153.03MB © OmeNServE v2.60 ©",
                 "Hi-Res Masters 1984 - 38 - Metallica - Ride The Lightning (Remastered).flac",
             ),
-            "Heywood": (
-                "!Heywood 092 - Metallica - Until It Sleeps.mp3 ::INFO:: "
+            "Oakwood": (
+                "!Oakwood 092 - Metallica - Until It Sleeps.mp3 ::INFO:: "
                 "6.32Mb 4m30s 192/44.10/JS  OmeNServE v2.60",
                 "092 - Metallica - Until It Sleeps.mp3",
             ),
-            "[tjserv]": (
-                "![tjserv] 047. Metallica - Master Of Puppets (Remastered).mp3 "
+            "[rigserv]": (
+                "![rigserv] 047. Metallica - Master Of Puppets (Remastered).mp3 "
                 "::INFO:: 19.95MB : OmenServe v2.71 :",
                 "047. Metallica - Master Of Puppets (Remastered).mp3",
             ),
-            "squizz": (
-                "!squizz 101-metallica-the-ecstasy_of_gold.mp3 ::INFO:: "
+            "quirkz": (
+                "!quirkz 101-metallica-the-ecstasy_of_gold.mp3 ::INFO:: "
                 "3.7MB 2m1s VBR/256/44.1/JS * OmenServe v2.71 *",
                 "101-metallica-the-ecstasy_of_gold.mp3",
             ),
@@ -505,8 +505,8 @@ class BroadcastRepliesFromRealBots(DCCoreTestCase):
     match, and the header contains a "!" token too - it is telling the user
     what to type:
 
-        Search Result 1 Match For X  Copy And Paste !Vibessono FILENAME To ...
-        !Vibessono 50 Oldies Party - ... .mp3  ::INFO:: 4.6MB
+        Search Result 1 Match For X  Copy And Paste !Echosonic FILENAME To ...
+        !Echosonic 50 Oldies Party - ... .mp3  ::INFO:: 4.6MB
 
     The extraction searched anywhere in the line, so the header matched as
     well and produced a Download button for a file literally named
@@ -524,24 +524,24 @@ class BroadcastRepliesFromRealBots(DCCoreTestCase):
 
     # Verbatim from a broadcast for "Testament Souls" in #dccore-test.
     HEADERS = [
-        ("Vibessono", "Search Result 1 Match For Testament Souls Copy And Paste "
-                      "!Vibessono FILENAME To The Channel To Request. (25/25) "
+        ("Echosonic", "Search Result 1 Match For Testament Souls Copy And Paste "
+                      "!Echosonic FILENAME To The Channel To Request. (25/25) "
                       "Free Slots, 0 Queued OmeNServE v2.60"),
-        ("ValMp3", "Search Result ~ 2 Matches For Testament Souls ~ Copy And "
-                   "Paste !ValMp3 FILENAME To The Channel To Request. (5/5) "
+        ("ValOgg", "Search Result ~ 2 Matches For Testament Souls ~ Copy And "
+                   "Paste !ValOgg FILENAME To The Channel To Request. (5/5) "
                    "Free Slots, 0 Queued OmeNServE v2.60"),
-        ("[tjserv]", "Search Result : 1 Match For Testament Souls : Copy And "
-                     "Paste ![tjserv] FILENAME To The Channel To Request. (6/6)"),
+        ("[rigserv]", "Search Result : 1 Match For Testament Souls : Copy And "
+                     "Paste ![rigserv] FILENAME To The Channel To Request. (6/6)"),
     ]
 
     RESULTS = [
-        ("Vibessono", "!Vibessono 50 Oldies Party - 29614 - Testament - Souls Of "
+        ("Echosonic", "!Echosonic 50 Oldies Party - 29614 - Testament - Souls Of "
                       "Black.mp3  ::INFO:: 4.6MB OmeNServE v2.60",
          "50 Oldies Party - 29614 - Testament - Souls Of Black.mp3"),
-        ("`Stryder", "!`Stryder Testament - Original Album Series - 404 - Souls "
+        ("`Glider", "!`Glider Testament - Original Album Series - 404 - Souls "
                      "Of Black.mp3  ::INFO:: 7.7MB OmeNServE v2.60",
          "Testament - Original Album Series - 404 - Souls Of Black.mp3"),
-        ("[tjserv]", "![tjserv] Testament (1990) Souls Of Black.rar  ::INFO:: "
+        ("[rigserv]", "![rigserv] Testament (1990) Souls Of Black.rar  ::INFO:: "
                      "89.92MB : OmenServe v2.71 :",
          "Testament (1990) Souls Of Black.rar"),
         ("kurtb66", "!kurtb66 14 - Testament - Souls Of Black.mp3  ::INFO:: "
@@ -600,11 +600,11 @@ class BroadcastRepliesFromRealBots(DCCoreTestCase):
         """Real nicks in these channels carry punctuation - a backtick, square
         brackets. The token is whitespace-delimited on purpose so those keep
         working rather than being split apart."""
-        entry = self._capture("`Stryder", self.RESULTS[1][1])
-        self.assertEqual(entry.get("bot"), "`Stryder")
+        entry = self._capture("`Glider", self.RESULTS[1][1])
+        self.assertEqual(entry.get("bot"), "`Glider")
 
-        entry = self._capture("[tjserv]", self.RESULTS[2][1])
-        self.assertEqual(entry.get("bot"), "[tjserv]")
+        entry = self._capture("[rigserv]", self.RESULTS[2][1])
+        self.assertEqual(entry.get("bot"), "[rigserv]")
 
     def test_every_reply_is_still_recorded_either_way(self):
         """Nothing is dropped. A line with no usable token is still shown to
@@ -694,14 +694,14 @@ class SearchHeaderStats(DCCoreTestCase):
         so without an explicit guard it parses as a header and every result
         row would carry the sender's stats."""
         self.assertIsNone(irc.parse_search_header(
-            "!Vibessono 50 Oldies Party - Testament.mp3  ::INFO:: 4.6MB "
+            "!Echosonic 50 Oldies Party - Testament.mp3  ::INFO:: 4.6MB "
             "OmeNServE v2.60"))
 
     def test_an_spqr_result_line_is_never_a_header(self):
         """SPQR matches carry no ::INFO:: tag at all - a bare token and a
         filename."""
         self.assertIsNone(irc.parse_search_header(
-            "!BigTruck Testament - Souls of Black.mp3"))
+            "!BigRig Testament - Souls of Black.mp3"))
 
     def test_unrelated_chatter_is_not_a_header(self):
         self.assertIsNone(irc.parse_search_header(
