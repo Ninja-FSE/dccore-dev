@@ -1291,7 +1291,22 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     dcc_sock.listen(1)
     
     safe_file_name = file_name.replace(" ", "_")
-    ctcp_handshake = f"PRIVMSG {user} :\x01DCC SEND {safe_file_name} {ip_long} {assigned_port} {file_size}\x01\r\n"
+    # The handshake is a PRIVMSG like any other: the server prepends our
+    # ":nick!ident@host " when relaying it, and the whole thing has to fit
+    # inside 512 bytes. A non-ASCII filename costs 2-3 bytes per character,
+    # so a ~150-character Chinese or Japanese title overruns that on its own -
+    # and the fields the transfer actually needs (address, port, size) sit
+    # AFTER the name, so the server's cut takes THOSE and the receiver is
+    # handed a handshake it cannot act on. Trimming the name ourselves costs a
+    # shortened save-name; not trimming it costs the transfer.
+    ctcp_handshake = announce.fit_irc_filename(
+        lambda offered: (f"PRIVMSG {user} :\x01DCC SEND {offered} "
+                         f"{ip_long} {assigned_port} {file_size}\x01\r\n"),
+        safe_file_name)
+    if safe_file_name not in ctcp_handshake:
+        # Say so rather than letting the receiver silently save it under a
+        # name the operator never chose and cannot find in their own library.
+        print(f"[DCC] Offered filename shortened to fit the IRC line: {file_name!r}")
     
     try:
         irc_sock.send(ctcp_handshake.encode())
