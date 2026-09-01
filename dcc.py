@@ -9,7 +9,7 @@ import sys
 import re
 import subprocess
 
-import config
+import defaults as config
 import platform_compat
 import list as list_mod
 import announce
@@ -124,7 +124,7 @@ def _is_temp_zip_cache_file(path):
     Checked against config.TMP_ZIP_DIR's actual configured value, not a
     hardcoded directory name: a literal "tmp_zips" substring check against
     the shipped default meant an operator who renamed the setting (via
-    local_config.py or settings.conf, both documented override points)
+    admin_config.py or settings.conf, both documented override points)
     would have every packed .rar sent successfully and never cleaned up
     afterward - this would simply never be true again, silently.
 
@@ -229,7 +229,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
       * a legacy non-dict row, which has nowhere to store a counter.
     Both are settled on their first failure.
     """
-    import config
+    import defaults as config
     import db
 
     u_key = str(user).lower()
@@ -323,7 +323,7 @@ def check_queue_and_send(irc_sock, completed_user):
     import os
     import re
     import time
-    import config
+    import defaults as config
     import db
     
     user_key = completed_user.lower()

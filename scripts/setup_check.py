@@ -153,33 +153,33 @@ def main(platform):
     print("Configuration")
 
     # #162 finding #19: settings.conf is fully first-class - config.py applies
-    # it SECOND (so it wins over local_config.py on a shared key), the daemon
+    # it SECOND (so it wins over admin_config.py on a shared key), the daemon
     # starts fine from it alone, and every setting an operator would otherwise
-    # put in local_config.py (including ADMIN_HOSTMASKS/ADMIN_PASSWORD_HASH -
+    # put in admin_config.py (including ADMIN_HOSTMASKS/ADMIN_PASSWORD_HASH -
     # see settings_file.is_overridable()) can live there instead. This used to
-    # hard-fail whenever local_config.py was absent, even when settings.conf
+    # hard-fail whenever admin_config.py was absent, even when settings.conf
     # alone had already configured everything - contradicting this check's own
     # later "Applied N setting(s)" output on the very same run.
-    local_config_present = os.path.exists(os.path.join(REPO, "local_config.py"))
+    admin_config_present = os.path.exists(os.path.join(REPO, "admin_config.py"))
     try:
         import settings_file
         settings_conf_present = os.path.exists(settings_file.settings_path())
     except Exception:
         settings_conf_present = os.path.exists(os.path.join(REPO, "settings.conf"))
 
-    if not local_config_present and not settings_conf_present:
-        fail("no local_config.py and no settings.conf - copy local_config.py.sample "
-             "to local_config.py, or settings.conf.sample to settings.conf, and fill "
+    if not admin_config_present and not settings_conf_present:
+        fail("no admin_config.py and no settings.conf - copy admin_config.py.sample "
+             "to admin_config.py, or settings.conf.sample to settings.conf, and fill "
              "one of them in, or the daemon will use the upstream defaults")
-    elif not local_config_present:
-        ok("configured via settings.conf (no local_config.py)")
+    elif not admin_config_present:
+        ok("configured via settings.conf (no admin_config.py)")
     elif not settings_conf_present:
-        ok("configured via local_config.py")
+        ok("configured via admin_config.py")
     else:
-        ok("configured via local_config.py and settings.conf")
+        ok("configured via admin_config.py and settings.conf")
 
     try:
-        import config
+        import defaults as config
     except Exception as err:
         fail(f"config.py did not load: {err}")
         print()
@@ -195,7 +195,7 @@ def main(platform):
     nick = str(getattr(config, "NICKNAME", "")).strip().lower()
     if nick in UPSTREAM_NICKS:
         fail(f"NICKNAME is still {config.NICKNAME!r} - it will collide with the "
-             f"production bot. Set your own in local_config.py.")
+             f"production bot. Set your own in admin_config.py.")
 
     # Sharing a channel with the upstream bot is only a problem when the NICK is
     # also still the default. Two distinct operators in one channel is the entire
@@ -249,7 +249,7 @@ def main(platform):
              f"{', '.join(sorted(still_upstream))} is the upstream operator's own "
              f"admin nick and would grant full control of your bot's "
              f"!ban/!rehash/!update/!clearqueue commands. Set your own in "
-             f"local_config.py or settings.conf.")
+             f"admin_config.py or settings.conf.")
     else:
         ok(f"admin nick {admin_nick_raw}")
 
@@ -306,7 +306,7 @@ def main(platform):
     if start > end:
         fail(f"DCC_PORT_START ({start}) is greater than DCC_PORT_END ({end}) - "
              f"the range is empty, so no DCC transfer can ever open a listening "
-             f"port; check for the two values being swapped in local_config.py")
+             f"port; check for the two values being swapped in admin_config.py")
     else:
         free = 0
         for port in range(start, end + 1):

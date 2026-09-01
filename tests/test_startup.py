@@ -23,7 +23,7 @@ if REPO_ROOT not in sys.path:
 if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 import irc  # noqa: E402
 import queue_mgr  # noqa: E402

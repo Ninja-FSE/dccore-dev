@@ -3,7 +3,7 @@ import time
 import sys
 import builtins
 import socket
-import config
+import defaults as config
 import stats_mgr
 
 # The ordinary flood-protection queue

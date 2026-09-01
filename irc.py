@@ -12,7 +12,7 @@ import traceback
 import urllib.request
 
 # The bot's own modules
-import config
+import defaults as config
 import platform_compat
 import runtime
 import list

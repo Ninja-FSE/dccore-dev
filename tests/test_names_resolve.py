@@ -55,9 +55,9 @@ IMPLICIT_MODULE_NAMES = {
 
 
 def daemon_modules():
-    """Every .py the daemon is built from. local_config.py is the operator's."""
+    """Every .py the daemon is built from. admin_config.py is the operator's."""
     return sorted(name for name in os.listdir(REPO_ROOT)
-                  if name.endswith(".py") and name != "local_config.py")
+                  if name.endswith(".py") and name != "admin_config.py")
 
 
 def unresolvable_names(source, label):

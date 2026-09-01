@@ -23,7 +23,7 @@ settings.conf.sample lists every setting with its default and explanation.
 
 NOTHING BREAKS FOR AN EXISTING INSTALL
 
-local_config.py still works exactly as it did. config.py applies it first and
+admin_config.py still works exactly as it did. config.py applies it first and
 then this file on top, so an operator who has one can ignore settings.conf
 entirely, or migrate at their own pace, or use both. Where both set the same
 name, settings.conf wins - it is the one the operator edited most recently by
@@ -107,7 +107,7 @@ def unconfigured_required(namespace, shipped_defaults):
     blank, in `namespace` - i.e. genuinely never overridden by this install.
 
     `shipped_defaults` is config.SHIPPED_DEFAULTS: a snapshot config.py takes
-    of its own REQUIRED literals BEFORE local_config.py or settings.conf ever
+    of its own REQUIRED literals BEFORE admin_config.py or settings.conf ever
     apply. Comparing against that snapshot, not against config.py's source
     freshly re-read, is what lets a rehash's importlib.reload(config)
     re-execute the same snapshot line and get the identical values back
@@ -596,20 +596,20 @@ def _atomic_write(path, text):
             os.unlink(tmp_path)
 
 
-def shadowed_by_local_config(names):
-    """Which of `names` local_config.py also sets.
+def shadowed_by_admin_config(names):
+    """Which of `names` admin_config.py also sets.
 
-    Not an error and not blocked - config.py applies local_config.py first and
+    Not an error and not blocked - config.py applies admin_config.py first and
     this file second, so saving here is what takes effect. But an operator who
-    keeps their real values in local_config.py should be told that this is the
+    keeps their real values in admin_config.py should be told that this is the
     point where that stops being true for a setting, rather than discovering it
     the next time they edit the Python file and nothing happens.
     """
     try:
-        import local_config
+        import admin_config
     except Exception:
         return []
-    return sorted(name for name in names if hasattr(local_config, name))
+    return sorted(name for name in names if hasattr(admin_config, name))
 
 
 def save(namespace, changes, path=None, log=print):
@@ -689,11 +689,11 @@ def save(namespace, changes, path=None, log=print):
         _atomic_write(path, text if ending == "\n"
                       else text.replace("\n", ending))
 
-    shadowed = shadowed_by_local_config(changes)
+    shadowed = shadowed_by_admin_config(changes)
     name = os.path.basename(path)
     log(f"[CONFIG] Wrote {len(changes)} setting(s) to {name}.")
     for setting in shadowed:
-        log(f"[CONFIG] {name} now sets {setting}, which local_config.py also "
+        log(f"[CONFIG] {name} now sets {setting}, which admin_config.py also "
             f"sets. This file is applied second, so this file wins from now on.")
 
     return {"path": path, "written": sorted(changes), "added": added,

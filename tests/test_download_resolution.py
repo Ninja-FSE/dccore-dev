@@ -36,7 +36,7 @@ import unittest
 
 from tests import support  # noqa: F401  (path setup)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import dcc  # noqa: E402
 
 from tests.test_path_security import InlineThread, PathSecurityBase, quiet  # noqa: E402

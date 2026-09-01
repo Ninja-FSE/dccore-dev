@@ -22,7 +22,7 @@ import unittest
 
 from tests.support import DCCoreTestCase, queue_row
 
-import config
+import defaults as config
 import db
 import dcc
 

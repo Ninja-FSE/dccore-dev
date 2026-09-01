@@ -66,7 +66,7 @@ import threading
 import time
 
 import adminchat
-import config
+import defaults as config
 import platform_compat
 
 try:
@@ -1571,7 +1571,7 @@ def start():
     if not adminchat.password_is_configured():
         print("[WEBUI] ADMIN_PASSWORD_HASH is not set; refusing to start the dashboard "
               "without a login. Generate one with `python adminchat.py` and put the "
-              "result in local_config.py or settings.conf.")
+              "result in admin_config.py or settings.conf.")
         return
 
     # 127.0.0.1 when absent, matching config.py. 0.0.0.0 would bind every

@@ -1,6 +1,6 @@
-"""local_config.py overrides reach the values that are derived from them.
+"""admin_config.py overrides reach the values that are derived from them.
 
-config.py applies local_config.py at the very bottom, on purpose: an operator
+config.py applies admin_config.py at the very bottom, on purpose: an operator
 overrides a tracked default without their deployment showing up as a diff.
 
 That works for a plain setting, because nothing has read it yet. It does NOT
@@ -40,18 +40,18 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 
 
-class LocalConfigOverrideTests(DCCoreTestCase):
+class AdminConfigOverrideTests(DCCoreTestCase):
 
-    def _reload_with_local_config(self, body):
-        """Reload config.py with `body` as the machine's local_config.py.
+    def _reload_with_admin_config(self, body):
+        """Reload config.py with `body` as the machine's admin_config.py.
 
         Every test writes one - an empty file when it wants "no overrides" -
-        so a developer who has a real local_config.py on their machine gets
+        so a developer who has a real admin_config.py on their machine gets
         the same result as CI, which has none. Without that, "no overrides"
         would mean "whatever this particular box happens to be configured
         for", which is not a test.
@@ -65,20 +65,20 @@ class LocalConfigOverrideTests(DCCoreTestCase):
         self.addCleanup(importlib.reload, config)
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         self.addCleanup(lambda: tmp in sys.path and sys.path.remove(tmp))
-        self.addCleanup(sys.modules.pop, "local_config", None)
+        self.addCleanup(sys.modules.pop, "admin_config", None)
 
-        with open(os.path.join(tmp, "local_config.py"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(tmp, "admin_config.py"), "w", encoding="utf-8") as handle:
             handle.write(body)
 
         sys.path.insert(0, tmp)
-        sys.modules.pop("local_config", None)
+        sys.modules.pop("admin_config", None)
         with contextlib.redirect_stdout(io.StringIO()):
             importlib.reload(config)
         return config
 
     def test_a_channel_override_moves_the_broadcast_channel(self):
         """The defect. Overriding CHANNEL must move the derived value with it."""
-        cfg = self._reload_with_local_config('CHANNEL = "#dccore-test"\n')
+        cfg = self._reload_with_admin_config('CHANNEL = "#dccore-test"\n')
 
         self.assertEqual(cfg.CHANNEL, "#dccore-test")
         self.assertEqual(
@@ -91,7 +91,7 @@ class LocalConfigOverrideTests(DCCoreTestCase):
         """CHANNEL is a comma-separated list; only the first is broadcast to,
         deliberately - broadcasting into every joined channel multiplies the
         disruption for one search."""
-        cfg = self._reload_with_local_config(
+        cfg = self._reload_with_admin_config(
             'CHANNEL = "#first-one,#second-one,#third-one"\n')
 
         self.assertEqual(cfg.BROADCAST_SEARCH_CHANNEL, "#first-one")
@@ -99,7 +99,7 @@ class LocalConfigOverrideTests(DCCoreTestCase):
     def test_an_explicit_broadcast_channel_still_wins(self):
         """Control. Deriving the value must not start overwriting an operator
         who set it on purpose - config.py's own comment offers that choice."""
-        cfg = self._reload_with_local_config(
+        cfg = self._reload_with_admin_config(
             'CHANNEL = "#dccore-test"\n'
             'BROADCAST_SEARCH_CHANNEL = "#somewhere-else"\n')
 
@@ -113,7 +113,7 @@ class LocalConfigOverrideTests(DCCoreTestCase):
         to derive FROM, so both stay unset. oserve.startup()'s REQUIRED gate
         is what actually refuses to boot in this state; importing config.py
         itself must not raise (see the `and CHANNEL` guard this test pins)."""
-        cfg = self._reload_with_local_config("# no overrides\n")
+        cfg = self._reload_with_admin_config("# no overrides\n")
 
         self.assertIsNone(cfg.CHANNEL)
         self.assertIsNone(cfg.BROADCAST_SEARCH_CHANNEL)
@@ -123,7 +123,7 @@ class LocalConfigOverrideTests(DCCoreTestCase):
         string - webserver.start_broadcast_search() returns 503 "No broadcast
         channel configured" on a blank one, which would be a confusing way to
         learn you typed an empty string."""
-        cfg = self._reload_with_local_config(
+        cfg = self._reload_with_admin_config(
             'CHANNEL = "#dccore-test"\n'
             'BROADCAST_SEARCH_CHANNEL = ""\n')
 
@@ -140,7 +140,7 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
     """
 
     def _parse(self):
-        with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
             return ast.parse(handle.read())
 
     def _override_lines(self, tree):
@@ -149,13 +149,13 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         Found by SHAPE, not by name. Naming the mechanisms would be another
         hand-maintained list that has to stay in step with config.py - which
         is precisely how this check went wrong. It knew only about
-        local_config.py, so when settings.conf arrived as a second and LATER
+        admin_config.py, so when settings.conf arrived as a second and LATER
         override, the check kept passing while a value derived between the two
         silently ignored it.
 
         Two shapes cover both mechanisms, and anything else of the same kind:
 
-          * a star-import          `from local_config import *`
+          * a star-import          `from admin_config import *`
           * a call handed the namespace
                                    `settings_file.apply_to(globals())`
         """
@@ -188,7 +188,7 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
     def test_both_override_mechanisms_are_seen(self):
         """The specific regression this replaced.
 
-        There are two mechanisms - local_config.py and settings.conf - and a
+        There are two mechanisms - admin_config.py and settings.conf - and a
         check that spots only the first passes happily while a value derived
         BETWEEN the two ignores the second entirely. Asserting more than one
         is found means losing sight of a mechanism fails here instead of in
@@ -198,7 +198,7 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         self.assertGreaterEqual(
             len(lines), 2,
             f"only {len(lines)} override point(s) found in config.py, at "
-            f"{lines}. config.py applies both local_config.py and "
+            f"{lines}. config.py applies both admin_config.py and "
             f"settings.conf; a check that sees only one of them lets a value "
             f"derived between the two silently ignore the other.")
 
@@ -279,7 +279,7 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         source = textwrap.dedent("""
             CHANNEL = "#a,#b"
             BROADCAST = CHANNEL.split(",")[0]
-            from local_config import *
+            from admin_config import *
         """)
 
         offenders = self.derived_above_override(ast.parse(source))
@@ -297,7 +297,7 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         source = textwrap.dedent("""
             CHANNEL: str = "#a,#b"
             BROADCAST: str = CHANNEL.split(",")[0]
-            from local_config import *
+            from admin_config import *
         """)
 
         offenders = self.derived_above_override(ast.parse(source))
@@ -311,7 +311,7 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         must not be reported."""
         source = textwrap.dedent("""
             CHANNEL: str = "#a,#b"
-            from local_config import *
+            from admin_config import *
             BROADCAST: str = CHANNEL.split(",")[0]
         """)
 
@@ -323,7 +323,7 @@ class NoSettingIsDerivedBeforeOverridesLand(unittest.TestCase):
         source = textwrap.dedent("""
             CHANNEL: str = "#a"
             BROADCAST: str
-            from local_config import *
+            from admin_config import *
         """)
 
         self.assertEqual(self.derived_above_override(ast.parse(source)), [])

@@ -40,7 +40,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import commands  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 
@@ -52,7 +52,7 @@ RUNTIME_ASSIGNED = {"ORIGINAL_NICK", "MY_IP_OR_DOCK", "fetch_feature_disabled"}
 
 def modules():
     for name in sorted(os.listdir(REPO_ROOT)):
-        if name.endswith(".py") and name != "local_config.py":
+        if name.endswith(".py") and name != "admin_config.py":
             yield name, os.path.join(REPO_ROOT, name)
     scripts = os.path.join(REPO_ROOT, "scripts")
     for name in sorted(os.listdir(scripts)):
@@ -62,7 +62,7 @@ def modules():
 
 def declared_defaults():
     """Every setting config.py declares, and the value it declares."""
-    with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+    with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     out = {}
     for node in tree.body:

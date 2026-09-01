@@ -51,7 +51,7 @@ import socket
 import threading
 import time
 
-import config
+import defaults as config
 import platform_compat
 
 # --------------------------------------------------------------------------
@@ -172,7 +172,7 @@ def is_admin_host(prefix_or_line):
 # ==========================================================================
 
 def make_password_hash(password, iterations=PBKDF2_ITERATIONS):
-    """Build the value to paste into local_config.ADMIN_PASSWORD_HASH.
+    """Build the value to paste into admin_config.ADMIN_PASSWORD_HASH.
 
     pbkdf2_hmac rather than scrypt: scrypt is the stronger primitive, but it
     depends on the OpenSSL build Python was linked against and raises where that
@@ -899,7 +899,7 @@ def handle_dcc_chat(irc_sock, line, nick, ctcp_text):
     if not password_is_configured():
         print("[ADMINCHAT] DCC CHAT from an authorised host refused: "
               "ADMIN_PASSWORD_HASH is not set. Generate one with "
-              "adminchat.make_password_hash() and put it in local_config.py.")
+              "adminchat.make_password_hash() and put it in admin_config.py.")
         return False
 
     offer = parse_offer(ctcp_text)
@@ -1033,7 +1033,7 @@ def _connect_and_serve(irc_sock, nick, host, ip, port, token=None):
             return
         print(f"[ADMINCHAT] Could not connect to {nick} at {ip}:{port} ({err}); "
               f"falling back to listening. Set ADMIN_CHAT_MODE = \"listen\" in "
-              f"local_config.py to go straight here and skip the wait.")
+              f"admin_config.py to go straight here and skip the wait.")
         _listen_and_serve(irc_sock, nick, host, token)
         return
     _serve(sock, ip, nick, host, f"opened to {ip}:{port}")
@@ -1153,7 +1153,7 @@ def _read_password(prompt):
 
 
 if __name__ == "__main__":
-    print("Generate the value for local_config.ADMIN_PASSWORD_HASH.")
+    print("Generate the value for admin_config.ADMIN_PASSWORD_HASH.")
     first = _read_password("Password: ")
     second = _read_password("Again: ")
     if first != second:
@@ -1163,4 +1163,4 @@ if __name__ == "__main__":
     print()
     print('ADMIN_PASSWORD_HASH = "%s"' % make_password_hash(first))
     print()
-    print("Paste that line into local_config.py (gitignored), not config.py.")
+    print("Paste that line into admin_config.py (gitignored), not config.py.")

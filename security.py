@@ -3,7 +3,7 @@ import threading
 import time
 import os
 import sys
-import config
+import defaults as config
 import db
 
 # Nicks we have already sent a debug notice about - one notice per nick.
@@ -125,7 +125,7 @@ def check_user_status(user, hostmask=None):
     import os
     import re
     import time
-    import config
+    import defaults as config
     import announce
 
     user_lower = user.lower()
@@ -261,7 +261,7 @@ def is_flooding(user):
     """Flood protection: clears the queue on a ban, bans until midnight, and logs it all."""
     import time
     import sys
-    import config
+    import defaults as config
     import db
     import announce
     

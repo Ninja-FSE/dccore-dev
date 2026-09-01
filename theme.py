@@ -59,7 +59,7 @@
 # filename budget on every line that carries a filename. Presets here change
 # which colours the segments are, never how many there are.
 
-import config
+import defaults as config
 
 # The mIRC colour pair for a solid block is "fg,bg" with fg == bg: the
 # character cell is filled with the background and the (invisible) foreground

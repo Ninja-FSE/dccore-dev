@@ -31,7 +31,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
 
 import announce  # noqa: E402
 import commands  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 import dcc  # noqa: E402
 
@@ -452,7 +452,7 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
     # picked up by that scan any more and there is nothing left to exclude.
     NOT_PRESERVED = {
         "ADMIN_HOSTMASKS":
-            "a setting read from local_config.py, not runtime state - it is "
+            "a setting read from admin_config.py, not runtime state - it is "
             "SUPPOSED to be re-read from the file on a rehash",
         "vip_queue":
             "transient OUTPUT, not state. commands.py says so explicitly: "
@@ -488,7 +488,7 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
         """
         import ast
         path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.py")
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "defaults.py")
         with open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         names = []

@@ -19,7 +19,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
 import announce  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 

@@ -201,7 +201,7 @@ def _guard_condition_for(marker, helper=("is_user_event", "is_server_numeric",
 
 def _evaluate(condition, line, **names):
     """Evaluate a condition lifted from irc.py against a given raw line."""
-    import config
+    import defaults as config
     import re
     namespace = {"line": line, "irc": irc, "config": config, "re": re,
                  "is_user_event": irc.is_user_event,
@@ -245,7 +245,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_the_join_handler_still_ignores_the_bots_own_join(self):
         """Losing that half would make the bot thaw queues off its own JOIN."""
-        import config
+        import defaults as config
         condition = _guard_condition_for("joined_user = join_match.group(1)")
         own = f":{config.NICKNAME}!bot@host JOIN #mp3passion"
         self.assertFalse(_evaluate(condition, own), condition)

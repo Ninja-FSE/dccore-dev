@@ -33,7 +33,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import announce  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 import list as list_mod  # noqa: E402
 import theme  # noqa: E402
@@ -185,7 +185,7 @@ class NoNinthCopy(unittest.TestCase):
 
     def modules(self):
         for name in sorted(os.listdir(REPO_ROOT)):
-            if name.endswith(".py") and name not in ("theme.py", "local_config.py"):
+            if name.endswith(".py") and name not in ("theme.py", "admin_config.py"):
                 yield name
 
     def test_no_module_but_theme_contains_a_block_code(self):
@@ -421,7 +421,7 @@ class OverridingOneRole(ThemedPathCase):
 
     def test_a_non_string_value_is_ignored(self):
         """It goes straight into an f-string on the wire. Only reachable via
-        local_config.py (Python) - settings.conf's coerce() always produces a
+        admin_config.py (Python) - settings.conf's coerce() always produces a
         string or None for a str-typed setting."""
         self.set_config(CUSTOM_THEME_BORDER=6)
 

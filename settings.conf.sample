@@ -19,7 +19,7 @@
 #   * Yes/no settings accept true/false, yes/no, on/off, 1/0.
 #   * List settings are comma-separated.
 #   * A '%' is an ordinary character here; it needs no escaping.
-#   * If you already have a local_config.py it still works exactly as
+#   * If you already have a admin_config.py it still works exactly as
 #     before. This file is applied on top of it, so you can migrate a
 #     few settings at a time, or ignore this file entirely.
 #   * The mIRC colour codes (C_*) are deliberately not listed: they are
@@ -68,11 +68,11 @@
 # all of them: broadcasting into every channel this bot has joined multiplies
 # the disruption to every other operator sharing those channels, for one
 # search. Defaults to the first entry of CHANNEL above; override explicitly
-# here (or in local_config.py) if that is not the right one.
+# here (or in admin_config.py) if that is not the right one.
 # Derived from CHANNEL - but NOT here. See "DERIVED VALUES" at the end of this
 # file: computing it at this point captures the tracked default above and
 # silently ignores an operator's own CHANNEL. None means "derive it below";
-# setting it explicitly, here or in local_config.py, still wins.
+# setting it explicitly, here or in admin_config.py, still wins.
 #BROADCAST_SEARCH_CHANNEL = 
 
 
@@ -197,7 +197,7 @@
 # with "<your-account>.users.undernet.org", which nobody else can obtain. That
 # host IS the proof of your services login.
 # 
-# Put the real values in local_config.py, which is gitignored, NOT here.
+# Put the real values in admin_config.py, which is gitignored, NOT here.
 #ADMIN_HOSTMASKS = 
 
 # Generated with:  python adminchat.py
@@ -370,7 +370,7 @@
 # whatever the chosen THEME preset already says.
 # 
 # #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
-# dict, CUSTOM_THEME, which is why it lived here or in local_config.py rather
+# dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard
 # configurable too, the same as every other setting - "one file, one format".
@@ -392,7 +392,7 @@
 
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
 # a network-facing surface should never be on just because someone pulled and
-# restarted. Opt in from local_config.py, not here.
+# restarted. Opt in from admin_config.py, not here.
 # 
 # Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
 # logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
@@ -408,7 +408,7 @@
 # is no window where the dashboard is reachable unauthenticated.
 # 
 # "127.0.0.1" is the tracked default: safe out of the box, reachable only from
-# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# this machine. Set this to "0.0.0.0" in admin_config.py if you want it
 # reachable from other devices on your LAN (phone, laptop).
 # 
 # DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. A login gate does not stop

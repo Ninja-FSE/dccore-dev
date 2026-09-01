@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import zipfile
 import time
-import config
+import defaults as config
 import platform_compat
 
 # Multi-disc/box-set container names the !rar album list truncates at - see
@@ -242,7 +242,7 @@ def generate_master_list():
     import datetime
     import zipfile
     import re
-    import config
+    import defaults as config
     import db
     import list as list_mod
 

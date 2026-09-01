@@ -36,7 +36,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import runtime  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -147,17 +147,25 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
         self.assertGreater(len(self._production_modules()), 5)
 
     def _config_aliases(self, tree):
-        """Every local name this file's `import config`/`import config as X`
-        statements bind - not scoped per-function, since a whole-file "any
-        alias found anywhere counts" is precise enough for a lint-style
-        check and does not need real scope resolution. `commands.py`'s own
-        `import config as _cfg` inside handle_rehash_request is exactly why
-        this exists: the plain-"config" check alone missed it entirely."""
+        """Every local name this file's `import defaults as config`/
+        `import defaults as X` statements bind - not scoped per-function,
+        since a whole-file "any alias found anywhere counts" is precise
+        enough for a lint-style check and does not need real scope
+        resolution. `commands.py`'s own `import defaults as _cfg` inside
+        handle_rehash_request is exactly why this exists: the plain-"config"
+        check alone missed it entirely.
+
+        Matches on the REAL module name, "defaults" (#170's RFC renamed the
+        file from config.py) - every production module now does
+        `import defaults as config`, so matching the old "config" name here
+        would silently never match anything again, defeating this entire
+        check without a single test failing to say so.
+        """
         aliases = {"config"}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == "config":
+                    if alias.name == "defaults":
                         aliases.add(alias.asname or alias.name)
         return aliases
 
@@ -212,7 +220,7 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
         """A container added to config.py instead of runtime.py would not
         survive a rehash, which is the bug this whole change removes."""
         # ADMIN_HOSTMASKS is an empty list, but it is a SETTING - the operator
-        # fills it from local_config.py and it is SUPPOSED to be re-read on a
+        # fills it from admin_config.py and it is SUPPOSED to be re-read on a
         # rehash rather than preserved.
         #
         # CUSTOM_THEME used to join it for the same reason (per-role colour
@@ -223,7 +231,7 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
         # allow-list here.
         allowed = {"ADMIN_HOSTMASKS"}
 
-        with io.open(os.path.join(REPO_ROOT, "config.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
 
         offenders = []
@@ -272,8 +280,9 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
                 if isinstance(target, ast.Name) and target.id == "modules_to_reload":
                     names = [el.value for el in value.elts
                              if isinstance(el, ast.Constant)]
-                    self.assertIn("config", names,
-                                  "fixture invariant: config should be reloaded")
+                    self.assertIn("defaults", names,
+                                  "fixture invariant: defaults (formerly config.py, "
+                                  "#170's RFC) should be reloaded")
                     self.assertNotIn(
                         "runtime", names,
                         "runtime.py is in modules_to_reload, so a rehash "

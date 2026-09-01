@@ -220,7 +220,7 @@ def long_path(path):
 
 def describe():
     """One line for the startup log, so the platform in use is never a guess."""
-    rar = rar_command(getattr(sys.modules.get("config"), "RAR_BINARY", None))
+    rar = rar_command(getattr(sys.modules.get("defaults"), "RAR_BINARY", None))
     return (
         f"platform={'windows' if IS_WINDOWS else 'posix'} "
         f"python={sys.version_info.major}.{sys.version_info.minor} "

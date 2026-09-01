@@ -76,5 +76,5 @@ venv.bak/
 CLAUDE.md
 
 # Per-machine config overrides (paths, nick, channels)
-local_config.py
+admin_config.py
 settings.conf

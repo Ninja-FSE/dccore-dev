@@ -25,7 +25,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
 import adminchat  # noqa: E402
 import announce  # noqa: E402
 import commands  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 import stats_mgr  # noqa: E402
 

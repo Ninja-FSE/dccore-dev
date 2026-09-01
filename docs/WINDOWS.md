@@ -27,14 +27,14 @@ on PATH, because WinRAR does not add itself to PATH.
 
 ## Setup
 
-### 1. Create `local_config.py`
+### 1. Create `admin_config.py`
 
-Copy `local_config.py.sample` to `local_config.py` and fill it in. That file is
+Copy `admin_config.py.sample` to `admin_config.py` and fill it in. That file is
 gitignored and never leaves your machine.
 
 > **The one line that matters most is `CHANNEL`.**
 >
-> `config.py` ships with the upstream operator's live channels and nickname. If
+> `defaults.py` ships with the upstream operator's live channels and nickname. If
 > you start the daemon without overriding them, you join his trading channels as
 > a second bot with a near-identical name. That reads as a clone and can get
 > **both** of you banned. Set your own nickname and your own test channel.
@@ -55,13 +55,13 @@ Set at minimum:
 | `ADMIN_NICK` | your nick |
 | `FILE_DIRECTORY` | your music folder — start with a small one |
 
-`local_config.py.sample` has commented-out placeholders for all seven, in a
+`admin_config.py.sample` has commented-out placeholders for all seven, in a
 section near the top.
 
 **Prefer plain text?** Every setting above can also go in `settings.conf`
 instead (copy `settings.conf.sample` to `settings.conf`) — no Python syntax,
 and it's what the web dashboard's Settings page writes to as well. The setup
-check in step 2 accepts either file; `local_config.py` still owns
+check in step 2 accepts either file; `admin_config.py` still owns
 `ADMIN_HOSTMASKS`/`ADMIN_PASSWORD_HASH` most naturally, since those come from
 running `python adminchat.py`, but they work in `settings.conf` too.
 
@@ -89,7 +89,7 @@ refuses to start if it fails.
 
 ## Why there is a launcher at all
 
-Every data path in `config.py` is relative — `./data/bans.txt`, `./lists` — so
+Every data path in `defaults.py` is relative — `./data/bans.txt`, `./lists` — so
 they resolve against the **working directory**, not the code. Started from
 anywhere other than the repository folder, the daemon quietly creates an empty
 `data` folder wherever it happened to start and boots with no bans, no queue and
@@ -109,7 +109,7 @@ adding a service wrapper.
 ## Networking
 
 **Forward TCP 55000–55010** to this machine for anyone to download from you.
-That range is `DCC_PORT_START`–`DCC_PORT_END` in `config.py`, and the admin
+That range is `DCC_PORT_START`–`DCC_PORT_END` in `defaults.py`, and the admin
 console borrows a port from it too when it has to listen.
 
 ### Testing a download from your own machine will probably fail
@@ -117,7 +117,7 @@ console borrows a port from it too when it has to listen.
 This is not a bug. The daemon advertises its **public** IP in every DCC offer,
 and most routers will not route a connection from inside the network back to
 themselves. Either test from a second machine or a phone, or set
-`MY_IP_OR_DOCK` to this PC's LAN address in `local_config.py` for local testing
+`MY_IP_OR_DOCK` to this PC's LAN address in `admin_config.py` for local testing
 only — and remove it before real use.
 
 ---

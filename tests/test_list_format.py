@@ -31,7 +31,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import list as list_mod  # noqa: E402
 import platform_compat  # noqa: E402
 import settings_file  # noqa: E402
@@ -405,7 +405,7 @@ class AValueThatIsNotOneOfTheThree(ListFormatCase):
         self.assertEqual([name for name, _why in report["bad"]], ["LIST_FORMAT"])
 
     def test_one_that_reached_config_anyway_still_serves_a_list(self):
-        """local_config.py assigns straight onto config and answers to nobody,
+        """admin_config.py assigns straight onto config and answers to nobody,
         so the write-time check above is not the last line of defence."""
         self.build("zip")
         self.set_config(LIST_FORMAT="Zip Or Something")

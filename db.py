@@ -6,7 +6,7 @@ import time
 import datetime
 import tempfile
 import threading
-import config
+import defaults as config
 
 # Every on-disk file this module owns is small and rewritten in full, so a single
 # lock serialising the writes is enough. It is deliberately NOT dcc.queue_lock:

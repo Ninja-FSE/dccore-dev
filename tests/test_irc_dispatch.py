@@ -23,7 +23,7 @@ from tests.support import (DCCoreTestCase, reset_config, install_fake_oserve,
                            silence_debug, no_disk_writes, queue_row,
                            CapturedDispatch, TempTree, RecordingSocket, DeadSocket)
 
-import config
+import defaults as config
 import irc
 
 

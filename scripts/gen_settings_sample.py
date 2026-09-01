@@ -46,7 +46,7 @@ HEADER = """\
 #   * Yes/no settings accept true/false, yes/no, on/off, 1/0.
 #   * List settings are comma-separated.
 #   * A '%' is an ordinary character here; it needs no escaping.
-#   * If you already have a local_config.py it still works exactly as
+#   * If you already have a admin_config.py it still works exactly as
 #     before. This file is applied on top of it, so you can migrate a
 #     few settings at a time, or ignore this file entirely.
 #   * The mIRC colour codes (C_*) are deliberately not listed: they are
@@ -114,13 +114,13 @@ def _doc_lines(source_lines, node):
 
 
 def build():
-    path = os.path.join(REPO_ROOT, "config.py")
+    path = os.path.join(REPO_ROOT, "defaults.py")
     with io.open(path, encoding="utf-8") as handle:
         source = handle.read()
     lines = source.split("\n")
     tree = ast.parse(source)
 
-    import config
+    import defaults as config
 
     section = "general"
     out = [HEADER]
@@ -144,7 +144,7 @@ def build():
             if not hasattr(config, name):
                 continue
             # Read the default from the SOURCE, not from the imported
-            # module. The live module reflects whatever local_config.py,
+            # module. The live module reflects whatever admin_config.py,
             # settings.conf or a test has already applied, which would make
             # the generated sample depend on the machine that ran it.
             try:

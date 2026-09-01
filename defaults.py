@@ -1,5 +1,14 @@
 # =====================================================================
-# CONFIG.PY - CENTRAL CONFIGURATION FOR THE DCCORE DAEMON
+# DEFAULTS.PY - CENTRAL CONFIGURATION FOR THE DCCORE DAEMON
+# =====================================================================
+# Renamed from config.py as part of #170's RFC: every module that reads a
+# setting still does `import defaults as config` and reads `config.X` -
+# see any other module's own import line for why the internal name did not
+# change along with the file. This file's own job did not change either: it
+# is the tracked, always-present base and type declaration for every
+# setting (~60 of them), which admin_config.py and settings.conf below then
+# optionally override. Without this file, an operator would have to type
+# out every single setting by hand just to get a working bot.
 # =====================================================================
 # The live in-memory containers this file used to define are in runtime.py
 # now, and are bound below in section 8. See that module's docstring for why:
@@ -43,11 +52,11 @@ DEBUG_CHANNEL: str = "#dccore-debug"
 # all of them: broadcasting into every channel this bot has joined multiplies
 # the disruption to every other operator sharing those channels, for one
 # search. Defaults to the first entry of CHANNEL above; override explicitly
-# here (or in local_config.py) if that is not the right one.
+# here (or in admin_config.py) if that is not the right one.
 # Derived from CHANNEL - but NOT here. See "DERIVED VALUES" at the end of this
 # file: computing it at this point captures the tracked default above and
 # silently ignores an operator's own CHANNEL. None means "derive it below";
-# setting it explicitly, here or in local_config.py, still wins.
+# setting it explicitly, here or in admin_config.py, still wins.
 BROADCAST_SEARCH_CHANNEL: str = None
 
 # ---------------------------------------------------------------------
@@ -155,7 +164,7 @@ DEBUG_MSG_DELAY: float  = 0.5    # Pause between each line sent to the debug cha
 # with "<your-account>.users.undernet.org", which nobody else can obtain. That
 # host IS the proof of your services login.
 #
-# Put the real values in local_config.py, which is gitignored, NOT here.
+# Put the real values in admin_config.py, which is gitignored, NOT here.
 ADMIN_HOSTMASKS: list = []
 # Generated with:  python adminchat.py
 ADMIN_PASSWORD_HASH: str = ""
@@ -310,7 +319,7 @@ THEME: str = "classic"        # classic, midnight, forest, orchid, plain
 # whatever the chosen THEME preset already says.
 #
 # #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
-# dict, CUSTOM_THEME, which is why it lived here or in local_config.py rather
+# dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard
 # configurable too, the same as every other setting - "one file, one format".
@@ -439,7 +448,7 @@ known_bots = runtime.known_bots
 # ---------------------------------------------------------------------
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
 # a network-facing surface should never be on just because someone pulled and
-# restarted. Opt in from local_config.py, not here.
+# restarted. Opt in from admin_config.py, not here.
 #
 # Flask is also an OPTIONAL dependency. If it is not installed, webserver.start()
 # logs "[WEBUI] Flask not installed; dashboard disabled." and returns - it
@@ -455,7 +464,7 @@ WEBUI_ENABLED: bool = False
 # is no window where the dashboard is reachable unauthenticated.
 #
 # "127.0.0.1" is the tracked default: safe out of the box, reachable only from
-# this machine. Set this to "0.0.0.0" in local_config.py if you want it
+# this machine. Set this to "0.0.0.0" in admin_config.py if you want it
 # reachable from other devices on your LAN (phone, laptop).
 #
 #   DO NOT PORT-FORWARD THIS PORT TO THE INTERNET. A login gate does not stop
@@ -470,7 +479,7 @@ WEBUI_PORT: int = 8420
 # ---------------------------------------------------------------------
 # Two mechanisms, both supported, so nothing breaks for an existing install:
 #
-#   local_config.py   the original - Python, `from local_config import *`.
+#   admin_config.py   the original - Python, `from admin_config import *`.
 #                     Still read, still works. Nothing to do if you have one.
 #   settings.conf     plain text, no Python. settings.conf.sample lists every
 #                     setting with its default and what it does.
@@ -496,8 +505,8 @@ SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
                     if name in globals()}
 
 try:
-    from local_config import *  # noqa: F401,F403
-    print('[CONFIG] Applied overrides from local_config.py')
+    from admin_config import *  # noqa: F401,F403
+    print('[CONFIG] Applied overrides from admin_config.py')
 except ImportError:
     pass
 
@@ -507,14 +516,14 @@ settings_file.apply_to(globals())
 # 10. DERIVED VALUES (computed AFTER local overrides, never before)
 # ---------------------------------------------------------------------
 # Anything whose value is computed from another setting belongs here, below
-# BOTH override mechanisms (local_config.py and settings.conf), not next to
+# BOTH override mechanisms (admin_config.py and settings.conf), not next to
 # the setting it reads.
 #
 # BROADCAST_SEARCH_CHANNEL used to be derived at the top of this file, far
 # above the point where overrides land. Its own comment promised it "defaults
 # to the first entry of CHANNEL" - and it did, but to the first entry of the
 # TRACKED default, not the operator's. So an operator who set
-# CHANNEL = "#their-channel" (in local_config.py OR settings.conf) still had a
+# CHANNEL = "#their-channel" (in admin_config.py OR settings.conf) still had a
 # dashboard broadcast search send its @find into #mp3passion: the first
 # channel of the shipped default, a real public channel they may not even be
 # in.

@@ -44,11 +44,11 @@ fi
 # settings.conf is fully first-class (see scripts/setup_check.py's own note) -
 # the daemon starts fine from it alone, so this only refuses when NEITHER
 # override exists.
-if [ ! -f "local_config.py" ] && [ ! -f "settings.conf" ]; then
+if [ ! -f "admin_config.py" ] && [ ! -f "settings.conf" ]; then
     echo
-    echo "  No local_config.py and no settings.conf found."
+    echo "  No admin_config.py and no settings.conf found."
     echo
-    echo "  Copy local_config.py.sample to local_config.py, or"
+    echo "  Copy admin_config.py.sample to admin_config.py, or"
     echo "  settings.conf.sample to settings.conf, and fill one in."
     echo "  Without either the daemon uses the defaults in config.py, which"
     echo "  point at somebody else's live bot and channels."

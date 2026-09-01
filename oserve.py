@@ -13,7 +13,7 @@ import platform_compat
 platform_compat.install_console_encoding_guard()
 
 # Load the bot's modules
-import config
+import defaults as config
 
 # Allocate the locks at startup, in memory. This keeps config.py free of
 # function calls and imports.
@@ -65,7 +65,7 @@ total_sent_bytes = 0
 def queue_message(user, message, is_vip=False):
     """The queue's entry point, with a strictly isolated VIP express lane."""
     user_key = user.lower()
-    import config
+    import defaults as config
     
     # VIP GATE: only genuine channel adverts, or messages explicitly flagged
     # is_vip=True, are allowed through here.
@@ -107,8 +107,8 @@ def startup():
               "(blank, or still the shipped default):")
         for name in unconfigured:
             print(f"[CRITICAL]   {name}")
-        print("[CRITICAL] Set them in local_config.py or settings.conf before starting - "
-              "see local_config.py.sample / settings.conf.sample.")
+        print("[CRITICAL] Set them in admin_config.py or settings.conf before starting - "
+              "see admin_config.py.sample / settings.conf.sample.")
         sys.exit(1)
 
     if not os.path.exists(config.FILE_DIRECTORY):

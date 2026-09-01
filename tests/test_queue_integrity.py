@@ -30,7 +30,7 @@ from tests.support import (DCCoreTestCase, no_disk_writes, queue_row,
                            silence_debug)
 
 import announce
-import config as config_mod
+import defaults as config_mod
 import db
 import dcc
 

@@ -27,7 +27,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
 
 import adminchat  # noqa: E402
 import commands  # noqa: E402
-import config  # noqa: E402
+import defaults as config  # noqa: E402
 import db  # noqa: E402
 import list as list_mod  # noqa: E402
 import settings_file  # noqa: E402
@@ -2482,7 +2482,7 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
     SOURCES = ("oserve.py", "webserver.py")
 
     def shipped_defaults(self):
-        path = os.path.join(REPO_ROOT, "config.py")
+        path = os.path.join(REPO_ROOT, "defaults.py")
         with io.open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         shipped = {}

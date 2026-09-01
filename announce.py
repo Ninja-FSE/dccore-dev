@@ -5,7 +5,7 @@ import datetime
 import threading
 import sys
 import collections
-import config
+import defaults as config
 import list
 import dcc
 import db
@@ -192,7 +192,7 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     import db
     import stats_mgr
     import time
-    import config
+    import defaults as config
     oserve = sys.modules.get('oserve')
     
     # Read the live counters from the store and the statistics module
@@ -312,7 +312,7 @@ def announce_worker():
     global current_worker_id
     import time
     import sys
-    import config
+    import defaults as config
     
     # A unique id for this particular thread start, based on the current time
     my_worker_id = time.time()
@@ -400,7 +400,7 @@ def send_search_result_header(user, search_term, match_count, channel):
     """Send the search header as a private message, in the colour-block style."""
     import sys
     import dcc
-    import config
+    import defaults as config
     oserve = sys.modules.get('oserve')
     
     active_dl = oserve.active_downloads if oserve else 0
@@ -466,7 +466,7 @@ def send_debug(msg_text, category="INFO"):
     """Send a colour-block log line to the debug channel over a raw socket, undelayed."""
     import sys
     import time
-    import config
+    import defaults as config
     
     current_time = time.strftime("%H:%M:%S")
     
@@ -565,7 +565,7 @@ def start_announce_thread():
 
 def send_pack_error_notice(irc_sock, user):
     """Send the user a private NOTICE, in the same colour theme, when a request is refused."""
-    import config
+    import defaults as config
     import sys
     
     # Take the colour codes from the existing structure
