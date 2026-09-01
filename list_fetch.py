@@ -269,8 +269,22 @@ def _pick_list_file(extract_dir):
       * if none remain, returns None so the caller can report "no
         recognisable list file" instead of guessing at all.
     """
+    # long_path()-wrapped, like every other path in this module (see the
+    # comment at the top of _write_member()). This was the one function
+    # without it, and both halves bite on Windows: os.walk() silently returns
+    # nothing for a directory past MAX_PATH, and the getsize() below raises
+    # FileNotFoundError out of a function whose caller documents it as never
+    # raising. A fetched list lands under a temp directory plus the sending
+    # bot's own nick plus whatever it called its file, so the depth is not
+    # this bot's to control.
+    #
+    # The walk root is wrapped and the results are joined onto that same
+    # wrapped root, so nothing downstream mixes a prefixed path with an
+    # unprefixed one - the mistake that turns a silent omission into a
+    # ValueError.
+    long_root = platform_compat.long_path(extract_dir)
     txt_files = []
-    for root, _dirs, files in os.walk(extract_dir):
+    for root, _dirs, files in os.walk(long_root):
         for fname in files:
             if fname.lower().endswith(".txt"):
                 txt_files.append(os.path.join(root, fname))
@@ -285,7 +299,24 @@ def _pick_list_file(extract_dir):
     if len(candidates) == 1:
         return candidates[0]
 
-    candidates.sort(key=lambda p: os.path.getsize(p), reverse=True)
+    # A member that vanished between the walk and here (an antivirus quarantine
+    # mid-fetch is the realistic one) sorts last rather than taking the whole
+    # fetch down: this function's caller documents it as never raising.
+    #
+    # The long_path() here is belt to the walk's braces and currently
+    # redundant - every path in txt_files was joined onto the already-wrapped
+    # root, so it arrives prefixed and the call is idempotent. It stays so the
+    # two do not have to be reasoned about together: a later change that
+    # unwraps the walk would otherwise reintroduce half the bug silently.
+    def _size(path):
+        try:
+            return os.path.getsize(platform_compat.long_path(path))
+        except OSError as err:
+            print(f"[LIST-FETCH] Could not size {os.path.basename(path)!r} "
+                  f"while picking the list file: {err}")
+            return -1
+
+    candidates.sort(key=_size, reverse=True)
     print(f"[LIST-FETCH] WARNING: {len(candidates)} candidate .txt files found "
           f"in {extract_dir!r}; picking the largest "
           f"({os.path.basename(candidates[0])}) as the master list - a "

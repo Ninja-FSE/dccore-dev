@@ -312,16 +312,57 @@ def _load_advanced_stats_unlocked():
 
     if not os.path.exists(STATS_FILE):
         return default_stats
+    # The read is its own block so the handle is CLOSED before anything tries
+    # to rename the file. Renaming a file this process still has open raises
+    # PermissionError on Windows - which is finding #25 in the same audit,
+    # committed here while fixing #26. Caught by running it, not by reading it.
+    reason = None
     try:
         with open(STATS_FILE, "r") as f:
             parts = f.read().strip().split()
-            if len(parts) == 7:
-                return [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5]), parts[6]]
-            elif len(parts) == 2:
-                return [int(parts[0]), int(parts[1]), 0, 0, 0, 0, today_str]
     except Exception as e:
-        print(f"[DB ERROR] Could not parse stats.txt, using defaults: {e}")
+        print(f"[DB ERROR] Could not read stats.txt, using defaults: {e}")
+        return default_stats
+
+    try:
+        if len(parts) == 7:
+            return [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]),
+                    int(parts[4]), int(parts[5]), parts[6]]
+        if len(parts) == 2:
+            # The supported legacy row: an old build wrote only the two
+            # lifetime totals.
+            return [int(parts[0]), int(parts[1]), 0, 0, 0, 0, today_str]
+        # Any other column count fell straight through to the defaults with
+        # NOTHING said, and the next completed transfer persisted those zeros -
+        # the lifetime totals gone, and no line anywhere to say when or why.
+        # Everything reaching this file now goes through _atomic_write, so it
+        # takes a legacy build, an fsck or a hand edit to get here; that is an
+        # argument for it being rare, not for it being silent.
+        reason = f"expected 7 columns (or the legacy 2), found {len(parts)}"
+    except Exception as e:
+        reason = str(e)
+
+    _preserve_corrupt_stats(STATS_FILE, reason)
     return default_stats
+
+
+def _preserve_corrupt_stats(path, reason):
+    """Keep an unreadable stats.txt as <name>.corrupt before it is overwritten.
+
+    load_dcc_queue() has done this since it was written; this loader never
+    did, so the one artefact that could have said what the totals used to be
+    was destroyed by the next transfer. Same posture, same suffix.
+
+    Best-effort by design: failing to preserve it must not stop the daemon
+    reading its defaults and carrying on.
+    """
+    print(f"[DB ERROR] stats.txt is not readable ({reason}); starting from zero.")
+    try:
+        backup = path + ".corrupt"
+        os.replace(path, backup)
+        print(f"[DB ERROR] The damaged file was kept as {backup} for manual recovery.")
+    except Exception as backup_err:
+        print(f"[DB ERROR] Could not even back up the damaged stats file: {backup_err}")
 
 
 def _save_advanced_stats_unlocked(stats):
