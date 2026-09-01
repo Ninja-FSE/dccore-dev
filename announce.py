@@ -48,6 +48,48 @@ def fit_irc_line(build, value, budget=IRC_LINE_BUDGET):
     return trimmed
 
 
+def fit_irc_filename(build, filename, budget=IRC_LINE_BUDGET):
+    """Render build(filename), shrinking the filename's STEM until it fits.
+
+    fit_irc_line() marks what it cut with an ellipsis, which is right for a line
+    a person reads and wrong for one a program consumes. A DCC SEND handshake's
+    filename is the name the receiving client SAVES THE FILE AS: trimmed the
+    other way it arrives as "Symphony No 9 in D mino..." with no extension, and
+    lands as a file the operating system will not open. So the extension is kept
+    and the stem is what gives way.
+
+    Worth being clear about what this trades. A shortened save-name is a real
+    cost - the receiver does not get the name the operator chose. It is the
+    smaller cost: the fields the transfer actually needs (address, port, size)
+    sit AFTER the filename in the handshake, so a line the server truncates
+    loses those instead, and the receiver gets a handshake it cannot act on at
+    all. One of the two has to give, and a file that arrives under a shorter
+    name beats a file that does not arrive.
+    """
+    line = build(filename)
+    if len(line.encode("utf-8", errors="ignore")) <= budget:
+        return line
+
+    stem, extension = os.path.splitext(str(filename))
+    # splitext() already takes only the last dot, so this is a sanity check on
+    # the result rather than a second parse: a trailing component that long is
+    # not an extension, and preserving it would eat the budget it exists to save.
+    if len(extension) > 10:
+        stem, extension = str(filename), ""
+
+    while stem and len(build(stem + extension).encode("utf-8", errors="ignore")) > budget:
+        stem = stem[:-1]
+
+    fitted = build(stem + extension)
+    if len(fitted.encode("utf-8", errors="ignore")) > budget:
+        # Same reasoning as fit_irc_line's own guard: the fixed part of the
+        # template is over budget by itself, so no amount of shrinking the
+        # filename helps and looping forever would be worse than saying so.
+        print(f"[IRC LINE] A DCC filename cannot be fitted into {budget} bytes "
+              f"even with nothing left of the name.")
+    return fitted
+
+
 # Debug lines are produced by the IRC READ THREAD (security.check_user_status runs for every
 # PRIVMSG) and by transfer threads. They used to be written straight to the socket with a
 # blocking time.sleep(0.5) held under a lock, which stalled whoever called it: 30 banned
