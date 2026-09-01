@@ -29,8 +29,10 @@ on PATH, because WinRAR does not add itself to PATH.
 
 ### The fast path: `python3 setup.py`
 
-Asks six questions - nickname, IRC server, channel(s), admin nick, the admin
-console password, and the music directory - and writes them to
+Asks nickname, IRC server, channel(s), admin nick, the admin console
+password, the music directory (optional - easier to set from the web
+dashboard once the daemon is running, if you would rather do it there),
+and whether to enable the web dashboard - and writes them to
 `settings.conf` and `admin_config.py` itself. Covers everything below;
 skip to step 2 if you use it. The rest of this section is the manual
 equivalent, for anyone who would rather edit the files by hand.
@@ -42,29 +44,33 @@ gitignored and never leaves your machine.
 
 > **The one line that matters most is `CHANNEL`.**
 >
-> `defaults.py` ships with the upstream operator's live channels and nickname. If
-> you start the daemon without overriding them, you join his trading channels as
-> a second bot with a near-identical name. That reads as a clone and can get
-> **both** of you banned. Set your own nickname and your own test channel.
+> `NICKNAME`, `CHANNEL` and `ADMIN_NICK` ship blank on purpose - `oserve.startup()`
+> refuses to boot while any of them is still unset, naming every one that is
+> still unconfigured. Set your own nickname and your own test channel here
+> (or in `settings.conf`) before the daemon can start at all.
 >
-> This is no longer just advice: `oserve.startup()` refuses to boot while
-> `NICKNAME`, `CHANNEL`, `ADMIN_NICK` or `FILE_DIRECTORY` is still blank,
-> naming every one that is still unconfigured. `SERVER` and `DEBUG_CHANNEL`
-> are not part of that check - their shipped defaults are already correct
-> for almost every install.
+> `SERVER` and `DEBUG_CHANNEL` are not part of that check - their shipped
+> defaults are already correct for almost every install. Neither is
+> `FILE_DIRECTORY`: requiring it would block the daemon from ever reaching
+> the web dashboard, the one place that is genuinely easier to set it from -
+> a blank one only warns.
 
 Set at minimum:
 
 | setting | why |
 |---|---|
 | `NICKNAME`, `ALT_NICKNAME` | must not collide with the live bot |
-| `LIST_BASE_NAME` | names your generated list files |
 | `CHANNEL`, `DEBUG_CHANNEL` | your own test channel |
 | `ADMIN_NICK` | your nick |
 | `FILE_DIRECTORY` | your music folder — start with a small one |
 
-`admin_config.py.sample` has commented-out placeholders for all seven, in a
-section near the top.
+`LIST_BASE_NAME` (names your generated list files) is not in that list -
+it automatically takes NICKNAME's own value once NICKNAME is set, so only
+set it explicitly if you want the list named differently from the bot.
+
+`admin_config.py.sample` has commented-out placeholders for all seven
+(`LIST_BASE_NAME` included, for the rare case you want it), in a section
+near the top.
 
 **Prefer plain text?** Every setting above can also go in `settings.conf`
 instead (copy `settings.conf.sample` to `settings.conf`) — no Python syntax,
@@ -81,8 +87,8 @@ scripts\windows\start-dccore.bat check
 
 This loads the same config the daemon will and reports what it resolved. It
 never opens a connection to a server and never joins anything. It fails on a
-missing music directory, and on a config still pointing at the upstream nick or
-channels.
+music directory that is set but does not exist, among other things - see the
+full report it prints for what else it checks.
 
 ### 3. Start it
 

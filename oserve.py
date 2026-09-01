@@ -41,6 +41,7 @@ if not hasattr(config, 'fetched_bot_lists_lock'):
 import list
 import dcc
 import db
+import update_list
 import announce
 import irc        # The network connection to Undernet
 import queue_mgr  # The flood-protection queue (round-robin)
@@ -95,11 +96,11 @@ def startup():
     """
     print(f"--- {config.SCRIPT_VERSION} is starting up ---")
 
-    # The hard backstop for #170's RFC: scripts/setup_check.py's UPSTREAM_*
-    # checks are a friendlier, EARLIER warning an operator can choose to run
+    # The hard backstop for #170's RFC: scripts/setup_check.py's pre-flight
+    # report is a friendlier, EARLIER warning an operator can choose to run
     # (or a launcher runs for them) - this is what actually stops the daemon
-    # itself from ever joining somebody else's channels under their nickname
-    # with their admin nick in control, regardless of how it was started.
+    # itself from ever booting with NICKNAME/CHANNEL/ADMIN_NICK still blank,
+    # regardless of how it was started.
     import settings_file
     unconfigured = settings_file.unconfigured_required(vars(config), config.SHIPPED_DEFAULTS)
     if unconfigured:
@@ -111,7 +112,20 @@ def startup():
               "see admin_config.py.sample / settings.conf.sample.")
         sys.exit(1)
 
-    if not os.path.exists(config.FILE_DIRECTORY):
+    # FILE_DIRECTORY is deliberately NOT in settings_file.REQUIRED (see its
+    # own comment) - a blank value means "not chosen yet", not "misconfigured",
+    # and the daemon boots anyway so the dashboard's own Settings page can be
+    # the place that sets it, rather than needing it typed blind before the
+    # dashboard is even reachable. A value that IS set but wrong (does not
+    # exist) still refuses to start - that is a real misconfiguration, not an
+    # unmade choice, and is worth catching before anything tries to serve
+    # from it.
+    if not config.FILE_DIRECTORY:
+        print("[WARNING] No music directory configured yet - the daemon will "
+              "connect, but cannot search or serve anything. Set FILE_DIRECTORY "
+              "from the web dashboard's Settings page, settings.conf, or "
+              "admin_config.py.")
+    elif not os.path.exists(config.FILE_DIRECTORY):
         print(f"[CRITICAL] Missing directory: {config.FILE_DIRECTORY}")
         sys.exit(1)
 
@@ -119,6 +133,14 @@ def startup():
     # flac-serv-* names if this install predates the rename. A no-op on every
     # run after the first, and on any install that never had them.
     db.migrate_legacy_side_files()
+
+    # Before find_latest_list() below: defaults.py's LIST_BASE_NAME derivation
+    # (an untouched value takes NICKNAME's own value once NICKNAME is set)
+    # means an existing install's list files can be sitting on disk under the
+    # OLD "DCCore-*" name while LIST_BASE_NAME now resolves to something else -
+    # see migrate_list_base_name()'s own docstring. A no-op on every run after
+    # the first, and on any install that never had a "DCCore-*" list.
+    update_list.migrate_list_base_name()
 
     latest_list = list.find_latest_list()
     if not latest_list:

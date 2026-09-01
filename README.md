@@ -54,7 +54,7 @@ The one optional extra is the web dashboard, which needs Flask and is opt-in - t
 ```bash
 python3 setup.py
 ```
-Asks six questions - nickname, IRC server, channel(s), admin nick, admin console password (the same prompt as running `adminchat.py` directly), and the music directory - and writes them to `settings.conf` and `admin_config.py` for you. Answers what `settings_file.REQUIRED` needs to let the daemon boot at all, nothing more; everything else stays configurable afterwards from the CLI or the web dashboard's Settings page. Safe to run again later - every prompt shows what is already configured as its default.
+Asks nickname, IRC server, channel(s), admin nick, admin console password (the same prompt as running `adminchat.py` directly), the music directory, and whether to enable the web dashboard - and writes them to `settings.conf` and `admin_config.py` for you. The music directory is optional; it is often easier to browse-and-confirm it from the web dashboard's Settings page once the daemon is running than to type a path here. Everything else stays configurable afterwards from the CLI or the web dashboard's Settings page. Safe to run again later - every prompt shows what is already configured as its default.
 
 ### Local overrides
 Copy [`admin_config.py.sample`](admin_config.py.sample) to `admin_config.py` (gitignored) to set machine-specific values - such as the admin console's `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH` - without editing a tracked file, or without running `setup.py` at all. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) for the full admin console setup guide.
@@ -63,9 +63,9 @@ Copy [`admin_config.py.sample`](admin_config.py.sample) to `admin_config.py` (gi
 Copy `settings.conf.sample` to `settings.conf` (also gitignored) to set the same kind of machine-specific values in a plain text file instead - no Python syntax required. It is what the web dashboard's Settings page and the admin console's CLI both write to, and `defaults.py` applies it *after* `admin_config.py`, so a value set in both places takes its value from `settings.conf`. The daemon starts fine from `settings.conf` alone, with no `admin_config.py` at all; use whichever fits how you prefer to configure things, or both.
 
 ### First-time setup
-Before the first real start, verify the setup without connecting to IRC. This catches the two mistakes that actually cause trouble: a music directory that does not exist, and a config still carrying the upstream nickname or channels - which would put a near-identical second bot into the production bot's live channels.
+Before the first real start, verify the setup without connecting to IRC. This catches the mistakes that actually cause trouble at boot - most notably a music directory that is set but does not exist - without ever opening a socket.
 
-The daemon itself backstops this too: `oserve.startup()` refuses to boot while `NICKNAME`, `CHANNEL`, `ADMIN_NICK` or `FILE_DIRECTORY` is still blank (`settings_file.REQUIRED`), regardless of how the daemon is started - the check below is the friendlier, earlier warning. `SERVER` and `DEBUG_CHANNEL` are not in that list on purpose: their shipped defaults are already correct for almost every install, so requiring them too would just make an operator retype a value that was already right.
+The daemon itself backstops this too: `oserve.startup()` refuses to boot while `NICKNAME`, `CHANNEL` or `ADMIN_NICK` is still blank (`settings_file.REQUIRED`), regardless of how the daemon is started - the check below is the friendlier, earlier warning. `SERVER` and `DEBUG_CHANNEL` are not in that list on purpose: their shipped defaults are already correct for almost every install, so requiring them too would just make an operator retype a value that was already right. `FILE_DIRECTORY` is not in that list either, deliberately: requiring it would block the daemon from ever reaching the web dashboard, the one place that is genuinely easier to set it from - a blank one only warns, both here and at boot.
 
 **Linux:**
 ```bash

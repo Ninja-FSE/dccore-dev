@@ -23,7 +23,20 @@ import runtime
 queue_lock = threading.Lock()
 
 def is_safe_path(base_dir, path, follow_symlinks=True):
-    """Safety filter: prevents directory traversal attacks."""
+    """Safety filter: prevents directory traversal attacks.
+
+    A falsy base_dir (chchatzop's review of #184: FILE_DIRECTORY is
+    deliberately not in settings_file.REQUIRED any more, so callers that
+    used to be able to assume it was always set can no longer do so) refuses
+    rather than raising: os.path.realpath(None) is a TypeError, and every
+    caller here is a security boundary, where "there is no base to check
+    against" must read as "nothing is safe", not as an unhandled exception a
+    caller's own except Exception can turn into a silent, unexplained
+    failure.
+    """
+    if not base_dir:
+        return False
+
     if follow_symlinks:
         matchpath = os.path.realpath(path)
     else:
@@ -848,6 +861,18 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 announce_mod.send_dcc_error(user, "rar_disabled")
                 return
 
+            # FILE_DIRECTORY is deliberately not in settings_file.REQUIRED any
+            # more (chchatzop's review of #184) - the daemon can be up and
+            # answering requests before an operator has chosen a music
+            # directory. Every album this branch packs lives under it, so
+            # checked here, explicitly, rather than letting
+            # list_mod.resolve_list_folder()/is_safe_path() below fail on a
+            # None base and fall through to the bare except at the bottom of
+            # this function, which told the requester nothing at all.
+            if not config.FILE_DIRECTORY:
+                announce_mod.send_dcc_error(user, "not_configured")
+                return
+
             raw_win_path = requested_file[5:].strip()
             
             # Trim any leftovers, in case somebody pasted an old row
@@ -986,6 +1011,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             base_directory = os.path.abspath(config.LOCAL_LIST_DIR)
             full_path = os.path.join(base_directory, requested_file)
         else:
+            # Same reasoning as the !rar branch above: FILE_DIRECTORY can
+            # legitimately be unset (chchatzop's review of #184), and an
+            # ordinary track request - unlike a list artifact request, which
+            # never touches FILE_DIRECTORY at all - has nothing to look for
+            # without it. Checked explicitly rather than letting
+            # os.path.abspath(None) raise into the bare except below, which
+            # left the requester with no response of any kind.
+            if not config.FILE_DIRECTORY:
+                announce.send_dcc_error(user, "not_configured")
+                return
             base_directory = os.path.abspath(config.FILE_DIRECTORY)
             full_path = os.path.join(base_directory, requested_file)
 
@@ -1256,7 +1291,22 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     dcc_sock.listen(1)
     
     safe_file_name = file_name.replace(" ", "_")
-    ctcp_handshake = f"PRIVMSG {user} :\x01DCC SEND {safe_file_name} {ip_long} {assigned_port} {file_size}\x01\r\n"
+    # The handshake is a PRIVMSG like any other: the server prepends our
+    # ":nick!ident@host " when relaying it, and the whole thing has to fit
+    # inside 512 bytes. A non-ASCII filename costs 2-3 bytes per character,
+    # so a ~150-character Chinese or Japanese title overruns that on its own -
+    # and the fields the transfer actually needs (address, port, size) sit
+    # AFTER the name, so the server's cut takes THOSE and the receiver is
+    # handed a handshake it cannot act on. Trimming the name ourselves costs a
+    # shortened save-name; not trimming it costs the transfer.
+    ctcp_handshake = announce.fit_irc_filename(
+        lambda offered: (f"PRIVMSG {user} :\x01DCC SEND {offered} "
+                         f"{ip_long} {assigned_port} {file_size}\x01\r\n"),
+        safe_file_name)
+    if safe_file_name not in ctcp_handshake:
+        # Say so rather than letting the receiver silently save it under a
+        # name the operator never chose and cannot find in their own library.
+        print(f"[DCC] Offered filename shortened to fit the IRC line: {file_name!r}")
     
     try:
         irc_sock.send(ctcp_handshake.encode())

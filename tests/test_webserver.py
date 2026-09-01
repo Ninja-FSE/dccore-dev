@@ -26,6 +26,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
 import adminchat  # noqa: E402
+import announce  # noqa: E402
 import commands  # noqa: E402
 import defaults as config  # noqa: E402
 import db  # noqa: E402
@@ -33,7 +34,7 @@ import list as list_mod  # noqa: E402
 import settings_file  # noqa: E402
 import webserver  # noqa: E402
 
-from tests.support import DCCoreTestCase, queue_row  # noqa: E402
+from tests.support import DCCoreTestCase, queue_row, silence_debug  # noqa: E402
 
 WEBUI_TEST_PASSWORD = "test-password"
 
@@ -515,6 +516,86 @@ class BroadcastSearchTests(DCCoreTestCase):
                              "fit_irc_line() measures the full line, \\r\\n included")
 
 
+class ListUpdateToolTests(DCCoreTestCase):
+    """start_list_update()/build_update_list_status_payload() - the pure
+    logic behind POST /api/tools/update-list and its /status counterpart.
+
+    Added alongside setup.py's dashboard-first FILE_DIRECTORY question (#170):
+    an operator who sets the music directory from the Settings page - the
+    place this project's own setup.py now points at, since FILE_DIRECTORY
+    is deliberately not in settings_file.REQUIRED - had no way at all to
+    then build the master list without a real IRC client or a CLI already
+    running.
+
+    threading.Thread is patched to _SyncThread (imported from
+    tests.test_commands, which already built it for the identical need in
+    ListUpdateTimeoutTests) so commands.handle_list_update_request()'s own
+    async_list_updater() runs synchronously and its effect on
+    config.update_inprogress is observable with no real background thread
+    or real update_list.py subprocess."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.test_commands import _SyncThread
+        self.debug = silence_debug(announce)
+        real_thread_cls = threading.Thread
+        threading.Thread = _SyncThread
+        self.addCleanup(setattr, threading, "Thread", real_thread_cls)
+        real_sleep = time.sleep
+        time.sleep = lambda *_a, **_k: None
+        self.addCleanup(setattr, time, "sleep", real_sleep)
+
+        import subprocess
+        real_run = subprocess.run
+
+        def fake_run(cmd, **kwargs):
+            import types
+            return types.SimpleNamespace(returncode=0, stdout="List of 1 Files\n", stderr="")
+
+        subprocess.run = fake_run
+        self.addCleanup(setattr, subprocess, "run", real_run)
+
+    def test_a_clean_run_starts_and_finishes_synchronously_under_the_fake_thread(self):
+        status, result = webserver.start_list_update()
+        self.assertEqual(status, 200)
+        self.assertEqual(result["update"], "started")
+        # _SyncThread ran the whole update inline, so by the time this
+        # returns the finally block has already cleared the flag again.
+        self.assertFalse(config.update_inprogress)
+
+    def test_a_run_already_in_progress_is_rejected(self):
+        config.update_inprogress = True
+        status, result = webserver.start_list_update()
+        self.assertEqual(status, 409)
+        self.assertIn("already running", result["error"])
+
+    def test_a_paused_system_scan_is_rejected_when_pause_on_update_is_set(self):
+        config.search_inprogress = True
+        config.PAUSE_ON_UPDATE = True
+        status, result = webserver.start_list_update()
+        self.assertEqual(status, 409)
+        self.assertIn("already in progress", result["error"])
+
+    def test_a_system_scan_does_not_block_when_pause_on_update_is_off(self):
+        """PAUSE_ON_UPDATE=False means commands.handle_list_update_request()
+        itself never even checks search_inprogress - see its own comment -
+        so this route must not invent a stricter gate than the command it
+        wraps enforces."""
+        config.search_inprogress = True
+        config.PAUSE_ON_UPDATE = False
+        status, _result = webserver.start_list_update()
+        self.assertEqual(status, 200)
+
+    def test_status_payload_reflects_a_run_in_progress(self):
+        config.update_inprogress = True
+        payload = webserver.build_update_list_status_payload()
+        self.assertTrue(payload["running"])
+
+    def test_status_payload_reflects_no_run_in_progress(self):
+        payload = webserver.build_update_list_status_payload()
+        self.assertFalse(payload["running"])
+
+
 class FetchRoutesTests(DCCoreTestCase):
     """build_fetch_enqueue_result()/build_fetch_status_payload() - the pure
     logic behind POST /api/fetch/enqueue and GET /api/fetch/status."""
@@ -745,7 +826,10 @@ class FetchDeleteResultTests(DCCoreTestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
 
     def test_in_flight_states_are_refused_not_deleted(self):
-        for state in ("pending", "offered", "listening", "receiving"):
+        """"pending" is deliberately NOT in this list - see
+        tests/test_fetch_queue_bounds.py, which covers why it is deletable and
+        that the other three still are not."""
+        for state in ("offered", "listening", "receiving"):
             with self.subTest(state=state):
                 rid = f"r-{state}"
                 self._put_row(rid, state=state, stored_filename=None)
@@ -844,6 +928,21 @@ class FetchDeleteRouteTests(DCCoreTestCase):
         self.assertEqual(resp.get_json()["deleted"], "rid")
         self.assertNotIn("rid", config.fetch_queue)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
+
+    def test_deleting_a_pending_fetch_succeeds_via_http(self):
+        """Audit #162 finding 27: this used to 409 like the three states
+        below, which left a mistaken bulk enqueue clearable only by restarting
+        the daemon."""
+        config.fetch_queue["rid"] = {
+            "bot": "goodbot", "filename": "Song.flac", "request_type": "file",
+            "state": "pending", "requested_at": 1.0, "offered_at": None,
+            "bytes_received": 0, "total_size": None, "reason": "",
+            "stored_filename": None,
+        }
+        resp = self.client.post("/api/fetch/rid/delete")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("rid", config.fetch_queue)
 
     def test_deleting_an_in_flight_fetch_is_refused_via_http(self):
         config.fetch_queue["rid"] = {
@@ -1191,6 +1290,19 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertIn("error", resp.get_json())
         self.assertEqual(self.oserve.queued, [])
         self.assertFalse(config.broadcast_search_inprogress)
+
+    def test_an_over_long_enqueue_batch_is_a_413_via_http(self):
+        """Audit #162 finding 27. 413 is not a status this app returns
+        anywhere else, so it is worth confirming Flask ships it rather than
+        coercing it - the pure-function coverage is in
+        tests/test_fetch_queue_bounds.py."""
+        resp = self.client.post("/api/fetch/enqueue", json=[
+            {"bot": "goodbot", "filename": f"S{n}.flac"}
+            for n in range(webserver.FETCH_ENQUEUE_MAX_ITEMS + 1)])
+
+        self.assertEqual(resp.status_code, 413)
+        self.assertIn("error", resp.get_json())
+        self.assertEqual(config.fetch_queue, {})
 
     def test_fetch_enqueue_bot_with_crlf_is_rejected_via_http(self):
         resp = self.client.post("/api/fetch/enqueue", json={

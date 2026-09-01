@@ -210,6 +210,47 @@ def new_fetch_row(bot, filename, now=None, request_type="file"):
 
 _UNRESOLVED_FETCH_STATES = ("pending", "offered", "listening", "receiving")
 
+# MAX_UNRESOLVED_FETCHES: the ceiling on how many rows may sit unresolved
+# (pending or in flight) at once, across every requester.
+#
+# MAX_FETCH_SLOTS already bounds the rows actually MOVING - count_active_fetches()
+# counts offered/listening/receiving, and check_fetch_queue() promotes only into
+# free slots. Nothing bounded the rows WAITING. A `pending` row costs no socket
+# and no slot, so the dispatcher was content to let the backlog behind those three
+# slots grow without limit, and one bulk enqueue could park thousands of rows that
+# then drain at MSG_DELAY seconds apiece - hours of outbound IRC the operator did
+# not ask for a second time.
+#
+# A module constant rather than a config setting, matching webserver.py's own
+# WEBUI_MAX_SEARCH_RESULTS/FILELISTS_MAX_PAGE_SIZE: this is a backstop against a
+# mistake, not a knob anyone tunes. An operator who genuinely wants a fourth
+# thousand-file batch queued can delete rows or wait for the first three to drain,
+# and MAX_FETCH_SLOTS is the setting that actually governs throughput.
+#
+# 1000 is deliberately far above any real batch - the dashboard's largest
+# hand-driven multi-select is a page of checkboxes - and far below the point where
+# the queue's own size is the problem.
+MAX_UNRESOLVED_FETCHES = 1000
+
+
+def count_unresolved_fetches(queue=None):
+    """Rows that have not reached a terminal state: pending plus in flight.
+
+    The companion to count_active_fetches(), and deliberately a WIDER count:
+    that one answers "how many slots are busy" (offered/listening/receiving)
+    for the dispatcher's promotion decision, this one answers "how much work
+    is outstanding" for admission control. `pending` is the whole difference
+    between them, and it is exactly the state that used to be unbounded.
+
+    Derived on demand rather than tracked as a counter, same as
+    count_active_fetches() - see the comment on config.fetch_queue for why a
+    second source of truth for a number already implied by the rows is worse
+    than recomputing it.
+    """
+    queue = _ensure_fetch_queue() if queue is None else queue
+    return sum(1 for row in queue.values()
+               if row.get("state") in _UNRESOLVED_FETCH_STATES)
+
 
 def _has_outstanding_bot_alone_request_locked(queue, bot):
     """True if `queue` already has an unresolved "list" or "folder" row for
@@ -277,14 +318,25 @@ def enqueue_fetch(bot, filename, request_type="file"):
     itself first, so it can return a clear 409 instead of just observing
     None come back from here.
 
-    "file" rows are never affected - they use exact bot+filename admission
-    control and were never ambiguous (see _claim_matching_offer_locked()).
+    "file" rows are never affected by THAT check - they use exact bot+filename
+    admission control and were never ambiguous (see _claim_matching_offer_locked()).
+
+    Every request_type, "file" included, is refused once the queue already
+    holds MAX_UNRESOLVED_FETCHES unresolved rows. Enforced here for the same
+    defense-in-depth reason as the check above, and additionally because it is
+    the only place it CAN be exact: the count and the insert have to happen
+    under one hold of the lock or two callers race.
     """
     queue = _ensure_fetch_queue()
     normalized_type = request_type if request_type in ("file", "list", "folder") else "file"
     request_id = uuid.uuid4().hex[:12]
     with _fetch_lock():
         if normalized_type in ("list", "folder") and _has_outstanding_bot_alone_request_locked(queue, bot):
+            return None
+        # Checked under the same lock that does the insert, so the count cannot
+        # go stale between deciding there is room and taking it - two request
+        # threads enqueueing at once cannot both read 999 and both create.
+        if count_unresolved_fetches(queue) >= MAX_UNRESOLVED_FETCHES:
             return None
         while request_id in queue:  # practically never, but be certain
             request_id = uuid.uuid4().hex[:12]

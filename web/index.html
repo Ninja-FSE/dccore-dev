@@ -273,6 +273,20 @@
     <section class="view" id="view-tools">
       <div class="tool-card">
         <div class="tool-head">
+          <h2 class="tool-name">Update list</h2>
+          <button type="button" class="btn btn-accent" id="update-list-run-btn">Run</button>
+        </div>
+        <p class="tool-what">
+          Rebuilds the master list by walking the whole music directory again
+          &mdash; the same rebuild <code>!update</code> triggers over IRC.
+          Worth running here right after setting or changing the music
+          directory from the Settings page, since nothing else prompts for
+          it automatically.
+        </p>
+        <p class="tool-status" id="update-list-status"></p>
+      </div>
+      <div class="tool-card">
+        <div class="tool-head">
           <h2 class="tool-name">Verify list</h2>
           <button type="button" class="btn btn-accent" id="verify-run-btn">Run</button>
         </div>

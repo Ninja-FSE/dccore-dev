@@ -126,7 +126,7 @@ class NeitherLauncherCarriesChecks(unittest.TestCase):
     fail here rather than quietly restarting the drift this removed."""
 
     # Things only the shared module should ever do.
-    FORBIDDEN = ("getattr(config", "UPSTREAM_NICKS", "UPSTREAM_CHANNELS",
+    FORBIDDEN = ("getattr(config", "DCC_PORT_START", "MAX_DCC_SLOTS",
                  "socket.socket", "def fail", "def warn", "def ok")
 
     def test_the_launchers_contain_no_check_logic(self):
@@ -164,18 +164,18 @@ class NeitherLauncherCarriesChecks(unittest.TestCase):
             self.assertIn("main", names, f"{name}'s launcher never calls main()")
 
     def test_the_checks_live_in_exactly_one_place(self):
-        """UPSTREAM_NICKS is the marker: it is the knowledge that was
+        """DCC_PORT_START is the marker: it is the knowledge that was
         duplicated, so counting where it appears counts the copies."""
         holders = []
         for root, _dirs, files in os.walk(SCRIPTS):
             for filename in files:
-                if filename.endswith(".py") and "UPSTREAM_NICKS" in source(
+                if filename.endswith(".py") and "DCC_PORT_START" in source(
                         os.path.join(root, filename)):
                     holders.append(os.path.relpath(
                         os.path.join(root, filename), REPO_ROOT))
 
         self.assertEqual(len(holders), 1,
-                         "the upstream-bot check exists in more than one "
+                         "the setup check exists in more than one "
                          "file again: " + ", ".join(sorted(holders)))
 
 

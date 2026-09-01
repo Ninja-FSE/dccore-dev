@@ -165,6 +165,22 @@ def parse_pagination_params(raw_offset, raw_limit):
 # before whatever fixed template text surrounds it at the actual emit site.
 IRC_LINE_FIELD_MAX_LEN = 300
 
+# FETCH_ENQUEUE_MAX_ITEMS: how many items one POST /api/fetch/enqueue body may
+# carry. The route takes a list because multi-select is the point - but it took
+# an unbounded one, and a single request could create thousands of rows.
+#
+# This is the payload-shaped half of the bound; dcc_fetch.MAX_UNRESOLVED_FETCHES
+# is the queue-shaped half, and both are needed. Capping only the request lets N
+# requests do what one could; capping only the queue accepts a 50,000-item body,
+# validates every item, and only then discovers there was never room - having
+# already spent the memory and the CPU that the cap exists to avoid.
+#
+# 500 clears every way the dashboard can actually produce a batch: the broadcast
+# search table is capped at WEBUI_MAX_SEARCH_RESULTS (50), the file-list browser
+# has no select-all so its batches are hand-ticked boxes, and the bulk-paste box
+# is the only unbounded input - which is the one this is for.
+FETCH_ENQUEUE_MAX_ITEMS = 500
+
 
 def reject_if_unsafe_for_irc_line(value, field_name, max_len=IRC_LINE_FIELD_MAX_LEN):
     """Return an error string if `value` is not safe to interpolate into an
@@ -855,6 +871,15 @@ def build_fetch_enqueue_result(payload):
     if not isinstance(items, list) or not items:
         return 400, {"error": 'Expected a {"bot": .., "filename": ..} object, '
                                'or a non-empty list of them.'}
+    # Before the per-item loop, not inside it: the whole point is to refuse the
+    # body without paying for it. Rejecting the request outright rather than
+    # taking the first 500 and reporting the rest - a partial accept on a batch
+    # this size is worse than a refusal, because the operator cannot tell from
+    # the dashboard which files made it in and would have to diff the Downloads
+    # table against what they pasted.
+    if len(items) > FETCH_ENQUEUE_MAX_ITEMS:
+        return 413, {"error": f"At most {FETCH_ENQUEUE_MAX_ITEMS} items per "
+                              f"request; this one had {len(items)}."}
 
     created = []
     errors = []
@@ -880,7 +905,18 @@ def build_fetch_enqueue_result(payload):
         if not bot or not filename:
             errors.append({"error": "Both 'bot' and 'filename' are required.", "item": raw})
             continue
-        created.append(dcc_fetch.enqueue_fetch(bot, filename))
+        request_id = dcc_fetch.enqueue_fetch(bot, filename)
+        if request_id is None:
+            # Only reachable via the queue cap: enqueue_fetch()'s other refusal
+            # is for "list"/"folder" rows and this route only creates "file"
+            # ones. Appending the None unchecked - which is what this line used
+            # to do - would have put a null in "created", so the dashboard would
+            # report the row as queued and then never find it again.
+            errors.append({"error": "The fetch queue is full - wait for some "
+                                    "downloads to finish, or delete queued rows.",
+                           "item": raw})
+            continue
+        created.append(request_id)
 
     status = 200 if created else 400
     return status, {"created": created, "errors": errors}
@@ -912,13 +948,29 @@ def build_fetch_delete_result(request_id):
     """DELETE /api/fetch/<request_id>: forget a finished fetch and remove its
     file from FETCHED_FILES_DIR, if it has one.
 
-    Refuses anything still in flight (pending/offered/listening/receiving) -
-    there is no cancellation path for a transfer thread already running, so
-    dropping the row out from under it would just let the thread keep writing
-    to a file nothing in the UI can see or ever clean up again. Only
+    Refuses anything actually in flight (offered/listening/receiving) - there
+    is no cancellation path for a transfer thread already running, so dropping
+    the row out from under it would just let the thread keep writing to a file
+    nothing in the UI can see or ever clean up again.
+
+    `pending` is deletable, and used to be refused alongside those three. It
+    does not belong with them: a pending row is one check_fetch_queue() has not
+    promoted yet, so there is no thread, no socket, no offer on the wire and no
+    file on disk - nothing to cancel, only a row to forget. Sweeping it in with
+    the in-flight states meant a queue could only be emptied by restarting the
+    daemon, since !rehash preserves fetch_queue too: one mistaken bulk enqueue
+    was unrecoverable from the dashboard that created it.
+
+    Safe against the dispatcher precisely because both sides take
+    dcc_fetch._fetch_lock(): check_fetch_queue() holds it while flipping
+    pending -> offered, and this function holds it across reading the state and
+    doing the del. A row cannot be promoted in between - either we observe
+    `pending` and it is still pending when it is removed, or we observe
+    `offered` and refuse.
+
     "complete" (this includes a rejected list archive - see
     build_fetch_status_payload()'s caller for that distinction, it is still
-    state == "complete" here) and "failed" rows are deletable.
+    state == "complete" here) and "failed" rows remain deletable as before.
 
     Never builds the on-disk path from request_id or anything else attacker-
     reachable - request_id only selects the row, and the row's own
@@ -941,8 +993,8 @@ def build_fetch_delete_result(request_id):
         row = getattr(config, "fetch_queue", {}).get(request_id)
         if row is None:
             return 404, {"error": "Unknown fetch request."}
-        if row.get("state") not in ("complete", "failed"):
-            return 409, {"error": "Only a completed or failed fetch can be deleted."}
+        if row.get("state") not in ("complete", "failed", "pending"):
+            return 409, {"error": "A fetch already in progress cannot be deleted."}
         stored_filename = row.get("stored_filename")
         del config.fetch_queue[request_id]
 
@@ -1007,6 +1059,51 @@ def build_verify_list_payload():
         # AutoQ.mrc and every ordinary request sends - not unreachable outright.
         "shadowed": sum(item["count"] - 1 for item in duplicates),
     }
+
+
+# Attributed nick for admin actions the dashboard dispatches on an operator's
+# behalf - nobody is logged into IRC as "WEB-DASHBOARD", so this can never
+# collide with (or impersonate) a real admin nick in a log line or in
+# commands.py's own messaging. Shared by every such action below (rehash,
+# list update): one identity, not a fresh one invented per route.
+WEB_DASHBOARD_SOURCE = "WEB-DASHBOARD"
+
+
+def build_update_list_status_payload():
+    """GET /api/tools/update-list/status payload: whether a master-list
+    rebuild is running right now. config.update_inprogress is set True just
+    before commands.handle_list_update_request() starts its background
+    thread and cleared in that thread's own `finally`, so this is accurate
+    for a rebuild started here, from !update, or from the admin console."""
+    return {"running": bool(getattr(config, "update_inprogress", False))}
+
+
+def start_list_update():
+    """POST /api/tools/update-list's pure logic: kick off a master-list
+    rebuild, the dashboard's own equivalent of !update - added because
+    FILE_DIRECTORY is deliberately not in settings_file.REQUIRED (see its
+    own comment): an operator who sets it for the first time from this same
+    Settings page had no way at all to then build the list it enables,
+    short of a real IRC client or a CLI already running.
+
+    commands.handle_list_update_request() already starts update_list.py on
+    its own daemon thread and returns immediately - see its own docstring -
+    so this only needs the same re-entrancy guard it makes internally,
+    surfaced as a real HTTP response rather than the debug-channel notice it
+    also sends, which an operator with no IRC client open would never see.
+
+    Returns (http_status, payload_dict).
+    """
+    if bool(getattr(config, "update_inprogress", False)):
+        return 409, {"error": "A list update is already running."}
+    if (bool(getattr(config, "search_inprogress", False))
+            and bool(getattr(config, "PAUSE_ON_UPDATE", True))):
+        return 409, {"error": "Another system scan is already in progress."}
+
+    import commands
+    commands.handle_list_update_request(
+        WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE, authorised=True)
+    return 200, {"update": "started"}
 
 
 # ==========================================================================
@@ -1204,12 +1301,6 @@ def build_settings_payload():
     }
 
 
-# The rehash the settings save route dispatches is attributed to this rather
-# than an operator nick: nobody is logged into IRC as "WEB-DASHBOARD", so this
-# can never collide with (or impersonate) a real admin nick in a log line or
-# in commands.handle_rehash_request's own messaging.
-WEB_REHASH_SOURCE = "WEB-DASHBOARD"
-
 # Settings that only take effect on a full daemon restart - webserver.py owns
 # a live listening socket and is deliberately excluded from
 # commands.py's modules_to_reload, so a rehash after saving one of these three
@@ -1260,7 +1351,7 @@ def _save_settings_and_rehash(changes):
     import commands
     threading.Thread(
         target=commands.handle_rehash_request,
-        args=(WEB_REHASH_SOURCE, WEB_REHASH_SOURCE),
+        args=(WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE),
         kwargs={"authorised": True},
         daemon=True,
     ).start()
@@ -1478,6 +1569,15 @@ if HAVE_FLASK:
         @app.route("/api/tools/verify-list")
         def api_tools_verify_list():
             return jsonify(build_verify_list_payload())
+
+        @app.route("/api/tools/update-list", methods=["POST"])
+        def api_tools_update_list():
+            status, result = start_list_update()
+            return jsonify(result), status
+
+        @app.route("/api/tools/update-list/status")
+        def api_tools_update_list_status():
+            return jsonify(build_update_list_status_payload())
 
         @app.route("/api/filelists/fetch", methods=["POST"])
         def api_filelists_fetch():
