@@ -21,6 +21,16 @@
 # also be set in settings.conf instead (see settings.conf.sample) if you
 # prefer configuring them from the web dashboard or CLI rather than by hand.
 #
+# NICKNAME, CHANNEL, ADMIN_NICK and FILE_DIRECTORY are not just recommended -
+# oserve.startup() refuses to boot (sys.exit(1), naming every one still
+# unconfigured) while any of them is still blank. See settings_file.REQUIRED
+# if you want the full, authoritative list. SERVER and DEBUG_CHANNEL are NOT
+# in that list even though they matter - their shipped defaults
+# ("irc.undernet.org", "#dccore-debug") are already correct for almost every
+# install, and forcing them blank too would make those correct, intended
+# values impossible to set explicitly (the gate cannot tell "left at
+# default" apart from "deliberately confirmed the default is right").
+#
 # NICKNAME = "YourBotName"
 # ALT_NICKNAME = "YourBotName_"
 # CHANNEL = "#your-test-channel"

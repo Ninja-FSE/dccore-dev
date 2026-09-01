@@ -38,6 +38,12 @@ gitignored and never leaves your machine.
 > you start the daemon without overriding them, you join his trading channels as
 > a second bot with a near-identical name. That reads as a clone and can get
 > **both** of you banned. Set your own nickname and your own test channel.
+>
+> This is no longer just advice: `oserve.startup()` refuses to boot while
+> `NICKNAME`, `CHANNEL`, `ADMIN_NICK` or `FILE_DIRECTORY` is still blank,
+> naming every one that is still unconfigured. `SERVER` and `DEBUG_CHANNEL`
+> are not part of that check - their shipped defaults are already correct
+> for almost every install.
 
 Set at minimum:
 

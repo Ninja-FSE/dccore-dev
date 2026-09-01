@@ -51,6 +51,22 @@ class BootCase(DCCoreTestCase):
         config.BANS_FILE = os.path.join(self.tree.root, "bans.txt")
         config.DCC_QUEUE_FILE = os.path.join(self.tree.root, "dcc_queue.txt")
 
+        # #170's RFC: oserve.startup() now refuses to boot while any of
+        # settings_file.REQUIRED still resolves to its shipped default (or is
+        # blank) - see settings_file.unconfigured_required(). This models an
+        # already-configured install; RequiredSettingsGateTests below is what
+        # actually exercises the gate itself, against values left at their
+        # shipped defaults on purpose. set_config() restores every one of
+        # these after each test, so nothing here leaks into a test that runs
+        # afterwards and never touches them itself.
+        self.set_config(
+            NICKNAME="TestBot",
+            SERVER="irc.test.example",
+            CHANNEL="#test-channel",
+            ADMIN_NICK="TestAdmin",
+            DEBUG_CHANNEL="#test-debug",
+        )
+
         self.oserve = real_oserve()
 
         # startup() spawns the flood-queue worker. Stubbed so the suite does not
@@ -96,6 +112,52 @@ class StartupRunsOnThisPlatform(BootCase):
         """A fresh install has no list yet; that must not stop the boot."""
         output = self.boot()
         self.assertIn("No file list found", output)
+
+    def test_a_required_setting_still_at_its_shipped_default_stops_the_daemon(self):
+        """#170's RFC, the daemon's own hard backstop. BootCase's own setUp()
+        already overrode every settings_file.REQUIRED name away from its
+        shipped default - undoing just NICKNAME here is what a bot that
+        never got configured at all looks like, minus the other five."""
+        self.set_config(NICKNAME=config.SHIPPED_DEFAULTS["NICKNAME"])
+        with self.assertRaises(SystemExit) as caught:
+            self.boot()
+        self.assertEqual(caught.exception.code, 1)
+
+    def test_the_refusal_names_which_settings_are_still_unconfigured(self):
+        self.set_config(
+            NICKNAME=config.SHIPPED_DEFAULTS["NICKNAME"],
+            CHANNEL=config.SHIPPED_DEFAULTS["CHANNEL"],
+        )
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                self.oserve.startup()
+        output = buffer.getvalue()
+        self.assertIn("NICKNAME", output)
+        self.assertIn("CHANNEL", output)
+        # The four this test left alone must not be reported alongside them.
+        self.assertNotIn("SERVER", output)
+        self.assertNotIn("ADMIN_NICK", output)
+
+    def test_a_blank_required_setting_also_stops_the_daemon(self):
+        """The other half of "unconfigured": a fresh install that uncommented
+        a REQUIRED line in settings.conf.sample but left it blank, rather
+        than one that never touched it at all."""
+        self.set_config(CHANNEL="")
+        with self.assertRaises(SystemExit) as caught:
+            self.boot()
+        self.assertEqual(caught.exception.code, 1)
+
+    def test_a_value_that_merely_resembles_the_upstream_brand_is_not_flagged(self):
+        """The gate only ever checks blank-vs-not (NICKNAME's shipped
+        default is None, not a real value - see config.py's own comment on
+        why). A nickname that happens to still contain "DCCore" - like this
+        install's own real "DCCoreWeb" - is a real, deliberate operator
+        choice, not an untouched default; only scripts/setup_check.py's
+        separate UPSTREAM_NICKS check cares about the brand name itself."""
+        self.set_config(NICKNAME="DCCoreWeb")
+        output = self.boot()  # must not raise
+        self.assertIn(config.SCRIPT_VERSION, output)
 
     def test_it_reports_the_list_when_there_is_one(self):
         name = f"{config.LIST_BASE_NAME}-2026-08-26.txt"

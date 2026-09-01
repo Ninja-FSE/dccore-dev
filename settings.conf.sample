@@ -32,23 +32,35 @@
 
 #LIST_BASE_NAME = DCCore
 
-
-[irc network and channel settings]
+# SERVER keeps a real, working default on purpose - "irc.undernet.org" is
+# correct for essentially every operator of an Undernet file server, not one
+# operator's identity to avoid. It is NOT in settings_file.REQUIRED for
+# exactly that reason - see REQUIRED's own comment.
 #SERVER = irc.undernet.org
 
 #PORT = 6667
 
-#NICKNAME = DCCore
+# NICKNAME, ADMIN_NICK, CHANNEL and FILE_DIRECTORY (below) are None - not a
+# real value - because they ARE in settings_file.REQUIRED: oserve.startup()
+# refuses to boot while any of them is still blank, so there is no shipped
+# value here for a copy-paste install to silently inherit and run under
+# somebody else's identity. See REQUIRED's own comment in settings_file.py
+# for the full reasoning, and RAR_BINARY above for the same "None means
+# unset" convention this already used before REQUIRED existed.
+# REQUIRED - the daemon refuses to start until this is set.
+#NICKNAME = 
 
 #ALT_NICKNAME = DCCore_
 
-#ADMIN_NICK = FLAC,Samoth
+# REQUIRED - the daemon refuses to start until this is set.
+#ADMIN_NICK = 
 
-#CHANNEL = #mp3passion,#mp3servers,#mp3-best-of,#mp3country,#mp3albums4u,#mp3download
+# REQUIRED - the daemon refuses to start until this is set.
+#CHANNEL = 
 
-# Not one operator's own channel. A shipped default is what an install that
-# never touches this joins, so leaving "#flac-serv" here would point every new
-# bot's debug output at somebody else's channel.
+# Not one operator's own channel. #171's default of "#dccore-debug" is a fine
+# thing for ANY bot to use unmodified - unlike NICKNAME/CHANNEL/ADMIN_NICK
+# above, it is not in settings_file.REQUIRED, and keeps its own real default.
 #DEBUG_CHANNEL = #dccore-debug
 
 # The single channel a "search all bots" broadcast (@find) goes into - see
@@ -68,7 +80,14 @@
 # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
 #PAUSE_ON_UPDATE = true
 
-#FILE_DIRECTORY = /mnt/nfs-musik
+# None, not a real path - FILE_DIRECTORY is in settings_file.REQUIRED (see its
+# own comment): oserve.startup() already refuses to boot on a directory that
+# does not exist, but a shipped literal path would let a copy-paste install
+# reach that check with somebody else's actual music folder path, not "not
+# configured at all". Blank makes the REQUIRED gate catch it first, with a
+# clearer message.
+# REQUIRED - the daemon refuses to start until this is set.
+#FILE_DIRECTORY = 
 
 # Off refuses every !rar request with a notice; ordinary single-file transfers are unaffected
 #RAR_ENABLED = true
@@ -344,6 +363,32 @@
 # install silently changes identity.
 # classic, midnight, forest, orchid, plain
 #THEME = classic
+
+# Override individual roles on top of the chosen preset, for an operator who
+# would rather be unique than pick from a list - each is a raw mIRC code
+# string like "\x0306,06", or None (the default) to leave that role at
+# whatever the chosen THEME preset already says.
+# 
+# #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
+# dict, CUSTOM_THEME, which is why it lived here or in local_config.py rather
+# than settings.conf - settings_file.is_overridable() takes only primitives.
+# Six plain strings are primitives, so this is now settings.conf/dashboard
+# configurable too, the same as every other setting - "one file, one format".
+# The trade-off named out loud in that discussion: a future new theme ROLE
+# still needs a new key here, a generator update and a theme.py change - the
+# old dict form could have accepted an unknown role name for free. That loss
+# is accepted; concrete uniformity now outweighs a hypothetical future role.
+#CUSTOM_THEME_BORDER = 
+
+#CUSTOM_THEME_SEPARATOR = 
+
+#CUSTOM_THEME_TEXTBOX = 
+
+#CUSTOM_THEME_VALUE = 
+
+#CUSTOM_THEME_ALERT = 
+
+#CUSTOM_THEME_ACCENT = 
 
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
 # a network-facing surface should never be on just because someone pulled and

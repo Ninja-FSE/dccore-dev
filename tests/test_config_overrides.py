@@ -105,12 +105,18 @@ class LocalConfigOverrideTests(DCCoreTestCase):
 
         self.assertEqual(cfg.BROADCAST_SEARCH_CHANNEL, "#somewhere-else")
 
-    def test_with_no_overrides_it_derives_from_the_shipped_default(self):
-        """Control. The behaviour without a local_config.py must not change."""
+    def test_with_no_overrides_and_no_channel_there_is_nothing_to_derive(self):
+        """Control, updated for #170's RFC: CHANNEL is now one of
+        settings_file.REQUIRED and ships blank (None) rather than a real
+        tracked default (see CHANNEL's own comment in config.py) - a fresh,
+        not-yet-configured install has nothing for BROADCAST_SEARCH_CHANNEL
+        to derive FROM, so both stay unset. oserve.startup()'s REQUIRED gate
+        is what actually refuses to boot in this state; importing config.py
+        itself must not raise (see the `and CHANNEL` guard this test pins)."""
         cfg = self._reload_with_local_config("# no overrides\n")
 
-        self.assertEqual(cfg.BROADCAST_SEARCH_CHANNEL,
-                         cfg.CHANNEL.split(",")[0].strip())
+        self.assertIsNone(cfg.CHANNEL)
+        self.assertIsNone(cfg.BROADCAST_SEARCH_CHANNEL)
 
     def test_a_blank_broadcast_channel_falls_back_rather_than_staying_blank(self):
         """An operator who sets it to "" gets the derived value, not an empty

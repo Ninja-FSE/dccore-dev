@@ -130,6 +130,18 @@ def reset_config(**overrides):
     config.ALT_NICKNAME = "DCCore_"
     config.ADMIN_NICK = "FLAC"
     config.MY_IP_OR_DOCK = "203.0.113.7"
+    # #170's RFC: CHANNEL and FILE_DIRECTORY are in settings_file.REQUIRED and
+    # ship blank (None) in config.py, same reason NICKNAME/ADMIN_NICK above
+    # are reset explicitly here rather than left at their (now blank) shipped
+    # default - a test that never sets these itself must still see a real,
+    # non-blank value, matching how the whole suite already behaved before
+    # REQUIRED existed. A path that does not exist is the right baseline for
+    # FILE_DIRECTORY: that already matched the shipped default's own real-
+    # world behaviour on any machine that is not the operator's own NAS, and
+    # tests/test_startup.py's BootCase (and anything else that needs a real,
+    # existing directory) already overrides this via make_tree().
+    config.CHANNEL = "#mp3passion"
+    config.FILE_DIRECTORY = "/nonexistent-dccore-test-directory"
     for stale in ("PREVIOUS_NICK",):
         if hasattr(config, stale):
             delattr(config, stale)

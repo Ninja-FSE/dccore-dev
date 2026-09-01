@@ -156,23 +156,18 @@ def theme_name():
 def palette():
     """The six roles for the configured theme, as a dict.
 
-    config.CUSTOM_THEME overrides individual roles on top of the chosen
+    config.CUSTOM_THEME_<ROLE> overrides one role on top of the chosen
     preset, so somebody who wants one colour changed does not have to restate
-    the other five. It is a dict rather than a settings.conf line on purpose:
-    settings_file.is_overridable() takes primitives, so this is a
-    local_config.py knob for an operator who would rather be unique than pick
-    from a list, and the presets are what the settings page offers.
-
-    Unknown keys are ignored rather than merged: a typo like "boarder" would
-    otherwise sit in the palette doing nothing, and the role it was meant to
-    set would silently keep the preset's value.
+    the other five. #170's RFC flattened this from a single CUSTOM_THEME dict
+    into six plain strings (see config.py's own comment on that change) - a
+    role left at its default of None keeps the preset's own value, exactly
+    as an absent key in the old dict did.
     """
     roles = dict(THEMES[theme_name()])
-    custom = getattr(config, "CUSTOM_THEME", None)
-    if isinstance(custom, dict):
-        for role, value in custom.items():
-            if role in roles and isinstance(value, str):
-                roles[role] = value
+    for role in roles:
+        override = getattr(config, f"CUSTOM_THEME_{role.upper()}", None)
+        if isinstance(override, str) and override:
+            roles[role] = override
     return roles
 
 

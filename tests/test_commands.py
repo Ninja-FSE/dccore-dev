@@ -443,13 +443,14 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
     """
 
     # Excluded on purpose. Each entry is a claim about WHY losing it is fine.
+    #
+    # CUSTOM_THEME used to be listed here (a setting, not runtime state - the
+    # operator's per-role colour overrides, meant to be re-read on a rehash
+    # rather than preserved). #170's RFC flattened it into six plain
+    # CUSTOM_THEME_<ROLE> strings; _config_containers() below only matches
+    # dict/list literals and runtime.py bindings, so none of the six are
+    # picked up by that scan any more and there is nothing left to exclude.
     NOT_PRESERVED = {
-        "CUSTOM_THEME":
-            "a setting, not runtime state: the operator's per-role colour "
-            "overrides, read from config.py or local_config.py. Losing it on a "
-            "rehash is not a loss - re-reading it is the point, the same way "
-            "ADMIN_HOSTMASKS below is meant to be re-read.",
-
         "ADMIN_HOSTMASKS":
             "a setting read from local_config.py, not runtime state - it is "
             "SUPPOSED to be re-read from the file on a rehash",
