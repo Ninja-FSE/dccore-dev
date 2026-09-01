@@ -27,6 +27,14 @@ on PATH, because WinRAR does not add itself to PATH.
 
 ## Setup
 
+### The fast path: `python3 setup.py`
+
+Asks six questions - nickname, IRC server, channel(s), admin nick, the admin
+console password, and the music directory - and writes them to
+`settings.conf` and `admin_config.py` itself. Covers everything below;
+skip to step 2 if you use it. The rest of this section is the manual
+equivalent, for anyone who would rather edit the files by hand.
+
 ### 1. Create `admin_config.py`
 
 Copy `admin_config.py.sample` to `admin_config.py` and fill it in. That file is

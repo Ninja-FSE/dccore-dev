@@ -50,8 +50,14 @@ pip install -r requirements.txt      # succeeds, installs nothing
 ```
 The one optional extra is the web dashboard, which needs Flask and is opt-in - the bot starts fine without it.
 
+### Guided first-run setup
+```bash
+python3 setup.py
+```
+Asks six questions - nickname, IRC server, channel(s), admin nick, admin console password (the same prompt as running `adminchat.py` directly), and the music directory - and writes them to `settings.conf` and `admin_config.py` for you. Answers what `settings_file.REQUIRED` needs to let the daemon boot at all, nothing more; everything else stays configurable afterwards from the CLI or the web dashboard's Settings page. Safe to run again later - every prompt shows what is already configured as its default.
+
 ### Local overrides
-Copy [`admin_config.py.sample`](admin_config.py.sample) to `admin_config.py` (gitignored) to set machine-specific values - such as the admin console's `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH` - without editing a tracked file. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) for the full admin console setup guide.
+Copy [`admin_config.py.sample`](admin_config.py.sample) to `admin_config.py` (gitignored) to set machine-specific values - such as the admin console's `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH` - without editing a tracked file, or without running `setup.py` at all. See [docs/ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) for the full admin console setup guide.
 
 ### settings.conf
 Copy `settings.conf.sample` to `settings.conf` (also gitignored) to set the same kind of machine-specific values in a plain text file instead - no Python syntax required. It is what the web dashboard's Settings page and the admin console's CLI both write to, and `defaults.py` applies it *after* `admin_config.py`, so a value set in both places takes its value from `settings.conf`. The daemon starts fine from `settings.conf` alone, with no `admin_config.py` at all; use whichever fits how you prefer to configure things, or both.
