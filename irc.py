@@ -285,10 +285,10 @@ def parse_search_header(text):
 # ---------------------------------------------------------------------------
 #
 # Every file-serving bot on this network announces itself on a timer. Captured
-# from #Mp3Passion on 2026-08-29: 392 lines, 31 bots with a readable advert,
-# in four different wordings and no two decorated alike. The capture is the
-# specification, and every line of it is a fixture in
-# tests/test_advert_listener.py.
+# from a busy public file-sharing channel on 2026-08-29: 392 lines, 31 bots
+# with a readable advert, in four different wordings and no two decorated
+# alike. The capture is the specification, and every line of it is a fixture
+# in tests/test_advert_listener.py.
 #
 # THE ADVERT IS NOT ALWAYS ONE MESSAGE
 #
@@ -571,8 +571,8 @@ def _capture_channel_advert(user, target, msg, now=None):
     that bot's current one when it was never theirs.
 
     So an advert whose claimed nick does not match the nick that sent it is
-    dropped. All 31 bots captured from #Mp3Passion agree with their own sender,
-    so nothing legitimate is lost.
+    dropped. All 31 bots in the capture agree with their own sender, so
+    nothing legitimate is lost.
 
     A CONTINUATION IS TRUSTED ONLY AFTER THAT CHECK HAS PASSED
 
