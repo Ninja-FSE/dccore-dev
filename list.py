@@ -664,11 +664,19 @@ def execute_search(irc_sock, user, search_term, channel):
             if oserve:
                 BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
                 
-                for match in matches: 
-                    # Wrap the row in the colour-block frame and send it raw to the user
-                    block_match = f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {match}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} "
-                    result_msg = f"PRIVMSG {user} :{block_match}\r\n"
-                    oserve.queue_message(user, result_msg)
+                for match in matches:
+                    # Through fit_irc_line, like the header of this very reply
+                    # two lines above. These rows were the only user-visible
+                    # lines in the module that skipped it, so a long filename
+                    # was cut by the server instead - and the cut discards the
+                    # trailing reset, smearing colour down the client's window.
+                    # #162 finding #31.
+                    def _build(shown_match):
+                        block_match = (f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} "
+                                       f"{shown_match}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} ")
+                        return f"PRIVMSG {user} :{block_match}\r\n"
+
+                    oserve.queue_message(user, announce.fit_irc_line(_build, match))
         else:
             print(f"[SEARCH RESULT] 0 Match(es) found for {user} in {channel} on '{search_term}'")
                 
