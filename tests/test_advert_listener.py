@@ -31,7 +31,7 @@ WHAT THE SAMPLE SETTLES
     RAR-folder list advertised under a "^" trigger.
   * The labels are stable, the layout is not.
   * A list DATE comes from the OmenServe family. A list SIZE comes from SPQR,
-    from the RAR advert, and from DCCore and Samoth - so nothing may depend on
+    from the RAR advert, and from DCCore and TestBot - so nothing may depend on
     either being there.
 """
 
@@ -345,8 +345,8 @@ PROSPECT = (
     '\x03\x031,15\x02 \x02\x036\x0313 \x03'
 )
 
-SAMOTH = (
-    '\x0315,01\x0304,01\xae \x0314,01Type:\x0315,01 @Samoth \x0314,01For My List '
+TESTBOT = (
+    '\x0315,01\x0304,01\xae \x0314,01Type:\x0315,01 @TestBot \x0314,01For My List '
     'Of:\x0315,01 47,418 \x0314,01Files (\x0315,011.23TB\x0314,01) \x0304,01\xae '
     '\x0314,01Slots:\x0315,01 2/2 \x0304,01\xae \x0314,01Queued:\x0315,01 0 \x0304,01\xae '
     '\x0314,01Speed: (\x0315,010k/s / \x0315,0146.5MB/s\x0314,01) \x0304,01\xae '
@@ -465,7 +465,7 @@ ALL_CAPTURED = [
     ('Lmelght', LMELGHT),
     ('mq-nz', MQ_NZ),
     ('prospect', PROSPECT),
-    ('Samoth', SAMOTH),
+    ('TestBot', TESTBOT),
     ('Sonota', SONOTA),
     ('squizz', SQUIZZ),
     ('va23boam-', VA23BOAM),
@@ -517,7 +517,7 @@ KARAOKE_DUDE_SLOTS = 'SLOTS 4 4 NOW 0 999 0 475128 1913546153330 2 1787144654 23
 LMELGHT_SLOTS = 'SLOTS 3 3 NOW 0 999 0 242558 2715497806325 0 1786660191 87967 OmenServe v2.71'
 MQ_NZ_SLOTS = 'SLOTS 5 5 NOW 0 999 0 82388 589109188453 0 1759308895 35471 OmenServe v2.71'
 PROSPECT_SLOTS = 'SLOTS 5 5 NOW 0 95 6557000 36342'
-SAMOTH_SLOTS = 'SLOTS 2 2 NOW 0 999 0 47418 1363377847376 0 1787833259 24061 OmeNServE v2.60'
+TESTBOT_SLOTS = 'SLOTS 2 2 NOW 0 999 0 47418 1363377847376 0 1787833259 24061 OmeNServE v2.60'
 VA23BOAM_SLOTS = 'SLOTS 8 8 NOW 0 999 0 95747 26457270004846 0 1786926708 24364 OmeNServE v2.60'
 VIBESSONO_SLOTS = 'SLOTS 25 25 NOW 9 999 0 718005 6760435525369 0 1787698644 270671 OmeNServE v2.60'
 
@@ -546,7 +546,7 @@ ALL_SLOTS = [
     ('Lmelght', LMELGHT_SLOTS),
     ('mq-nz', MQ_NZ_SLOTS),
     ('prospect', PROSPECT_SLOTS),
-    ('Samoth', SAMOTH_SLOTS),
+    ('TestBot', TESTBOT_SLOTS),
     ('va23boam-', VA23BOAM_SLOTS),
     ('Vibessono', VIBESSONO_SLOTS),
 ]
@@ -586,7 +586,7 @@ class ReadingRealAdverts(unittest.TestCase):
         anything but the labels would need a rule per bot."""
         for text, nick, files in ((D_F_D, "D_F_D", 127312),
                                   (ALY, "Aly", 389136),
-                                  (SAMOTH, "Samoth", 47418),
+                                  (TESTBOT, "TestBot", 47418),
                                   (SQUIZZ, "squizz", 285139),
                                   (ABUEIO, "AbueIo", 150623)):
             with self.subTest(nick=nick):
@@ -650,11 +650,11 @@ class ReadingRealAdverts(unittest.TestCase):
         self.assertEqual(advert["list_size"], "1.21TB")
 
     def test_one_other_bot_publishes_a_size_the_same_way(self):
-        """Samoth runs something that writes "Files (1.23TB)" too. Pinned
+        """TestBot runs something that writes "Files (1.23TB)" too. Pinned
         because it is the only non-DCCore bot in the sample that does, so it is
         the one that would break if the size pattern were narrowed to our own
         wording."""
-        advert = irc.parse_channel_advert(SAMOTH)
+        advert = irc.parse_channel_advert(TESTBOT)
 
         self.assertEqual(advert["files"], 47418)
         self.assertEqual(advert["list_size"], "1.23TB")

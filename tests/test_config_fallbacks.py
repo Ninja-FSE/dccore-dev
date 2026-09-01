@@ -224,7 +224,7 @@ class AnAuthorisationCheckRefusesWhenItDoesNotKnow(DCCoreTestCase):
     def test_nobody_is_an_admin(self):
         self.without_admin_nick()
 
-        for nick in ("sysop", "SysOp", "Samoth", "mallory", ""):
+        for nick in ("sysop", "SysOp", "Op2", "mallory", ""):
             with self.subTest(nick=nick):
                 self.assertFalse(commands.is_admin(nick))
 
@@ -240,14 +240,14 @@ class AnAuthorisationCheckRefusesWhenItDoesNotKnow(DCCoreTestCase):
         self.set_config(ADMIN_NICK="")
 
         self.assertFalse(commands.is_admin("sysop"))
-        self.assertFalse(commands.is_admin("Samoth"))
+        self.assertFalse(commands.is_admin("Op2"))
 
     def test_a_configured_admin_still_passes(self):
         """The control. Failing closed must not mean failing always."""
-        self.set_config(ADMIN_NICK="SysOp,Samoth")
+        self.set_config(ADMIN_NICK="SysOp,Op2")
 
         self.assertTrue(commands.is_admin("sysop"))
-        self.assertTrue(commands.is_admin("SAMOTH"))
+        self.assertTrue(commands.is_admin("OP2"))
         self.assertFalse(commands.is_admin("mallory"))
 
 
