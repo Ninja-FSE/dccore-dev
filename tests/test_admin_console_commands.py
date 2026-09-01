@@ -35,9 +35,9 @@ from tests.support import DCCoreTestCase, silence_debug  # noqa: E402
 class FakeSession:
     """A Session that records instead of writing a socket."""
 
-    def __init__(self, nick="FLAC"):
+    def __init__(self, nick="SysOp"):
         self.nick = nick
-        self.host = "flac.users.undernet.org"
+        self.host = "sysop.users.undernet.org"
         self.peer_ip = "127.0.0.1"
         self.authenticated = True
         self.closed = False
@@ -69,24 +69,24 @@ class AuthorisedBypassesTheNickCheck(DCCoreTestCase):
     def test_a_console_may_ban_though_its_nick_is_not_admin_nick(self):
         """The trap this phase had to avoid.
 
-        FLAC authenticated with his +x host and a password. If the handler still
-        insisted his NICK be in ADMIN_NICK, every console command would fail for
-        exactly the people the console exists to serve.
+        The operator authenticated with their +x host and a password. If the
+        handler still insisted their NICK be in ADMIN_NICK, every console
+        command would fail for exactly the people the console exists to serve.
         """
-        self.assertFalse(commands.is_admin("FLAC"))
-        commands.handle_hard_ban_request("FLAC", "DCC-CONSOLE", "!ban *!*@spam.net",
+        self.assertFalse(commands.is_admin("SysOp"))
+        commands.handle_hard_ban_request("SysOp", "DCC-CONSOLE", "!ban *!*@spam.net",
                                          authorised=True)
         self.assertEqual(db.load_hard_bans(), ["*!*@spam.net"])
 
     def test_a_console_may_unban(self):
         db.add_hard_ban("*!*@spam.net")
-        commands.handle_hard_unban_request("FLAC", "DCC-CONSOLE", "!unban *!*@spam.net",
+        commands.handle_hard_unban_request("SysOp", "DCC-CONSOLE", "!unban *!*@spam.net",
                                            authorised=True)
         self.assertEqual(db.load_hard_bans(), [])
 
     def test_the_channel_path_still_checks_the_nick(self):
         """Default is authorised=False, so nothing changes for channel callers."""
-        commands.handle_hard_ban_request("FLAC", "#mp3passion", "!ban *!*@spam.net")
+        commands.handle_hard_ban_request("SysOp", "#mp3passion", "!ban *!*@spam.net")
         self.assertEqual(db.load_hard_bans(), [],
                          "a non-admin nick in channel must still be refused")
 
@@ -287,7 +287,7 @@ class DebugOutputReachesTheConsole(DCCoreTestCase):
         announce.send_debug("still fine")  # must not raise
 
     def test_mirc_formatting_is_stripped_for_the_console(self):
-        session = adminchat.Session(socket.socket(), "127.0.0.1", "FLAC", "h")
+        session = adminchat.Session(socket.socket(), "127.0.0.1", "SysOp", "h")
         self.addCleanup(session.close, None)
         session.authenticated = True
         session.debug_sink(f"{config.C_BOLD}dave{config.C_RESET} returned", "JOIN")
@@ -297,7 +297,7 @@ class DebugOutputReachesTheConsole(DCCoreTestCase):
         self.assertIn("[JOIN]", line)
 
     def test_an_unauthenticated_session_receives_nothing(self):
-        session = adminchat.Session(socket.socket(), "127.0.0.1", "FLAC", "h")
+        session = adminchat.Session(socket.socket(), "127.0.0.1", "SysOp", "h")
         self.addCleanup(session.close, None)
         session.authenticated = False
         session.debug_sink("secret operational detail", "INFO")
@@ -313,13 +313,13 @@ class DebugOutputReachesTheConsole(DCCoreTestCase):
             def shutdown(self, how):
                 pass
 
-        session = adminchat.Session(Exploding(), "127.0.0.1", "FLAC", "h")
+        session = adminchat.Session(Exploding(), "127.0.0.1", "SysOp", "h")
         session.authenticated = True
         for i in range(200):
             session.debug_sink(f"line {i}", "INFO")
 
     def test_closing_a_session_unregisters_its_sink(self):
-        session = adminchat.Session(socket.socket(), "127.0.0.1", "FLAC", "h")
+        session = adminchat.Session(socket.socket(), "127.0.0.1", "SysOp", "h")
         session.authenticated = True
         announce.add_debug_sink(session.debug_sink)
         self.assertIn(session.debug_sink, announce._debug_sinks)

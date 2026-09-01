@@ -10,8 +10,8 @@ drifted into contradicting the file they were standing in for.
                    commands.py said "#flac-debug"   <- a channel that is not it
                    irc.py said "#flac-serv"
 
-  ADMIN_NICK       config.py says "FLAC,Samoth"
-                   commands.py said "FLAC"          <- one operator, not two
+  ADMIN_NICK       config.py says "SysOp,Op2"
+                   commands.py said "SysOp"          <- one operator, not two
 
   PAUSE_ON_UPDATE  config.py says True
                    three modules said False         <- the exact inversion
@@ -22,10 +22,10 @@ that differs from it is wrong by construction, whichever of the two was meant.
 
 WHY THE ADMIN ONE IS NOT MERELY UNTIDY
 
-is_admin()'s docstring records removing `or user.lower() == "flac"` because it
-"made the literal nick flac an admin regardless of what config.ADMIN_NICK was
+is_admin()'s docstring records removing `or user.lower() == "sysop"` because it
+"made the literal nick sysop an admin regardless of what config.ADMIN_NICK was
 set to - an undocumented second account nobody could turn off". Four lines
-below that paragraph, the default was 'FLAC'. The same account through a
+below that paragraph, the default was 'SysOp'. The same account through a
 different door, and an Undernet nick is not owned without services auth.
 """
 
@@ -224,30 +224,30 @@ class AnAuthorisationCheckRefusesWhenItDoesNotKnow(DCCoreTestCase):
     def test_nobody_is_an_admin(self):
         self.without_admin_nick()
 
-        for nick in ("flac", "FLAC", "Samoth", "mallory", ""):
+        for nick in ("sysop", "SysOp", "Op2", "mallory", ""):
             with self.subTest(nick=nick):
                 self.assertFalse(commands.is_admin(nick))
 
     def test_the_nick_the_old_default_named_is_not_special(self):
-        """The whole point. 'FLAC' was the default, so with the setting absent
+        """The whole point. 'SysOp' was the default, so with the setting absent
         it was the one nick that still passed - and an Undernet nick is not
         owned without services auth, so anyone can simply take it."""
         self.without_admin_nick()
 
-        self.assertFalse(commands.is_admin("flac"))
+        self.assertFalse(commands.is_admin("sysop"))
 
     def test_an_empty_setting_grants_nothing_either(self):
         self.set_config(ADMIN_NICK="")
 
-        self.assertFalse(commands.is_admin("flac"))
-        self.assertFalse(commands.is_admin("Samoth"))
+        self.assertFalse(commands.is_admin("sysop"))
+        self.assertFalse(commands.is_admin("Op2"))
 
     def test_a_configured_admin_still_passes(self):
         """The control. Failing closed must not mean failing always."""
-        self.set_config(ADMIN_NICK="FLAC,Samoth")
+        self.set_config(ADMIN_NICK="SysOp,Op2")
 
-        self.assertTrue(commands.is_admin("flac"))
-        self.assertTrue(commands.is_admin("SAMOTH"))
+        self.assertTrue(commands.is_admin("sysop"))
+        self.assertTrue(commands.is_admin("OP2"))
         self.assertFalse(commands.is_admin("mallory"))
 
 

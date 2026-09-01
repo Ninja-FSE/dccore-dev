@@ -61,7 +61,7 @@ class GenuineEventsStillWork(unittest.TestCase):
         self.assertTrue(irc.is_user_event(":dave!u@h PART #mp3passion", "PART"))
 
     def test_an_admin_style_hostmask_is_accepted(self):
-        line = ":FLAC!flac@Undernet.CoolGuy.Users QUIT :Quit: leaving"
+        line = ":SysOp!sysop@Undernet.CoolGuy.Users QUIT :Quit: leaving"
         self.assertTrue(irc.is_user_event(line, "QUIT"))
 
 
