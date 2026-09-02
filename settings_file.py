@@ -476,6 +476,22 @@ def _check_writable(name, value, namespace, types):
         except ValueError as err:
             raise SettingsWriteError(f"{name}: {err}") from None
 
+    # A REQUIRED setting cannot be blanked. oserve.startup() already refuses to
+    # boot while NICKNAME, CHANNEL or ADMIN_NICK is empty - but that check runs
+    # at BOOT, and the two places these are written from are the web
+    # dashboard's Settings page and setup.py. Saving a blank one was accepted,
+    # reported as saved, and the daemon then refused to start.
+    #
+    # The dashboard goes down with the daemon, so the one screen the value
+    # could be corrected from is gone too, and nothing anywhere says that
+    # hand-editing settings.conf is now the only way back. Refusing the write
+    # is the difference between an error message and an unbootable install.
+    if name in REQUIRED and not str(value).strip():
+        raise SettingsWriteError(
+            f"{name} cannot be blank - the daemon refuses to start without it. "
+            f"Clearing it here would leave no way to set it again except by "
+            f"editing settings.conf by hand.")
+
     text = render(value)
 
     if "\n" in text or "\r" in text:

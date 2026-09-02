@@ -197,11 +197,29 @@ def main(platform):
     ok(f"nickname {getattr(config, 'NICKNAME', '?')} "
        f"(alt {getattr(config, 'ALT_NICKNAME', '?')})")
 
-    # NICKNAME/CHANNEL being blank at all is caught separately, hard, by
-    # settings_file.REQUIRED (see oserve.startup()) - this check only reports
-    # what is actually configured, it does not compare it against anything.
     channels = str(getattr(config, "CHANNEL", ""))
     ok(f"channels {channels}")
+
+    # The same check oserve.startup() makes, run here rather than only there.
+    # This file's whole purpose is to be the friendlier, earlier warning, and
+    # it used to defer this one to boot on the reasoning that boot catches it
+    # "hard" - which it does, by exiting. So a fresh install was told "Ready to
+    # start" by the pre-flight and then refused by the daemon seconds later,
+    # with the pre-flight's verdict being the thing that was wrong.
+    #
+    # Called rather than reimplemented: one definition of what "configured"
+    # means, so the two cannot drift apart again.
+    try:
+        import settings_file as _settings_file
+        unconfigured = _settings_file.unconfigured_required(
+            vars(config), getattr(config, "SHIPPED_DEFAULTS", {}))
+    except Exception as err:
+        unconfigured = []
+        fail(f"could not check the required settings: {err}")
+    for name in unconfigured:
+        fail(f"{name} is still unconfigured (blank, or still the shipped "
+             f"default) - the daemon refuses to start until it is set. Run "
+             f"setup.py, or set it in settings.conf or admin_config.py.")
 
     # From #127. A slot count below 1 makes dcc.py's own gate
     # (len(active_transfers) < MAX_DCC_SLOTS) unsatisfiable, so the bot joins,
