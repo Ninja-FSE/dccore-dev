@@ -35,7 +35,7 @@ What DCCore does today, and what it does not do yet.
 
 - **Authenticated admin console over DCC CHAT**, gated on the operator's services host *and* a PBKDF2-hashed password. Read-only commands (`status`, `queue`, `slots`, `bans`, `uptime`, `version`) and action commands (`ban`, `unban`, `clearqueue`, `rehash`, `update`) — see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md).
 - **Optional web dashboard** — Search, Queue, File Lists grouped by folder, Downloads, a duplicate-filename verifier, a list rebuilder, and a Settings page. Off by default, loopback by default, behind the same password as the console.
-- **Guided first-run setup** — `python3 setup.py` asks six questions and writes a working configuration.
+- **Guided first-run setup** — `python3 configure.py` asks six questions and writes a working configuration.
 - **Pre-flight check** — `start-dccore.sh check` verifies the setup without opening a socket.
 - **Two configuration mechanisms** — `admin_config.py` for Python, `settings.conf` for plain text; the dashboard and console both write to the latter.
 - **`!rehash`** reloads code and settings live, preserving queues and transfer state.
@@ -76,7 +76,7 @@ Two pieces are worth doing carefully rather than quickly: containment (`is_safe_
 
 ### Test coverage where it is thinnest
 
-The pre-publication audit found that **21 daemon functions have no behavioural coverage at all** — including `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop and `setup.py`'s entry point. Each can be replaced with a statement that raises while all tests still pass.
+The pre-publication audit found that **21 daemon functions have no behavioural coverage at all** — including `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop and `configure.py`'s entry point. Each can be replaced with a statement that raises while all tests still pass.
 
 Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would not be noticed. Nine dashboard routes are never requested by any test.
 

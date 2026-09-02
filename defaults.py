@@ -613,7 +613,7 @@ if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
 # LIST_BASE_NAME predicted this exact gap: #170's RFC discussion (its own
 # comment) noted it "can derive from NICKNAME rather than being asked for at
 # all" once NICKNAME itself is required - see settings_file.py's own comment
-# on why LIST_BASE_NAME is not in REQUIRED. Found live, running setup.py
+# on why LIST_BASE_NAME is not in REQUIRED. Found live, running configure.py
 # against a real install: NICKNAME came out "DCCoreTest", but the generated
 # list still came out named "DCCore-<date>.zip", because nothing ever did
 # the derivation the RFC predicted.

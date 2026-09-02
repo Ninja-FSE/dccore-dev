@@ -101,7 +101,7 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting
 # ("blank means never configured") instead of a rule with exceptions.
 #
 # FILE_DIRECTORY is ALSO not here, even though an earlier version of this
-# set included it - found live, running setup.py against a real install:
+# set included it - found live, running configure.py against a real install:
 # requiring it here meant the daemon could not boot at all without a music
 # directory chosen up front, which is the one thing this project's own web
 # dashboard is a genuinely easier place to set (browse-and-confirm, rather

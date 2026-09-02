@@ -24,7 +24,7 @@ Developed on Linux (Debian/Ubuntu, including Proxmox LXC) and runs on Windows �
 ## Guided setup
 
 ```bash
-python3 setup.py
+python3 configure.py
 ```
 
 Six questions — nickname, IRC server, channel(s), admin nick, admin console password, and the music directory — written to `settings.conf` and `admin_config.py` for you.
@@ -35,7 +35,7 @@ Safe to run again later: every prompt shows what is already configured as its de
 
 ## Configuring it by hand
 
-`setup.py` is a convenience, not a requirement. There are two mechanisms and you can use either or both.
+`configure.py` is a convenience, not a requirement. There are two mechanisms and you can use either or both.
 
 **`settings.conf`** — plain text, no Python syntax. Copy `settings.conf.sample` and edit. This is what the dashboard's Settings page and the admin console both write to.
 

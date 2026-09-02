@@ -112,7 +112,7 @@ class StartupRunsOnThisPlatform(BootCase):
 
     def test_a_blank_music_directory_warns_but_still_boots(self):
         """FILE_DIRECTORY is deliberately NOT in settings_file.REQUIRED (see
-        its own comment) - found live, running setup.py against a real
+        its own comment) - found live, running configure.py against a real
         install: requiring it blocked the daemon from ever reaching the web
         dashboard, the one place that is genuinely easier to set it from.
         Blank must not raise (os.path.exists(None) does) and must not exit -

@@ -140,7 +140,7 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
 
     def _production_modules(self):
         return [f for f in sorted(os.listdir(REPO_ROOT))
-                if f.endswith(".py") and f != "setup.py"]
+                if f.endswith(".py") and f != "configure.py"]
 
     def test_the_scan_finds_modules_to_check(self):
         """Fixture invariant - an empty file list would pass vacuously."""
