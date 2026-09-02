@@ -15,7 +15,7 @@ the cross-bot fetch feature added two containers without touching the list, so
 a !rehash silently emptied every fetched bot list and reported zero active
 fetches while transfers were still moving bytes.
 
-This module is never reloaded (see commands.py's modules_to_reload). Its
+This module is never reloaded (see commands.py's CORE_MODULES). Its
 containers therefore survive a reload for a structural reason rather than
 because somebody remembered to add them to a list, and a container added here
 in future is safe without anyone doing anything.

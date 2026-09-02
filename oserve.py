@@ -263,7 +263,7 @@ def run_forever():
             print("\nShutting down...")
             sys.exit(0)
         except Exception as main_err:
-            print(f"[CRITICAL MAIN ERROR] Huvudloopen dippade: {main_err}")
+            print(f"[CRITICAL MAIN ERROR] The main loop stopped: {main_err}")
 
         # If the network dies, clear the socket cleanly before the next attempt
         irc_connection = None

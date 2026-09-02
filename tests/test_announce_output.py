@@ -518,5 +518,51 @@ def _rmtree(path):
     shutil.rmtree(path, ignore_errors=True)
 
 
+class TheQueuePositionNoticeReadsTheSetting(QuietTestCase):
+    """announce.send_dcc_queue_notice() tells a user where they are in their
+    own queue, and how long that queue may get.
+
+    It hardcoded "of 100" while send_dcc_error()'s "user_full" message twenty
+    lines above read config.MAX_USER_QUEUE properly - so the two messages
+    about the same limit disagreed the moment an operator changed it, and the
+    one a user sees on every queued file was the wrong one.
+    """
+
+    def notice(self):
+        return "".join(m for _u, m, *_ in self.oserve.queued)
+
+    def test_it_quotes_the_configured_limit(self):
+        self.set_config(MAX_USER_QUEUE=20)
+
+        announce.send_dcc_queue_notice("dave", "Song.flac", 5)
+
+        text = self.notice()
+        self.assertIn("20", text)
+        self.assertNotIn("of 100", text)
+
+    def test_the_default_still_reads_correctly(self):
+        """Control: a limit that happens to equal the old literal must still
+        come from the setting, not from the literal being left in place."""
+        self.set_config(MAX_USER_QUEUE=100)
+
+        announce.send_dcc_queue_notice("dave", "Song.flac", 3)
+
+        self.assertIn("100", self.notice())
+
+    def test_it_agrees_with_the_queue_full_error(self):
+        """The two messages describe one limit and must not disagree - which
+        is the whole defect, stated as a test."""
+        self.set_config(MAX_USER_QUEUE=42)
+
+        announce.send_dcc_queue_notice("dave", "Song.flac", 1)
+        queued_text = self.notice()
+        self.oserve.queued.clear()
+        announce.send_dcc_error("dave", "user_full")
+        full_text = self.notice()
+
+        self.assertIn("42", queued_text)
+        self.assertIn("42", full_text)
+
+
 if __name__ == "__main__":
     unittest.main()

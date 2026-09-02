@@ -91,9 +91,36 @@ SWEDISH = re.compile(
     r"tystade|annonsering|kanalannonsering|reklamklockan|kanalreklam|"
     r"felmeddelande|minsta|utan|vakthunden|trigga|samma|"
     r"aktiveringslogik|eventuella|dubbla|snedstreck|slutet|innan|mappar|"
-    r"mot|bygger|meddelandet|officiella|centralstyrda|exakt|kopia|vackra|"
-    r"paustid|sekunder|mellan|varje"
-    r")\b",
+    # "mot" was here and is now removed, for the reason the note at the top
+    # of this list gives: once stems take suffixes, Swedish "mot" + "or"
+    # is the English word "motor", and irc.py's "Breaking to reconnect
+    # motor..." tripped it immediately. Same call as "alla" (Alla marcia)
+    # and "tar" (archive.tar.gz) - a three-letter preposition cannot be
+    # conclusive on a single hit, and Swedish prose containing it will
+    # contain something else on this list too.
+    r"bygger|meddelandet|officiella|centralstyrda|exakt|kopia|vackra|"
+    r"paustid|sekunder|mellan|varje|"
+    # Round four, and the first one where the LIST was not the problem. Two
+    # lines shipped the whole way to the release prep:
+    #
+    #   oserve.py  "[CRITICAL MAIN ERROR] Huvudloopen dippade"
+    #   irc.py     "[ERROR] Fel under server-handskakningen"
+    #
+    # The second is the instructive one. "handskakning" was ALREADY on this
+    # list. The code says "handskakningen" - the definite form - and the
+    # trailing word boundary refused to match a stem with a suffix on it.
+    # Adding "handskakningen" would have fixed that one line and left the next
+    # inflection of the next word to be found by hand all over again.
+    #
+    # So the group below matches Swedish's definite and plural endings after
+    # any listed stem. That is a different kind of fix from lengthening the
+    # list: it makes every word already here cover its own inflections.
+    #
+    # "huvudloop" and "dippa" are added the old way, because no stem of theirs
+    # was ever listed - a suffix group cannot help with a word the list has
+    # never seen, which remains the real shape of this problem.
+    r"huvudloop|dippa"
+    r")(?:en|et|erna|arna|orna|ar|er|or|na|n|t|s)?\b",
     re.IGNORECASE,
 )
 
@@ -228,6 +255,31 @@ class TheSourceIsEnglish(unittest.TestCase):
         sample = 'print(f"[DB ERROR] Kunde inte skicka ban-notis: {err}")'
         self.assertTrue(SWEDISH.findall(sample),
                         "the detector no longer recognises Swedish")
+
+    def test_it_sees_a_stem_with_a_suffix_on_it(self):
+        """Control for the suffix group specifically.
+
+        Added after a mutation run deleted that group and NOTHING failed -
+        there is no Swedish left in the tree, so the mechanism had nothing to
+        prove itself against. That is the same shape as the miss it was added
+        for: "handskakning" was on the list, the code said "handskakningen",
+        and the word boundary refused the match for four rounds.
+        """
+        for word in ("handskakningen", "handskakningar", "filerna",
+                     "meddelandet", "sekunderna"):
+            with self.subTest(word=word):
+                self.assertTrue(SWEDISH.findall(word),
+                                "an inflected form is invisible again")
+
+    def test_the_suffix_group_does_not_swallow_english(self):
+        """The other side of it. Widening a matcher is only safe if it stays
+        specific - "motor" is Swedish "mot" plus "-or", which is why "mot" is
+        no longer on the list at all."""
+        for phrase in ("Breaking to reconnect motor...",
+                       "the sender and the receiver",
+                       "a list of files and folders"):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(SWEDISH.findall(phrase), [])
 
 
 def _docs():

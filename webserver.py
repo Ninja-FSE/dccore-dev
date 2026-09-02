@@ -51,7 +51,7 @@ place - a password gate stops a stranger from finding the dashboard and
 using it, not from a wire-level eavesdropper on a network the operator should
 not have put this host on to begin with.
 
-Nothing here is added to commands.py's modules_to_reload. A !rehash reload
+Nothing here is added to commands.py's CORE_MODULES. A !rehash reload
 re-executes this module's body, which would try to re-bind a live listening
 socket out from under app.run() - the same reasoning that already excludes
 adminchat.py. Route handlers read config fresh via getattr() on every request
@@ -1303,7 +1303,7 @@ def build_settings_payload():
 
 # Settings that only take effect on a full daemon restart - webserver.py owns
 # a live listening socket and is deliberately excluded from
-# commands.py's modules_to_reload, so a rehash after saving one of these three
+# commands.py's CORE_MODULES, so a rehash after saving one of these three
 # cannot apply it live. Surfaced in the save response's "restart_required" so
 # the frontend can tell the operator, rather than implying "rehash" fixed it.
 SETTINGS_RESTART_ONLY = {"WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"}

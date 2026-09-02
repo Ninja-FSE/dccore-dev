@@ -54,7 +54,7 @@ The optional dashboard is `webserver.py` and `web/`, and disables itself cleanly
 python3 -m unittest discover -s tests -t .
 ```
 
-1956 of them, stdlib-only, on Linux and Windows and Python 3.10 and 3.12 in CI. `scripts/preflight.py` runs the same suite twice, once with host tooling hidden, to catch anything that only passes because of what happens to be installed.
+2071 of them, stdlib-only, on Linux and Windows and Python 3.10 and 3.12 in CI. `scripts/preflight.py` runs the same suite twice, once with host tooling hidden, to catch anything that only passes because of what happens to be installed.
 
 ## License
 
