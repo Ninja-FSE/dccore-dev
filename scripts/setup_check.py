@@ -219,7 +219,7 @@ def main(platform):
     for name in unconfigured:
         fail(f"{name} is still unconfigured (blank, or still the shipped "
              f"default) - the daemon refuses to start until it is set. Run "
-             f"setup.py, or set it in settings.conf or admin_config.py.")
+             f"configure.py, or set it in settings.conf or admin_config.py.")
 
     # From #127. A slot count below 1 makes dcc.py's own gate
     # (len(active_transfers) < MAX_DCC_SLOTS) unsatisfiable, so the bot joins,

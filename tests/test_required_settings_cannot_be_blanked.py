@@ -4,7 +4,7 @@ TWO HALVES OF ONE HOLE
 
 settings_file.REQUIRED - NICKNAME, CHANNEL, ADMIN_NICK - was enforced in
 exactly one place: oserve.startup(), at boot. Nothing checked it on the WRITE
-path, and the write path is the web dashboard's Settings page and setup.py.
+path, and the write path is the web dashboard's Settings page and configure.py.
 
 So: clear the nickname field in the dashboard, save, and be told it saved. It
 did save. The daemon then refuses to start - and the dashboard is served by the
@@ -21,9 +21,9 @@ pre-flight's verdict being the wrong one.
 WHY THE WRITE GUARD LIVES IN _check_writable
 
 Every writer goes through settings_file.save(): the dashboard
-(webserver.py:1344), setup.py's wizard (setup.py:230) and the admin console's
-CLI. Putting it at that chokepoint covers all three and cannot be bypassed by a
-fourth arriving later.
+(webserver.py:1344), configure.py's wizard (configure.py:230) and the admin
+console's CLI. Putting it at that chokepoint covers all three and cannot be
+bypassed by a fourth arriving later.
 
 NOT the same rule as unconfigured_required(). That treats "still the shipped
 default" as unconfigured, which is right for a boot check and wrong for a write
@@ -151,11 +151,11 @@ class OrdinarySavesStillWork(SavingCase):
 
 
 class TheGuardCoversEveryWriter(unittest.TestCase):
-    """The dashboard, setup.py and the admin console CLI all reach the file
-    through save(). Pinned so a fourth writer cannot appear beside it."""
+    """The dashboard, configure.py and the admin console CLI all reach the
+    file through save(). Pinned so a fourth writer cannot appear beside it."""
 
-    def test_setup_py_writes_through_settings_file_save(self):
-        with io.open(os.path.join(REPO_ROOT, "setup.py"), encoding="utf-8") as handle:
+    def test_configure_py_writes_through_settings_file_save(self):
+        with io.open(os.path.join(REPO_ROOT, "configure.py"), encoding="utf-8") as handle:
             source = handle.read()
 
         self.assertIn("settings_file.save(", source)
