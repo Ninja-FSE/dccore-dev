@@ -230,5 +230,126 @@ class TheSourceIsEnglish(unittest.TestCase):
                         "the detector no longer recognises Swedish")
 
 
+def _docs():
+    """Every Markdown file shipped to a reader."""
+    out = [os.path.join(REPO_ROOT, "README.md")]
+    docs = os.path.join(REPO_ROOT, "docs")
+    for name in sorted(os.listdir(docs)):
+        if name.endswith(".md"):
+            out.append(os.path.join(docs, name))
+    return out
+
+
+_FENCE = re.compile(r"^\s*(```|~~~)")
+_CODE_SPAN = re.compile(r"`[^`]*`")
+
+
+def _markdown_prose(path):
+    """(line number, text) for the prose of a Markdown file.
+
+    Fenced blocks are dropped and inline `code spans` are blanked, because
+    docs/UPDATES.md's v1.10.0-RC3 entry quotes the Swedish it is reporting
+    the removal of - `"Kunde inte skicka JOIN"`, `"Startar tidtagaruret"` -
+    and the accented characters an accent scan cannot see. Those quotations
+    are the evidence for the entry; a check that failed on them would be
+    demanding the changelog lie about what it changed.
+
+    Blanking rather than deleting keeps the line numbers honest in a failure
+    message.
+    """
+    with io.open(path, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+
+    out, in_fence = [], False
+    for n, line in enumerate(lines, 1):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        out.append((n, _CODE_SPAN.sub("``", line)))
+    return out
+
+
+class TheShippedDocsAreEnglish(unittest.TestCase):
+    """The modules were translated in #65/#66 and are held there by the tests
+    above. docs/UPDATES.md kept its Swedish half until the release prep, on the
+    reasoning that a changelog records history as it was written - which is
+    true of the facts and not of the language they are in. It was the largest
+    file in the repository and the least readable to a newcomer.
+
+    The same argument the module guard makes applies here: without a check, the
+    next branch reintroduces it. Same word list, so a word learned from a real
+    miss in a module is learned for the docs too.
+    """
+
+    def test_no_shipped_document_contains_swedish(self):
+        scanned, offenders = [], []
+        for path in _docs():
+            scanned.append(path)
+            for n, text in _markdown_prose(path):
+                found = SWEDISH.findall(text)
+                if found:
+                    offenders.append(
+                        f"{os.path.basename(path)}:{n}: "
+                        f"{sorted(set(w.lower() for w in found))} "
+                        f"-> {text.strip()[:60]}")
+        self.assertEqual(
+            offenders, [],
+            "Swedish in shipped documentation:\n  " + "\n  ".join(offenders))
+        self.assertIn("UPDATES.md", [os.path.basename(q) for q in scanned],
+                      "the changelog was not scanned - an empty file "
+                      "list makes every assertion above vacuously true")
+
+    def test_prose_outside_a_code_span_is_still_read(self):
+        """Control, and the one that matters. Blanking code spans is what lets
+        the RC3 entry keep its quotations; blanking too much would make the
+        test above pass on a wholly Swedish document without noticing."""
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write("Boten kunde inte skicka filen.\n")
+            path = handle.name
+        self.addCleanup(os.remove, path)
+
+        prose = [text for _n, text in _markdown_prose(path)]
+
+        self.assertTrue(any(SWEDISH.findall(text) for text in prose),
+                        "bare prose is no longer being read")
+
+    def test_a_fenced_block_is_skipped(self):
+        """Console transcripts and config samples get pasted into fences, and
+        they are not prose an author chose the language of. Added after a
+        mutation run: removing the fence handling broke nothing, because no
+        document happens to have Swedish in a fence today."""
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write("Run it:" + chr(10) + "```" + chr(10) +
+                         "kunde inte skicka filen" + chr(10) + "```" + chr(10))
+            path = handle.name
+        self.addCleanup(os.remove, path)
+
+        prose = [text for _n, text in _markdown_prose(path)]
+
+        self.assertFalse(any(SWEDISH.findall(text) for text in prose),
+                         "the inside of a fenced block is being read as prose")
+
+    def test_a_quotation_inside_a_code_span_is_exempt(self):
+        """The RC3 entry, in miniature. Without this the changelog could not
+        name the strings it removed."""
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write('Removed `"Kunde inte skicka JOIN"` from the boot path.\n')
+            path = handle.name
+        self.addCleanup(os.remove, path)
+
+        prose = [text for _n, text in _markdown_prose(path)]
+
+        self.assertFalse(any(SWEDISH.findall(text) for text in prose),
+                         "a quoted string is being reported as untranslated prose")
+
+
 if __name__ == "__main__":
     unittest.main()
