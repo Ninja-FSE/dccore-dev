@@ -126,6 +126,22 @@ class QueuePayloadTests(DCCoreTestCase):
         rows = webserver.build_queue_payload()
         self.assertEqual(rows[0]["status"], "sending")
 
+    def test_a_sender_with_no_prior_queue_row_still_appears(self):
+        """#220: a free slot with nothing already queued dispatches straight
+        into active_transfers and never touches dcc_queue at all (see
+        dcc.start_dcc_send()). The summary view used to iterate dcc_queue
+        only, so this user was invisible here while /api/stats (reading
+        active_transfers directly) correctly showed the transfer."""
+        config.dcc_queue = {}
+        config.active_transfers = [{"user": "erin", "file": "Live.flac"}]
+
+        rows = {row["user"]: row for row in webserver.build_queue_payload()}
+
+        self.assertIn("erin", rows, "a sending user with no queue row is missing")
+        self.assertEqual(rows["erin"]["status"], "sending")
+        self.assertEqual(rows["erin"]["preview"], "Live.flac")
+        self.assertEqual(rows["erin"]["count"], 0)
+
     def test_empty_queue_is_an_empty_list(self):
         self.assertEqual(webserver.build_queue_payload(), [])
 

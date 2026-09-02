@@ -154,15 +154,26 @@ def admin_host_patterns():
 def is_admin_host(prefix_or_line):
     """True only when the line's HOST matches a configured admin pattern.
 
-    A pattern of "*" (or any pattern reducing to it) is refused: it would admit
-    every host on the network and make the whole gate decorative. security.py
-    refuses an all-wildcard hard ban for the mirror-image reason.
+    A pattern reducing to nothing once wildcards are stripped is refused: it
+    would admit every host on the network and make the whole gate decorative.
+    security.py refuses an all-wildcard hard ban for the mirror-image reason.
+
+    Strips "*!@." - the same four characters security.py's own hard-ban guard
+    strips, not just "*". A HOST cannot contain "!" or "@" (only a full
+    <nick>!<ident>@<host> hostmask can), so those two are no-ops here - but a
+    host is made of dot-separated labels, and "*.*" reduces to a lone "." under
+    a stars-only strip: truthy, so it passed and compiled to a pattern
+    matching essentially every real host. #218, found by the same audit that
+    caught the hard-ban version of this in #168.
     """
     host = source_host(prefix_or_line)
     if not host:
         return False
     for pattern in admin_host_patterns():
-        if not pattern.replace("*", ""):
+        residue = pattern
+        for separator in "*!@.":
+            residue = residue.replace(separator, "")
+        if not residue:
             print(f"[ADMINCHAT] Refusing dangerously broad ADMIN_HOSTMASKS entry: {pattern!r}")
             continue
         if _compile(pattern).match(host):
