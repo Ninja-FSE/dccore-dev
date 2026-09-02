@@ -234,9 +234,75 @@ class PasswordHandling(unittest.TestCase):
                 self.assertFalse(adminchat.verify_password(junk, PASSWORD))
 
     def test_verification_is_constant_time(self):
-        source = open(os.path.join(REPO_ROOT, "adminchat.py"), encoding="utf-8").read()
-        self.assertTrue("hmac.compare_digest" in source,
-                        "a plain == on the digest leaks the password through timing")
+        """That verify_password() actually COMPARES with hmac.compare_digest,
+        not that adminchat.py contains that string somewhere.
+
+        The previous version was `assertIn("hmac.compare_digest", source)`.
+        Rewriting the return as `expected == actual` and leaving any mention of
+        the name behind - this docstring would do it - passed. So would calling
+        compare_digest somewhere unrelated. A guard for a timing leak that a
+        timing leak walks straight past is worse than no guard, because the
+        suite reports it as covered.
+
+        The real function is kept underneath the recorder: the comparison still
+        has to give the right answer, or a wrapper that records and returns
+        True would satisfy this and admit everyone.
+        """
+        import hmac
+
+        calls = []
+        real = hmac.compare_digest
+
+        def recorder(left, right):
+            calls.append((left, right))
+            return real(left, right)
+
+        hmac.compare_digest = recorder
+        self.addCleanup(setattr, hmac, "compare_digest", real)
+
+        stored = adminchat.make_password_hash(PASSWORD, iterations=1000)
+
+        self.assertTrue(adminchat.verify_password(stored, PASSWORD))
+        self.assertTrue(calls,
+                        "the digests were compared with == - a wrong password "
+                        "is rejected fractionally sooner the earlier it differs, "
+                        "which is the whole attack")
+
+    def test_a_wrong_password_is_compared_the_same_way(self):
+        """The half an attacker actually drives. A short-circuit on the failing
+        path is the timing leak; the succeeding path cannot show it."""
+        import hmac
+
+        calls = []
+        real = hmac.compare_digest
+        hmac.compare_digest = lambda a, b: (calls.append((a, b)), real(a, b))[1]
+        self.addCleanup(setattr, hmac, "compare_digest", real)
+
+        stored = adminchat.make_password_hash(PASSWORD, iterations=1000)
+
+        self.assertFalse(adminchat.verify_password(stored, "wrong password"))
+        self.assertTrue(calls, "the failing comparison short-circuited")
+
+    def test_the_digests_reaching_the_comparison_are_bytes_of_equal_length(self):
+        """compare_digest is only constant-time over equal-length bytes; given
+        two different lengths it can return early on the length alone. pbkdf2
+        always returns 32 bytes for sha256, so this holds - pinned because a
+        change to the stored format is exactly what would break it quietly."""
+        import hmac
+
+        seen = []
+        real = hmac.compare_digest
+        hmac.compare_digest = lambda a, b: (seen.append((a, b)), real(a, b))[1]
+        self.addCleanup(setattr, hmac, "compare_digest", real)
+
+        stored = adminchat.make_password_hash(PASSWORD, iterations=1000)
+        adminchat.verify_password(stored, "wrong password")
+
+        self.assertTrue(seen)
+        for left, right in seen:
+            self.assertIsInstance(left, bytes)
+            self.assertIsInstance(right, bytes)
+            self.assertEqual(len(left), len(right))
 
 
 class OfferParsing(unittest.TestCase):

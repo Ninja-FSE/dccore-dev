@@ -17,6 +17,7 @@ truncated rawbytes file raised and cost the caller the file count and the list
 date too.
 """
 
+import io
 import os
 import sys
 import unittest
@@ -222,12 +223,73 @@ class SideFilesAreWrittenAtomically(DCCoreTestCase):
         config.LIST_BASE_NAME = "DCCore"
 
     def test_generation_uses_the_atomic_writer(self):
-        source = open(os.path.join(REPO_ROOT, "update_list.py"), encoding="utf-8").read()
-        self.assertTrue("db._atomic_write(SIZE_FILE_PATH" in source)
-        self.assertTrue("db._atomic_write(RAWBYTES_FILE_PATH" in source)
-        self.assertFalse('open(SIZE_FILE_PATH, "w"' in source,
-                         "truncate-then-write leaves a readable empty file on any interruption")
-        self.assertFalse('open(RAWBYTES_FILE_PATH, "w"' in source)
+        """That both side files are PUBLISHED through db._atomic_write, not
+        that update_list.py contains that call as text.
+
+        The previous version was four substring checks against the source. Two
+        asserted the call appears; two asserted a truncating open() does not.
+        Putting `if False:` in front of the real calls satisfied all four, and
+        so would moving them into a branch that never runs.
+
+        The test below it already drives the same publish to prove a failed
+        write leaves the old values alone - so the machinery to check this
+        properly was sitting directly underneath the source scan the whole
+        time.
+        """
+        import db
+
+        real = db._atomic_write
+        written = []
+
+        def recorder(path, text):
+            written.append(os.path.basename(path))
+            return real(path, text)
+
+        db._atomic_write = recorder
+        try:
+            self.assertTrue(update_list.generate_master_list())
+        finally:
+            db._atomic_write = real
+
+        self.assertIn(config.LIST_SIZE_FILE, written,
+                      f"the size file was written some other way: {written}")
+        self.assertIn(config.LIST_RAWBYTES_FILE, written,
+                      f"the raw byte count was written some other way: {written}")
+
+    def test_the_side_files_are_never_left_readable_and_empty(self):
+        """What the two assertFalse(open(...)) source checks were reaching for.
+
+        A truncate-then-write leaves a zero-length file readable for the
+        instant between the two, and the advert reads these on a timer: it
+        would publish a size of nothing. Asserted by watching the file rather
+        than by looking for the shape of a call that would cause it.
+        """
+        self.assertTrue(update_list.generate_master_list())
+
+        for path in (list_mod.size_file_path(), list_mod.rawbytes_file_path()):
+            with self.subTest(path=os.path.basename(path)):
+                self.assertTrue(os.path.getsize(path) > 0)
+
+        # Rebuild over the top: the publish replaces rather than truncates, so
+        # there is no moment at which the file exists and is empty.
+        sizes = []
+        real_open = io.open
+
+        def watching_open(target, *args, **kwargs):
+            if isinstance(target, str) and os.path.basename(target) in (
+                    config.LIST_SIZE_FILE, config.LIST_RAWBYTES_FILE):
+                if os.path.exists(target):
+                    sizes.append(os.path.getsize(target))
+            return real_open(target, *args, **kwargs)
+
+        io.open = watching_open
+        try:
+            self.assertTrue(update_list.generate_master_list())
+        finally:
+            io.open = real_open
+
+        self.assertNotIn(0, sizes,
+                         "a side file was observed existing and empty")
 
     def test_an_interrupted_publish_leaves_the_previous_values(self):
         """Behaviour, not source text: make the write fail and read back."""
