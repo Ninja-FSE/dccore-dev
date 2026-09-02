@@ -14,6 +14,7 @@ import os
 import shutil
 import socket
 import sys
+import time
 
 IS_WINDOWS = os.name == "nt"
 
@@ -226,3 +227,49 @@ def describe():
         f"python={sys.version_info.major}.{sys.version_info.minor} "
         f"rar={rar or 'NOT FOUND'}"
     )
+
+
+def replace_with_retry(src, dst, attempts=5, base_delay=0.02):
+    """os.replace(), retrying a bounded number of times with backoff on
+    PermissionError.
+
+    #162 finding #25: on Windows, os.replace() raises PermissionError
+    ([WinError 5]) when another handle has `dst` open at the exact instant of
+    the rename - security.check_user_status() does exactly that, holding
+    hard_bans.txt open (unlocked, no share-deny) on the IRC read thread for
+    every PRIVMSG. Measured under synthetic load: 256/300 replace attempts
+    failed with a reader active throughout. A bounded retry-with-backoff
+    (total worst case here: ~0.3s across 4 sleeps) gives that brief per-line
+    read window time to close without leaving a bad-actor open handle able to
+    block a write indefinitely - this still raises after `attempts`, same as a
+    bare os.replace() would, just not on the first collision.
+
+    POSIX rename() has no such failure mode at all (a reader who already has
+    the old inode open keeps reading it undisturbed after the rename), so this
+    loop is a no-op there in practice: the first attempt always succeeds, and
+    no test on that platform can exercise the retry path itself - only that a
+    normal replace still works, which the persistence tests already cover.
+
+    WHY IT LIVES HERE
+
+    It was db._replace_with_retry(), private to the module that happened to
+    need it first, while six other atomic publishes across update_list.py,
+    settings_file.py and defaults.py called os.replace() bare and had the same
+    hazard with none of the handling. The worst of those is the master list
+    publish: a PermissionError there takes the bot's list off the air, which is
+    the exact failure the atomic-publish rewrite exists to prevent.
+
+    A Windows-versus-POSIX difference isolated from the rest of the codebase is
+    what this module is for, so it is here and public rather than reached for
+    through another module's underscore.
+    """
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as err:
+            last_err = err
+            if attempt < attempts - 1:
+                time.sleep(base_delay * (2 ** attempt))
+    raise last_err

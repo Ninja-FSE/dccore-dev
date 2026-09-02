@@ -44,6 +44,7 @@ import configparser
 import io
 import os
 import re
+import platform_compat
 import tempfile
 import threading
 
@@ -602,7 +603,7 @@ def _atomic_write(path, text):
             out.write(text)
             out.flush()
             os.fsync(out.fileno())
-        os.replace(tmp_path, path)
+        platform_compat.replace_with_retry(tmp_path, path)
         tmp_path = None
     finally:
         if tmp_path and os.path.exists(tmp_path):

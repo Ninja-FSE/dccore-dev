@@ -564,7 +564,11 @@ def _migrate_local_config_to_admin_config(directory=None, log=print):
         return False
 
     try:
-        os.replace(local_config_path, admin_config_path)
+        # Imported here rather than at the top of the file: this runs at import
+        # time, before the rest of defaults.py has finished defining itself,
+        # and a local import keeps that ordering obviously irrelevant.
+        import platform_compat
+        platform_compat.replace_with_retry(local_config_path, admin_config_path)
     except OSError as err:
         log(f"[MIGRATE] Could not rename local_config.py to admin_config.py: {err}. "
             f"Rename it yourself, or copy its settings into admin_config.py.")

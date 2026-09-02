@@ -2,10 +2,10 @@
 import io
 import json
 import os
-import time
 import datetime
 import tempfile
 import threading
+import platform_compat
 import defaults as config
 
 # Every on-disk file this module owns is small and rewritten in full, so a single
@@ -25,40 +25,6 @@ FETCH_HISTORY_FILE = getattr(config, "FETCH_HISTORY_FILE",
                               os.path.join("data", "fetch_history.json"))
 
 
-def _replace_with_retry(src, dst, attempts=5, base_delay=0.02):
-    """os.replace(), retrying a bounded number of times with backoff on
-    PermissionError.
-
-    #162 finding #25: on Windows, os.replace() raises PermissionError
-    ([WinError 5]) when another handle has `dst` open at the exact instant of
-    the rename - security.check_user_status() does exactly that, holding
-    hard_bans.txt open (unlocked, no share-deny) on the IRC read thread for
-    every PRIVMSG. Measured under synthetic load: 256/300 replace attempts
-    failed with a reader active throughout. A bounded retry-with-backoff
-    (total worst case here: ~0.3s across 4 sleeps) gives that brief per-line
-    read window time to close without leaving a bad-actor open handle able to
-    block a write indefinitely - this still raises after `attempts`, same as
-    before this existed, just not on the first collision.
-
-    POSIX rename() has no such failure mode at all (a reader who already has
-    the old inode open keeps reading it undisturbed after the rename), so
-    this loop is a no-op there in practice: the first attempt always
-    succeeds, and no test on this platform can exercise the retry path
-    itself - only that a normal replace still works, which the existing
-    persistence tests already cover.
-    """
-    last_err = None
-    for attempt in range(attempts):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError as err:
-            last_err = err
-            if attempt < attempts - 1:
-                time.sleep(base_delay * (2 ** attempt))
-    raise last_err
-
-
 def _atomic_write(path, text):
     """Write `text` to `path` atomically.
 
@@ -67,7 +33,8 @@ def _atomic_write(path, text):
 
     os.replace() is used rather than os.rename(): on Windows os.rename() raises
     FileExistsError when the destination already exists, while os.replace()
-    overwrites atomically on both Windows and POSIX. See _replace_with_retry()'s
+    overwrites atomically on both Windows and POSIX. See
+    platform_compat.replace_with_retry()'s
     own docstring for why the replace itself is retried rather than called bare.
 
     A reader therefore always sees either the complete previous file or the complete
@@ -83,7 +50,7 @@ def _atomic_write(path, text):
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
-        _replace_with_retry(tmp_path, path)
+        platform_compat.replace_with_retry(tmp_path, path)
     except Exception:
         try:
             os.remove(tmp_path)
@@ -142,7 +109,7 @@ def migrate_legacy_side_files(log=print):
         if os.path.exists(new_path) or not os.path.exists(legacy_path):
             continue
         try:
-            os.replace(legacy_path, new_path)
+            platform_compat.replace_with_retry(legacy_path, new_path)
             moved.append((legacy_name, configured))
         except OSError as err:
             log(f"[MIGRATE] Could not rename {legacy_name} to {configured}: {err}. "
@@ -359,7 +326,7 @@ def _preserve_corrupt_stats(path, reason):
     print(f"[DB ERROR] stats.txt is not readable ({reason}); starting from zero.")
     try:
         backup = path + ".corrupt"
-        os.replace(path, backup)
+        platform_compat.replace_with_retry(path, backup)
         print(f"[DB ERROR] The damaged file was kept as {backup} for manual recovery.")
     except Exception as backup_err:
         print(f"[DB ERROR] Could not even back up the damaged stats file: {backup_err}")
@@ -802,7 +769,7 @@ def load_dcc_queue():
         print(f"[DB ERROR] Could not read the saved DCC queue, starting empty: {e}")
         try:
             backup = file_path + ".corrupt"
-            os.replace(file_path, backup)
+            platform_compat.replace_with_retry(file_path, backup)
             print(f"[DB ERROR] The damaged file was kept as {backup} for manual recovery.")
         except Exception as backup_err:
             print(f"[DB ERROR] Could not even back up the damaged file: {backup_err}")

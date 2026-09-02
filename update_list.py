@@ -181,7 +181,7 @@ def migrate_list_base_name(log=print):
         if os.path.exists(new_path):
             continue
         try:
-            os.replace(old_path, new_path)
+            platform_compat.replace_with_retry(old_path, new_path)
             moved.append((item, new_name))
         except OSError as err:
             log(f"[MIGRATE] Could not rename {item} to {new_name}: {err}. "
@@ -283,7 +283,7 @@ def _write_rar_artifact(tmp_path, members):
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=getattr(config, "RAR_TIMEOUT", 1800))
         if result.returncode == 0 and os.path.exists(built):
-            os.replace(built, tmp_path)
+            platform_compat.replace_with_retry(built, tmp_path)
             return True
         detail = (result.stderr or result.stdout or "").strip().splitlines()
         print(f"[LIST-GEN] rar exited {result.returncode} packing the list - "
@@ -595,16 +595,16 @@ def generate_master_list():
         # ones. os.replace overwrites atomically on both POSIX and Windows, where os.rename
         # would raise because the destination already exists.
         #
-        os.replace(tmp_txt_path, txt_path)
+        platform_compat.replace_with_retry(tmp_txt_path, txt_path)
         if serve_albums:
-            os.replace(tmp_rar_path, rar_path)
+            platform_compat.replace_with_retry(tmp_rar_path, rar_path)
         else:
             # Not published, and not left behind either: an empty album list
             # in lists/ reads as "this bot offers no albums" to anything
             # counting the file, which is a different claim from "it does
             # not offer them at all".
             _discard_temp_lists(tmp_rar_path)
-        os.replace(tmp_artifact_path, artifact_path)
+        platform_compat.replace_with_retry(tmp_artifact_path, artifact_path)
 
         # The two side files are published HERE, AFTER every swap above has
         # already succeeded, and atomically. They used to be written before

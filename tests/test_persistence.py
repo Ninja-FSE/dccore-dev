@@ -24,6 +24,7 @@ from tests.support import DCCoreTestCase, queue_row
 
 import defaults as config
 import db
+import platform_compat
 import dcc
 
 
@@ -232,7 +233,7 @@ class TestFailedWriteKeepsPreviousFile(PersistenceTestCase):
 
 
 class ReplaceWithRetryTests(unittest.TestCase):
-    """db._replace_with_retry() in isolation - #162 finding #25's write-side
+    """platform_compat.replace_with_retry() in isolation - #162 finding #25's write-side
     half. The real failure mode (os.replace() raising PermissionError
     because another handle, e.g. security.check_user_status() reading
     hard_bans.txt, has the destination open) is Windows-only and cannot be
@@ -253,7 +254,7 @@ class ReplaceWithRetryTests(unittest.TestCase):
         calls = []
         os.replace = lambda src, dst: calls.append((src, dst))
 
-        db._replace_with_retry("a", "b")
+        platform_compat.replace_with_retry("a", "b")
 
         self.assertEqual(calls, [("a", "b")])
         self.assertEqual(self.sleeps, [])
@@ -268,7 +269,7 @@ class ReplaceWithRetryTests(unittest.TestCase):
 
         os.replace = flaky_replace
 
-        db._replace_with_retry("a", "b")
+        platform_compat.replace_with_retry("a", "b")
 
         self.assertEqual(attempts["n"], 3)
         # Two failures before the third, successful attempt - two backoff sleeps.
@@ -283,7 +284,7 @@ class ReplaceWithRetryTests(unittest.TestCase):
         os.replace = always_fails
 
         with self.assertRaises(PermissionError):
-            db._replace_with_retry("a", "b", attempts=3, base_delay=0.001)
+            platform_compat.replace_with_retry("a", "b", attempts=3, base_delay=0.001)
 
         self.assertEqual(len(self.sleeps), 2, "2 sleeps between 3 attempts")
 
@@ -300,7 +301,7 @@ class ReplaceWithRetryTests(unittest.TestCase):
         os.replace = wrong_kind_of_failure
 
         with self.assertRaises(OSError):
-            db._replace_with_retry("a", "b")
+            platform_compat.replace_with_retry("a", "b")
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.sleeps, [])
