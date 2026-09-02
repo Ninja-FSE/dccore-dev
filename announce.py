@@ -9,6 +9,7 @@ import defaults as config
 import list
 import dcc
 import db
+import runtime
 import stats_mgr
 import theme
 
@@ -108,7 +109,11 @@ _debug_queue = globals().get("_debug_queue") or collections.deque(maxlen=200)
 # the outbound rate on the one shared socket. A superseded drain now retires itself.
 _debug_drain_id = 0
 _debug_drain_started = False
-_debug_drain_guard = threading.Lock()
+# Bound to runtime.py's object rather than constructed here, for the same reason
+# dcc.queue_lock is: announce.py is reloaded by !rehash, and a fresh
+# threading.Lock() on every reload could let two callers both pass the
+# "already started?" check below at once and start two drain workers.
+_debug_drain_guard = runtime.debug_drain_guard
 
 
 def _debug_drain_worker(my_id):
@@ -165,7 +170,13 @@ def _debug_drain_worker(my_id):
 # survivable and losing the read loop is not.
 # ---------------------------------------------------------------------
 _debug_sinks = []
-_debug_sinks_lock = threading.Lock()
+# Bound to runtime.py's object, not constructed here - see _debug_drain_guard
+# above. commands.py's rehash handler reads live sinks out under this same
+# lock (announce_module._debug_sinks_lock) before the reload and reattaches
+# them after; a fresh lock on every reload would let that read race a
+# concurrent add_debug_sink()/remove_debug_sink() call from a live console
+# session.
+_debug_sinks_lock = runtime.debug_sinks_lock
 
 
 def add_debug_sink(sink):

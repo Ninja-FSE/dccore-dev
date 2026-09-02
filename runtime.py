@@ -93,6 +93,28 @@ fetched_bot_lists        = {}  # Parsed lists fetched FROM other bots, keyed by 
 # reason, and this one shouldn't be the first.
 _channel_users_lock = threading.Lock()
 
+# Every other module-level lock a reloaded module used to allocate for itself.
+#
+# importlib.reload() re-executes a module body, and `queue_lock = threading.
+# Lock()` at module level is rebound exactly like `dcc_queue = {}` was before
+# this file existed - a thread already inside `with dcc.queue_lock:` goes on
+# holding the OLD object, the next caller acquires the fresh one !rehash just
+# created, and both proceed into the critical section at once. The trigger is
+# routine: the web dashboard fires a rehash on every Settings save, so this is
+# reachable by an operator clicking Save while a transfer is running, not by
+# anything exotic.
+#
+# Same fix as _channel_users_lock above, generalised: allocate the lock HERE,
+# where it is never reloaded, and have the owning module bind its name to
+# this object (`queue_lock = runtime.queue_lock`) instead of constructing its
+# own. A reload of that module re-runs the binding statement and picks the
+# same live lock back up - the identical trick runtime.py already uses for
+# containers, just for an object a rebind can silently break instead of empty.
+queue_lock         = threading.Lock()  # dcc.py's transfer queue - see dcc.py's own comment
+debug_drain_guard  = threading.Lock()  # announce.py's single-drain-worker start guard
+debug_sinks_lock   = threading.Lock()  # announce.py's admin-console debug sink list
+disk_lock          = threading.Lock()  # db.py's serialised on-disk writes
+
 
 # Other bots advertising in our channels ------------------------------------
 # nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",

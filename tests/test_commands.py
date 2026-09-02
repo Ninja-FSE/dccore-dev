@@ -465,8 +465,11 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
             "preserved, but by the dedicated ram_backup_users path rather "
             "than PRESERVE_RUNTIME, because it is deep-copied",
         "dcc_queue":
-            "preserved, but by the dedicated ram_backup_queue path, which "
-            "also lowercases the keys on the way back in",
+            "preserved structurally, being runtime.py-bound - not through "
+            "PRESERVE_RUNTIME's merge-and-restore, which would be actively "
+            "wrong here: the object is never replaced by a reload at all, so "
+            "restoring a pre-reload snapshot over it could only ever discard "
+            "writes made during the reload window (see #216)",
     }
 
     def _config_containers(self):

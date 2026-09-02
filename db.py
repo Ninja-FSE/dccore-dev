@@ -6,13 +6,19 @@ import datetime
 import tempfile
 import threading
 import platform_compat
+import runtime
 import defaults as config
 
 # Every on-disk file this module owns is small and rewritten in full, so a single
 # lock serialising the writes is enough. It is deliberately NOT dcc.queue_lock:
 # dcc.py calls save_dcc_queue() while already holding queue_lock, and threading.Lock
 # is not reentrant, so reusing it would deadlock on the first save.
-_disk_lock = threading.Lock()
+#
+# Bound to runtime.py's object, not constructed here - db.py is reloaded by
+# !rehash (commands.CORE_MODULES), and a fresh threading.Lock() on every reload
+# would let two callers both believe they hold exclusive access to the same
+# on-disk file at once. See dcc.queue_lock's own comment for the full mechanism.
+_disk_lock = runtime.disk_lock
 
 # save and load previously used two different literals ("data/..." vs "./data/...").
 # One constant now, built with os.path.join so it is correct on Windows too.
