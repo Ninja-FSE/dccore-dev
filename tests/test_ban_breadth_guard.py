@@ -1,14 +1,20 @@
 """A hard-ban pattern that matches everyone must be refused, in every spelling.
 
-The guard was "is anything left after removing the stars", and that is exactly
-right where it was first written: adminchat.is_admin_host() matches a HOST
-pattern, and a host contains no "!" or "@", so "*" is the only way to spell
-"everything" there.
+The guard was originally "is anything left after removing the stars", on the
+reasoning that adminchat.is_admin_host() matches a HOST pattern, and a host
+contains no "!" or "@", so "*" was believed to be the only way to spell
+"everything" there. That reasoning missed the dot: a host is dot-separated
+labels, so "*.*" reduces to a lone "." under a stars-only strip - truthy, so
+it was accepted, and compiled to a pattern matching essentially every real
+host (#218). Both guards now strip the same four characters, "*!@.": the two
+adminchat's own host string can never contain are harmless no-ops there, and
+security.py needs all four for a full <nick>!<ident>@<host> hostmask.
 
-security.py inherited the same line for a pattern that can be a full hostmask.
-Before #168, hostmask patterns matched nothing at all, so it did not matter -
-"*!*@*" was inert for the same reason "*!*@spammer.net" was inert, which was
-the bug #168 fixed. Making hostmask bans work made "ban everyone" work too:
+security.py inherited the stars-only line for a pattern that can be a full
+hostmask, and the same gap existed there first. Before #168, hostmask patterns
+matched nothing at all, so it did not matter - "*!*@*" was inert for the same
+reason "*!*@spammer.net" was inert, which was the bug #168 fixed. Making
+hostmask bans work made "ban everyone" work too:
 
     *!*@*      residue "!@"   truthy, so accepted
     *!*        residue "!"    truthy, so accepted
@@ -127,31 +133,45 @@ class TheLegitimateOnesStillWork(BanCase):
                 self.assertFalse(self.blocked("dave", "~d@good.isp.net"))
 
 
-class TheGuardIsRightWhereItWasBorrowedFrom(unittest.TestCase):
-    """adminchat.is_admin_host() carries the same line, and there it is
-    correct: it matches a HOST, which cannot contain "!" or "@". Recorded so
-    nobody "fixes" that one to match this one, or copies this one somewhere a
-    dot is meaningful."""
+class TheAdminHostGuardCatchesDotsToo(unittest.TestCase):
+    """adminchat.is_admin_host() carries the same shape of guard as the
+    hard-ban one above, for the same reason - see this file's own docstring
+    for why a stars-only strip missed "*.*" here specifically (#218)."""
 
-    def test_a_host_pattern_of_stars_is_still_refused_there(self):
+    def _check(self, pattern, line):
         import adminchat
         previous = getattr(config, "ADMIN_HOSTMASKS", [])
-        config.ADMIN_HOSTMASKS = ["*"]
+        config.ADMIN_HOSTMASKS = [pattern]
         try:
-            self.assertFalse(adminchat.is_admin_host(":d!~d@any.host PRIVMSG x :y"))
+            return adminchat.is_admin_host(line)
         finally:
             config.ADMIN_HOSTMASKS = previous
+
+    def test_a_host_pattern_of_stars_is_refused(self):
+        self.assertFalse(self._check("*", ":d!~d@any.host PRIVMSG x :y"))
+
+    def test_no_spelling_of_match_everyone_gets_through(self):
+        for pattern in ("*", "**", "*.*", "*.*.*"):
+            with self.subTest(pattern=pattern):
+                self.assertFalse(
+                    self._check(pattern, ":d!~d@any.host PRIVMSG x :y"),
+                    f"{pattern!r} admitted a host it should have refused")
 
     def test_and_a_real_host_pattern_still_admits(self):
-        import adminchat
-        previous = getattr(config, "ADMIN_HOSTMASKS", [])
-        config.ADMIN_HOSTMASKS = ["operator2.users.undernet.org"]
-        try:
-            self.assertTrue(adminchat.is_admin_host(
-                ":c!~c@operator2.users.undernet.org PRIVMSG x :y"))
-            self.assertFalse(adminchat.is_admin_host(":m!~m@evil.example PRIVMSG x :y"))
-        finally:
-            config.ADMIN_HOSTMASKS = previous
+        self.assertTrue(self._check(
+            "operator2.users.undernet.org",
+            ":c!~c@operator2.users.undernet.org PRIVMSG x :y"))
+        self.assertFalse(self._check(
+            "operator2.users.undernet.org",
+            ":m!~m@evil.example PRIVMSG x :y"))
+
+    def test_a_legitimate_wildcard_domain_still_admits(self):
+        """The control for the fix itself: *.example.org names a real,
+        legitimate set of hosts and must keep working."""
+        self.assertTrue(self._check(
+            "*.example.org", ":c!~c@shell.example.org PRIVMSG x :y"))
+        self.assertFalse(self._check(
+            "*.example.org", ":m!~m@evil.example PRIVMSG x :y"))
 
 
 class TheSampleDoesNotPutTheDashboardOnTheLan(unittest.TestCase):

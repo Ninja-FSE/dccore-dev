@@ -417,11 +417,29 @@ def build_queue_payload(user=None):
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         return {"user": user_key, "status": status, "count": len(entries), "files": files}
 
+    # #220: a user sent with a free slot and nothing already queued never
+    # enters dcc_queue at all - dcc.py's admission check appends straight to
+    # active_transfers and returns (see start_dcc_send()). Iterating only
+    # queue.items(), as this used to, left them off the Queue table entirely
+    # while /api/stats (which reads active_transfers directly) showed the
+    # transfer correctly - the two disagreeing about the same page. The
+    # single-user branch above already got this right by checking
+    # sending_users regardless of whether entries exist; this does the same.
+    active_by_user = {}
+    for tx in active:
+        active_by_user.setdefault(str(tx.get("user", "")).lower(), tx)
+
     rows = []
-    for user_key, entries in queue.items():
+    for user_key in dict.fromkeys(list(queue.keys()) + list(sending_users)):
+        entries = queue.get(user_key, [])
         status = "sending" if user_key in sending_users else ("frozen" if user_key in frozen else "queued")
         first = entries[0] if entries else None
-        preview = first.get("file", "?") if isinstance(first, dict) else (str(first) if first is not None else "")
+        if first is not None:
+            preview = first.get("file", "?") if isinstance(first, dict) else str(first)
+        elif user_key in active_by_user:
+            preview = active_by_user[user_key].get("file", "?")
+        else:
+            preview = ""
         rows.append({"user": user_key, "preview": preview, "count": len(entries), "status": status})
     return rows
 

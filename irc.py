@@ -1567,6 +1567,17 @@ def irc_loop():
                         # !unban, !rehash, !update, !clearqueue) are deliberately left out:
                         # each self-checks against ADMIN_NICK in its own handler already, so
                         # gating them here would only meter the operator against themselves.
+                        #
+                        # FIXED (#219): a private CTCP DCC SEND - the cross-bot fetch reply
+                        # path below - was not in this set either. Its own admission control
+                        # only decides whether an OFFER is one we solicited; deciding that
+                        # costs a thread and a fetch-queue scan per message regardless, and
+                        # nothing bounded how many any single, non-banned user could send.
+                        # Self-contained, like the QUE/REMOVE clause above it: this whole
+                        # expression is lifted out of this file's source text and evaluated
+                        # by tests/test_irc_dispatch.py, so a local computed outside it (a
+                        # `ctcp_upper = ...` line before this block, tried first) is invisible
+                        # to that harness and breaks it with a NameError.
                         is_bot_command = (
                             msg_lower == f"@{config.NICKNAME.lower()}"
                             or msg_lower == f"@{config.NICKNAME.lower()}-help"
@@ -1579,6 +1590,9 @@ def irc_loop():
                             or any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
                             or msg_lower in ("!list", "!debugnames", "!ping")
                             or (msg.startswith("\x01") and msg.strip("\x01").strip().upper() in ("QUE", "REMOVE"))
+                            or (msg.startswith("\x01")
+                                and msg.strip("\x01").strip().upper().startswith("DCC SEND ")
+                                and target_chan.lower() == config.NICKNAME.lower())
                         )
                         if is_bot_command and security.is_flooding(user):
                             continue 

@@ -92,19 +92,26 @@ LIVE_NICK_LINE, LIVE_NICK_CONDITION = _one_elif_condition(LIVE_NICK_FRAGMENT)
 FLOOD_GATE_SOURCE = _flood_gate_source()
 
 
-def _evaluate(source, msg):
+def _evaluate(source, msg, target_chan=None):
     """Evaluate a condition lifted from irc.py against one PRIVMSG payload.
 
-    ``msg``/``msg_lower``/``bot_aliases`` are bound exactly as irc.py binds them
-    at the point the condition runs, so the surrounding config state decides the
-    outcome just as it does in the daemon. irc.py strips the payload before
-    dispatching, so the corpus here is pre-stripped too.
+    ``msg``/``msg_lower``/``bot_aliases``/``target_chan`` are bound exactly as
+    irc.py binds them at the point the condition runs, so the surrounding
+    config state decides the outcome just as it does in the daemon. irc.py
+    strips the payload before dispatching, so the corpus here is pre-stripped
+    too.
+
+    ``target_chan`` defaults to the bot's own nick - i.e. a private message -
+    since that is what every existing corpus entry here implicitly assumes;
+    only the DCC SEND clause (#219) reads it at all, and it needs an explicit
+    value from a caller checking that one.
     """
     namespace = {
         "msg": msg,
         "msg_lower": msg.lower(),
         "bot_aliases": irc.get_bot_aliases(),
         "config": config,
+        "target_chan": target_chan if target_chan is not None else config.NICKNAME,
     }
     return bool(eval(source, namespace))  # source comes from irc.py itself
 
@@ -336,6 +343,27 @@ class FloodGateCoverageTests(DCCoreTestCase):
         self.assertFalse(self._gate("@DCCore"))
         self.assertFalse(self._gate("just chatting about DCCore"))
         self.assertFalse(self._gate("!DCCoreX Song.flac"))
+
+    def test_a_private_dcc_send_ctcp_is_metered(self):
+        """#219: dcc_fetch.handle_incoming_offer() is dispatched to a thread
+        for any DCC SEND CTCP sent privately to the bot - its own admission
+        control only decides afterward whether the offer was solicited, so
+        deciding that costs work regardless. Nothing bounded how many of these
+        any single, non-banned user could send until this clause existed."""
+        reset_config(NICKNAME="DCCore", ORIGINAL_NICK="DCCore")
+        offer = "\x01DCC SEND Track.flac 3232235521 5001 12345\x01"
+
+        self.assertTrue(_evaluate(FLOOD_GATE_SOURCE, offer, target_chan="DCCore"))
+
+    def test_a_dcc_send_ctcp_addressed_to_a_channel_is_not_metered(self):
+        """The control: the real dispatch only ever acts on a DCC SEND
+        addressed to the bot itself (a copy landing in a channel is
+        meaningless - any member could have sent it), so the gate must not
+        meter what the dispatch would not act on either."""
+        reset_config(NICKNAME="DCCore", ORIGINAL_NICK="DCCore")
+        offer = "\x01DCC SEND Track.flac 3232235521 5001 12345\x01"
+
+        self.assertFalse(_evaluate(FLOOD_GATE_SOURCE, offer, target_chan="#chan"))
 
     def test_gate_uses_the_same_alias_set_as_the_dispatch(self):
         """Defect guard: the gate and the dispatch must be built from the same
