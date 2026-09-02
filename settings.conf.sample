@@ -343,7 +343,15 @@
 # 800KB/s died at t=600s having received ~480MB, threw it all away (no resume),
 # and burned a MAX_FETCH_SLOTS slot for ten minutes doing it - every retry
 # identical (#162 finding #11).
-#FETCH_FOLDER_TRANSFER_TIMEOUT = 3600
+# 
+# 3600 UNDERSHOT ITS OWN GOAL (#223): the cap grew 10.24x (200MB -> 2GB) but
+# the timeout only 6x (600s -> 3600s), so the IMPLIED throughput floor a peer
+# has to sustain went UP for a folder, not down - 349,525 B/s for a plain
+# file, 596,523 B/s for a folder. A peer exactly fast enough to complete a
+# maximum-size plain file could not complete a maximum-size folder, which is
+# the opposite of "give a large discography more room to be slow". Scaled by
+# the same 10.24x the size cap was: 600 * (2147483648 / MAX_FETCH_FILE_SIZE).
+#FETCH_FOLDER_TRANSFER_TIMEOUT = 6144
 
 # How often a new @find broadcast (POST /api/search/broadcast) is allowed to
 # start. Independent of the UI - courtesy to other bots/operators on a shared

@@ -650,6 +650,54 @@ class TestStatsAndBansRoundTrip(PersistenceTestCase):
         self.assertAlmostEqual(config.banned_users["good1!*@*"], 1111.0, places=6)
         self.assertAlmostEqual(config.banned_users["good2!*@*"], 2222.0, places=6)
 
+    def test_a_non_ascii_nick_round_trips(self):
+        """#226: load_bans_from_file() opened bans.txt with no encoding, so on
+        Windows it used the locale ANSI code page while save (via
+        _atomic_write) always writes utf-8. A banned nick containing a byte
+        sequence invalid in that code page made the whole read raise, and the
+        surrounding except left config.banned_users empty - every active
+        timed ban lost at the next startup."""
+        expiry = time.time() + 3600.0
+        config.banned_users = {"Söker!*@värd.example": expiry}
+
+        db.save_bans_to_file()
+        config.banned_users = {}
+        db.load_bans_from_file()
+
+        self.assertIn("söker!*@värd.example", config.banned_users)
+        self.assertAlmostEqual(config.banned_users["söker!*@värd.example"], expiry, places=6)
+
+    def test_the_read_declares_utf8_explicitly(self):
+        """The property #226 is actually about, checked in source rather than
+        by round-trip: Python's default encoding when none is given is the
+        LOCALE's, which is utf-8 on the Linux CI runners this suite runs on -
+        so the test above alone would not fail even with the bug present.
+        Only Windows, with a non-utf-8 ANSI code page active, was ever
+        exposed."""
+        import ast
+        import io as _io
+
+        with _io.open(db.__file__, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+
+        sites = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "open"):
+                continue
+            if not (len(node.args) >= 1 and isinstance(node.args[0], ast.Attribute)
+                    and node.args[0].attr == "BANS_FILE"):
+                continue
+            sites.append(node.lineno)
+            has_encoding = any(kw.arg == "encoding" for kw in node.keywords)
+            self.assertTrue(has_encoding,
+                            f"open(config.BANS_FILE, ...) at line {node.lineno} "
+                            f"does not declare an explicit encoding")
+
+        self.assertTrue(sites, "fixture invariant: no open(config.BANS_FILE) "
+                               "call site found at all - the scan is broken, "
+                               "not the code")
+
     def test_speed_record_round_trip(self):
         """save_speed_record() writes atomically to the shared module constant - both
         halves of the pair must agree on the path - and leaves no residue."""

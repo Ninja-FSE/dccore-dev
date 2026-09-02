@@ -496,18 +496,36 @@ class FolderTransferTimeoutTests(DCCoreTestCase):
     FETCH_TRANSFER_TIMEOUT, sized for the 200MB MAX_FETCH_FILE_SIZE cap, even
     though it has its own 10x-larger MAX_FETCH_FOLDER_FILE_SIZE cap - a large,
     legitimately slow discography transfer could be aborted (no resume, so
-    every retry identical) well before it had any chance to finish."""
+    every retry identical) well before it had any chance to finish.
+
+    #223: the FIRST fix (3600s) undershot its own goal. The cap grew 10.24x
+    (200MB -> 2GB) but the timeout only grew 6x (600s -> 3600s), so the
+    IMPLIED THROUGHPUT FLOOR a peer has to sustain went UP for a folder, not
+    down - a peer exactly fast enough to finish a maximum-size plain file in
+    600s could not finish a maximum-size folder in 3600s. Rescaled to 6144s,
+    matching the size cap's own 10.24x."""
 
     def test_a_folder_row_gets_its_own_longer_wall_clock(self):
-        self.set_config(FETCH_TRANSFER_TIMEOUT=600, FETCH_FOLDER_TRANSFER_TIMEOUT=3600)
-        self.assertEqual(dcc_fetch._fetch_transfer_timeout("folder"), 3600)
+        self.set_config(FETCH_TRANSFER_TIMEOUT=600, FETCH_FOLDER_TRANSFER_TIMEOUT=6144)
+        self.assertEqual(dcc_fetch._fetch_transfer_timeout("folder"), 6144)
         self.assertEqual(dcc_fetch._fetch_transfer_timeout("file"), 600)
         self.assertEqual(dcc_fetch._fetch_transfer_timeout("list"), 600,
                          "only 'folder' gets the longer ceiling")
 
     def test_falls_back_to_sane_defaults_when_unconfigured(self):
-        self.assertEqual(dcc_fetch._fetch_transfer_timeout("folder"), 3600)
+        self.assertEqual(dcc_fetch._fetch_transfer_timeout("folder"), 6144)
         self.assertEqual(dcc_fetch._fetch_transfer_timeout("file"), 600)
+
+    def test_the_folder_floor_is_not_stricter_than_the_plain_file_floor(self):
+        """The defect itself, stated as the property that matters: a peer
+        sustaining the plain-file floor must not be timed out on a folder."""
+        file_floor = config.MAX_FETCH_FILE_SIZE / dcc_fetch._fetch_transfer_timeout("file")
+        folder_floor = config.MAX_FETCH_FOLDER_FILE_SIZE / dcc_fetch._fetch_transfer_timeout("folder")
+
+        self.assertLessEqual(
+            folder_floor, file_floor * 1.01,  # 1% slack for rounding the timeout to a whole second
+            f"a folder demands {folder_floor:.0f} B/s but a plain file only "
+            f"{file_floor:.0f} B/s - the folder timeout undershot its own cap increase")
 
 
 class FallbackLockIsShared(DCCoreTestCase):

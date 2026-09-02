@@ -84,6 +84,8 @@ RUNTIME_FLAGS = {
     "bot_joined_channel": True,
     "activation_triggered": False,
     "update_inprogress": False,
+    "last_list_update_ok": None,
+    "last_list_update_error": None,
     "connection_epoch": 1,
     "broadcast_search_inprogress": False,
     "broadcast_search_deadline": 0,

@@ -1092,8 +1092,21 @@ def build_update_list_status_payload():
     rebuild is running right now. config.update_inprogress is set True just
     before commands.handle_list_update_request() starts its background
     thread and cleared in that thread's own `finally`, so this is accurate
-    for a rebuild started here, from !update, or from the admin console."""
-    return {"running": bool(getattr(config, "update_inprogress", False))}
+    for a rebuild started here, from !update, or from the admin console.
+
+    "ok"/"error" (#224): "running" alone could not distinguish a rebuild
+    that worked from one that failed - web/app.js's poll showed "Done. Check
+    Stats for the new file count." the moment `running` flipped false,
+    whichever it was. `ok` is None until the FIRST rebuild in this process
+    finishes (never run yet is not the same claim as "it failed"), then True
+    or False for whether that one succeeded; `error` names why when it did
+    not.
+    """
+    return {
+        "running": bool(getattr(config, "update_inprogress", False)),
+        "ok": getattr(config, "last_list_update_ok", None),
+        "error": getattr(config, "last_list_update_error", None),
+    }
 
 
 def start_list_update():

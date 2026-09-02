@@ -132,7 +132,13 @@ def load_bans_from_file():
     if not os.path.exists(config.BANS_FILE):
         return
     try:
-        with open(config.BANS_FILE, "r") as f:
+        # #226: no encoding here used the locale ANSI code page on Windows,
+        # while save_bans_to_file() (via _atomic_write) always writes utf-8.
+        # A banned nick containing a byte sequence invalid in that code page
+        # made the whole read raise; the bare except below caught it and
+        # every active timed ban was lost - on the platform this project is
+        # explicitly trying to support better.
+        with open(config.BANS_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if " " not in line:

@@ -409,12 +409,24 @@ def generate_master_list():
         for file in files:
             if file.lower().endswith(('.mp3', '.flac')):
                 full_file_path = os.path.join(root, file)
-                file_bytes = 0
                 try:
                     file_bytes = os.path.getsize(platform_compat.long_path(full_file_path))
-                    total_bytes += file_bytes
-                except:
-                    pass
+                except OSError as size_err:
+                    # #228: a bare `except: pass` left file_bytes at 0 and the
+                    # entry was published anyway - permission denied, a
+                    # dangling symlink, or a file removed mid-scan all read as
+                    # a legitimate 0-byte track. The list is the thing the
+                    # bot HANDS OUT: publishing it meant offering a download
+                    # that can only ever fail once someone actually requests
+                    # it, with the library's reported total size quietly
+                    # short and no log line saying why. Excluded and logged
+                    # instead - one bad file costs itself, not the whole scan
+                    # (walk_errors above is for a whole SUBTREE going
+                    # unreadable, a more systemic failure than one file).
+                    print(f"[LIST-GEN ERROR] Skipping {full_file_path!r}, "
+                         f"could not read its size: {size_err}")
+                    continue
+                total_bytes += file_bytes
                 rel_dir = os.path.relpath(root, scan_root)
                 if rel_dir == ".":
                     rel_dir = ""

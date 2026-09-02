@@ -406,6 +406,20 @@ def announce_worker():
                         
                     # Read the live figures at this exact moment
                     file_count, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes()
+
+                    # #229: get_file_count_date_size_and_raw_bytes() answers the
+                    # sentinel "No List" as the DATE when no master list exists
+                    # yet - a fresh install before its first !update. Unguarded,
+                    # that string was interpolated straight into the advert
+                    # ("...created No List"), published into every channel every
+                    # ANNOUNCE_INTERVAL until the first list build finished.
+                    # commands.py's -stats reply already guards the same
+                    # sentinel; the advert - far more publicly visible - never
+                    # had the same treatment. Skipped rather than reworded: an
+                    # advert with nothing to announce is not useful chatter.
+                    if list_date == "No List":
+                        continue
+
                     formatted_count = f"{file_count:,}"
                     
                     oserve = sys.modules.get('oserve')

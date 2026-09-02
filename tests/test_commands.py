@@ -219,6 +219,42 @@ class HardBanFileDurability(DCCoreTestCase):
                 commands.handle_hard_ban_request("SysOp", "#c", text)
                 self.assertEqual(db.load_hard_bans(), ["alpha*"])
 
+    def test_an_over_broad_pattern_is_refused_not_confirmed(self):
+        """#225: security.py's enforcement loop silently declines a pattern
+        that reduces to nothing once wildcards/separators are stripped - it
+        only ever logged to stdout, which the admin who typed the command
+        never sees. Before this fix "!ban *" was CONFIRMED as added and was
+        a permanent no-op: the admin believed a ban was live when it was
+        not, which is the direction that matters."""
+        for pattern in ("*", "*!*", "*@*", "*!*@*", "*!*@*.*"):
+            with self.subTest(pattern=pattern):
+                self.write("")
+                commands.handle_hard_ban_request("SysOp", "#c", f"!ban {pattern}")
+                self.assertEqual(db.load_hard_bans(), [],
+                                 f"{pattern!r} was written to hard_bans.txt despite "
+                                 f"security.py refusing to enforce it")
+
+    def test_the_operator_is_told_it_was_refused_not_confirmed(self):
+        """The message itself matters here, not just the file: the old
+        behaviour's whole failure was announce.send_debug() confirming
+        success while security.py silently declined to enforce it."""
+        self.write("")
+        self.debug = silence_debug(announce)
+
+        commands.handle_hard_ban_request("SysOp", "#c", "!ban *!*@*")
+
+        messages = [msg for _cat, msg in self.debug]
+        self.assertTrue(any("Refused" in msg for msg in messages), messages)
+        self.assertFalse(any("Added" in msg for msg in messages),
+                         "must not also claim the ban was added")
+
+    def test_a_legitimate_pattern_is_unaffected(self):
+        """Control: the refusal must not spread to patterns that are broad
+        but real, which #168 exists to let through."""
+        self.write("")
+        commands.handle_hard_ban_request("SysOp", "#c", "!ban *!*@spammer.net")
+        self.assertEqual(db.load_hard_bans(), ["*!*@spammer.net"])
+
 
 class QueueRemoveCleansTempArchives(DCCoreTestCase):
     """@<nick>-remove dropped the rows and orphaned the archives they named."""
@@ -901,6 +937,43 @@ class ListUpdateTimeoutTests(DCCoreTestCase):
         # finally: block must still clear both flags even on a timeout
         self.assertFalse(config.search_inprogress)
         self.assertFalse(config.update_inprogress)
+
+    def test_a_shrunk_library_is_reported_as_a_drop_not_added_zero(self):
+        """#230: added_files was clamped straight to zero, so a library that
+        SHRANK - a partial mount failure returning some files, fewer than
+        before, which generate_master_list()'s own zero-file guard does not
+        catch - read identically to one that had not changed at all: "Added
+        0 new file(s)". The operator who just lost real files from their
+        share was told nothing happened."""
+        tree = self.make_tree()
+        list_path = os.path.join(tree.lists, "DCCore-2026-09-02.txt")
+        with open(list_path, "w", encoding="utf-8") as handle:
+            handle.write("List of 100 Files\n")
+
+        def fake_run(cmd, **kwargs):
+            import types
+            # Simulates what a real update_list.py subprocess does on disk:
+            # rewrites the same master list, here with fewer files than it
+            # started with - a partial mount failure that still found SOME
+            # files is exactly the case generate_master_list()'s all-or-
+            # nothing zero-file guard does not catch.
+            with open(list_path, "w", encoding="utf-8") as handle:
+                handle.write("List of 40 Files\n")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        import subprocess
+        real_run = subprocess.run
+        subprocess.run = fake_run
+        self.addCleanup(setattr, subprocess, "run", real_run)
+
+        commands.handle_list_update_request("admin", "#chan", authorised=True)
+
+        messages = [msg for _cat, msg in self.debug]
+        self.assertTrue(any("DROPPED" in msg for msg in messages), messages)
+        self.assertTrue(any("100" in msg and "40" in msg for msg in messages),
+                        f"the drop message does not name both counts: {messages}")
+        self.assertFalse(any("Added 0" in msg for msg in messages),
+                         "a shrunk library must not read as an unchanged one")
 
     def test_a_second_update_is_refused_while_one_is_running_even_with_pause_off(self):
         """#162 finding #17's re-entrancy half: with PAUSE_ON_UPDATE=False the

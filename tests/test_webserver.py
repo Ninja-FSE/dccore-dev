@@ -611,6 +611,45 @@ class ListUpdateToolTests(DCCoreTestCase):
         payload = webserver.build_update_list_status_payload()
         self.assertFalse(payload["running"])
 
+    def test_ok_is_none_before_any_rebuild_has_run(self):
+        """Never having run yet is not the same claim as "it failed" -
+        web/app.js must not report a failure for a fresh process that has
+        simply never rebuilt the list."""
+        payload = webserver.build_update_list_status_payload()
+        self.assertIsNone(payload["ok"])
+
+    def test_a_successful_rebuild_is_reported_as_ok(self):
+        status, _result = webserver.start_list_update()
+        self.assertEqual(status, 200)
+
+        payload = webserver.build_update_list_status_payload()
+        self.assertTrue(payload["ok"])
+        self.assertIsNone(payload["error"])
+
+    def test_a_failed_rebuild_is_reported_as_not_ok(self):
+        """#224: build_update_list_status_payload() used to answer only
+        {"running": bool} - nothing recorded whether the rebuild that just
+        finished actually succeeded, so web/app.js's poll showed "Done.
+        Check Stats for the new file count." the moment `running` flipped
+        false, whichever it was. A rebuild that failed - missing
+        update_list.py, a bad FILE_DIRECTORY, a mount that timed out - was
+        reported to the operator as having worked."""
+        import subprocess
+
+        def failing_run(cmd, **kwargs):
+            import types
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="disk full")
+
+        subprocess.run = failing_run
+
+        status, _result = webserver.start_list_update()
+        self.assertEqual(status, 200, "starting the rebuild itself still succeeds")
+
+        payload = webserver.build_update_list_status_payload()
+        self.assertFalse(payload["ok"])
+        self.assertIsNotNone(payload["error"])
+        self.assertIn("disk full", payload["error"])
+
 
 class FetchRoutesTests(DCCoreTestCase):
     """build_fetch_enqueue_result()/build_fetch_status_payload() - the pure
