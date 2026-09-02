@@ -72,10 +72,15 @@ class ThemedPathCase(DCCoreTestCase):
     def setUp(self):
         super().setUp()
         self.tree = self.make_tree()
+        # DEBUG_CHANNEL is named explicitly rather than inherited: these are
+        # byte-identical golden fixtures, and send_debug's line embeds the
+        # channel. Leaning on the shipped default made the palette fixtures
+        # hostage to an unrelated decision about where debug output goes -
+        # which is exactly what changed when it started shipping blank.
         self.set_config(LOCAL_LIST_DIR=self.tree.lists, LIST_BASE_NAME="DCCoreTest",
                         NICKNAME="DCCoreTest", SCRIPT_VERSION="vTest", MAX_DCC_SLOTS=5,
                         STATS_FILE=os.path.join(self.tree.root, "stats.txt"),
-                        THEME="classic")
+                        DEBUG_CHANNEL="#dccore-debug", THEME="classic")
         self.addCleanup(setattr, db, "SPEED_RECORD_FILE", db.SPEED_RECORD_FILE)
         db.SPEED_RECORD_FILE = os.path.join(self.tree.root, "speed.txt")
         with io.open(config.STATS_FILE, "w", encoding="utf-8") as handle:

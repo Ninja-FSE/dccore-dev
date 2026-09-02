@@ -25,7 +25,7 @@
 # of them is still blank. See settings_file.REQUIRED if you want the full,
 # authoritative list. SERVER and DEBUG_CHANNEL are NOT in that list even
 # though they matter - their shipped defaults ("irc.undernet.org",
-# "#dccore-debug") are already correct for almost every install, and forcing
+# blank DEBUG_CHANNEL) are already right for almost every install, and forcing
 # them blank too would make those correct, intended values impossible to set
 # explicitly (the gate cannot tell "left at default" apart from "deliberately
 # confirmed the default is right"). FILE_DIRECTORY is also not in that list,
