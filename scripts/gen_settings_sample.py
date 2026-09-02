@@ -100,8 +100,8 @@ def _doc_lines(source_lines, node):
 
     # Look for the inline comment only AFTER the value ends. Splitting the
     # whole line on "#" cuts inside a string literal, so
-    #     CHANNEL = "#mp3passion,#mp3servers,..."
-    # produced a junk comment line reading `mp3passion,...#mp3download"` above
+    #     CHANNEL = "#example-one,#example-two,..."
+    # produced a junk comment line reading `example-one,...#example-three"` above
     # every channel-valued setting in the generated sample.
     own = source_lines[node.lineno - 1]
     if node.end_lineno == node.lineno:
