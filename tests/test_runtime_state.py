@@ -261,35 +261,27 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
     def test_runtime_is_not_reloaded_by_a_rehash(self):
         """The whole mechanism rests on this. If runtime lands in the reload
         list, every container is emptied again and the tests above still pass,
-        because they never go through !rehash itself."""
-        with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
-            source = handle.read()
+        because they never go through !rehash itself.
 
-        for node in ast.walk(ast.parse(source)):
-            # AnnAssign as well as Assign. Annotating the list would otherwise
-            # leave this scan matching nothing at all - which the self.fail()
-            # after the loop already turns into a loud failure rather than a
-            # quiet pass, but the scan should simply see it.
-            if isinstance(node, ast.Assign):
-                targets, value = node.targets, node.value
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                targets, value = [node.target], node.value
-            else:
-                continue
-            for target in targets:
-                if isinstance(target, ast.Name) and target.id == "modules_to_reload":
-                    names = [el.value for el in value.elts
-                             if isinstance(el, ast.Constant)]
-                    self.assertIn("defaults", names,
-                                  "fixture invariant: defaults (formerly config.py, "
-                                  "#170's RFC) should be reloaded")
-                    self.assertNotIn(
-                        "runtime", names,
-                        "runtime.py is in modules_to_reload, so a rehash "
-                        "re-executes it and empties every container - exactly "
-                        "the bug moving them there was meant to remove")
-                    return
-        self.fail("could not find modules_to_reload in commands.py")
+        This read commands.py's AST for a local named `modules_to_reload` and
+        broke the moment that literal became the CORE_MODULES constant - a
+        refactor that changed no behaviour. It failed for a change that
+        improved the code while a real regression (deleting the reload call
+        outright) would have left it green, which is the wrong way round.
+
+        Reading the exported value instead: same property, no dependence on
+        what the thing is called or where it is written.
+        """
+        import commands
+
+        self.assertIn("defaults", commands.CORE_MODULES,
+                      "fixture invariant: defaults (formerly config.py, "
+                      "#170's RFC) should be reloaded")
+        self.assertNotIn(
+            "runtime", commands.CORE_MODULES,
+            "runtime.py is in the reload list, so a rehash re-executes it and "
+            "empties every container - exactly the bug moving them there was "
+            "meant to remove")
 
 
 if __name__ == "__main__":

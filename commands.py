@@ -434,6 +434,49 @@ def restore_preserved_runtime(cfg, preserved_runtime):
     return restored
 
 
+CORE_MODULES = ('admin_config', 'defaults', 'list', 'dcc', 'announce',
+                'security', 'db', 'stats_mgr')
+
+
+def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
+    """Reload the daemon's modules in place and return the names reloaded.
+
+    ORDER IS LOAD-BEARING, which is why this is a named constant rather than a
+    literal inside the handler. defaults.py ends with `from admin_config import
+    *`; reloading defaults re-executes that statement, but the import system
+    serves the CACHED sys.modules['admin_config'] rather than re-reading the
+    file. Reloading defaults alone therefore picked up nothing an operator had
+    written in admin_config.py - and !rehash reported "Rehash completed!"
+    regardless.
+
+    The case that makes it worth fixing is REVOCATION. A hostmask deleted from
+    ADMIN_HOSTMASKS stayed live until the process was restarted, while the
+    operator had been told the change was applied.
+
+    A module that is not loaded is skipped: admin_config.py is optional and
+    gitignored, so it is frequently absent.
+
+    importlib is imported here rather than at the top of the file because it
+    was imported inside handle_rehash_request(), and this body was reading it
+    out of that scope. `sys` really is module-level; `importlib` was not.
+    """
+    import importlib
+
+    reloaded = []
+    for mod_name in modules:
+        if mod_name in sys.modules:
+            importlib.reload(sys.modules[mod_name])
+            reloaded.append(mod_name)
+
+    # Last, and separately: reloading this module rebinds the very names the
+    # caller is executing out of. The running frame keeps its old code object,
+    # which is what makes this safe here and would not be if it ran first.
+    if reload_self and 'commands' in sys.modules:
+        importlib.reload(sys.modules['commands'])
+        reloaded.append('commands')
+    return reloaded
+
+
 def handle_rehash_request(user, target_chan, authorised=False):
     """Reload the modules live, in memory, without reading anything back from disk."""
     import importlib
@@ -523,15 +566,10 @@ def handle_rehash_request(user, target_chan, authorised=False):
         live_debug_sinks = list(announce._debug_sinks)
 
     try:
-        # 2. REHASH: reload every core module live, in memory
-        modules_to_reload = ['defaults', 'list', 'dcc', 'announce', 'security', 'db', 'stats_mgr']
-        for mod_name in modules_to_reload:
-            if mod_name in sys.modules:
-                importlib.reload(sys.modules[mod_name])
-                
-        if 'commands' in sys.modules:
-            importlib.reload(sys.modules['commands'])
-            
+        # 2. REHASH: reload every core module live, in memory. The ORDER matters
+        # and is documented on reload_modules_in_order() itself.
+        reload_modules_in_order()
+
         print(f"[REHASH SUCCESS] Every Python module was reloaded in memory by {user}.")
 
         # Put the live state back before anything else runs against the fresh modules. The
