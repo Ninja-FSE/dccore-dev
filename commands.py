@@ -995,11 +995,11 @@ def handle_list_update_request(user, target_chan, authorised=False):
         announce.send_debug(f"System maintenance initiated by {user}. MasterList is rebuilding, file requests temporarily paused...", category="INFO")
     else:
         print(f"[UPDATE START] {user} ran !update. The pause switch is False, so sharing continues meanwhile.")
-        announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive...", category="INFO")
+        announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory...", category="INFO")
 
     # 1. Take the previous real file count from line 1
     old_count = count_from_master_list()
-    announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive, bot paused...", category="INFO")
+    announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory, bot paused...", category="INFO")
     def async_list_updater():
         try:
             base_path = os.path.dirname(os.path.abspath(__file__))
