@@ -154,7 +154,25 @@ def main(platform):
     except Exception:
         settings_conf_present = os.path.exists(os.path.join(REPO, "settings.conf"))
 
-    if not admin_config_present and not settings_conf_present:
+    legacy_present = os.path.exists(os.path.join(REPO, "local_config.py"))
+
+    if not admin_config_present and not settings_conf_present and legacy_present:
+        # Not unconfigured - an upgrade that has not been started yet. #170
+        # renamed local_config.py to admin_config.py, and because that file is
+        # gitignored the pull could not rename the operator's own copy.
+        #
+        # This is NOT a failure, and saying so matters: the launcher refuses to
+        # start when this check fails, and its message would send the operator
+        # to admin_config.py.sample - which is exactly the condition that makes
+        # defaults.py's migration skip, stranding their real settings for good.
+        #
+        # The rename has in fact already happened by the time anyone reads this
+        # line: "import defaults" below runs it at import time, and the check
+        # imports defaults a few lines further down. So this reports what was
+        # done rather than asking for anything.
+        ok("migrated local_config.py to admin_config.py (renamed in #170; the "
+           "file is gitignored, so the upgrade could not rename it for you)")
+    elif not admin_config_present and not settings_conf_present:
         fail("no admin_config.py and no settings.conf - copy admin_config.py.sample "
              "to admin_config.py, or settings.conf.sample to settings.conf, and fill "
              "one of them in, or the daemon will use the upstream defaults")
