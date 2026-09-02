@@ -3,11 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Ignorera allt innehåll i lists/
+# Ignore everything inside lists/ and data/
 lists/*
 data/*
 
-# Men ignorera INTE .gitkeep-filen i lists/
+# ...but do NOT ignore the .gitkeep files that keep those directories
 !lists/.gitkeep
 !data/.gitkeep
 

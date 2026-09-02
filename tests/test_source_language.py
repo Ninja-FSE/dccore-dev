@@ -351,5 +351,111 @@ class TheShippedDocsAreEnglish(unittest.TestCase):
                          "a quoted string is being reported as untranslated prose")
 
 
+# Plain files an operator reads or copies. Not Markdown and not Python, so
+# neither guard above looked at them - and two Swedish comments had already
+# reached settings.conf.sample once, which is GENERATED and is the file an
+# operator copies to settings.conf.
+PLAIN_FILES = (
+    ".gitignore",
+    "requirements.txt",
+    "settings.conf.sample",
+    "admin_config.py.sample",
+)
+
+_ACCENTS = "åäöÅÄÖ"
+
+
+def has_swedish_accent(line):
+    """A separate function so a control can drive it directly.
+
+    Inline, it had no control: a mutation run disabled the check and
+    nothing failed, because no file in the tree currently has an accent
+    in it. A scan that only passes because there is nothing to find
+    proves nothing about whether it can find anything.
+    """
+    return any(c in line for c in _ACCENTS)
+
+
+def _plain_lines(name):
+    path = os.path.join(REPO_ROOT, name)
+    if not os.path.exists(path):
+        return []
+    with io.open(path, encoding="utf-8") as handle:
+        return list(enumerate(handle.read().splitlines(), 1))
+
+
+class ThePlainOperatorFilesAreEnglish(unittest.TestCase):
+    """The gap the two guards above left between them.
+
+    .gitignore shipped two Swedish comments the whole way to the release
+    prep - "Ignorera allt innehall i lists/" and "Men ignorera INTE
+    .gitkeep-filen i lists/" - because the module guard reads .py files and
+    the docs guard reads .md files, and .gitignore is neither.
+
+    admin_config.py.sample ends in .py.sample, not .py, so it fell through the
+    same gap. settings.conf.sample is generated from defaults.py, which IS
+    covered - but only the parts of it that survive into the generated file,
+    and the docstring on the module guard already records two Swedish comments
+    reaching that sample once.
+
+    Both checks run here, because neither finds what the other does: an accent
+    scan cannot see "Kunde inte skicka JOIN", and a word list cannot see a word
+    nobody thought to add.
+    """
+
+    def test_no_plain_file_contains_swedish(self):
+        offenders = []
+        for name in PLAIN_FILES:
+            for number, line in _plain_lines(name):
+                found = SWEDISH.findall(line)
+                if found:
+                    offenders.append(
+                        f"{name}:{number}: {sorted(set(w.lower() for w in found))} "
+                        f"-> {line.strip()[:60]}")
+
+        self.assertEqual(offenders, [],
+                         "Swedish in a file an operator reads:\n  " +
+                         "\n  ".join(offenders))
+
+    def test_no_plain_file_contains_a_swedish_accent(self):
+        """Cheap, and catches the words the list does not have. These files
+        have no reason to carry a-ring, a-umlaut or o-umlaut at all: unlike
+        the docs, none of them quotes anything."""
+        offenders = []
+        for name in PLAIN_FILES:
+            for number, line in _plain_lines(name):
+                if has_swedish_accent(line):
+                    offenders.append(f"{name}:{number}: {line.strip()[:60]}")
+
+        self.assertEqual(offenders, [],
+                         "a Swedish accent in a file an operator reads:\n  " +
+                         "\n  ".join(offenders))
+
+    def test_the_files_it_names_are_actually_there(self):
+        """A renamed or deleted file would make this pass by reading nothing,
+        which is the failure mode of every allowlist-shaped check."""
+        missing = [name for name in PLAIN_FILES
+                   if not os.path.exists(os.path.join(REPO_ROOT, name))]
+
+        self.assertEqual(missing, [],
+                         "named here but not in the tree, so nothing is scanned")
+
+    def test_it_reads_something(self):
+        """Control. Empty files would satisfy both scans above."""
+        for name in PLAIN_FILES:
+            with self.subTest(file=name):
+                self.assertTrue(_plain_lines(name))
+
+    def test_the_accent_scan_actually_detects(self):
+        """Control for the scan itself, added after a mutation run turned it
+        off and nothing failed - there is no accent in the tree today, so the
+        assertion had nothing to prove it worked."""
+        for accent in _ACCENTS:
+            with self.subTest(accent=accent):
+                self.assertTrue(has_swedish_accent(f"ignorera n{accent}got"))
+
+        self.assertFalse(has_swedish_accent("# Ignore everything inside lists/"))
+
+
 if __name__ == "__main__":
     unittest.main()
