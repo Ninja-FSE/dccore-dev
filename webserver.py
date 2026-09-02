@@ -431,6 +431,14 @@ def build_queue_payload(user=None):
 
     rows = []
     for user_key in dict.fromkeys(list(queue.keys()) + list(sending_users)):
+        # sending_users comes from active_transfers, whose rows are built by
+        # dcc.py rather than keyed by it - an entry missing its "user" field
+        # contributes "" to that set and used to reach the page as a blank row
+        # with a "?" preview. Iterating dcc_queue alone could not produce that,
+        # because its keys are always real nicks; taking senders from a list of
+        # dicts is what introduced the possibility.
+        if not user_key:
+            continue
         entries = queue.get(user_key, [])
         status = "sending" if user_key in sending_users else ("frozen" if user_key in frozen else "queued")
         first = entries[0] if entries else None

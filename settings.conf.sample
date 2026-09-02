@@ -299,6 +299,9 @@
 # Max simultaneous in-flight/offered fetches
 #MAX_FETCH_SLOTS = 3
 
+# Interacts with flood protection: a bot's DCC SEND offers are metered like any
+# other command, so this must stay well below MAX_REQUESTS (per REQUEST_WINDOW)
+# or a bot answering your own fetch requests can trip the flood gate and be muted.
 # 200 MB - reject the offer before we even connect
 #MAX_FETCH_FILE_SIZE = 209715200
 
