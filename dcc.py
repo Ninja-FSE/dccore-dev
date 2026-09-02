@@ -1349,6 +1349,17 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         threading.Thread(target=delayed_port_retry, daemon=True).start()
 
         print("[DCC PORTS] No free DCC port for " + str(user) + "; entry stays queued, retrying in 45s.")
+        # The listener is closed HERE and not anywhere else. Every path from the
+        # try: below runs through a finally: that closes it, but this branch
+        # returns before reaching that try - so the socket created a few lines
+        # above was leaked, once per refused request, on a path that retries
+        # every 45 seconds. On a bot whose ports are genuinely exhausted that is
+        # a steady file-descriptor leak for as long as the condition lasts,
+        # which is exactly when the daemon can least afford one.
+        try:
+            dcc_sock.close()
+        except Exception:
+            pass
         return
 
     dcc_sock.settimeout(30.0)

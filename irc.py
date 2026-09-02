@@ -1625,7 +1625,8 @@ def irc_loop():
                                     threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
                                     continue
                             elif msg_lower == f"@{config.NICKNAME.lower()}":
-                                threading.Thread(target=list.send_file_list, args=(s, user, target_chan)).start()
+                                threading.Thread(target=list.send_file_list, args=(s, user, target_chan),
+                                                 daemon=True).start()
                             elif msg_lower == f"@{config.NICKNAME.lower()}-help":
                                 threading.Thread(target=commands.handle_help_request, args=(s, user, target_chan), daemon=True).start()
                                 continue
@@ -1688,7 +1689,9 @@ def irc_loop():
                                 parts = msg.split(" ", 1)
                                 if len(parts) > 1:
                                     requested_file = parts[1].strip()
-                                    threading.Thread(target=dcc.handle_download_request, args=(s, user, requested_file, target_chan)).start()
+                                    threading.Thread(target=dcc.handle_download_request,
+                                                    args=(s, user, requested_file, target_chan),
+                                                    daemon=True).start()
                                     
                         except Exception as cmd_err:
                             print(f"[ERROR] Error handling a bot command from {user}: {cmd_err}")
