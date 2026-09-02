@@ -25,6 +25,7 @@ import commands  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
 import list as list_mod  # noqa: E402
+import platform_compat  # noqa: E402
 import update_list  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -505,7 +506,19 @@ class AnUnreadableFileIsExcludedNotPublishedAsZeroBytes(MasterListCase):
         real_getsize = os.path.getsize
 
         def fake_getsize(path):
-            if os.path.normpath(path) == os.path.normpath(target_path):
+            # Compared through long_path() on BOTH sides, because that is how
+            # the code under test calls it: update_list.py:413 is
+            # os.path.getsize(platform_compat.long_path(full_file_path)).
+            #
+            # On Windows long_path() prefixes "\?\", so a plain normpath
+            # comparison never matched, this stub never raised, and both tests
+            # below silently exercised the READABLE path - passing on Linux,
+            # where long_path() is the identity function, and failing here.
+            #
+            # A stub has to match the way production calls the function, not
+            # the way the test happens to hold the path.
+            if (platform_compat.long_path(os.path.normpath(path))
+                    == platform_compat.long_path(os.path.normpath(target_path))):
                 raise OSError(13, "Permission denied", path)
             return real_getsize(path)
 
