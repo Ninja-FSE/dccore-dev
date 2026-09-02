@@ -25,7 +25,7 @@ queue_lock = threading.Lock()
 def is_safe_path(base_dir, path, follow_symlinks=True):
     """Safety filter: prevents directory traversal attacks.
 
-    A falsy base_dir (chchatzop's review of #184: FILE_DIRECTORY is
+    A falsy base_dir (#184's review: FILE_DIRECTORY is
     deliberately not in settings_file.REQUIRED any more, so callers that
     used to be able to assume it was always set can no longer do so) refuses
     rather than raising: os.path.realpath(None) is a TypeError, and every
@@ -862,7 +862,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 return
 
             # FILE_DIRECTORY is deliberately not in settings_file.REQUIRED any
-            # more (chchatzop's review of #184) - the daemon can be up and
+            # more (#184's review) - the daemon can be up and
             # answering requests before an operator has chosen a music
             # directory. Every album this branch packs lives under it, so
             # checked here, explicitly, rather than letting
@@ -1012,7 +1012,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             full_path = os.path.join(base_directory, requested_file)
         else:
             # Same reasoning as the !rar branch above: FILE_DIRECTORY can
-            # legitimately be unset (chchatzop's review of #184), and an
+            # legitimately be unset (#184's review), and an
             # ordinary track request - unlike a list artifact request, which
             # never touches FILE_DIRECTORY at all - has nothing to look for
             # without it. Checked explicitly rather than letting

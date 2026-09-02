@@ -163,7 +163,7 @@ class IsSafePathTests(DCCoreTestCase):
         self.assertTrue(dcc.is_safe_path(self.tree.music, staying))
 
     def test_a_blank_base_dir_is_rejected_not_raised(self):
-        """chchatzop's review of #184: FILE_DIRECTORY is deliberately not in
+        """#184's review: FILE_DIRECTORY is deliberately not in
         settings_file.REQUIRED any more, so every caller here can now be
         handed None. os.path.realpath(None) is a TypeError - this must
         refuse instead, since every caller is a security boundary where
@@ -515,7 +515,7 @@ class PoisonedQueueRowTests(PathSecurityBase):
 
 
 class FileDirectoryUnsetRequestTests(PathSecurityBase):
-    """chchatzop's review of #184: FILE_DIRECTORY is deliberately not in
+    """#184's review: FILE_DIRECTORY is deliberately not in
     settings_file.REQUIRED any more (see its own comment) - the daemon can be
     up, joined and answering requests before an operator has chosen a music
     directory. Before this fix, a file or !rar request in that state reached

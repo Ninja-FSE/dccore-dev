@@ -326,7 +326,7 @@ THEME: str = "classic"        # classic, midnight, forest, orchid, plain
 # string like "\x0306,06", or None (the default) to leave that role at
 # whatever the chosen THEME preset already says.
 #
-# #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
+# #170's RFC (issue #170's discussion, its Q1): this used to be one
 # dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard
@@ -514,7 +514,7 @@ SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
 def _migrate_local_config_to_admin_config(directory=None, log=print):
     """Carry an existing local_config.py across to admin_config.py's name.
 
-    chchatzop's review of #187, found on the real upgrade path: config.py ->
+    #187's review, found on the real upgrade path: config.py ->
     defaults.py is a TRACKED file, so git renames it on every operator's disk
     automatically on pull. local_config.py -> admin_config.py is NOT - it is
     gitignored, so it was never in the repository for git to rename. An
@@ -597,7 +597,7 @@ settings_file.apply_to(globals())
 if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
     BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
 
-# LIST_BASE_NAME predicted this exact gap: #170's RFC discussion (chchatzop's
+# LIST_BASE_NAME predicted this exact gap: #170's RFC discussion (its own
 # comment) noted it "can derive from NICKNAME rather than being asked for at
 # all" once NICKNAME itself is required - see settings_file.py's own comment
 # on why LIST_BASE_NAME is not in REQUIRED. Found live, running setup.py

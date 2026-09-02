@@ -1,6 +1,6 @@
 """local_config.py doesn't follow config.py's rename to defaults.py.
 
-chchatzop's review of #187, found on the real upgrade path: config.py ->
+#187's review, found on the real upgrade path: config.py ->
 defaults.py is a TRACKED file, so git renames it on every operator's disk
 automatically on pull. local_config.py -> admin_config.py is NOT - it is
 gitignored, so it was never in the repository for git to rename. An operator

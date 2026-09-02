@@ -851,7 +851,7 @@ class FetchDeleteResultTests(DCCoreTestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
 
     def test_a_stored_filename_escaping_fetched_files_dir_is_refused_not_removed(self):
-        """chchatzop's PR #150 review finding: unlike api_fetch_download()
+        """#150's review finding: unlike api_fetch_download()
         (Flask's send_from_directory() does its own safe join and raises
         NotFound on anything that escapes `directory`), this route used to
         trust stored_filename with a plain os.path.join() and no re-check of

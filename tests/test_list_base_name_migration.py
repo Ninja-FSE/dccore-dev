@@ -1,6 +1,6 @@
 """LIST_BASE_NAME's NICKNAME derivation orphans existing list files.
 
-chchatzop's review of #184: defaults.py's DERIVED VALUES section makes an
+#184's review: defaults.py's DERIVED VALUES section makes an
 untouched LIST_BASE_NAME take NICKNAME's own value once NICKNAME is set
 (#170's RFC predicted this, see its own comment). Every install that never
 set LIST_BASE_NAME explicitly has its list files on disk as

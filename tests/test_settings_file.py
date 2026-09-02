@@ -203,9 +203,9 @@ class UnconfiguredRequiredTests(unittest.TestCase):
         test_the_fetch_containers_are_in_the_preserved_list already uses for
         PRESERVE_RUNTIME.
 
-        SERVER and DEBUG_CHANNEL are deliberately absent - chchatzop's
-        review of the first version of this (a real test-run against the
-        live install) found that keeping either REQUIRED made its own
+        SERVER and DEBUG_CHANNEL are deliberately absent - a review of the
+        first version of this (a real test-run against the live install)
+        found that keeping either REQUIRED made its own
         correct, intended value permanently unusable, since the gate refuses
         a value equal to its shipped default and "irc.undernet.org"/
         "#dccore-debug" are correct-by-default for virtually every operator,

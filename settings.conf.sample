@@ -375,7 +375,7 @@
 # string like "\x0306,06", or None (the default) to leave that role at
 # whatever the chosen THEME preset already says.
 # 
-# #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
+# #170's RFC (issue #170's discussion, its Q1): this used to be one
 # dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard

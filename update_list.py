@@ -117,7 +117,7 @@ _SHIPPED_LIST_BASE_NAME = "DCCore"
 
 def migrate_list_base_name(log=print):
     """Carry existing list files across when LIST_BASE_NAME changed out from
-    under them - chchatzop's review of #184: defaults.py's LIST_BASE_NAME
+    under them - #184's review: defaults.py's LIST_BASE_NAME
     derivation (an untouched value takes NICKNAME's own value once NICKNAME
     is set) means every existing install's list files, generated before that
     derivation existed, are sitting on disk as "DCCore-<date>.*" while
