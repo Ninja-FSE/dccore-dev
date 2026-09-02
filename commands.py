@@ -865,6 +865,62 @@ def subprocess_failure_message(stderr, stdout):
     return lines[-1] if lines else "Unknown script error"
 
 
+# Reads ONLY line 1 of the real master list, so it costs almost nothing
+def count_from_master_list():
+    """The file count on line 1 of the newest master list, or 0.
+
+    Lifted out of handle_list_update_request() so it can be called directly.
+    It was a closure over nothing - it reads config and the disk - and being
+    one meant the only way to reach it was to run a real !update, subprocess
+    and all. A glob-escaping fix to this very function could not be proved
+    by any test until it moved out here.
+
+    The three imports are local because they were local in the enclosing
+    function, and the closure was reading them out of ITS scope - lifting the
+    body out without them raised NameError('os') on the first call, caught by
+    the broad except below and reported as a count of 0. Which is to say the
+    extraction reproduced the exact bug it was made to prove was fixed.
+    """
+    import glob
+    import os
+    import re
+
+    try:
+        # Find every text file in the directory matching the bot's name
+        # LIST_BASE_NAME, not NICKNAME: irc.py rebinds NICKNAME on a 433 fallback, and
+        # update_list.py names the files with LIST_BASE_NAME. Keyed off the live nick this
+        # counted 0 both before and after a rebuild, so !update reported "0 files, added 0"
+        # while the advert reported the real total. Matches list.find_latest_list().
+        # glob.escape both halves: "[" and "]" are a character class to glob, and
+        # both are ordinary in the two values interpolated here. Bot[GR] is a
+        # standard IRC nick, and LIST_BASE_NAME follows NICKNAME by default; a
+        # music share under D:\Lists[FLAC]\ is the same bug from the other side.
+        # Unescaped, the pattern matched nothing and never errored: @find answered
+        # "No MasterList found" and the advert published "0 Files" forever.
+        pattern = os.path.join(glob.escape(config.LOCAL_LIST_DIR),
+                               f"{glob.escape(config.LIST_BASE_NAME)}-*.txt")
+        all_txt_files = sorted(glob.glob(pattern))
+        
+        # Filter out the RAR list, so only the true master list is read
+        true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
+        
+        if true_master_lists:
+            list_path = true_master_lists[-1]  # The very newest master list
+            if os.path.exists(list_path):
+                with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
+                    first_line = f.readline().strip()
+                    
+                    # Look for the "List of X Files" pattern
+                    match = re.search(r"List of\s+([\d,.]+)\s+Files", first_line, re.IGNORECASE)
+                    if match:
+                        raw_num = match.group(1).replace(",", "").replace(".", "")
+                        if raw_num.isdigit():
+                            return int(raw_num)
+    except Exception as e:
+        print(f"[LIST READ ERROR] Could not read line 1: {e}")
+    return 0
+
+
 def handle_list_update_request(user, target_chan, authorised=False):
     """Run update_list.py, wait for it, and read the file count from line 1 of the list."""
     import subprocess
@@ -903,38 +959,8 @@ def handle_list_update_request(user, target_chan, authorised=False):
         print(f"[UPDATE START] {user} ran !update. The pause switch is False, so sharing continues meanwhile.")
         announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive...", category="INFO")
 
-
-    # Reads ONLY line 1 of the real master list, so it costs almost nothing
-    def get_count_from_list():
-        try:
-            # Find every text file in the directory matching the bot's name
-            # LIST_BASE_NAME, not NICKNAME: irc.py rebinds NICKNAME on a 433 fallback, and
-            # update_list.py names the files with LIST_BASE_NAME. Keyed off the live nick this
-            # counted 0 both before and after a rebuild, so !update reported "0 files, added 0"
-            # while the advert reported the real total. Matches list.find_latest_list().
-            all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.LIST_BASE_NAME}-*.txt")))
-            
-            # Filter out the RAR list, so only the true master list is read
-            true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
-            
-            if true_master_lists:
-                list_path = true_master_lists[-1]  # The very newest master list
-                if os.path.exists(list_path):
-                    with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
-                        first_line = f.readline().strip()
-                        
-                        # Look for the "List of X Files" pattern
-                        match = re.search(r"List of\s+([\d,.]+)\s+Files", first_line, re.IGNORECASE)
-                        if match:
-                            raw_num = match.group(1).replace(",", "").replace(".", "")
-                            if raw_num.isdigit():
-                                return int(raw_num)
-        except Exception as e:
-            print(f"[LIST READ ERROR] Could not read line 1: {e}")
-        return 0
-
     # 1. Take the previous real file count from line 1
-    old_count = get_count_from_list()
+    old_count = count_from_master_list()
     announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing NFS-drive, bot paused...", category="INFO")
     def async_list_updater():
         try:
@@ -964,7 +990,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 # ---------------------------------------------------------------------
                 
                 # 3. Read the new file count from line 1
-                new_count = get_count_from_list()
+                new_count = count_from_master_list()
                 
                 # Work out the exact difference
                 added_files = new_count - old_count

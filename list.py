@@ -206,7 +206,15 @@ def find_latest_list():
     nick collision happens.
     """
     try:
-        all_txt_files = sorted(glob.glob(os.path.join(config.LOCAL_LIST_DIR, f"{config.LIST_BASE_NAME}-*.txt")))
+        # glob.escape both halves: "[" and "]" are a character class to glob, and
+        # both are ordinary in the two values interpolated here. Bot[GR] is a
+        # standard IRC nick, and LIST_BASE_NAME follows NICKNAME by default; a
+        # music share under D:\Lists[FLAC]\ is the same bug from the other side.
+        # Unescaped, the pattern matched nothing and never errored: @find answered
+        # "No MasterList found" and the advert published "0 Files" forever.
+        pattern = os.path.join(glob.escape(config.LOCAL_LIST_DIR),
+                               f"{glob.escape(config.LIST_BASE_NAME)}-*.txt")
+        all_txt_files = sorted(glob.glob(pattern))
         # Keep the RAR list out of the search, so only the master list is scanned.
         # FULL_LIST_MARKER keeps the DELIVERED text list out too: that one is a
         # copy of this file with the album rows appended, and which of the two
