@@ -86,4 +86,4 @@ pkill -f oserve.py && rm -rf __pycache__ */__pycache__ && python3 oserve.py
 ```
 
 ## License
-[MIT](LICENSE)
+[GPLv3](LICENSE) - forks and modified versions must stay open source.
