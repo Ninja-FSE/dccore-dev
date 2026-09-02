@@ -189,6 +189,19 @@ def startup():
     # in-memory only until now, so a completed download and its Delete
     # button both silently vanished from the dashboard on every restart.
     config.fetch_queue.update(db.load_fetch_history())
+    # #221: a bot that ran for months before retention existed loads all of it
+    # back here. Pruning at startup as well as on the persist cycle means an
+    # upgrade cleans up once rather than carrying the backlog forever.
+    # Non-fatal, for the same reason the dispatcher start further down is:
+    # retention is housekeeping, and a bot that cannot import dcc_fetch has a
+    # bigger problem than an over-long Downloads list. tests/test_startup.py
+    # simulates exactly that by putting None in sys.modules, and an unguarded
+    # import here took the whole boot down with it.
+    try:
+        import dcc_fetch
+        dcc_fetch.prune_fetch_history()
+    except Exception as prune_err:
+        print(f"[STARTUP] Could not prune the fetch history: {prune_err}")
     if config.fetch_queue:
         print(f"[STARTUP] Fetch history: {len(config.fetch_queue)} finished fetch(es) remembered.")
 

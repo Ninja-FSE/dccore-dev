@@ -268,6 +268,13 @@ DCC_PORT_END: int   = 55010
 # outbound leech traffic (us fetching from others) starve our own serving
 # capacity, or vice versa.
 MAX_FETCH_SLOTS: int        = 3        # Max simultaneous in-flight/offered fetches
+# How long a finished (complete/failed) cross-bot fetch stays in the Downloads
+# table. Age is the primary rule because that table is a recent record of what
+# happened, not an archive; the row cap below is only a backstop for a burst of
+# activity inside the window. Pruning forgets the ROW, never the downloaded
+# file - that stays under FETCHED_FILES_DIR. 0 disables either rule.
+FETCH_HISTORY_DAYS: int     = 30       # Days a finished fetch stays in the history
+FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever their age
 # Interacts with flood protection: a bot's DCC SEND offers are metered like any
 # other command, so this must stay well below MAX_REQUESTS (per REQUEST_WINDOW)
 # or a bot answering your own fetch requests can trip the flood gate and be muted.
