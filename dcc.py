@@ -16,11 +16,18 @@ import announce
 import db
 import runtime
 
-# THE queue lock: created once here, at the top of the module, before any function
-# below can be called - so `with queue_lock:` throughout this file always resolves
-# to this one object, never needs a fallback, and is what db.py's and announce.py's
-# own comments mean when they say "queue_lock".
-queue_lock = threading.Lock()
+# THE queue lock: bound to runtime.py's object, not constructed here - dcc.py is
+# reloaded by !rehash (commands.CORE_MODULES), and importlib.reload() re-executing
+# `queue_lock = threading.Lock()` would rebind this name to a brand-new lock every
+# time, exactly the bug runtime.py's own module docstring exists to remove for
+# containers. A thread already inside `with queue_lock:` when that happened would
+# go on holding the old, now-invisible object while the next caller acquired the
+# fresh one - two threads in the critical section at once. Binding to runtime.py's
+# object instead means a reload re-runs this same line and picks the identical live
+# lock back up, so `with queue_lock:` throughout this file always resolves to the
+# one object every caller has ever held, and is what db.py's and announce.py's own
+# comments mean when they say "queue_lock".
+queue_lock = runtime.queue_lock
 
 def is_safe_path(base_dir, path, follow_symlinks=True):
     """Safety filter: prevents directory traversal attacks.

@@ -516,19 +516,20 @@ def handle_rehash_request(user, target_chan, authorised=False):
                     raw_slots = getattr(mod, attr)
                     ram_user_slots = {k.lower(): v for k, v in raw_slots.items()}
 
-    # C. The QUEUE - keep the original objects in memory, never via disk
-    ram_backup_queue = {}
-    for mod_name in ['dcc', 'defaults', 'oserve', 'queue_mgr', 'list']:
-        mod = sys.modules.get(mod_name)
-        if mod:
-            for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
-                if hasattr(mod, attr) and isinstance(getattr(mod, attr), dict):
-                    raw_q = getattr(mod, attr)
-                    # Only keep users who still have real tracks queued
-                    ram_backup_queue = {k.lower(): v for k, v in raw_q.items() if v and len(v) > 0}
-
-    if ram_backup_queue:
-        print(f"[REHASH RAM] Secured {len(ram_backup_queue)} active sharing queue(s) in memory.")
+    # dcc_queue is NOT snapshotted here, unlike channel_users/slots above. It is
+    # a runtime.py-bound container (see that module's docstring), so a reload
+    # never actually empties or replaces it - the object dcc.py/defaults.py see
+    # after reload_modules_in_order() below is the identical one they saw before
+    # it, with every write that happened during the reload window already on it.
+    #
+    # A snapshot-and-restore used to run here anyway, capturing dcc_queue before
+    # the reload and overwriting it with that snapshot afterwards. Since the live
+    # object never actually changes, that restore was strictly destructive: a
+    # request that arrived during the reload window was wiped by the snapshot's
+    # `.clear()`, and a transfer that COMPLETED during the window - removed from
+    # the live queue - came back from the stale snapshot and was sent again.
+    # rar_queue and download_queue, probed in the same removed loop, were never
+    # real container names anywhere in this codebase.
 
     # Keep the old channel list, for the JOIN/PART comparison
     old_chans = [c.strip().lower() for c in config.CHANNEL.split(",") if c.strip()]
@@ -690,29 +691,9 @@ def handle_rehash_request(user, target_chan, authorised=False):
                             for k, v in ram_user_slots.items(): combined_slots[k.upper()] = v
                             setattr(mod, attr, combined_slots)
 
-        # Restore the queue, putting the exact objects back under lowercased keys
-        if ram_backup_queue:
-            combined_queue = {}
-            for k, v in ram_backup_queue.items():
-                combined_queue[k.lower()] = v
-                
-            for mod_name in ['dcc', 'defaults', 'oserve', 'queue_mgr', 'list']:
-                mod = sys.modules.get(mod_name)
-                if mod:
-                    for attr in ['dcc_queue', 'rar_queue', 'download_queue']:
-                        if not hasattr(mod, attr):
-                            continue
-                        existing = getattr(mod, attr)
-                        if isinstance(existing, dict):
-                            # Mutate rather than rebind. config.dcc_queue is
-                            # the object runtime.py holds; setattr here would
-                            # silently detach it and the queue would drift.
-                            existing.clear()
-                            existing.update(combined_queue)
-                        else:
-                            setattr(mod, attr, combined_queue)
-            print(f"[REHASH RAM] The active sharing queue was restored in memory, lowercased.")
-
+        # No queue restore here - see the removed snapshot's comment above.
+        # dcc_queue is runtime.py-bound and was never actually touched by the
+        # reload, so there is nothing to put back.
 
         # Reset the text queues (send_queue) to empty dicts so they cannot clash
         for mod_name in ['queue_mgr', 'defaults', 'oserve', 'irc']:
