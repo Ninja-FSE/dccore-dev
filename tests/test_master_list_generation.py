@@ -21,6 +21,7 @@ if REPO_ROOT not in sys.path:
 if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
+import commands  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
 import list as list_mod  # noqa: E402
@@ -170,10 +171,48 @@ class TheRequestTriggerIsStable(MasterListCase):
     """
 
     def test_production_generates_the_list_in_a_subprocess(self):
-        source = open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8").read()
-        handler = source.split("def handle_list_update_request", 1)[1]
-        self.assertIn("subprocess.run", handler,
-                      "in-process generation would stamp the list with the LIVE nick")
+        """That the handler RUNS update_list.py as a subprocess, not that
+        commands.py contains the text "subprocess.run".
+
+        The previous version sliced the source from "def
+        handle_list_update_request" and asserted the substring appeared
+        somewhere after it. A comment saying "we use subprocess.run here"
+        passed. So did wrapping the real call in `if False:`.
+
+        What the substring stood for is load-bearing, and this class's own
+        docstring explains why: in-process generation would stamp the list
+        with the LIVE nick, which after a 433 collision is the alt nick, and
+        the alt nick is not one of the aliases the bot answers to. The list
+        would be built and then be unrequestable.
+        """
+        import subprocess
+        import time as time_mod
+        import types
+
+        calls = []
+        real_run = subprocess.run
+
+        def recorder(args, **kwargs):
+            calls.append(args)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        subprocess.run = recorder
+        self.addCleanup(setattr, subprocess, "run", real_run)
+
+        commands.handle_list_update_request("operator", "#channel", authorised=True)
+
+        # The handler dispatches into a daemon thread and returns immediately.
+        # Polled rather than joined: a thread-set diff also catches whatever
+        # unrelated daemon threads the rest of the suite has running, and
+        # joining one of those waits out the whole timeout for nothing.
+        deadline = time_mod.time() + 10
+        while not calls and time_mod.time() < deadline:
+            time_mod.sleep(0.01)
+
+        self.assertTrue(calls, "the list was not rebuilt in a subprocess")
+        launched = [a for a in calls
+                    if any("update_list.py" in str(part) for part in a)]
+        self.assertTrue(launched, f"a subprocess ran, but not update_list.py: {calls}")
 
     def test_the_default_nick_is_an_alias_so_lists_keep_working(self):
         config.NICKNAME = "DCCore_"          # after a 433 collision

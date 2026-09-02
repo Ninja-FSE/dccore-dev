@@ -5,7 +5,10 @@ one they are on, so a change that is right on Linux and wrong on Windows fails
 before it merges rather than after somebody tries the port.
 """
 
+import ast
+import io
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -242,23 +245,153 @@ class DescribeTests(unittest.TestCase):
         self.assertIn("rar=", line)
 
 
-class WiringTests(unittest.TestCase):
-    """The daemon must actually use these rather than keeping its own copies."""
+def _calls_to(module_name, dotted):
+    """Every ast.Call node in `module_name` that calls `dotted`, e.g.
+    "platform_compat.prepare_listener".
 
-    def test_dcc_uses_prepare_listener_not_a_bare_reuseaddr(self):
-        source = open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8").read()
-        self.assertIn("platform_compat.prepare_listener", source)
-        self.assertNotIn("socket.SO_REUSEADDR", source,
-                         "dcc.py must not set SO_REUSEADDR directly - it is wrong on Windows")
+    A substring scan cannot tell a call from a mention. Four of the guards
+    below were `assertIn("platform_compat.prepare_listener", source)`, which
+    this very sentence would satisfy if it lived in the module.
+    """
+    owner, attribute = dotted.split(".")
+    path = os.path.join(REPO_ROOT, module_name)
+    with io.open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (isinstance(func, ast.Attribute) and func.attr == attribute
+                and isinstance(func.value, ast.Name) and func.value.id == owner):
+            found.append(node)
+    return found
+
+
+class WiringTests(unittest.TestCase):
+    """The daemon must actually use these rather than keeping its own copies.
+
+    These were four substring scans of module source. The audit's objection is
+    that `if False:` in front of a real call site leaves such a scan green, and
+    a comment naming the function satisfies it with no call at all.
+
+    Two things changed. The listener check below is now driven through the real
+    send path, so it fails if the call stops happening. The rest are AST checks
+    for a genuine Call node rather than text - weaker than execution, and said
+    plainly rather than implied: an AST check still passes against `if False:`.
+    They also cover all six call sites now. The substring versions looked at
+    dcc.py and irc.py only, while adminchat.py (x2) and dcc_fetch.py (x1) make
+    the same platform-specific calls and were never checked at all.
+    """
+
+    def test_dcc_calls_prepare_listener_on_the_real_send_path(self):
+        """Executed, not scanned. prepare_listener() runs just before the bind
+        loop in start_dcc_send(), so holding the only configured port open
+        makes the send stop at "No available DCC ports" a few lines later -
+        the call has already happened by then, and nothing waits on a
+        30-second accept()."""
+        import socket
+        import dcc
+        from tests.support import RecordingSocket, reset_config
+
+        config = reset_config()
+        calls = []
+        real = platform_compat.prepare_listener
+
+        def recorder(sock):
+            calls.append(sock)
+            return real(sock)
+
+        platform_compat.prepare_listener = recorder
+        self.addCleanup(setattr, platform_compat, "prepare_listener", real)
+
+        held = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        held.bind(("0.0.0.0", 0))
+        held.listen(1)
+        self.addCleanup(held.close)
+        busy = held.getsockname()[1]
+
+        directory = tempfile.mkdtemp(prefix="dccore-wiring-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        track = os.path.join(directory, "Song.flac")
+        with io.open(track, "w", encoding="utf-8") as handle:
+            handle.write("x" * 4096)
+
+        config.DCC_PORT_START = busy
+        config.DCC_PORT_END = busy
+        # 8.8.8.8, not a TEST-NET address: Python classes 203.0.113.x as
+        # private, so is_offerable_to_strangers() refuses it and the send
+        # returns before it ever reaches the listener.
+        config.MY_IP_OR_DOCK = "8.8.8.8"
+
+        sock = RecordingSocket()
+        dcc.start_dcc_send(sock, "dave", track, "Song.flac", "#chan",
+                           {"file": "Song.flac", "path": track})
+
+        self.assertTrue(calls,
+                        "the listener socket was prepared some other way - on "
+                        "Windows that means SO_REUSEADDR, which lets another "
+                        "process take the incoming connection")
+
+    def test_every_listener_is_prepared_through_platform_compat(self):
+        for module in ("dcc.py", "adminchat.py", "dcc_fetch.py"):
+            with self.subTest(module=module):
+                self.assertTrue(
+                    _calls_to(module, "platform_compat.prepare_listener"),
+                    f"{module} binds a listener without preparing it")
+
+    def test_no_module_sets_so_reuseaddr_itself(self):
+        """The half that matters most on Windows, where SO_REUSEADDR means the
+        OPPOSITE thing: it lets another process bind the same port and take the
+        incoming connection, which on a DCC listener is a hijack."""
+        for module in ("dcc.py", "adminchat.py", "dcc_fetch.py", "irc.py"):
+            with self.subTest(module=module):
+                with io.open(os.path.join(REPO_ROOT, module), encoding="utf-8") as handle:
+                    tree = ast.parse(handle.read())
+                offenders = [node.lineno for node in ast.walk(tree)
+                             if isinstance(node, ast.Attribute)
+                             and node.attr == "SO_REUSEADDR"]
+
+                self.assertEqual(offenders, [],
+                                 f"{module} sets SO_REUSEADDR directly at line(s) "
+                                 f"{offenders} - wrong on Windows")
 
     def test_dcc_resolves_the_rar_binary(self):
-        source = open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8").read()
-        self.assertIn("platform_compat.rar_command", source)
-        self.assertNotIn('["rar", "a"', source, "dcc.py must not hardcode the bare name 'rar'")
+        self.assertTrue(_calls_to("dcc.py", "platform_compat.rar_command"))
 
-    def test_irc_uses_apply_keepalive(self):
-        source = open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8").read()
-        self.assertIn("platform_compat.apply_keepalive", source)
+    def test_nothing_hardcodes_the_bare_rar_name(self):
+        """A bare "rar" is found on PATH on Linux and usually is not on
+        Windows, where it lives under Program Files."""
+        for module in ("dcc.py", "update_list.py"):
+            with self.subTest(module=module):
+                with io.open(os.path.join(REPO_ROOT, module), encoding="utf-8") as handle:
+                    source = handle.read()
+
+                self.assertNotIn('["rar", "a"', source)
+                self.assertNotIn("['rar', 'a'", source)
+
+    def test_keepalive_is_applied_through_platform_compat(self):
+        for module in ("irc.py", "adminchat.py"):
+            with self.subTest(module=module):
+                self.assertTrue(
+                    _calls_to(module, "platform_compat.apply_keepalive"),
+                    f"{module} holds a long-lived socket open without keepalive")
+
+    def test_the_call_scanner_can_tell_a_call_from_a_mention(self):
+        """Control for _calls_to itself. The substring version of these guards
+        would pass on a module whose only occurrence is inside a string."""
+        import tempfile as tf
+
+        with tf.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                   encoding="utf-8", dir=REPO_ROOT) as handle:
+            handle.write('x = "platform_compat.prepare_listener"\n'
+                         '# platform_compat.prepare_listener(sock)\n')
+            path = handle.name
+        self.addCleanup(os.remove, path)
+
+        self.assertEqual(_calls_to(os.path.basename(path),
+                                   "platform_compat.prepare_listener"), [])
 
     def test_config_supports_a_local_override(self):
         source = open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8").read()
