@@ -959,23 +959,61 @@ def take_complete_lines(buffer, chunk):
                              for raw in raw_lines]
 
 
+def resolve_dcc_address(lookup=None, log=print):
+    """The address every DCC offer carries, for the remote client to dial.
+
+    Lifted out of irc_loop() so it can be tested: while it was inline, the only
+    way to check "a pinned address is not overwritten" was to grep irc.py for
+    the word, and that assertion passes on `if False:` with the word still in
+    the file. Both branches are exercised directly now.
+
+    An operator who set MY_IP_OR_DOCK keeps it. docs/WINDOWS.md documents doing
+    exactly that for a static address or a forwarded router, and the lookup used
+    to run unconditionally and overwrite it, so the documented setting silently
+    did nothing.
+
+    Otherwise ask ipify. On any failure this returns "" and NOT "127.0.0.1",
+    which is what it used to do. A loopback address in a DCC offer sends every
+    leecher to their own machine: they receive nothing, while the bot reports
+    "Active Transfer Started" and holds a slot for each of them. Nothing caught
+    it because the only guard was `if ip_long == 0`, and 127.0.0.1 converts to
+    2130706433. Returning "" makes dcc.is_offerable_to_strangers() refuse, with
+    a message naming the setting the operator has to fill in.
+
+    `lookup` exists for the tests; production passes nothing and gets ipify.
+    """
+    pinned = str(getattr(config, "MY_IP_OR_DOCK", "") or "").strip()
+    if pinned:
+        log(f"[IP CHECK] Using the address configured in MY_IP_OR_DOCK: {pinned}")
+        return pinned
+
+    log("[IP CHECK] Fetching the public address from the ipify API...")
+    try:
+        if lookup is None:
+            req = urllib.request.Request(
+                "https://api.ipify.org",
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            )
+            found = urllib.request.urlopen(req, timeout=5.0).read().decode("utf-8").strip()
+        else:
+            found = str(lookup() or "").strip()
+        log(f"[IP CHECK] Address detected. DCC IP set to: {found}")
+        return found
+    except Exception as e:
+        log(f"[WARNING] Could not reach the ipify API ({e}).")
+        log("[WARNING] No public address is known, so DCC sends will be refused "
+            "rather than offered to nobody. Set MY_IP_OR_DOCK in admin_config.py "
+            "or settings.conf to your public address to serve without this lookup.")
+        return ""
+
+
 def irc_loop():
     """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
     import announce
     oserve = sys.modules.get('oserve')
     
-    print("[IP CHECK] Fetching the public address from the ipify API...")
-    try:
-        req = urllib.request.Request(
-            "https://api.ipify.org", 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        config.MY_IP_OR_DOCK = urllib.request.urlopen(req, timeout=5.0).read().decode("utf-8").strip()
-        print(f"[IP CHECK] Address detected. DCC IP set to: {config.MY_IP_OR_DOCK}")
-    except Exception as e:
-        print(f"[WARNING] Could not reach the ipify API ({e}). Falling back to 127.0.0.1")
-        config.MY_IP_OR_DOCK = "127.0.0.1"
+    config.MY_IP_OR_DOCK = resolve_dcc_address()
     
      # ---------------------------------------------------------------------
     
