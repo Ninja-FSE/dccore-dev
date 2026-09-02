@@ -316,15 +316,62 @@ def get_total_queued_count():
     return total
 
 def get_public_ip_long():
-    """Convert the bot's detected IP into the mIRC-compatible long format."""
+    """Convert config.MY_IP_OR_DOCK into the mIRC-compatible long format, or 0
+    if it is blank or not a dotted-quad at all.
+
+    Deliberately a pure converter, and it stays one. An earlier version of this
+    fix folded the "is this address any use to a remote client?" question in
+    here, which broke the admin console: adminchat.py's DCC CHAT listen-back
+    uses the same value, and an operator connecting from the same machine or
+    the same LAN has a loopback or private address that is entirely correct for
+    that purpose. Only the file-transfer path needs the stricter rule, so the
+    stricter rule lives there - see is_offerable_to_strangers() below.
+    """
+    text = str(getattr(config, "MY_IP_OR_DOCK", "") or "").strip()
+    if not text:
+        return 0
     try:
-        ip = config.MY_IP_OR_DOCK
-        parts = ip.split('.')
+        parts = text.split('.')
         if len(parts) == 4:
             return (int(parts[0]) << 24) + (int(parts[1]) << 16) + (int(parts[2]) << 8) + int(parts[3])
     except Exception as e:
         print(f"[DCC IP ERROR] Could not convert the IP to long form: {e}")
     return 0
+
+
+def is_offerable_to_strangers(ip_text=None):
+    """Can a stranger on a public IRC network actually dial this address?
+
+    #162 follow-up, found by the pre-publication audit. irc.py's connect used to
+    fall back to "127.0.0.1" whenever the ipify lookup failed, and the only
+    guard on the send path was `if ip_long == 0`. 127.0.0.1 converts to
+    2130706433, which is not 0, so nothing caught it: the bot accepted every
+    request, told each user "Active Transfer Started", held a DCC slot, and sent
+    every leecher to their own loopback. One warning at boot was the only clue,
+    and the queue drained into failed transfers.
+
+    Loopback, private, link-local, multicast, reserved and unspecified are all
+    unreachable from the far side of a public network, so an offer carrying one
+    is an offer to nobody. Refusing with a message the operator can act on beats
+    a transfer that silently never happens.
+
+    An operator serving a LAN pins MY_IP_OR_DOCK, and irc.py now uses a pinned
+    value verbatim without the lookup - but the offer still has to be dialable
+    by whoever receives it, so this applies either way.
+    """
+    import ipaddress
+
+    text = str(ip_text if ip_text is not None
+               else getattr(config, "MY_IP_OR_DOCK", "") or "").strip()
+    if not text:
+        return False
+    try:
+        address = ipaddress.IPv4Address(text)
+    except Exception:
+        return False
+    return not (address.is_loopback or address.is_private or address.is_link_local
+                or address.is_multicast or address.is_reserved or address.is_unspecified)
+
 
 def check_queue_and_send(irc_sock, completed_user):
     """Check the queues and run RAR packing one at a time, without flooding the server."""
@@ -1199,10 +1246,27 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     # refused connection or a half-finished stream must not consume the queue row.
     transfer_completed = False
     
-    if ip_long == 0 or file_size == 0:
-        print(f"[DCC CRITICAL ABORT] Aborted the send for {user}. Path: {file_path} (Size: {file_size})")
+    # is_offerable_to_strangers() is the address half; ip_long == 0 only catches
+    # a blank or malformed value, and a loopback address passes it (127.0.0.1 is
+    # 2130706433). See that function for what went wrong without it.
+    if ip_long == 0 or file_size == 0 or not is_offerable_to_strangers():
+        # Two very different failures used to share one message. "File access
+        # issue or empty payload. Please try again." is actively misleading for
+        # the address case: there is nothing wrong with the file, retrying
+        # cannot help, and only the operator can fix it.
+        if ip_long == 0 or not is_offerable_to_strangers():
+            reason = ("this bot has no usable public address configured, so it "
+                      "cannot offer a transfer")
+            print(f"[DCC CRITICAL ABORT] No usable public address "
+                  f"(MY_IP_OR_DOCK={getattr(config, 'MY_IP_OR_DOCK', '')!r}); refused "
+                  f"the send for {user} rather than offering one nobody can dial. "
+                  f"Set MY_IP_OR_DOCK in admin_config.py or settings.conf.")
+        else:
+            reason = "file access issue or empty payload. Please try again"
+            print(f"[DCC CRITICAL ABORT] Aborted the send for {user}. "
+                  f"Path: {file_path} (Size: {file_size})")
         try: 
-            msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} File access issue or empty payload. Please try again.\r\n"
+            msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {reason}.\r\n"
             irc_sock.send(msg.encode('utf-8', errors='ignore'))
         except: 
             pass
