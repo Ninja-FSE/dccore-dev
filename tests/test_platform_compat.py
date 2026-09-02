@@ -110,7 +110,7 @@ class LongPathTests(unittest.TestCase):
     def test_identity_on_posix(self):
         if platform_compat.IS_WINDOWS:
             self.skipTest("POSIX behaviour")
-        p = "/mnt/nfs-musik/Artist/Album/Track.flac"
+        p = "/srv/library/Artist/Album/Track.flac"
         self.assertEqual(platform_compat.long_path(p), p)
 
     def test_windows_gets_the_extended_prefix(self):

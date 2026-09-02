@@ -109,12 +109,12 @@ class ThemedPathCase(DCCoreTestCase):
         """Run one path and return the lines it queued."""
         self.oserve.queued.clear()
         if label == "send_transfer_complete":
-            announce.send_transfer_complete("#mp3passion", "dave",
+            announce.send_transfer_complete("#dccore-test", "dave",
                                             "Enter Sandman.flac", 4096, 1000.0, 512000)
         elif label == "send_dcc_sending_notice":
             announce.send_dcc_sending_notice("dave", "Enter Sandman.flac")
         elif label == "send_search_result_header":
-            announce.send_search_result_header("dave", "metallica", 3, "#mp3passion")
+            announce.send_search_result_header("dave", "metallica", 3, "#dccore-test")
         elif label == "send_dcc_queue_notice":
             announce.send_dcc_queue_notice("dave", "Enter Sandman.flac", 2)
         elif label == "send_pack_error_notice":
@@ -130,7 +130,7 @@ class ThemedPathCase(DCCoreTestCase):
             list_mod.send_list_trigger_info(None, "dave")
         elif label == "list.execute_search":
             config.search_inprogress = False
-            list_mod.execute_search(None, "dave", "metallica", "#mp3passion")
+            list_mod.execute_search(None, "dave", "metallica", "#dccore-test")
         else:
             raise AssertionError("unknown path " + label)
         return [message for _user, message, _vip in self.oserve.queued]

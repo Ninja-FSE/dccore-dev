@@ -64,7 +64,7 @@ class RarInprogressOwnershipTests(DCCoreTestCase):
         # A path that does not exist makes file_size come out 0, tripping
         # the critical-abort branch without ever opening a real socket.
         dcc.start_dcc_send(self.sock, "bob", next_file["path"], "Missing.flac",
-                           "#mp3passion", next_file)
+                           "#dccore-test", next_file)
 
         self.assertTrue(config.rar_inprogress,
                         "a plain file's own abort released another user's pack interlock")
@@ -80,7 +80,7 @@ class RarInprogressOwnershipTests(DCCoreTestCase):
         config.dcc_queue["bob"] = [next_file]
 
         dcc.start_dcc_send(self.sock, "bob", next_file["path"], "Album.rar",
-                           "#mp3passion", next_file)
+                           "#dccore-test", next_file)
 
         self.assertFalse(config.rar_inprogress,
                          "a pack's own send must still release its own interlock on abort")
@@ -223,7 +223,7 @@ class PortExhaustionPreservesTheArchiveTests(DCCoreTestCase):
         config.dcc_queue["bob"] = [next_file]
 
         dcc.start_dcc_send(self.sock, "bob", archive_path, "Album.rar",
-                           "#mp3passion", next_file)
+                           "#dccore-test", next_file)
 
         self.assertTrue(os.path.exists(archive_path),
                         "the port-exhaustion branch deleted an archive its own "

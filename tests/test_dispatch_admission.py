@@ -96,7 +96,7 @@ class DispatchAdmissionTests(DCCoreTestCase):
 
     def in_channel(self, *users, **kwargs):
         """Put users in the bot's live channel list (the 353/JOIN mirror)."""
-        channel = kwargs.pop("channel", "#mp3passion")
+        channel = kwargs.pop("channel", "#dccore-test")
         config.channel_users[channel] = set(users)
 
     def busy_slot(self, user, file_name="Busy.flac"):
@@ -266,7 +266,7 @@ class DispatchAdmissionTests(DCCoreTestCase):
         queue_lock and take the whole promotion path down with it.
         """
         self.in_channel("dave", "erin")
-        config.dcc_queue["dave"] = ["/mnt/nfs-musik/Artist/Album/Legacy.mp3"]
+        config.dcc_queue["dave"] = ["/srv/library/Artist/Album/Legacy.mp3"]
         config.dcc_queue["erin"] = [queue_row(user="erin", filename="Modern.flac")]
 
         dcc.check_queue_and_send(self.sock, "carl")  # must not raise
@@ -276,7 +276,7 @@ class DispatchAdmissionTests(DCCoreTestCase):
                          "legacy string row was not skipped cleanly: %r" % (self.notices,))
         self.assertNotIn("dave", config.user_processing_lock)
         self.assertEqual(config.dcc_queue["dave"],
-                         ["/mnt/nfs-musik/Artist/Album/Legacy.mp3"],
+                         ["/srv/library/Artist/Album/Legacy.mp3"],
                          "the legacy row must be left untouched, not silently dropped")
 
     def test_waiting_user_absent_from_channel_users_is_not_promoted(self):
@@ -423,7 +423,7 @@ class DispatchAdmissionTests(DCCoreTestCase):
 
         The packer thread itself is prevented from actually running: its
         real target would fail against queue_row()'s fake
-        "/mnt/nfs-musik/..." path (not really inside FILE_DIRECTORY) and
+        "/srv/library/..." path (not really inside FILE_DIRECTORY) and
         release the interlocks again moments later, in a background
         thread racing this assertion - not a hypothetical, CI itself hit
         this the first time this test was written, on whichever run

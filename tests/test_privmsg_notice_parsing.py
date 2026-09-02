@@ -40,13 +40,13 @@ import irc  # noqa: E402
 class GenuinePrivmsgAndNoticeStillParse(unittest.TestCase):
 
     def test_a_channel_privmsg_parses_correctly(self):
-        line = ":dave!~u@host.example.com PRIVMSG #mp3passion :!DCCore Song.flac"
+        line = ":dave!~u@host.example.com PRIVMSG #dccore-test :!DCCore Song.flac"
         parsed = irc.parse_privmsg(line)
         self.assertIsNotNone(parsed)
         nick, ident_host, target, message = parsed
         self.assertEqual(nick, "dave")
         self.assertEqual(ident_host, "~u@host.example.com")
-        self.assertEqual(target, "#mp3passion")
+        self.assertEqual(target, "#dccore-test")
         self.assertEqual(message, "!DCCore Song.flac")
 
     def test_a_private_privmsg_to_the_bot_parses_correctly(self):
@@ -62,10 +62,10 @@ class GenuinePrivmsgAndNoticeStillParse(unittest.TestCase):
         self.assertEqual(ident_host, "sysop@Undernet.CoolGuy.Users")
 
     def test_a_channel_notice_parses_correctly(self):
-        line = ":goodbot!u@h NOTICE #mp3passion :Search results for metallica"
+        line = ":goodbot!u@h NOTICE #dccore-test :Search results for metallica"
         nick, target, message = irc.parse_notice(line)
         self.assertEqual(nick, "goodbot")
-        self.assertEqual(target, "#mp3passion")
+        self.assertEqual(target, "#dccore-test")
         self.assertEqual(message, "Search results for metallica")
 
     def test_a_private_notice_parses_correctly(self):
@@ -98,9 +98,9 @@ class MessageBodyCannotForgeASecondCommand(unittest.TestCase):
     def test_a_search_result_mentioning_privmsg_is_not_misparsed(self):
         """Not just an attack - an ordinary filename or search term
         containing the literal word could trip the old greedy regex too."""
-        line = ":dave!u@h PRIVMSG #mp3passion :@find PRIVMSG SomeOne handler.mp3"
+        line = ":dave!u@h PRIVMSG #dccore-test :@find PRIVMSG SomeOne handler.mp3"
         nick, ident_host, target, message = irc.parse_privmsg(line)
-        self.assertEqual(target, "#mp3passion")
+        self.assertEqual(target, "#dccore-test")
         self.assertEqual(message, "@find PRIVMSG SomeOne handler.mp3")
 
 
@@ -132,16 +132,16 @@ class ServerNumericsCannotForgeAUserPrefix(unittest.TestCase):
 class MalformedLinesAreRefused(unittest.TestCase):
 
     def test_a_prefixless_line_is_refused(self):
-        self.assertIsNone(irc.parse_privmsg("PRIVMSG #mp3passion :hello"))
-        self.assertIsNone(irc.parse_notice("NOTICE #mp3passion :hello"))
+        self.assertIsNone(irc.parse_privmsg("PRIVMSG #dccore-test :hello"))
+        self.assertIsNone(irc.parse_notice("NOTICE #dccore-test :hello"))
 
     def test_a_privmsg_with_no_message_text_is_refused(self):
         """No ':' separator at all - not even an empty message."""
-        self.assertIsNone(irc.parse_privmsg(":dave!u@h PRIVMSG #mp3passion"))
+        self.assertIsNone(irc.parse_privmsg(":dave!u@h PRIVMSG #dccore-test"))
 
     def test_a_command_must_not_merely_start_the_word(self):
         """PRIVMSGX is not PRIVMSG - \\s+ is what stops the prefix match."""
-        line = ":dave!u@h PRIVMSGX #mp3passion :hello"
+        line = ":dave!u@h PRIVMSGX #dccore-test :hello"
         self.assertIsNone(irc.parse_privmsg(line))
 
 

@@ -107,8 +107,8 @@ class LongPathSpelling(unittest.TestCase):
     def test_it_is_an_identity_off_windows(self):
         if platform_compat.IS_WINDOWS:
             self.skipTest("Windows applies a prefix; checked below")
-        self.assertEqual(platform_compat.long_path("/mnt/nfs-musik/x.flac"),
-                         "/mnt/nfs-musik/x.flac")
+        self.assertEqual(platform_compat.long_path("/srv/library/x.flac"),
+                         "/srv/library/x.flac")
 
     @unittest.skipUnless(platform_compat.IS_WINDOWS, WINDOWS_ONLY)
     def test_a_drive_path_gets_the_extended_prefix(self):
@@ -122,8 +122,8 @@ class LongPathSpelling(unittest.TestCase):
         This is the spelling the service deployment depends on, so getting it
         wrong would break exactly the case the change exists for.
         """
-        got = platform_compat.long_path("\\\\NAStradamus\\Music\\1 Metal\\x.flac")
-        self.assertEqual(got, "\\\\?\\UNC\\NAStradamus\\Music\\1 Metal\\x.flac")
+        got = platform_compat.long_path("\\\\MEDIASERVER\\Music\\1 Metal\\x.flac")
+        self.assertEqual(got, "\\\\?\\UNC\\MEDIASERVER\\Music\\1 Metal\\x.flac")
 
     @unittest.skipUnless(platform_compat.IS_WINDOWS, WINDOWS_ONLY)
     def test_an_already_prefixed_path_is_left_alone(self):
@@ -262,7 +262,7 @@ class ADeepLibraryFileIsNotReportedMissing(PathSecurityBase):
     def _request(self, name):
         self.notices.clear()
         with quiet():
-            dcc.handle_download_request(self.sock, "dave", name, "#mp3passion")
+            dcc.handle_download_request(self.sock, "dave", name, "#dccore-test")
         return [kind for kind, _args in self.notices]
 
     def test_a_genuinely_missing_file_IS_refused(self):

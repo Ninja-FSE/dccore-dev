@@ -108,7 +108,7 @@ class TwoFoldersOneFilename(PathSecurityBase):
         InlineThread.dispatched = []
         config.dcc_queue.clear()
         with quiet():
-            dcc.handle_download_request(self.sock, "dave", name, "#mp3passion")
+            dcc.handle_download_request(self.sock, "dave", name, "#dccore-test")
         return [kind for kind, _args in self.notices]
 
     def _served_path(self):

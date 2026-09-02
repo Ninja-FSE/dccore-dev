@@ -144,8 +144,8 @@ def parse_notice(line):
 # line per match, and the HEADER also contains a "!" token - it is telling
 # the user what to type:
 #
-#   Search Result 1 Match For X   Copy And Paste !Vibessono FILENAME To ...
-#   !Vibessono 50 Oldies Party - ... .mp3  ::INFO:: 4.6MB
+#   Search Result 1 Match For X   Copy And Paste !Echosonic FILENAME To ...
+#   !Echosonic 50 Oldies Party - ... .mp3  ::INFO:: 4.6MB
 #
 # Searching anywhere in the line matched the header too, and produced a
 # Download button for a file literally named "FILENAME To The Channel To
@@ -285,9 +285,9 @@ def parse_search_header(text):
 # ---------------------------------------------------------------------------
 #
 # Every file-serving bot on this network announces itself on a timer. Captured
-# from #Mp3Passion on 2026-08-29: 392 lines, 31 bots with a readable advert,
-# in four different wordings and no two decorated alike. The capture is the
-# specification, and every line of it is a fixture in
+# from a busy public file-sharing channel: 392 lines, 31 bots with a readable
+# advert, in four different wordings and no two decorated alike. The capture
+# is the specification, and every line of it is a fixture in
 # tests/test_advert_listener.py.
 #
 # THE ADVERT IS NOT ALWAYS ONE MESSAGE
@@ -296,8 +296,8 @@ def parse_search_header(text):
 # does not fit IRC's 512-byte line limit. The break lands wherever the bot ran
 # out of room, mid-field and sometimes mid-value:
 #
-#   Vibessono, line 1:  ... Served: 16,399 <> List:
-#   Vibessono, line 2:  Aug 25th <> Search: ON <> Mode: Normal <>
+#   Echosonic, line 1:  ... Served: 16,399 <> List:
+#   Echosonic, line 2:  Aug 25th <> Search: ON <> Mode: Normal <>
 #
 # Read on its own, line 1 says the bot published no list date and line 2 is not
 # an advert at all. Both are wrong, and "no date" is the answer that matters -
@@ -308,18 +308,18 @@ def parse_search_header(text):
 # THREE WORDINGS, PLUS OUR OWN
 #
 #   OmenServe / OmenTweak / DCCore - 28 of the 31, the "Type: @nick" wording:
-#     Type: @Bsk For My List Of: 719,041 Files <> Slots: 10/10 <> Queued: 0
+#     Type: @Zkx For My List Of: 719,041 Files <> Slots: 10/10 <> Queued: 0
 #     <> Speed: 0cps <> Served: 3,456,016 <> List: Aug 10th <> Mode: Normal
 #
-#   SPQR - BigTruck and prospect, a different sentence entirely, and the only
+#   SPQR - BigRig and outlook, a different sentence entirely, and the only
 #   family that puts a size in the PRIVMSG advert:
-#     For My List(19527files:163812MB) and DCC Status, type @BigTruck and
-#     @BigTruck-stats. [(0/7) Slots (0/216) Ques Taken]
+#     For My List(19527files:163812MB) and DCC Status, type @BigRig and
+#     @BigRig-stats. [(0/7) Slots (0/216) Ques Taken]
 #
 #   RAR folders - a SECOND, separate list some bots serve beside their loose
 #   files, under a "^"-suffixed trigger, with its own count and its own size:
-#     Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
-#   Bsk publishes both: 719,041 loose files AND 39,454 RAR folders. They are
+#     Type @Zkx^ to get my list of 39,454 (5.48 TB) RAR folders
+#   Zkx publishes both: 719,041 loose files AND 39,454 RAR folders. They are
 #   two different lists and are kept apart in the registry for that reason.
 #
 # WHAT THE SAMPLE SETTLES
@@ -333,7 +333,7 @@ def parse_search_header(text):
 #   * Preamble is normal. Bots open with an album count, a sentence of French,
 #     a note about an OP. The advert is not the whole line and cannot be
 #     anchored to its start.
-#   * Nicks can carry brackets and backticks - @[tjserv], @`Stryder - so a
+#   * Nicks can carry brackets and backticks - @[rigserv], @`Glider - so a
 #     word-characters-only pattern would miss them.
 #   * A list DATE is published by every bot in the OmenServe family. A list
 #     SIZE is published only by SPQR, by the RAR-folder advert, and by DCCore
@@ -380,12 +380,12 @@ _ADVERT_DATE_RE = re.compile(
     r"(?:List:|Date:|created)\s*([A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?)",
     re.IGNORECASE)
 
-# SPQR: "For My List(19527files:163812MB) ... type @BigTruck and @BigTruck-stats."
+# SPQR: "For My List(19527files:163812MB) ... type @BigRig and @BigRig-stats."
 _SPQR_LIST_RE = re.compile(
     r"For\s+My\s+List\s*\(\s*([\d,]+)\s*files\s*:\s*([\d,.]+\s*[KMGT]?B)\s*\)", re.IGNORECASE)
 _SPQR_NICK_RE = re.compile(r"type\s+@(\S+)", re.IGNORECASE)
 
-# The separate RAR-folder list: "Type @Bsk^ to get my list of 39,454 (5.48 TB)
+# The separate RAR-folder list: "Type @Zkx^ to get my list of 39,454 (5.48 TB)
 # RAR folders". The trigger carries a "^" the bot's own nick does not.
 _RAR_RE = re.compile(
     r"Type\s+@(\S+?)\^\s+to\s+get\s+my\s+list\s+of\s+([\d,]+)\s*\(([^)]{1,20})\)\s*RAR\s+folders",
@@ -430,7 +430,7 @@ def _parse_omenserve_advert(clean):
 
 
 def _parse_spqr_advert(clean):
-    """SPQR's wording: "For My List(19527files:163812MB) ... type @BigTruck".
+    """SPQR's wording: "For My List(19527files:163812MB) ... type @BigRig".
 
     No colon after "Type", no "Of:", and the count and size share one
     parenthesis - so none of the patterns above see it, and both bots running
@@ -454,13 +454,13 @@ def _parse_spqr_advert(clean):
 
 
 def _parse_rar_folder_advert(clean):
-    """The separate RAR-folder list: "Type @Bsk^ to get my list of 39,454
+    """The separate RAR-folder list: "Type @Zkx^ to get my list of 39,454
     (5.48 TB) RAR folders".
 
-    A different list from the same bot, not a different bot - Bsk advertises
+    A different list from the same bot, not a different bot - Zkx advertises
     719,041 loose files in one message and 39,454 RAR folders in another. The
     "^" belongs to the trigger, not to the nick, so it is stripped before the
-    sender check: Bsk sends this, "Bsk^" does not exist.
+    sender check: Zkx sends this, "Zkx^" does not exist.
     """
     found = _RAR_RE.search(clean)
     if not found:
@@ -481,7 +481,7 @@ _ADVERT_PARSERS = (_parse_omenserve_advert, _parse_spqr_advert, _parse_rar_folde
 
 # What each family is entitled to write into a registry entry. A bot's RAR
 # advert must not overwrite the count of its loose-file list, and the other way
-# round - they are two lists and Bsk publishes both.
+# round - they are two lists and Zkx publishes both.
 _ADVERT_FIELDS = {
     "omenserve": ("files", "list_date", "list_size"),
     "spqr": ("files", "list_size"),
@@ -571,8 +571,8 @@ def _capture_channel_advert(user, target, msg, now=None):
     that bot's current one when it was never theirs.
 
     So an advert whose claimed nick does not match the nick that sent it is
-    dropped. All 31 bots captured from #Mp3Passion agree with their own sender,
-    so nothing legitimate is lost.
+    dropped. All 31 bots in the capture agree with their own sender, so
+    nothing legitimate is lost.
 
     A CONTINUATION IS TRUSTED ONLY AFTER THAT CHECK HAS PASSED
 
@@ -606,7 +606,7 @@ def _capture_channel_advert(user, target, msg, now=None):
         return
 
     # Not an advert on its own. It may be the rest of one - see this section's
-    # comment on Vibessono, whose date arrives here and nowhere else.
+    # comment on Echosonic, whose date arrives here and nowhere else.
     pending = _advert_tails.get(key)
     if not pending:
         return
@@ -698,10 +698,10 @@ def _flush_known_bots(now=None, force=False):
 # There are at least three layouts in one channel:
 #
 #   24 bots    14 fields, count at 7, bytes at 8
-#   fallguyf00 13 fields - one shorter, so count at 6 and bytes at 7
+#   fallback77 13 fields - one shorter, so count at 6 and bytes at 7
 #   SPQR       8 fields, count LAST, no byte figure at all
 #
-# Index 7 on fallguyf00's line is 14,247,378,895,149 - which as a file count
+# Index 7 on fallback77's line is 14,247,378,895,149 - which as a file count
 # is fourteen trillion files, and would have gone straight into the registry
 # and onto the dashboard. Nothing in the line says which layout it is.
 #

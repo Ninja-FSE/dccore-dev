@@ -27,9 +27,9 @@ import irc  # noqa: E402
 REAL_LINES = {
     "001": ":irc.undernet.org 001 DCCore :Welcome to the Undernet IRC Network",
     "376": ":irc.undernet.org 376 DCCore :End of /MOTD command.",
-    "352": ":irc.undernet.org 352 DCCore #mp3passion user host server dave H :0 real",
-    "353": ":irc.undernet.org 353 DCCore = #mp3passion :dave @alice +bob",
-    "366": ":irc.undernet.org 366 DCCore #mp3passion :End of /NAMES list.",
+    "352": ":irc.undernet.org 352 DCCore #dccore-test user host server dave H :0 real",
+    "353": ":irc.undernet.org 353 DCCore = #dccore-test :dave @alice +bob",
+    "366": ":irc.undernet.org 366 DCCore #dccore-test :End of /NAMES list.",
     "433": ":irc.undernet.org 433 * DCCore :Nickname is already in use.",
     "513": ":irc.undernet.org 513 DCCore :To connect type /QUOTE PONG 1234567",
 }
@@ -45,12 +45,12 @@ class GenuineNumericsStillWork(unittest.TestCase):
 
     def test_alternate_nick_as_target_is_accepted(self):
         """After a 433 the target is DCCore_, not DCCore."""
-        line = ":Ashburn.Va.Us.Undernet.org 353 DCCore_ @ #mp3servers :erin dave"
+        line = ":Ashburn.Va.Us.Undernet.org 353 DCCore_ @ #dccore-test2 :erin dave"
         self.assertTrue(irc.is_server_numeric(line, "353"))
 
     def test_all_three_names_symbols_are_accepted(self):
         for symbol in ("=", "@", "*"):
-            line = f":irc.undernet.org 353 DCCore {symbol} #mp3passion :dave alice"
+            line = f":irc.undernet.org 353 DCCore {symbol} #dccore-test :dave alice"
             with self.subTest(symbol=symbol):
                 self.assertTrue(irc.is_server_numeric(line, "353"))
 
@@ -64,25 +64,25 @@ class ChannelTextCannotForgeANumeric(unittest.TestCase):
 
     def test_forged_513_is_refused(self):
         """The critical one: 513 writes a raw PONG with no pacing and no ban check."""
-        line = ":attacker!user@host PRIVMSG #mp3passion :hey 513 PONG abc"
+        line = ":attacker!user@host PRIVMSG #dccore-test :hey 513 PONG abc"
         self.assertFalse(irc.is_server_numeric(line, "513"))
 
     def test_forged_353_is_refused(self):
         """353 populates channel_users, which dcc.py trusts to decide who is present."""
-        line = ":attacker!u@h PRIVMSG #mp3passion :lol 353 x #mp3passion :victim"
+        line = ":attacker!u@h PRIVMSG #dccore-test :lol 353 x #dccore-test :victim"
         self.assertFalse(irc.is_server_numeric(line, "353"))
 
     def test_forged_352_is_refused(self):
-        line = ":attacker!u@h PRIVMSG #mp3passion :a b c 352 d e f g victim"
+        line = ":attacker!u@h PRIVMSG #dccore-test :a b c 352 d e f g victim"
         self.assertFalse(irc.is_server_numeric(line, "352"))
 
     def test_an_ordinary_track_request_is_not_read_as_001(self):
         """The old test was `"001" in line` - this is a normal music request."""
-        line = ":alice!u@h PRIVMSG #mp3passion :!DCCore 001 - Enter Sandman.flac"
+        line = ":alice!u@h PRIVMSG #dccore-test :!DCCore 001 - Enter Sandman.flac"
         self.assertFalse(irc.is_server_numeric(line, "001"))
 
     def test_an_ordinary_sentence_is_not_read_as_376(self):
-        line = ":alice!u@h PRIVMSG #mp3passion :track 376 is missing from the list"
+        line = ":alice!u@h PRIVMSG #dccore-test :track 376 is missing from the list"
         self.assertFalse(irc.is_server_numeric(line, "376"))
 
     def test_a_notice_cannot_forge_one(self):
@@ -158,7 +158,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
         condition = _guard_condition_for("parts[-1].strip()")
         self.assertTrue(_evaluate(condition, REAL_LINES["513"]), condition)
         self.assertFalse(
-            _evaluate(condition, ":attacker!u@h PRIVMSG #mp3passion :hey 513 PONG abc"),
+            _evaluate(condition, ":attacker!u@h PRIVMSG #dccore-test :hey 513 PONG abc"),
             condition)
 
     def test_the_pong_guard_still_requires_the_pong_keyword(self):
@@ -176,7 +176,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_the_registration_guard_ignores_a_track_named_001(self):
         condition = _guard_condition_for("joined = True")
-        track = ":alice!u@h PRIVMSG #mp3passion :!DCCore 001 - Enter Sandman.flac"
+        track = ":alice!u@h PRIVMSG #dccore-test :!DCCore 001 - Enter Sandman.flac"
         self.assertFalse(_evaluate(condition, track, joined=False), condition)
 
     def test_the_whois_guard_is_wired_to_352_not_something_else(self):
@@ -192,7 +192,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
 
     def test_the_presence_guard_refuses_forged_channel_text(self):
         condition = _guard_condition_for("name_match = re.search")
-        forged = ":attacker!u@h PRIVMSG #mp3passion :lol 353 x #mp3passion :victim"
+        forged = ":attacker!u@h PRIVMSG #dccore-test :lol 353 x #dccore-test :victim"
         self.assertFalse(_evaluate(condition, forged), condition)
 
 

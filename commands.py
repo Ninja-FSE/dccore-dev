@@ -709,7 +709,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
             for chan in old_chans:
                 if chan not in new_chans:
                     # Not a channel name. config.py declares DEBUG_CHANNEL as
-                    # "#flac-serv", so a literal "#flac-debug" here was a second
+                    # "#example-serv", so a literal "#example-debug" here was a second
                     # source of truth that disagreed with the first - and the
                     # one place it would have been consulted is the one place it
                     # decides whether to PART a channel.

@@ -2,14 +2,15 @@
 written against real traffic instead of guesses.
 
 This produced the fixtures in tests/test_advert_listener.py: 392 lines from
-#Mp3Passion on 2026-08-29, 33 bots, four different advert wordings, five of
-them splitting their advert across two messages. None of that was predictable
-from the outside, and every one of those facts is now a test.
+one busy public file-sharing channel, 33 bots, four different advert
+wordings, five of them splitting their advert across two messages. None of
+that was predictable from the outside, and every one of those facts is now
+a test.
 
 Run it again to refresh the sample, or to look at a channel this one has never
 seen:
 
-    python scripts/capture_adverts.py --nick observer_x --channel "#Mp3Passion" \
+    python scripts/capture_adverts.py --nick observer_x --channel "#example-channel" \
         --minutes 25 --out adverts.log
 
 Output is one tab-separated row per message: time, kind (PRIVMSG / NOTICE /

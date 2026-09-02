@@ -40,7 +40,7 @@ JAPANESE = "日本語の曲.flac"
 
 
 def request_line(filename):
-    return f":dave!~d@isp.net PRIVMSG #mp3passion :!dccore {filename}\r\n"
+    return f":dave!~d@isp.net PRIVMSG #dccore-test :!dccore {filename}\r\n"
 
 
 def feed(chunks):

@@ -110,12 +110,12 @@ def source_host(prefix_or_line):
 def host_pattern_of(mask):
     """Reduce a configured mask to the HOST pattern it really means.
 
-    A mask may be written either as a bare host ("FLAC.users.undernet.org") or in
-    the familiar iroffer/IRC form ("*!*@FLAC.users.undernet.org"). Either way only
+    A mask may be written either as a bare host ("operator.users.undernet.org") or in
+    the familiar iroffer/IRC form ("*!*@operator.users.undernet.org"). Either way only
     the part after the last "@" is used.
 
     The nick and ident halves are discarded ON PURPOSE. In nick!ident@host the
-    ident is supplied by the client - anyone can set theirs to "flac" - so a
+    ident is supplied by the client - anyone can set theirs to "operator" - so a
     pattern that appears to constrain it grants no security while breaking the
     moment the operator's client changes its ident setting. Only the host is
     issued by the server.
@@ -829,7 +829,7 @@ def parse_offer(ctcp_text):
       when its Local Info lookup has not resolved, and it is not a no-op: on
       Linux connect() to 0.0.0.0 is treated as "this host", so the bot dials
       ITSELF and gets ECONNREFUSED. That is exactly the
-      "Could not connect to FLAC at 0.0.0.0:11283" in the field report.
+      "Could not connect to operator at 0.0.0.0:11283" in the field report.
     * multicast and reserved ranges cannot be a listening client either.
 
     Loopback and private addresses are deliberately kept dialable: an operator

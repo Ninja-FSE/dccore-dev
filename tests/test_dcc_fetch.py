@@ -117,7 +117,7 @@ class OfferParsingTests(unittest.TestCase):
 
 class PassiveOfferParsingTests(unittest.TestCase):
     """port 0 plus a trailing token is the standard passive/reverse DCC
-    marker - a real third-party bot (ValMp3) answered a cross-bot fetch
+    marker - another bot on the network (ValOgg) answered a cross-bot fetch
     request with exactly this shape during live testing, and the old code
     rejected it as "Unusable" because it checked `port <= 0`. It must now
     parse as a distinct, valid result - see parse_dcc_send_offer()'s
@@ -125,17 +125,18 @@ class PassiveOfferParsingTests(unittest.TestCase):
     passive DCC CHAT."""
 
     def test_the_reported_offer_parses(self):
-        """Exact reproduction from tonight's logs."""
+        """Reproduction of a real passive offer's shape - the claimed IP is a
+        TEST-NET-3 address (RFC 5737), not the real one originally logged."""
         offer = dcc_fetch.parse_dcc_send_offer(
             "DCC SEND [Metallica]_-_72_Seasons_-_01-72_Seasons.mp3 "
-            "1279781699 0 3359600 11124")
+            "3405803818 0 3359600 11124")
         self.assertEqual(offer, {
             "filename": "[Metallica]_-_72_Seasons_-_01-72_Seasons.mp3",
             "ip": None,
             "port": 0,
             "size": 3359600,
             "token": "11124",
-            "claimed_ip": "76.71.235.67",
+            "claimed_ip": "203.0.113.42",
         })
 
     def test_a_different_token_and_size_also_parses(self):
@@ -908,22 +909,22 @@ class PassiveOfferEndToEndTests(DCCoreTestCase):
         return payload.rstrip("\x01\r\n").split()
 
     def test_the_reported_offer_end_to_end(self):
-        """The exact ValMp3 shape from tonight's logs, all the way through a
+        """The exact ValOgg shape from a real capture, all the way through a
         real accepted connection and a byte-for-byte written file."""
         payload = b"MP3" + (b"\x05\x06\x07\x08" * 2048)
-        rid = self._enqueue_and_offer("valmp3", "72_Seasons.mp3")
+        rid = self._enqueue_and_offer("valogg", "72_Seasons.mp3")
         offer_line = (f"DCC SEND 72_Seasons.mp3 {ip_long('198.51.100.9')} "
                       f"0 {len(payload)} 42424")
 
         worker = threading.Thread(
             target=dcc_fetch.handle_incoming_offer,
-            args=(None, "valmp3", offer_line), daemon=True)
+            args=(None, "valogg", offer_line), daemon=True)
         worker.start()
 
         user, message = self._wait_for_reply()
         self.assertIsNotNone(message, "our own passive-offer reply must be "
                              "queued through oserve.queue_message")
-        self.assertEqual(user, "valmp3")
+        self.assertEqual(user, "valogg")
 
         fields = self._fields_of(message)
         self.assertEqual(fields[:3], ["DCC", "SEND", "72_Seasons.mp3"])
@@ -934,7 +935,7 @@ class PassiveOfferEndToEndTests(DCCoreTestCase):
         self.assertLessEqual(our_port, config.DCC_PORT_END)
         self.assertEqual(fields[5], str(len(payload)))
         self.assertEqual(fields[6], "42424",
-                         "the token must be echoed back unchanged, or ValMp3 "
+                         "the token must be echoed back unchanged, or ValOgg "
                          "cannot match our reply to its own request")
 
         # Stand in for the offering bot: dial the port WE just advertised,

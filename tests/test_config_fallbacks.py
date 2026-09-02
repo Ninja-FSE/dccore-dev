@@ -6,9 +6,9 @@ almost none of them can ever fire. That is exactly what makes them dangerous:
 a value nothing exercises is a value nothing corrects, and several had already
 drifted into contradicting the file they were standing in for.
 
-  DEBUG_CHANNEL    config.py says "#flac-serv"
-                   commands.py said "#flac-debug"   <- a channel that is not it
-                   irc.py said "#flac-serv"
+  DEBUG_CHANNEL    config.py says "#example-serv"
+                   commands.py said "#example-debug"   <- a channel that is not it
+                   irc.py said "#example-serv"
 
   ADMIN_NICK       config.py says "SysOp,Op2"
                    commands.py said "SysOp"          <- one operator, not two
@@ -142,23 +142,23 @@ class NoFallbackContradictsConfig(unittest.TestCase):
         """Control. Every other test here reads the real tree, where the answer
         is now "none" - which is also exactly what a rule that had stopped
         comparing anything at all would say."""
-        declared = {"DEBUG_CHANNEL": "#flac-serv", "MAX_DCC_SLOTS": 3}
+        declared = {"DEBUG_CHANNEL": "#example-serv", "MAX_DCC_SLOTS": 3}
 
         caught = contradictions(declared, [
-            ("fake.py", 1, "DEBUG_CHANNEL", "#flac-debug"),
+            ("fake.py", 1, "DEBUG_CHANNEL", "#example-debug"),
             ("fake.py", 2, "MAX_DCC_SLOTS", 9),
         ])
 
         self.assertEqual(len(caught), 2, caught)
-        self.assertIn("#flac-debug", caught[0])
+        self.assertIn("#example-debug", caught[0])
 
     def test_the_rule_passes_what_it_should(self):
         """The other direction. A rule that called everything a contradiction
         would be no more use than one that called nothing one."""
-        declared = {"DEBUG_CHANNEL": "#flac-serv", "MAX_DCC_SLOTS": 3}
+        declared = {"DEBUG_CHANNEL": "#example-serv", "MAX_DCC_SLOTS": 3}
 
         self.assertEqual(contradictions(declared, [
-            ("fake.py", 1, "DEBUG_CHANNEL", "#flac-serv"),   # agrees
+            ("fake.py", 1, "DEBUG_CHANNEL", "#example-serv"),   # agrees
             ("fake.py", 2, "DEBUG_CHANNEL", ""),             # declines
             ("fake.py", 3, "MAX_DCC_SLOTS", 0),              # declines
             ("fake.py", 4, "ORIGINAL_NICK", "DCCore"),       # runtime-assigned

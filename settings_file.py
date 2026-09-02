@@ -54,7 +54,7 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting
 
 # The settings a fresh install MUST change before oserve.startup() will boot -
 # see unconfigured_required()'s own docstring for the mechanism, and issue
-# #162 findings #18/#20 (chchatzop's audit-followup RFC in #170's discussion)
+# #162 findings #18/#20 (the audit-followup RFC in #170's discussion)
 # for why this exists at all: a bot that never touches these joins the
 # upstream operator's live channels under his nickname, reports its debug
 # output into his channel, and grants HIS admin nicks full control.
@@ -75,7 +75,7 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting
 #     one that could disagree about WHICH settings matter.
 #
 # LIST_BASE_NAME is deliberately not here even though setup_check.py has
-# historically cared about it too - chchatzop's RFC comment on #170 notes it
+# historically cared about it too - #170's RFC comment notes it
 # "can derive from NICKNAME rather than being asked for at all" once NICKNAME
 # itself is required; defaults.py's own "DERIVED VALUES" section now does
 # exactly that (an untouched LIST_BASE_NAME takes NICKNAME's value once
@@ -83,8 +83,8 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting
 # redundant way of demanding the same answer.
 #
 # SERVER and DEBUG_CHANNEL are deliberately NOT here, even though the RFC
-# discussion's own first pass included them. chchatzop caught the reason
-# during a real test-run against the live install: the gate below refuses a
+# discussion's own first pass included them. That was found during a real
+# test-run against the live install: the gate below refuses a
 # name whose CURRENT value equals its SHIPPED default - correct for an
 # identity setting (leaving NICKNAME/CHANNEL/ADMIN_NICK at their shipped
 # values means impersonating the upstream operator), but "irc.undernet.org"

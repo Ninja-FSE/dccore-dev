@@ -32,10 +32,10 @@ import irc  # noqa: E402
 # without the leading colon on the channel, and a netsplit QUIT reason is two
 # server names - which is exactly the sort of free text the old guards trusted.
 GENUINE = {
-    "JOIN": ":dave!~u@host.example.com JOIN #mp3passion",
-    "JOIN_COLON": ":dave!~u@host.example.com JOIN :#mp3passion",
-    "PART": ":dave!~u@host.example.com PART #mp3passion",
-    "PART_REASON": ":dave!~u@host.example.com PART #mp3passion :Leaving",
+    "JOIN": ":dave!~u@host.example.com JOIN #dccore-test",
+    "JOIN_COLON": ":dave!~u@host.example.com JOIN :#dccore-test",
+    "PART": ":dave!~u@host.example.com PART #dccore-test",
+    "PART_REASON": ":dave!~u@host.example.com PART #dccore-test :Leaving",
     "QUIT": ":dave!~u@host.example.com QUIT :Ping timeout: 245 seconds",
     "QUIT_SPLIT": ":dave!~u@host.example.com QUIT :*.net *.split",
     "NICK": ":dave!~u@host.example.com NICK :dave2",
@@ -58,7 +58,7 @@ class GenuineEventsStillWork(unittest.TestCase):
 
     def test_a_part_with_no_reason_is_accepted(self):
         """PART often arrives with nothing after the channel; (\\s|$) covers that."""
-        self.assertTrue(irc.is_user_event(":dave!u@h PART #mp3passion", "PART"))
+        self.assertTrue(irc.is_user_event(":dave!u@h PART #dccore-test", "PART"))
 
     def test_an_admin_style_hostmask_is_accepted(self):
         line = ":SysOp!sysop@Undernet.CoolGuy.Users QUIT :Quit: leaving"
@@ -70,30 +70,30 @@ class ChannelTextCannotForgeAnEvent(unittest.TestCase):
 
     def test_a_search_for_a_song_is_not_a_quit(self):
         """The regression that cost real users their queues."""
-        line = ":dave!u@h PRIVMSG #mp3passion :@find QUIT PLAYING GAMES"
+        line = ":dave!u@h PRIVMSG #dccore-test :@find QUIT PLAYING GAMES"
         self.assertFalse(irc.is_user_event(line, "QUIT"))
 
     def test_talking_about_quitting_is_not_a_quit(self):
-        line = ":attacker!u@h PRIVMSG #mp3passion :i will QUIT now"
+        line = ":attacker!u@h PRIVMSG #dccore-test :i will QUIT now"
         self.assertFalse(irc.is_user_event(line, "QUIT"))
 
     def test_talking_about_parting_is_not_a_part(self):
-        line = ":attacker!u@h PRIVMSG #mp3passion :should i PART #mp3passion ?"
+        line = ":attacker!u@h PRIVMSG #dccore-test :should i PART #dccore-test ?"
         self.assertFalse(irc.is_user_event(line, "PART"))
 
     def test_talking_about_joining_is_not_a_join(self):
         """A forged JOIN thawed the speaker's own frozen queue on demand."""
-        line = ":attacker!u@h PRIVMSG #mp3passion :hello JOIN #mp3passion"
+        line = ":attacker!u@h PRIVMSG #dccore-test :hello JOIN #dccore-test"
         self.assertFalse(irc.is_user_event(line, "JOIN"))
 
     def test_a_forged_nick_change_is_refused(self):
         """This one overwrote another user's send_queue entry."""
-        line = ":attacker!u@h PRIVMSG #mp3passion :hey NICK :victim"
+        line = ":attacker!u@h PRIVMSG #dccore-test :hey NICK :victim"
         self.assertFalse(irc.is_user_event(line, "NICK"))
 
     def test_a_part_reason_cannot_forge_a_quit(self):
         """Reasons are free text, and the old test read the whole line."""
-        line = ":attacker!u@h PART #mp3passion :bye everyone QUIT soon"
+        line = ":attacker!u@h PART #dccore-test :bye everyone QUIT soon"
         self.assertFalse(irc.is_user_event(line, "QUIT"))
 
     def test_a_quit_reason_cannot_forge_a_join(self):
@@ -101,7 +101,7 @@ class ChannelTextCannotForgeAnEvent(unittest.TestCase):
         self.assertFalse(irc.is_user_event(line, "JOIN"))
 
     def test_a_topic_cannot_forge_a_part(self):
-        line = ":attacker!u@h TOPIC #mp3passion :do not PART #mp3passion please"
+        line = ":attacker!u@h TOPIC #dccore-test :do not PART #dccore-test please"
         self.assertFalse(irc.is_user_event(line, "PART"))
 
     def test_the_motd_cannot_forge_one(self):
@@ -119,7 +119,7 @@ class ChannelTextCannotForgeAnEvent(unittest.TestCase):
 
     def test_a_command_must_not_merely_start_the_word(self):
         """QUITTING is not QUIT; (\\s|$) is what stops the prefix match."""
-        line = ":dave!u@h QUITTING #mp3passion"
+        line = ":dave!u@h QUITTING #dccore-test"
         self.assertFalse(irc.is_user_event(line, "QUIT"))
 
 
@@ -220,7 +220,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
         condition = _guard_condition_for("q_user = quit_match.group(1).lower()")
         self.assertTrue(_evaluate(condition, GENUINE["QUIT"]), condition)
         self.assertFalse(
-            _evaluate(condition, ":dave!u@h PRIVMSG #mp3passion :@find QUIT PLAYING GAMES"),
+            _evaluate(condition, ":dave!u@h PRIVMSG #dccore-test :@find QUIT PLAYING GAMES"),
             condition)
 
     def test_the_quit_handler_does_not_fire_on_a_part(self):
@@ -247,7 +247,7 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
         """Losing that half would make the bot thaw queues off its own JOIN."""
         import defaults as config
         condition = _guard_condition_for("joined_user = join_match.group(1)")
-        own = f":{config.NICKNAME}!bot@host JOIN #mp3passion"
+        own = f":{config.NICKNAME}!bot@host JOIN #dccore-test"
         self.assertFalse(_evaluate(condition, own), condition)
 
     # --- the nick handlers ------------------------------------------------
@@ -292,9 +292,9 @@ class GuardsAreWiredToTheRightHandlers(unittest.TestCase):
     def test_the_433_handler_refuses_a_forged_part_reason(self):
         """The old PRIVMSG/NOTICE exclusion did not cover PART or QUIT reasons."""
         condition = _guard_condition_for("[LIVE NICK COLLISION]")
-        for forged in (":attacker!u@h PART #mp3passion :bye 433 all",
+        for forged in (":attacker!u@h PART #dccore-test :bye 433 all",
                        ":attacker!u@h QUIT :erroneous nickname lol",
-                       ":attacker!u@h TOPIC #mp3passion :read 433 rules"):
+                       ":attacker!u@h TOPIC #dccore-test :read 433 rules"):
             with self.subTest(line=forged):
                 self.assertFalse(_evaluate(condition, forged), condition)
 

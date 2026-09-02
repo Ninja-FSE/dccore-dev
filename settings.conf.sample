@@ -193,11 +193,11 @@
 
 # Empty list = console disabled, and every DCC CHAT request is ignored.
 # 
-# Each entry is a HOST pattern. It may be written bare ("FLAC.users.undernet.org")
-# or in the familiar IRC form ("*!*@FLAC.users.undernet.org"); either way only the
+# Each entry is a HOST pattern. It may be written bare ("operator.users.undernet.org")
+# or in the familiar IRC form ("*!*@operator.users.undernet.org"); either way only the
 # part after the last "@" is used. The nick and ident halves are discarded on
 # purpose - the ident is supplied by the client and anyone can set theirs to
-# "flac", so constraining it grants nothing. Only the host is issued by the server.
+# "operator", so constraining it grants nothing. Only the host is issued by the server.
 # 
 # On Undernet, log into X and set usermode +x. The server then replaces your host
 # with "<your-account>.users.undernet.org", which nobody else can obtain. That
@@ -375,7 +375,7 @@
 # string like "\x0306,06", or None (the default) to leave that role at
 # whatever the chosen THEME preset already says.
 # 
-# #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
+# #170's RFC (issue #170's discussion, its Q1): this used to be one
 # dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard

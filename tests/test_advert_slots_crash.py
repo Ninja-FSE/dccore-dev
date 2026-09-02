@@ -109,7 +109,7 @@ class TheAttackItself(DCCoreTestCase):
         runtime.known_bots_flushed_at = T0   # suppress disk writes
 
     def send(self, text):
-        irc._capture_channel_advert("mallory", "#mp3passion", text, now=T0)
+        irc._capture_channel_advert("mallory", "#dccore-test", text, now=T0)
 
     def test_the_two_lines_no_longer_take_the_connection_down(self):
         """The whole defect, in the order it was delivered."""
@@ -188,15 +188,15 @@ class NoCaptureCanBreakTheReadLoop(DCCoreTestCase):
     def test_the_advert_capture_contains_an_exploding_parser(self):
         self.addCleanup(setattr, irc, "parse_advert_slots", irc.parse_advert_slots)
         irc.parse_advert_slots = self.exploding
-        irc._capture_channel_advert("mallory", "#mp3passion", REGISTER, now=T0)
+        irc._capture_channel_advert("mallory", "#dccore-test", REGISTER, now=T0)
 
-        irc._capture_channel_advert("mallory", "#mp3passion", "\x01SLOTS 5\x01", now=T0)
+        irc._capture_channel_advert("mallory", "#dccore-test", "\x01SLOTS 5\x01", now=T0)
 
     def test_the_advert_capture_contains_one_in_the_advert_parser_too(self):
         self.addCleanup(setattr, irc, "parse_channel_advert", irc.parse_channel_advert)
         irc.parse_channel_advert = self.exploding
 
-        irc._capture_channel_advert("mallory", "#mp3passion", REGISTER, now=T0)
+        irc._capture_channel_advert("mallory", "#dccore-test", REGISTER, now=T0)
 
     def test_the_broadcast_capture_is_guarded_the_same_way(self):
         """It sits four lines above the advert capture in the same loop, and
@@ -247,11 +247,11 @@ class NoCaptureCanBreakTheReadLoop(DCCoreTestCase):
         import io as _io
         self.addCleanup(setattr, irc, "parse_advert_slots", irc.parse_advert_slots)
         irc.parse_advert_slots = self.exploding
-        irc._capture_channel_advert("mallory", "#mp3passion", REGISTER, now=T0)
+        irc._capture_channel_advert("mallory", "#dccore-test", REGISTER, now=T0)
 
         buffer = _io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            irc._capture_channel_advert("mallory", "#mp3passion", "\x01SLOTS 5\x01", now=T0)
+            irc._capture_channel_advert("mallory", "#dccore-test", "\x01SLOTS 5\x01", now=T0)
 
         printed = buffer.getvalue()
         self.assertIn("_capture_channel_advert", printed)

@@ -145,10 +145,10 @@ class TheGuardIsRightWhereItWasBorrowedFrom(unittest.TestCase):
     def test_and_a_real_host_pattern_still_admits(self):
         import adminchat
         previous = getattr(config, "ADMIN_HOSTMASKS", [])
-        config.ADMIN_HOSTMASKS = ["chchatzop.users.undernet.org"]
+        config.ADMIN_HOSTMASKS = ["operator2.users.undernet.org"]
         try:
             self.assertTrue(adminchat.is_admin_host(
-                ":c!~c@chchatzop.users.undernet.org PRIVMSG x :y"))
+                ":c!~c@operator2.users.undernet.org PRIVMSG x :y"))
             self.assertFalse(adminchat.is_admin_host(":m!~m@evil.example PRIVMSG x :y"))
         finally:
             config.ADMIN_HOSTMASKS = previous

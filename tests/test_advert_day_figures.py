@@ -143,7 +143,7 @@ class ItStillDoesNotWriteToDisk(DayFigureCase):
         self.write_stats(days_ago=1)
         before = io.open(self.config.STATS_FILE, encoding="utf-8").read()
 
-        announce.send_transfer_complete("#mp3passion", "dave", "track.flac",
+        announce.send_transfer_complete("#dccore-test", "dave", "track.flac",
                                         4096, time.time() - 2, 512000)
 
         self.assertEqual(io.open(self.config.STATS_FILE, encoding="utf-8").read(), before)
@@ -167,7 +167,7 @@ class TheTransferNoticeCarriesTheSameFigures(DayFigureCase):
     def test_it_does_not_announce_yesterdays_traffic_as_todays(self):
         self.write_stats(days_ago=1)
 
-        announce.send_transfer_complete("#mp3passion", "dave", "track.flac",
+        announce.send_transfer_complete("#dccore-test", "dave", "track.flac",
                                         4096, time.time() - 2, 512000)
 
         line = self.announced()
@@ -181,7 +181,7 @@ class TheTransferNoticeCarriesTheSameFigures(DayFigureCase):
         self.write_stats(days_ago=1)
 
         _total, yesterday, today = announce.get_formatted_stats_strings()
-        announce.send_transfer_complete("#mp3passion", "dave", "track.flac",
+        announce.send_transfer_complete("#dccore-test", "dave", "track.flac",
                                         4096, time.time() - 2, 512000)
         line = self.announced()
         self.assertIn(yesterday, plain(line), 

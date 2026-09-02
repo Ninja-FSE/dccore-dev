@@ -162,11 +162,11 @@ DEBUG_MSG_DELAY: float  = 0.5    # Pause between each line sent to the debug cha
 # ---------------------------------------------------------------------
 # Empty list = console disabled, and every DCC CHAT request is ignored.
 #
-# Each entry is a HOST pattern. It may be written bare ("FLAC.users.undernet.org")
-# or in the familiar IRC form ("*!*@FLAC.users.undernet.org"); either way only the
+# Each entry is a HOST pattern. It may be written bare ("operator.users.undernet.org")
+# or in the familiar IRC form ("*!*@operator.users.undernet.org"); either way only the
 # part after the last "@" is used. The nick and ident halves are discarded on
 # purpose - the ident is supplied by the client and anyone can set theirs to
-# "flac", so constraining it grants nothing. Only the host is issued by the server.
+# "operator", so constraining it grants nothing. Only the host is issued by the server.
 #
 # On Undernet, log into X and set usermode +x. The server then replaces your host
 # with "<your-account>.users.undernet.org", which nobody else can obtain. That
@@ -326,7 +326,7 @@ THEME: str = "classic"        # classic, midnight, forest, orchid, plain
 # string like "\x0306,06", or None (the default) to leave that role at
 # whatever the chosen THEME preset already says.
 #
-# #170's RFC (issue #170's discussion, chchatzop's Q1): this used to be one
+# #170's RFC (issue #170's discussion, its Q1): this used to be one
 # dict, CUSTOM_THEME, which is why it lived here or in admin_config.py rather
 # than settings.conf - settings_file.is_overridable() takes only primitives.
 # Six plain strings are primitives, so this is now settings.conf/dashboard
@@ -514,7 +514,7 @@ SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
 def _migrate_local_config_to_admin_config(directory=None, log=print):
     """Carry an existing local_config.py across to admin_config.py's name.
 
-    chchatzop's review of #187, found on the real upgrade path: config.py ->
+    #187's review, found on the real upgrade path: config.py ->
     defaults.py is a TRACKED file, so git renames it on every operator's disk
     automatically on pull. local_config.py -> admin_config.py is NOT - it is
     gitignored, so it was never in the repository for git to rename. An
@@ -584,9 +584,8 @@ settings_file.apply_to(globals())
 # to the first entry of CHANNEL" - and it did, but to the first entry of the
 # TRACKED default, not the operator's. So an operator who set
 # CHANNEL = "#their-channel" (in admin_config.py OR settings.conf) still had a
-# dashboard broadcast search send its @find into #mp3passion: the first
-# channel of the shipped default, a real public channel they may not even be
-# in.
+# dashboard broadcast search send its @find into whatever channel the
+# shipped default named: a real public channel they may not even be in.
 #
 # Only an unset value is derived, so an explicit choice always wins. CHANNEL
 # itself may also still be unset here - #170's RFC made it one of
@@ -598,7 +597,7 @@ settings_file.apply_to(globals())
 if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
     BROADCAST_SEARCH_CHANNEL = CHANNEL.split(",")[0].strip()
 
-# LIST_BASE_NAME predicted this exact gap: #170's RFC discussion (chchatzop's
+# LIST_BASE_NAME predicted this exact gap: #170's RFC discussion (its own
 # comment) noted it "can derive from NICKNAME rather than being asked for at
 # all" once NICKNAME itself is required - see settings_file.py's own comment
 # on why LIST_BASE_NAME is not in REQUIRED. Found live, running setup.py

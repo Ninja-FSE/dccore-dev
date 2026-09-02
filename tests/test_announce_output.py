@@ -75,7 +75,7 @@ class FitIrcLineTests(QuietTestCase):
 
     # A stand-in for the real templates: a colour code up front, a colour-coded
     # fixed tail behind the variable field, and the CRLF the daemon always adds.
-    HEAD = "PRIVMSG #mp3passion :\x0304,05 \x0310,10 \x0301,00 Sent: "
+    HEAD = "PRIVMSG #dccore-test :\x0304,05 \x0310,10 \x0301,00 Sent: "
     TAIL = " \x0310,10 \x0304,05 \r\n"
 
     def build(self, value):
@@ -182,7 +182,7 @@ class TransferCompleteLineTests(QuietTestCase):
         """
         self.assertEqual(len(CLASSICAL_TRACK), 158)
         announce.send_transfer_complete(
-            "#mp3passion", "dave", CLASSICAL_TRACK, 41_000_000, time.time() - 30, 512000
+            "#dccore-test", "dave", CLASSICAL_TRACK, 41_000_000, time.time() - 30, 512000
         )
         line = self.announced()
         self.assertLessEqual(encoded_len(line), announce.IRC_LINE_BUDGET)
@@ -196,7 +196,7 @@ class TransferCompleteLineTests(QuietTestCase):
     def test_short_filename_is_left_untouched(self):
         """A normal filename must reach the channel verbatim, no ellipsis."""
         announce.send_transfer_complete(
-            "#mp3passion", "dave", "01 - Enter Sandman.flac", 4096, time.time() - 2, 512000
+            "#dccore-test", "dave", "01 - Enter Sandman.flac", 4096, time.time() - 2, 512000
         )
         line = self.announced()
         self.assertLess(encoded_len(line), announce.IRC_LINE_BUDGET)
@@ -206,7 +206,7 @@ class TransferCompleteLineTests(QuietTestCase):
     def test_debug_note_carries_the_full_filename(self):
         """The channel line is clamped; the debug log still names the file."""
         announce.send_transfer_complete(
-            "#mp3passion", "dave", CLASSICAL_TRACK, 41_000_000, time.time() - 30, 512000
+            "#dccore-test", "dave", CLASSICAL_TRACK, 41_000_000, time.time() - 30, 512000
         )
         self.assertTrue(self.debug_lines, "transfer completion produced no debug line")
         category, text = self.debug_lines[-1]
@@ -227,7 +227,7 @@ class SearchResultHeaderTests(QuietTestCase):
         Nothing capped it, so any user could type a 500-character @find and the
         private header came back over 512 bytes and was cut mid-colour-code.
         """
-        announce.send_search_result_header("dave", "metallica" * 60, 7, "#mp3passion")
+        announce.send_search_result_header("dave", "metallica" * 60, 7, "#dccore-test")
         line = self.header()
         self.assertLessEqual(encoded_len(line), announce.IRC_LINE_BUDGET)
         self.assertIn("...", line)
@@ -236,14 +236,14 @@ class SearchResultHeaderTests(QuietTestCase):
 
     def test_non_ascii_search_term_is_clamped_in_bytes(self):
         """Defect: a multi-byte term overflowed even when its char count fitted."""
-        announce.send_search_result_header("dave", "ä" * 400, 3, "#mp3passion")
+        announce.send_search_result_header("dave", "ä" * 400, 3, "#dccore-test")
         line = self.header()
         self.assertLessEqual(encoded_len(line), announce.IRC_LINE_BUDGET)
         self.assertLess(len(line), announce.IRC_LINE_BUDGET)
 
     def test_ordinary_search_term_is_untouched(self):
         """A normal term must be echoed back exactly, with no ellipsis."""
-        announce.send_search_result_header("dave", "metallica", 7, "#mp3passion")
+        announce.send_search_result_header("dave", "metallica", 7, "#dccore-test")
         line = self.header()
         self.assertIn("metallica", line)
         self.assertNotIn("...", line)

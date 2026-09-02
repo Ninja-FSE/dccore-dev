@@ -98,7 +98,7 @@ gitignored**, so nothing here reaches GitHub. Do not put these in `defaults.py`.
 ```python
 # admin_config.py
 
-ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]
+ADMIN_HOSTMASKS = ["*!*@operator.users.undernet.org"]
 
 ADMIN_PASSWORD_HASH = "pbkdf2_sha256$200000$3f0a...$91c4..."
 
@@ -114,14 +114,14 @@ The mask may be written either way — both mean the same thing, because only th
 part after the last `@` is used:
 
 ```python
-ADMIN_HOSTMASKS = ["FLAC.users.undernet.org"]        # bare host
-ADMIN_HOSTMASKS = ["*!*@FLAC.users.undernet.org"]    # familiar IRC form
+ADMIN_HOSTMASKS = ["operator.users.undernet.org"]        # bare host
+ADMIN_HOSTMASKS = ["*!*@operator.users.undernet.org"]    # familiar IRC form
 ```
 
 Wildcards work, and more than one entry is allowed:
 
 ```python
-ADMIN_HOSTMASKS = ["FLAC.users.undernet.org", "Neo.users.undernet.org"]
+ADMIN_HOSTMASKS = ["operator.users.undernet.org", "operator2.users.undernet.org"]
 ```
 
 A pattern that reduces to bare `*` is refused and logged — it would admit the
@@ -325,7 +325,7 @@ no password refuses everyone rather than letting anyone in.
 **The log says the connection to you timed out.**
 
 ```
-[ADMINCHAT] Could not connect to FLAC at 203.0.113.41:55101 (timed out);
+[ADMINCHAT] Could not connect to operator at 203.0.113.41:55101 (timed out);
 falling back to listening.
 ```
 
@@ -350,7 +350,7 @@ bot stops dialling you altogether.
 **The log says it could not connect to you at `0.0.0.0`.**
 
 ```
-[ADMINCHAT] Could not connect to FLAC at 0.0.0.0:11283 ([Errno 111] Connection refused).
+[ADMINCHAT] Could not connect to operator at 0.0.0.0:11283 ([Errno 111] Connection refused).
 ```
 
 Your client did not know its own address and offered `0.0.0.0`. That is not a
@@ -362,7 +362,7 @@ Fix it properly in mIRC under **Options → Connect → Local Info** as above.
 **The log says "Unusable DCC CHAT offer".**
 
 ```
-[ADMINCHAT] Unusable DCC CHAT offer from FLAC: 'DCC CHAT chat 3405803861 0 350'
+[ADMINCHAT] Unusable DCC CHAT offer from operator: 'DCC CHAT chat 3405803861 0 350'
 ```
 
 That particular one was a parser bug, now fixed — the offer above is a valid
