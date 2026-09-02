@@ -285,10 +285,10 @@ def parse_search_header(text):
 # ---------------------------------------------------------------------------
 #
 # Every file-serving bot on this network announces itself on a timer. Captured
-# from a busy public file-sharing channel on 2026-08-29: 392 lines, 31 bots
-# with a readable advert, in four different wordings and no two decorated
-# alike. The capture is the specification, and every line of it is a fixture
-# in tests/test_advert_listener.py.
+# from a busy public file-sharing channel: 392 lines, 31 bots with a readable
+# advert, in four different wordings and no two decorated alike. The capture
+# is the specification, and every line of it is a fixture in
+# tests/test_advert_listener.py.
 #
 # THE ADVERT IS NOT ALWAYS ONE MESSAGE
 #

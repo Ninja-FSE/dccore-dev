@@ -7,8 +7,8 @@ we hold for them is still current.
 
 THE FIXTURES ARE REAL
 
-Every advert below was captured from #DCCore-Test on 2026-08-29 by a read-only
-observer: 392 lines, 33 bots, twenty minutes. They are reproduced as they
+Every advert below was captured from a busy public file-sharing channel by a
+read-only observer: 392 lines, 33 bots, twenty minutes. They are reproduced as they
 arrived, not tidied, because the untidiness is the point - no two bots format
 alike, and a parser written against a cleaned-up sample is a parser written
 against a bot nobody runs.
@@ -57,7 +57,7 @@ T0 = 1000000.0
 CTCP = chr(1)
 
 
-# Captured from #DCCore-Test on 2026-08-29 - 392 lines, 33 bots. Verbatim,
+# Captured from a busy public file-sharing channel - 392 lines, 33 bots. Verbatim,
 # save for the bytes the socket's errors="ignore" decode drops before the
 # parser ever sees them. scripts/capture_adverts.py took the sample.
 
