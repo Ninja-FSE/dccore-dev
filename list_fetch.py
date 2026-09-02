@@ -406,7 +406,15 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
         # specific cases still means "abort this extraction" - never an
         # exception loose in the fetch thread. The type name goes into the
         # reason because, unlike the cases above, it is not self-describing.
-        shutil.rmtree(extract_dir, ignore_errors=True)
+        #
+        # long_path()-wrapped like every other rmtree() in this function
+        # (#222): this branch is the one a hand-crafted archive with long
+        # member paths actually reaches, so on Windows it is also the one
+        # most likely to be cleaning up a directory over the 260-character
+        # limit - unwrapped, ignore_errors=True would swallow that failure
+        # and leave the rejected, partially-extracted contents on disk
+        # permanently, under FETCHED_FILES_DIR.
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return None, f"extraction aborted: {type(err).__name__}: {err}"
 
     return _pick_list_file(extract_dir), None

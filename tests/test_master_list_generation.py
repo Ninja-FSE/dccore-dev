@@ -25,6 +25,7 @@ import commands  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
 import list as list_mod  # noqa: E402
+import platform_compat  # noqa: E402
 import update_list  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -485,6 +486,76 @@ class UnreadableSubtreeKeepsThePreviousIndex(MasterListCase):
         self.assertTrue(self.generate())
 
 
+class AnUnreadableFileIsExcludedNotPublishedAsZeroBytes(MasterListCase):
+    """#228: a bare `except: pass` around os.path.getsize() left file_bytes
+    at 0 and still appended the entry - permission denied, a dangling
+    symlink, or a file removed mid-scan all read as a legitimate 0-byte
+    track. The list is what the bot HANDS OUT: publishing it offered a
+    download that can only ever fail once someone actually requests it, with
+    the library's reported total size quietly short and no log line saying
+    why.
+
+    Deliberately the opposite fix from UnreadableSubtreeKeepsThePreviousIndex
+    above: THAT is a whole subtree going unreadable, systemic enough to
+    refuse the whole run and keep the previous good index. ONE file failing
+    getsize() is not - excluding just that file and publishing everything
+    else is what the control below checks was not lost along with the bug.
+    """
+
+    def getsize_raising_for(self, target_path):
+        real_getsize = os.path.getsize
+
+        def fake_getsize(path):
+            # Compared through long_path() on BOTH sides, because that is how
+            # the code under test calls it: update_list.py:413 is
+            # os.path.getsize(platform_compat.long_path(full_file_path)).
+            #
+            # On Windows long_path() prefixes "\?\", so a plain normpath
+            # comparison never matched, this stub never raised, and both tests
+            # below silently exercised the READABLE path - passing on Linux,
+            # where long_path() is the identity function, and failing here.
+            #
+            # A stub has to match the way production calls the function, not
+            # the way the test happens to hold the path.
+            if (platform_compat.long_path(os.path.normpath(path))
+                    == platform_compat.long_path(os.path.normpath(target_path))):
+                raise OSError(13, "Permission denied", path)
+            return real_getsize(path)
+
+        os.path.getsize = fake_getsize
+        self.addCleanup(lambda: setattr(os.path, "getsize", real_getsize))
+
+    def test_the_unreadable_file_is_left_out(self):
+        good_path = self.add("Metallica/Black Album/01.flac")
+        bad_path = self.add("Metallica/Black Album/02.flac")
+        self.getsize_raising_for(bad_path)
+
+        self.assertTrue(self.generate(),
+                        "one bad file must not refuse the whole scan")
+
+        lines = self.request_lines()
+        self.assertTrue(any("01.flac" in line for line in lines),
+                        "the readable file must still be published")
+        self.assertFalse(any("02.flac" in line for line in lines),
+                         "the unreadable file must not be published as a "
+                         "0-byte entry nobody can ever actually download")
+
+    def test_the_readable_files_total_size_is_not_shorted(self):
+        """A second control: the excluded file's phantom 0 bytes must not
+        even implicitly participate - the header's total is exactly what the
+        readable files (the tree's two defaults plus the one added here) add
+        up to, not counting the excluded file at all."""
+        good_path = self.add("Metallica/New Album/01.flac", data=b"\x00" * 4096)
+        bad_path = self.add("Metallica/New Album/02.flac", data=b"\x00" * 4096)
+        self.getsize_raising_for(bad_path)
+
+        self.generate()
+
+        header = self.read_list().split("\n", 1)[0]
+        expected_files = len(self.tree.tracks) + 1  # the tree's two defaults, plus the good one
+        self.assertIn(f"List of {expected_files} Files", header)
+
+
 class SideFilesOnlyPublishAfterTheSwap(MasterListCase):
     """#162 finding #32: the size/rawbytes side files used to be written
     BEFORE the os.replace() calls that actually publish the new list, so a
@@ -626,8 +697,21 @@ class FlatteningIsWiredIntoTheWriter(MasterListCase):
     """
 
     def walk_yielding(self, *names):
-        """Make the scan see `names` in the album folder, whatever is on disk."""
+        """Make the scan see `names` in the album folder, whatever is on disk.
+
+        The names this class yields (embedded newlines, surrogateescape
+        bytes) generally do not exist as real files - only os.walk() is
+        stubbed to report them, deliberately, so the test works on every
+        platform including one where such a name cannot actually be created.
+        os.path.getsize() is therefore also stubbed here: since #228,
+        generate_master_list() excludes a file it cannot read the size of,
+        and unwrapped every synthetic name here would raise
+        FileNotFoundError and be silently excluded - passing every assertion
+        below by leaving nothing to make them fail, not by the flattening
+        actually working.
+        """
         real_walk = os.walk
+        real_getsize = os.path.getsize
         album = os.path.abspath(self.tree.album)
 
         def fake_walk(top, *args, **kwargs):
@@ -646,8 +730,16 @@ class FlatteningIsWiredIntoTheWriter(MasterListCase):
                 else:
                     yield root, dirs, files
 
+        def fake_getsize(path):
+            try:
+                return real_getsize(path)
+            except OSError:
+                return 2048  # matches MasterListCase.add()'s own default size
+
         os.walk = fake_walk
+        os.path.getsize = fake_getsize
         self.addCleanup(lambda: setattr(os, "walk", real_walk))
+        self.addCleanup(lambda: setattr(os.path, "getsize", real_getsize))
 
     def test_a_newline_in_a_scanned_name_cannot_split_the_entry(self):
         self.walk_yielding("evil\nname.flac")

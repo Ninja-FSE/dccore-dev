@@ -1041,6 +1041,36 @@ class MalformedArchivesZipfileLeaks(SafeExtractionTests):
             os.path.exists(list_fetch.list_extract_dir("probebot")),
             "the aborted extraction left its directory behind")
 
+    def test_the_cleanup_uses_long_path_like_every_other_one_in_this_file(self):
+        """#222: platform_compat.long_path() is identity on Linux, so the
+        test above passes whether or not this branch's rmtree() is wrapped -
+        it cannot distinguish the bug from the fix on this platform. This
+        branch matters more than the others it stands beside: it is the one
+        a hand-crafted archive with long member paths actually reaches, so on
+        Windows it is the one most likely to be cleaning up a path over the
+        260-character limit, where ignore_errors=True would otherwise
+        silently leave the debris under FETCHED_FILES_DIR forever."""
+        import ast
+
+        with io.open(list_fetch.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        tree = ast.parse(source)
+
+        bare = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "rmtree"):
+                continue
+            if not node.args:
+                continue
+            first = node.args[0]
+            wrapped = (isinstance(first, ast.Call) and isinstance(first.func, ast.Attribute)
+                      and first.func.attr == "long_path")
+            if not wrapped:
+                bare.append(node.lineno)
+
+        self.assertEqual(bare, [], f"rmtree() called without long_path() at line(s): {bare}")
+
     def test_a_sound_archive_is_still_accepted(self):
         """Control. The wider guard must not start swallowing good ones."""
         path = os.path.join(self.tmp, "fine.zip")

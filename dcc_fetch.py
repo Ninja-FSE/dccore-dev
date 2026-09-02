@@ -1241,7 +1241,7 @@ def _fetch_transfer_timeout(request_type):
     retry identical) well before it had any chance to finish.
     """
     if request_type == "folder":
-        return getattr(config, "FETCH_FOLDER_TRANSFER_TIMEOUT", 3600)
+        return getattr(config, "FETCH_FOLDER_TRANSFER_TIMEOUT", 6144)
     return getattr(config, "FETCH_TRANSFER_TIMEOUT", 600)
 
 

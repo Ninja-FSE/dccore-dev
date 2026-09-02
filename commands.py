@@ -797,8 +797,23 @@ def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
     pattern = parts[1].strip().lower()
     if not pattern:
         return
-        
-    
+
+    # #225: security.py's enforcement loop silently declines an over-broad
+    # pattern - one that reduces to nothing once wildcards and mask
+    # separators are stripped, which would ban every user on the network -
+    # logging only to stdout, which the admin who typed the command never
+    # sees. Without this, "!ban *" was confirmed as added and was a
+    # permanent no-op: the admin believed a ban was live when it was not,
+    # which is the direction that matters.
+    import security
+    if security.is_over_broad_hard_ban_pattern(pattern):
+        announce.send_debug(
+            f"Refused - {config.C_BOLD}{pattern}{config.C_RESET} reduces to nothing "
+            f"once wildcards are stripped, which would ban every user on the network.",
+            category="INFO")
+        print(f"[HARD BAN REFUSED] {user} tried to add over-broad pattern: {pattern}")
+        return
+
     # db.add_hard_ban does the whole read-modify-write under the disk lock and
     # replaces the file atomically. The old code appended with no newline check,
     # so on a hand-edited file whose last line lacked one it glued two patterns
@@ -988,6 +1003,13 @@ def handle_list_update_request(user, target_chan, authorised=False):
             
             if not os.path.exists(script_path):
                 announce.send_debug(f"Critical Error: Could not find update_list.py", category="INFO")
+                # #224: build_update_list_status_payload() used to report only
+                # {"running": bool} - nothing recorded whether the rebuild that
+                # just finished actually succeeded, so the dashboard's poll
+                # showed "Done. Check Stats for the new file count." the moment
+                # `running` flipped false, whether the rebuild worked or not.
+                config.last_list_update_ok = False
+                config.last_list_update_error = "update_list.py not found"
                 return
                 
             # 2. Threaded run, bounded by LIST_UPDATE_TIMEOUT (default 1800s, shaped
@@ -1010,34 +1032,66 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 
                 # 3. Read the new file count from line 1
                 new_count = count_from_master_list()
-                
+
                 # Work out the exact difference
                 added_files = new_count - old_count
-                if added_files < 0: 
-                    added_files = 0
-                
-                # 4. Confirm, through the VIP express lane
-                announce.send_debug(
-                    f"List update successfully completed! MasterList now contains {config.C_BOLD}{new_count:,}{config.C_RESET} files. "
-                    f"Added {added_files:,} new file(s) since last index.", 
-                    category="INFO"
-                )
+
+                # #230: clamping straight to zero made a SHRUNK library read
+                # identically to an unchanged one - "Added 0 new file(s)" - even
+                # though files were lost. generate_master_list()'s own zero-file
+                # guard only refuses a scan that found literally nothing; a
+                # partial mount failure that still returns SOME files (fewer
+                # than before) passes that guard, publishes a truncated index,
+                # and the operator who just lost real files from their share was
+                # told nothing changed.
+                if added_files < 0:
+                    # No dedicated warning category exists in send_debug() (see
+                    # its own category list) - "INFO" here, same as the normal
+                    # path, since the wording itself is what carries the
+                    # warning; inventing a category that falls through to the
+                    # same [INFO] tag anyway would only look distinct without
+                    # being distinct.
+                    announce.send_debug(
+                        f"List update completed, but the file count DROPPED from "
+                        f"{old_count:,} to {config.C_BOLD}{new_count:,}{config.C_RESET} "
+                        f"({-added_files:,} fewer). Check the music directory/mount "
+                        f"before trusting this list.",
+                        category="INFO"
+                    )
+                else:
+                    # 4. Confirm, through the VIP express lane
+                    announce.send_debug(
+                        f"List update successfully completed! MasterList now contains {config.C_BOLD}{new_count:,}{config.C_RESET} files. "
+                        f"Added {added_files:,} new file(s) since last index.",
+                        category="INFO"
+                    )
+                # The script itself succeeded either way - #230's shrink
+                # warning above is a caution about the RESULT, not a failure
+                # of the rebuild process #224 is about.
+                config.last_list_update_ok = True
+                config.last_list_update_error = None
 
             else:
                 error_msg = subprocess_failure_message(process.stderr, process.stdout)
                 announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
-                
+                config.last_list_update_ok = False
+                config.last_list_update_error = error_msg
+
         except subprocess.TimeoutExpired:
             announce.send_debug(
                 f"List update FAILED: Script execution timed out after {list_update_timeout} seconds.",
                 category="INFO")
+            config.last_list_update_ok = False
+            config.last_list_update_error = f"timed out after {list_update_timeout}s"
         except Exception as e:
             print(f"[UPDATE ERROR] The list update could not be run: {e}")
             announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")
+            config.last_list_update_ok = False
+            config.last_list_update_error = str(e)
         finally:
             # Release the global pause lock again
             config.search_inprogress = False
-            
+
             # Clear the maintenance flag, so list.py knows the list is ready
             config.update_inprogress = False
             print("[MAINTENANCE END] Sharing and searching have been restarted automatically.")

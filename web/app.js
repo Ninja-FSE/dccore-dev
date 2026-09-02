@@ -1177,7 +1177,14 @@
       clearInterval(updateList.pollTimer);
       updateList.pollTimer = null;
       el.updateListRunBtn.disabled = false;
-      showUpdateListStatus("Done. Check Stats for the new file count.", false);
+      // #224: "running" alone cannot tell a rebuild that worked from one
+      // that failed - this used to say "Done" unconditionally the moment
+      // running flipped false, whichever it was.
+      if (payload.ok === false) {
+        showUpdateListStatus("Failed: " + (payload.error || "unknown error"), true);
+      } else {
+        showUpdateListStatus("Done. Check Stats for the new file count.", false);
+      }
     }).catch(function (err) {
       markConnection(false);
       clearInterval(updateList.pollTimer);
