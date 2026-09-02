@@ -480,7 +480,7 @@ def _check_writable(name, value, namespace, types):
     # A REQUIRED setting cannot be blanked. oserve.startup() already refuses to
     # boot while NICKNAME, CHANNEL or ADMIN_NICK is empty - but that check runs
     # at BOOT, and the two places these are written from are the web
-    # dashboard's Settings page and setup.py. Saving a blank one was accepted,
+    # dashboard's Settings page and configure.py. Saving a blank one was
     # reported as saved, and the daemon then refused to start.
     #
     # The dashboard goes down with the daemon, so the one screen the value

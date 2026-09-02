@@ -1542,7 +1542,7 @@ class FilelistsHttpPaginationTests(DCCoreTestCase):
         # under no folder at all, which pages as a single group now and would
         # exercise nothing.
         write_master_list(self.tree.lists, "DCCore", [
-            (f"D:\MUSIC\Album {i:02d}\\", [(f"Track {i:02d}.flac", "1.0MB")])
+            (f"D:\\MUSIC\\Album {i:02d}\\", [(f"Track {i:02d}.flac", "1.0MB")])
             for i in range(10)
         ])
         self.set_config(ADMIN_PASSWORD_HASH=adminchat.make_password_hash(
