@@ -357,8 +357,30 @@ def _sweep_flood_tracking_if_due(now):
     return _prune_flood_tracking(now)
 
 
+def format_ban_duration(seconds):
+    """A short human phrase for a ban length: "45 minutes", "1 hour".
+
+    Every message about the escalation ban is built from this, so the console
+    line, the debug notice and the NOTICE the banned user reads cannot drift
+    apart from each other or from config.FLOOD_BAN_SECONDS. They all used to
+    say "until midnight", which stopped being true the moment the duration
+    became fixed (#227) - and the one a stranger sees is the one that matters.
+    """
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} second" + ("" if seconds == 1 else "s")
+    if seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes} minute" + ("" if minutes == 1 else "s")
+    hours = seconds / 3600.0
+    if hours == int(hours):
+        whole = int(hours)
+        return f"{whole} hour" + ("" if whole == 1 else "s")
+    return f"{hours:.1f} hours"
+
+
 def is_flooding(user):
-    """Flood protection: clears the queue on a ban, bans until midnight, and logs it all."""
+    """Flood protection: clears the queue on a ban, applies the escalation ban, and logs it all."""
     import time
     import sys
     import defaults as config
@@ -375,15 +397,16 @@ def is_flooding(user):
     _sweep_flood_tracking_if_due(now)
     
     # ---------------------------------------------------------------------
-    # STEP 2: the user kept hammering while muted -> a hard ban until midnight
+    # STEP 2: the user kept hammering while muted -> a fixed-length ban
     # ---------------------------------------------------------------------
     if user_key in config.muted_until:
         if now < config.muted_until[user_key]:
-            current_time_struct = time.localtime(now)
-            seconds_since_midnight = (current_time_struct.tm_hour * 3600) + (current_time_struct.tm_min * 60) + current_time_struct.tm_sec
-            seconds_until_midnight = 86400 - seconds_since_midnight
-            
-            config.banned_users[user_key] = now + seconds_until_midnight
+            # A FIXED duration, not midnight (#227). The old arithmetic made the
+            # sentence depend on the time of day: 00:01 bought nearly 24 hours,
+            # 23:59 bought seconds, for identical behaviour. Arbitrary is worse
+            # than short.
+            ban_seconds = int(getattr(config, "FLOOD_BAN_SECONDS", 3600))
+            config.banned_users[user_key] = now + ban_seconds
             db.save_bans_to_file()
             
             if user_key in config.muted_until:
@@ -392,16 +415,17 @@ def is_flooding(user):
             if user_key in config.send_queue:
                 del config.send_queue[user_key]
             
-            print(f"[SECURITY BAN] Banned {user} until midnight. Saved to {config.BANS_FILE} via db.py.")
+            spell = format_ban_duration(ban_seconds)
+            print(f"[SECURITY BAN] Banned {user} for {spell}. Saved to {config.BANS_FILE} via db.py.")
             
             # VIP log: send the day-ban notice straight out, with no queue delay
             announce.send_debug(
-                f"User {user} ignored warnings and flooded during mute. Upgraded to daily ban until midnight! Saved to disk layout.", 
+                f"User {user} ignored warnings and flooded during mute. Upgraded to a {spell} ban! Saved to disk layout.", 
                 category="TBAN"
             )
             
             if oserve:
-                oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}[WARNING]{config.C_RESET} You flooded the server, you are now banned until midnight\r\n")
+                oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}[WARNING]{config.C_RESET} You flooded the server, you are now banned for {spell}\r\n")
             return True
         else:
             del config.muted_until[user_key]

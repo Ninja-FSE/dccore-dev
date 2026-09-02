@@ -327,6 +327,14 @@ BROADCAST_SEARCH_COOLDOWN: int = 30     # Seconds
 MAX_REQUESTS: int   = 10       # Most commands (search or file) per time window
 REQUEST_WINDOW: int = 5       # Size of the rolling time window, in seconds
 MUTE_TIME: int      = 30       # Mute in seconds on the first flood violation
+# Escalation ban, in seconds, for someone who keeps flooding while already
+# muted. This used to expire at local midnight, which made the punishment
+# depend on the clock rather than the offence: trip it at 00:01 and you were
+# banned for nearly a day, trip it at 23:59 and you were banned for seconds.
+# Same offence, arbitrary sentence. A fixed duration is predictable for the
+# operator and for the person banned. Note it does NOT self-escalate the way
+# midnight accidentally did - repeat offenders are a hard-ban case (!ban).
+FLOOD_BAN_SECONDS: int = 3600  # Ban in seconds when someone floods while muted
 MAX_SEND_FAILS: int = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
 RAR_TIMEOUT: int    = 1800     # Longest a rar packing run may take, in seconds, before it is abandoned
 LIST_UPDATE_TIMEOUT: int = 1800  # Longest a !update / update_list.py run may take, in seconds, before it is abandoned. A full NFS walk legitimately takes minutes, so this is shaped like RAR_TIMEOUT above, not a short fixed number.
