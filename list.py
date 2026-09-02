@@ -610,16 +610,28 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
 
 def execute_search(irc_sock, user, search_term, channel):
     """Search the list file, sending the matching rows exactly as they are stored."""
-        # MAINTENANCE GATE: block the search while an update is running, if config says so
-    if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'search_inprogress', False) is True:
+    # update_inprogress, not search_inprogress (#214) - see dcc.py's own comment
+    # on the same change. This branch is the REBUILD case and its message says
+    # so; the branch below is the concurrent-search case and needs its own.
+    if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'update_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Search engine is temporarily paused during MasterList rebuild. Please wait a moment.\r\n")
         print(f"[MAINTENANCE BLOCK] Refused a search (@find) from {user}: an !update is running.")
         return
 
-    # Guard against two searches at once
+    # Guard against two searches at once. This used to print to the console and
+    # return, sending the user nothing at all - their @find simply vanished.
+    #
+    # It was also unreachable with PAUSE_ON_UPDATE on, because the branch above
+    # returned first on the very same flag. Now that the two flags mean
+    # different things, this is the branch a second searcher actually reaches,
+    # so it has to say something, and something accurate: the previous wording
+    # anywhere near here blamed a MasterList rebuild that is not happening.
     if getattr(config, 'search_inprogress', False):
+        oserve = sys.modules.get('oserve')
+        if oserve:
+            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Another search is running right now - try again in a moment.\r\n")
         print(f"[SEARCH BLOCK] Ignored a search from {user}: another scan is already running.")
         return
         

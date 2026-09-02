@@ -890,7 +890,18 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
     # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------
-    if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'search_inprogress', False) is True:
+    # update_inprogress, NOT search_inprogress (#214). Both are set by !update,
+    # but search_inprogress is ALSO set by every @find for the seconds it reads
+    # the list - so any search refused every file request from everyone else,
+    # and told them "MasterList is currently rebuilding", which was untrue. A
+    # search only READS the list; it is the rebuild that replaces the files
+    # underneath a transfer, and only the rebuild needs this gate.
+    #
+    # A real rebuild is unaffected: !update sets update_inprogress
+    # unconditionally and search_inprogress only when PAUSE_ON_UPDATE is on,
+    # so gating on update_inprogress behind the same switch refuses exactly
+    # what it refused before.
+    if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'update_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: MasterList is currently rebuilding. File requests temporarily paused. Please wait 1-2 minutes.\r\n")
