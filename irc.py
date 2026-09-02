@@ -1089,7 +1089,7 @@ def irc_loop():
             # The old 70-second timeout tore down HEALTHY links during quiet periods.
             s.settimeout(20.0)
         except Exception as auth_err:
-            print(f"[ERROR] Fel under server-handskakningen: {auth_err}")
+            print(f"[ERROR] Error during the server handshake: {auth_err}")
             try: s.close()
             except: pass
             _release_socket()

@@ -508,8 +508,12 @@ def send_dcc_queue_notice(user, file_name, position):
         
         # Build the message in the colour-block style
         def _build(shown_name):
+            # config.MAX_USER_QUEUE, not a literal 100. The operator can set
+            # this to anything, and send_dcc_error()'s "user_full" message
+            # twenty lines above already reads it properly - so the two
+            # messages about the same limit disagreed whenever it was changed.
             text_content = (f"Added {shown_name} to your personal queue at "
-                            f"position #{position} of 100.")
+                            f"position #{position} of {config.MAX_USER_QUEUE}.")
             block_msg = (f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} "
                          f"{text_content}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} ")
             return f"NOTICE {user} :{block_msg}\r\n"

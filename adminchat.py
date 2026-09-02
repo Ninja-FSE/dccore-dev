@@ -34,8 +34,11 @@ gets no banner, no connection, no reply of any kind, and no way to learn whether
 the mask was wrong. The cost of an unauthorised attempt is one regex.
 
 Connection direction follows iroffer's non-passive path: the requesting client
-listens and supplies its ip/port, and the bot connects OUT to it. No listening
-port is opened here, so this adds no inbound firewall surface. Passive DCC (the
+listens and supplies its ip/port, and the bot connects OUT to it. That path opens
+no listening port. _open_chat_listener() below DOES bind one, in the
+DCC_PORT_START..DCC_PORT_END range, as the fallback for an operator whose client
+the bot cannot dial - so this module is not inbound-surface-free, and the earlier
+claim that it was is corrected here. Passive DCC (the
 client sending port 0, bot listening instead) is not supported yet; it would want
 a port borrowed from the DCC_PORT_START..DCC_PORT_END range.
 """
@@ -73,7 +76,7 @@ PBKDF2_ITERATIONS = 200_000
 
 # --------------------------------------------------------------------------
 # Module state. This module is deliberately absent from commands.py's
-# modules_to_reload: importlib.reload re-executes a module body, which would
+# CORE_MODULES: importlib.reload re-executes a module body, which would
 # drop a live session's socket on the floor on every !rehash. That is not
 # hypothetical - it is what used to happen to every runtime container in
 # config.py until PRESERVE_RUNTIME was added.

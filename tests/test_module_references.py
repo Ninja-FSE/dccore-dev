@@ -75,8 +75,25 @@ def module_name_literals(source):
             node_targets = (node.targets if isinstance(node, ast.Assign)
                             else [node.target])
             for target in node_targets:
-                if (isinstance(target, ast.Name) and target.id == "modules_to_reload"
-                        and isinstance(node.value, ast.List)):
+                # Matched on SHAPE, not on one hard-coded variable name, and
+                # on a tuple as well as a list. This used to require the name
+                # `modules_to_reload` and an ast.List. #199 renamed that local
+                # to the constant CORE_MODULES and made it a tuple - and this
+                # scan silently stopped seeing four of the modules it names
+                # (announce, security, db, stats_mgr), which appear nowhere
+                # else in commands.py.
+                #
+                # Nothing failed, because the OTHER shape below - the
+                # sys.modules.get() calls - kept finding enough names in
+                # commands.py to satisfy the test that was supposed to notice.
+                # A guard that goes blind and stays green is the failure this
+                # whole file exists to prevent, so it now matches any
+                # uppercase-or-reload-named sequence of string literals.
+                name = target.id if isinstance(target, ast.Name) else ""
+                looks_like_a_module_list = (
+                    "modules" in name.lower() or "reload" in name.lower())
+                if (looks_like_a_module_list
+                        and isinstance(node.value, (ast.List, ast.Tuple))):
                     for element in node.value.elts:
                         if isinstance(element, ast.Constant) and isinstance(element.value, str):
                             found.append((element.value, node.lineno))
@@ -110,8 +127,17 @@ class EveryNamedModuleExists(unittest.TestCase):
     def test_every_module_referred_to_by_name_exists(self):
         references = self._references()
 
+        # admin_config.py is gitignored: it holds the operator's own overrides
+        # and is absent in every clean checkout by design. The reload list
+        # names it on purpose, and commands.reload_modules_in_order() skips
+        # what is not in sys.modules. Surfaced the moment the scan above
+        # regained sight of CORE_MODULES, which is the guard working.
+        ABSENT_BY_DESIGN = {"admin_config"}
+
         missing = []
         for name, sites in sorted(references.items()):
+            if name in ABSENT_BY_DESIGN:
+                continue
             if not os.path.exists(os.path.join(REPO_ROOT, f"{name}.py")):
                 missing.append(f"{name!r} (named at {', '.join(sites)})")
 
@@ -134,15 +160,30 @@ class EveryNamedModuleExists(unittest.TestCase):
             f"The scan probably stopped recognising a shape it used to match, "
             f"rather than the code having stopped using module names.")
 
-    def test_modules_to_reload_is_among_them(self):
-        """The most important single list, named explicitly so that losing
-        sight of it fails loudly rather than reducing the count by a few."""
-        sites = [site for sites in self._references().values() for site in sites]
+    def test_the_rehash_reload_list_is_among_them(self):
+        """The most important single list, asserted BY ITS CONTENTS.
 
-        self.assertTrue(
-            any(site.startswith("commands.py") for site in sites),
-            "no module names found in commands.py, which holds "
-            "modules_to_reload and every sys.modules loop the rehash uses")
+        This used to assert only that some module name was found somewhere in
+        commands.py - which stayed true after #199 renamed the list, because
+        commands.py is full of unrelated sys.modules.get() calls. The scan had
+        gone blind to four of the eight modules the rehash reloads and this
+        test reported everything fine.
+
+        Naming the members is the point: the failure mode is the scan quietly
+        matching a different shape, and only the contents can tell.
+        """
+        import commands
+
+        references = self._references()
+        for module in commands.CORE_MODULES:
+            if module == "admin_config":
+                continue  # optional, gitignored, absent in a clean checkout
+            with self.subTest(module=module):
+                self.assertIn(
+                    module, references,
+                    f"{module} is reloaded by !rehash but the scan does not "
+                    f"see it named anywhere - if it is ever renamed, nothing "
+                    f"will notice the reload list still holds the old name")
 
 
 class TheScanSeesEachShape(unittest.TestCase):
