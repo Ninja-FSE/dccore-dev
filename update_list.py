@@ -115,6 +115,68 @@ def _prune_superseded_lists(keep):
 _SHIPPED_LIST_BASE_NAME = "DCCore"
 
 
+# The name the artifacts in LOCAL_LIST_DIR were last published under.
+#
+# #213: the migration below could only ever carry files across from the shipped
+# default, so it worked exactly once. Rename the bot a second time - or from any
+# value that was never "DCCore" - and the artifacts on disk keep the old name
+# while the bot looks for the new one. A restart does not recover it: the list
+# is right there and invisible, and the advert says 0 files.
+#
+# The previous name has to be remembered somewhere. A marker file in the lists
+# directory rather than settings.conf/admin_config.py, because it travels with
+# the thing it describes: a value in the config can be hand-edited, replaced
+# wholesale on an upgrade, or restored from a backup taken before the rename,
+# and each of those silently orphans the lists again - which is the exact
+# failure being closed. A file in the directory cannot drift from the directory
+# it names, because it is in it.
+#
+# Absent means an install from before this existed, which is precisely when
+# falling back to _SHIPPED_LIST_BASE_NAME is the right guess.
+#
+# The leading dot and the lack of a .txt/.zip/.rar suffix keep it out of every
+# artifact scan in list.py and out of the glob in find_latest_list().
+_LIST_BASE_MARKER = ".dccore-list-base"
+
+
+def list_base_marker_path(directory=None):
+    directory = directory or getattr(config, "LOCAL_LIST_DIR", "./lists")
+    return os.path.join(directory, _LIST_BASE_MARKER)
+
+
+def read_list_base_marker(directory=None):
+    """The LIST_BASE_NAME the artifacts on disk were published under, or None.
+
+    None on any read problem, deliberately: an unreadable marker must fall back
+    to the shipped-default guess, never raise into startup.
+    """
+    try:
+        with io.open(list_base_marker_path(directory), encoding="utf-8") as handle:
+            return handle.read().strip() or None
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def write_list_base_marker(name=None, directory=None, log=print):
+    """Record the name the artifacts are now published under. Returns True on
+    success.
+
+    Written through db._atomic_write, like the advert side files: a marker
+    truncated by a crash mid-write would read as absent, sending the next
+    migration back to the shipped-default guess and stranding the artifacts
+    this call exists to keep findable.
+    """
+    import db
+
+    name = config.LIST_BASE_NAME if name is None else name
+    try:
+        db._atomic_write(list_base_marker_path(directory), str(name) + "\n")
+        return True
+    except Exception as err:
+        log(f"[MIGRATE] Could not record the list base name: {err}. "
+            f"A future rename may not find these files.")
+        return False
+
 def migrate_list_base_name(log=print):
     """Carry existing list files across when LIST_BASE_NAME changed out from
     under them - #184's review: defaults.py's LIST_BASE_NAME
@@ -150,10 +212,20 @@ def migrate_list_base_name(log=print):
     Returns the list of (old, new) basenames actually moved, for the tests
     and for the startup log.
     """
-    if config.LIST_BASE_NAME == _SHIPPED_LIST_BASE_NAME:
+    directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
+
+    # What the files on disk are actually called, not what they were called
+    # when the bot shipped. Absent means an install from before the marker
+    # existed, where the shipped default is the right guess (#213).
+    previous = read_list_base_marker(directory) or _SHIPPED_LIST_BASE_NAME
+
+    if previous == config.LIST_BASE_NAME:
+        # Nothing to move. Still record it: an install that has never been
+        # renamed has no marker, and writing one now means its FIRST rename is
+        # migrated from the right name rather than from the shipped guess.
+        write_list_base_marker(config.LIST_BASE_NAME, directory, log=log)
         return []
 
-    directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
     try:
         entries = os.listdir(directory)
     except OSError as err:
@@ -166,7 +238,7 @@ def migrate_list_base_name(log=print):
     # would also match a file already renamed to the NEW LIST_BASE_NAME when
     # that name itself happens to start with "DCCore" - e.g. "DCCoreTest" -
     # corrupting an already-correct file instead of leaving it alone.
-    old_prefix = _SHIPPED_LIST_BASE_NAME + "-"
+    old_prefix = previous + "-"
 
     moved = []
     for item in entries:
@@ -175,7 +247,7 @@ def migrate_list_base_name(log=print):
         if not item.endswith((".txt", ".zip", ".rar")):
             continue
 
-        new_name = config.LIST_BASE_NAME + item[len(_SHIPPED_LIST_BASE_NAME):]
+        new_name = config.LIST_BASE_NAME + item[len(previous):]
         old_path = os.path.join(directory, item)
         new_path = os.path.join(directory, new_name)
         if os.path.exists(new_path):
@@ -189,6 +261,12 @@ def migrate_list_base_name(log=print):
 
     for old_name, new_name in moved:
         log(f"[MIGRATE] Renamed {old_name} to {new_name}.")
+
+    # After the move, not before: if the renames failed the marker must still
+    # say what the files on disk are really called, or the next startup would
+    # look for them under a name nothing has.
+    if moved or not read_list_base_marker(directory):
+        write_list_base_marker(config.LIST_BASE_NAME, directory, log=log)
     return moved
 
 
@@ -630,6 +708,11 @@ def generate_master_list():
         # caller the file count and the list date as well as the size.
         db._atomic_write(SIZE_FILE_PATH, formatted_size)
         db._atomic_write(RAWBYTES_FILE_PATH, str(total_bytes))
+        # #213: the artifacts just published are named after the CURRENT
+        # LIST_BASE_NAME, so this is the moment that fact becomes true. Written
+        # here rather than only in the migration, so a rename between two
+        # rebuilds is still migrated from the right name.
+        write_list_base_marker(config.LIST_BASE_NAME, log=print)
 
         print(f"[LIST-GEN] New lists activated: {os.path.basename(txt_path)} "
               f"(download: {os.path.basename(artifact_path)})")
