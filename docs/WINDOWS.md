@@ -27,7 +27,7 @@ on PATH, because WinRAR does not add itself to PATH.
 
 ## Setup
 
-### The fast path: `python3 setup.py`
+### The fast path: `python3 configure.py`
 
 Asks nickname, IRC server, channel(s), admin nick, the admin console
 password, the music directory (optional - easier to set from the web

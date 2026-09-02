@@ -130,7 +130,7 @@ class AdminConfigOverrideTests(DCCoreTestCase):
         self.assertEqual(cfg.BROADCAST_SEARCH_CHANNEL, "#dccore-test")
 
     def test_a_nickname_override_moves_the_list_base_name(self):
-        """Found live, running setup.py against a real install: NICKNAME came
+        """Found live, running configure.py against a real install: NICKNAME came
         out "DCCoreTest", but the generated list still came out named
         "DCCore-<date>.zip" - #170's RFC predicted exactly this ("LIST_BASE_NAME
         can derive from NICKNAME") but nothing did the derivation until now."""

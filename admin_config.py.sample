@@ -31,7 +31,7 @@
 # confirmed the default is right"). FILE_DIRECTORY is also not in that list,
 # deliberately: requiring it would block the daemon from ever reaching the
 # web dashboard, the one place that is genuinely easier to set it from - a
-# blank one only warns, both at boot and from setup.py.
+# blank one only warns, both at boot and from configure.py.
 #
 # NICKNAME = "YourBotName"
 # ALT_NICKNAME = "YourBotName_"

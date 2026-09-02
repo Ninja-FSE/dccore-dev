@@ -70,7 +70,7 @@ ISP hostname, `+x` did not take and the console will not let you in.
 
 ### 2. Generate a password hash
 
-`python3 setup.py` does steps 2 and 3 together - the same password prompt as
+`python3 configure.py` does steps 2 and 3 together - the same password prompt as
 below, writing the resulting hash straight into `admin_config.py` - if you
 have not already run it. To do it by hand instead:
 

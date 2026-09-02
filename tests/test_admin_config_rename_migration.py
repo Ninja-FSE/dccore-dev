@@ -88,7 +88,7 @@ class ItRefusesToGuess(MigrationCase):
 
     def test_an_existing_admin_config_wins_over_an_old_local_config(self):
         """An operator who has already started fresh under the new name -
-        or already ran setup.py - must not have that overwritten by
+        or already ran configure.py - must not have that overwritten by
         something left over from before."""
         self.write("local_config.py", 'NICKNAME = "OldBot"\n')
         self.write("admin_config.py", 'NICKNAME = "NewBot"\n')

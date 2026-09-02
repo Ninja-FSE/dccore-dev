@@ -212,7 +212,7 @@ class UnconfiguredRequiredTests(unittest.TestCase):
         not somebody else's identity to avoid.
 
         FILE_DIRECTORY is also absent - added here originally, then found,
-        running setup.py against a real install, to block the daemon from
+        running configure.py against a real install, to block the daemon from
         booting at all without a music directory chosen up front, which is
         the one thing the web dashboard's own Settings page is a genuinely
         easier place to set - but the dashboard needs the daemon RUNNING to

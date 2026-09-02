@@ -1,4 +1,4 @@
-# setup.py - guided first-run configuration for a new DCCore install.
+# configure.py - guided first-run configuration for a new DCCore install.
 """Answers settings_file.REQUIRED (NICKNAME, CHANNEL, ADMIN_NICK) plus
 SERVER, the admin console password, the web dashboard, and (optionally) the
 music directory, then writes them where they actually belong, so a fresh
@@ -273,7 +273,7 @@ def write_admin_config_password(password_hash, path=None, sample_path=None):
         with open(sample_path, "r", encoding="utf-8") as handle:
             existing_text = handle.read()
     else:
-        existing_text = "# admin_config.py - created by setup.py\n"
+        existing_text = "# admin_config.py - created by configure.py\n"
 
     text = build_admin_config_text(existing_text, password_hash)
 

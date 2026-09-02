@@ -520,9 +520,9 @@ class ListUpdateToolTests(DCCoreTestCase):
     """start_list_update()/build_update_list_status_payload() - the pure
     logic behind POST /api/tools/update-list and its /status counterpart.
 
-    Added alongside setup.py's dashboard-first FILE_DIRECTORY question (#170):
+    Added alongside configure.py's dashboard-first FILE_DIRECTORY question (#170):
     an operator who sets the music directory from the Settings page - the
-    place this project's own setup.py now points at, since FILE_DIRECTORY
+    place this project's own configure.py now points at, since FILE_DIRECTORY
     is deliberately not in settings_file.REQUIRED - had no way at all to
     then build the master list without a real IRC client or a CLI already
     running.
