@@ -891,9 +891,9 @@ class FetchDeleteResultTests(DCCoreTestCase):
         self.assertNotIn("r6", db.load_fetch_history())
 
 
-@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
-                                            "CI never installs it, this class only runs when it "
-                                            "happens to be available locally")
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed. CI installs "
+                                            "requirements-web.txt, so these DO run there; "
+                                            "this skip is for a local checkout without it")
 class FetchDeleteRouteTests(DCCoreTestCase):
     """POST /api/fetch/<request_id>/delete through the real Flask app."""
 
@@ -1261,9 +1261,9 @@ class ListFetchRoutesTests(DCCoreTestCase):
         self.assertIn("error", result)
 
 
-@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
-                                            "CI never installs it, this class only runs when it "
-                                            "happens to be available locally")
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed. CI installs "
+                                            "requirements-web.txt, so these DO run there; "
+                                            "this skip is for a local checkout without it")
 class CrlfInjectionHttpRouteTests(DCCoreTestCase):
     """BUG 1 regression, exercised through the real Flask app/test client
     (not just the pure functions above) - end to end, a raw HTTP POST with an
@@ -1411,9 +1411,9 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertEqual(resp.status_code, 404)
 
 
-@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
-                                            "CI never installs it, this class only runs when it "
-                                            "happens to be available locally")
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed. CI installs "
+                                            "requirements-web.txt, so these DO run there; "
+                                            "this skip is for a local checkout without it")
 class LoginGateTests(DCCoreTestCase):
     """require_login() and the /login, /logout routes it exempts itself from.
 
@@ -1523,9 +1523,9 @@ class LoginGateTests(DCCoreTestCase):
         self.assertEqual(resp.status_code, 200)
 
 
-@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
-                                            "CI never installs it, this class only runs when it "
-                                            "happens to be available locally")
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed. CI installs "
+                                            "requirements-web.txt, so these DO run there; "
+                                            "this skip is for a local checkout without it")
 class FilelistsHttpPaginationTests(DCCoreTestCase):
     """GET /api/filelists and GET /api/filelists/bot/<nick>, end to end
     through the real Flask app - both now return a page object
@@ -2997,9 +2997,9 @@ class SettingsPayloadTests(DCCoreTestCase):
         self.assertTrue(adminchat.verify_password(config.ADMIN_PASSWORD_HASH, "newpass1"))
 
 
-@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed - see the module docstring: "
-                                            "CI never installs it, this class only runs when it "
-                                            "happens to be available locally")
+@unittest.skipUnless(webserver.HAVE_FLASK, "Flask not installed. CI installs "
+                                            "requirements-web.txt, so these DO run there; "
+                                            "this skip is for a local checkout without it")
 class SettingsHttpRouteTests(DCCoreTestCase):
     """GET/POST /api/settings and POST /api/settings/password, end to end
     through the real Flask app - same setUp shape as
