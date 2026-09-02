@@ -135,121 +135,121 @@ Went from 168 to 250+ tests across this release, all evaluating the actual guard
 
 ---
 ## 🟦 v1.9.0-RC1 (2026-08-15) - "The Gold & Audio Handshake Release"
-### 🚀 Nya funktioner
-- **🛡️ Apostrof-räddare i Packaren (`Single Quote Filter`):** Implementerat en intelligent teckenbevarare inuti `inline_rar_packer` i `dcc.py` via `os.path.basename`. Om källmappen på din NFS-disk innehåller en apostrof (`'`), tvingas tecknet med live in i det färdiga `.rar`-filnamnet (t.ex. `A_Winter's_Tale_(1995).rar`). Detta förhindrar att tecknet tvättas bort till fula understreck, vilket säkrar 100% träffsäkerhet i din AutoQ!
-- **💽 Separerad Multidisc-tvätt (`update_list.py`):** Optimerat listgeneratorn till att göra skillnad på dina textlistor. Den vanliga textlistan (`.txt`) visar fullständiga undermappar som `\Digital Media 1\` och `\CD2\` för att bevara låtstrukturen, medan din albumlista (`-RAR-.txt`) tvättas kirurgiskt under filskrivningen. Alla multidisc-ändelser klipps bort så att hela boxen listas på en (1) enda ren rad (t.ex. `Mission Underground (2026)\`).
-- **🗜️ Helautomatiskt Box-pack:** När en multidisc-huvudrad requestas via `!rar`, suger din `dcc.py`-sändningsmotor med sig samtliga undermappar helautomatiskt in i ett och samma `.rar`-arkiv på din containers SSD-cache.
-- **⚙️ Helautomatisk Kallstart & Auto-Wake:** Monterat en trådsäkrad tändningsrad i slutet av uppstartskedjan i `oserve.py`. Så fort boten har stabiliserats (5 sekunder efter kanalinträde), scannas `dcc_queue.txt` helautomatiskt och startar fildelningsslussen direkt utan krav på manuella kommandon.
+### 🚀 New features
+- **🛡️ Apostrophes survive packing (`Single Quote Filter`):** `inline_rar_packer` in `dcc.py` now derives the archive name with `os.path.basename`. A source folder containing an apostrophe (`'`) keeps it in the finished `.rar` name (e.g. `A_Winter's_Tale_(1995).rar`) instead of having it replaced by an underscore, so the packed file is named the same as the folder that was requested.
+- **💽 Multidisc sets are listed differently in each list (`update_list.py`):** The list generator now treats the two text lists differently. The plain list (`.txt`) shows full subfolders such as `\Digital Media 1\` and `\CD2\` to preserve the track structure, while the album list (`-RAR-.txt`) is stripped as it is written: multidisc suffixes are cut so a whole box set appears on a single line (e.g. `Mission Underground (2026)\`).
+- **🗜️ Whole box sets pack automatically:** When the parent line of a multidisc set is requested with `!rar`, the send path in `dcc.py` pulls every subfolder into one `.rar` archive on the local cache disk.
+- **⚙️ Cold start and auto-wake:** A thread-safe trigger at the end of the startup chain in `oserve.py`. Once the bot has settled (five seconds after joining), `dcc_queue.txt` is scanned automatically and transfers resume with no operator command needed.
 
-### 🐛 Buggfixar & Optimeringar
-- **🧬 Helsäkrat Singel-Trådat Dubbelpostningsskydd:** Flyttat all kritisk slutlogik, disksanering, kö-poppning och kanalreklam spikrakt in i ett helisolerat `finally:`-block i `dcc.py`. Detta garanterar att kanalannonseringen körs **en (1) enda, perfekt gång** per sändning och utplånar dolda spöktrådar.
-- **🏎️ 100% DCC Complete i mIRC:** Återställde den tidstestade 1.5 sekunders andningspausen i slutet av sändningen. Detta ger mIRC-klienten exakt rätt tidsfönster att flusha nätverksbufferten, vilket garanterar **Success/Complete** istället för felaktiga `incomplete`-flaggor på snabba Bahnhof-linor.
-- **🌈 Skiftlägesoberoende AutoQ-Bypass:** Totalrenoverat kanalkontrollsystem som är 100% blint för stora och små bokstäver (t.ex. `abueio` vs `AbueIo`). System-triggers (`system_next_trigger_fallback`) slår nu vidöppet för bypass-slussarna så att kön aldrig fryser fast i tystnad vid uppstart eller omladdning.
-- **🧼 Sanerad DB-räknare:** Statistikblocket har rensats från lokala `import db`-krockar som tidigare orsakade `UnboundLocalError`. Terminalutskriften har städats från råa array-listor till en superren guldstandard: `[DB COUNTER] Statistik uppdaterad live på disken! (Skickade filer: Xst)`.
-- **🎛️ Lås-rensande Rehash (`!rehash`):** `!rehash`-motorn i `commands.py` har uppgraderats till och hämtar nätverkssocketen direkt via den levande instansen i `sys.modules`. Den nollställer och spolar ur alla gamla frusna packarlås (`config.rar_inprogress = False`) och användar-lås ur RAM-minnet på under 0 ms.
-- **📊 Kalibrerad Kanalreklam:** Slots-klockan i `announce.py` har kalibrerats så att den delar totalhastigheten på antalet aktiva nedladdningar. Detta ger ett helt verklighetstroget live-snitt per slot och utplånar kosmiska "rymdhastigheter" (t.ex. 51 miljoner MB/s) från kanalen.
+### 🐛 Bug fixes & optimisations
+- **🧬 One announcement per send, not two:** All end-of-send work - disk cleanup, popping the queue, and the channel advert - moved into an isolated `finally:` block in `dcc.py`. The channel announcement now runs exactly once per send, instead of being duplicated by a second thread.
+- **🏎️ `Complete` instead of `incomplete` in mIRC:** Restored the 1.5-second pause at the end of a send. It gives the receiving client the window it needs to flush its network buffer, so a transfer reports **Success/Complete** rather than a spurious `incomplete` on a fast link.
+- **🌈 Case-insensitive queue bypass:** The channel check is no longer case-sensitive (`#channel` vs `#Channel`). System triggers (`system_next_trigger_fallback`) now also open the bypass paths, so the queue cannot stall silently at startup or after a reload.
+- **🧼 Cleaned-up database counter:** The statistics block no longer carries a local `import db` that shadowed the module-level one and raised `UnboundLocalError`. The terminal output prints one summary line - files sent, written live to disk - instead of dumping a raw array.
+- **🎛️ Lock-clearing rehash (`!rehash`):** The `!rehash` handler in `commands.py` takes the live network socket from the running instance via `sys.modules`. It also clears stale packer and per-user locks (`config.rar_inprogress = False`) out of memory, so a pack that died no longer leaves the queue wedged.
+- **📊 Calibrated channel advert:** The slots figure in `announce.py` now divides total throughput by the number of active downloads, giving a real per-slot average instead of the implausible speeds (tens of millions of MB/s) it used to advertise.
 
 ---
 ## 🟦 v1.5.0-BETA (2026-08-10) - "The RAM Dictionary Queue & Inline RAR Packer Update"
-### 🚀 Nya funktioner
-- **📦 Högpresterande RAM Dictionary-kö (`dcc_queue.txt`):** Totalrenoverat hela kösystemet från enkla textsträngar till en strukturerad JSON/Dictionary-matris lagrad direkt i RAM-minnet. Varje kö-objekt spårar nu sanna metadata i realtid (användarnamn, kanal, absolut sökväg, filtyp, samt flaggorna `is_unpacked_rar_folder` och `is_temporary_zip`).
-- **⚡ Isolerad Inline RAR-Packare (`inline_rar_packer`):** Implementerat en automatisk, trådsäkrad komprimeringsmotor djupt inbäddat i `dcc.py` via `subprocess.run(["rar", "a", ...])`. Boten känner omedelbart igen requestade album-mappar, skapar ett temporärt virtuellt `.rar`-arkiv direkt på din containers SSD-cache (`data/tmp_zips/`), och strömmar sedan paketet live över nätverket.
-- **🛡️ Skrivskyddad Musikdisk-säkring (`RO-Protection`):** Genom att tvinga RAR-motorn att arbeta via en dedikerad arbetsväxel (`-w`) riktad mot SSD-disken, garanteras det att din känsliga NFS-musikdisk lämnas 100 % i fred utan att boten någonsin försöker skriva temporärdata i dina skrivskyddade musikmappar.
+### 🚀 New features
+- **📦 In-memory dictionary queue (`dcc_queue.txt`):** The queue was rewritten from flat text strings to a structured JSON/dictionary form held in memory. Each entry now carries real metadata: nick, channel, absolute path, file type, and the `is_unpacked_rar_folder` and `is_temporary_zip` flags.
+- **⚡ Inline RAR packer (`inline_rar_packer`):** A thread-safe compression step in `dcc.py` built on `subprocess.run(["rar", "a", ...])`. The bot recognises a requested album folder, builds a temporary `.rar` archive in the local cache directory (`data/tmp_zips/`), and streams that.
+- **🛡️ The shared library is never written to (`RO-Protection`):** The RAR process is given a working directory (`-w`) on the cache disk, so it never attempts to write temporary data into the music folders - which are typically mounted read-only.
 
-### 🐛 Buggfixar & Optimeringar
-- **🔒 Stenhårda RAM-lås mot Trådkrockar (`rar_inprogress`):** Introducerat de globala minneslåsen `config.rar_inprogress` och `config.user_processing_lock`. Detta sätter en linjär spärr i kön som gör att boten strikt packar och skickar en (1) virtuell mapp i taget, vilket utplånade tidigare CPU- och disk-skenor helt.
-- **🧹 Automatisk Disksanering (Cache Cleanup):** Byggt en intelligent rensningsfunktion i sändningsavslutet som kontrollerar om en temporär `.rar`-fil fortfarande behövs av en annan aktiv slot eller användarkö. Om filen är helt ledig, raderas den omedelbart från SSD-disken via `os.remove()` för att hålla lagringen kliniskt ren.
+### 🐛 Bug fixes & optimisations
+- **🔒 In-memory locks against thread collisions (`rar_inprogress`):** Added the global locks `config.rar_inprogress` and `config.user_processing_lock`. The queue packs and sends one folder at a time, which removed the CPU and disk contention that concurrent packs were causing.
+- **🧹 Automatic cache cleanup:** The end of a send checks whether a temporary `.rar` is still needed by another active slot or queued request. If nothing else refers to it, it is removed with `os.remove()`.
 
 ---
 
 ## 🟦 v1.4.5-BETA (2026-07-31) - "The Multi-Character Regex Sanitizer Update"
-### 🚀 Nya funktioner
-- **🧹 Universell Sök-Sanering (`@find`):** Integrerat en kraftfull regex-tvätt via `re.sub(r'[-*_.]', ' ', search_term)` inuti sökfunktionen i `list.py`. Boten översätter nu omedelbart alla mIRC-stjärnor (`*`), understreck (`_`), punkter (`.`) och bindestreck (`-`) till rena mellanslag innan sökorden splittas. Detta eliminerar problemet med missade träffar när användare söker med råa specialtecken (t.ex. `metallica*red*alert`).
+### 🚀 New features
+- **🧹 Search terms are sanitised (`@find`):** `re.sub(r'[-*_.]', ' ', search_term)` in `list.py`'s search function. Asterisks (`*`), underscores (`_`), dots (`.`) and hyphens (`-`) become spaces before the search terms are split, so a query typed with separators (e.g. `metallica*red*alert`) still matches.
 
 ---
 ## 🟦 v1.4.4-BETA (2026-07-30) - "The External Indexer & Micro-Read Update"
-### 🚀 Nya funktioner
-- **🎛️ Helautomatisk Listuppdatering (`!update`):** Byggt ett avancerat administrationsverktyg i `commands.py` som exekverar ditt externa skript `update_list.py` i en stängd bakgrundstråd via `subprocess.run`. Detta gör att du kan indexera om hela din NFS-musikdisk live direkt inifrån mIRC utan Proxmox CLI-access.
-- **⚡ Blixtsnabb Mikro-Read Optimering:** Skapat en högpresterande beräkningsmotor (`get_count_from_list`) som enbart läser den absolut första raden ur din gigantiska masterlista (`f.readline()`). Den använder ett strikt regex-mönster (`List of X Files`) för att suga ut det sanna filantalet på 0ms helt utan att belasta disk-I/O eller CPU.
-- **🧮 Matematisk Realtids-skanning:** Boten sparar och jämför nu dina exakta filsiffror live före och efter skript-exekveringen, vilket gör att den stolt kan annonsera exakt hur många nya flac-låtar som har lagts till sedan din förra sökning.
+### 🚀 New features
+- **🎛️ List rebuild from IRC (`!update`):** An admin command in `commands.py` that runs the external `update_list.py` script in a background thread via `subprocess.run`, so the library can be re-indexed without shell access to the host.
+- **⚡ Micro-read optimisation:** `get_count_from_list` reads only the first line of the master list (`f.readline()`) and matches it against the pattern `List of X Files` to recover the file count, without reading or walking the rest of the file.
+- **🧮 Before-and-after comparison:** The bot records the file count before and after the script runs, so it can report exactly how many files were added since the previous scan.
 
-### 🐛 Buggfixar & Optimeringar
-- **🧟 Eliminering av Zombie-processer:** Genom att migrera från asynkron `Popen` till synkroniserad tråd-hantering via `subprocess.run` garanteras det nu att Linux-kärnan städar bort barn-processen omedelbart vid slutförd skanning, vilket lämnar din `ps aux`-lista 100 % ren från fula `defunct`-rader.
-- **🧬 Cirkulär Namnkonflikts-säkring:** Isolerat system-importen av `list` lokalt inuti funktionen via Pythons levande modulstruktur (`sys.modules.get('list')`), vilket helt eliminerade en tyst krasch orsakad av att Python blandade ihop din fil `list.py` med det inbyggda array-objektet `list`.
+### 🐛 Bug fixes & optimisations
+- **🧟 No more zombie processes:** Moving from asynchronous `Popen` to `subprocess.run` means the kernel reaps the child as soon as the scan finishes, instead of leaving a `defunct` entry behind in the process table.
+- **🧬 Circular name-conflict fix:** The import of `list` was moved inside the function and taken from `sys.modules.get('list')`, which removed a silent failure caused by the module `list.py` shadowing Python's built-in `list`.
 
 ---
 
 ## 🟦 v1.4.3-BETA (2026-07-30) - "The Clean Config & Security Sync Update"
-### 🚀 Nya funktioner
-- **🧼 100% Import-Fri `config.py`:** Sanerat och städat ur hela din centrala konfigurationsfil från all funktionell källkod, dolda `import os`-satser samt dynamiska `BASE_DIR`-beräkningar. Alla sökvägar (till `stats.txt`, `bans.txt` och `hard_bans.txt`) är nu helt normaliserade, rena och kraschsäkra textsträngar.
-- **🛡️ Live Anti-Flood & Mute-Spårning:** Integrerat din asynkrona VIP-motor `announce.send_debug` djupt inuti flood-skyddet `is_flooding` i `security.py`. Boten strömmar nu färgkodade, lila **`[TEMPBAN]`**-notiser live till mIRC på 0ms så fort en användare rör sig för snabbt, rensar deras fildelningskö och loggar om de uppgraderas till en hård dags-ban fram till midnatt.
-- **🚨 Centraliserat Säkerhetsgränssnitt:** Uppgraderat användarkontrollen `check_user_status` i `security.py` med din blixtsnabba socket-send. Systemet dundrar nu upp mörkröda **`[HARDBAN]`**-notiser i din dolda `#flac-debug`-kanal i samma mikrosekund som en spambot som matchar dina permanenta wildcards försöker hamra på sökkommandona.
+### 🚀 New features
+- **🧼 Import-free `config.py`:** The central configuration file was cleared of functional code - hidden `import os` statements and dynamic `BASE_DIR` computation. The paths to `stats.txt`, `bans.txt` and `hard_bans.txt` are now plain, normalised strings.
+- **🛡️ Live anti-flood and mute tracking:** `announce.send_debug` is now called from `is_flooding` in `security.py`. A colour-coded purple **`[TEMPBAN]`** notice goes out as soon as a user exceeds the rate limit; their queue is cleared, and an escalation to a day-long ban until midnight is logged.
+- **🚨 Central security reporting:** `check_user_status` in `security.py` uses the same direct socket send. Dark red **`[HARDBAN]`** notices are posted to the debug channel the moment a nick matching a permanent wildcard starts hammering the search commands.
 
-### 🐛 Buggfixar & Optimeringar
-- **⛓️ Trådsäker Fil-Normalisering:** Justerat filhanteringen inuti administratörsverktygen i `commands.py` (`!ban` och `!unban`) till att läsa direkt från din rena config-sträng, vilket eliminerade ett dolt `NameError` vid boot och ser till att trådarna alltid hittar spikrakt in i din undermapp `data/`.
+### 🐛 Bug fixes & optimisations
+- **⛓️ Thread-safe path handling:** The admin commands `!ban` and `!unban` in `commands.py` read their paths from the config strings, which removed a `NameError` at boot and makes the threads resolve correctly into the `data/` subdirectory.
 
 ---
 
 ## 🟦 v1.4.2-BETA (2026-07-30) - "The Hard Ban & Admin Category Update"
-### 🚀 Nya funktioner
-- **🛡️ Permanent Wildcard-skydd (`hard_bans.txt`):** Skapat ett isolerat säkerhetslager för fasta spambot-mönster (t.ex. `lidx_*`) djupt inbäddat i undermappen `data/`. Denna fil är helt fredad från systemets helautomatiska midnatts-rensning av vanliga flood-spärrar.
-- **🛠️ Live Admin-kommandon (`!ban` / `!unban`):** Monterat två nya administrationsverktyg i `commands.py` som låter dig skriva till och städa i din permanenta ban-fil direkt inifrån mIRC via din asynkrona socket-send, helt utan behov av CLI-access eller manuell `!rehash`.
-- **🎨 Dedikerade Säkerhets-färgblock:** Utökat färgblocks-motorn i `announce.py` med två helt egna, solida mIRC-etiketter: Mörkröd **`[HARDBAN]`** för permanenta wildcards och Lila **`[TEMPBAN]`** för rörliga dags-bans, vilket skapar total linjär struktur på den kritvita debug-linjen.
-- **🧭 Absolut Trådsynk & Sökvägslås:** Integrerat `os.path.normpath` och absoluta sökvägar baserat på botens hjärta (`BASE_DIR`) för att garantera att de trådade fil-kommandona alltid hittar djupt in i din `data/`-mapp, samt stensäkrat lowercase-formatering (`.lower()`) genom hela kedjan för att stänga alla case-sensitive kryphål för spambottar.
+### 🚀 New features
+- **🛡️ Permanent wildcard blocks (`hard_bans.txt`):** A separate file under `data/` for fixed spambot patterns (e.g. `spammer_*`). It is exempt from the automatic midnight clearing that applies to ordinary flood bans.
+- **🛠️ Admin commands (`!ban` / `!unban`):** Two commands in `commands.py` that write to and clean up the permanent ban file from IRC, with no shell access and no manual `!rehash` needed.
+- **🎨 Dedicated security colour blocks:** `announce.py` gained two mIRC labels of its own: dark red **`[HARDBAN]`** for permanent wildcards and purple **`[TEMPBAN]`** for temporary day bans, so the two are distinguishable at a glance on the debug line.
+- **🧭 Path and case handling:** `os.path.normpath` and absolute paths derived from `BASE_DIR` make the threaded file commands resolve into `data/` wherever the bot is started from, and lowercase normalisation (`.lower()`) is applied through the whole chain to close the case-sensitivity gaps that let a spambot slip past a ban.
 
 ---
 
 ## 🟦 v1.4.1-BETA (2026-07-30) - "The Intelligent Wildcard Search Update"
-### 🚀 Nya funktioner
-- **🔍 Dynamisk Wildcard-sökning (`@find`):** Skrivit om sökfunktionen `execute_search` i `list.py` till en asynkron ord-för-ord-skanning. Motorn splittar nu upp söksträngen i enskilda ord och rensar bort lösa bindestreck. Sökningen är helt oberoende av ordning och kräver bara att alla ord existerar på raden för att ge en träff (t.ex. matchar både `metallica red alert` och `red alert metallica`).
+### 🚀 New features
+- **🔍 Word-by-word wildcard search (`@find`):** `execute_search` in `list.py` was rewritten as a word-by-word scan. The search string is split into individual words with loose hyphens removed, and matching is order-independent: every word has to appear on the line, in any order (so `metallica red alert` and `red alert metallica` both match).
 
-### 🐛 Buggfixar & Optimeringar
-- **🧹 Diskutrymmes-optimering:** Genomfört en manuell djup-rensning av dolda system- och cachefiler (`/var/cache/apt/` index) i din Proxmox LXC-container, vilket frigjorde över 270 MB välbehövligt andrum på systemdisken inför GitHub-etableringen.
+### 🐛 Bug fixes & optimisations
+- **🧹 Disk space on the host:** A manual clean-out of cached package index files (`/var/cache/apt/`), freeing over 270 MB on the system disk ahead of setting the repository up. Host maintenance rather than a code change, recorded here because it is what the release day actually consisted of.
 
 ---
 
 ## 🟦 v1.4.0-BETA (2026-07-30) - "The Live Rehash & Channel Sync Update"
-### 🚀 Nya funktioner
-- **🔄 Live Modul-Rehash (`!rehash`):** Integrerat `importlib.reload()` i `commands.py` för att ladda om botens alla centrala moduler live i RAM-minnet helt utan att behöva stänga av eller döda processen i Proxmox-CLI.
-- **🌐 Helautomatisk Kanalsynk:** Boten jämför nu dina kanaler live under en rehash. Den skickar automatiskt `JOIN` till nya kanaler som lagts till i `config.py` och kör `PART` i de kanaler som tagits bort.
-- **⚡ Människovänlig Latensmätare (`!ping`):** Byggt ett administrationsverktyg isolerat i `commands.py` som mäter botens exakta svarstid till Undernet-servern i sekunder med 3 decimaler (t.ex. `0.129 sec`), helt rensat från dolda färgkrockar och textförvridningar.
-- **🎯 Intelligent Färg- och Trådsäkring:** Rensat ut alla råa mIRC-färgkoder från textsträngarna inuti `commands.py` för att eliminera dolda färgkrockar på skärmen, samt synkat den levande reklam-timern så att den tvingas vänta fulla 5 minuter i stället for att starta krockande dubbeltrådar vid en rehash.
+### 🚀 New features
+- **🔄 Live module rehash (`!rehash`):** `importlib.reload()` in `commands.py` reloads every core module in place, with no need to stop or kill the process.
+- **🌐 Automatic channel sync:** A rehash compares the configured channel list against the joined one, sending `JOIN` for channels added to `config.py` and `PART` for channels removed from it.
+- **⚡ Readable latency measurement (`!ping`):** An admin command in `commands.py` that reports the round-trip time to the IRC server in seconds to three decimal places (e.g. `0.129 sec`), with the colour codes stripped out so nothing distorts the reply.
+- **🎯 Colour and thread handling:** Raw mIRC colour codes were removed from the strings in `commands.py` to stop them bleeding into each other on screen, and the advert timer was synchronised so a rehash makes it wait its full five minutes instead of starting a second, competing thread.
 
-### 🐛 Buggfixar & Optimeringar
-- **🎛️ Asynkron Rå Socket-sluss:** Skrivit om `send_debug` inuti `announce.py` till att använda en direkt, asynkron `irc_sock.send`-metod. Detta gör att alla loggar, latenssvar och rehash-bekräftelser bypassar botens interna 15-sekunders nätverksbuffert och poppar upp i mIRC på absolut 0.0 sekunder.
-- **🧬 Dynamisk Tagg-interferens:** Uppdaterat `irc.py` Del 1 med en dedikerad `PONG`-sluss högst upp i huvudloopen för att fånga latens-svaret före alla andra PRIVMSG-filter.
+### 🐛 Bug fixes & optimisations
+- **🎛️ Direct socket send:** `send_debug` in `announce.py` was rewritten to use `irc_sock.send` directly, so logs, latency replies and rehash confirmations bypass the internal 15-second message queue and appear immediately.
+- **🧬 `PONG` handled before the PRIVMSG filters:** `irc.py` gained a dedicated `PONG` branch at the top of the main loop, so the latency reply is caught before anything else can consume it.
 
 ---
 
 ## 🟥 v1.3.0-BETA (2026-07-28) - "The Debug & Theme Sync Update"
-### 🚀 Nya funktioner
-- **🛠️ VIP Debug-kanal (`#flac-debug`):** Byggt en helautomatisk nätverkssluss som skickar tidstämplade och färgkodade CLI-loggar direkt live in i mIRC.
-- **🏎️ Express-logg via VIP:** Kopplat om funktionen `send_debug` till att använda `is_vip=True` så att systemloggarna skjuts ut på 0ms utan att störa den vanliga kön.
-- **🏷️ Kategori-taggar för Debug:** Skapat dynamiska och färgkodade etiketter till vänster i loggen: `[SENT]` (Grön), `[PART]` (Röd), `[QUIT]` (Lila) och `[JOIN]` (Turkos) inramade av solida färgstolpar.
+### 🚀 New features
+- **🛠️ Debug channel:** An automatic gateway that sends timestamped, colour-coded CLI logs live to a dedicated debug channel on IRC.
+- **🏎️ Express logging:** `send_debug` was switched to `is_vip=True` so system logs go out immediately, without waiting behind the normal queue.
+- **🏷️ Category tags in the debug log:** Colour-coded labels down the left-hand side: `[SENT]` (green), `[PART]` (red), `[QUIT]` (purple) and `[JOIN]` (cyan), framed by solid colour blocks.
 
-### 🐛 Buggfixar & Optimeringar
-- **📦 Eliminering av svarta rutor:** Strukturerat om blankstegsmatningen i `send_debug` och bakat in en fast `{BG_TEXT_BOX}` (kritvit bakgrund) för att förhindra mIRC från att rita fula svarta cache-boxar runt texten.
-- **📋 Garanterad text-formatering:** Justerat `announce.py` med en lokal strängkontroll (`str()`) för att förhindra att heltal (`integers`) från databasen misstolkas som råa mIRC-färgnummer på skärmen.
-- **🧩 Namnkonflikts-säkring:** Ändrat `isinstance(stats, list)` till en ren `type()`-kontroll för att helt eliminera den dolda namnkonflikten med fildelningsmodulen `list.py`.
+### 🐛 Bug fixes & optimisations
+- **📦 No more black boxes:** The spacing in `send_debug` was restructured and a fixed `{BG_TEXT_BOX}` (white background) baked in, which stops mIRC drawing black cache boxes around the text.
+- **📋 Text formatting:** `announce.py` casts values with `str()` so integers coming out of the database are not read as raw mIRC colour numbers.
+- **🧩 Name-conflict fix:** `isinstance(stats, list)` was replaced with a plain `type()` check, removing the conflict with the file-sharing module `list.py`.
 
 ---
 
 ## 🟨 v1.2.0-BETA (2026-07-27) - "The Database & Index Sync"
-### 🚀 Nya funktioner
-- **📉 Live 7-Kolonnsstatistik:** Integrerat en automatisk uppräkning av totalt skickade filer, totalt skickade bytes samt dagens och gårdagens mätare vid varje slutförd filöverföring.
-- **💾 Hård Disk-flush (`fsync`):** Uppgraderat `db.save_advanced_stats` med `f.flush()` och `os.fsync()` för att tvinga Linux/Proxmox att skriva ändringarna direkt på disken i stället för att ligga kvar i operativsystemets buffert.
+### 🚀 New features
+- **📉 Seven-column live statistics:** Total files sent, total bytes sent, and today's and yesterday's counters are all incremented on every completed transfer.
+- **💾 Forced disk flush (`fsync`):** `db.save_advanced_stats` calls `f.flush()` and `os.fsync()` so the change reaches the disk rather than sitting in the operating system's write buffer.
 
-### 🐛 Buggfixar & Optimeringar
-- **🔢 Index-synkronisering:** Korrigerat databasindexen (`stats` för gårdagen och `stats` för idag) inuti `announce.py` så att de matchar 7-kolonnsformatet från `stats.txt` i stället för att läsa av listdatumet och krascha.
-- **🧮 Datumsäkrad matematik:** Fixat ett kritiskt `ValueError` i `dcc.py` genom att isolera listdatumet (index 6) som en rå sträng, vilket hindrar matteloopen från att försöka göra om bindestreck till heltal.
+### 🐛 Bug fixes & optimisations
+- **🔢 Index synchronisation:** The database indices for yesterday and today in `announce.py` were corrected to match the seven-column format of `stats.txt`. They had been reading the list date and crashing.
+- **🧮 Date-safe arithmetic:** A `ValueError` in `dcc.py` was fixed by isolating the list date (index 6) as a plain string, so the arithmetic loop no longer tries to turn a hyphenated date into an integer.
 
 ---
 
 ## 🟩 v1.1.0-BETA (2026-07-26) - "The VIP Express & Architecture Update"
-### 🚀 Nya funktioner
-- **🚅 Isolerad VIP-sluss:** Skapat en ny flagga `is_vip=False` i huvudfunktionen `oserve.queue_message`. De nya kommandona skickar nu med `is_vip=True`, vilket gör att de flyger spikrakt förbi det vanliga flood-skyddet.
-- **⛓️ Kedjad Kommandotolk:** Byggt om hela kommandotolken i `irc.py` till en stängd `if / elif`-kedja samt ändrat `continue` till `return` i CTCP-filtret, vilket helt eliminerade problemet med dolda dubbelpostningar i kanalerna.
+### 🚀 New features
+- **🚅 Isolated VIP send path:** A new `is_vip=False` flag in `oserve.queue_message`. Commands passing `is_vip=True` go straight past the normal flood-protection queue.
+- **⛓️ Chained command parser:** The command parser in `irc.py` was rebuilt as a closed `if / elif` chain, and `continue` was changed to `return` in the CTCP filter, which removed the duplicated replies appearing in channels.
 
-### 🐛 Buggfixar & Optimeringar
-- **🧬 Cirkulär import-spärr:** Ersatt den vanliga topp-importen i `commands.py` med en live-avläsning via `sys.modules.get('oserve')` ur RAM-minnet, vilket förhindrar att boten låser sig vid boot.
-- **🧼 Cache-rensning:** Rensat ut gamla överflödiga och dubblerade definitioner av `def queue_message` ur `oserve.py` som låg och skrev över den nya källkoden vid uppstart.
+### 🐛 Bug fixes & optimisations
+- **🧬 Circular import fix:** The top-level import in `commands.py` was replaced with a live lookup via `sys.modules.get('oserve')`, which stops the bot deadlocking at boot.
+- **🧼 Cache cleanup:** Old duplicate definitions of `def queue_message` were removed from `oserve.py`, where they had been overriding the current one at startup.
