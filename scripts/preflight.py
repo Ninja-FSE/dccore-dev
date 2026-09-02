@@ -71,6 +71,14 @@ def main():
                            "check_imports.py")]),
         ("compile every source file", [py, "-m", "compileall", "-q", "."]),
         ("full suite", [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."]),
+        # The audit's first critical: a public daemon function nothing calls has
+        # no regression protection at all, and the suite reports it as covered
+        # anyway. This runs the suite a second time under a profiler, which
+        # costs about fifteen seconds on top, and fails on any public function
+        # nothing enters that is not listed in tests/uncovered_functions.txt.
+        ("no uncovered public function",
+         [py, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "function_coverage.py")]),
     ]
 
     results = [run(label, argv) for label, argv in checks]
