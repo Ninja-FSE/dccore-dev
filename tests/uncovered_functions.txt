@@ -1,0 +1,21 @@
+# Public daemon functions that no test enters, with the reason for each.
+#
+# scripts/function_coverage.py runs the suite under a profiler and fails on
+# any public module-level function nothing calls. This file is the exception
+# list, and it works in BOTH directions on purpose:
+#
+#   * a function that is uncovered and NOT listed here fails the gate, so no
+#     new blind spot can appear;
+#   * a function that IS listed here and has since become covered ALSO fails
+#     the gate, so the list has to shrink as work lands instead of quietly
+#     becoming a list of excuses.
+#
+# Format: module.py::function_name          # why
+#
+# The audit that produced this found twenty-one such functions. Fifteen were
+# uncovered when the gate was first run; tests/test_uncovered_daemon_functions.py
+# took that to the two below. Both are `while True:` loops that own the
+# process, which is a different kind of problem from a function nobody called.
+
+announce.py::announce_worker      # `while True` on a timer, sleeping between adverts. Entering it means running it, and it never returns. Its one caller, start_announce_thread(), IS covered; the body needs an injectable stop condition before a test can drive it, which is a change to the daemon rather than to the tests.
+irc.py::irc_loop                  # the read loop: connects a real socket, blocks on recv, and never returns. resolve_dcc_address() and take_complete_lines() were lifted out of it (#193, #180) precisely so the parts that HAVE logic could be tested; what is left is the loop itself. Covering it needs a fake connection the loop can be pointed at.
