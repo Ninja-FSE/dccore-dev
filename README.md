@@ -84,3 +84,6 @@ To perform a completely clean reboot of the bot on Linux, clear hidden cache fil
 ```bash
 pkill -f oserve.py && rm -rf __pycache__ */__pycache__ && python3 oserve.py
 ```
+
+## License
+[GPLv3](LICENSE) - forks and modified versions must stay open source.
