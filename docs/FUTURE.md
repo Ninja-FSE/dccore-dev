@@ -46,7 +46,7 @@ What DCCore does today, and what it does not do yet.
 
 - **1956 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
-- **Two adversarial audits** — [#162](https://github.com/Ninja-FSE/dccore-dev/issues/162) (32 defects, all fixed) and a pre-publication sweep before the first public release.
+- **Two adversarial audits** — an internal audit (32 defects, all fixed) and a pre-publication sweep before the first public release.
 
 ---
 
@@ -54,11 +54,11 @@ What DCCore does today, and what it does not do yet.
 
 Ordered by what unblocks what, not by preference.
 
-### Multiple lists, and multiple folders per list — [#164](https://github.com/Ninja-FSE/dccore-dev/issues/164)
+### Multiple lists, and multiple folders per list
 
 The largest gap against OmenServe, which has had both since long before this project started. DCCore serves **one** directory into **one** list.
 
-The design is settled — see [#69](https://github.com/Ninja-FSE/dccore-dev/issues/69):
+The design is settled:
 
 - One trigger, unchanged. `@<botnick>` everywhere; no new syntax for anybody to learn.
 - A list has an operator-facing name and a set of directories. Names are never typed in a channel.

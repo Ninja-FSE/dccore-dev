@@ -429,9 +429,9 @@ class TheAnnounceThreadStarter(DCCoreTestCase):
 
 
 class TheFirstRunWizardsEntryPoint(unittest.TestCase):
-    """setup.py's main() and offer_to_generate_master_list().
+    """configure.py's main() and offer_to_generate_master_list().
 
-    tests/test_setup.py covers the pure functions the wizard pulls out for
+    tests/test_configure.py covers the pure functions the wizard pulls out for
     exactly that purpose, and stops there - so the function that decides the
     ORDER those four run in, and the one that decides whether a freshly
     configured install ends up with a list at all, were never entered.
@@ -442,8 +442,8 @@ class TheFirstRunWizardsEntryPoint(unittest.TestCase):
     """
 
     def setUp(self):
-        import setup
-        self.setup = setup
+        import configure
+        self.setup = configure
 
     def stub(self, name, result=None):
         calls = []
