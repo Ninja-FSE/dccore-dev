@@ -48,10 +48,23 @@ NICKNAME: str      = None
 ALT_NICKNAME: str  = "DCCore_"
 ADMIN_NICK: str    = None
 CHANNEL: str       = None
-# Not one operator's own channel. #171's default of "#dccore-debug" is a fine
-# thing for ANY bot to use unmodified - unlike NICKNAME/CHANNEL/ADMIN_NICK
-# above, it is not in settings_file.REQUIRED, and keeps its own real default.
-DEBUG_CHANNEL: str = "#dccore-debug"
+# Ships BLANK, and that is a deliberate reversal of #171's "#dccore-debug".
+#
+# That default was fine while this project was two operators who knew each
+# other: a shared debug room is convenient. It stops being fine the moment the
+# repository is public. irc.py joins this channel automatically on connect and
+# streams the daemon's internals into it - bans, pack failures, transfer
+# detail, nicknames - so every adopter of a public DCCore would broadcast their
+# own operation into one room, and read everybody else's.
+#
+# Blank means "no debug channel", not "misconfigured": irc.py already guards
+# the JOIN with `if debug_chan:` and says so when there is none, and both
+# getattr call sites already fall back to ''. An operator who wants one names
+# their own, which is the only answer that is right for more than one install.
+#
+# Still not in settings_file.REQUIRED - having no debug channel is a perfectly
+# good state to run in, unlike having no NICKNAME.
+DEBUG_CHANNEL: str = ""
 
 # The single channel a "search all bots" broadcast (@find) goes into - see
 # webserver.py's POST /api/search/broadcast. Deliberately ONE channel, never

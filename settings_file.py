@@ -89,9 +89,10 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting
 # identity setting (leaving NICKNAME/CHANNEL/ADMIN_NICK at their shipped
 # values means impersonating the upstream operator), but "irc.undernet.org"
 # is not somebody else's identity to avoid - it is the correct server for
-# essentially every operator of an Undernet file server, and
-# "#dccore-debug" (the default since #171) is a perfectly reasonable debug
-# channel for a new bot. Keeping either REQUIRED would make its own correct,
+# essentially every operator of an Undernet file server. DEBUG_CHANNEL is out
+# for a different reason since it started shipping blank: an install with no
+# debug channel is not misconfigured, it simply has no debug channel, and
+# irc.py skips the JOIN. Keeping SERVER REQUIRED would make its own correct,
 # intended value permanently unusable: an operator who explicitly writes
 # SERVER = "irc.undernet.org" is refused for exactly the same reason as one
 # who never touched it at all, because the gate cannot tell those two apart
