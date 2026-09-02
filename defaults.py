@@ -268,6 +268,9 @@ DCC_PORT_END: int   = 55010
 # outbound leech traffic (us fetching from others) starve our own serving
 # capacity, or vice versa.
 MAX_FETCH_SLOTS: int        = 3        # Max simultaneous in-flight/offered fetches
+# Interacts with flood protection: a bot's DCC SEND offers are metered like any
+# other command, so this must stay well below MAX_REQUESTS (per REQUEST_WINDOW)
+# or a bot answering your own fetch requests can trip the flood gate and be muted.
 MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
 # A "list" request_type row (a fetched master-list zip, see list_fetch.py) is a
 # text index, never a real download - a whole 1.21TB/47,420-file library

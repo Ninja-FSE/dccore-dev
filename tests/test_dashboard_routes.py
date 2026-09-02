@@ -255,5 +255,41 @@ class TheFetchDownloadRoute(DashboardRouteCase):
         self.assertEqual(resp.status_code, 401)
 
 
+class TheQueueViewIgnoresAMalformedTransfer(DashboardRouteCase):
+    """#236 made the Queue summary take senders from active_transfers as well
+    as dcc_queue, which fixed a real blind spot - a user sending with a free
+    slot and nothing queued never enters dcc_queue at all.
+
+    It also changed where the row keys come from. dcc_queue's keys are always
+    real nicks; active_transfers holds dicts that dcc.py builds, and an entry
+    missing its "user" field contributes "" to the sender set. That reached the
+    page as a blank row with a "?" preview - not reachable through dcc.py's own
+    code today, but it was not reachable at all before the change.
+    """
+
+    def test_an_entry_with_no_user_produces_no_row(self):
+        config.dcc_queue.clear()
+        config.active_transfers[:] = []
+        self.addCleanup(config.active_transfers.clear)
+        config.active_transfers.append({"bytes_sent": 0})
+
+        rows = webserver.build_queue_payload()
+
+        self.assertEqual(rows, [], "a malformed transfer reached the page")
+
+    def test_a_well_formed_entry_still_appears(self):
+        """Control: filtering must not swallow the fix #236 made."""
+        config.dcc_queue.clear()
+        config.active_transfers[:] = []
+        self.addCleanup(config.active_transfers.clear)
+        config.active_transfers.append({"user": "Dave", "file": "Song.flac"})
+
+        rows = webserver.build_queue_payload()
+
+        self.assertEqual([r["user"] for r in rows], ["dave"])
+        self.assertEqual(rows[0]["status"], "sending")
+        self.assertEqual(rows[0]["preview"], "Song.flac")
+
+
 if __name__ == "__main__":
     unittest.main()
