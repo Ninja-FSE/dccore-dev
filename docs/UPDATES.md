@@ -37,6 +37,11 @@ These tests are about the probe *order*, which needs no network, so the socket l
 
 Fourth instance of an environment-dependent precondition being asserted rather than probed, after the loopback address, the console code page and `MAX_PATH`.
 
+### 🎨 THEME is a choice on the settings page, not a text box
+The dashboard offered `THEME` as free text: an operator had to already know and correctly spell one of the five preset names (`classic`, `midnight`, `forest`, `orchid`, `plain`), with nothing on the page to discover them. `LIST_FORMAT` solved the identical problem for `"txt"`/`"zip"`/`"rar"` via `settings_file.CHOICES`, which the page renders as a dropdown instead of a text input - `THEME` was simply never added to it. A typo also used to save successfully and only surface later as a console print from `theme.theme_name()`'s own fallback; it is now refused at save time, with the reason, the same as an unrecognised `LIST_FORMAT` already was.
+
+`theme.THEMES` is not imported to build the new tuple: `theme.py` imports `defaults`, and `defaults.py` imports `settings_file` at module scope, so `import theme` here closes that into a cycle - verified by trying it, and it fails depending on which of the two modules a test or entry point happens to import first, not consistently. Named directly instead, same as `LIST_FORMAT`'s own tuple; a test pins it against `theme.THEMES` so the two cannot drift silently if a preset is ever added or renamed.
+
 ## 🟩 v1.10.0 (2026-09-01) - "General Availability"
 RC4 shipped a full changelog entry below; everything after it did not. **66 PRs merged into `beta` over the five weeks since RC4** without a single one getting its own entry here - this release closes that gap with one condensed summary, grouped by theme rather than narrated PR-by-PR. See each PR's own description on GitHub for the full story behind any one line below.
 
