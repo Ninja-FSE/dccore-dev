@@ -58,15 +58,15 @@ class AdminGate(DCCoreTestCase):
         self.assertFalse(commands.is_admin("dave"))
 
     def test_a_comma_separated_list_admits_every_name(self):
-        config.ADMIN_NICK = "SysOp, Neo ,erin"
-        for name in ("SysOp", "neo", "ERIN"):
+        config.ADMIN_NICK = "SysOp, Jordan ,erin"
+        for name in ("SysOp", "jordan", "ERIN"):
             with self.subTest(name=name):
                 self.assertTrue(commands.is_admin(name))
         self.assertFalse(commands.is_admin("dave"))
 
     def test_the_hardcoded_sysop_fallback_stays_gone(self):
         """It made the literal nick "sysop" an admin whatever ADMIN_NICK said."""
-        config.ADMIN_NICK = "Neo"
+        config.ADMIN_NICK = "Jordan"
         self.assertFalse(commands.is_admin("sysop"),
                          "removing the undocumented second admin account must stay removed")
 

@@ -34,7 +34,7 @@ earlier build migrates `local_config.py` to `admin_config.py` automatically.
 
 ### Testing
 
-- **Coverage is measured, not asserted.** A pre-flight check fails the build if any public function in the daemon is never entered by a test. Fifteen of the daemon's 205 public functions were not, the first time it ran — including `!rehash`, the command that sends a user the file list, and the IRC read loop. Two remain, both `while True:` loops that own the process, and both are listed with the reason.
+- **Every public function is checked against a profiler**, not just a test count: fifteen of the daemon's 205 public functions were never entered by any test the first time this ran — including `!rehash`, the command that sends a user the file list, and the IRC read loop. Two remain uncovered, both `while True:` loops that own the process, each recorded with the reason.
 - Linux and Windows, on two Python versions, on every push and pull request.
 
 ## v1.10.0-RC4 — The Web Dashboard Release
