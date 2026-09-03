@@ -111,6 +111,7 @@ Three things worth knowing:
 - It is copied **verbatim**, so box-drawing characters and ASCII art survive intact. Nothing is reformatted or stripped.
 - Keep lines to roughly **80 characters**. The folder headings below are drawn to the width of the folder they frame, so a much wider banner reads as broken next to them.
 - It is capped at `LIST_HEADER_MAX_BYTES` (8 KB by default). Past that the banner is truncated and the run says so, rather than quietly stapling a large file onto every list request.
+- **Do not start a line with `!yourbotname`.** The list is read by scripts as well as people — AutoQ copies request lines straight out of it and sends them — so a banner line beginning with your own trigger reads as a request for a file that does not exist. Anything else is fine; it is only the first word of a line that matters.
 
 mIRC colour codes work if your audience reads the list in mIRC, but they show as stray characters in a plain text editor — worth deciding which of the two matters more for your channel.
 

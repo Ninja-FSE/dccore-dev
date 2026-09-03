@@ -427,5 +427,109 @@ class TheGeneratedListCarriesItsIdentity(DCCoreTestCase):
             f"{identity_at}; it must stay on the reader's first screen")
 
 
+class NothingInTheMastheadLooksLikeACommand(DCCoreTestCase):
+    """The list is read by scripts, not only by people.
+
+    AutoQ.mrc copies request lines out of it and sends them verbatim, so a
+    header line that happens to begin with the request trigger would be sent
+    to the bot as a request for a file that does not exist. The masthead added
+    lines to this file, which is what makes it worth pinning rather than
+    assuming.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.tree = self.make_tree()
+        self.header_path = os.path.join(self.tree.root, "list_header.txt")
+        self.set_config(LOCAL_LIST_DIR=self.tree.lists,
+                        FILE_DIRECTORY=self.tree.music,
+                        LIST_BASE_NAME="DCCore", NICKNAME="DCCore",
+                        ORIGINAL_NICK="DCCore",
+                        SCRIPT_VERSION="DCCore v9.9.9",
+                        PROJECT_URL="https://github.com/Ninja-FSE/dccore",
+                        LIST_HEADER_FILE=self.header_path,
+                        LIST_HEADER_MAX_BYTES=8192)
+        path = os.path.join(self.tree.music, "Artist", "Album", "track.flac")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "wb") as handle:
+            handle.write(b"\x00" * 2048)
+
+    def lists(self):
+        """(txt lines, rar lines) from a real generated pair."""
+        with io.open(self.header_path, "wb") as handle:
+            handle.write(b"  ___  \n |   | decorative art, no trigger here\n")
+        self.set_config(RAR_ENABLED=True)
+        update_list.generate_master_list()
+
+        import list as list_mod
+        with io.open(list_mod.find_latest_list(), encoding="utf-8") as handle:
+            txt = handle.read().splitlines()
+
+        rar_name = next(n for n in os.listdir(self.tree.lists)
+                        if "-RAR-" in n and n.endswith(".txt"))
+        with io.open(os.path.join(self.tree.lists, rar_name),
+                     encoding="utf-8") as handle:
+            rar = handle.read().splitlines()
+        return txt, rar
+
+    def test_no_line_above_the_listing_starts_with_the_request_trigger(self):
+        trigger = f"!{config.NICKNAME}"
+        txt, _rar = self.lists()
+
+        first_request = next(n for n, l in enumerate(txt)
+                             if l.startswith(trigger))
+
+        for index, line in enumerate(txt[:first_request]):
+            self.assertFalse(
+                line.startswith(trigger),
+                f"list line {index} is part of the header but begins with the "
+                f"request trigger, so a script reading this file would send it "
+                f"back as a request: {line!r}")
+
+    def test_the_rar_masthead_does_not_shadow_a_rar_request(self):
+        """Same property on the !rar list, where the request line is the whole
+        command and the masthead sits directly above it."""
+        trigger = f"!{config.NICKNAME}"
+        _txt, rar = self.lists()
+
+        first_request = next(n for n, l in enumerate(rar)
+                             if l.startswith(trigger))
+
+        for line in rar[:first_request]:
+            self.assertFalse(line.startswith(trigger), line)
+
+    def test_the_request_rows_themselves_are_untouched(self):
+        """Control. The check above would pass trivially on a list that had
+        stopped emitting request rows at all, which is the failure it is least
+        able to notice on its own."""
+        trigger = f"!{config.NICKNAME}"
+        txt, rar = self.lists()
+
+        file_rows = [l for l in txt if l.startswith(trigger)]
+        rar_rows = [l for l in rar if l.startswith(trigger)]
+
+        self.assertTrue(file_rows, "the .txt list emitted no request rows")
+        self.assertTrue(rar_rows, "the !rar list emitted no request rows")
+        self.assertIn("track.flac", " ".join(file_rows))
+        self.assertTrue(any(" !rar " in row for row in rar_rows))
+
+    def test_the_rar_request_row_carries_nothing_after_the_folder(self):
+        """The constraint itself. AutoQ.mrc sends this line verbatim, so a
+        size or any other trailing field stops it matching — see the comment
+        at the write site in update_list.py and #69."""
+        trigger = f"!{config.NICKNAME} !rar "
+        _txt, rar = self.lists()
+
+        rows = [l for l in rar if l.startswith(trigger)]
+        self.assertTrue(rows, "no !rar request row was produced")
+
+        for row in rows:
+            folder = row[len(trigger):]
+            self.assertTrue(
+                folder.endswith("\\"),
+                f"a !rar row must end at the folder it requests, with nothing "
+                f"appended: {row!r}")
+
+
 if __name__ == "__main__":
     unittest.main()
