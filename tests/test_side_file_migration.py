@@ -140,7 +140,7 @@ class ItRefusesToGuess(MigrationCase):
 
 
 class TheNameIsGoneFromTheTree(unittest.TestCase):
-    """Neo's actual question: do we need it in the code at all. The settings
+    """The actual question: do we need it in the code at all. The settings
     are the last place the old name was load-bearing."""
 
     def source(self, name):
