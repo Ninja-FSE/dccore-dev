@@ -21,6 +21,15 @@ Three constraints shaped the placement, each with a test:
 
 `tests/test_config_fallbacks.py` caught the identity line reading `getattr(config, 'SCRIPT_VERSION', 'DCCore')` - a non-empty fallback is a second opinion about a value `config.py` already declares. It is now `update_list.list_identity_line()`, shared by both writers so they cannot drift.
 
+### 🤖 The list says, where it is written, that a script reads it back
+The generated list is not only read by people. **AutoQ.mrc** copies request lines out of it and sends them verbatim, so `!DCCore !rar D:\MUSIC\Artist\Album\` is a command rather than a display row, and appending anything to it stops AutoQ matching. That is what ruled out a folder size on each album row - wanted, and parked in #69 until there is a list format carrying structure separately from the request line.
+
+Nothing in the tree said so. `dcc.py` cites AutoQ compatibility for **archive and filename** shape (around lines 93, 125, 640, 1078-1091, 1215) and `TheRequestTriggerIsStable` pins the trigger against nick drift, but neither covers the request line's *format* - so the objection had to be rediscovered rather than read. The constraint now lives at the write site.
+
+The masthead makes it worth testing rather than only documenting, since it put new lines into a file a script parses: no line above the listing may begin with the request trigger, in either list; the `!rar` row must end at the folder; and a control that request rows are still emitted at all, without which the first three would pass on a list that had stopped producing them. Appending `::SIZE:: 1.2GB` to the `!rar` row fails the trailing-field test, and a masthead starting with the trigger fails three.
+
+`INSTALL.md` tells operators not to start a banner line with the bot's own trigger - documented rather than sanitised, since stripping it would break the verbatim promise the banner exists for.
+
 ### 🧪 The port-ordering tests stop depending on the machine
 `FetchListenerPortOrderingTests` bound real sockets and then asserted which port came back, which quietly required 55000-55010 to be free. `_open_fetch_listener()` falls through to the next port whenever one is taken, so a listener still open from an earlier test - or a `TIME_WAIT` left by one - silently changed the answer. Both tests failed that way during a full-suite run, on a branch that touched none of this code; holding port 55005 on a clean checkout reproduces it exactly.
 

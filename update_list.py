@@ -725,7 +725,25 @@ def generate_master_list():
                         raw_rar_str = f"D:\\MUSIC\\{rar_folder_clean}\\"
                         display_rar_folder = raw_rar_str.replace("/", "\\")
                         
-                        # Write the row exactly once per album to the .rar text file
+                        # Write the row exactly once per album to the .rar text file.
+                        #
+                        # NOTHING MAY BE APPENDED TO THIS LINE.
+                        #
+                        # It is not a display row, it is a command. AutoQ.mrc -
+                        # the mIRC script people use to auto-download files and
+                        # folders - copies this line out of the list and sends it
+                        # verbatim, so anything after the folder stops it matching.
+                        #
+                        # A folder size here is the obvious and recurring idea, and
+                        # it was wanted; it is parked in #69 until there is a list
+                        # format that carries structure separately from the request
+                        # line. dcc.py already cites AutoQ compatibility for archive
+                        # and filename shape, but nothing said it constrained this
+                        # line, so the objection had to be rediscovered.
+                        #
+                        # The file rows below end "::INFO:: <size>" and AutoQ copes
+                        # with that. It is a precedent for one trailing field, not a
+                        # licence for more - check against AutoQ before adding one.
                         if display_rar_folder not in written_rar_folders:
                             f_rar.write(f"!{config.NICKNAME} !rar {_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)
