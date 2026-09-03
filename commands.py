@@ -91,7 +91,7 @@ def handle_help_request(s, user, target):
     if getattr(config, "RAR_ENABLED", True):
         lines.append(
             f"To request a whole album packed as one .rar, use the album list "
-            f"that came with it: {bold}{red}!{nick} !rar D:\\MUSIC\\Artist\\Album\\{reset}")
+            f"that came with it: {bold}{red}!{nick} !rar Artist\\Album\\{reset}")
 
     lines.append(
         f"What I have and what I have sent: {bold}{red}@{nick}-stats{reset}. "
@@ -536,7 +536,8 @@ def handle_rehash_request(user, target_chan, authorised=False):
 
     # Pause the advert for the moment
     announce.is_ready = False
-    announce.send_debug(f"Rehash triggered by {user} from {target_chan}. PAUSING NOTICES & ADVERTISEMENT...", category="INFO")
+    announce.send_debug(f"Rehash triggered by {user} from {target_chan}. Pausing the channel advert "
+        f"(command replies keep working)...", category="INFO")
     
     # vip_queue is deliberately NOT preserved, for the same reason send_queue is not: it is
     # transient OUTPUT, not state. Restoring it would also replay lines addressed to channels
@@ -728,7 +729,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
             for chan in old_chans:
                 if chan not in new_chans:
                     # Not a channel name. config.py declares DEBUG_CHANNEL as
-                    # "#example-serv", so a literal "#example-debug" here was a second
+                    # "" (blank) since #193, so a literal "#example-debug" here was a second
                     # source of truth that disagreed with the first - and the
                     # one place it would have been consulted is the one place it
                     # decides whether to PART a channel.
@@ -840,6 +841,10 @@ def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
     import os
     
     if not authorised and not is_admin(user):
+        # Logged, like !ban / !clearqueue / !rehash / !update all are. This
+        # returned silently, so an operator auditing attempted privilege abuse
+        # had a blind spot on exactly one command (#234).
+        print(f"[SECURITY] Unauthorised user {user} tried to run !unban.")
         return
 
     parts = msg_text.split(" ", 1)
@@ -853,7 +858,8 @@ def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
         
     filename = config.HARD_BANS_FILE
     if not os.path.exists(filename):
-        announce.send_debug("The permanent hard_bans.txt file is empty.", category="INFO")
+        announce.send_debug(f"No permanent ban file yet ({filename} does not exist), "
+                            f"so there is nothing to remove.", category="INFO")
         return
         
     # db.remove_hard_ban rewrites the file through a temp + os.replace. The old
@@ -935,8 +941,15 @@ def count_from_master_list():
                                f"{glob.escape(config.LIST_BASE_NAME)}-*.txt")
         all_txt_files = sorted(glob.glob(pattern))
         
-        # Filter out the RAR list, so only the true master list is read
-        true_master_lists = [f for f in all_txt_files if "-RAR-" not in f]
+        # Both markers, matching list.find_latest_list(). Excluding only
+        # "-RAR-" left the DELIVERED "-FULL-" copy in the running, and it sorts
+        # after any plain date suffix - so this counted a different file from the
+        # one @find and the advert read. It agreed only because that copy happens
+        # to carry the same header (#234).
+        import list as _list_mod
+        true_master_lists = [f for f in all_txt_files
+                             if "-RAR-" not in f
+                             and _list_mod.FULL_LIST_MARKER not in f]
         
         if true_master_lists:
             list_path = true_master_lists[-1]  # The very newest master list

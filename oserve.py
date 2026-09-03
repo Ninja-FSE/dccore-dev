@@ -58,7 +58,10 @@ irc_connection = None
 threads_started = False
 
 # Live traffic statistics, measured in real time by dcc.py
-current_speed_bytes = 0    
+# current_speed_bytes was here: assigned once and never read or written
+# anywhere in the repository. Live transfer speed is derived from
+# active_downloads/total_sent_bytes below, which are the names dcc.py really
+# updates - so anyone tracing speed through this one found nothing (#232).    
 active_downloads = 0       
 send_fails_count = 0       
 total_sent_bytes = 0       

@@ -271,9 +271,13 @@ def strip_info_suffix(rest):
 def _split_entry_line(line_strip):
     """Pull the filename and size back out of one "!..." master-list line.
 
-    Best-effort on purpose - this feeds the read-only web dashboard, never
-    IRC, so a line that does not split cleanly returns what it can rather
-    than raising.
+    Best-effort on purpose: a line that does not split cleanly returns what
+    it can rather than raising.
+
+    This said it feeds "the read-only web dashboard, never IRC". It is on
+    the live IRC search path too - find_matching_entries() calls it, and
+    execute_search() calls that - so anything slow or throwing here costs a
+    channel @find, not just a dashboard render (#234).
     """
     _, _, rest = line_strip.partition(" ")
     return strip_info_suffix(rest)

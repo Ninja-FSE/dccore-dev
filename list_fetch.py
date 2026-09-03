@@ -563,7 +563,9 @@ def get_fetched_bot_page(entry, offset, limit):
     already does for this bot's own list - dedup, and return one page of the
     result.
 
-    Returns (page_rows, total_row_count, error): `error` is None on success;
+    Returns (page_rows, total_folders, total_rows, error): `error` is None on
+    success. Four values, not the three this said until #232 - a new caller
+    written from the docstring alone would have unpacked it wrong.
     otherwise a short, human-readable string (e.g. the file having gone
     missing from disk since the fetch - an operator manually clearing
     data/fetched/, or some other bug entirely) and `page_rows`/`total` are
