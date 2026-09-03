@@ -380,6 +380,64 @@ def is_offerable_to_strangers(ip_text=None):
                 or address.is_multicast or address.is_reserved or address.is_unspecified)
 
 
+def next_waiting_pack_owner(exclude_user=None):
+    """The user whose queue HEAD is a folder pack, in arrival order, or None.
+
+    check_queue_and_send() only ever looks at the queue of the user handed to
+    it, and every caller hands it the user whose transfer just finished. A
+    second user turned away at the [RAR-HOLD] branch - because someone else's
+    pack held config.rar_inprogress - was therefore never revisited: their row
+    stayed queued until they happened to complete some unrelated transfer of
+    their own, which on a bot serving one album at a time may be never.
+
+    Arrival order is dict insertion order on config.dcc_queue. Queue entries
+    carry no timestamp, and insertion order is what the rest of the queue
+    already treats as arrival order, so this matches rather than invents.
+
+    HEAD only, not "anywhere in their queue": check_queue_and_send() dispatches
+    entries[0] and nothing else, so a pack sitting behind a plain file is not
+    dispatchable yet and waking that user would be a no-op that looks like a
+    fix.
+    """
+    exclude = (exclude_user or "").lower()
+    with queue_lock:
+        for user_key, entries in config.dcc_queue.items():
+            if user_key == exclude or not entries:
+                continue
+            head = entries[0]
+            if isinstance(head, dict) and head.get('is_unpacked_rar_folder') is True:
+                return head.get('user_raw') or user_key
+    return None
+
+
+def redispatch_waiting_pack(irc_sock, just_finished=None):
+    """Wake the next queued folder pack, once rar_inprogress has been released.
+
+    Called from every path that clears rar_inprogress. Returns the user woken,
+    or None - which the tests assert on, and which is also the honest answer
+    when there was nothing to wake.
+
+    Re-checks rar_inprogress first: these callers clear it a line or two
+    earlier, but a concurrent trigger may already have claimed it, and starting
+    a second packer would defeat the interlock this whole branch exists to
+    hold.
+
+    Dispatched on a thread rather than called inline. check_queue_and_send()
+    takes queue_lock, and threading.Lock is not reentrant - the scan above
+    releases it before returning, but the send path this leads into is long
+    (it packs an album), and running it inline would also make one completion
+    recurse into the next.
+    """
+    if getattr(config, 'rar_inprogress', False):
+        return None
+    owner = next_waiting_pack_owner(exclude_user=just_finished)
+    if not owner:
+        return None
+    print(f"[RAR-WAKE] A pack for {owner} was waiting on the packer lock; dispatching it now.")
+    threading.Thread(target=check_queue_and_send, args=(irc_sock, owner),
+                     daemon=True).start()
+    return owner
+
 def check_queue_and_send(irc_sock, completed_user):
     """Check the queues and run RAR packing one at a time, without flooding the server."""
     import announce as announce_mod
@@ -524,6 +582,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     finally:
                         if not handed_off:
                             config.rar_inprogress = False
+                            # #215: this release is the only moment another user's held pack can
+                            # start. Nothing else revisits them - every check_queue_and_send()
+                            # caller passes the user who just finished, never the one turned
+                            # away at [RAR-HOLD].
+                            redispatch_waiting_pack(irc_sock, just_finished=completed_user)
                             if hasattr(config, 'user_processing_lock'):
                                 config.user_processing_lock.discard(completed_user.lower())
 
@@ -542,6 +605,11 @@ def check_queue_and_send(irc_sock, completed_user):
                                 ]
                         db.save_dcc_queue()
                         config.rar_inprogress = False
+                        # #215: this release is the only moment another user's held pack can
+                        # start. Nothing else revisits them - every check_queue_and_send()
+                        # caller passes the user who just finished, never the one turned
+                        # away at [RAR-HOLD].
+                        redispatch_waiting_pack(irc_sock, just_finished=completed_user)
                         if hasattr(config, 'user_processing_lock'):
                             config.user_processing_lock.discard(completed_user.lower())
                         announce_mod.send_debug(
@@ -1296,6 +1364,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # exhaustion branch, which already got this right).
         if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
             config.rar_inprogress = False
+            # #215: this release is the only moment another user's held pack can
+            # start. Nothing else revisits them - every check_queue_and_send()
+            # caller passes the user who just finished, never the one turned
+            # away at [RAR-HOLD].
+            redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
             
@@ -1344,6 +1417,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # clearing a flag another user's pack is holding is how the interlock leaks.
         if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
             config.rar_inprogress = False
+            # #215: this release is the only moment another user's held pack can
+            # start. Nothing else revisits them - every check_queue_and_send()
+            # caller passes the user who just finished, never the one turned
+            # away at [RAR-HOLD].
+            redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
         # #162 finding #8: this branch's own comment above says the row
@@ -1603,6 +1681,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # abort and port-exhaustion branches above.
         if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
             config.rar_inprogress = False
+            # #215: this release is the only moment another user's held pack can
+            # start. Nothing else revisits them - every check_queue_and_send()
+            # caller passes the user who just finished, never the one turned
+            # away at [RAR-HOLD].
+            redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(user.lower())
 
