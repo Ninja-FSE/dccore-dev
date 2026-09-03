@@ -1306,7 +1306,11 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing."""
-    global active_transfers
+    # No `global active_transfers` here: there is no module-level name of that
+    # kind in this file, and there never was. Every real use below is
+    # config.active_transfers, which needs no declaration. The statement was
+    # inert, and inviting: it read as though this function mutated a module
+    # global somebody could go looking for (#232).
     import time
     import os
     import socket

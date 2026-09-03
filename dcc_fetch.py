@@ -97,7 +97,7 @@ RECV_CHUNK = 65536
 # defensively, nowhere else - dcc_fetch never parses this out of anything,
 # it only ever receives a filename we ourselves already chose when the fetch
 # was enqueued.
-_FILENAME_CHARSET_RE = re.compile(r'[^\w\-_\. \(\)]')  # mirrors dcc.py:762
+_FILENAME_CHARSET_RE = re.compile(r'[^\w\-_\. \(\)]')  # mirrors dcc.py's _sanitize_rar_leaf_name()
 
 # THE canonical definition of "which bytes are unsafe to interpolate into a
 # raw outbound IRC/CTCP line" - webserver.reject_if_unsafe_for_irc_line()
@@ -753,7 +753,7 @@ def parse_dcc_send_offer(ctcp_text):
     a bare 'port 0' with no token (nothing to answer it with).
 
     The ip_long decode is the exact inverse of dcc.get_public_ip_long()
-    (dcc.py:201-210).
+    (dcc.py).
     """
     text = str(ctcp_text).strip().strip("\x01").strip()
     if not text.upper().startswith("DCC SEND "):
@@ -1477,5 +1477,11 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
             # partial file from a failed long-named transfer is never
             # cleaned up.
             os.remove(platform_compat.long_path(dest_path))
-    except OSError:
+    except OSError as cleanup_err:
+        # Logged, not swallowed. webserver.py's equivalent cleanup prints on
+        # the same failure; here an antivirus or an open handle holding the
+        # partial file left debris under FETCHED_FILES_DIR with no clue why
+        # disk use was climbing (#234).
+        print(f"[FETCH] Could not remove the partial file {dest_path}: "
+              f"{cleanup_err}")
         pass

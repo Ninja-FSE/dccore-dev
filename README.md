@@ -21,7 +21,7 @@ See [docs/FUTURE.md](docs/FUTURE.md) for the full picture, including what is *no
 ## Quick start
 
 ```bash
-python3 configure.py                        # six questions
+python3 configure.py                        # a few questions
 ./scripts/linux/start-dccore.sh check   # verify, without touching the network
 ./scripts/linux/start-dccore.sh         # go
 python3 update_list.py                  # build the first list

@@ -208,6 +208,7 @@ prefix.
 | `bans` | permanent and timed bans |
 | `uptime` | how long the daemon has been running |
 | `version` | build and platform |
+| `verify` | filenames that appear in two folders |
 
 ### What you can do
 

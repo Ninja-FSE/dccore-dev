@@ -468,7 +468,8 @@ fetch_queue = runtime.fetch_queue
 
 # Fetched-and-parsed lists FROM OTHER BOTS (list_fetch.py), keyed by
 # lowercased bot nick -> {"bot": <original-case nick>, "fetched_at":
-# <timestamp>, "entries": [...rows in the same shape
+# <timestamp>, "list_path": <file>, "entry_count": <n> (list_fetch.py writes
+# those two; an "entries" key was described here until #232 and never existed)
 # list.entries_to_filelist_rows() produces for our own list...],
 # "source_zip": <the zip's stored filename>}. One entry per bot - a later
 # fetch for a nick already present REPLACES it, it does not accumulate

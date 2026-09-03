@@ -1,9 +1,20 @@
 # adminchat.py - Authenticated DCC CHAT console for the operator.
-"""Phase 1: transport and authentication only.
+"""The operator's console: transport, authentication, and the commands.
 
-The admin commands themselves are NOT here yet, deliberately. This phase is the
-security surface and nothing else, so what has to be reviewed carefully is small:
-who is allowed to open a session, and what proves it.
+This file is the whole admin console. It authenticates a session, and it
+defines and dispatches every command that session can run - including the
+destructive ones (ban, unban, clearqueue, rehash, update). COMMANDS at the
+bottom is the complete list.
+
+It said the opposite until #231: "Phase 1: transport and authentication only.
+The admin commands themselves are NOT here yet, deliberately." That was true
+when the file was written and stopped being true when the dispatcher landed.
+It is the first thing anyone reads here, and it claimed a narrow
+security-review scope - "who may open a session, and what proves it" - for a
+file that also holds every command worth reviewing carefully.
+
+The authentication is still the part to read first, and it is described below.
+But it is no longer the only thing here.
 
 WHY DCC CHAT RATHER THAN A CHANNEL OR PM COMMAND
 ------------------------------------------------
@@ -33,14 +44,24 @@ This one screens the host on the incoming CTCP, before replying at all. A strang
 gets no banner, no connection, no reply of any kind, and no way to learn whether
 the mask was wrong. The cost of an unauthorised attempt is one regex.
 
-Connection direction follows iroffer's non-passive path: the requesting client
-listens and supplies its ip/port, and the bot connects OUT to it. That path opens
-no listening port. _open_chat_listener() below DOES bind one, in the
-DCC_PORT_START..DCC_PORT_END range, as the fallback for an operator whose client
-the bot cannot dial - so this module is not inbound-surface-free, and the earlier
-claim that it was is corrected here. Passive DCC (the
-client sending port 0, bot listening instead) is not supported yet; it would want
-a port borrowed from the DCC_PORT_START..DCC_PORT_END range.
+CONNECTION DIRECTION, AND THE INBOUND SURFACE
+---------------------------------------------
+The preferred path follows iroffer's non-passive form: the requesting client
+listens and supplies its ip/port, and the bot connects OUT to it. That path
+opens no listening port.
+
+Both fallbacks do. _open_chat_listener() binds a port in the
+DCC_PORT_START..DCC_PORT_END range when the bot cannot dial the operator's
+client, and the passive form - the client offering port 0, meaning "you listen
+instead" - is parsed and answered with an offer of our own. So this module is
+not inbound-surface-free, and the host check is what stands in front of that
+surface.
+
+Two earlier claims here were wrong and are corrected rather than deleted,
+because both were load-bearing for anyone deciding how much of this file needs
+a security review: that no listening port is opened (#217), and that passive
+DCC is not supported (#231). parse_offer() has handled port 0 since the
+listen-mode work, and tests/test_adminchat.py drives it end to end.
 """
 
 import binascii
@@ -400,11 +421,14 @@ class Session:
 def banner_lines():
     """Modelled on iroffer's chat_banner(): welcome, build, then the prompt.
 
-    The uptime line iroffer prints is deliberately absent for now.
-    stats_mgr.get_uptime_seconds() exists but is called from nowhere and resets to
-    zero on every !rehash, because start_time is a module global and !rehash
-    reloads stats_mgr. Printing it before that is fixed would just be printing a
-    wrong number. Phase 2 fixes it and adds the line.
+    The uptime line iroffer prints is deliberately absent from the BANNER, but
+    the value behind it is live: _uptime_seconds() below wraps
+    stats_mgr.get_uptime_seconds(), and both `uptime` and `status` report it.
+
+    This used to say the function was "called from nowhere" and reset to zero on
+    every !rehash. Neither is true any more: it has two callers, and stats_mgr
+    guards start_time with a try/except NameError precisely so a reload leaves
+    the original value standing (#232).
     """
     return [
         "",

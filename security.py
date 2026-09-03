@@ -453,7 +453,7 @@ def is_flooding(user):
         # VIP log: send the warning notice straight out, with no queue delay
         announce.send_debug(
             f"User {user} moving too fast! Triggered temporary mute for {config.MUTE_TIME} seconds. Queue cleared.", 
-            category="TBAN"
+            category="MUTE"
         )
         
         if oserve:

@@ -9,7 +9,7 @@ types, arrived in 3.11. Adding a third-party TOML parser would spend this
 project's "no third-party packages" property on a settings file.
 
 So if the defaults lived in the text file too, something would have to declare
-each value's type: 23 of the settings are not strings. That something is a
+each value's type: 34 of the settings are not strings. That something is a
 second list to keep in step with the first, and this codebase has already been
 bitten by exactly that shape - PRESERVE_RUNTIME was a hand-maintained list of
 names that drifted out of step with config.py and silently emptied live state.
@@ -466,7 +466,7 @@ def _check_writable(name, value, namespace, types):
             f"operator configures. Writing it would make one run's value "
             f"permanent.")
 
-    # A web form sends strings for everything, including the 23 settings that
+    # A web form sends strings for everything, including the 34 settings that
     # are not strings. A string is therefore taken as the text an operator
     # typed and read the same way the file would read it - which for a setting
     # that IS a string returns it unchanged, so a caller holding real Python

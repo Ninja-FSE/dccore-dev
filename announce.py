@@ -299,7 +299,8 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     msg = fit_irc_line(_build, file_name)
     if oserve:
         oserve.queue_message("channel_announce", msg)
-    print(f"[ANNOUNCE] Sent block transfer complete notice to {channel} for {user} ({speed_str})")
+    print(f"[ANNOUNCE] Queued the block transfer complete notice for {channel}, "
+          f"user {user} ({speed_str})")
 
     # The closing line, using the live 'speed_str' safely
     try:
@@ -336,7 +337,7 @@ def send_dcc_sending_notice(user, file_name):
     
     if oserve:
         oserve.queue_message(user, msg, is_vip=True)
-    print(f"[ANNOUNCE] Sent custom block notice to {user} for '{file_name}'")
+    print(f"[ANNOUNCE] Queued the custom block notice for {user}, '{file_name}'")
 
 def get_formatted_stats_strings():
     """The advert's figures, read from stats.txt without writing to it.
@@ -585,6 +586,11 @@ def send_debug(msg_text, category="INFO"):
         # [HARDBAN], and that one is an admin confirming a !ban. These two must not look
         # alike - one is routine administration, the other is someone probing the filesystem.
         tag_str = f"{A}[SECURITY]{R}{BG_TEXT_BOX}"
+    elif category.upper() == "MUTE":
+        # Its own tag. A 30-second mute and the escalation ban both used
+        # TBAN, so both rendered [TEMPBAN] and an operator watching the
+        # console could not tell a slap from a sentence (#234).
+        tag_str = f"{config.C_PURPLE}[MUTED]{R}{BG_TEXT_BOX}"
     elif category.upper() == "TBAN":
         # A purple block label for TEMPORARY day-bans
         tag_str = f"{config.C_PURPLE}[TEMPBAN]{R}{BG_TEXT_BOX}"
