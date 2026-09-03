@@ -21,6 +21,13 @@ Three constraints shaped the placement, each with a test:
 
 `tests/test_config_fallbacks.py` caught the identity line reading `getattr(config, 'SCRIPT_VERSION', 'DCCore')` - a non-empty fallback is a second opinion about a value `config.py` already declares. It is now `update_list.list_identity_line()`, shared by both writers so they cannot drift.
 
+### 🖼️ The delivered list shows the operator's banner once, not once per section
+The `-FULL-` text download is the master index and the `!rar` album list concatenated, and each carries its own banner. That is right when they are handed out separately - `.zip` and `.rar` do exactly that, and the `!rar` list is served on its own - but joined, it put the operator's ASCII art halfway down the file as well as at the top, which reads as a bug rather than a design. Introduced by the banner itself, caught by generating a real list rather than by a test.
+
+Removed at concatenation rather than at the writer, so the standalone `!rar` copy keeps its branding, and by matching the exact text `read_operator_header()` returned rather than by recognising a banner in the output - only the first is knowable, since a free-form banner could otherwise contain anything, including something shaped like a folder heading.
+
+The identity line still repeats per section, deliberately: the album half should say what is serving it too, and one line is a section header where a banner of arbitrary height is not.
+
 ### 🤖 The list says, where it is written, that a script reads it back
 The generated list is not only read by people. **AutoQ.mrc** copies request lines out of it and sends them verbatim, so `!DCCore !rar D:\MUSIC\Artist\Album\` is a command rather than a display row, and appending anything to it stops AutoQ matching. That is what ruled out a folder size on each album row - wanted, and parked in #69 until there is a list format carrying structure separately from the request line.
 
