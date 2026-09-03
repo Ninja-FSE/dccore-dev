@@ -398,6 +398,79 @@ def build_list_artifact(fmt, members, date_str):
     return fmt, tmp, final
 
 
+def list_identity_line(nickname=None):
+    """"Served by <nick> - <version> - <url>", with absent parts left out.
+
+    Shared by the .txt and the !rar list so the two cannot drift, and built by
+    joining on what is actually present: an operator who blanks SCRIPT_VERSION
+    or PROJECT_URL should get a shorter line, never a dangling " - " with
+    nothing after it.
+
+    The fallbacks here are empty strings rather than a literal like "DCCore".
+    A non-empty fallback would be a second opinion about a value config.py
+    already declares, and which one won would depend on how the value happened
+    to be read - see tests/test_config_fallbacks.py, which enforces exactly
+    that. An empty fallback declines to have an opinion instead.
+    """
+    if nickname is None:
+        nickname = getattr(config, "NICKNAME", "")
+
+    parts = [str(getattr(config, "SCRIPT_VERSION", "") or "").strip(),
+             str(getattr(config, "PROJECT_URL", "") or "").strip()]
+    detail = " - ".join(part for part in parts if part)
+
+    return f"Served by {nickname} - {detail}" if detail else f"Served by {nickname}"
+
+
+def read_operator_header(path=None, max_bytes=None):
+    """The operator's own banner for the top of the list, or "" if there is none.
+
+    Free-form: several lines, ASCII art, a channel name - whatever should greet
+    whoever opens the file. Returned VERBATIM apart from line-ending
+    normalisation. Everything else written into the list goes through
+    _one_line(), which flattens control characters; doing that here would
+    destroy the art this exists to carry, so the banner deliberately bypasses
+    it.
+
+    "" on anything unreadable, matching read_list_base_marker()'s reasoning: a
+    banner is decoration, and no decoration should ever stop a list being
+    built. A missing file is the normal state, not an error.
+
+    Line endings are normalised to "\\n" because the list is opened without
+    newline="", so the writer translates "\\n" to os.linesep itself. A CRLF
+    banner written through that untouched would come out "\\r\\r\\n" on Windows.
+    """
+    if path is None:
+        path = getattr(config, "LIST_HEADER_FILE", "./data/list_header.txt")
+    if max_bytes is None:
+        max_bytes = getattr(config, "LIST_HEADER_MAX_BYTES", 8192)
+
+    try:
+        with io.open(platform_compat.long_path(path), "rb") as handle:
+            raw = handle.read(int(max_bytes) + 1)
+    except (OSError, ValueError, TypeError):
+        return ""
+
+    if not raw:
+        return ""
+
+    truncated = len(raw) > int(max_bytes)
+    if truncated:
+        raw = raw[:int(max_bytes)]
+        print(f"[LIST-GEN] {path} is larger than {max_bytes} bytes; "
+              f"the banner was truncated.")
+
+    # errors="replace": this is operator-supplied and may be in any encoding.
+    # A banner in the wrong code page should come out looking odd, not abort
+    # the list build.
+    text = raw.decode("utf-8", errors="replace")
+
+    # Normalise line endings, drop trailing blank lines so this function owns
+    # the spacing around the banner rather than inheriting whatever the file
+    # happened to end with.
+    return "\n".join(text.splitlines()).rstrip("\n")
+
+
 def generate_master_list():
     """Scan the music directory, clear the old files first, and build both lists."""
     import os
@@ -547,11 +620,44 @@ def generate_master_list():
              open(tmp_rar_path, "w", encoding="utf-8") as f_rar:
                  
             f.write(f"List of {total_files_count:,} Files ({formatted_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n")
-            f.write(f"To request a file, copy/paste to the channel... !{config.NICKNAME} FILENAME eg. !{config.NICKNAME} Songname.flac\n\n\n")
+            f.write(f"To request a file, copy/paste to the channel... !{config.NICKNAME} FILENAME eg. !{config.NICKNAME} Songname.flac\n")
+
+            # The operator's banner and the bot's identity go BELOW the two
+            # lines above and above the first folder - not at the very top.
+            # commands.count_from_master_list() reads one readline() and pulls
+            # "List of N Files" out of it, so anything inserted above that line
+            # silently zeroes the count feeding !update and the channel advert:
+            # no exception, no empty file, just a list that advertises nothing.
+            #
+            # The identity line exists because this file travels. It gets sent
+            # to strangers over DCC and reopened weeks later in a text editor
+            # with no memory of which bot produced it.
+            # The identity line sits directly under the two functional lines,
+            # ABOVE the operator's banner. The banner is free-form and can be
+            # any height, so putting it first would push the attribution off
+            # the reader's first screen exactly on the installs that decorate
+            # the most. Fixed position, always visible.
+            #
+            # Still not line 1: commands.count_from_master_list() does one
+            # readline() and regexes "List of N Files" out of it, so anything
+            # above that line silently zeroes the count feeding !update and the
+            # channel advert - no exception, no empty file, just a list that
+            # advertises nothing.
+            operator_header = read_operator_header()
+            f.write(list_identity_line() + "\n")
+            if operator_header:
+                f.write("\n" + operator_header + "\n")
+            f.write("\n")
 
             if serve_albums:
                 f_rar.write(f"List of Entire Album Folders (!rar) for !{config.NICKNAME} generated on {date_header_str}\n")
                 f_rar.write(f"To request an entire album, copy/paste the line... eg. !{config.NICKNAME} !rar D:\\MUSIC\\Album\\\n")
+                # Same order as the .txt above, and for the same reason. The
+                # !rar list is a separate download that travels on its own, so
+                # it carries its own copy rather than inheriting one.
+                f_rar.write(list_identity_line() + "\n")
+                if operator_header:
+                    f_rar.write("\n" + operator_header + "\n")
                 f_rar.write("="*90 + "\n\n")
 
             current_folder = None

@@ -1012,6 +1012,34 @@ def resolve_dcc_address(lookup=None, log=print):
         return ""
 
 
+def ctcp_version_reply(user):
+    """The NOTICE line answering one CTCP VERSION query, or None if disabled.
+
+    A standalone function so it is unit-testable without driving irc_loop(),
+    matching rehash_nick_change_line()'s own reason for existing.
+
+    NOTICE rather than PRIVMSG. That is the CTCP rule, and the reason is
+    practical: two bots that both answer CTCP with a privmsg answer each other
+    forever. It also means nothing lands in a channel - the reply goes to
+    whoever asked and nobody else sees it, which is the whole difference
+    between this and a "!version" command.
+
+    Returns None, not an empty string, when CTCP_VERSION_REPLY is off: the
+    caller must send nothing at all and stay as silent as the bot was before
+    this existed, rather than answer with something evasive.
+    """
+    if not getattr(config, "CTCP_VERSION_REPLY", True):
+        return None
+
+    version = str(getattr(config, "SCRIPT_VERSION", "") or "").strip()
+    url = str(getattr(config, "PROJECT_URL", "") or "").strip()
+
+    # Joined on what is actually present. An operator who blanks either one
+    # should get a shorter reply, never a dangling " - " or a bare separator.
+    detail = " - ".join(part for part in (version, url) if part) or "DCCore"
+    return f"NOTICE {user} :\x01VERSION {detail}\x01\r\n"
+
+
 def irc_loop():
     """The connection, PING/PONG, and every incoming PRIVMSG from Undernet."""
     global bot_joined_channel
@@ -1594,7 +1622,7 @@ def irc_loop():
                             or msg.startswith("@locator ")
                             or any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
                             or msg_lower in ("!list", "!debugnames", "!ping")
-                            or (msg.startswith("\x01") and msg.strip("\x01").strip().upper() in ("QUE", "REMOVE"))
+                            or (msg.startswith("\x01") and msg.strip("\x01").strip().upper() in ("QUE", "REMOVE", "VERSION"))
                             or (msg.startswith("\x01")
                                 and msg.strip("\x01").strip().upper().startswith("DCC SEND ")
                                 and target_chan.lower() == config.NICKNAME.lower())
@@ -1636,6 +1664,23 @@ def irc_loop():
                                         target=dcc_fetch.handle_incoming_offer,
                                         args=(s, user, msg.strip("\x01").strip()),
                                         daemon=True).start()
+                                    continue
+                                if ctcp_cmd == "VERSION":
+                                    # Answered inline rather than on a thread:
+                                    # one send, nothing read from disk, and
+                                    # irc.py already sends directly from this
+                                    # loop (see the RAM-CHECK reply below).
+                                    #
+                                    # VERSION is in the is_bot_command list
+                                    # above, so a flooding user's query is
+                                    # dropped before reaching here. An
+                                    # unthrottled CTCP responder is a standard
+                                    # way to make a bot flood ITSELF off the
+                                    # network: a few hundred queries and the
+                                    # bot's own replies trip excess-flood.
+                                    version_reply = ctcp_version_reply(user)
+                                    if version_reply:
+                                        s.send(version_reply.encode())
                                     continue
                                 if ctcp_cmd == "QUE":
                                     threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()

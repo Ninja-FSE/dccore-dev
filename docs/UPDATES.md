@@ -2,6 +2,25 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🪪 The bot can say what it is, without saying it in the channel
+Two surfaces wanted the same missing fact. There was no project URL anywhere in the tree - no `github.com/...` in any `.py` or `.md` - so a list that reached a stranger carried nothing about what produced it, and a CTCP VERSION query got silence. `PROJECT_URL` is now defined once beside `SCRIPT_VERSION` and both consumers read it (from #69).
+
+**CTCP VERSION is answered**, by NOTICE straight back to whoever asked. `irc.py` already parsed incoming CTCP but only acted on `QUE`, `REMOVE` and `DCC SEND`. `VERSION` joins the flood-gated set, because an unthrottled CTCP responder is a standard way to make a bot flood *itself* off the network - a few hundred queries and its own replies trip excess-flood. `CTCP_VERSION_REPLY` turns it off for operators who would rather not advertise a build.
+
+Deliberately **not** a `!version` command. The bug report template (#251) told reporters to use one, and none exists: in this codebase a bang means IRC, and `version` lives in the admin console without one. Building it to make the document true was backwards and was rejected - a `!` command answers in channel every time anyone tries it, whereas a CTCP reply is private. The template now points at the admin console command that already exists.
+
+**Every generated list carries a masthead** - `Served by <nick> - <version> - <url>` - and an operator can put their own banner below it by creating `data/list_header.txt` (`LIST_HEADER_FILE`, bounded by `LIST_HEADER_MAX_BYTES`). Both the `.txt` and the `!rar` list get it; the `.zip`/`.rar` downloads inherit it, since they derive from the same files.
+
+Three constraints shaped the placement, each with a test:
+
+* **Not line 1.** `commands.count_from_master_list()` does one `readline()` and regexes `List of N Files` out of it. Anything above that line stops the regex matching and fails silently - no exception, no empty file, just a count of zero feeding `!update` and the channel advert. The guard asserts the count is *identical* with and without a banner rather than equal to a literal, so it still fails if placement moves back up.
+* **Above the operator's banner, not below.** The banner is free-form and any height, so the other order buries the attribution on exactly the installs that decorate the most. A test writes a 200-line banner and asserts the masthead is still within the first few lines.
+* **The banner bypasses `_one_line()`.** That flattens control characters, which is right for folder lines and fatal for the ASCII art this exists to carry. Line endings are normalised too: the list is opened without `newline=""`, so a CRLF banner passed through untouched would come out `\r\r\n` on Windows.
+
+`tests/test_config_fallbacks.py` caught the identity line reading `getattr(config, 'SCRIPT_VERSION', 'DCCore')` - a non-empty fallback is a second opinion about a value `config.py` already declares. It is now `update_list.list_identity_line()`, shared by both writers so they cannot drift.
+
 ## 🟩 v1.10.0 (2026-09-01) - "General Availability"
 RC4 shipped a full changelog entry below; everything after it did not. **66 PRs merged into `beta` over the five weeks since RC4** without a single one getting its own entry here - this release closes that gap with one condensed summary, grouped by theme rather than narrated PR-by-PR. See each PR's own description on GitHub for the full story behind any one line below.
 
