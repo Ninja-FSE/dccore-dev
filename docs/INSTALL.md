@@ -116,7 +116,54 @@ mIRC colour codes work if your audience reads the list in mIRC, but they show as
 
 ## Upgrading
 
-Pull and restart. One thing is worth knowing if you are coming from a version before the `config.py` → `defaults.py` rename:
+Your settings and data are never touched by an upgrade: `settings.conf`, `admin_config.py` and everything under `data/` are gitignored, so updating the code cannot overwrite them. That is also the one thing to watch — see step 4.
+
+**1. Stop the daemon.** A transfer in progress will be cut off, so a quiet moment is kinder than mid-queue.
+
+**2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong.
+
+```bash
+cp -r data data.backup && cp settings.conf admin_config.py data.backup/
+```
+
+**3. Get the new version.**
+
+```bash
+git pull
+```
+
+If you installed from a downloaded release rather than a clone, download the new release and unpack it over the top — your gitignored files are not in the archive, so they survive. Keep `data/` where it is.
+
+**4. Check for new settings.** This is the step people miss. `settings.conf` is gitignored, so `git pull` updates `settings.conf.sample` but never your own file. New settings do not appear in it, and you will not hear about them.
+
+```bash
+comm -23 <(grep -oE '^#?[A-Z_]+ *=' settings.conf.sample | tr -d '# =' | sort) \
+         <(grep -oE '^[A-Z_]+ *=' settings.conf | tr -d ' =' | sort)
+```
+
+That lists every setting the sample knows about and your file does not. Most of them will be settings you were happy to leave at their defaults, so read it as "what exists", not as a to-do list.
+
+Nothing breaks if you skip this — every setting has a working default and the daemon runs fine without any of them being present. You simply will not know what became available. The changelog is the readable version of the same information.
+
+**5. Read the changelog.** [UPDATES.md](UPDATES.md) says what changed and, where it matters, what you have to do about it.
+
+**6. Verify before going live.**
+
+```bash
+./scripts/linux/start-dccore.sh check
+```
+
+This checks the configuration without connecting to IRC, so a mistake surfaces before your channel sees it. Windows: `scripts\windows\start-dccore.bat check`.
+
+**7. Start it, and rebuild the list if the changelog says the list output changed.**
+
+```bash
+./scripts/linux/start-dccore.sh
+```
+
+The master list is only regenerated when you ask. If a release changes what the list contains, the file you are serving keeps its old content until the next `!update` — which looks like the upgrade did nothing.
+
+### Coming from a version before the `config.py` → `defaults.py` rename
 
 Your own overrides file was called `local_config.py` and is gitignored, so `git pull` cannot rename it for you. **Do not copy `admin_config.py.sample` over the top** — that strands your real settings. Just start the daemon once and it renames the file itself, keeping every setting in it. The launchers and the pre-flight check both say so if they meet that state.
 

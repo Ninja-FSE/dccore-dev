@@ -43,6 +43,35 @@ never as its own line of development.
 
 ## Releasing to `dccore`
 
+### Before you extract anything
+
+Every PR is supposed to carry its own documentation, so this is a check that
+nothing slipped through rather than a writing session. In practice it is where
+the omissions surface, because it is the last point at which they are cheap.
+
+- **Roll `## Unreleased` into a version heading** in both `docs/UPDATES.md` and
+  `docs/UPDATES-PUBLIC.md`, with the date. If either has no Unreleased section
+  but commits have landed since the last release, something shipped without an
+  entry — write it now from the merged PRs.
+- **Bump `SCRIPT_VERSION`** in `defaults.py`. It is the version the bot reports
+  over CTCP VERSION, prints in the advert, and stamps on every generated list,
+  so a stale one misreports itself in three places at once.
+- **Tag the release** on `dccore` after the merge, matching the changelog
+  heading exactly. `v1.10.0` in the changelog and `v1.9.0-RC1` on the tag is
+  the kind of mismatch nobody notices until someone reports a bug against a
+  version that does not exist.
+- **Check `docs/FUTURE.md`** for anything the release implements that is still
+  listed as planned or not-yet-done. A roadmap calling a shipped thing missing
+  makes the changelog look like it is overclaiming — this drifted once and
+  reached the public repo before it was caught.
+- **Check `docs/INSTALL.md`'s Upgrading section** covers anything an existing
+  operator has to *do*. New settings never appear in an existing
+  `settings.conf` (it is gitignored), and a change to what the generated list
+  contains does nothing until the operator runs `!update` — neither is
+  self-evident from the outside.
+
+### The extraction
+
 1. On `main` here, `git archive --format=tar HEAD | tar -x` into a scratch
    tree — no `.git` history carried over.
 2. Strip dev-only tooling that has no shipped consumer: `scripts/preflight.py`,
