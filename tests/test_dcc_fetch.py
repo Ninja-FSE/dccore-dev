@@ -840,39 +840,70 @@ class FetchListenerPortOrderingTests(DCCoreTestCase):
     first-probed port as either adminchat's downward-from-end scan or
     dcc.py's own outbound SEND (upward-from-start, verified separately in
     dcc.py's own tests) - reducing first-probe collisions with both.
+
+    WHY THESE DO NOT BIND REAL SOCKETS
+
+    They used to. That made them assert which port came back while quietly
+    depending on 55000-55010 being free on the machine, which is not something
+    a test can assume: `_open_fetch_listener()` falls through to the next port
+    whenever one is taken, so a listener still open from an earlier test - or
+    a TIME_WAIT left by one - silently changes the answer. Both failed that
+    way during a full-suite run, one as `55004 != 55005` and the other as
+    `55000 == 55000`, on a branch that touched none of this.
+
+    Proven environmental rather than a regression: on a clean checkout, simply
+    holding port 55005 reproduces the first failure exactly.
+
+    What these tests are actually about is the PROBE ORDER, and that needs no
+    network at all. Faking bind makes them deterministic, lets them state
+    which ports are occupied instead of hoping, and covers the fallback
+    behaviour that could not be reached before. Real binding is still
+    exercised end to end by PassiveOfferEndToEndTests below.
     """
+
+    def probe(self, occupied=()):
+        """Run _open_fetch_listener() against a fake socket layer.
+
+        Returns (attempted_ports, port). `occupied` names the ports whose bind
+        should fail, the way a port held by another process behaves.
+        """
+        attempted = []
+        taken = set(occupied)
+        real_socket_cls = socket.socket
+
+        class FakeListenerSocket:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def setsockopt(self, *args, **kwargs):
+                # platform_compat.prepare_listener() sets one address-reuse
+                # option and nothing else.
+                return None
+
+            def bind(self, addr):
+                attempted.append(addr[1])
+                if addr[1] in taken:
+                    raise OSError(98, "Address already in use")
+
+            def listen(self, *args, **kwargs):
+                return None
+
+            def close(self):
+                return None
+
+        socket.socket = FakeListenerSocket
+        try:
+            _listener, port = dcc_fetch._open_fetch_listener()
+        finally:
+            socket.socket = real_socket_cls
+        return attempted, port
 
     def test_first_probed_port_is_the_midpoint_of_the_range(self):
         self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55010)
-        attempted_ports = []
-        real_socket_cls = socket.socket
 
-        class RecordingSocket:
-            def __init__(self, *args, **kwargs):
-                self._real = real_socket_cls(*args, **kwargs)
+        attempted, port = self.probe()
 
-            def bind(self, addr):
-                attempted_ports.append(addr[1])
-                return self._real.bind(addr)
-
-            def listen(self, *args, **kwargs):
-                return self._real.listen(*args, **kwargs)
-
-            def close(self):
-                return self._real.close()
-
-            def __getattr__(self, name):
-                return getattr(self._real, name)
-
-        socket.socket = RecordingSocket
-        try:
-            listener, port = dcc_fetch._open_fetch_listener()
-        finally:
-            socket.socket = real_socket_cls
-
-        self.assertIsNotNone(listener)
-        self.addCleanup(listener.close)
-        self.assertEqual(attempted_ports[0], 55005, "midpoint of 55000-55010")
+        self.assertEqual(attempted[0], 55005, "midpoint of 55000-55010")
         self.assertEqual(port, 55005)
 
     def test_never_shares_a_first_probed_port_with_adminchat_or_dcc_py(self):
@@ -880,10 +911,53 @@ class FetchListenerPortOrderingTests(DCCoreTestCase):
         dcc.py's own outbound SEND scans upward from DCC_PORT_START (first
         probe: START). The fetch listener's first probe must be neither."""
         self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55010)
-        listener, port = dcc_fetch._open_fetch_listener()
-        self.addCleanup(listener.close)
-        self.assertNotEqual(port, config.DCC_PORT_START)
-        self.assertNotEqual(port, config.DCC_PORT_END)
+
+        attempted, _port = self.probe()
+
+        self.assertNotEqual(attempted[0], config.DCC_PORT_START)
+        self.assertNotEqual(attempted[0], config.DCC_PORT_END)
+
+    def test_it_scans_upward_from_the_midpoint_then_wraps_downward(self):
+        """The full order, which the real-socket version could only assert the
+        first element of. Upward from the midpoint to the end, then downward
+        from just below the midpoint to the start."""
+        self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55010)
+
+        attempted, _port = self.probe(occupied=range(55000, 55011))
+
+        self.assertEqual(attempted,
+                         [55005, 55006, 55007, 55008, 55009, 55010,
+                          55004, 55003, 55002, 55001, 55000])
+
+    def test_a_busy_midpoint_falls_through_to_the_next_port(self):
+        """Reachable only now that occupancy can be stated. This is exactly
+        what the machine was doing to these tests when they bound for real."""
+        self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55010)
+
+        attempted, port = self.probe(occupied=[55005])
+
+        self.assertEqual(attempted[:2], [55005, 55006])
+        self.assertEqual(port, 55006)
+
+    def test_a_full_range_returns_no_listener_rather_than_raising(self):
+        """The caller checks for None. Raising instead would take down the
+        fetch path on a busy box rather than declining one offer."""
+        self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55010)
+
+        attempted, port = self.probe(occupied=range(55000, 55011))
+
+        self.assertIsNone(port)
+        self.assertEqual(len(attempted), 11, "every port must be tried once")
+
+    def test_a_single_port_range_still_works(self):
+        """Boundary: start == end makes the midpoint both ends at once, and
+        the downward half of the scan empty."""
+        self.set_config(DCC_PORT_START=55000, DCC_PORT_END=55000)
+
+        attempted, port = self.probe()
+
+        self.assertEqual(attempted, [55000])
+        self.assertEqual(port, 55000)
 
 
 class PassiveOfferEndToEndTests(DCCoreTestCase):
