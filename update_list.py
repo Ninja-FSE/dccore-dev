@@ -734,12 +734,44 @@ def generate_master_list():
                         # folders - copies this line out of the list and sends it
                         # verbatim, so anything after the folder stops it matching.
                         #
+                        # The exact mechanism, read out of AutoQ.mrc's own
+                        # `on *:filercvd:*:` handler rather than inferred:
+                        #
+                        #   $left($trunc($nopath($filename)),-4)
+                        #       == $nopath($left($trunc($3-),-1))
+                        #
+                        # `$3-` is "token 3 to END OF LINE" - greedy, not just
+                        # the folder token. Clean row: $3- is the folder,
+                        # $left(...,-1) drops the trailing backslash, $nopath()
+                        # takes "Album", and it matches the received filename
+                        # minus ".rar", so the row is dequeued. Append anything
+                        # and $3- swallows it too; $trunc() strips the spaces,
+                        # so the character $left(...,-1) removes is the last
+                        # letter of what was appended rather than the
+                        # backslash, and $nopath() then extracts a substring
+                        # that can never match. filercvd never fires, and the
+                        # album stays queued in AutoQ forever despite having
+                        # actually arrived. Verified against the script and
+                        # reproduced (#256).
+                        #
+                        # Updating AutoQ is not a way out: people install old
+                        # copies from mirrors, so the deployed versions cannot
+                        # be assumed current.
+                        #
                         # A folder size here is the obvious and recurring idea, and
-                        # it was wanted; it is parked in #69 until there is a list
-                        # format that carries structure separately from the request
-                        # line. dcc.py already cites AutoQ compatibility for archive
-                        # and filename shape, but nothing said it constrained this
-                        # line, so the objection had to be rediscovered.
+                        # it was wanted. dcc.py already cites AutoQ compatibility
+                        # for archive and filename shape, but nothing said it
+                        # constrained this line, so the objection had to be
+                        # rediscovered.
+                        #
+                        # The size belongs on the MAIN list's per-folder heading
+                        # instead - see the folder_line write below. That heading
+                        # is framed decoration, not a row AutoQ imports, so it can
+                        # carry anything; and putting it there leaves this file at
+                        # exactly one line per album, which a second ::INFO:: line
+                        # per row would not (AutoQ only discards ::INFO:: for .mp3
+                        # and .flac, so a bare one here would be queued as if it
+                        # were a request). Tracked in #69.
                         #
                         # The file rows below end "::INFO:: <size>" and AutoQ copes
                         # with that. It is a precedent for one trailing field, not a
