@@ -40,7 +40,10 @@ Full guide, including configuring it by hand and upgrading from an older install
 | [ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) | the authenticated DCC CHAT console |
 | [WINDOWS.md](docs/WINDOWS.md) | the Windows guide |
 | [CONVENTIONS.md](docs/CONVENTIONS.md) | how this codebase is written, if you want to contribute |
-| [UPDATES.md](docs/UPDATES.md) | changelog |
+| [UPDATES.md](docs/UPDATES.md) | internal changelog |
+| [UPDATES-PUBLIC.md](docs/UPDATES-PUBLIC.md) | the changelog that ships as `dccore`'s docs/UPDATES.md |
+| [SECURITY.md](docs/SECURITY.md) | how to report a vulnerability (ships to `dccore` as-is) |
+| [PUBLIC-REPO-WORKFLOW.md](docs/PUBLIC-REPO-WORKFLOW.md) | the dccore-dev / dccore split, issue handling, release steps |
 
 ## How it is put together
 
