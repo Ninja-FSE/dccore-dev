@@ -32,6 +32,15 @@ not a collaborator here) loses all visibility into their own report.
 
 No GitHub feature does steps 2-4 for you. It's a checklist, not tooling.
 
+**Never develop directly against `dccore`, not even for a small doc file.**
+`SECURITY.md` was added there directly (#2, before this doc existed) and
+did not exist here — so the next release's extraction would have silently
+deleted it, since the release tree only ever contains what `dccore-dev`
+has. chchatzop caught it (`dccore#3`) before a release shipped. Anything
+meant to persist across releases has to originate here and flow through
+extraction like every other file; `dccore` gets content only as a release,
+never as its own line of development.
+
 ## Releasing to `dccore`
 
 1. On `main` here, `git archive --format=tar HEAD | tar -x` into a scratch
