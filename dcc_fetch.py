@@ -385,6 +385,96 @@ def _mark_failed_locked(row, reason):
 _last_persisted_terminal_snapshot = {}
 
 
+# Any requested_at below this is treated as absent rather than as a date. A
+# fetch cannot predate the software, so a value down here is a default, a
+# sentinel or corruption - and deleting a row because its timestamp is
+# unreadable is the one direction this must not fail in. 1 Jan 2000.
+_PLAUSIBLE_EPOCH = 946684800
+
+
+def prune_fetch_history_locked(queue, now=None):
+    """Forget terminal fetch rows that are too old, or too many. Returns the
+    ids dropped. Must be called with the fetch lock already held.
+
+    #221: complete/failed rows were never removed. MAX_UNRESOLVED_FETCHES only
+    bounds pending and in-flight rows, and the only way to drop a finished one
+    was the dashboard's delete button, one at a time. Meanwhile the whole
+    history is reloaded into memory at every startup (oserve.py), returned in
+    full by /api/fetch/status with no pagination - which web/app.js polls every
+    4 seconds regardless of the active tab - and scanned linearly for every
+    inbound DCC SEND. All three get slower for the life of the process.
+
+    AGE FIRST, COUNT AS A BACKSTOP. An age cap matches what the Downloads table
+    is for: a recent record of what happened, not an archive. A count cap alone
+    discards arbitrarily - whichever rows happen to be oldest when the cap is
+    hit, whether they are an hour old or a month. The count is kept as a
+    backstop for a burst of activity inside the window, which age cannot bound.
+
+    IN-FLIGHT ROWS ARE NEVER TOUCHED, at any age. A pending row that has sat
+    for a month is a bug worth seeing, not history worth forgetting, and
+    dropping it here would silently unbook work the dispatcher still owns.
+
+    THE FILE ON DISK IS NOT DELETED. Only the daemon's memory of which fetch
+    produced it. Removing somebody's downloaded album because a bookkeeping row
+    expired would be a surprising thing for a retention setting to do; the file
+    stays under FETCHED_FILES_DIR where the operator can see and remove it. The
+    trade is that a pruned row's file is no longer deletable from the dashboard,
+    which is the lesser of the two.
+    """
+    import time as _time
+
+    now = _time.time() if now is None else now
+    days = float(getattr(config, "FETCH_HISTORY_DAYS", 30) or 0)
+    max_rows = int(getattr(config, "FETCH_HISTORY_MAX_ROWS", 500) or 0)
+
+    terminal = [(rid, row) for rid, row in queue.items()
+                if row.get("state") in ("complete", "failed")]
+    dropped = []
+
+    if days > 0:
+        cutoff = now - (days * 86400)
+        for rid, row in terminal:
+            # A row with no USABLE timestamp is kept: it predates
+            # requested_at, and treating "unknown" as "infinitely old" would
+            # delete exactly the rows whose age cannot be established.
+            #
+            # Zero counts as unusable, not as 1970. Rows built before this
+            # field existed - and every fixture that omits it - carry 0, and
+            # the first version of this dropped all of them on sight.
+            requested_at = row.get("requested_at")
+            usable = (isinstance(requested_at, (int, float))
+                      and requested_at >= _PLAUSIBLE_EPOCH)
+            if usable and requested_at < cutoff:
+                dropped.append(rid)
+
+    if max_rows > 0:
+        survivors = [(rid, row) for rid, row in terminal if rid not in dropped]
+        excess = len(survivors) - max_rows
+        if excess > 0:
+            # Oldest first, and rows with no timestamp sort oldest - here that
+            # is right: the count cap has to drop SOMETHING, and an undateable
+            # row is the least useful thing to keep.
+            survivors.sort(key=lambda pair: pair[1].get("requested_at") or 0)
+            dropped.extend(rid for rid, _row in survivors[:excess])
+
+    for rid in dropped:
+        queue.pop(rid, None)
+    if dropped:
+        print(f"[FETCH-HISTORY] Pruned {len(dropped)} finished fetch row(s); "
+              f"the files themselves are untouched.")
+    return dropped
+
+
+def prune_fetch_history():
+    """prune_fetch_history_locked() for a caller that does not hold the lock -
+    oserve.py's startup, which loads the history back from disk and would
+    otherwise carry however much of it accumulated before this existed."""
+    with _fetch_lock():
+        dropped = prune_fetch_history_locked(config.fetch_queue)
+    if dropped:
+        persist_fetch_history()
+    return dropped
+
 def _persist_fetch_history_locked(queue):
     """Snapshot every 'complete'/'failed' row and write it to disk, if the
     CONTENT of that snapshot has changed since the last one written. Must be
@@ -406,6 +496,9 @@ def _persist_fetch_history_locked(queue):
     simply do not exist after a restart, same as before this change.
     """
     global _last_persisted_terminal_snapshot
+    # #221: on the same tick that already holds the lock and already walks the
+    # dict, so retention costs one comparison per row and no new machinery.
+    prune_fetch_history_locked(queue)
     terminal = {rid: dict(row) for rid, row in queue.items()
                 if row.get("state") in ("complete", "failed")}
     if terminal == _last_persisted_terminal_snapshot:
