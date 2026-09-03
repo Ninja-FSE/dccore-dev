@@ -52,3 +52,9 @@
 # that ships. Before this rule the internal one was in the archive, and it
 # still named a real channel.
 docs/UPDATES.md    export-ignore
+
+# docs/PUBLIC-REPO-WORKFLOW.md documents this split itself: it names this
+# repository directly, by handle, and references internal issue and PR
+# numbers that resolve to nothing outside it. It exists to be read by the
+# two of us, not shipped.
+docs/PUBLIC-REPO-WORKFLOW.md    export-ignore

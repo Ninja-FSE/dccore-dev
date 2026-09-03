@@ -33,7 +33,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Files that exist to be read by the two of us and must not reach the public
 # tree. Each needs an export-ignore rule in .gitattributes.
-INTERNAL = ("docs/UPDATES.md",)
+INTERNAL = ("docs/UPDATES.md", "docs/PUBLIC-REPO-WORKFLOW.md")
 
 
 def archive_members():
