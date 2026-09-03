@@ -1173,19 +1173,21 @@ SETTINGS_CATEGORIES = (
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
-                                                "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE"]),
+                                                "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
+                                                "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES"]),
     ("advertising",   "Advertising & search",  ["THEME", "CUSTOM_THEME_BORDER", "CUSTOM_THEME_SEPARATOR",
                                                 "CUSTOM_THEME_TEXTBOX", "CUSTOM_THEME_VALUE",
                                                 "CUSTOM_THEME_ALERT", "CUSTOM_THEME_ACCENT",
                                                 "ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
-                                                "BROADCAST_SEARCH_COOLDOWN"]),
+                                                "BROADCAST_SEARCH_COOLDOWN",
+                                                "CTCP_VERSION_REPLY"]),
     ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME", "FLOOD_BAN_SECONDS",
                                                 "MAX_SEND_FAILS", "RAR_TIMEOUT", "LIST_UPDATE_TIMEOUT"]),
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE",
-                                                "SCRIPT_VERSION"]),
+                                                "SCRIPT_VERSION", "PROJECT_URL"]),
 )
 
 # A human-readable label per setting, since the raw config.py name
@@ -1241,6 +1243,8 @@ SETTINGS_LABELS = {
     "FETCH_HISTORY_FILE": "Fetch history file",
     "LIST_SIZE_FILE": "List size file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
+    "LIST_HEADER_FILE": "List banner file",
+    "LIST_HEADER_MAX_BYTES": "List banner size limit (bytes)",
 
     "THEME": "Colour theme",
     "CUSTOM_THEME_BORDER": "Custom theme: border colour",
@@ -1252,6 +1256,7 @@ SETTINGS_LABELS = {
     "ANNOUNCE_INTERVAL": "Advert interval (seconds)",
     "BROADCAST_SEARCH_CHANNEL": "Broadcast search channel",
     "BROADCAST_SEARCH_COOLDOWN": "Broadcast search cooldown (seconds)",
+    "CTCP_VERSION_REPLY": "Answer CTCP VERSION",
 
     "MAX_REQUESTS": "Max requests per window",
     "REQUEST_WINDOW": "Request window (seconds)",
@@ -1273,6 +1278,7 @@ SETTINGS_LABELS = {
     "DEBUG_TO_CHANNEL": "Send debug lines to channel",
     "DEBUG_TO_CONSOLE": "Send debug lines to admin console",
     "SCRIPT_VERSION": "Script version",
+    "PROJECT_URL": "Project URL",
 }
 
 

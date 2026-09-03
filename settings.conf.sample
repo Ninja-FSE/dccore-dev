@@ -30,6 +30,22 @@
 
 #SCRIPT_VERSION = DCCore v1.10.0
 
+# Where this bot came from. Defined once because two things say it: the CTCP
+# VERSION reply, and the header of every generated list. Before this there was
+# no project URL anywhere in the tree, so anyone who received a list had no way
+# to find out what produced it.
+#PROJECT_URL = https://github.com/Ninja-FSE/dccore
+
+# Answer CTCP VERSION with SCRIPT_VERSION and PROJECT_URL. Operators who would
+# rather not advertise a version can turn this off; the bot then ignores the
+# query exactly as it did before, rather than answering with something evasive.
+# 
+# The reply is a NOTICE, never a PRIVMSG. That is the CTCP rule, and the reason
+# is practical: two bots that both answer CTCP with a privmsg answer each other
+# forever. It is also why nothing here lands in a channel - the reply goes
+# straight back to whoever asked, and no one else sees it.
+#CTCP_VERSION_REPLY = true
+
 # Names every generated list file ("<LIST_BASE_NAME>-<date>.txt" and its
 # .zip/.rar counterparts). Automatically takes NICKNAME's own value once
 # NICKNAME is set, unless this is given an explicit value of its own first -
@@ -146,6 +162,21 @@
 #STATS_FILE = ./data/stats.txt
 
 #HARD_BANS_FILE = ./data/hard_bans.txt
+
+# The operator's own banner, printed at the top of every generated list above
+# the bot's identity line. Free-form: several lines, ASCII art, a channel name,
+# whatever should greet whoever opens the file. Missing or empty means no
+# banner, which is the normal state for most installs.
+# 
+# A file rather than a settings.conf value because multi-line ASCII art does
+# not survive "key = value", and editing it there would be miserable.
+#LIST_HEADER_FILE = ./data/list_header.txt
+
+# Ceiling on the above. Someone will eventually point LIST_HEADER_FILE at the
+# wrong file, and without a cap that staples an arbitrary number of megabytes
+# onto every list request. Past this the banner is truncated and the run says
+# so, rather than shipping it silently.
+#LIST_HEADER_MAX_BYTES = 8192
 
 # Other bots seen advertising in our channels, and what each last published
 # about its own list. JSON rather than the column format the files above use:

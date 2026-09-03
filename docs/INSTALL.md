@@ -96,6 +96,24 @@ python3 update_list.py
 
 or `!update` from IRC, or the dashboard's **Update list** button. On a large library this takes a while; the advert will report the real file count once it finishes.
 
+### Putting your own banner on it
+
+Every generated list starts with the file count, the request instructions, and a line naming the bot and this project. Below that you can put anything you like — a greeting, your channel, ASCII art — by creating one file:
+
+```bash
+nano data/list_header.txt
+```
+
+Whatever it contains is copied into the top of the `.txt`, `.zip` and `.rar` lists on the next `!update`. There is nothing to enable: the file not existing is the normal state, and means no banner.
+
+Three things worth knowing:
+
+- It is copied **verbatim**, so box-drawing characters and ASCII art survive intact. Nothing is reformatted or stripped.
+- Keep lines to roughly **80 characters**. The folder headings below are drawn to the width of the folder they frame, so a much wider banner reads as broken next to them.
+- It is capped at `LIST_HEADER_MAX_BYTES` (8 KB by default). Past that the banner is truncated and the run says so, rather than quietly stapling a large file onto every list request.
+
+mIRC colour codes work if your audience reads the list in mIRC, but they show as stray characters in a plain text editor — worth deciding which of the two matters more for your channel.
+
 ## Upgrading
 
 Your settings and data are never touched by an upgrade: `settings.conf`, `admin_config.py` and everything under `data/` are gitignored, so updating the code cannot overwrite them. That is also the one thing to watch — see step 4.
