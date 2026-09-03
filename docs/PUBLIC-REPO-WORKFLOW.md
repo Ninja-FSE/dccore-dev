@@ -40,9 +40,12 @@ No GitHub feature does steps 2-4 for you. It's a checklist, not tooling.
    `scripts/capture_adverts.py`, `scripts/function_coverage.py`,
    `tests/uncovered_functions.txt`. Keep anything a shipped file's tests
    depend on (`scripts/gen_settings_sample.py`, `docs/CONVENTIONS.md`).
-3. Swap the changelog: delete `docs/UPDATES.md` (internal, references
-   internal PR numbers and pre-release history that means nothing outside
-   this repo), rename `docs/UPDATES-PUBLIC.md` → `docs/UPDATES.md`. Keep
+3. Swap the changelog: rename `docs/UPDATES-PUBLIC.md` → `docs/UPDATES.md`
+   in the scratch tree. The internal `docs/UPDATES.md` needs no removal
+   step — it carries `export-ignore`, so step 1 never extracted it (#246),
+   and `tests/test_internal_files_do_not_ship.py` fails if that ever stops
+   being true. Do not add an `rm` back: it would be a no-op that sends the
+   next reader looking for a file step 1 was right not to produce. Keep
    `UPDATES-PUBLIC.md` current here as work lands, the same way `UPDATES.md`
    is kept current — write the public-facing entry in the same PR as the
    fix, not as an afterthought at release time.
