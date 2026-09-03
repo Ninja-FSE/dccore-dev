@@ -373,6 +373,16 @@
 # Mute in seconds on the first flood violation
 #MUTE_TIME = 30
 
+# Escalation ban, in seconds, for someone who keeps flooding while already
+# muted. This used to expire at local midnight, which made the punishment
+# depend on the clock rather than the offence: trip it at 00:01 and you were
+# banned for nearly a day, trip it at 23:59 and you were banned for seconds.
+# Same offence, arbitrary sentence. A fixed duration is predictable for the
+# operator and for the person banned. Note it does NOT self-escalate the way
+# midnight accidentally did - repeat offenders are a hard-ban case (!ban).
+# Ban in seconds when someone floods while muted
+#FLOOD_BAN_SECONDS = 3600
+
 # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
 #MAX_SEND_FAILS = 3
 
