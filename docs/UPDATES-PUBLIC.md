@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Saving a setting from the dashboard no longer shows your other settings as blank.** Nickname, admin nick and channels could come back empty on the Settings page straight after a save - alarming, and never true: the file always had them, and a refresh showed them again. The page now waits for the reload it just triggered instead of reporting its halfway state.
+
+- **A debug channel set from the dashboard is joined straight away.** It used to save correctly, report "Rehash started", and not be joined until the next restart - with nothing to tell you it had been skipped.
+
+- **A rehash cannot leave a running bot with no nickname, channels or admin.** If `settings.conf` cannot be read at the moment you rehash - antivirus holding it open, a network share blinking, an editor mid-save - the daemon now keeps the values it is already running with and says so, instead of quietly carrying on with none.
+
+- **`settings.conf` stays tidy when the dashboard adds a setting to it.** The explanatory comment block is written once rather than again on every save, blank lines no longer accumulate, and the file ends with a newline.
+
 - **Channels with a space after the comma now all get joined.** `#one, #two, #three` used to join `#one` and silently drop the rest - IRC treats the space as the end of the list - while the bot went on advertising in channels it had never entered. Write the list however reads best; it works either way now.
 
 - **The bot now uses the nickname the server actually gave it.** If your nickname is longer than the network allows, the server shortens it silently - Undernet's limit is 12 characters. DCCore used to carry on believing the longer name, so it advertised a nick nobody could message. It now reads its real name back from the server, says so, and tells you the limit that caused it. Requests pasted from your existing list keep working either way.

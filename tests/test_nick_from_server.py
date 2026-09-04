@@ -3,9 +3,9 @@
 WHAT WENT WRONG
 
 A nickname longer than the server's NICKLEN is not refused - it is silently
-SHORTENED. Undernet allows 12, so a bot configured as "Samoth-DCCore"
-registered as "Samoth-DCCor" and the daemon never noticed: it logged
-"CURRENT_NICK settled as: Samoth-DCCore", advertised "@Samoth-DCCore" - a nick
+SHORTENED. Undernet allows 12, so a bot configured as "DCCore-Server"
+registered as "DCCore-Serve" and the daemon never noticed: it logged
+"CURRENT_NICK settled as: DCCore-Server", advertised "@DCCore-Server" - a nick
 nobody could PM or DCC - and answered to a name it did not have.
 
 433 (nick already in use) was handled, because that one announces itself.
@@ -43,8 +43,8 @@ class TheNickComesFromTheNumericsTarget(unittest.TestCase):
         """Real 001 lines from three networks. The wording differs on every
         one of them; the target position does not."""
         cases = [
-            (":irc.undernet.org 001 Samoth-DCCor "
-             ":Welcome to the Undernet IRC Network", "Samoth-DCCor"),
+            (":irc.undernet.org 001 DCCore-Serve "
+             ":Welcome to the Undernet IRC Network", "DCCore-Serve"),
             (":hitchcock.freenode.net 001 MyBot "
              ":Welcome to the freenode Internet Relay Chat Network MyBot", "MyBot"),
             (":irc.local 001 Short :Welcome", "Short"),
@@ -55,10 +55,10 @@ class TheNickComesFromTheNumericsTarget(unittest.TestCase):
 
     def test_a_truncated_nick_is_reported_as_the_server_gave_it(self):
         """The actual defect: 13 characters configured, 12 registered."""
-        line = ":irc.undernet.org 001 Samoth-DCCor :Welcome"
+        line = ":irc.undernet.org 001 DCCore-Serve :Welcome"
 
-        self.assertEqual(irc.numeric_target(line), "Samoth-DCCor")
-        self.assertNotEqual(irc.numeric_target(line), "Samoth-DCCore")
+        self.assertEqual(irc.numeric_target(line), "DCCore-Serve")
+        self.assertNotEqual(irc.numeric_target(line), "DCCore-Server")
 
     def test_the_unregistered_star_is_not_a_nick(self):
         """Before registration completes a server addresses an unknown client
@@ -129,20 +129,20 @@ class AdoptingTheServersNickKeepsTheListWorking(DCCoreTestCase):
     """
 
     def test_the_bot_answers_to_both_names(self):
-        self.set_config(NICKNAME="Samoth-DCCor",        # what the server gave
-                        ORIGINAL_NICK="Samoth-DCCore")  # what the list carries
+        self.set_config(NICKNAME="DCCore-Serve",        # what the server gave
+                        ORIGINAL_NICK="DCCore-Server")  # what the list carries
 
         aliases = irc.get_bot_aliases()
 
-        self.assertIn("samoth-dccor", aliases)
-        self.assertIn("samoth-dccore", aliases)
+        self.assertIn("dccore-serve", aliases)
+        self.assertIn("dccore-server", aliases)
 
     def test_the_live_nick_comes_first(self):
         """get_bot_aliases() promises current nick first, and the advert
         publishes the live one - which after this fix is a nick that exists."""
-        self.set_config(NICKNAME="Samoth-DCCor", ORIGINAL_NICK="Samoth-DCCore")
+        self.set_config(NICKNAME="DCCore-Serve", ORIGINAL_NICK="DCCore-Server")
 
-        self.assertEqual(irc.get_bot_aliases()[0], "samoth-dccor")
+        self.assertEqual(irc.get_bot_aliases()[0], "dccore-serve")
 
     def test_nothing_changes_when_the_server_agrees(self):
         """Control. The overwhelmingly common case is a nickname that fits, and

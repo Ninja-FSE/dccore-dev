@@ -438,6 +438,25 @@ CORE_MODULES = ('admin_config', 'defaults', 'list', 'dcc', 'announce',
                 'security', 'db', 'stats_mgr')
 
 
+def _channels_to_sync(config):
+    """Every channel the bot should be in: CHANNEL, plus the debug channel.
+
+    Lowercased, because the JOIN/PART comparison this feeds is by name and IRC
+    channel names are case-insensitive.
+
+    DEBUG_CHANNEL is a channel the daemon joins (irc.py, at connect) and talks
+    in (announce.send_debug), so it is part of "where the bot should be" even
+    though it is deliberately NOT in settings_file.REQUIRED and is blank on a
+    fresh install. Blank means no debug channel, not a channel named "".
+    """
+    raw = str(getattr(config, "CHANNEL", "") or "")
+    chans = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    debug_chan = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip().lower()
+    if debug_chan and debug_chan not in chans:
+        chans.append(debug_chan)
+    return chans
+
+
 def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
     """Reload the daemon's modules in place and return the names reloaded.
 
@@ -461,19 +480,58 @@ def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
     out of that scope. `sys` really is module-level; `importlib` was not.
     """
     import importlib
+    import settings_file
 
-    reloaded = []
-    for mod_name in modules:
-        if mod_name in sys.modules:
-            importlib.reload(sys.modules[mod_name])
-            reloaded.append(mod_name)
+    # What the operator's configuration actually resolved to BEFORE the reload.
+    # Two separate jobs below: the lock stops other threads seeing this window,
+    # and this snapshot is the backstop for when the window does not close
+    # cleanly.
+    live = sys.modules.get('defaults')
+    before = ({name: getattr(live, name, None) for name in settings_file.REQUIRED}
+              if live is not None else {})
 
-    # Last, and separately: reloading this module rebinds the very names the
-    # caller is executing out of. The running frame keeps its old code object,
-    # which is what makes this safe here and would not be if it ran first.
-    if reload_self and 'commands' in sys.modules:
-        importlib.reload(sys.modules['commands'])
-        reloaded.append('commands')
+    # Everything from here to the end of the reload is one window as far as any
+    # other thread is concerned - see runtime.config_reload_lock's own comment
+    # for what is observable inside it and how it was found.
+    with runtime.config_reload_lock:
+        reloaded = []
+        for mod_name in modules:
+            if mod_name in sys.modules:
+                importlib.reload(sys.modules[mod_name])
+                reloaded.append(mod_name)
+
+        # The lock hides the window; it cannot help if the window never closes.
+        # settings_file.apply_to() is deliberately forgiving - an unreadable
+        # settings.conf is logged and the built-in defaults are kept, which is
+        # right at STARTUP (oserve.startup()'s REQUIRED gate then refuses to
+        # boot and the operator is told why) and wrong here, because a rehash
+        # has no such gate: the daemon is already running and would simply
+        # carry on with no nickname, no channels and no admin. A file that was
+        # readable a moment ago and is not now - antivirus holding it open,
+        # a network share blinking, an editor mid-save - would silently
+        # de-configure a live bot.
+        #
+        # settings_file.REQUIRED ONLY, and only a value that WAS set and came
+        # back blank. That narrowness is what stops this becoming a ratchet
+        # that prevents a rehash from unsetting anything: every other setting
+        # reverts to its shipped default normally, which is what a rehash is
+        # for. A blank REQUIRED setting is the one state that is never
+        # legitimate - save() refuses to write one (SettingsWriteError) and
+        # oserve.startup() refuses to boot with one - so restoring it can
+        # never overwrite something an operator actually asked for.
+        for name, value in before.items():
+            if value and not getattr(live, name, None):
+                setattr(live, name, value)
+                print(f"[REHASH CONFIG] {name} came back blank from the reload, so the "
+                      f"value that was already running was kept. Check that settings.conf "
+                      f"is readable - the next restart will use whatever it says.")
+
+        # Last, and separately: reloading this module rebinds the very names the
+        # caller is executing out of. The running frame keeps its old code object,
+        # which is what makes this safe here and would not be if it ran first.
+        if reload_self and 'commands' in sys.modules:
+            importlib.reload(sys.modules['commands'])
+            reloaded.append('commands')
     return reloaded
 
 
@@ -531,8 +589,20 @@ def handle_rehash_request(user, target_chan, authorised=False):
     # rar_queue and download_queue, probed in the same removed loop, were never
     # real container names anywhere in this codebase.
 
-    # Keep the old channel list, for the JOIN/PART comparison
-    old_chans = [c.strip().lower() for c in config.CHANNEL.split(",") if c.strip()]
+    # Keep the old channel list, for the JOIN/PART comparison.
+    #
+    # The debug channel belongs in BOTH sides of that comparison, and used to be
+    # in neither. irc.py joins it once, at connect, right after the main
+    # channels; the sync below built its list from CHANNEL alone and mentioned
+    # DEBUG_CHANNEL only to avoid PARTing it. So an operator who set a debug
+    # channel on the dashboard was told "Rehash started", watched the setting
+    # save correctly, and the bot never joined - nothing to see in any log,
+    # because nothing failed. Reported from a real install.
+    #
+    # Symmetry is what keeps it quiet: present on both sides when it has not
+    # changed, so an unchanged debug channel is not re-JOINed with a "due to new
+    # configuration layout!" line on every single rehash.
+    old_chans = _channels_to_sync(config)
 
     # Pause the advert for the moment
     announce.is_ready = False
@@ -716,7 +786,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
         irc_sock = getattr(oserve, 'irc_connection', None)
         
         if irc_sock:
-            new_chans = [c.strip().lower() for c in config.CHANNEL.split(",") if c.strip()]
+            new_chans = _channels_to_sync(config)
             
             for chan in new_chans:
                 if chan not in old_chans:

@@ -541,6 +541,17 @@ def _check_writable(name, value, namespace, types):
     return text, value
 
 
+# The explanation appended above a setting that was not already in the file.
+# A tuple, and consulted rather than retyped, so "is it already there?" and
+# "what do we write?" cannot drift into two different answers - which is how
+# a real install came to have it twice.
+_ADDED_HEADER = (
+    "# Added by DCCore because these settings were not already",
+    "# in this file. Section headers are cosmetic; a setting",
+    "# works wherever it appears.",
+)
+
+
 def _rewrite(existing, wanted):
     """The new text, editing lines in place and appending only what is missing.
 
@@ -606,16 +617,36 @@ def _rewrite(existing, wanted):
 
     missing = [name for name in wanted if name not in edited]
     if missing:
-        tail = [] if existing.endswith("\n") or not existing else [""]
-        tail.append("")
-        tail.append("# Added by DCCore because these settings were not already")
-        tail.append("# in this file. Section headers are cosmetic; a setting")
-        tail.append("# works wherever it appears.")
+        # Exactly one blank line between what the file already says and what
+        # is being appended, however the file happened to end. The old form
+        # added a blank line to whatever split("\n") had already left
+        # behind, so a file ending with a newline - which is to say every file
+        # this function has ever written - grew two blank lines per save.
+        while lines and not lines[-1].strip():
+            lines.pop()
+        tail = [""]
+
+        # ONCE. The header is prose explaining where these lines came from,
+        # and a second copy explains nothing. A real install ended up with it
+        # twice: the operator saved one setting from the dashboard and the
+        # block was appended again underneath the one already there, because
+        # this only ever asked whether a SETTING was missing and never
+        # whether the EXPLANATION was.
+        if not any(line.strip() == _ADDED_HEADER[0] for line in lines):
+            tail.extend(_ADDED_HEADER)
         for name in missing:
             tail.append("%s = %s" % (name, wanted[name]))
         lines.extend(tail)
 
-    return "\n".join(lines), sorted(edited), sorted(missing)
+    text = "\n".join(lines)
+    # A text file ends with a newline. The append path above could not
+    # produce one - it extended the list past split("\n")'s trailing
+    # "" - so every settings.conf that had ever had a setting added to it
+    # ended mid-line. Harmless to parse() and wrong for everything else that
+    # reads it, starting with the next append onto the end of that line.
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text, sorted(edited), sorted(missing)
 
 def _atomic_write(path, text):
     """Write `text` to `path` atomically, so a reader sees the whole old file
