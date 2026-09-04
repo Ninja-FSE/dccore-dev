@@ -41,16 +41,16 @@ class TheJoinLineNeverContainsASpace(DCCoreTestCase):
     file is a way of arriving at this one."""
 
     def test_spaces_after_commas_are_tolerated(self):
-        self.set_config(CHANNEL="#Mp3Passion, #mp3servers, #mp3download")
+        self.set_config(CHANNEL="#Music, #servers, #downloads")
 
         self.assertEqual(irc.join_target_list(),
-                         "#Mp3Passion,#mp3servers,#mp3download")
+                         "#Music,#servers,#downloads")
         self.assertNotIn(" ", irc.join_target_list())
 
     def test_the_real_reported_configuration(self):
         """Six channels, one joined. Verbatim from the install that found it."""
-        self.set_config(CHANNEL="#Mp3Passion, #mp3servers, #mp3download, "
-                                "#mp3-best-of, #mp3country, #mp3Albums4u")
+        self.set_config(CHANNEL="#Music, #servers, #downloads, "
+                                "#best-of, #country, #albums")
 
         self.assertEqual(len(irc.configured_channels()), 6)
         self.assertNotIn(" ", irc.join_target_list())
@@ -78,9 +78,9 @@ class TheJoinLineNeverContainsASpace(DCCoreTestCase):
     def test_case_is_left_alone(self):
         """Channel names are case-insensitive on the wire, but the operator
         typed what they typed and it appears in the advert."""
-        self.set_config(CHANNEL="#Mp3Passion, #mp3servers")
+        self.set_config(CHANNEL="#Music, #servers")
 
-        self.assertEqual(irc.configured_channels()[0], "#Mp3Passion")
+        self.assertEqual(irc.configured_channels()[0], "#Music")
 
 
 class TheOrdinaryCasesStillWork(DCCoreTestCase):

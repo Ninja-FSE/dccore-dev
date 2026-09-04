@@ -4,6 +4,42 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🖥️ A rehash no longer shows - or leaves - a configuration the daemon does not have
+One operator saved one setting from the dashboard. Four defects fell out of it, and every one of them was silent.
+
+**The Settings page came back with Nickname, Admin nick(s) and Channels EMPTY.** Nothing was lost - `settings.conf` had all three the entire time, and a refresh showed them - but the page an operator uses to check their configuration told them their configuration was gone.
+
+`importlib.reload(defaults)` re-executes `defaults.py` from the top. That file is a long list of literal assignments (`NICKNAME = None`, `CHANNEL = None`, `ADMIN_NICK = None`) with `settings_file.apply_to(globals())` only at the very END of it, so for the whole of a reload every configured setting is transiently back to its shipped default. Measured against the reporting install's own file: **a reader looping on `config.NICKNAME` during a rehash saw it blank for 52% of the window.** Not a narrow race - half of it.
+
+Saving from the dashboard starts the rehash on a background thread and returns at once, and the browser re-fetches `/api/settings` immediately, so it lands inside that window nearly every time. Only the three `REQUIRED` settings *looked* wrong, which is why it took a real install to find: every other setting on that page has a shipped default that happens to match what most operators run (`SERVER`, `WEBUI_HOST`), so it renders identically whether or not `settings.conf` has been applied yet.
+
+`runtime.config_reload_lock` is the fix, and it lives in `runtime.py` for that module's founding reason - a lock allocated in a module `!rehash` reloads is a new lock every rehash, and this one is held *by* the rehash. `RLock`, because the rehash thread holds it across the reload and calls `announce.send_debug()` inside it, which fans out to the web console sink - webserver code, same thread, same lock.
+
+**And a backstop, for when the window does not close.** `settings_file.apply_to()` is deliberately forgiving about an unreadable `settings.conf`: it logs and keeps the built-in defaults. That is right at startup, where `oserve.startup()`'s `REQUIRED` gate then refuses to boot and says why. It is wrong at rehash, where there is no gate - the daemon is already connected and would simply carry on with no nickname, no channels and no admin. A file readable a moment ago and not now (antivirus holding it open, a network share blinking, an editor mid-save) would silently de-configure a live bot. `reload_modules_in_order()` now snapshots `settings_file.REQUIRED` before the reload and puts back anything that came back blank, loudly. Narrow on purpose: `REQUIRED` only, and only a value that *was* set - anything wider would be a ratchet no rehash could ever unset.
+
+### 📡 The debug channel is joined by a rehash, not only by a reconnect
+Same report. The operator typed a debug channel into the dashboard, pressed Save, was told "Rehash started", and the bot never joined it.
+
+`irc.py` joins `DEBUG_CHANNEL` once, at connect, right after the main channels. The rehash's channel sync built its list from `CHANNEL` alone and mentioned `DEBUG_CHANNEL` in exactly one place - the test that stops it being PARTed. So setting a debug channel on a running bot reported success and did nothing until the next restart, with no way to tell from any log that anything had been skipped.
+
+`_channels_to_sync()` now supplies **both** sides of the JOIN/PART comparison, and the symmetry is the point: put the debug channel only in `new_chans` and the reported bug is fixed at the cost of re-JOINing that channel, with a *"due to new configuration layout!"* line, on every rehash for ever.
+
+It also replaces a bare `config.CHANNEL.split(",")` on both sides - an `AttributeError` on `None`, thrown on the rehash thread between the reload and the end of the channel sync.
+
+### 📝 settings.conf stops growing a new header block, and ends with a newline
+The same save, seen from the file. `_rewrite()`'s append branch asked whether a SETTING was missing and never whether the EXPLANATION was, so the three-line *"Added by DCCore because these settings were not already in this file"* block was written again underneath the copy already there - twice in the reporting install's file, and once more per save after that. It also appended past the empty string `split("\n")` leaves behind, so every `settings.conf` that had ever had a setting added to it ended mid-line.
+
+Neither breaks `parse()`. Both are wrong in a file an operator opens and reads, and both compound - the blank lines came in pairs, one per save.
+
+The header is now a single `_ADDED_HEADER` tuple, consulted rather than retyped, so "is it already there?" and "what do we write?" cannot drift into two different answers - which is how it came to be there twice.
+
+### 🧹 One operator's nickname and channels are out of the published tree
+Found while writing the tests above. `.gitattributes` export-ignores `docs/UPDATES.md` and `docs/PUBLIC-REPO-WORKFLOW.md` and **nothing else** - so `tests/` and `irc.py` ship to the public repository verbatim, and three test files plus two `irc.py` comments carried a real operator's nickname and their six real channel names, written in as "the reported case".
+
+Replaced with invented ones that preserve the property each test rests on: the long nick is still 13 characters and its truncation still 12, because that arithmetic *is* the NICKLEN test; the six-channel list is still six; the mixed-case channel still has a capital in it.
+
+The `flac-serv-*` hits elsewhere in the tree are deliberate and stay: they are the legacy side-file names `db.migrate_legacy_side_files()` matches byte-for-byte, and `defaults.py` already says so.
+
 ### 🚪 A space after a comma no longer costs you every channel but the first
 Reported from a real install: six channels configured, one joined, and a log line saying *"Activating the advert despite 5 unconfirmed channel(s)"* that never connected the two.
 

@@ -1195,9 +1195,9 @@ def irc_loop():
                     #
                     # A nickname longer than the server's NICKLEN is not
                     # refused - it is silently SHORTENED. Undernet allows 12,
-                    # so "Samoth-DCCore" registered as "Samoth-DCCor" while the
+                    # so "DCCore-Server" registered as "DCCore-Serve" while the
                     # daemon went on believing the longer name: it advertised
-                    # "@Samoth-DCCore", a nick nobody could PM or DCC, and said
+                    # "@DCCore-Server", a nick nobody could PM or DCC, and said
                     # "CURRENT_NICK settled as" the name it had never had. 433
                     # was handled; this was not, because nothing failed.
                     #

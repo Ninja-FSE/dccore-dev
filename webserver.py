@@ -69,6 +69,7 @@ import time
 import adminchat
 import defaults as config
 import platform_compat
+import runtime
 
 try:
     from flask import Flask, jsonify, redirect, request, send_from_directory, session
@@ -1319,8 +1320,25 @@ def build_settings_payload():
     still reachable rather than silently missing from the page (see
     SettingsPayloadTests' completeness guard, which currently keeps this at
     zero entries by keeping SETTINGS_CATEGORIES exhaustive).
+
+    Read under runtime.config_reload_lock, because this page is what found the
+    reload window (see that lock's comment). Saving a setting from here starts
+    a rehash on a background thread and returns immediately; the browser then
+    re-fetches this endpoint at once and, without the lock, read config while
+    importlib.reload(defaults) was part way through re-executing it - so the
+    Settings page rendered Nickname, Admin nick(s) and Channels blank on a
+    daemon whose settings.conf had all three. The lock makes this wait for the
+    reload it just triggered rather than reporting its halfway state.
     """
     import settings_file
+    with runtime.config_reload_lock:
+        return _settings_payload_unlocked(settings_file)
+
+
+def _settings_payload_unlocked(settings_file):
+    """build_settings_payload()'s body, split out only so the lock above wraps
+    one expression and cannot be left un-taken by a later edit adding an early
+    return."""
     types = settings_file.declared_types(vars(config))
     categories = []
     seen = set()

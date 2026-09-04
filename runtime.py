@@ -115,6 +115,39 @@ debug_drain_guard  = threading.Lock()  # announce.py's single-drain-worker start
 debug_sinks_lock   = threading.Lock()  # announce.py's admin-console debug sink list
 disk_lock          = threading.Lock()  # db.py's serialised on-disk writes
 
+# The reload window, which is not only about rebinding.
+#
+# importlib.reload(defaults) re-executes defaults.py from the top, and that
+# file is a list of literal assignments (NICKNAME = None, CHANNEL = None, ...)
+# with `settings_file.apply_to(globals())` only at the very END. So for the
+# whole of a reload every setting an operator configured is transiently back
+# to its shipped default - not corrupted, just not applied yet.
+#
+# Measured on a real install's file: a reader looping on config.NICKNAME
+# during !rehash saw it blank for 52% of the reload. That is not a narrow
+# race to reason away; it is half the window.
+#
+# Found from the dashboard. An operator saved DEBUG_CHANNEL, the browser
+# re-fetched /api/settings the instant the response said "Rehash started",
+# and the Settings page came back with Nickname, Admin nick(s) and Channels
+# EMPTY. Nothing was lost - settings.conf was intact the whole time and a
+# refresh showed the real values - but the page an operator uses to check
+# their configuration told them their configuration was gone.
+#
+# Only the three REQUIRED settings looked wrong, which is why it took a real
+# install to notice: every other setting on that page has a shipped default
+# that happens to match what most operators run (SERVER, WEBUI_HOST), so it
+# renders identically whether or not settings.conf has been applied yet.
+#
+# RLock, not Lock: the rehash thread holds this across the reload and calls
+# announce.send_debug() inside it, which fans out to the web console sink -
+# webserver code, on the same thread, reaching for the same lock.
+#
+# Here rather than in commands.py for this module's founding reason: a lock
+# allocated in a module that !rehash reloads is a NEW lock every rehash, and
+# this one is held BY the rehash.
+config_reload_lock = threading.RLock()
+
 
 # Other bots advertising in our channels ------------------------------------
 # nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",
