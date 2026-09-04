@@ -21,6 +21,31 @@ The advert loop was unaffected, because `announce.py` strips each entry as it go
 
 `join_target_list()` normalises before sending, so what an operator typed works as written. 10 tests, mutation-verified - putting `config.CHANNEL` back into the JOIN fails at once - and including a control that a list with no spaces passes through untouched, so this is a repair and not a change of behaviour.
 
+### 📛 The bot takes its nickname from the server, not from config
+Found on a real install. A nickname longer than the server's `NICKLEN` is not refused - it is silently **shortened**. Undernet allows 12, so `Samoth-DCCore` registered as `Samoth-DCCor` and the daemon never noticed: it logged *"CURRENT_NICK settled as: Samoth-DCCore"*, advertised `@Samoth-DCCore` - a nick nobody could PM or DCC - and went on believing a name it had never had. `433` was handled because it announces itself; truncation does not, so nothing failed and nothing caught it.
+
+**The nick now comes from the numeric's target field.** Every numeric reply is `:<prefix> <code> <target> ...` and for a registered client `<target>` *is* its nick - RFC 1459/2812 message structure rather than a courtesy, so every IRCd does it. What varies is RPL_WELCOME's *text*, which each network writes as it likes, so this reads the field and never the sentence.
+
+**And `005` says why.** Nothing read RPL_ISUPPORT before, so the limit the server publishes was there and unused. `isupport_nicklen()` reads it, and the daemon can now name the reason instead of leaving an operator to notice their bot is called something else.
+
+The shortened name goes into `NICKNAME` only - `ORIGINAL_NICK` keeps the configured value. That is what keeps the master list working: it is built by a subprocess importing fresh config, so its request lines carry the configured name, and `get_bot_aliases()` already answers to both because it was written for the same divergence after a `433`.
+
+13 tests, against real `001` lines from three networks. The negatives matter more than the positives and are mutation-verified: a forged `PRIVMSG` carrying `001` must not rename the bot (unanchored matching once read `!DCCore 001 - Enter Sandman.flac` as a numeric), the pre-registration `*` target is not a nick, `NICKLEN` in the trailing prose is not a limit, and `MAXNICKLEN=` is not `NICKLEN=`.
+### 🧭 Turning the Console off no longer disables the whole dashboard
+Reported from a real install, running the shipped default. `WEBUI_CONSOLE_ENABLED` is off, so `/api/console/log` answers 404, so `disableConsoleUi()` ran - and it **removed** `#view-console` from the page.
+
+`activateView()` walks every key in `views` and calls `getElementById("view-" + key).classList` on each. With the section gone that is a null dereference, and it threw on **every view switch**, before the per-view loaders at the bottom of the function. So the symptom was not a missing Console: it was Settings stuck on "Loading" for ever, and Queue, Stats and Downloads quietly refusing to refresh. One disabled feature disabling the entire dashboard.
+
+The nav button is hidden now and the section stays in the DOM. `activateView()` also checks for null before dereferencing - one absent section must not take the router with it, whatever removes it next time.
+
+Two structural guards in `tests/test_web_assets.py`, both mutation-verified against the exact defect. Neither can prove the navigation works - nothing here executes JavaScript - but they refuse the move that broke it: deleting a section the router still looks up, and dereferencing that lookup without a check.
+### 🪟 The Windows instructions name a command Windows has
+Reported from a real install: someone following the setup on Windows was told to run `python3 configure.py`. A python.org install gives you `py` and `python` and **not** `python3` - and Windows 10 and 11 ship an App Execution Alias for that exact name, so typing it opens the Microsoft Store or prints "Python was not found" on a machine where Python is installed and working perfectly. A confusing failure at the very first step, from a document written on Linux.
+
+`scripts/windows/start-dccore.bat` never had this problem - it probes `py -3`, then `python`, and says what to install if it finds neither. Only the prose was wrong, which is why nothing caught it: the code was right.
+
+`docs/WINDOWS.md` now uses `py` throughout, with a note on why. `README.md`'s Quick start gains the Windows block - it said "Windows is the same with `start-dccore.bat`", which covered the second and third lines and not the first, the only one that actually breaks. `docs/INSTALL.md` says it once where the command first appears.
+
 ### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
 Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
 

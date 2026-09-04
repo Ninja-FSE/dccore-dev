@@ -27,7 +27,16 @@ on PATH, because WinRAR does not add itself to PATH.
 
 ## Setup
 
-### The fast path: `python3 configure.py`
+### The fast path: `py configure.py`
+
+> **`py`, not `python3`.** A python.org install gives you `py` and
+> `python`; it does not give you `python3`. Worse, Windows 10 and 11 ship
+> an App Execution Alias for that exact name, so typing `python3` opens
+> the Microsoft Store or prints *"Python was not found"* even though
+> Python is installed and working. `py` is the launcher Windows installs
+> for you and is the one to use here. (`python` works too if you ticked
+> *Add python.exe to PATH*.)
+
 
 Asks nickname, IRC server, channel(s), admin nick, the admin console
 password, the music directory (optional - easier to set from the web
