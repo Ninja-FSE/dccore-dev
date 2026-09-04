@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The Windows setup instructions now use `py`**, not `python3`. Windows does not give you a `python3` command, and typing it opens the Microsoft Store instead — so the documented first step failed on a machine where Python was installed and working. The launcher scripts were always right; only the instructions were wrong.
+
 - **A Console page in the web dashboard** — off by default; turn it on with `WEBUI_CONSOLE_ENABLED` if you want it. It gives the admin console's commands and live log in the browser. Worth knowing before you enable it: the dashboard asks only for your password, where the DCC CHAT console also checks your services host, and it has no TLS — so this is the admin command set behind one factor on your LAN rather than two.
 
 ## v1.11.0 — The Several Folders Release
