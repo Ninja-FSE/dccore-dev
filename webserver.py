@@ -1187,7 +1187,8 @@ SETTINGS_CATEGORIES = (
                                                 "MAX_SEND_FAILS", "RAR_TIMEOUT", "LIST_UPDATE_TIMEOUT"]),
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS"]),
-    ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"]),
+    ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
+                                                "WEBUI_CONSOLE_ENABLED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE",
                                                 "SCRIPT_VERSION", "PROJECT_URL"]),
 )
@@ -1276,6 +1277,7 @@ SETTINGS_LABELS = {
     "WEBUI_ENABLED": "Enable web dashboard",
     "WEBUI_HOST": "Host",
     "WEBUI_PORT": "Port",
+    "WEBUI_CONSOLE_ENABLED": "Enable the Console page (remote admin)",
 
     "DEBUG_MODE": "Debug mode",
     "DEBUG_TO_CHANNEL": "Send debug lines to channel",
@@ -1860,12 +1862,30 @@ if HAVE_FLASK:
                 body.get("new_password", ""), body.get("confirm_password", ""))
             return jsonify(result), status
 
+        # 404, not 403, when the Console is off. 403 would confirm the routes
+        # exist and are merely disabled, which tells anyone probing that this
+        # build has an admin console worth coming back for. Not found is the
+        # honest answer to "is there a console here" when there is not one
+        # reachable, and the operator who wants it is looking at the setting,
+        # not at the URL.
+        #
+        # Both routes check independently rather than sharing a decorator: they
+        # are the whole attack surface of this feature, and a decorator applied
+        # to one and forgotten on the other is a silent hole. Two lines each is
+        # cheap enough to not be clever about.
+        def _console_is_available():
+            return bool(getattr(config, "WEBUI_CONSOLE_ENABLED", False))
+
         @app.route("/api/console/log")
         def api_console_log():
+            if not _console_is_available():
+                return jsonify({"error": "not found"}), 404
             return jsonify(build_console_log_payload(request.args.get("since")))
 
         @app.route("/api/console/command", methods=["POST"])
         def api_console_command():
+            if not _console_is_available():
+                return jsonify({"error": "not found"}), 404
             body = json_object(request.get_json(silent=True))
             status, result = build_console_command_result(
                 body.get("command", ""), request.remote_addr)

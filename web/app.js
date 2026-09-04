@@ -19,6 +19,9 @@
   var DOWNLOADS_POLL_MS = 4000;
   var FILELISTS_BOTS_POLL_MS = 4000;
   var CONSOLE_LOG_POLL_MS = 2000;
+  // Held so the poll can stop itself when the Console turns out to be off -
+  // see disableConsoleUi().
+  var consoleLogTimer = null;
   // Matches webserver.py's FILELISTS_DEFAULT_PAGE_SIZE - keep the two in
   // sync if either changes, so a page here always lines up with a page the
   // server actually hands back.
@@ -1613,7 +1616,7 @@
   // when the operator switches to it is worth more than the handful of
   // requests saved by only polling while the tab is visible.
   pollConsoleLog();
-  setInterval(pollConsoleLog, CONSOLE_LOG_POLL_MS);
+  consoleLogTimer = setInterval(pollConsoleLog, CONSOLE_LOG_POLL_MS);
   pollFilelistsBots();
 
   // ---------------------------------------------------------------- Stats
@@ -1737,6 +1740,24 @@
     if (atBottom) { el.consoleLog.scrollTop = el.consoleLog.scrollHeight; }
   }
 
+  // WEBUI_CONSOLE_ENABLED is off: the routes answer 404 and there is nothing
+  // here to show. Take the page's Console away and stop asking.
+  //
+  // Handled as its own case rather than falling into the catch below, because
+  // that one calls markConnection(false) - so a dashboard with the Console
+  // switched off would have reported the whole daemon as unreachable, once
+  // per poll, for ever. The bot is perfectly fine; one feature is not enabled.
+  function disableConsoleUi() {
+    if (consoleLogTimer !== null) {
+      clearInterval(consoleLogTimer);
+      consoleLogTimer = null;
+    }
+    var navButton = document.querySelector(".nav-item[data-view=\"console\"]");
+    if (navButton) { navButton.remove(); }
+    var view = document.getElementById("view-console");
+    if (view) { view.remove(); }
+  }
+
   function pollConsoleLog() {
     fetchJson("/api/console/log?since=" + state.consoleCursor).then(function (payload) {
       markConnection(true);
@@ -1744,7 +1765,13 @@
       appendConsoleLines((payload.lines || []).map(function (line) {
         return consoleLineNode(line.text, line.category, line.time, false);
       }));
-    }).catch(function () { markConnection(false); });
+    }).catch(function (err) {
+      if (err && String(err.message) === "HTTP 404") {
+        disableConsoleUi();
+        return;
+      }
+      markConnection(false);
+    });
   }
 
   el.consoleForm.addEventListener("submit", function (evt) {
