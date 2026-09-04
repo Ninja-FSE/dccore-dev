@@ -136,6 +136,12 @@ changes too, but a restart is the sure thing while you are setting this up.
 
 ## Using it
 
+**Would rather not open a second IRC client at all?** The web dashboard's
+Console page runs the exact same command set and shows the exact same live
+log, in the browser, behind the same password — see the Console entry in
+the dashboard's own nav once `WEBUI_ENABLED` is on. Everything below still
+applies to it except the connection steps, which do not exist over HTTP.
+
 From your IRC client:
 
 ```

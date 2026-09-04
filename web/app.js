@@ -18,6 +18,7 @@
   var UPDATE_LIST_POLL_MS = 3000;
   var DOWNLOADS_POLL_MS = 4000;
   var FILELISTS_BOTS_POLL_MS = 4000;
+  var CONSOLE_LOG_POLL_MS = 2000;
   // Matches webserver.py's FILELISTS_DEFAULT_PAGE_SIZE - keep the two in
   // sync if either changes, so a page here always lines up with a page the
   // server actually hands back.
@@ -30,7 +31,8 @@
     filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
     tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." },
     settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." },
-    stats:     { title: "Stats",      sub: "Everything this bot knows about itself." }
+    stats:     { title: "Stats",      sub: "Everything this bot knows about itself." },
+    console:   { title: "Console",    sub: "The DCC CHAT admin console's commands and live log, in the browser." }
   };
 
   var state = {
@@ -38,7 +40,8 @@
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
     filelistsHistory: [],
     settingsLoaded: false, settingsCategories: [], settingsActiveCategory: null,
-    settingsBaseline: {}, settingsDirty: {}, settingsAdminPasswordSet: false
+    settingsBaseline: {}, settingsDirty: {}, settingsAdminPasswordSet: false,
+    consoleCursor: 0
   };
 
   var el = {
@@ -110,7 +113,11 @@
     settingsSaveBtn:      document.getElementById("settings-save-btn"),
     settingsSavebarText:  document.getElementById("settings-savebar-text"),
     settingsRestartNote:  document.getElementById("settings-restart-note"),
-    settingsSaveStatus:   document.getElementById("settings-save-error")
+    settingsSaveStatus:   document.getElementById("settings-save-error"),
+    consoleLog:     document.getElementById("console-log"),
+    consoleForm:    document.getElementById("console-form"),
+    consoleInput:   document.getElementById("console-input"),
+    consoleRunBtn:  document.getElementById("console-run-btn")
   };
 
   function escapeHtml(value) {
@@ -1599,6 +1606,14 @@
   // while the operator is on any other view - keep the switcher's options
   // fresh regardless of which tab is showing, same reasoning as above.
   setInterval(pollFilelistsBots, FILELISTS_BOTS_POLL_MS);
+
+  // Runs continuously regardless of which view is active, the same as
+  // loadDownloads above: the buffer this polls (webserver._console_log) is
+  // bounded server-side either way, and a console that is already caught up
+  // when the operator switches to it is worth more than the handful of
+  // requests saved by only polling while the tab is visible.
+  pollConsoleLog();
+  setInterval(pollConsoleLog, CONSOLE_LOG_POLL_MS);
   pollFilelistsBots();
 
   // ---------------------------------------------------------------- Stats
@@ -1680,6 +1695,86 @@
       renderStats(data);
     }).catch(function () { markConnection(false); });
   }
+
+  // -------------------------------------------------------------- Console
+  //
+  // Two sources feed the same on-screen log: the ambient debug stream,
+  // polled from GET /api/console/log (matching webserver.py's own LOG/COMMAND
+  // split - see build_console_log_payload()'s docstring), and a command's own
+  // reply, appended straight from what POST /api/console/command returns
+  // rather than waiting for the next poll. Both render through the same
+  // appendConsoleLines(), so the transcript reads as one continuous console
+  // regardless of which endpoint a given line actually came from.
+
+  function consoleLineNode(text, category, timeSeconds, isLocal) {
+    var row = document.createElement("div");
+    row.className = "console-line" + (isLocal ? " is-local" : "");
+    if (category) { row.setAttribute("data-category", category); }
+
+    var stamp = document.createElement("span");
+    stamp.className = "console-line-time";
+    stamp.textContent = timeSeconds
+      ? new Date(timeSeconds * 1000).toLocaleTimeString()
+      : "";
+
+    var body = document.createElement("span");
+    body.className = "console-line-text";
+    body.textContent = text;
+
+    row.appendChild(stamp);
+    row.appendChild(body);
+    return row;
+  }
+
+  function appendConsoleLines(rows) {
+    if (!rows.length) { return; }
+    // Scrolled to (or near) the bottom already? Stay pinned there as new
+    // lines arrive. Already scrolled up reading something older? Leave the
+    // view alone rather than yanking it back down mid-read.
+    var atBottom = el.consoleLog.scrollHeight - el.consoleLog.scrollTop
+                   - el.consoleLog.clientHeight < 24;
+    rows.forEach(function (row) { el.consoleLog.appendChild(row); });
+    if (atBottom) { el.consoleLog.scrollTop = el.consoleLog.scrollHeight; }
+  }
+
+  function pollConsoleLog() {
+    fetchJson("/api/console/log?since=" + state.consoleCursor).then(function (payload) {
+      markConnection(true);
+      state.consoleCursor = payload.cursor;
+      appendConsoleLines((payload.lines || []).map(function (line) {
+        return consoleLineNode(line.text, line.category, line.time, false);
+      }));
+    }).catch(function () { markConnection(false); });
+  }
+
+  el.consoleForm.addEventListener("submit", function (evt) {
+    evt.preventDefault();
+    var command = el.consoleInput.value.trim();
+    if (!command) { return; }
+
+    appendConsoleLines([consoleLineNode("> " + command, null, Date.now() / 1000, true)]);
+    el.consoleInput.value = "";
+    el.consoleInput.disabled = true;
+    el.consoleRunBtn.disabled = true;
+
+    postJson("/api/console/command", { command: command }).then(function (res) {
+      // 200 carries {lines: [...]}; the one non-2xx case (an empty command,
+      // rejected by build_console_command_result() before it ever reaches
+      // adminchat.handle_command()) carries {error: "..."} instead.
+      var lines = (res.data && res.data.lines) ||
+                  (res.data && res.data.error ? [res.data.error] : []);
+      appendConsoleLines(lines.map(function (text) {
+        return consoleLineNode(text, null, Date.now() / 1000, true);
+      }));
+    }).catch(function (err) {
+      appendConsoleLines([consoleLineNode(
+        "Request failed: " + err.message, null, Date.now() / 1000, true)]);
+    }).then(function () {
+      el.consoleInput.disabled = false;
+      el.consoleRunBtn.disabled = false;
+      el.consoleInput.focus();
+    });
+  });
 
   // ---------------------------------------------------------------- Theme
   //

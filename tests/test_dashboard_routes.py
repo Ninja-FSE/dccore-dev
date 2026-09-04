@@ -60,6 +60,7 @@ READ_ONLY_ROUTES = [
     ("/api/search/broadcast/status", "build_broadcast_status_payload"),
     ("/api/tools/update-list/status", "build_update_list_status_payload"),
     ("/api/tools/verify-list", "build_verify_list_payload"),
+    ("/api/console/log", "build_console_log_payload"),
 ]
 
 
@@ -145,6 +146,53 @@ class TheSearchRoute(DashboardRouteCase):
 
     def test_it_refuses_an_unauthenticated_caller(self):
         resp = self.client.get("/api/search?q=x")
+
+        self.assertEqual(resp.status_code, 401)
+
+
+class TheConsoleCommandRoute(DashboardRouteCase):
+    """/api/console/command is the one mutating route in this file with no
+    query string to pass through - the body is JSON, not ?q=. See
+    tests/test_web_console.py for build_console_command_result() itself
+    (command dispatch, 'quit', unrecognised names); this is only the wiring:
+    does the route reach that builder with what the caller actually sent."""
+
+    def test_it_passes_the_command_through(self):
+        self.log_in()
+
+        resp = self.client.post("/api/console/command", json={"command": "uptime"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(),
+                         webserver.build_console_command_result("uptime")[1])
+
+    def test_a_missing_body_is_treated_as_an_empty_command(self):
+        """Not a 500. json_object() is what every other mutating route in
+        this file already falls back to for a malformed or absent body."""
+        self.log_in()
+
+        resp = self.client.post("/api/console/command")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("error", resp.get_json())
+
+    def test_the_command_actually_reaches_the_builder(self):
+        """Control for the pass-through test above: if the route ignored the
+        body entirely, that test would still pass, because it compares
+        against a builder call that used the same hardcoded string."""
+        self.log_in()
+        recorded = []
+        real = webserver.build_console_command_result
+        webserver.build_console_command_result = (
+            lambda command, remote_addr=None: recorded.append(command) or real(command))
+        self.addCleanup(setattr, webserver, "build_console_command_result", real)
+
+        self.client.post("/api/console/command", json={"command": "status"})
+
+        self.assertEqual(recorded, ["status"])
+
+    def test_it_refuses_an_unauthenticated_caller(self):
+        resp = self.client.post("/api/console/command", json={"command": "uptime"})
 
         self.assertEqual(resp.status_code, 401)
 
