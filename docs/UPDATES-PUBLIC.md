@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Channels with a space after the comma now all get joined.** `#one, #two, #three` used to join `#one` and silently drop the rest - IRC treats the space as the end of the list - while the bot went on advertising in channels it had never entered. Write the list however reads best; it works either way now.
+
 - **A Console page in the web dashboard** — off by default; turn it on with `WEBUI_CONSOLE_ENABLED` if you want it. It gives the admin console's commands and live log in the browser. Worth knowing before you enable it: the dashboard asks only for your password, where the DCC CHAT console also checks your services host, and it has no TLS — so this is the admin command set behind one factor on your LAN rather than two.
 
 ## v1.11.0 — The Several Folders Release

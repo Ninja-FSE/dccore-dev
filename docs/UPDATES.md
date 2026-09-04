@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚪 A space after a comma no longer costs you every channel but the first
+Reported from a real install: six channels configured, one joined, and a log line saying *"Activating the advert despite 5 unconfirmed channel(s)"* that never connected the two.
+
+`config.CHANNEL` was handed to `JOIN` verbatim. RFC 2812 is `JOIN <channel>{,<channel>} [<key>{,<key>}]` - **space-separated parameters** - so
+
+```
+JOIN #one, #two, #three
+```
+
+joins `#one` and hands the server `#two,` as a channel *key*. The rest is discarded, and nothing about that is an error, so nothing reported one.
+
+The format that breaks it is the one that reads naturally, and the one `configure.py` echoes back at the operator when it shows their current value - so the tool actively encouraged it.
+
+The advert loop was unaffected, because `announce.py` strips each entry as it goes. Only the JOIN did not, which is why the bot looked half-working rather than broken: it adverted in channels it had never joined.
+
+`join_target_list()` normalises before sending, so what an operator typed works as written. 10 tests, mutation-verified - putting `config.CHANNEL` back into the JOIN fails at once - and including a control that a list with no spaces passes through untouched, so this is a repair and not a change of behaviour.
+
 ### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
 Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
 

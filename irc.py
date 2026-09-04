@@ -54,6 +54,39 @@ def is_server_numeric(line, code):
     return re.match(r"^:\S+\s+" + code + r"\s+\S+", line) is not None
 
 
+def configured_channels():
+    """CHANNEL as a list, in order, with the whitespace people actually type
+    taken off.
+
+    Every consumer of CHANNEL splits on the comma; most of them then strip,
+    and the two that did not are what made this necessary.
+    """
+    raw = str(getattr(config, "CHANNEL", "") or "")
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def join_target_list():
+    """The channels formatted for a JOIN, which is stricter than it looks.
+
+    RFC 2812 is `JOIN <channel>{,<channel>} [<key>{,<key>}]` - SPACE-separated
+    parameters. So a space anywhere in the list ends it: sending
+
+        JOIN #one, #two, #three
+
+    joins "#one" and hands the server "#two," as a channel KEY. The rest is
+    discarded silently, because nothing about it is an error - the server did
+    exactly what it was told.
+
+    config.CHANNEL used to be passed to JOIN verbatim, so an operator who put
+    a space after each comma - which reads naturally, and is how configure.py
+    echoes the value back at them - joined their first channel and no others.
+    No warning and no failure: just five channels that never appeared, and an
+    advert loop happily addressing them, because announce.py strips per entry
+    where the JOIN did not.
+    """
+    return ",".join(configured_channels())
+
+
 def is_user_event(line, command):
     """True only when `line` is a genuine user event with this command.
 
@@ -1413,7 +1446,11 @@ def irc_loop():
                             except Exception as join_err:
                                 print(f"[ERROR] Could not send JOIN: {join_err}")
                                 
-                        threading.Thread(target=delayed_join, args=(s, config.CHANNEL), daemon=True).start()
+                        # Normalised, not raw: a space after a comma turns the
+                        # rest of the list into a channel key and joins only the
+                        # first. See join_target_list().
+                        threading.Thread(target=delayed_join,
+                                         args=(s, join_target_list()), daemon=True).start()
 
                     if joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
                         # FIXED (issue #9): parses WHICH channel the 366 line refers to instead
