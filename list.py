@@ -348,9 +348,30 @@ def find_matching_entries(search_words, limit=None, list_path=None):
             elif state == "open":
                 if is_rule:
                     continue  # malformed doubled rule; keep waiting for the folder line
-                current_folder = line_strip
-                state = "folder_seen"
-                continue
+                if line_strip.startswith("!"):
+                    # A FILE line where a folder heading was expected. The list
+                    # is malformed, and taking this as the heading loses the
+                    # file AND shifts every heading after it by one, so the
+                    # rest of the list is mis-attributed or swallowed too.
+                    #
+                    # Our own lists cannot reach this: update_list.py writes
+                    # every heading as "D:\MUSIC\<folder>\", which is never
+                    # all "=" and never starts with "!". A FETCHED list can -
+                    # list_fetch.py runs this same parser over a list another
+                    # bot wrote, and a folder there named "====" reads as a
+                    # second rule line, leaving this state machine waiting for
+                    # a heading that never comes. Found with a folder named
+                    # exactly that: every file after it, including files in
+                    # perfectly normal folders, vanished from search.
+                    #
+                    # A line starting with "!" is a file, whatever the state
+                    # machine expected, so the parser resynchronises here
+                    # instead of consuming it.
+                    state = "none"
+                else:
+                    current_folder = line_strip
+                    state = "folder_seen"
+                    continue
             elif state == "folder_seen":
                 state = "none"
                 if is_rule:

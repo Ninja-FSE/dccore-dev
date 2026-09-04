@@ -4,6 +4,37 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧭 One odd folder name made every file after it invisible
+`find_matching_entries()` walks the master list with a three-state machine, because the format wraps each folder heading in a pair of rule lines. A rule line is "every character is `=`" - so a folder whose NAME is also all `=` reads as a *second* rule line. The machine treats that as a malformed doubled rule, keeps waiting for a heading, and takes the next line it gets - a FILE line - as the heading instead.
+
+That loses the file **and** shifts every heading after it by one, so the rest of the list is mis-attributed or swallowed too. Measured on a three-folder list with one bad name in the middle: searching found **one of the three files**, and the one it missed last was in a perfectly ordinary folder.
+
+Nothing failed. The list on disk was complete and the files were still served correctly when requested by name; only search and the dashboard's File Lists view were wrong.
+
+**It is not reachable through our own list** - update_list.py writes every heading as `D:\MUSIC\<folder>\`, which is neither all `=` nor starts with `!`. It is reachable through a **fetched** one: `list_fetch.py` runs this same parser over a list another bot wrote and sent us, and that bot's folder names are not ours to choose.
+
+A line starting with `!` is a file line, whatever the state machine was expecting. Checking that before consuming it as a heading lets the parser resynchronise, so a malformed heading now costs only its own folder's attribution instead of the remainder of the list.
+
+### 📏 A fetched file's name is cut to fit one path component
+The offering bot chooses the filename in a DCC SEND. `_sanitize_offer_filename()` strips separators, `..`, nulls and everything outside the charset whitelist - but it does not truncate, and the comment at the `open()` call said that was covered:
+
+```python
+# _sanitize_offer_filename() does not truncate, so the length of this
+# name is entirely the offering bot's choice - wrap it like dcc.py
+# wraps every path it touches.
+handle = open(platform_compat.long_path(dest_path), "wb")
+```
+
+**There are two different limits and `long_path()` only lifts one of them.** The `\\?\` prefix removes the 260-character limit on the TOTAL PATH - which is exactly why dcc.py wraps every path it touches. The limit on a single path COMPONENT (255 characters on NTFS, 255 bytes on ext4) is a filesystem rule underneath that prefix and does not move. Measured by binary search against a real filesystem, with the wrap in place: **255**.
+
+So an over-long offer failed at `open()` with `[Errno 22] Invalid argument`, caught by the transfer's own `except Exception` and reported as `transfer error: ...` - which names neither the length nor the name. Nothing crashed. That file simply never fetched, every time.
+
+**And the prefix counts.** The stored name is `<request-id>_<cleaned name>`, and the request id is `uuid4().hex[:12]` plus an underscore - so the real budget for the offered name was 242 characters, not 255. Short enough to reach with a genuine filename (a long classical or live-recording title), not only with a hostile one, which is what makes this worth fixing rather than only worth refusing.
+
+`_fit_name_component()` shrinks the STEM and keeps the extension, the same choice `announce.fit_irc_filename()` makes and for the same reason: the extension is how the file is recognised and opened, and a name trimmed the other way arrives as "Symphony No 9 in D mino" with nothing on the end. The budget is counted in **UTF-8 bytes**, because ext4's limit is bytes and an accented title costs two per character; `_truncate_utf8()` cuts on a character boundary, since a blind byte slice lands inside one.
+
+Fitting happens BEFORE the `is_safe_path()` containment check, so there is a test that a truncated name still cannot escape - a name cut down to `.` or `..` would be exactly that.
+
 ### 🔒 A setting the daemon has no blank behaviour for can no longer be saved blank
 From an audit of the dashboard's settings surface: every string field the page offers was saved empty, and the accepted ones read back. **Twenty-eight were accepted.** Four of them are used verbatim on the wire or on disk.
 

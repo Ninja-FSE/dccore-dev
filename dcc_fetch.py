@@ -978,15 +978,66 @@ def _sanitize_offer_filename(raw_name):
     return name
 
 
+# One path COMPONENT, in bytes. NTFS allows 255 characters per name and ext4
+# 255 bytes, so a byte budget of 255 satisfies both - measured in UTF-8,
+# because a filename of accented characters costs two bytes each and Linux
+# counts those.
+#
+# platform_compat.long_path() does NOT cover this. The `\\?\` prefix lifts the
+# 260-character limit on the TOTAL PATH; the per-component limit is a
+# filesystem rule underneath it and stays exactly where it was. The comment at
+# the open() call in _receive_offer_bytes() said the wrap made the offered
+# name's length safe, and it did not: 255 was still the wall, verified against
+# a real filesystem.
+MAX_NAME_BYTES = 255
+
+
+def _truncate_utf8(text, limit):
+    """`text` cut to at most `limit` UTF-8 bytes, never mid-character.
+
+    errors="ignore" is what drops a trailing partial sequence: slicing encoded
+    bytes can land inside a multi-byte character, and a name is decoded again
+    before it is ever used.
+    """
+    return text.encode("utf-8")[:limit].decode("utf-8", "ignore")
+
+
+def _fit_name_component(name, limit=MAX_NAME_BYTES):
+    """`name` shortened to fit one path component, keeping its extension.
+
+    The STEM is what shrinks, the way announce.fit_irc_filename() shrinks a
+    stem rather than cutting the end off: the extension is how the operator
+    and their player recognise what the file is, and a name trimmed the other
+    way arrives as "Symphony No 9 in D mino" with no extension at all.
+    """
+    if len(name.encode("utf-8")) <= limit:
+        return name
+    stem, ext = os.path.splitext(name)
+    ext_bytes = len(ext.encode("utf-8"))
+    if ext_bytes >= limit:
+        # A pathological "extension" longer than the whole budget is not an
+        # extension worth preserving.
+        return _truncate_utf8(name, limit)
+    return _truncate_utf8(stem, limit - ext_bytes) + ext
+
+
 def _resolve_destination_path(request_id, raw_filename):
     """Build the on-disk path a completed fetch will be written to, or None
     if it fails the path-containment check. The request id is folded into
     the stored filename so two fetches that happen to share a cleaned
     filename can never collide or overwrite each other.
+
+    The finished component is length-fitted LAST, after the request id is
+    prefixed, because that prefix is part of what has to fit: 12 hex
+    characters plus an underscore, so an offered name of 243 characters was
+    already over the line before this function returned. The offering bot
+    chooses that length, and the failure it caused was an
+    "[Errno 22] Invalid argument" from open() - caught and reported as
+    "transfer error", which names neither the length nor the name.
     """
     dest_dir = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
     clean_name = _sanitize_offer_filename(raw_filename)
-    stored_name = f"{request_id}_{clean_name}"
+    stored_name = _fit_name_component(f"{request_id}_{clean_name}")
     candidate = os.path.join(dest_dir, stored_name)
     if not dcc.is_safe_path(dest_dir, candidate):
         return None, None
@@ -1405,9 +1456,11 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     failure_reason = None
     handle = None
     try:
-        # _sanitize_offer_filename() does not truncate, so the length of this
-        # name is entirely the offering bot's choice - wrap it like dcc.py
-        # wraps every path it touches.
+        # Two different limits, and long_path() only lifts one of them. The
+        # `\\?\` wrap handles the 260-character TOTAL PATH limit, which is why
+        # dcc.py wraps every path it touches; _resolve_destination_path() has
+        # already fitted the NAME to MAX_NAME_BYTES, which the wrap does not
+        # affect and which the offering bot would otherwise choose.
         handle = open(platform_compat.long_path(dest_path), "wb")
         while bytes_received < total_size:
             if time.time() > wall_deadline:

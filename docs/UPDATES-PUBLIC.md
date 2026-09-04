@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A strangely named folder in another bot's list no longer hides the rest of it.** If a fetched list contained a folder whose name was made only of `=` characters, it looked like part of the list's own formatting — and everything after it silently disappeared from search and from the File Lists page, including files in perfectly ordinary folders. Only lists fetched from other bots were affected; your own was never at risk.
+
+- **Files with very long names now fetch.** A file offered by another bot whose name ran past the filesystem's limit failed every time with an unhelpful "transfer error", because the length check the code believed it had only covered the full path, not the name itself. Long names are now shortened to fit, keeping the file extension.
+
 - **A "Sent" announcement can no longer be addressed to a broken target.** For a queued item that did not record which channel it came from, the bot built its completion message with the whole channel list where one channel belongs - the line was malformed and the announcement silently vanished, even though the file had gone out fine.
 
 - **Settings that the bot cannot run without can no longer be saved empty.** The server address, the fallback nickname, the list's base name and the dashboard's own bind address were all accepted blank, and each one is used exactly as typed - an empty server address is a connection to nowhere, an empty bind address exposes the dashboard on every network interface rather than just your own machine. Settings that ship blank on purpose, like the debug channel or the rar path, can still be cleared.
