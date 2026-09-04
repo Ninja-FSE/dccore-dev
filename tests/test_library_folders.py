@@ -178,8 +178,16 @@ class TheOtherRules(LibraryCase):
         self.assertTrue(any("already used by" in line for line in found))
 
     def test_a_label_cannot_contain_a_separator(self):
-        """It becomes a path component users copy back, so it has to be one."""
-        for bad in ("a/b", "a\\b", "..", "C:"):
+        """It becomes a path component users copy back, so it has to be one.
+
+        Both separators and the drive form are refused on EVERY platform, not
+        by the host's own rules. On Linux a backslash is an ordinary filename
+        character and "C:" an ordinary directory name, so a label made there
+        would pass os.path.splitdrive() and then be read as a drive specifier
+        by every Windows client that pastes the path back. That is what the
+        first version of this got wrong, and Linux CI caught it.
+        """
+        for bad in ("a/b", "a\\b", "..", "C:", "D:Music"):
             with self.subTest(label=bad):
                 found = library.problems(
                     [library.Folder(bad, self.make_dir("Real"))])
@@ -270,7 +278,17 @@ class LabelsAndLookup(LibraryCase):
         self.assertEqual(library.default_label(os.path.join("D:", "Flac")), "Flac")
 
     def test_default_label_ignores_a_trailing_separator(self):
-        self.assertEqual(library.default_label("D:\\Flac\\"), "Flac")
+        """Built with os.sep rather than written as a Windows literal.
+
+        A backslash is a legal filename CHARACTER on POSIX, not a separator,
+        so "D:\\Flac\\" is one folder genuinely called that on Linux and
+        default_label() returning the whole string there is correct. The
+        earlier version of this test hardcoded the Windows form and failed on
+        the Linux half of CI - the assumption was the test's, not the code's.
+        """
+        path = os.path.join("somewhere", "Flac") + os.sep
+
+        self.assertEqual(library.default_label(path), "Flac")
 
     def test_a_drive_root_still_gets_a_label(self):
         """An empty label would produce a doubled separator in every path
