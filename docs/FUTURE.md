@@ -56,7 +56,7 @@ Ordered by what unblocks what, not by preference.
 
 ### Multiple lists, and multiple folders per list
 
-The largest gap against OmenServe, which has had both since long before this project started. DCCore serves **one** directory into **one** list.
+The largest gap against OmenServe, which has had both since long before this project started. DCCore now serves **several** directories into **one** list; more than one list is still to come.
 
 The design is settled:
 
@@ -66,13 +66,14 @@ The design is settled:
 - A private message uses the list marked primary, since a PM carries no channel.
 - A channel with no list bound gets nothing: no advert, no requests answered.
 
-It ships in three steps, each useful on its own:
+**Multi-folder is largely built.** `library.py` answers which folders and in what order, resolution reads a folder's label out of a heading, and the scan builds one list from all of them — configurable today by editing `data/library_folders.json`. What is left is the Settings page: a reorderable list of folders with a validated add and a folder browser, so it does not need hand-edited JSON.
 
-1. Make "the list" an explicit object with exactly one instance — a pure refactor, no behaviour change.
-2. Give that object a directory set. **Multi-folder ships here**, still with one list.
-3. Allow more than one instance. **Multi-list ships here**, with per-channel adverts falling out nearly free.
+Multi-list then follows: allow more than one list object, with per-channel adverts falling out nearly free. The folder set moves inside a list at that point, which is why every caller goes through one accessor rather than reading a setting directly — the move rebinds the accessor instead of touching 54 call sites a second time.
 
-Two pieces are worth doing carefully rather than quickly: containment (`is_safe_path` becomes "inside *any* configured root", and that is the one place a mistake is a security bug rather than an inconvenience), and index identity (two roots can hold the same relative path, so an entry has to record which root it came from).
+Two pieces were worth doing carefully rather than quickly, and one of them turned out the opposite way to what this section used to predict:
+
+- **Containment.** This said `is_safe_path()` would become "inside *any* configured root", and called that the one place a mistake is a security bug rather than an inconvenience. Right about the risk, wrong about the answer: widening it that way is a strictly weaker test. Because a heading names its own folder, resolution returns *which* folder it landed in and the check runs against that one — the same strength as when there was only ever one. `is_safe_path()` itself was never touched.
+- **Index identity.** Two folders can hold the same relative path — the same album in flac and in mp3 is the ordinary case — so an entry has to record which folder it came from. That is the label leading every path, and it is what makes the containment answer above possible.
 
 ### Test coverage where it is thinnest
 

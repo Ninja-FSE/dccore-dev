@@ -24,6 +24,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
 import commands  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
+import library  # noqa: E402
 import list as list_mod  # noqa: E402
 import platform_compat  # noqa: E402
 import update_list  # noqa: E402
@@ -347,12 +348,42 @@ class TheAlbumList(MasterListCase):
         with open(self.rar_path(), encoding="utf-8") as handle:
             rar_text = handle.read()
         rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
-        # "Disc 1" is the earliest matching segment (index 2) - truncating
-        # there leaves "Artist/Album" (two segments, the real album).
-        self.assertIn("!DCCore !rar D:\\MUSIC\\Artist\\Album\\", rar_lines)
-        self.assertNotIn("!DCCore !rar D:\\MUSIC\\Artist\\Album\\Disc 1\\", rar_lines,
+
+        # Every path now leads with the folder's label (#164). Derived rather
+        # than written out, so this test says "the album under its folder" and
+        # not "the folder happens to be called music".
+        label = library.folders()[0].name
+
+        # "Disc 1" is the earliest matching segment - truncating there leaves
+        # the label plus Artist/Album, the real album.
+        self.assertIn(f"!DCCore !rar D:\\MUSIC\\{label}\\Artist\\Album\\", rar_lines)
+        self.assertNotIn(f"!DCCore !rar D:\\MUSIC\\{label}\\Artist\\Album\\Disc 1\\",
+                         rar_lines,
                          "must not stop at the later 'CD' match instead of "
                          "the earlier 'Disc' one")
+
+    def test_a_disc_directly_under_an_artist_does_not_collapse_to_the_root(self):
+        """The threshold that moved with the label, and why it had to.
+
+        It means "leave at least two segments below the folder" - artist and
+        album. rel_dir now begins with the label, so every index shifted by
+        one: left at its old value, this shape would truncate to
+        <label>/Artist, which is the artist root dcc.py refuses outright.
+        The album would then have no requestable row at all - the exact
+        failure the threshold exists to prevent.
+        """
+        self.add("SoloArtist/Disc 1/01.flac")
+        self.assertTrue(self.generate())
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            rar_lines = [l for l in handle.read().split("\n") if l.startswith("!")]
+
+        label = library.folders()[0].name
+
+        self.assertNotIn(f"!DCCore !rar D:\\MUSIC\\{label}\\SoloArtist\\", rar_lines,
+                         "truncated to the artist root, which cannot be requested")
+        self.assertIn(f"!DCCore !rar D:\\MUSIC\\{label}\\SoloArtist\\Disc 1\\",
+                      rar_lines,
+                      "the untruncated path is still a request dcc.py serves")
 
 
 class PruningSupersededLists(MasterListCase):
