@@ -35,6 +35,7 @@ import collections
 import io
 import json
 import os
+import re
 import tempfile
 
 import defaults as config
@@ -47,6 +48,11 @@ import platform_compat
 # here, rather than a None quietly reaching a path join and producing a path
 # that looks plausible.
 Folder = collections.namedtuple("Folder", ("name", "path"))
+
+# A leading drive specifier: "C:", "D:Music". Matched literally rather than
+# with os.path.splitdrive() because a label made on Linux is still read on
+# Windows - see problems(). Same pattern list.py uses on heading components.
+_DRIVE_PREFIX_RE = re.compile(r"^[A-Za-z]:")
 
 
 def folders_file():
@@ -138,8 +144,15 @@ def problems(entries):
             found.append(f"{path}: no label. It becomes part of every path in "
                          f"the list, so it cannot be blank.")
         else:
-            if name in (os.curdir, os.pardir) or any(
-                    sep in name for sep in ("/", "\\")) or os.path.splitdrive(name)[0]:
+            # Both separators and the drive pattern are checked LITERALLY, not
+            # through os.path.splitdrive() or os.sep. Those follow the host's
+            # own rules, and on Linux a backslash is an ordinary filename
+            # character and "C:" is an ordinary directory name - so a label
+            # generated there would pass, then be read as a drive specifier by
+            # every Windows client that pastes the path back. The label travels
+            # further than the machine that made it.
+            if name in (".", "..") or any(
+                    sep in name for sep in ("/", "\\")) or _DRIVE_PREFIX_RE.match(name):
                 found.append(
                     f"{path}: the label {name!r} must be a single folder name "
                     f"- no slashes, no \"..\", no drive letter. It is written "
