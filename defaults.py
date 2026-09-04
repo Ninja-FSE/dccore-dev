@@ -621,6 +621,22 @@ import settings_file
 SHIPPED_DEFAULTS = {name: globals()[name] for name in settings_file.REQUIRED
                     if name in globals()}
 
+# The same snapshot, for EVERY setting rather than only the REQUIRED three,
+# and taken at the same moment - before either override mechanism runs, so
+# these are the values this version of the code ships with rather than the
+# values this install happens to be running.
+#
+# settings_file._check_writable() needs it to answer one question: may this
+# setting be saved empty? A default of None means "unset unless you say
+# otherwise" and blank is how an operator says it again (RAR_BINARY back to
+# "look on PATH"). A non-empty shipped default means the daemon has no
+# behaviour for blank at all - SERVER = "" is a connect() to no host,
+# ALT_NICKNAME = "" is a NICK command with no nickname - and the CURRENT
+# value cannot answer that, because by the time a second save asks, the first
+# one has already blanked it.
+SHIPPED_VALUES = {name: value for name, value in list(globals().items())
+                  if settings_file.is_overridable(name, value)}
+
 def _migrate_local_config_to_admin_config(directory=None, log=print):
     """Carry an existing local_config.py across to admin_config.py's name.
 

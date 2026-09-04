@@ -391,7 +391,14 @@ def announce_worker():
                 break
                 
             if is_ready:
-                channels_to_spam = config.CHANNEL.split(",")
+                # Through the accessor rather than a fourth hand-rolled split.
+                # config.CHANNEL is None for part of every rehash - defaults.py
+                # re-executes its literals before settings.conf is re-applied -
+                # and `None.split(",")` is an AttributeError on the advert
+                # thread. is_ready gates this loop during a rehash, but is_ready
+                # is itself a module global the same reload rebinds.
+                import irc
+                channels_to_spam = irc.configured_channels()
                 # The sampling itself now lives in stats_mgr.live_speed(), so the
                 # dashboard can show the same figure without reimplementing it or
                 # importing the daemon to get at dcc.queue_lock. It caches for a
