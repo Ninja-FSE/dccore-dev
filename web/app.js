@@ -173,8 +173,13 @@
 
   function activateView(name) {
     state.active = name;
+    // Guarded, because one missing section must not take the whole navigation
+    // with it. Unguarded, a null here threw before the per-view loaders at the
+    // bottom of this function ran, so every OTHER view silently stopped
+    // working too - one absent element disabling the entire dashboard.
     Object.keys(views).forEach(function (key) {
-      document.getElementById("view-" + key).classList.toggle("is-active", key === name);
+      var section = document.getElementById("view-" + key);
+      if (section) { section.classList.toggle("is-active", key === name); }
     });
     el.navItems.forEach(function (btn) {
       btn.classList.toggle("is-active", btn.dataset.view === name);
@@ -1752,10 +1757,21 @@
       clearInterval(consoleLogTimer);
       consoleLogTimer = null;
     }
+    // HIDDEN, not removed - and #view-console stays in the DOM.
+    //
+    // activateView() walks every key in `views` and calls
+    // getElementById("view-" + key).classList on each, so deleting the console
+    // section made that return null and throw. On EVERY view switch. The
+    // Console went away and took the rest of the navigation with it: Settings
+    // sat on its "Loading" placeholder for ever, because the exception fired
+    // before the branch that calls loadSettings(), and Queue, Stats and
+    // Downloads stopped refreshing for the same reason.
+    //
+    // Found on a real install running with the Console off - which is the
+    // default, so this was the ordinary case and not a corner of it.
     var navButton = document.querySelector(".nav-item[data-view=\"console\"]");
-    if (navButton) { navButton.remove(); }
-    var view = document.getElementById("view-console");
-    if (view) { view.remove(); }
+    if (navButton) { navButton.hidden = true; }
+    if (state.active === "console") { activateView("search"); }
   }
 
   function pollConsoleLog() {
