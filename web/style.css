@@ -984,6 +984,99 @@ html, body {
   text-transform: uppercase;
 }
 
+/* --------------------------------------------------------------- Console */
+
+.console-card {
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+}
+
+.console-log {
+  margin-top: 14px;
+  height: min(60vh, 520px);
+  overflow-y: auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.console-log:empty::before {
+  content: "Nothing logged yet.";
+  color: var(--text-faint);
+}
+
+.console-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.console-line-time {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.console-line-text {
+  color: var(--text-dim);
+}
+
+/* HARDBAN is send_debug()'s own name for a blocked path-traversal or a
+   poisoned queue entry - see announce.py's own comment on why that one gets
+   a [SECURITY] tag and a colour nothing else does. Mirrored here so the same
+   line reads as urgent in the web console too, not just on the channel. */
+.console-line[data-category="HARDBAN"] .console-line-text {
+  color: var(--danger);
+}
+
+/* A line this page produced itself - a command's own reply, or the local
+   "Unknown command" / error text build_console_command_result() returns -
+   rather than something that arrived through the ambient debug log. */
+.console-line.is-local .console-line-text {
+  color: var(--text);
+}
+
+.console-input-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.console-prompt {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.console-input {
+  flex: 1 1 auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.console-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.console-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+
 .verify-tag.is-dim {
   background: transparent;
   color: var(--text-faint);

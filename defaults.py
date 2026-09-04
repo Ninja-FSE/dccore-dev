@@ -548,6 +548,33 @@ known_bots = runtime.known_bots
 # dashboard.
 WEBUI_ENABLED: bool = False
 
+# The Console page - the admin console in a browser tab - is OFF unless this
+# says otherwise, separately from WEBUI_ENABLED above.
+#
+# The two ways to reach the admin command set are not equally protected:
+#
+#   DCC CHAT console   the operator's services host (ADMIN_HOSTMASKS) AND a
+#                      PBKDF2 password. Two factors.
+#   this dashboard     the same password, and nothing else. One factor, over
+#                      HTTP with no TLS (see WEBUI_HOST's own comment).
+#
+# So the Console makes ban, unban, clearqueue, rehash and update reachable
+# through the weaker door. That is a perfectly reasonable trade for an
+# operator who wants it - it is their LAN and their password - but it must be
+# a trade they CHOSE.
+#
+# Without this switch, turning the dashboard on for Search and Queue would
+# have started granting remote admin as a side effect, and an operator who
+# enabled it months ago would have gained a remote admin console on upgrade
+# with no setting changed and nothing recording that their exposure had
+# widened. WEBUI_ENABLED was deliberately made to fail closed (#116); this
+# keeps what saying yes to it grants from quietly growing.
+#
+# Same shape as ADMIN_CHANNEL_COMMANDS, which exists for the same reason: an
+# admin surface reachable from a weaker path gets its own switch and a written
+# reason for its default.
+WEBUI_CONSOLE_ENABLED: bool = False
+
 # LOGIN REQUIRED, shared with the DCC CHAT admin console: every route,
 # including static assets, needs a session started by POSTing the password
 # for ADMIN_PASSWORD_HASH to /login (see webserver.py's module docstring).

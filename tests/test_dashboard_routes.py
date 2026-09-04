@@ -60,6 +60,7 @@ READ_ONLY_ROUTES = [
     ("/api/search/broadcast/status", "build_broadcast_status_payload"),
     ("/api/tools/update-list/status", "build_update_list_status_payload"),
     ("/api/tools/verify-list", "build_verify_list_payload"),
+    ("/api/console/log", "build_console_log_payload"),
 ]
 
 
@@ -75,7 +76,13 @@ class DashboardRouteCase(DCCoreTestCase):
         self.set_config(
             ADMIN_PASSWORD_HASH=adminchat.make_password_hash(PASSWORD, iterations=1000),
             LOCAL_LIST_DIR=self.tree.lists, FILE_DIRECTORY=self.tree.music,
-            LIST_BASE_NAME="DCCoreTest", NICKNAME="DCCoreTest")
+            LIST_BASE_NAME="DCCoreTest", NICKNAME="DCCoreTest",
+            # The Console ships OFF (WEBUI_CONSOLE_ENABLED) - it puts the admin
+            # command set behind one factor instead of two, so it is opted into
+            # rather than granted by turning the dashboard on. Enabled here
+            # because these tests are about the routes' wiring; the gate itself
+            # is TheConsoleGate below.
+            WEBUI_CONSOLE_ENABLED=True)
         self.app = webserver.create_app()
         self.client = self.app.test_client()
         webserver._web_bad_ips.clear()
@@ -145,6 +152,53 @@ class TheSearchRoute(DashboardRouteCase):
 
     def test_it_refuses_an_unauthenticated_caller(self):
         resp = self.client.get("/api/search?q=x")
+
+        self.assertEqual(resp.status_code, 401)
+
+
+class TheConsoleCommandRoute(DashboardRouteCase):
+    """/api/console/command is the one mutating route in this file with no
+    query string to pass through - the body is JSON, not ?q=. See
+    tests/test_web_console.py for build_console_command_result() itself
+    (command dispatch, 'quit', unrecognised names); this is only the wiring:
+    does the route reach that builder with what the caller actually sent."""
+
+    def test_it_passes_the_command_through(self):
+        self.log_in()
+
+        resp = self.client.post("/api/console/command", json={"command": "uptime"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(),
+                         webserver.build_console_command_result("uptime")[1])
+
+    def test_a_missing_body_is_treated_as_an_empty_command(self):
+        """Not a 500. json_object() is what every other mutating route in
+        this file already falls back to for a malformed or absent body."""
+        self.log_in()
+
+        resp = self.client.post("/api/console/command")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("error", resp.get_json())
+
+    def test_the_command_actually_reaches_the_builder(self):
+        """Control for the pass-through test above: if the route ignored the
+        body entirely, that test would still pass, because it compares
+        against a builder call that used the same hardcoded string."""
+        self.log_in()
+        recorded = []
+        real = webserver.build_console_command_result
+        webserver.build_console_command_result = (
+            lambda command, remote_addr=None: recorded.append(command) or real(command))
+        self.addCleanup(setattr, webserver, "build_console_command_result", real)
+
+        self.client.post("/api/console/command", json={"command": "status"})
+
+        self.assertEqual(recorded, ["status"])
+
+    def test_it_refuses_an_unauthenticated_caller(self):
+        resp = self.client.post("/api/console/command", json={"command": "uptime"})
 
         self.assertEqual(resp.status_code, 401)
 
@@ -289,6 +343,68 @@ class TheQueueViewIgnoresAMalformedTransfer(DashboardRouteCase):
         self.assertEqual([r["user"] for r in rows], ["dave"])
         self.assertEqual(rows[0]["status"], "sending")
         self.assertEqual(rows[0]["preview"], "Song.flac")
+
+
+class TheConsoleGate(DashboardRouteCase):
+    """WEBUI_CONSOLE_ENABLED, and why it exists.
+
+    The two ways to reach the admin command set are not equally protected: the
+    DCC CHAT console needs the operator's services host AND the password, the
+    dashboard needs the password alone, over HTTP with no TLS. So the Console
+    page puts ban/unban/clearqueue/rehash/update behind the weaker door.
+
+    That is a fine trade for an operator who wants it. Without this switch it
+    would not have been a trade at all - anyone who had turned the dashboard on
+    for Search and Queue would have gained a remote admin console on upgrade,
+    no setting changed, nothing recording that their exposure had widened.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(WEBUI_CONSOLE_ENABLED=False)
+        self.app = webserver.create_app()
+        self.client = self.app.test_client()
+
+    def test_the_log_route_is_not_there_when_the_console_is_off(self):
+        self.log_in()
+
+        self.assertEqual(self.client.get("/api/console/log").status_code, 404)
+
+    def test_the_command_route_is_not_there_when_the_console_is_off(self):
+        """Checked separately from the log route on purpose. They are the whole
+        attack surface of this feature, and a gate applied to one and forgotten
+        on the other is a silent hole - which is exactly the shape of mistake
+        that would leave the mutating route open while the harmless one was
+        shut."""
+        self.log_in()
+
+        resp = self.client.post("/api/console/command", json={"command": "uptime"})
+
+        self.assertEqual(resp.status_code, 404)
+
+    def test_it_is_404_rather_than_403(self):
+        """403 would confirm the routes exist and are merely switched off,
+        which tells anyone probing that this build has an admin console worth
+        coming back for."""
+        self.log_in()
+        resp = self.client.get("/api/console/log")
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertNotEqual(resp.status_code, 403)
+
+    def test_still_closed_to_someone_who_never_logged_in(self):
+        """Control on the pair above: the gate must not have replaced the login
+        with itself. An unauthenticated request is turned away whether the
+        console is on or off."""
+        self.assertIn(self.client.get("/api/console/log").status_code, (302, 401, 404))
+
+    def test_the_rest_of_the_dashboard_is_unaffected(self):
+        """Control. A gate that took the whole dashboard down with it would
+        satisfy every assertion above."""
+        self.log_in()
+
+        self.assertEqual(self.client.get("/api/stats").status_code, 200)
+        self.assertEqual(self.client.get("/api/queue").status_code, 200)
 
 
 if __name__ == "__main__":

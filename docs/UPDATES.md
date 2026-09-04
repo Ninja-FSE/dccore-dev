@@ -2,6 +2,27 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
+Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
+
+Nothing about `adminchat.py` was duplicated. `webserver.build_console_command_result()` dispatches straight into `adminchat.COMMANDS`/`handle_command()` - the exact command set the DCC CHAT console runs, so a change to one cannot silently stop matching the other. `webserver._console_debug_sink()` registers with `announce.add_debug_sink()`, the same fan-out `adminchat.Session.debug_sink()` already uses - which is also why `DEBUG_TO_CONSOLE` (on by default, independent of `DEBUG_TO_CHANNEL`) is the only switch this needs: an operator with no debug channel at all still gets the log for free, and nothing downstream of `announce.send_debug()`'s 44 call sites had to learn a new destination exists.
+
+**The log and a command's reply are two different things, and the page treats them that way.** A command is request/response - `POST /api/console/command` returns exactly the lines that one command produced. `GET /api/console/log?since=<cursor>` is the ambient stream, polled. This matters for `ban`, `unban`, `clearqueue`, `rehash` and `update`: each runs on a background thread (`adminchat._run_detached`) and replies immediately with only an acknowledgement, the same as a DCC CHAT session sees - the actual result arrives a moment later through the log, once the handler underneath calls `send_debug()` on completion. Verified live rather than assumed: running `ban` returns `["Banning ... ..."]` alone, and the log's next poll carries the real `[BAN]` line from `db.py`.
+
+`quit` is the one command intercepted before it ever reaches `handle_command()`: it means `session.close()` in `adminchat.py`, which requires a socket - meaningless, and an `AttributeError` on `_WebConsoleSession`, without the special case (mutation-tested: removing it turns the crash into a caught-and-reported "Command failed" line instead of the friendly one).
+
+`announce` is imported lazily, inside the sink and the log builder, not at module scope - `tests/test_import_graph.py` already enforces that `webserver.py` pulls in nothing beyond a fixed allow-list, precisely so a route handler cannot quietly drag the daemon's modules into a page that is tested without one running.
+
+29 new tests (25 in `tests/test_web_console.py`, 4 of route wiring in `tests/test_dashboard_routes.py`), full suite green, verified end to end against a real running instance (login, every command, the async ban→log follow-up, an unauthenticated 401).
+
+**It ships OFF, behind `WEBUI_CONSOLE_ENABLED`.** The two ways to reach the admin command set are not equally protected: the DCC CHAT console needs the operator's services host (`ADMIN_HOSTMASKS`) *and* the password, while the dashboard needs the password alone, over HTTP with no TLS. So this puts `ban`, `unban`, `clearqueue`, `rehash` and `update` behind the weaker door - a fine trade for an operator who wants it, but it has to be a trade they chose. Without the switch, anyone who had turned the dashboard on for Search and Queue would have gained a remote admin console on upgrade: no setting changed, nothing recording that their exposure had widened. `WEBUI_ENABLED` was deliberately made to fail closed (#116); this keeps what saying yes to it grants from quietly growing. Same shape as `ADMIN_CHANNEL_COMMANDS`, which exists for the same reason.
+
+Both routes check the switch **independently** rather than sharing a decorator - they are the whole attack surface, and a decorator applied to one and forgotten on the other is a silent hole. Mutation-verified: leaving the *mutating* route ungated fails. They answer 404 rather than 403, because 403 confirms the routes exist and are merely switched off, which tells anyone probing that this build has an admin console worth coming back for.
+
+**A bug the gate would otherwise have caused.** `pollConsoleLog()` runs on a timer whatever view is open, and its `catch` calls `markConnection(false)` - so with the Console off, every poll would 404 and the dashboard would report the whole daemon as unreachable, once every two seconds, for ever. The 404 is now its own case: it removes the nav item and the view, stops the timer, and leaves the connection indicator alone.
+
 ## 🟩 v1.11.0 (2026-09-04) - "The Several Folders Release"
 
 Serving from more than one directory, which is the largest single gap against OmenServe and the one most asked about. **Configurable today by editing `data/library_folders.json`; the Settings page for it is still to come** (#164) - so this ships the capability, not yet the convenience.

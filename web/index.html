@@ -57,6 +57,9 @@
       <button class="nav-item" data-view="stats">
         <span class="nav-icon">&#9673;</span> Stats
       </button>
+      <button class="nav-item" data-view="console">
+        <span class="nav-icon">&#10095;</span> Console
+      </button>
     </nav>
 
     <div class="status-card">
@@ -366,6 +369,32 @@
       </p>
 
       <p class="stat-foot" id="st-foot"></p>
+    </section>
+
+    <section class="view" id="view-console">
+      <div class="tool-card console-card">
+        <p class="tool-what">
+          The same commands and the same live log as the DCC CHAT admin
+          console (<code>/dcc chat &lt;botnick&gt;</code>), for an operator
+          who would rather not keep a second IRC client open, or run without
+          a debug channel at all. Type <code>help</code> for the full command
+          list.
+        </p>
+        <div class="console-log" id="console-log"></div>
+        <form class="console-input-row" id="console-form">
+          <span class="console-prompt">&gt;</span>
+          <input type="text" class="console-input" id="console-input"
+                autocomplete="off" spellcheck="false"
+                placeholder="status, queue, help ...">
+          <button type="submit" class="btn btn-accent" id="console-run-btn">Run</button>
+        </form>
+        <p class="console-note">
+          <code>ban</code>, <code>unban</code>, <code>clearqueue</code>,
+          <code>rehash</code> and <code>update</code> reply immediately with
+          just an acknowledgement &mdash; their result appears a moment
+          later in the log above, the same as it would in a DCC CHAT window.
+        </p>
+      </div>
     </section>
 
   </div>
