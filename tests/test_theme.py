@@ -433,5 +433,49 @@ class OverridingOneRole(ThemedPathCase):
         self.assertEqual(theme.palette()["border"], theme.CLASSIC["border"])
 
 
+class ThemeIsAChoiceNotFreeText(unittest.TestCase):
+    """Before this, the dashboard offered THEME as a plain text box: an
+    operator had to already know and correctly spell one of the five preset
+    names, with nothing on the page to discover them. LIST_FORMAT solved the
+    identical problem for "txt"/"zip"/"rar" via settings_file.CHOICES, which
+    the settings page renders as a <select> instead of an <input type=text>
+    (see webserver.py's _settings_field()). THEME was simply never added to
+    it.
+    """
+
+    def test_settings_file_and_theme_agree_on_the_preset_names(self):
+        """The two cannot be the same object - see settings_file.CHOICES'
+        own comment on why theme.THEMES is not imported to build this tuple
+        - so nothing stops them drifting apart except a test that checks."""
+        import settings_file
+
+        self.assertEqual(set(settings_file.CHOICES["THEME"]), set(theme.THEMES))
+
+    def test_the_settings_page_offers_every_theme(self):
+        """End to end, the same shape as ListFormatCase's own
+        test_the_settings_page_offers_all_three: the page must actually
+        expose the choices, not just declare them somewhere unread."""
+        import webserver
+        fields = [f for category in webserver.build_settings_payload()["categories"]
+                  for f in category["fields"]]
+        field = [f for f in fields if f["name"] == "THEME"]
+
+        self.assertEqual(len(field), 1, "THEME is not on the settings page")
+        self.assertEqual(sorted(field[0]["choices"]), sorted(theme.THEMES))
+
+    def test_an_unrecognised_theme_is_refused_at_save_not_at_read(self):
+        """Before this, a typo in THEME saved successfully and only
+        surfaced later as a console print from theme.theme_name()'s own
+        fallback (a warning and "classic", never an error) - the same
+        quiet-wrongness LIST_FORMAT's own CHOICES entry exists to avoid for
+        "ZIP" or "tar". Reusing coerce() directly rather than going through
+        the HTTP route: this is a property of settings_file, not of the web
+        layer built on top of it."""
+        import settings_file
+
+        with self.assertRaises(ValueError):
+            settings_file.coerce("THEME", "not-a-real-theme", "classic")
+
+
 if __name__ == "__main__":
     unittest.main()
