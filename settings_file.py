@@ -209,6 +209,22 @@ def settings_path():
     return os.environ.get("DCCORE_SETTINGS_FILE") or DEFAULT_PATH
 
 
+# Uppercase names that describe the CODE rather than the installation.
+#
+# SCRIPT_VERSION was an editable field on the dashboard's Settings page. Saving
+# it wrote the number into settings.conf, and settings.conf is applied AFTER
+# the shipped defaults - so from that moment the value in the file won, for
+# ever. The next upgrade shipped a new version and the daemon went on
+# reporting the old one, in the advert, the list masthead, the CTCP VERSION
+# reply and the dashboard's own header, with nothing to say why. "What version
+# are you running?" is the first question asked about any install, and this
+# made the answer unreliable in the one direction nobody checks.
+#
+# PROJECT_URL is deliberately NOT here: a fork pointing at its own repository
+# is a real configuration, and the rule above already stops it being blanked.
+NOT_SETTINGS = frozenset({"SCRIPT_VERSION"})
+
+
 def is_overridable(name, value):
     """Is `name` something an operator may set in settings.conf?
 
@@ -221,6 +237,8 @@ def is_overridable(name, value):
     if not name.isupper() or name.startswith("_"):
         return False
     if name.startswith("C_"):
+        return False
+    if name in NOT_SETTINGS:
         return False
     return isinstance(value, (str, bool, int, float, list, type(None)))
 
@@ -510,6 +528,35 @@ def _check_writable(name, value, namespace, types):
             f"{name} cannot be blank - the daemon refuses to start without it. "
             f"Clearing it here would leave no way to set it again except by "
             f"editing settings.conf by hand.")
+
+    # Nor can a setting the daemon has no blank behaviour FOR, which REQUIRED
+    # does not cover: it holds the three an operator must supply, not the many
+    # that already work and simply cannot be empty.
+    #
+    # The shipped default answers it without a list to maintain. A default of
+    # None means "unset unless you say otherwise", and blank is how an
+    # operator says it again - RAR_BINARY cleared is "look on PATH", and
+    # DEBUG_CHANNEL ships blank precisely because no debug channel is a real
+    # configuration. A non-empty shipped default is the opposite: there is no
+    # code path for empty anywhere.
+    #
+    # Found by a sweep of every string field the dashboard offers. Four were
+    # accepted blank and each is used verbatim on the wire or on disk -
+    # SERVER as the connect() host, ALT_NICKNAME as "NICK <alt>" after a 433,
+    # LIST_BASE_NAME as the master list's filename, WEBUI_HOST as the
+    # interface the dashboard binds, where empty means EVERY interface rather
+    # than the loopback the default is careful to specify.
+    #
+    # The SHIPPED default, not the current one: after a first blank save the
+    # current value IS empty, and a rule reading that would let every save
+    # after it through.
+    shipped = (namespace.get("SHIPPED_VALUES") or {}).get(name)
+    if (isinstance(shipped, str) and shipped.strip()
+            and not str(value).strip()):
+        raise SettingsWriteError(
+            f"{name} cannot be blank - it ships as {shipped!r} and the daemon "
+            f"has no behaviour for an empty one. Set it to the value you want "
+            f"instead of clearing it.")
 
     text = render(value)
 

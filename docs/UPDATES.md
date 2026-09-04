@@ -4,6 +4,68 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 A setting the daemon has no blank behaviour for can no longer be saved blank
+From an audit of the dashboard's settings surface: every string field the page offers was saved empty, and the accepted ones read back. **Twenty-eight were accepted.** Four of them are used verbatim on the wire or on disk.
+
+| Setting | What empty means |
+|---|---|
+| `SERVER` | `s.connect((config.SERVER, config.PORT))` with no host |
+| `ALT_NICKNAME` | the literal line `NICK ` after a 433, answered with 431 |
+| `LIST_BASE_NAME` | the master list's filename |
+| `WEBUI_HOST` | the interface the dashboard binds - empty is EVERY interface, where the default is careful to say loopback |
+
+`settings_file.REQUIRED` was the wrong list to extend. It means "an operator must supply this", which is why it holds exactly three names; the question here is the different one of whether a setting that already works may be emptied.
+
+**The shipped default answers it, with no list to maintain.** `None` means "unset unless you say otherwise" and blank is how an operator says it again - `RAR_BINARY` cleared is "look on PATH", `DEBUG_CHANNEL` ships blank because an install with no debug channel is not misconfigured. A non-empty shipped default is the opposite: there is no code path for empty anywhere in the daemon. `defaults.SHIPPED_VALUES` snapshots every setting at the same moment `SHIPPED_DEFAULTS` already snapshotted the REQUIRED three - before either override mechanism runs - because the CURRENT value cannot answer this: after one blank save it is itself empty, and a rule reading that would wave through every save after it.
+
+`FILE_DIRECTORY` stays blankable and that is correct: it ships as `None`, and since #260 an install serving from `library_folders.json` legitimately has none. `library.folders()` returns `[]` for it rather than raising.
+
+### 🧮 SCRIPT_VERSION is no longer an editable setting
+It was a field on the Settings page, labelled "Script version". Saving it wrote the number into `settings.conf` - and `settings.conf` is applied AFTER the shipped defaults, so from that moment the file won, permanently.
+
+The next upgrade would ship a new version and the daemon would go on reporting the old one: in the channel advert, the list masthead, the CTCP VERSION reply and the dashboard's own header, with nothing anywhere to say why. Measured before the fix: shipped `DCCore v99.0.0`, reported `DCCore v1.0.0-STALE`. "What version are you running?" is the first question asked about any install, and this made the answer unreliable in the one direction nobody thinks to check.
+
+`settings_file.NOT_SETTINGS` now holds it - uppercase names that describe the CODE rather than the installation. A version left in an existing `settings.conf` is ignored rather than applied, and does not stop the rest of the file being read. `PROJECT_URL` is deliberately NOT excluded: a fork pointing at its own repository is a real configuration, and it is only stopped from being blanked.
+
+A second guard came out of the mutation run: `SETTINGS_CATEGORIES` is not what decides whether a field renders - `build_settings_payload()` filters by `declared_types` + `is_overridable` - so a name left in a category after it stops being a setting silently vanishes from the page. There is now an assertion that the category list names only real settings.
+
+### 🏷️ The 433 fallback nickname actually runs
+Both 433 handlers read
+
+```python
+alt_nick = getattr(config, 'ALT_NICKNAME', f"{main_nick}`")
+```
+
+which reads as a defence against a missing or empty alt nick and is not one. `getattr`'s default fires only when the attribute is **absent**, and `defaults.py` declares `ALT_NICKNAME: str = "DCCore_"`, so it never is. The fallback was unreachable in both places - dead code that looked exactly like a safety net.
+
+It only mattered while the setting could be blanked, which is the entry above; but a file written before that fix still exists, and `admin_config.py` can still set it to anything. `irc.resolve_alt_nick()` now does what both call sites always looked like they were doing. Reachable only on a 433 - reconnecting after a split, with the old session still holding the name - which is the one moment the fallback exists for.
+
+### 📢 A PRIVMSG target is one channel, and the default was a list of them
+The channel a finished transfer is announced in was picked like this:
+
+```python
+target_chan = next_file.get('channel', config.CHANNEL.split(','))
+```
+
+`.split(',')` returns a LIST. A queue entry with no `'channel'` key therefore handed a list to `start_dcc_send()`, which passes it to `announce.send_transfer_complete()`, which builds `f"PRIVMSG {channel} :"` - and the line that went out was
+
+```
+PRIVMSG ['#one', '#two'] :Sent Song.flac to nick
+```
+
+A malformed target, answered with a numeric nothing here reads, so the announcement was lost while the transfer it announced had already succeeded. Nothing raised and nothing logged.
+
+Latent rather than live - every entry the request path builds does set `'channel'` - but the default was the wrong SHAPE either way, and one that is only correct by accident of nothing using it is worth removing. `dcc.announce_channel_for()` is lifted out for the same reason `resolve_dcc_address()` and `take_complete_lines()` were lifted out of `irc_loop()`: the caller needs a socket, a live queue and a channel-user map, and the rule itself is four lines. It also now treats an entry carrying an EMPTY channel the same as one carrying none, which `get()`'s default could not.
+
+**The sibling site is deliberately unchanged.** The global-queue scan uses the same expression as a list of channels to test membership in, and type-switches on str vs list explicitly. There a list is the right answer, and there is now an assertion saying so, because the obvious "tidy-up" would silently narrow that scan to one channel.
+
+`announce_worker()`'s own `config.CHANNEL.split(",")` went through `irc.configured_channels()` at the same time - it is an `AttributeError` on the advert thread while a rehash has `CHANNEL` set to `None`, and `is_ready` cannot be relied on to gate it because `is_ready` is a module global that same reload rebinds.
+
+The first version of this file's tests reimplemented the expression instead of calling it, and passed happily while the module was mutated back to the list default. The mutation run is what caught that; the test calls `dcc.announce_channel_for()` now.
+
+### 🔎 What the audit checked and found sound
+Recorded so the next audit starts further along rather than repeating it. Every dashboard route (25) refuses to answer without a session; ten path-traversal shapes served nothing; no route returns a 500 under a sweep of hostile query and body input; `app.js` references 72 element ids and every one exists in `index.html`, with no unguarded dereference and no unescaped value in an attribute (the quote-in-attribute class this file already carries `BroadcastRenderingXssRegressionTests` for); every pure parser in `irc.py` survives a fuzz sweep of malformed lines; and no lock or container in any reloaded module loses its identity across a rehash, which is `runtime.py` doing its job.
+
 ### 🖥️ A rehash no longer shows - or leaves - a configuration the daemon does not have
 One operator saved one setting from the dashboard. Four defects fell out of it, and every one of them was silent.
 

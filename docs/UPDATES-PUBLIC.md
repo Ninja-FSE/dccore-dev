@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A "Sent" announcement can no longer be addressed to a broken target.** For a queued item that did not record which channel it came from, the bot built its completion message with the whole channel list where one channel belongs - the line was malformed and the announcement silently vanished, even though the file had gone out fine.
+
+- **Settings that the bot cannot run without can no longer be saved empty.** The server address, the fallback nickname, the list's base name and the dashboard's own bind address were all accepted blank, and each one is used exactly as typed - an empty server address is a connection to nowhere, an empty bind address exposes the dashboard on every network interface rather than just your own machine. Settings that ship blank on purpose, like the debug channel or the rar path, can still be cleared.
+
+- **The version number is no longer an editable setting.** It was a field on the Settings page, and saving it pinned that number permanently - every future upgrade would go on reporting the old version in the advert, the list header, the CTCP VERSION reply and the dashboard. It describes the code you are running, so it is now read-only.
+
+- **The fallback nickname is used properly when your main nick is taken.** If the fallback was empty the bot sent a nickname command with no nickname in it and ended up with no nick at all - reachable only while reconnecting after a split, which is exactly when it matters.
+
 - **Saving a setting from the dashboard no longer shows your other settings as blank.** Nickname, admin nick and channels could come back empty on the Settings page straight after a save - alarming, and never true: the file always had them, and a refresh showed them again. The page now waits for the reload it just triggered instead of reporting its halfway state.
 
 - **A debug channel set from the dashboard is joined straight away.** It used to save correctly, report "Rehash started", and not be joined until the next restart - with nothing to tell you it had been skipped.

@@ -87,6 +87,30 @@ def join_target_list():
     return ",".join(configured_channels())
 
 
+def resolve_alt_nick(main_nick):
+    """The nickname to fall back to when the server refuses the main one.
+
+    Both call sites used to read
+
+        getattr(config, 'ALT_NICKNAME', f"{main_nick}`")
+
+    which looks like it defends against a missing or empty alt nick and does
+    not: getattr's default fires only when the attribute is ABSENT, and
+    defaults.py declares ALT_NICKNAME as a str with a real value, so it never
+    is. The fallback was unreachable in both places.
+
+    That mattered because the setting could be SAVED empty from the dashboard
+    (settings_file now refuses it, but files written before that still exist,
+    and admin_config.py can still set it to anything). An empty alt nick sent
+    the literal line "NICK " - a NICK command with no nickname, which the
+    server answers with 431 and no nick at all. Only reachable on a 433, which
+    is to say while reconnecting after a split, with the old session still
+    holding the name: the one moment the fallback exists for.
+    """
+    alt = str(getattr(config, "ALT_NICKNAME", "") or "").strip()
+    return alt or f"{main_nick}`"
+
+
 def numeric_target(line):
     """The nick a server numeric is addressed to, or None.
 
@@ -1185,7 +1209,7 @@ def irc_loop():
                 
                 for a_line in auth_lines:
                     if " 433 " in a_line or "erroneous nickname" in a_line.lower():
-                        alt_nick = getattr(config, 'ALT_NICKNAME', f"{config.ORIGINAL_NICK}`")
+                        alt_nick = resolve_alt_nick(config.ORIGINAL_NICK)
                         print(f"[SERVER 433] The nick {config.NICKNAME} was taken. Switching CURRENT_NICK to: {alt_nick}")
                         s.send(f"NICK {alt_nick}\r\n".encode())
                         config.NICKNAME = alt_nick
@@ -1498,7 +1522,7 @@ def irc_loop():
                     if is_server_numeric(line, "433") or is_server_numeric(line, "432"):
                         main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
                         if str(config.NICKNAME).lower() == main_nick.lower():
-                            alt_nick = getattr(config, 'ALT_NICKNAME', f"{main_nick}`")
+                            alt_nick = resolve_alt_nick(main_nick)
                             print(f"[LIVE NICK COLLISION] The server reported a genuine collision for {main_nick}. Fallback nick: {alt_nick}")
                             s.send(f"NICK {alt_nick}\r\n".encode())
                             config.NICKNAME = alt_nick

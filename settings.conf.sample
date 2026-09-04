@@ -28,8 +28,6 @@
 [system and global engine settings]
 #DEBUG_MODE = false
 
-#SCRIPT_VERSION = DCCore v1.11.0
-
 # Where this bot came from. Defined once because two things say it: the CTCP
 # VERSION reply, and the header of every generated list. Before this there was
 # no project URL anywhere in the tree, so anyone who received a list had no way

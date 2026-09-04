@@ -1191,7 +1191,7 @@ SETTINGS_CATEGORIES = (
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
                                                 "WEBUI_CONSOLE_ENABLED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE",
-                                                "SCRIPT_VERSION", "PROJECT_URL"]),
+                                                "PROJECT_URL"]),
 )
 
 # A human-readable label per setting, since the raw config.py name
@@ -1283,7 +1283,6 @@ SETTINGS_LABELS = {
     "DEBUG_MODE": "Debug mode",
     "DEBUG_TO_CHANNEL": "Send debug lines to channel",
     "DEBUG_TO_CONSOLE": "Send debug lines to admin console",
-    "SCRIPT_VERSION": "Script version",
     "PROJECT_URL": "Project URL",
 }
 

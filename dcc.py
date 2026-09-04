@@ -57,6 +57,54 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
     # as part of "/srv/library", because the string happens to begin the same way.
     return matchpath == base or matchpath.startswith(base + os.sep)
 
+def default_announce_channel():
+    """The one channel to announce in when a queue entry does not name one.
+
+    ONE, not the list. The value this replaces was `config.CHANNEL.split(',')`,
+    used as the default of `next_file.get('channel', ...)` - so an entry
+    without a 'channel' key handed a LIST to start_dcc_send(), which passes it
+    to announce.send_transfer_complete(), which builds
+
+        f"PRIVMSG {channel} :"
+
+    The line that went out was `PRIVMSG ['#one', '#two'] :Sent ...` - a
+    malformed target the server answers with a numeric nothing reads, so the
+    "Sent" announcement was simply lost. Nothing raised, and the transfer
+    itself had already succeeded.
+
+    Every entry the request path creates does set 'channel' (handle_download_request
+    and the two paths around it), which is why this stayed latent - it needs an
+    entry from somewhere else, or one restored from a queue written before that
+    key existed.
+
+    Deferred import: irc.py imports THIS module at load time, so reaching for
+    it at the top would close a cycle. The same shape as the `import dcc_fetch`
+    calls inside irc.py's own handlers.
+    """
+    import irc
+    channels = irc.configured_channels()
+    return channels[0] if channels else ""
+
+
+def announce_channel_for(next_file):
+    """The channel one queue entry's completion should be announced in.
+
+    Lifted out of the queue-completion path so it can be tested at all: the
+    caller needs a socket, a live queue and a channel-user map, and the rule
+    itself is four lines. The same reason resolve_dcc_address() and
+    take_complete_lines() were lifted out of irc_loop().
+
+    `or`, not get()'s default: an entry carrying an EMPTY channel is as
+    unusable as one carrying none, and only the second case was handled
+    before.
+    """
+    if isinstance(next_file, dict):
+        named = next_file.get('channel')
+        if named:
+            return named
+    return default_announce_channel()
+
+
 def download_count_identity(file_path, file_name):
     """(key, display name, kind) for one completed send, for db.record_download().
 
@@ -491,10 +539,7 @@ def check_queue_and_send(irc_sock, completed_user):
 
 
     if next_file:
-        if isinstance(next_file, dict):
-            target_chan = next_file.get('channel', config.CHANNEL.split(','))
-        else:
-            target_chan = config.CHANNEL.split(',')
+        target_chan = announce_channel_for(next_file)
         
         user_is_actively_in_channel = False
         
