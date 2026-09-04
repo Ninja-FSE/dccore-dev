@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📛 The bot takes its nickname from the server, not from config
+Found on a real install. A nickname longer than the server's `NICKLEN` is not refused - it is silently **shortened**. Undernet allows 12, so `Samoth-DCCore` registered as `Samoth-DCCor` and the daemon never noticed: it logged *"CURRENT_NICK settled as: Samoth-DCCore"*, advertised `@Samoth-DCCore` - a nick nobody could PM or DCC - and went on believing a name it had never had. `433` was handled because it announces itself; truncation does not, so nothing failed and nothing caught it.
+
+**The nick now comes from the numeric's target field.** Every numeric reply is `:<prefix> <code> <target> ...` and for a registered client `<target>` *is* its nick - RFC 1459/2812 message structure rather than a courtesy, so every IRCd does it. What varies is RPL_WELCOME's *text*, which each network writes as it likes, so this reads the field and never the sentence.
+
+**And `005` says why.** Nothing read RPL_ISUPPORT before, so the limit the server publishes was there and unused. `isupport_nicklen()` reads it, and the daemon can now name the reason instead of leaving an operator to notice their bot is called something else.
+
+The shortened name goes into `NICKNAME` only - `ORIGINAL_NICK` keeps the configured value. That is what keeps the master list working: it is built by a subprocess importing fresh config, so its request lines carry the configured name, and `get_bot_aliases()` already answers to both because it was written for the same divergence after a `433`.
+
+13 tests, against real `001` lines from three networks. The negatives matter more than the positives and are mutation-verified: a forged `PRIVMSG` carrying `001` must not rename the bot (unanchored matching once read `!DCCore 001 - Enter Sandman.flac` as a numeric), the pre-registration `*` target is not a nick, `NICKLEN` in the trailing prose is not a limit, and `MAXNICKLEN=` is not `NICKLEN=`.
+
 ### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
 Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
 

@@ -54,6 +54,57 @@ def is_server_numeric(line, code):
     return re.match(r"^:\S+\s+" + code + r"\s+\S+", line) is not None
 
 
+def numeric_target(line):
+    """The nick a server numeric is addressed to, or None.
+
+    This is the server's own statement of what it calls us, and it is the only
+    reliable one. Every numeric reply is ':<prefix> <code> <target> ...' and
+    for a registered client <target> IS its nick - that is RFC 1459/2812
+    message structure, not a courtesy, so ircu, InspIRCd, UnrealIRCd, Solanum,
+    ngIRCd and Ergo all do it because they must.
+
+    Which is why this reads the FIELD and never the sentence. RPL_WELCOME's
+    text is whatever a network wants ("Welcome to the Internet Relay Network",
+    "Welcome to the Undernet IRC Network", or anything else); the target
+    position is fixed.
+
+    "*" is returned as None: before registration completes a server addresses
+    an unknown client that way, and it is not a nick anyone has.
+    """
+    match = re.match(r"^:\S+\s+\d{3}\s+(\S+)", line)
+    if not match:
+        return None
+    target = match.group(1)
+    return None if target == "*" else target
+
+
+def isupport_nicklen(line):
+    """The NICKLEN a 005 RPL_ISUPPORT line advertises, or None.
+
+    005 is where a server states its own limits, as space-separated TOKEN or
+    TOKEN=value pairs before the trailing text. Reading it is what lets the
+    daemon say why a nickname was shortened instead of leaving the operator to
+    notice that the bot in the channel is not called what they configured.
+
+    Not every server sends NICKLEN - it is a convention rather than a
+    standard - so None is an ordinary answer and callers must treat it as
+    "unknown", never as "no limit".
+    """
+    if not is_server_numeric(line, "005"):
+        return None
+    # Stop at the trailing parameter (":are supported by this server"), which
+    # is prose and could contain anything.
+    body = line.split(" :", 1)[0]
+    match = re.search(r"\bNICKLEN=(\d+)\b", body)
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def is_user_event(line, command):
     """True only when `line` is a genuine user event with this command.
 
@@ -1106,6 +1157,33 @@ def irc_loop():
                         s.send(f"NICK {alt_nick}\r\n".encode())
                         config.NICKNAME = alt_nick
                     
+                    # What the server actually calls us, taken from the numeric
+                    # it addressed to us rather than assumed from config.
+                    #
+                    # A nickname longer than the server's NICKLEN is not
+                    # refused - it is silently SHORTENED. Undernet allows 12,
+                    # so "Samoth-DCCore" registered as "Samoth-DCCor" while the
+                    # daemon went on believing the longer name: it advertised
+                    # "@Samoth-DCCore", a nick nobody could PM or DCC, and said
+                    # "CURRENT_NICK settled as" the name it had never had. 433
+                    # was handled; this was not, because nothing failed.
+                    #
+                    # Assigned to NICKNAME only. ORIGINAL_NICK keeps the
+                    # configured value, and get_bot_aliases() already answers to
+                    # both - it was written for the same divergence after a 433,
+                    # and the master list is stamped by a subprocess with the
+                    # configured name either way, so a pasted "!<nick> <file>"
+                    # keeps matching.
+                    if is_server_numeric(a_line, "001"):
+                        given = numeric_target(a_line)
+                        if given and given != config.NICKNAME:
+                            print(f"[SERVER] Registered as {given}, not "
+                                  f"{config.NICKNAME} - the server changed it. "
+                                  f"The advert and every reply will use "
+                                  f"{given}.")
+                            config.PREVIOUS_NICK = config.NICKNAME
+                            config.NICKNAME = given
+
                     if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
                         ident_str = getattr(config, 'IDENT', 'dccore')
                         real_str = getattr(config, 'REALNAME', 'dccore bot')
@@ -1142,6 +1220,10 @@ def irc_loop():
         # Bytes - see take_complete_lines() for why this must not be str.
         buffer = b""
         joined = False
+        # Reset per connection, like `joined` above and for the same reason: a
+        # reconnect to a different server may well have a different NICKLEN,
+        # and the operator should be told again if it matters there too.
+        announced_nicklen = False
         bot_joined_channel = False
         announce.is_ready = False
         
@@ -1351,6 +1433,25 @@ def irc_loop():
                         parts = line.split()
                         pong_code = parts[-1].strip()
                         s.send(f"PONG {pong_code}\r\n".encode())
+
+                    # 005 is where the server states its own limits, and it
+                    # arrives after 001 - so by now the shortened nick has
+                    # already been adopted above. This is the EXPLANATION, not
+                    # the detection: without it an operator sees their bot
+                    # under a name they did not choose and has nothing to
+                    # connect it to. Printed once, and only when the configured
+                    # name genuinely did not fit.
+                    if not announced_nicklen and is_server_numeric(line, "005"):
+                        limit = isupport_nicklen(line)
+                        configured = str(getattr(config, "ORIGINAL_NICK", "") or "")
+                        if limit and configured and len(configured) > limit:
+                            announced_nicklen = True
+                            print(f"[SERVER] This server allows {limit} "
+                                  f"characters in a nickname and NICKNAME is "
+                                  f"{len(configured)} ({configured}), so it was "
+                                  f"shortened to {config.NICKNAME}. Set NICKNAME "
+                                  f"to {limit} characters or fewer to choose the "
+                                  f"short form yourself.")
                     # Catches ONLY official server collisions; channel chatter is ignored
                     # Anchored: " 433 " matched those digits anywhere in the line, and the
                     # PRIVMSG/NOTICE exclusion under it did not cover PART or QUIT reasons
