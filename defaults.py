@@ -20,7 +20,7 @@ import runtime
 # 1. SYSTEM AND GLOBAL ENGINE SETTINGS
 # ---------------------------------------------------------------------
 DEBUG_MODE: bool    = False
-SCRIPT_VERSION: str = "DCCore v1.10.0"
+SCRIPT_VERSION: str = "DCCore v1.11.0"
 
 # Where this bot came from. Defined once because two things say it: the CTCP
 # VERSION reply, and the header of every generated list. Before this there was

@@ -53,9 +53,13 @@ the omissions surface, because it is the last point at which they are cheap.
   `docs/UPDATES-PUBLIC.md`, with the date. If either has no Unreleased section
   but commits have landed since the last release, something shipped without an
   entry — write it now from the merged PRs.
-- **Bump `SCRIPT_VERSION`** in `defaults.py`. It is the version the bot reports
-  over CTCP VERSION, prints in the advert, and stamps on every generated list,
-  so a stale one misreports itself in three places at once.
+- **Bump `SCRIPT_VERSION`** in `defaults.py` **and the version line in
+  `README.md`**. `SCRIPT_VERSION` is what the bot reports over CTCP VERSION,
+  prints in the advert and stamps on every generated list, so a stale one
+  misreports itself in three places at once; `README.md`'s is the first thing
+  a visitor to the public repo reads. This checklist named only the first of
+  them until v1.11.0, when the second was found by grepping for the old
+  number rather than by following the list.
 - **Tag the release** on `dccore` after the merge, matching the changelog
   heading exactly. `v1.10.0` in the changelog and `v1.9.0-RC1` on the tag is
   the kind of mismatch nobody notices until someone reports a bug against a
