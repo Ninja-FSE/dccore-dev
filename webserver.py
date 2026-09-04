@@ -1175,7 +1175,8 @@ SETTINGS_CATEGORIES = (
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
-                                                "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES"]),
+                                                "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES",
+                                                "LIBRARY_FOLDERS_FILE"]),
     ("advertising",   "Advertising & search",  ["THEME", "CUSTOM_THEME_BORDER", "CUSTOM_THEME_SEPARATOR",
                                                 "CUSTOM_THEME_TEXTBOX", "CUSTOM_THEME_VALUE",
                                                 "CUSTOM_THEME_ALERT", "CUSTOM_THEME_ACCENT",
@@ -1246,6 +1247,7 @@ SETTINGS_LABELS = {
     "LIST_RAWBYTES_FILE": "List raw bytes file",
     "LIST_HEADER_FILE": "List banner file",
     "LIST_HEADER_MAX_BYTES": "List banner size limit (bytes)",
+    "LIBRARY_FOLDERS_FILE": "Served folders file",
 
     "THEME": "Colour theme",
     "CUSTOM_THEME_BORDER": "Custom theme: border colour",

@@ -1,6 +1,6 @@
 # DCCore
 
-**v1.10.0** · Python 3.10+ · Linux and Windows
+**v1.11.0** · Python 3.10+ · Linux and Windows
 
 An IRC DCC file-sharing daemon — a modern reimplementation of OmenServe, the mIRC script that has run these channels for twenty years.
 

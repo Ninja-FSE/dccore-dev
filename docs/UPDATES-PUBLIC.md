@@ -2,10 +2,24 @@
 
 ## Unreleased
 
+- **A Console page in the web dashboard** — the DCC CHAT admin console's commands and live log, in the browser, for an operator who wants neither a second IRC client nor a debug channel. Same command set, same password. Commands that run in the background (`ban`, `rehash`, `update`, ...) reply immediately with an acknowledgement; the result follows a moment later in the log, the same as it would over DCC CHAT.
+
+## v1.11.0 — The Several Folders Release
+
+- **DCCore can serve from more than one folder.** Configure several — a flac library and an mp3 one, or music spread across two drives — and they are built into a single list, in the order you choose.
+
+  **Paths in the list now start with the folder's name**, so `D:\MUSIC\Artist\Album\` becomes `D:\MUSIC\Flac\Artist\Album\`. That is what lets the same album held in two folders be told apart. It applies even if you serve one folder, deliberately: doing it once now is better than changing every path again the day you add a second.
+
+  **Rebuild your list after upgrading** (`!update`, or the dashboard's Update list button). Until you do, the file you are serving still has the old paths.
+
+  **Almost nothing your users saved stops working.** A file request has always been `!YourBot Song.flac` — a name, not a path — so those are unaffected, and so is anything AutoQ queued from one. Only `!rar` folder requests carry a path, and those still resolve: an old unlabelled one is looked for in each of your folders in turn.
+
+  A folder that is not available when the list is built — an unplugged drive, a share that is down — is skipped with a warning and the rest are built. Your bot stays up with a smaller list rather than going quiet.
+
 - **The bot answers CTCP VERSION** with its build and a link to this project. It replies privately, by notice, straight back to whoever asked — nothing is said in the channel. Operators who would rather not advertise a build can turn it off with `CTCP_VERSION_REPLY`.
 - **Every generated list now names the bot that made it** and links back here, on a line under the file count. The list is the one thing that travels: it gets sent to strangers over DCC and reopened weeks later in a text editor, and until now it carried nothing saying what produced it.
 - **You can put your own banner on the list** — a greeting, your channel, ASCII art — by creating `data/list_header.txt`. Nothing to enable: if the file exists its contents are copied in verbatim on the next `!update`, so box-drawing characters survive intact. Capped at 8 KB. See [INSTALL.md](INSTALL.md#putting-your-own-banner-on-it).
-- **A Console page in the web dashboard** — the DCC CHAT admin console's commands and live log, in the browser, for an operator who wants neither a second IRC client nor a debug channel. Same command set, same password. Commands that run in the background (`ban`, `rehash`, `update`, ...) reply immediately with an acknowledgement; the result follows a moment later in the log, the same as it would over DCC CHAT.
+- **The dashboard's colour theme is now a dropdown**, not a text box you had to already know the right word for. Picking one you cannot spell wrong also means the daemon can refuse a bad value at the moment you save it, with a reason, instead of quietly falling back later.
 
 ## v1.10.0 — General Availability
 

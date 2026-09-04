@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
+Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
+
+Nothing about `adminchat.py` was duplicated. `webserver.build_console_command_result()` dispatches straight into `adminchat.COMMANDS`/`handle_command()` - the exact command set the DCC CHAT console runs, so a change to one cannot silently stop matching the other. `webserver._console_debug_sink()` registers with `announce.add_debug_sink()`, the same fan-out `adminchat.Session.debug_sink()` already uses - which is also why `DEBUG_TO_CONSOLE` (on by default, independent of `DEBUG_TO_CHANNEL`) is the only switch this needs: an operator with no debug channel at all still gets the log for free, and nothing downstream of `announce.send_debug()`'s 44 call sites had to learn a new destination exists.
+
+**The log and a command's reply are two different things, and the page treats them that way.** A command is request/response - `POST /api/console/command` returns exactly the lines that one command produced. `GET /api/console/log?since=<cursor>` is the ambient stream, polled. This matters for `ban`, `unban`, `clearqueue`, `rehash` and `update`: each runs on a background thread (`adminchat._run_detached`) and replies immediately with only an acknowledgement, the same as a DCC CHAT session sees - the actual result arrives a moment later through the log, once the handler underneath calls `send_debug()` on completion. Verified live rather than assumed: running `ban` returns `["Banning ... ..."]` alone, and the log's next poll carries the real `[BAN]` line from `db.py`.
+
+`quit` is the one command intercepted before it ever reaches `handle_command()`: it means `session.close()` in `adminchat.py`, which requires a socket - meaningless, and an `AttributeError` on `_WebConsoleSession`, without the special case (mutation-tested: removing it turns the crash into a caught-and-reported "Command failed" line instead of the friendly one).
+
+`announce` is imported lazily, inside the sink and the log builder, not at module scope - `tests/test_import_graph.py` already enforces that `webserver.py` pulls in nothing beyond a fixed allow-list, precisely so a route handler cannot quietly drag the daemon's modules into a page that is tested without one running.
+
+29 new tests (25 in `tests/test_web_console.py`, 4 of route wiring in `tests/test_dashboard_routes.py`), full suite green, verified end to end against a real running instance (login, every command, the async ban→log follow-up, an unauthenticated 401).
+
+## 🟩 v1.11.0 (2026-09-04) - "The Several Folders Release"
+
+Serving from more than one directory, which is the largest single gap against OmenServe and the one most asked about. **Configurable today by editing `data/library_folders.json`; the Settings page for it is still to come** (#164) - so this ships the capability, not yet the convenience.
+
+Alongside it, the bot can finally say what it is: a CTCP VERSION reply, a masthead on every generated list, and a banner the operator writes themselves.
+
 ### 🪪 The bot can say what it is, without saying it in the channel
 Two surfaces wanted the same missing fact. There was no project URL anywhere in the tree - no `github.com/...` in any `.py` or `.md` - so a list that reached a stranger carried nothing about what produced it, and a CTCP VERSION query got silence. `PROJECT_URL` is now defined once beside `SCRIPT_VERSION` and both consumers read it (from #69).
 
@@ -21,6 +40,61 @@ Three constraints shaped the placement, each with a test:
 
 `tests/test_config_fallbacks.py` caught the identity line reading `getattr(config, 'SCRIPT_VERSION', 'DCCore')` - a non-empty fallback is a second opinion about a value `config.py` already declares. It is now `update_list.list_identity_line()`, shared by both writers so they cannot drift.
 
+### 🖼️ The delivered list shows the operator's banner once, not once per section
+The `-FULL-` text download is the master index and the `!rar` album list concatenated, and each carries its own banner. That is right when they are handed out separately - `.zip` and `.rar` do exactly that, and the `!rar` list is served on its own - but joined, it put the operator's ASCII art halfway down the file as well as at the top, which reads as a bug rather than a design. Introduced by the banner itself, caught by generating a real list rather than by a test.
+
+Removed at concatenation rather than at the writer, so the standalone `!rar` copy keeps its branding, and by matching the exact text `read_operator_header()` returned rather than by recognising a banner in the output - only the first is knowable, since a free-form banner could otherwise contain anything, including something shaped like a folder heading.
+
+The identity line still repeats per section, deliberately: the album half should say what is serving it too, and one line is a section header where a banner of arbitrary height is not.
+
+### 📥 Reading an OmenServe operator's history (#69, step 1)
+The parser and the mapping. No UI and no endpoint yet, so nothing is reachable — this is the piece that can be tested without a browser.
+
+**There is no OmenServe stats file.** Mapped from a live install: OmenServe keeps nothing of its own, and the counters are mIRC's persistent `%variables` in `scripts/vars.ini`, written by whichever add-ons the operator runs — `%mx.*` (mxrarserver) for files and bytes sent, `%SD*` for the speed record, `%OSL.*` for the day buckets. Two operators running different add-ons keep their history in different variables, which is why nothing here is required and why **a missing variable produces an absent field rather than a zero**: writing a zero over somebody's real lifetime total is the worst thing this feature could do. Mutation-verified — making a missing field default to 0 fails 8 tests.
+
+Three numbers import: `%mx.rarsent` → total files, `%mx.rartsent` → total bytes, `%SDmaxspeed` → the speed record. **No unit conversion**: `%SDmaxspeed` is already bytes/s, exactly what `speed_record.txt` stores, so the units warning in the design was right in principle and does not apply. Its `<bytes>,<nick>` second half is dropped.
+
+The day buckets are **shown in the preview and deliberately not imported**. `%OSL.Today` reads `Friday` — a weekday name, not a date — so nothing can tell whether "today" means today or six days ago, and `db._rotate_day_unlocked()` would rotate an imported "today" out of existence on the next new day. Shown rather than silently dropped, because an operator can see them in their own file.
+
+**A correction to the design while building it.** The design put the parsing in the browser, so an operator's other ~268 variables never cross the network. But this repository never executes JavaScript in a test — `tests/test_web_assets.py` checks that `app.js` *parses*, explicitly "not what the script does", and CI has no node. A parser handling hand-edited text whose output overwrites cumulative totals is the last thing that should live where it cannot be tested. So the split moved: the page **filters** to the allowlisted lines (five lines of JavaScript), and this **parses**. Privacy intact, logic tested. `variable_names()` is served to the page rather than written into `app.js`, so the filter and the parser cannot drift.
+
+### 🗂️ One list, built from several folders (#164, step 3)
+The scan walks every configured folder in the operator's order, and every heading now leads with its folder's label: `D:\MUSIC\Artist\Album\` becomes `D:\MUSIC\Flac\Artist\Album\`. **The first step where published output changes.**
+
+**Labelled for a single folder too.** Labelling only at two or more looks gentler and is not: an operator who serves for weeks and then adds a second folder would change every path anyone already saved - a second break, landing on people who had no idea anything changed. Once, at the upgrade, is one.
+
+**What does not change** is most of it. A file request carries a filename, not a path (`dcc.py:1132`), so every saved file request and every AutoQ entry built from a file row is untouched. Only `!rar` folder requests carry a path, and step 2's resolution still accepts the unlabelled form by trying each folder in order - so an old saved `!rar` row keeps working.
+
+**A missing folder costs only itself.** An unplugged drive or unmounted share is skipped with a warning naming it, and the list is built from the rest. Deliberately different from a subtree failing *during* a walk of a folder that was present: that keeps the previous index rather than publishing a truncated one, because it is a systemic failure of a library we are meant to be reading. Every folder missing is still caught by the zero-files guard.
+
+**A bug caught before it was written.** The `!rar` multi-disc truncation guards on `truncate_at >= 2`, meaning "leave at least two segments below the folder" - artist and album. `rel_dir` now begins with the label, so every index shifted by one, and left at 2 a library shaped `<label>/<artist>/<disc 1>` would truncate to `<label>/<artist>`: the artist root `dcc.py` refuses outright, leaving that album with no requestable row at all. That is the exact failure the threshold was added to prevent. It is 3 now, with a test for the shape.
+
+Of 2303 existing tests only one needed changing, and it was a hardcoded expectation rather than a behaviour: it now derives the label instead of spelling it, so it says "the album under its folder" rather than "the folder happens to be called music".
+
+### 🧭 Resolution reads a heading's folder before anything writes one (#164, step 2)
+The design put the scan before resolution. That order does not work: the moment the scan writes `D:\MUSIC\Flac\Artist\Album\`, `resolve_list_folder()` joins the label onto `FILE_DIRECTORY` and every `!rar` request breaks. So the consumer learns labels first, while nothing produces them - which is also what makes this step a verified no-op in production.
+
+`resolve_list_folder_with_root()` returns **which folder** a heading landed in, and that is the point. `dcc.py`'s `!rar` path runs `is_safe_path()` and then an artist-root check; with several folders configured, asking about `FILE_DIRECTORY` asks about the wrong one, and asking "inside ANY configured folder" would be a weaker test than the one that line has always had. Resolving to a single root keeps it exactly as strong.
+
+A labelled heading resolves inside its folder. An unlabelled one - anything from a list saved before this, still sitting in someone's AutoQ queue - tries each folder in the operator's order and takes the first that exists. **Existence decides between the two**, so a label that shares a name with a real subfolder resolves to whichever is really there.
+
+The file-request path gains `search_roots`: the walk and the final containment check cover every folder, while list artifacts stay pinned to `LOCAL_LIST_DIR`, which is one place however many folders the library spans. The queued-pack re-check asks "inside one of the served folders", which is the honest question there - it has a real path and no heading to resolve.
+
+**A bug this found in its own change.** One of the four edits to the `!rar` path matched twice and failed; the queued re-check got fixed and the traversal guard did not. The result resolved a heading into the right folder and then checked containment against a different one, so every album outside the first folder would have been refused as a traversal attempt. Caught because the test drives the real handler with two folders and asserts the *reason* for a refusal, not just that one happened. Mutation-verified: reverting the guard to the global root fails.
+
+18 tests. `test_path_security` and `test_download_resolution` pass unchanged.
+
+### 📚 Groundwork for serving several folders (#164, step 1)
+`library.py` is now the one place that answers "which folders, in what order". **Nothing changes yet**: with no folder file on disk - every install today - `library.folders()` returns a single entry built from `FILE_DIRECTORY`, so every caller sees exactly what it saw before.
+
+The point of doing it this way round is the 54 `FILE_DIRECTORY` references across ten modules, concentrated in `dcc.py` (16) and `update_list.py` (9). Teaching each of them about a list of folders would mean touching all 54 again when multi-list arrives and the folder set moves inside a list; funnelled through one accessor, that later change rebinds the accessor instead.
+
+`LIBRARY_FOLDERS_FILE` (`./data/library_folders.json`) is an **override, not a replacement** - absent, `FILE_DIRECTORY` is the single folder - so an upgrade migrates nothing and the file appears the first time an operator saves a folder set. JSON rather than a `settings.conf` list because `settings_file.py` refuses any list entry containing a comma, and music paths routinely have one (`D:\Rock, Metal`).
+
+Validation is written now because it is what an operator meets the first time they configure two folders: no folder inside another (checked in **both** directions - a rule checking one would let the same overlap through depending on the order they were added), no duplicate paths, unique labels, and a label that is a single path component since it becomes part of paths users copy back. Every problem is reported at once rather than the first, and each names the specific entry it conflicts with.
+
+31 tests. Mutation-verified: replacing the separator-boundary containment test with a plain `startswith` fails (`/srv/library-backup` is not inside `/srv/library`), and dropping either nesting direction fails.
+
 ### 🤖 The list says, where it is written, that a script reads it back
 The generated list is not only read by people. **AutoQ.mrc** copies request lines out of it and sends them verbatim, so `!DCCore !rar D:\MUSIC\Artist\Album\` is a command rather than a display row, and appending anything to it stops AutoQ matching. That is what ruled out a folder size on each album row - wanted, and parked in #69 until there is a list format carrying structure separately from the request line.
 
@@ -37,18 +111,10 @@ These tests are about the probe *order*, which needs no network, so the socket l
 
 Fourth instance of an environment-dependent precondition being asserted rather than probed, after the loopback address, the console code page and `MAX_PATH`.
 
-### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
-Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
+### 🎨 THEME is a choice on the settings page, not a text box
+The dashboard offered `THEME` as free text: an operator had to already know and correctly spell one of the five preset names (`classic`, `midnight`, `forest`, `orchid`, `plain`), with nothing on the page to discover them. `LIST_FORMAT` solved the identical problem for `"txt"`/`"zip"`/`"rar"` via `settings_file.CHOICES`, which the page renders as a dropdown instead of a text input - `THEME` was simply never added to it. A typo also used to save successfully and only surface later as a console print from `theme.theme_name()`'s own fallback; it is now refused at save time, with the reason, the same as an unrecognised `LIST_FORMAT` already was.
 
-Nothing about `adminchat.py` was duplicated. `webserver.build_console_command_result()` dispatches straight into `adminchat.COMMANDS`/`handle_command()` - the exact command set the DCC CHAT console runs, so a change to one cannot silently stop matching the other. `webserver._console_debug_sink()` registers with `announce.add_debug_sink()`, the same fan-out `adminchat.Session.debug_sink()` already uses - which is also why `DEBUG_TO_CONSOLE` (on by default, independent of `DEBUG_TO_CHANNEL`) is the only switch this needs: an operator with no debug channel at all still gets the log for free, and nothing downstream of `announce.send_debug()`'s 44 call sites had to learn a new destination exists.
-
-**The log and a command's reply are two different things, and the page treats them that way.** A command is request/response - `POST /api/console/command` returns exactly the lines that one command produced. `GET /api/console/log?since=<cursor>` is the ambient stream, polled. This matters for `ban`, `unban`, `clearqueue`, `rehash` and `update`: each runs on a background thread (`adminchat._run_detached`) and replies immediately with only an acknowledgement, the same as a DCC CHAT session sees - the actual result arrives a moment later through the log, once the handler underneath calls `send_debug()` on completion. Verified live rather than assumed: running `ban` returns `["Banning ... ..."]` alone, and the log's next poll carries the real `[BAN]` line from `db.py`.
-
-`quit` is the one command intercepted before it ever reaches `handle_command()`: it means `session.close()` in `adminchat.py`, which requires a socket - meaningless, and an `AttributeError` on `_WebConsoleSession`, without the special case (mutation-tested: removing it turns the crash into a caught-and-reported "Command failed" line instead of the friendly one).
-
-`announce` is imported lazily, inside the sink and the log builder, not at module scope - `tests/test_import_graph.py` already enforces that `webserver.py` pulls in nothing beyond a fixed allow-list, precisely so a route handler cannot quietly drag the daemon's modules into a page that is tested without one running.
-
-29 new tests (25 in `tests/test_web_console.py`, 4 of route wiring in `tests/test_dashboard_routes.py`), full suite green, verified end to end against a real running instance (login, every command, the async ban→log follow-up, an unauthenticated 401).
+`theme.THEMES` is not imported to build the new tuple: `theme.py` imports `defaults`, and `defaults.py` imports `settings_file` at module scope, so `import theme` here closes that into a cycle - verified by trying it, and it fails depending on which of the two modules a test or entry point happens to import first, not consistently. Named directly instead, same as `LIST_FORMAT`'s own tuple; a test pins it against `theme.THEMES` so the two cannot drift silently if a preset is ever added or renamed.
 
 ## 🟩 v1.10.0 (2026-09-01) - "General Availability"
 RC4 shipped a full changelog entry below; everything after it did not. **66 PRs merged into `beta` over the five weeks since RC4** without a single one getting its own entry here - this release closes that gap with one condensed summary, grouped by theme rather than narrated PR-by-PR. See each PR's own description on GitHub for the full story behind any one line below.

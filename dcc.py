@@ -14,6 +14,7 @@ import platform_compat
 import list as list_mod
 import announce
 import db
+import library
 import runtime
 
 # THE queue lock: bound to runtime.py's object, not constructed here - dcc.py is
@@ -596,7 +597,18 @@ def check_queue_and_send(irc_sock, completed_user):
                     # SECOND LINE OF DEFENCE: queue entries survive restarts via dcc_queue.txt,
                     # so a poisoned row queued BEFORE the traversal guard existed would otherwise
                     # still be packed here. Re-verify the path immediately before calling rar.
-                    if not is_safe_path(config.FILE_DIRECTORY, true_source_dir):
+                    #
+                    # Checked against each configured folder rather than one
+                    # global (#164). Unlike the request path above, this has a
+                    # real path from the queue and no heading to resolve, so
+                    # "which folder does this belong to" IS the question - a
+                    # queued row can legitimately come from any of them. Still
+                    # is_safe_path() per folder, so each comparison resolves
+                    # symlinks and compares per separator exactly as before;
+                    # what changed is how many roots are legitimate, not how
+                    # any one of them is tested.
+                    if not any(is_safe_path(folder.path, true_source_dir)
+                               for folder in library.folders()):
                         print(f"[SECURITY] Blocked a poisoned queue entry for {completed_user}: {true_source_dir}")
                         with queue_lock:
                             if completed_user.lower() in config.dcc_queue:
@@ -1002,7 +1014,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # list_mod.resolve_list_folder()/is_safe_path() below fail on a
             # None base and fall through to the bare except at the bottom of
             # this function, which told the requester nothing at all.
-            if not config.FILE_DIRECTORY:
+            if not library.folders():
                 announce_mod.send_dcc_error(user, "not_configured")
                 return
 
@@ -1024,8 +1036,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # path with os.path.realpath() regardless, but this is the
             # traversal guard's input and there is no reason to change its
             # exact shape while consolidating the prefix logic.
-            true_source_dir = os.path.normpath(
-                list_mod.resolve_list_folder(win_path, base=config.FILE_DIRECTORY))
+            # Resolved WITH its root, because both guards below are about the
+            # one folder this heading landed in, not about a global. With
+            # several folders configured (#164), asking "is it inside
+            # FILE_DIRECTORY" would be asking about the wrong one; asking "is
+            # it inside ANY configured folder" would be a weaker test than the
+            # one this line has always had. Resolving to a single root keeps
+            # the check exactly as strong as it is today.
+            resolved_dir, source_folder = list_mod.resolve_list_folder_with_root(win_path)
+            true_source_dir = os.path.normpath(resolved_dir)
 
             # ---------------------------------------------------------------------
             # THE TRAVERSAL GUARD - this one is critical:
@@ -1036,7 +1055,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # So the FINAL path is verified to still be inside the music directory
             # before anything else happens.
             # ---------------------------------------------------------------------
-            if not is_safe_path(config.FILE_DIRECTORY, true_source_dir):
+            # Against the folder this heading RESOLVED INTO, not a global. With
+            # several folders configured (#164) the request may legitimately
+            # name any of them, and checking against one would refuse every
+            # album in the others. A None root means resolution found no
+            # configured folder at all, which is not safe by definition.
+            if source_folder is None or not is_safe_path(source_folder.path, true_source_dir):
                 print(f"[SECURITY] Blocked a traversal attempt from {user}: {raw_win_path!r} -> {true_source_dir}")
                 announce_mod.send_pack_error_notice(irc_sock, user)
                 announce_mod.send_debug(
@@ -1048,7 +1072,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # subfolder) rather than an actual album folder. relpath() rather
             # than the old hand-built linux_sub_path - same question, asked
             # of the path resolve_list_folder() already produced.
-            relative_to_root = os.path.relpath(true_source_dir, config.FILE_DIRECTORY)
+            relative_to_root = os.path.relpath(true_source_dir, source_folder.path)
             if os.sep not in relative_to_root:
                 print(f"[SECURITY] Blocked an attempt to pack the root folder from {user}: {relative_to_root}")
                 announce_mod.send_pack_error_notice(irc_sock, user)
@@ -1143,6 +1167,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         if list_mod.is_list_artifact_name(requested_file):
             base_directory = os.path.abspath(config.LOCAL_LIST_DIR)
             full_path = os.path.join(base_directory, requested_file)
+            # One root, and deliberately so: the lists live in exactly one
+            # place regardless of how many folders the library spans.
+            search_roots = [base_directory]
         else:
             # Same reasoning as the !rar branch above: FILE_DIRECTORY can
             # legitimately be unset (#184's review), and an
@@ -1151,10 +1178,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # without it. Checked explicitly rather than letting
             # os.path.abspath(None) raise into the bare except below, which
             # left the requester with no response of any kind.
-            if not config.FILE_DIRECTORY:
+            if not library.folders():
                 announce.send_dcc_error(user, "not_configured")
                 return
-            base_directory = os.path.abspath(config.FILE_DIRECTORY)
+            # Every configured folder, in the operator's order (#164). The
+            # first is still where a bare filename is guessed to be, which is
+            # what a single-folder install has always done; the rest are what
+            # the list lookup and the walk below fall through to.
+            search_roots = [os.path.abspath(folder.path)
+                            for folder in library.folders()]
+            base_directory = search_roots[0]
             full_path = os.path.join(base_directory, requested_file)
 
         is_master_zip = list_mod.is_list_artifact_name(requested_file)
@@ -1196,8 +1229,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                     # which could silently drift from the
                                     # original if the list format ever changed.
                                     if back_line.upper().startswith(list_mod.LIST_FOLDER_PREFIX):
-                                        found_folder = list_mod.resolve_list_folder(
-                                            back_line, base=base_directory)
+                                        # No explicit base: the heading itself
+                                        # says which folder it belongs to once
+                                        # there is more than one (#164), and
+                                        # pinning it to base_directory would
+                                        # resolve every heading into the first.
+                                        found_folder = list_mod.resolve_list_folder(back_line)
                                         break
                                 if found_folder is None:
                                     continue
@@ -1236,12 +1273,24 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 except Exception as list_err:
                     print(f"[DCC-LOOKUP ERROR] {list_err}")
             if not os.path.exists(platform_compat.long_path(full_path)):
-                for root, dirs, files in os.walk(base_directory):
-                    if requested_file in files:
-                        full_path = os.path.join(root, requested_file)
+                # Last resort, once the list lookup has not placed the file:
+                # walk for it. Each configured folder in turn, in the
+                # operator's order, so the same name in two of them resolves
+                # the way the list's own ordering already does.
+                for search_root in search_roots:
+                    for root, dirs, files in os.walk(search_root):
+                        if requested_file in files:
+                            full_path = os.path.join(root, requested_file)
+                            break
+                    if os.path.exists(platform_compat.long_path(full_path)):
                         break
 
-        if not is_safe_path(base_directory, full_path):
+        # Against every legitimate root rather than one. is_safe_path() itself
+        # is unchanged - each comparison still resolves symlinks and compares
+        # per separator - so what widened is which roots count as legitimate,
+        # not how any one of them is tested. A path outside all of them is
+        # still refused exactly as before.
+        if not any(is_safe_path(root, full_path) for root in search_roots):
             announce.send_dcc_error(user, "invalid_path")
             return
 
