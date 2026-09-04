@@ -138,6 +138,18 @@ BANS_FILE: str      = "./data/bans.txt"
 STATS_FILE: str     = "./data/stats.txt"
 HARD_BANS_FILE: str = "./data/hard_bans.txt"
 
+# The ordered set of folders served, once there is more than one of them
+# (#164). JSON rather than a settings.conf list for the reason KNOWN_BOTS_FILE
+# gives - the record has more than one field - and because settings_file.py
+# refuses a list entry containing a comma, which music paths routinely have
+# ("D:\Rock, Metal").
+#
+# An OVERRIDE, not a replacement: with no file here, library.folders() returns
+# one folder built from FILE_DIRECTORY, which is every install today. So an
+# upgrade migrates nothing, and this file appears the first time an operator
+# saves a folder set from the dashboard.
+LIBRARY_FOLDERS_FILE: str = "./data/library_folders.json"
+
 # The operator's own banner, printed at the top of every generated list above
 # the bot's identity line. Free-form: several lines, ASCII art, a channel name,
 # whatever should greet whoever opens the file. Missing or empty means no
