@@ -376,10 +376,31 @@ def find_matching_entries(search_words, limit=None, list_path=None):
 
 # Every folder heading in the master list starts with this, whatever the
 # library's real location is: update_list.py writes it verbatim (see its
-# raw_folder_str) because the OmenServe listing format has always looked that
-# way. It is a piece of the format, NOT a path - the operator's library may
-# well be at Z:\Music or /srv/library. What follows it is the folder
-# relative to FILE_DIRECTORY, which is what dcc.py joins to resolve a request.
+# raw_folder_str). It is a piece of the format, NOT a path - the operator's
+# library may well be at Z:\Music or /srv/library. What follows it is the
+# folder relative to FILE_DIRECTORY, which is what dcc.py joins to resolve a
+# request.
+#
+# This used to say the prefix was here "because the OmenServe listing format
+# has always looked that way". That is not so, and the correction matters
+# because it was being treated as a constraint.
+#
+# QuickList - the program that actually built OmenServe's lists - makes the
+# written path an OPTION rather than a fixed shape. Its own documentation:
+# "Optional partial folders in the public list, reducing chances of leaking
+# personal info. This strips the initial input portion of the folder from the
+# list." So lists in the wild carry full drive paths, stripped relative ones,
+# and bare folder names, and OmenServe consumed all of them. There is no
+# canonical prefix; "D:\MUSIC\" imitates one operator's list.
+#
+# Which means the prefix is ours to choose. AutoQ.mrc does not read it either:
+# its dequeue match takes $nopath() of the folder - the last component only -
+# so what comes in front has never mattered to it. See the comment at
+# update_list.py's !rar row for that mechanism, and #256 for how it was
+# verified.
+#
+# That is what makes the per-root labels in the multi-folder design (#164)
+# possible without breaking anything downstream.
 LIST_FOLDER_PREFIX = "D:\\MUSIC\\"
 
 # A leading drive specifier on one path component: "C:", "C:Windows".
