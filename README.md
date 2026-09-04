@@ -21,13 +21,20 @@ See [docs/FUTURE.md](docs/FUTURE.md) for the full picture, including what is *no
 ## Quick start
 
 ```bash
-python3 configure.py                        # a few questions
+python3 configure.py                    # a few questions
 ./scripts/linux/start-dccore.sh check   # verify, without touching the network
 ./scripts/linux/start-dccore.sh         # go
 python3 update_list.py                  # build the first list
 ```
 
-Windows is the same with `scripts\windows\start-dccore.bat`.
+On Windows, `py` rather than `python3` — a python.org install gives you `py` and `python`, not `python3`, and Windows ships an alias that makes `python3` open the Microsoft Store instead:
+
+```bat
+py configure.py
+scripts\windows\start-dccore.bat check
+scripts\windows\start-dccore.bat
+py update_list.py
+```
 
 Full guide, including configuring it by hand and upgrading from an older install: **[docs/INSTALL.md](docs/INSTALL.md)**.
 

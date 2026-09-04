@@ -4,6 +4,13 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 The Windows instructions name a command Windows has
+Reported from a real install: someone following the setup on Windows was told to run `python3 configure.py`. A python.org install gives you `py` and `python` and **not** `python3` - and Windows 10 and 11 ship an App Execution Alias for that exact name, so typing it opens the Microsoft Store or prints "Python was not found" on a machine where Python is installed and working perfectly. A confusing failure at the very first step, from a document written on Linux.
+
+`scripts/windows/start-dccore.bat` never had this problem - it probes `py -3`, then `python`, and says what to install if it finds neither. Only the prose was wrong, which is why nothing caught it: the code was right.
+
+`docs/WINDOWS.md` now uses `py` throughout, with a note on why. `README.md`'s Quick start gains the Windows block - it said "Windows is the same with `start-dccore.bat`", which covered the second and third lines and not the first, the only one that actually breaks. `docs/INSTALL.md` says it once where the command first appears.
+
 ### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
 Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
 
