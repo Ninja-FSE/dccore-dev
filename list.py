@@ -3,9 +3,11 @@ import os
 import time
 import datetime
 import defaults as config
+import library
 import oserve
 import dcc
 import announce
+import platform_compat
 import theme
 
 
@@ -407,39 +409,110 @@ LIST_FOLDER_PREFIX = "D:\\MUSIC\\"
 _DRIVE_PREFIX_RE = re.compile(r"^[A-Za-z]:")
 
 
-def resolve_list_folder(header, base=None):
-    """Turn a master-list folder heading into a real path on this machine.
+def list_heading_parts(header):
+    """The path components of a folder heading, prefix and drive letters gone.
 
-    Mirrors what dcc.handle_download_request() does when it resolves a
-    requested name: strip the format's fixed prefix, and join what remains to
-    FILE_DIRECTORY. An entry that carried no heading at all resolves to the
-    library root, which is where such a file actually sits.
+    Split out of resolve_list_folder() so the label-aware resolution below and
+    the single-root one share one answer about what a heading actually says.
 
-    This exists so the operator is shown a path they can act on. The raw
-    heading names a drive most installs do not have, which is worse than
-    useless in a tool whose whole job is "go and look at these folders".
+    A drive specifier has to come off each part before anything joins them. On
+    Windows, os.path.join() treats an argument like "C:" or "C:Windows" as
+    drive-relative and DISCARDS everything before it - so a heading naming any
+    drive other than the one the prefix strips would return a path with no
+    relation to the base at all, which is the one thing resolution promises not
+    to do.
+
+    Reachable input since #121: the `!rar` path passes a folder the user typed
+    in the channel through here. is_safe_path() still refuses the result, but a
+    joiner that can silently drop its own base is the wrong thing to be relying
+    on a downstream guard for.
     """
-    base = getattr(config, "FILE_DIRECTORY", "") if base is None else base
     text = (header or "").strip()
     if text.upper().startswith(LIST_FOLDER_PREFIX):
         text = text[len(LIST_FOLDER_PREFIX):]
     # Headings are written with backslashes regardless of the host, so split on
     # both and let os.path.join put the platform's own separator back.
     parts = [part for part in text.replace("\\", "/").split("/") if part]
-
-    # A drive specifier has to come off each part before joining. On Windows,
-    # os.path.join() treats an argument like "C:" or "C:Windows" as
-    # drive-relative and DISCARDS everything before it - so a heading naming
-    # any drive other than the one the prefix strips returns a path with no
-    # relation to `base` at all, which is the one thing this promises not to do.
-    #
-    # Reachable input since #121: the `!rar` path passes a folder the user
-    # typed in the channel through here. is_safe_path() still refuses the
-    # result, but a joiner that can silently drop its own base is the wrong
-    # thing to be relying on a downstream guard for.
     parts = [_DRIVE_PREFIX_RE.sub("", part, count=1) for part in parts]
-    parts = [part for part in parts if part]
+    return [part for part in parts if part]
 
+
+def resolve_list_folder_with_root(header):
+    """(path, Folder) for a heading: where it points, and which folder it is in.
+
+    The root matters to callers that guard on it. dcc.py's `!rar` path runs
+    is_safe_path() against the library root and then asks whether the result is
+    an artist root; with several folders configured, both questions are about
+    the ONE folder this heading resolved into, not about a global. Returning
+    the root here is what lets those checks keep their exact current strength
+    instead of widening to "inside any configured folder".
+
+    How a heading is read, in order:
+
+    1. If its first component is a configured label, it is a labelled path -
+       resolve inside that folder. This is what update_list.py writes once
+       there is more than one folder (#164).
+    2. Otherwise, try each configured folder in turn, in the operator's own
+       order, and take the first where the path actually exists. This is how a
+       heading from an OLDER list - written before labels, and still pasted
+       back by anyone who saved one - keeps resolving.
+
+    Existence decides between the two, so a label that happens to share a name
+    with a real subfolder resolves to whichever one is really there rather than
+    to whichever rule was written first.
+
+    When nothing exists, the labelled reading is returned if there was one and
+    the first folder otherwise. The caller's own existence check then fails
+    exactly as it did before, rather than this inventing a path that is real
+    but wrong.
+    """
+    folders = library.folders()
+    parts = list_heading_parts(header)
+
+    if not folders:
+        return ("", None)
+    if not parts:
+        return (folders[0].path, folders[0])
+
+    labelled = None
+    label = library.folder_for_label(parts[0])
+    if label is not None:
+        labelled = (os.path.join(label.path, *parts[1:]) if parts[1:] else label.path,
+                    label)
+        if os.path.isdir(platform_compat.long_path(labelled[0])):
+            return labelled
+
+    for folder in folders:
+        candidate = os.path.join(folder.path, *parts)
+        if os.path.isdir(platform_compat.long_path(candidate)):
+            return (candidate, folder)
+
+    if labelled is not None:
+        return labelled
+    return (os.path.join(folders[0].path, *parts), folders[0])
+
+
+def resolve_list_folder(header, base=None):
+    """Turn a master-list folder heading into a real path on this machine.
+
+    Mirrors what dcc.handle_download_request() does when it resolves a
+    requested name: strip the format's fixed prefix, and join what remains to
+    the folder it belongs to. An entry that carried no heading at all resolves
+    to the library root, which is where such a file actually sits.
+
+    This exists so the operator is shown a path they can act on. The raw
+    heading names a drive most installs do not have, which is worse than
+    useless in a tool whose whole job is "go and look at these folders".
+
+    An explicit `base` still resolves against that one directory, for callers
+    that genuinely mean a particular root rather than "wherever this heading
+    lives". Without one, resolution goes through the configured folders - see
+    resolve_list_folder_with_root() for how a heading is read.
+    """
+    if base is None:
+        return resolve_list_folder_with_root(header)[0]
+
+    parts = list_heading_parts(header)
     return os.path.join(base, *parts) if parts else base
 
 
