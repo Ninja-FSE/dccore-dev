@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Channels with a space after the comma now all get joined.** `#one, #two, #three` used to join `#one` and silently drop the rest - IRC treats the space as the end of the list - while the bot went on advertising in channels it had never entered. Write the list however reads best; it works either way now.
+
 - **The bot now uses the nickname the server actually gave it.** If your nickname is longer than the network allows, the server shortens it silently - Undernet's limit is 12 characters. DCCore used to carry on believing the longer name, so it advertised a nick nobody could message. It now reads its real name back from the server, says so, and tells you the limit that caused it. Requests pasted from your existing list keep working either way.
 - **The Windows setup instructions now use `py`**, not `python3`. Windows does not give you a `python3` command, and typing it opens the Microsoft Store instead — so the documented first step failed on a machine where Python was installed and working. The launcher scripts were always right; only the instructions were wrong.
 
