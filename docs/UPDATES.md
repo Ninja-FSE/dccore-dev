@@ -21,6 +21,13 @@ Three constraints shaped the placement, each with a test:
 
 `tests/test_config_fallbacks.py` caught the identity line reading `getattr(config, 'SCRIPT_VERSION', 'DCCore')` - a non-empty fallback is a second opinion about a value `config.py` already declares. It is now `update_list.list_identity_line()`, shared by both writers so they cannot drift.
 
+### 🖼️ The delivered list shows the operator's banner once, not once per section
+The `-FULL-` text download is the master index and the `!rar` album list concatenated, and each carries its own banner. That is right when they are handed out separately - `.zip` and `.rar` do exactly that, and the `!rar` list is served on its own - but joined, it put the operator's ASCII art halfway down the file as well as at the top, which reads as a bug rather than a design. Introduced by the banner itself, caught by generating a real list rather than by a test.
+
+Removed at concatenation rather than at the writer, so the standalone `!rar` copy keeps its branding, and by matching the exact text `read_operator_header()` returned rather than by recognising a banner in the output - only the first is knowable, since a free-form banner could otherwise contain anything, including something shaped like a folder heading.
+
+The identity line still repeats per section, deliberately: the album half should say what is serving it too, and one line is a section header where a banner of arbitrary height is not.
+
 ### 📥 Reading an OmenServe operator's history (#69, step 1)
 The parser and the mapping. No UI and no endpoint yet, so nothing is reachable — this is the piece that can be tested without a browser.
 
@@ -84,6 +91,11 @@ The masthead makes it worth testing rather than only documenting, since it put n
 These tests are about the probe *order*, which needs no network, so the socket layer is faked - `setsockopt`, `bind`, `listen` and `close` are the only four things the function touches. Occupancy can now be stated rather than hoped for, which makes three previously unreachable behaviours testable: the full scan order rather than just its first element, a busy midpoint falling through to the next port, and a completely full range returning `(None, None)` instead of raising. Reverting the function to its original downward-from-`DCC_PORT_END` bug kills 4 of the 6, and all 6 pass with every port in the range held by another process. Real binding is still covered end to end by `PassiveOfferEndToEndTests` in the same file.
 
 Fourth instance of an environment-dependent precondition being asserted rather than probed, after the loopback address, the console code page and `MAX_PATH`.
+
+### 🎨 THEME is a choice on the settings page, not a text box
+The dashboard offered `THEME` as free text: an operator had to already know and correctly spell one of the five preset names (`classic`, `midnight`, `forest`, `orchid`, `plain`), with nothing on the page to discover them. `LIST_FORMAT` solved the identical problem for `"txt"`/`"zip"`/`"rar"` via `settings_file.CHOICES`, which the page renders as a dropdown instead of a text input - `THEME` was simply never added to it. A typo also used to save successfully and only surface later as a console print from `theme.theme_name()`'s own fallback; it is now refused at save time, with the reason, the same as an unrecognised `LIST_FORMAT` already was.
+
+`theme.THEMES` is not imported to build the new tuple: `theme.py` imports `defaults`, and `defaults.py` imports `settings_file` at module scope, so `import theme` here closes that into a cycle - verified by trying it, and it fails depending on which of the two modules a test or entry point happens to import first, not consistently. Named directly instead, same as `LIST_FORMAT`'s own tuple; a test pins it against `theme.THEMES` so the two cannot drift silently if a preset is ever added or renamed.
 
 ## 🟩 v1.10.0 (2026-09-01) - "General Availability"
 RC4 shipped a full changelog entry below; everything after it did not. **66 PRs merged into `beta` over the five weeks since RC4** without a single one getting its own entry here - this release closes that gap with one condensed summary, grouped by theme rather than narrated PR-by-PR. See each PR's own description on GitHub for the full story behind any one line below.
