@@ -10,6 +10,7 @@ import tempfile
 import zipfile
 import time
 import defaults as config
+import library
 import platform_compat
 
 # Multi-disc/box-set container names the !rar album list truncates at - see
@@ -525,7 +526,9 @@ def generate_master_list():
     tmp_artifact_paths = tuple(_artifact_paths(f, today)[1] for f in list_mod.LIST_FORMATS)
     tmp_all_paths = tmp_index_paths + tmp_artifact_paths
 
-    print(f"[LIST-GEN] Scanning the library in {config.FILE_DIRECTORY}...")
+    scan_folders = library.folders()
+    print("[LIST-GEN] Scanning the library in "
+          + ", ".join(f"{f.path} ({f.name})" for f in scan_folders) + "...")
 
     all_files_data = []
     total_bytes = 0
@@ -555,33 +558,69 @@ def generate_master_list():
         walk_errors.append(err)
         print(f"[LIST-GEN ERROR] Could not read {err.filename!r} during the scan: {err}")
 
-    for root, dirs, files in os.walk(scan_root, onerror=_on_walk_error):
-        # Keep every track under its exact, complete path on disk
-        for file in files:
-            if file.lower().endswith(('.mp3', '.flac')):
-                full_file_path = os.path.join(root, file)
-                try:
-                    file_bytes = os.path.getsize(platform_compat.long_path(full_file_path))
-                except OSError as size_err:
-                    # #228: a bare `except: pass` left file_bytes at 0 and the
-                    # entry was published anyway - permission denied, a
-                    # dangling symlink, or a file removed mid-scan all read as
-                    # a legitimate 0-byte track. The list is the thing the
-                    # bot HANDS OUT: publishing it meant offering a download
-                    # that can only ever fail once someone actually requests
-                    # it, with the library's reported total size quietly
-                    # short and no log line saying why. Excluded and logged
-                    # instead - one bad file costs itself, not the whole scan
-                    # (walk_errors above is for a whole SUBTREE going
-                    # unreadable, a more systemic failure than one file).
-                    print(f"[LIST-GEN ERROR] Skipping {full_file_path!r}, "
-                         f"could not read its size: {size_err}")
-                    continue
-                total_bytes += file_bytes
-                rel_dir = os.path.relpath(root, scan_root)
-                if rel_dir == ".":
-                    rel_dir = ""
-                all_files_data.append((rel_dir, file, file_bytes))
+    for scan_folder in scan_folders:
+        # A folder that is not there RIGHT NOW is skipped, not fatal: an
+        # unplugged drive or an unmounted share should cost its own contents,
+        # not take the whole list - and the bot - off the air. Deliberately
+        # different from walk_errors below, which is a subtree going unreadable
+        # DURING a walk of a folder that was present: that is a systemic
+        # failure of a library we are meant to be reading, and it keeps the
+        # previous index rather than publishing a truncated one.
+        #
+        # Every folder missing is still caught, further down: the zero-files
+        # guard refuses to publish an empty list.
+        if not os.path.isdir(platform_compat.long_path(scan_folder.path)):
+            print(f"[LIST-GEN] Skipping {scan_folder.name} - "
+                  f"{scan_folder.path} is not available right now. The list "
+                  f"is being built without it.")
+            continue
+
+        # long_path()-wrapped, and the SAME wrapped value is relpath()'s base
+        # below - see the note above scan_root's original single-folder form.
+        scan_root = platform_compat.long_path(scan_folder.path)
+
+        for root, dirs, files in os.walk(scan_root, onerror=_on_walk_error):
+            # Keep every track under its exact, complete path on disk
+            for file in files:
+                if file.lower().endswith(('.mp3', '.flac')):
+                    full_file_path = os.path.join(root, file)
+                    try:
+                        file_bytes = os.path.getsize(platform_compat.long_path(full_file_path))
+                    except OSError as size_err:
+                        # #228: a bare `except: pass` left file_bytes at 0 and
+                        # the entry was published anyway - permission denied, a
+                        # dangling symlink, or a file removed mid-scan all read
+                        # as a legitimate 0-byte track. The list is the thing
+                        # the bot HANDS OUT: publishing it meant offering a
+                        # download that can only ever fail once someone
+                        # actually requests it, with the library's reported
+                        # total size quietly short and no log line saying why.
+                        # Excluded and logged instead - one bad file costs
+                        # itself, not the whole scan (walk_errors above is for
+                        # a whole SUBTREE going unreadable, a more systemic
+                        # failure than one file).
+                        print(f"[LIST-GEN ERROR] Skipping {full_file_path!r}, "
+                             f"could not read its size: {size_err}")
+                        continue
+                    total_bytes += file_bytes
+
+                    # The folder's LABEL leads every path (#164). Two folders
+                    # can hold the same relative path - the same album in flac
+                    # and in mp3 is the ordinary case, not a corner one - and
+                    # without the label their headings would be identical text
+                    # that resolution could not tell apart.
+                    #
+                    # Written for a single folder too. Labelling only at two or
+                    # more would mean an operator who adds a second folder
+                    # after weeks of serving changes every path anyone already
+                    # saved; doing it once, at the upgrade, is one break
+                    # instead of two.
+                    rel_dir = os.path.relpath(root, scan_root)
+                    if rel_dir == ".":
+                        rel_dir = ""
+                    rel_dir = (os.path.join(scan_folder.name, rel_dir)
+                               if rel_dir else scan_folder.name)
+                    all_files_data.append((rel_dir, file, file_bytes))
 
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
@@ -712,7 +751,16 @@ def generate_master_list():
                             if _BOX_WORD_RE.match(segment.strip()):
                                 truncate_at = seg_index
                                 break
-                        if truncate_at is not None and truncate_at >= 2:
+                        # Three, not two. The threshold means "leave at least
+                        # two segments below the FOLDER" - artist and album -
+                        # and rel_dir now begins with the folder's label
+                        # (#164), so every index shifted by one. Left at 2, a
+                        # library shaped <label>/<artist>/<disc 1> would
+                        # truncate to <label>/<artist>: the artist root, which
+                        # dcc.py refuses outright, leaving that album with no
+                        # requestable row at all - the exact failure the
+                        # threshold was added to prevent.
+                        if truncate_at is not None and truncate_at >= 3:
                             rar_folder_clean = "/".join(folder_segments[:truncate_at])
                         else:
                             # Truncating here would collapse to the artist
@@ -897,13 +945,18 @@ if __name__ == "__main__":
     # boots fine with, so os.path.exists(None) here (a TypeError, not a
     # clean failure) must be guarded against explicitly rather than assuming
     # a real string ever reaches this point.
-    if not config.FILE_DIRECTORY:
+    configured = library.folders()
+    if not configured:
         print("[CRITICAL] No music directory configured yet - set FILE_DIRECTORY "
               "from the web dashboard's Settings page, settings.conf, or "
               "admin_config.py before running this.")
         sys.exit(1)
-    if not os.path.exists(config.FILE_DIRECTORY):
-        print(f"[CRITICAL] Missing music directory: {config.FILE_DIRECTORY}")
+    # Every one missing, not any one: a single unavailable folder is skipped
+    # during the scan with a warning, and only a library with nothing readable
+    # in it at all is worth refusing to run for.
+    if not any(os.path.isdir(platform_compat.long_path(f.path)) for f in configured):
+        print("[CRITICAL] None of the configured music folders exist: "
+              + ", ".join(f.path for f in configured))
         sys.exit(1)
         
     success = generate_master_list()
