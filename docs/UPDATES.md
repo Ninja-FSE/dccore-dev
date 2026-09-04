@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧭 Turning the Console off no longer disables the whole dashboard
+Reported from a real install, running the shipped default. `WEBUI_CONSOLE_ENABLED` is off, so `/api/console/log` answers 404, so `disableConsoleUi()` ran - and it **removed** `#view-console` from the page.
+
+`activateView()` walks every key in `views` and calls `getElementById("view-" + key).classList` on each. With the section gone that is a null dereference, and it threw on **every view switch**, before the per-view loaders at the bottom of the function. So the symptom was not a missing Console: it was Settings stuck on "Loading" for ever, and Queue, Stats and Downloads quietly refusing to refresh. One disabled feature disabling the entire dashboard.
+
+The nav button is hidden now and the section stays in the DOM. `activateView()` also checks for null before dereferencing - one absent section must not take the router with it, whatever removes it next time.
+
+Two structural guards in `tests/test_web_assets.py`, both mutation-verified against the exact defect. Neither can prove the navigation works - nothing here executes JavaScript - but they refuse the move that broke it: deleting a section the router still looks up, and dereferencing that lookup without a check.
+
 ### 🖥️ A Console page in the dashboard - the DCC CHAT admin console, in the browser
 Requested directly: an operator who wants neither a second IRC client open just to reach the admin console, nor a debug channel broadcasting the daemon's internals to whoever joins it. The dashboard's new Console page is both, over HTTP, behind the same login as everything else there.
 

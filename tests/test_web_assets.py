@@ -160,6 +160,64 @@ class TheScriptAndThePageAgree(unittest.TestCase):
             "app.js looks up element id(s) that index.html does not define: "
             + ", ".join(missing))
 
+    def test_the_script_never_removes_a_view_section(self):
+        """The sibling of the test above: an element that exists at load time
+        but is DELETED at runtime fails exactly the same way, and that check
+        cannot see it because index.html still defines the id.
+
+        It happened. `disableConsoleUi()` removed `#view-console` when the
+        Console was switched off, and `activateView()` walks every key in
+        `views` calling `getElementById("view-" + key).classList` on each - so
+        after the removal that threw on EVERY view switch. The Console went
+        away and took the rest of the navigation with it: Settings stayed on
+        its "Loading" placeholder because the exception fired before the branch
+        that loads it, and Queue, Stats and Downloads stopped refreshing too.
+        Reported from a real install, running the shipped default.
+
+        This is structural, not behavioural - nothing here executes
+        JavaScript (see this module's own docstring). It cannot prove the
+        navigation works; it can refuse the specific move that broke it, which
+        is deleting a section the router still expects to find. Hiding one is
+        fine and is what the fix does.
+        """
+        script = read("app.js")
+
+        # `var x = document.getElementById("view-...")` followed later by
+        # `x.remove()`, and the direct form.
+        removed = set(re.findall(
+            r'getElementById\("(view-[^"]+)"\)\s*;?\s*\n?[^\n]*\.remove\(\)', script))
+        removed |= set(re.findall(
+            r'getElementById\("(view-[^"]+)"\)\.remove\(\)', script))
+
+        # The indirect form the real defect used: assigned to a name, removed
+        # a line or two later.
+        for name, view_id in re.findall(
+                r'var\s+(\w+)\s*=\s*document\.getElementById\("(view-[^"]+)"\)', script):
+            if re.search(r'\b' + re.escape(name) + r'\.remove\(\)', script):
+                removed.add(view_id)
+
+        self.assertEqual(
+            sorted(removed), [],
+            "app.js removes view section(s) that activateView() still looks up "
+            "on every switch: " + ", ".join(sorted(removed)) +
+            ". Hide them instead - .hidden = true - or the router throws and "
+            "takes every other view down with it.")
+
+    def test_the_view_router_tolerates_a_missing_section(self):
+        """Belt to the braces above. Even with no section deleted, a null from
+        getElementById must not take the whole router down - the failure that
+        made one disabled feature disable the entire dashboard."""
+        script = read("app.js")
+
+        router = script[script.index("function activateView"):]
+        router = router[:router.index("\n  }")]
+
+        self.assertNotRegex(
+            router, r'getElementById\("view-" \+ key\)\.classList',
+            "activateView() dereferences getElementById directly. One absent "
+            "section then throws before the per-view loaders below it run, so "
+            "every other view stops working too. Assign it and check for null.")
+
     def test_every_view_the_nav_offers_exists_in_both(self):
         """A nav button whose view is missing throws on the first click; a view
         the script does not know about can never be activated."""
