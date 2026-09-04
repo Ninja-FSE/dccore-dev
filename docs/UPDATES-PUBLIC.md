@@ -5,6 +5,7 @@
 - **The bot answers CTCP VERSION** with its build and a link to this project. It replies privately, by notice, straight back to whoever asked — nothing is said in the channel. Operators who would rather not advertise a build can turn it off with `CTCP_VERSION_REPLY`.
 - **Every generated list now names the bot that made it** and links back here, on a line under the file count. The list is the one thing that travels: it gets sent to strangers over DCC and reopened weeks later in a text editor, and until now it carried nothing saying what produced it.
 - **You can put your own banner on the list** — a greeting, your channel, ASCII art — by creating `data/list_header.txt`. Nothing to enable: if the file exists its contents are copied in verbatim on the next `!update`, so box-drawing characters survive intact. Capped at 8 KB. See [INSTALL.md](INSTALL.md#putting-your-own-banner-on-it).
+- **The dashboard's colour theme is now a dropdown**, not a text box you had to already know the right word for. Picking one you cannot spell wrong also means the daemon can refuse a bad value at the moment you save it, with a reason, instead of quietly falling back later.
 
 ## v1.10.0 — General Availability
 

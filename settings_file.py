@@ -177,8 +177,26 @@ _FALSE = {"0", "false", "no", "off"}
 # "kept the default" line in the startup log for a hand-edited settings.conf.
 #
 # Case is not part of the choice: an operator typing "ZIP" means "zip".
+#
+# THEME is the same shape as LIST_FORMAT - a fixed few names, not free text -
+# but theme.THEMES is not imported here to build this tuple. theme.py does
+# `import defaults as config`, and defaults.py does `import settings_file` at
+# module scope (to apply admin_config.py/settings.conf on top of its own
+# declarations) - so `import theme` here closes that into a cycle. It does
+# not always fail: whichever of settings_file/defaults happens to be
+# imported FIRST anywhere in the process decides whether Python resolves it
+# from a module already fully built or from one still mid-import, so the
+# failure would depend on import order rather than on anything about this
+# file. Verified by trying it: importing defaults before settings_file
+# happened to work, importing settings_file first raised
+# "partially initialized module 'settings_file' has no attribute 'apply_to'"
+# - the same values, opposite failure depending on which module a test or
+# entry point happens to touch first. Named here instead, same as
+# LIST_FORMAT; tests/test_theme.py pins it against theme.THEMES so the two
+# cannot drift silently if a preset is ever added or renamed.
 CHOICES = {
     "LIST_FORMAT": ("txt", "zip", "rar"),
+    "THEME": ("classic", "midnight", "forest", "orchid", "plain"),
 }
 
 
