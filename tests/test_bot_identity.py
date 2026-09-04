@@ -27,6 +27,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
 import commands  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
+import list as list_mod  # noqa: E402
 import update_list  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
@@ -425,6 +426,87 @@ class TheGeneratedListCarriesItsIdentity(DCCoreTestCase):
             identity_at, 5,
             "a 200-line banner pushed the masthead to line "
             f"{identity_at}; it must stay on the reader's first screen")
+
+
+class TheDeliveredCopyShowsTheBannerOnce(DCCoreTestCase):
+    """The `-FULL-` text download is the two lists concatenated, and each of
+    them carries its own banner - correct when they are handed out separately
+    (.zip and .rar do, and the !rar list is served on its own), wrong once
+    they are joined.
+
+    The operator's ASCII art appearing again halfway down the file they
+    downloaded reads as a bug rather than as a design, and the banner can be
+    any height.
+    """
+
+    BANNER = b"MARKER-BANNER-LINE\nsecond art line"
+
+    def setUp(self):
+        super().setUp()
+        self.tree = self.make_tree()
+        self.header_path = os.path.join(self.tree.root, "list_header.txt")
+        with io.open(self.header_path, "wb") as handle:
+            handle.write(self.BANNER)
+        self.set_config(LOCAL_LIST_DIR=self.tree.lists,
+                        FILE_DIRECTORY=self.tree.music,
+                        LIST_BASE_NAME="Bot", NICKNAME="Bot",
+                        ORIGINAL_NICK="Bot", LIST_FORMAT="txt",
+                        RAR_ENABLED=True,
+                        SCRIPT_VERSION="DCCore v9.9.9",
+                        PROJECT_URL="https://github.com/Ninja-FSE/dccore",
+                        LIST_HEADER_FILE=self.header_path,
+                        LIST_HEADER_MAX_BYTES=8192)
+        path = os.path.join(self.tree.music, "Artist", "Album", "track.flac")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "wb") as handle:
+            handle.write(b"\x00" * 2048)
+        update_list.generate_master_list()
+
+    def read(self, needle):
+        name = next(n for n in os.listdir(self.tree.lists)
+                    if needle in n and n.endswith(".txt"))
+        with io.open(os.path.join(self.tree.lists, name),
+                     encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_delivered_copy_carries_the_banner_once(self):
+        body = self.read(list_mod.FULL_LIST_MARKER)
+
+        self.assertEqual(body.count("MARKER-BANNER-LINE"), 1)
+        self.assertEqual(body.count("second art line"), 1)
+
+    def test_the_standalone_rar_list_keeps_its_own_banner(self):
+        """Control, and the reason this is done at concatenation rather than
+        by not writing it: the !rar list is also handed out on its own, and
+        stripping it at the writer would leave that copy unbranded."""
+        body = self.read("-RAR-")
+
+        self.assertEqual(body.count("MARKER-BANNER-LINE"), 1)
+
+    def test_the_master_index_keeps_its_banner(self):
+        """Control on the other member."""
+        body = self.read("Bot-2026")
+
+        self.assertGreaterEqual(body.count("MARKER-BANNER-LINE"), 1)
+
+    def test_the_identity_line_still_repeats_per_section(self):
+        """Deliberate, and the distinction worth pinning: the album half of
+        the delivered file should still say what is serving it. One line is a
+        section header; a banner of arbitrary height is not."""
+        body = self.read(list_mod.FULL_LIST_MARKER)
+
+        self.assertEqual(body.count("Served by Bot"), 2)
+
+    def test_both_sections_are_still_present(self):
+        """Control. Removing the banner must not have removed anything else -
+        a concatenation that lost its album half would satisfy the count
+        assertions above perfectly."""
+        body = self.read(list_mod.FULL_LIST_MARKER)
+
+        self.assertIn("List of", body)
+        self.assertIn("List of Entire Album Folders", body)
+        self.assertIn("!Bot !rar", body)
+        self.assertIn("track.flac", body)
 
 
 class NothingInTheMastheadLooksLikeACommand(DCCoreTestCase):

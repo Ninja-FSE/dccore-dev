@@ -286,13 +286,38 @@ def _write_text_artifact(tmp_path, members):
     choice about packaging; it is not a request to hand out less. This is a
     copy and not the master index itself precisely because the two must not be
     the same file - see list.FULL_LIST_MARKER.
+
+    THE OPERATOR'S BANNER APPEARS ONCE, NOT ONCE PER SECTION
+
+    Each source list carries its own banner, which is right when they are
+    downloaded separately - as .zip and .rar hand them out, and as the !rar
+    list is served on its own. Concatenated, that put the operator's ASCII art
+    in the middle of the file as well as at the top, which reads as a bug
+    rather than as a design.
+
+    The identity line deliberately still repeats. It is a section header - the
+    album half of this file should say what is serving it too, and one line is
+    not noise. The banner can be any height, which is the difference.
+
+    Removed by matching the exact text read_operator_header() returned rather
+    than by recognising a banner in the output, because only the first is
+    knowable: the banner is free-form and could otherwise be anything,
+    including something that looks like a folder heading.
     """
+    banner = read_operator_header()
+    # Exactly as generate_master_list() wrote it: a leading blank line, the
+    # banner, then the newline ending its last line.
+    banner_block = "\n" + banner + "\n" if banner else ""
+
     with io.open(tmp_path, "w", encoding="utf-8", newline="\n") as out:
         for index, (source, _name) in enumerate(members):
             if index:
                 out.write("\n\n")
             with io.open(source, encoding="utf-8") as handle:
-                shutil.copyfileobj(handle, out)
+                text = handle.read()
+            if index and banner_block:
+                text = text.replace(banner_block, "", 1)
+            out.write(text)
 
 
 def _write_zip_artifact(tmp_path, members):
