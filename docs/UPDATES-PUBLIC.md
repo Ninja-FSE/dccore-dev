@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.11.0 — The Several Folders Release
 
 - **DCCore can serve from more than one folder.** Configure several — a flac library and an mp3 one, or music spread across two drives — and they are built into a single list, in the order you choose.
 
