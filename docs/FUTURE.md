@@ -44,7 +44,7 @@ What DCCore does today, and what it does not do yet.
 
 ### Quality
 
-- **2707 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
+- **2732 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
 - **Two adversarial audits** — an internal audit (32 defects, all fixed) and a pre-publication sweep before the first public release.
 
@@ -57,6 +57,8 @@ Ordered by what unblocks what, not by preference.
 ### Multiple lists, and multiple folders per list
 
 The largest gap against OmenServe, which has had both since long before this project started. DCCore now serves **several** directories into **one** list; more than one list is still to come.
+
+`SEPARATE_VIDEO_LIST` is not that feature and does not pre-empt it: it splits one scan's output by content type, where this splits by folder set and binds each list to a channel. An operator whose film and music already live in separate folders wants this one, and turns that switch off.
 
 The design is settled:
 
@@ -92,7 +94,7 @@ This matters most as a prerequisite: step 1 above refactors seven modules that c
 ### Smaller things worth having
 
 - **PER-LIST file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them per list. `LIST_IGNORED_EXTENSIONS` does this globally; scoping it to one folder is the part still missing.
-- **A size cap on `!rar` packing.** There is none: a request packs whatever the folder holds. Harmless while libraries were albums; now that every file is listed, a film folder in the `!rar` list is a request to pack tens of gigabytes. `RAR_ENABLED` is the only switch today, and it is all-or-nothing.
+- **A size cap on `!rar` packing.** There is none: a request packs whatever the folder holds, however large. `RAR_EXTENSIONS` now keeps film folders out of the album list entirely, which removes the worst case, but a genuinely enormous album is still a request nobody sized before accepting.
 - **A "what's new" list** — files added in the last N days, generated alongside the main one.
 - **A list validator** run at build time, reporting anything a requester will not actually be able to get — duplicate filenames across folders being the common case.
 - **An OmenServe migration path** offered on first run, since almost everyone this is aimed at is running OmenServe today.

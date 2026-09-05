@@ -1313,11 +1313,27 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
         is_master_zip = list_mod.is_list_artifact_name(requested_file)
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
-            latest_list_path = list_mod.find_latest_list()
-            if latest_list_path and os.path.exists(latest_list_path):
+            # EVERY list, not just the master one. This is the lookup that
+            # turns a bare "!<nick> Some.Film.mkv" into a path on disk, and
+            # film and series moved into their own list file - so reading only
+            # the master would leave every video in the library listed,
+            # advertised and searchable, and impossible to actually get. The
+            # split would have been a regression dressed as a feature.
+            #
+            # Concatenated rather than searched file by file: the scan below
+            # reads folder headings and rows in order, and each list carries
+            # its own headings above its own rows, so joining them end to end
+            # leaves that state machine correct with nothing else changed.
+            # Master first, so a name in both resolves the same way it did
+            # before - the first copy the list names wins.
+            list_paths = list_mod.all_list_paths()
+            if list_paths:
                 try:
-                    with open(latest_list_path, "r", encoding="utf-8", errors="ignore") as lf:
-                        lines = lf.readlines()
+                    lines = []
+                    for one_list in list_paths:
+                        with open(one_list, "r", encoding="utf-8",
+                                  errors="ignore") as lf:
+                            lines.extend(lf.readlines())
                     target_folder = None
                     fallback_folder = None
                     clean_req = str(requested_file).lower().strip()

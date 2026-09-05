@@ -53,13 +53,32 @@ class MasterListCase(DCCoreTestCase):
             handle.write(data)
         return path
 
+    def use_empty_library(self):
+        """Start from nothing instead of TempTree's two baseline .flac tracks.
+
+        For the tests that assert exact counts. Doing the arithmetic against a
+        fixture this file does not own would break the moment somebody adds a
+        third baseline track, and the failure would read as a bug in the
+        counting rather than in the sum."""
+        empty = os.path.join(self.tree.root, "empty-library")
+        os.makedirs(empty, exist_ok=True)
+        config.FILE_DIRECTORY = empty
+        self.tree.music = empty
+
     def generate(self):
         return update_list.generate_master_list()
 
     def list_path(self):
+        # The film list is excluded here for the same reason
+        # list.find_latest_list() excludes it: it is named
+        # "<base>-VIDEO-<date>.txt", so it matches this prefix too. This
+        # helper missed it at first and every video test failed with "expected
+        # one master list, found 2" - the same shape as the production bug,
+        # found by the same omission.
         names = [n for n in os.listdir(self.tree.lists)
                  if n.startswith(config.LIST_BASE_NAME)
-                 and n.endswith(".txt") and "-RAR-" not in n]
+                 and n.endswith(".txt") and "-RAR-" not in n
+                 and f"-{list_mod.VIDEO_LIST_MARKER}-" not in n]
         self.assertEqual(len(names), 1, f"expected one master list, found {names}")
         return os.path.join(self.tree.lists, names[0])
 
@@ -69,11 +88,44 @@ class MasterListCase(DCCoreTestCase):
         return os.path.join(self.tree.lists, names[0])
 
     def read_list(self):
+        """The MUSIC list only. Film and series have their own file."""
         with open(self.list_path(), encoding="utf-8") as handle:
             return handle.read()
 
+    def video_list_path(self):
+        names = [n for n in os.listdir(self.tree.lists)
+                 if n.startswith(config.LIST_BASE_NAME)
+                 and f"-{list_mod.VIDEO_LIST_MARKER}-" in n and n.endswith(".txt")]
+        self.assertEqual(len(names), 1,
+                         f"expected one film list, found {names}")
+        return os.path.join(self.tree.lists, names[0])
+
+    def read_video_list(self):
+        with open(self.video_list_path(), encoding="utf-8") as handle:
+            return handle.read()
+
+    def has_video_list(self):
+        """False is the ordinary case: the file is only published when there
+        is video to put in it."""
+        return any(f"-{list_mod.VIDEO_LIST_MARKER}-" in n
+                   for n in os.listdir(self.tree.lists))
+
+    def read_everything(self):
+        """Both lists, for the many tests whose question is "is this file
+        indexed at all" rather than "which list did it land in"."""
+        text = self.read_list()
+        if self.has_video_list():
+            text += self.read_video_list()
+        return text
+
     def request_lines(self):
-        return [line for line in self.read_list().split("\n") if line.startswith("!")]
+        """Request rows across every list this scan published."""
+        return [line for line in self.read_everything().split("\n")
+                if line.startswith("!")]
+
+    def music_request_lines(self):
+        return [line for line in self.read_list().split("\n")
+                if line.startswith("!")]
 
 
 class ScanFindsTheRightFiles(MasterListCase):
@@ -154,7 +206,7 @@ class EveryFileIsListedUnlessItIsNamed(MasterListCase):
 
         self.assertTrue(self.generate())
 
-        listing = self.read_list()
+        listing = self.read_everything()
         self.assertIn("Feature.mkv", listing)
         self.assertIn("Extras.mp4", listing)
 
@@ -188,7 +240,7 @@ class EveryFileIsListedUnlessItIsNamed(MasterListCase):
 
         self.assertTrue(self.generate())
 
-        listing = self.read_list()
+        listing = self.read_everything()
         self.assertIn("Feature.mkv", listing)
         self.assertNotIn("poster.jpg", listing)
         self.assertNotIn("info.nfo", listing)
@@ -203,7 +255,7 @@ class EveryFileIsListedUnlessItIsNamed(MasterListCase):
 
         self.assertTrue(self.generate())
 
-        listing = self.read_list()
+        listing = self.read_everything()
         for ext in config.SHIPPED_VALUES["LIST_IGNORED_EXTENSIONS"]:
             with self.subTest(extension=ext):
                 self.assertNotIn("leftover" + ext, listing)
@@ -230,7 +282,7 @@ class EveryFileIsListedUnlessItIsNamed(MasterListCase):
 
         self.assertTrue(self.generate())
 
-        listing = self.read_list()
+        listing = self.read_everything()
         self.assertIn("Thumbs.db", listing)
         self.assertIn("Feature.mkv", listing)
 
@@ -247,7 +299,7 @@ class EveryFileIsListedUnlessItIsNamed(MasterListCase):
 
         self.assertTrue(self.generate())
 
-        listing = self.read_list()
+        listing = self.read_everything()
         for skipped in ("Thumbs.db", "desktop.ini", "half.TMP"):
             with self.subTest(file=skipped):
                 self.assertNotIn(skipped, listing)
@@ -325,7 +377,7 @@ class TheSettingIsResolvedOncePerScan(MasterListCase):
 
         self.assertTrue(self.generate())
 
-        self.assertIn("clip11.mkv", self.read_list())
+        self.assertIn("clip11.mkv", self.read_everything())
         self.assertLessEqual(len(calls), 2,
                              f"the setting was read {len(calls)} times for one "
                              f"scan of 14 files")
@@ -436,6 +488,332 @@ class TheWayAnOperatorTypesIt(DCCoreTestCase):
         nothing to be skipped should get."""
         self.assertEqual(self.extensions([]), ())
         self.assertEqual(self.extensions(""), ())
+
+
+class FilmAndSeriesGetTheirOwnList(MasterListCase):
+    """One walk, two lists, both in the archive @<botnick> already sends.
+
+    The pattern is not new here: the !rar album list has been a separate file
+    built from the same walk since long before this. What is new is that the
+    master list stopped being the only place a request can be answered from,
+    which is the whole risk of the change - see StillRequestableAfterTheSplit.
+    """
+
+    def test_a_film_goes_in_the_film_list_and_not_the_music_one(self):
+        self.add("Films/Some Film (2021)/Some Film.mkv")
+        self.add("Music/Artist/Album/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        self.assertIn("Some Film.mkv", self.read_video_list())
+        self.assertNotIn("Some Film.mkv", self.read_list())
+        self.assertIn("Track.flac", self.read_list())
+        self.assertNotIn("Track.flac", self.read_video_list())
+
+    def test_one_folder_holding_both_is_split_between_them(self):
+        """The case Neo's review names. A folder does not have to pick."""
+        self.add("Mixed/Concert/Live Set.flac")
+        self.add("Mixed/Concert/Live Set.mkv")
+
+        self.assertTrue(self.generate())
+
+        self.assertIn("Live Set.flac", self.read_list())
+        self.assertNotIn("Live Set.mkv", self.read_list())
+        self.assertIn("Live Set.mkv", self.read_video_list())
+        self.assertNotIn("Live Set.flac", self.read_video_list())
+
+    def test_everything_else_stays_with_the_music(self):
+        """Artwork, cue sheets and notes sit beside the tracks they belong to.
+        A film's subtitles land there too - the one rough edge of deciding per
+        file, and deliberate: see LIST_VIDEO_EXTENSIONS."""
+        for name in ("Music/Artist/Album/cover.jpg", "Music/Artist/Album/disc.cue",
+                     "Music/Artist/Album/notes.txt", "Music/Artist/Album/README"):
+            self.add(name, b"data")
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        for name in ("cover.jpg", "disc.cue", "notes.txt", "README"):
+            with self.subTest(file=name):
+                self.assertIn(name, listing)
+        self.assertFalse(self.has_video_list())
+
+    def test_a_music_only_library_gets_no_film_list_at_all(self):
+        """Not an empty file. Most libraries this serves are music only, and
+        an empty extra member in every download is clutter with no use."""
+        self.add("Music/Artist/Album/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        self.assertFalse(self.has_video_list(),
+                         "a film list was published for a library with no film")
+
+    def test_both_lists_travel_in_the_archive_the_bot_hands_out(self):
+        """No new trigger and nothing to learn: "@<botnick>" already sends one
+        archive holding the master list and the album list."""
+        self.add("Films/Feature/Feature.mkv")
+        self.add("Music/Artist/Album/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        names = [n for n in os.listdir(self.tree.lists) if n.endswith(".zip")]
+        self.assertEqual(len(names), 1, f"expected one archive, found {names}")
+        with zipfile.ZipFile(os.path.join(self.tree.lists, names[0])) as archive:
+            members = archive.namelist()
+
+        self.assertIn(os.path.basename(self.list_path()), members)
+        self.assertIn(os.path.basename(self.video_list_path()), members)
+
+    def test_the_film_list_survives_the_prune_that_follows_it(self):
+        """It is named "<base>-VIDEO-<date>.txt", so _prune_superseded_lists()
+        sees it as a generated list and would remove it - published and
+        deleted in the same run, every run, with only a "[LIST-CLEAN] Removed
+        1 superseded list(s)" line to show for it. That reads like
+        housekeeping working, which is exactly how the size side files were
+        lost once before."""
+        self.add("Films/Feature/Feature.mkv")
+
+        self.assertTrue(self.generate())
+
+        self.assertTrue(self.has_video_list(),
+                        "the film list was published and then pruned away")
+
+    def test_the_switch_turns_it_off(self):
+        """Off is a real answer. An operator whose films and music are already
+        in separate folders gets two lists from the multi-list feature
+        instead, keyed on the folders that already carry the answer."""
+        self.set_config(SEPARATE_VIDEO_LIST=False)
+        self.add("Films/Feature/Feature.mkv")
+        self.add("Music/Artist/Album/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        self.assertFalse(self.has_video_list())
+        listing = self.read_list()
+        self.assertIn("Feature.mkv", listing)
+        self.assertIn("Track.flac", listing)
+
+    def test_the_header_describes_the_list_it_is_on(self):
+        """The music list's size used to be the whole library's, films
+        included - a number a reader cannot reconcile with the file in front
+        of them."""
+        self.use_empty_library()
+        self.add("Films/Feature/Feature.mkv", b"\x00" * 40960)
+        self.add("Music/Artist/Album/Track.flac", b"\x00" * 1024)
+
+        self.assertTrue(self.generate())
+
+        # Parenthesised, because "1.00KB" is a substring of "41.00KB" -
+        # the combined size this test exists to reject. The first version
+        # asserted the bare number and passed against exactly that.
+        music_header = self.read_list().split("\n")[0]
+        self.assertIn("1 Files", music_header)
+        self.assertIn("(1.00KB)", music_header)
+
+        video_header = self.read_video_list().split("\n")[0]
+        self.assertIn("1 Films & Series", video_header)
+
+    def test_a_library_of_nothing_but_film_still_publishes(self):
+        """The zero-files guard counts the MUSIC list, so an all-film library
+        looks empty to it.
+
+        REBUILT, not built once: on a first run the guard finds no previous
+        index and publishes anyway, so the defect is invisible. It is the
+        second run that fails - "scan found 0 files but an index already
+        exists (mount unavailable?)" - which means an operator serving only
+        film gets one working list and then every !update refused for ever,
+        blaming a mount that is fine. A mutation removing the fix passed a
+        single-run version of this test.
+        """
+        self.use_empty_library()
+        self.add("Films/A Film/A Film.mkv")
+        self.add("Films/Another/Another.mp4")
+        self.assertTrue(self.generate(), "an all-film library refused to publish")
+
+        self.assertTrue(self.generate(),
+                        "an all-film library refused to REBUILD once it had "
+                        "an index of its own")
+
+        self.assertIn("A Film.mkv", self.read_video_list())
+
+
+class StillRequestableAfterTheSplit(MasterListCase):
+    """The regression the split could so easily have been.
+
+    A file request, an @find and the advert count all read find_latest_list()
+    alone. Move film and series into a second file without touching those,
+    and every video in the library is listed, advertised and impossible to
+    get - a feature that reads as working right up until somebody asks for
+    something.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.use_empty_library()
+        self.add("Films/Some Film (2021)/Some Film.mkv")
+        self.add("Music/Artist/Album/Track.flac")
+        self.assertTrue(self.generate())
+
+    def test_find_latest_list_still_means_the_music_list(self):
+        """It globs "<base>-*.txt" and takes the LAST. "-VIDEO-" sorts after
+        the bare date, so without a guard the film list wins and becomes the
+        list @find searches and the advert counts."""
+        self.assertEqual(os.path.basename(list_mod.find_latest_list()),
+                         os.path.basename(self.list_path()))
+
+    def test_every_list_is_offered_to_a_request(self):
+        paths = [os.path.basename(p) for p in list_mod.all_list_paths()]
+
+        self.assertEqual(paths, [os.path.basename(self.list_path()),
+                                 os.path.basename(self.video_list_path())])
+
+    def test_a_film_is_still_findable(self):
+        _entries, total = list_mod.find_matching_entries(["some", "film"])
+
+        self.assertEqual(total, 1, "@find can no longer see films")
+
+    def test_a_track_is_still_findable(self):
+        _entries, total = list_mod.find_matching_entries(["track"])
+
+        self.assertEqual(total, 1)
+
+    def test_one_search_spans_both_lists(self):
+        """A term matching in each returns both, counted together - the
+        header reports the true total rather than one file's worth."""
+        entries, total = list_mod.find_matching_entries([])
+
+        self.assertEqual(total, 2)
+        self.assertEqual({e["filename"] for e in entries},
+                         {"Some Film.mkv", "Track.flac"})
+
+    def test_the_advert_counts_every_list(self):
+        """The bot serves both, so the number it announces covers both -
+        otherwise it advertises a library smaller than the one in the archive
+        it hands out."""
+        count, _date, _size, _raw = \
+            list_mod.get_file_count_date_size_and_raw_bytes()
+
+        self.assertEqual(count, 2)
+
+    def test_the_request_lookup_reads_every_list(self):
+        """dcc.py turns a bare "!<nick> Some Film.mkv" into a path by scanning
+        the list. Read out of the source: driving the real resolution needs a
+        socket and a peer, and the one line that matters is which lists it
+        opens."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as fh:
+            code = "\n".join(line.split("#", 1)[0]
+                              for line in fh.read().splitlines())
+
+        self.assertIn("list_mod.all_list_paths()", code,
+                      "dcc.py resolves requests against one list, so every "
+                      "film in the library is listed and un-downloadable")
+
+
+class OnlyWhatIsWorthPackingIsPackable(MasterListCase):
+    """A folder earned its !rar row from holding ANY indexed file.
+
+    That read as "album folders" while the scan took .mp3 and .flac and
+    nothing else. The moment it took every file, every folder in the library
+    became packable - a season of a series, or a folder holding one text note
+    - and there is no size cap anywhere behind a line that anybody in the
+    channel can paste.
+    """
+
+    def rar_rows(self):
+        with open(self.rar_path(), encoding="utf-8") as handle:
+            return [line.strip() for line in handle if line.startswith("!")]
+
+    def test_an_album_folder_is_packable(self):
+        self.add("Music/Artist/Album/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        self.assertTrue(any("Album" in row for row in self.rar_rows()))
+
+    def test_a_film_folder_is_not(self):
+        """Belt: with the split on, a film is not even in the data the !rar
+        rows are built from, so this passes on the split alone. The gate is
+        what covers the case below, where the split is off."""
+        self.add("Films/Some Film (2021)/Some Film.mkv")
+
+        self.assertTrue(self.generate())
+
+        self.assertEqual([row for row in self.rar_rows() if "Some Film" in row], [])
+
+    def test_a_film_folder_is_not_packable_with_the_split_turned_off(self):
+        """Braces. SEPARATE_VIDEO_LIST off puts film back in the same list as
+        everything else - which is exactly the configuration an operator who
+        keeps films in their own folders will run - and then the only thing
+        standing between a stranger and "pack me forty gigabytes" is this
+        gate. A mutation deleting it passed every other test in this class."""
+        self.set_config(SEPARATE_VIDEO_LIST=False)
+        self.add("Films/Some Film (2021)/Some Film.mkv")
+
+        self.assertTrue(self.generate())
+
+        self.assertIn("Some Film.mkv", self.read_list())
+        self.assertEqual([row for row in self.rar_rows() if "Some Film" in row], [],
+                         "a film folder is packable when the split is off")
+
+    def test_the_shipped_packable_set_holds_no_video(self):
+        """Derived from the two settings rather than a list of names here.
+        One format in both would make its folder packable, and with the split
+        off that is a folder of films."""
+        video = {ext.lower()
+                 for ext in config.SHIPPED_VALUES["LIST_VIDEO_EXTENSIONS"]}
+        packable = {ext.lower()
+                    for ext in config.SHIPPED_VALUES["RAR_EXTENSIONS"]}
+
+        self.assertEqual(video & packable, set())
+
+    def test_a_folder_of_notes_is_not(self):
+        """The case that made this urgent: everything is listed now, so a
+        folder holding one text file used to earn a !rar row."""
+        self.add("Docs/Notes/liner notes.txt", b"data")
+
+        self.assertTrue(self.generate())
+
+        self.assertEqual([row for row in self.rar_rows() if "Notes" in row], [])
+
+    def test_a_film_beside_an_album_does_not_make_the_album_unpackable(self):
+        """The gate adds a condition; it must not remove one."""
+        self.add("Mixed/Concert/Live Set.flac")
+        self.add("Mixed/Concert/Live Set.mkv")
+
+        self.assertTrue(self.generate())
+
+        self.assertTrue(any("Concert" in row for row in self.rar_rows()))
+
+    def test_a_film_is_still_requestable_by_name(self):
+        """This decides PACKING and nothing else. Refusing to pack a film
+        folder must not make the film itself unavailable."""
+        self.add("Films/Some Film (2021)/Some Film.mkv")
+
+        self.assertTrue(self.generate())
+
+        self.assertIn("Some Film.mkv", self.read_video_list())
+
+    def test_the_packable_set_is_its_own_setting(self):
+        """Not "whatever the scan indexed", which is what it was."""
+        self.set_config(RAR_EXTENSIONS=[".flac"])
+        self.add("Music/Lossy/Track.mp3")
+        self.add("Music/Lossless/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        rows = self.rar_rows()
+        self.assertTrue(any("Lossless" in row for row in rows))
+        self.assertFalse(any("Lossy" in row for row in rows))
+
+    def test_an_empty_packable_set_makes_nothing_packable(self):
+        """A real configuration - "index everything, pack nothing" - and not
+        one that should fall back to packing everything."""
+        self.set_config(RAR_EXTENSIONS=[])
+        self.add("Music/Artist/Album/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        self.assertEqual(self.rar_rows(), [])
 
 
 class TheHelperIsTheOnlyPredicate(unittest.TestCase):

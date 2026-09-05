@@ -102,6 +102,11 @@ or `!update` from IRC, or the dashboard's **Update list** button. On a large lib
 
 Because everything is listed, **anything you leave in that directory is offered to anyone who asks.** It is the public face of the bot — keep out of it whatever should not leave.
 
+Two settings decide how the result is split up:
+
+- **`SEPARATE_VIDEO_LIST`** — publishes film and series as their own list rather than mixing them in with the music. Both travel in the same archive people get by typing your bot's name, so there is no second command to learn. `LIST_VIDEO_EXTENSIONS` says which formats count. Turn it off if your films and music are already in separate folders and you would rather split by folder.
+- **`RAR_EXTENSIONS`** — which formats make a folder packable with `!rar`. A folder needs one of these to get a row in the album list. Everything else stays listed and directly requestable; this only decides what can be packed, and packing has no size limit, so it is worth keeping narrow.
+
 ### Putting your own banner on it
 
 Every generated list starts with the file count, the request instructions, and a line naming the bot and this project. Below that you can put anything you like — a greeting, your channel, ASCII art — by creating one file:

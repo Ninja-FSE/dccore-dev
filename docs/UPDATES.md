@@ -117,6 +117,77 @@ means any other row may reach it with the size still attached. No regression
 is possible either way - there were no such rows at all before this - but an
 operator serving to AutoQ users should confirm it.
 
+### 🎬 Film and series get their own list, and only albums are packable
+
+Both from the review of the change above.
+
+**`!rar` eligibility had no format gate at all.** A folder earned a `!rar`
+row from holding any file the scan indexed, with `RAR_ENABLED` the only
+switch. That read as "album folders" while the scan took `.mp3` and `.flac`
+and nothing else. The moment it took everything, every folder in the library
+became packable - a season of a series, a folder holding one text note - and
+there is no size cap anywhere on packing, so an unbounded amount of CPU, disk
+and one transfer slot sat behind a line anybody in the channel can paste.
+
+`RAR_EXTENSIONS` decides it now, as its own set rather than "whatever the scan
+indexed". An album is a genuine multi-file collection - tracks, a cover, a cue
+sheet - which is what makes packing it useful; a film is one large file that
+can simply be requested by name, and still can.
+
+**Film and series publish as their own list**, `<base>-VIDEO-<date>.txt`,
+built from the same walk. No new trigger and nothing for anyone to learn:
+`@<botnick>` already hands out one archive containing the master list and the
+`!rar` album list, so this is a third member of the same download. The pattern
+is not new here either - the album list has been a separate file from the same
+scan since long before this.
+
+`SEPARATE_VIDEO_LIST` turns it off, and off is a real answer rather than a
+fallback. There are two ways to end up with a music list and a film list: this
+switch, when the two are mixed in the same folders and only the file says
+which is which; or several lists over their own folder sets, which is the
+roadmap's multi-list feature and the better route for a library already sorted
+that way on disk. The video list is only published when there is video to put
+in it, so a music-only library never gains an empty file.
+
+**The regression this could so easily have been.** A file request
+(`dcc.py:1316`), an `@find` (`list.py:328`) and the advert's count
+(`list.py:119`) all read `find_latest_list()` alone. Moving film into a second
+file without touching those would have left every video in the library listed,
+advertised and impossible to get - a feature that reads as working right up
+until somebody asks for something. `all_list_paths()` is the seam; all three
+go through it, and `dcc.py` concatenates the lists rather than searching them
+one at a time, so the folder-heading state machine below it is untouched.
+
+`find_latest_list()` needed a guard of its own: it globs `<base>-*.txt` and
+takes the LAST, and `-VIDEO-` sorts after a bare date, so the film list would
+have quietly become "the" master list. That is the failure its own comment
+already records for `-RAR-`. The test fixture had the identical blind spot -
+its `list_path()` helper globbed the same way - which is how the hazard was
+confirmed rather than merely reasoned about.
+
+Two more, found by the same walk:
+
+- **The music list's header claimed the whole library's size**, films
+  included: a number no reader can reconcile with the file in front of them.
+  The side files and the advert still report the library total, which is what
+  they are for.
+- **An all-film library refused to REBUILD.** The zero-files guard counts the
+  music list, so such a library looks empty to it. On a first run it finds no
+  previous index and publishes anyway, so nothing looks wrong; it is the
+  second run that fails with "scan found 0 files but an index already exists
+  (mount unavailable?)" - one working list, then every `!update` refused for
+  ever, blaming a mount that is fine.
+
+Three mutations corrected tests here rather than code. `"1.00KB"` is a
+substring of `"41.00KB"`, so the header assertion passed against exactly the
+combined figure it existed to reject. The all-film test ran the scan once and
+so never reached the guard. And the `!rar` gate turned out to be untested by
+the film case at all: with the split on, a film is not even in the data the
+`!rar` rows are built from, so the split alone keeps it out and deleting the
+gate broke nothing. The gate is now tested where it does the work - with
+`SEPARATE_VIDEO_LIST` off, which is the configuration an operator who keeps
+film in its own folders will run.
+
 ### 🔧 The mutation runner scored some mutations against code that was never on disk
 
 Two mutations of the same byte length, applied to one file inside the same

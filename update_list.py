@@ -35,21 +35,24 @@ def format_total_size(bytes_size):
         bytes_size /= 1024.0
     return f"{bytes_size:.1f}PiB"
 
-def ignored_extensions():
-    """The extensions to skip, normalised: lower-case and dot-leading.
+def _extension_set(setting_name):
+    """One setting's extensions, normalised: lower-case and dot-leading.
 
-    Normalised HERE rather than trusted from the setting, because this is
+    Normalised HERE rather than trusted from the setting, because these are
     reached from three directions - settings.conf, admin_config.py and the
     dashboard's Settings page - and only one of them goes anywhere near a
-    validator. An operator writing "DB, .ini, tmp" means the obvious thing.
+    validator. An operator writing "DB, .ini, tmp" means the obvious thing,
+    and so does "MKV,.mp4 , avi".
 
-    An empty result is a perfectly good answer under this model - it means
-    skip nothing, list everything - so there is no fallback. That is the whole
-    advantage of naming what to EXCLUDE: an empty include-list scanned a
-    library to zero files and needed a guess to recover from; an empty
-    exclude-list just lists the library.
+    The leading dot is not cosmetic. `"Thumbs.db".endswith("db")` is already
+    true, so it is not what makes a file match; it is what stops an extension
+    matching the END OF A NAME. Without it, ignoring "ts" also hides every
+    file called `credits` or `highlights`.
+
+    An empty result is a real answer for every one of these sets, so there is
+    no fallback anywhere: skip nothing, no video, nothing packable.
     """
-    raw = getattr(config, "LIST_IGNORED_EXTENSIONS", None)
+    raw = getattr(config, setting_name, None)
     if isinstance(raw, str):
         raw = raw.split(",")
     cleaned = []
@@ -59,6 +62,39 @@ def ignored_extensions():
             continue
         cleaned.append(text if text.startswith(".") else "." + text)
     return tuple(dict.fromkeys(cleaned))
+
+
+def ignored_extensions():
+    """Extensions left out of every list."""
+    return _extension_set("LIST_IGNORED_EXTENSIONS")
+
+
+def video_extensions():
+    """Extensions routed to the film and series list rather than the music one."""
+    return _extension_set("LIST_VIDEO_EXTENSIONS")
+
+
+def rar_extensions():
+    """Extensions that make a folder packable with !rar."""
+    return _extension_set("RAR_EXTENSIONS")
+
+
+def _has_extension(name, extensions):
+    return bool(extensions) and str(name).lower().endswith(tuple(extensions))
+
+
+def is_video_file(name, video=None):
+    """Does this file belong in the video list rather than the music one?"""
+    return _has_extension(name, video_extensions() if video is None else video)
+
+
+def is_packable_file(name, packable=None):
+    """Does this file make its folder requestable with !rar?
+
+    Its own set, deliberately not "anything the scan indexed" - see
+    RAR_EXTENSIONS in defaults.py for what that cost.
+    """
+    return _has_extension(name, rar_extensions() if packable is None else packable)
 
 
 def is_listed_file(name, ignored=None):
@@ -714,9 +750,16 @@ def generate_master_list():
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     txt_filename = f"{config.LIST_BASE_NAME}-{today}.txt"
     rar_filename = f"{config.LIST_BASE_NAME}-RAR-{today}.txt"
-    
+    # Same shape as the album list's name, and it has to be: list.py's
+    # find_latest_list() globs "<base>-*.txt" and takes the LAST one, so this
+    # file sorts after the master list and would silently become "the" list
+    # that @find searches and the advert counts. VIDEO_LIST_MARKER is how that
+    # function knows to leave it alone - the same guard "-RAR-" already needs.
+    video_filename = f"{config.LIST_BASE_NAME}-{list_mod.VIDEO_LIST_MARKER}-{today}.txt"
+
     txt_path = os.path.join(config.LOCAL_LIST_DIR, txt_filename)
     rar_path = os.path.join(config.LOCAL_LIST_DIR, rar_filename)
+    video_path = os.path.join(config.LOCAL_LIST_DIR, video_filename)
     
     # config.RAR_ENABLED (#140) refuses every !rar request. Building an album
     # list anyway, and shipping it inside the zip every user downloads, hands
@@ -743,10 +786,11 @@ def generate_master_list():
     # previous index exactly as it was.
     tmp_txt_path = txt_path + ".new"
     tmp_rar_path = rar_path + ".new"
+    tmp_video_path = video_path + ".new"
     # Every format's temporary, not just the configured one: a run that asked
     # for .rar and fell back to .zip has staged two, and the guards below have
     # no way of knowing which without repeating the decision.
-    tmp_index_paths = (tmp_txt_path, tmp_rar_path)
+    tmp_index_paths = (tmp_txt_path, tmp_rar_path, tmp_video_path)
     tmp_artifact_paths = tuple(_artifact_paths(f, today)[1] for f in list_mod.LIST_FORMATS)
     tmp_all_paths = tmp_index_paths + tmp_artifact_paths
 
@@ -755,6 +799,11 @@ def generate_master_list():
           + ", ".join(f"{f.path} ({f.name})" for f in scan_folders) + "...")
 
     all_files_data = []
+    # The music list, the film-and-series list, and which folders !rar may
+    # pack. All three filled by the one walk below - the !rar album list has
+    # been built from the same pass since long before this.
+    video_files_data = []
+    packable_folders = set()
     total_bytes = 0
 
     # long_path()-wrapped so a deeply-nested path (a real hazard in a music
@@ -782,13 +831,23 @@ def generate_master_list():
         walk_errors.append(err)
         print(f"[LIST-GEN ERROR] Could not read {err.filename!r} during the scan: {err}")
 
-    # Once, here - see is_listed_file()'s note. Resolving it inside the walk
-    # asked the question per file rather than per scan.
+    # Once, here - see is_listed_file()'s note. Resolving these inside the
+    # walk asked the question per file rather than per scan, and a 719k-file
+    # library would have rebuilt each tuple 719,000 times.
     ignored = ignored_extensions()
+    video_exts = video_extensions()
+    packable_exts = rar_extensions()
+    split_video = bool(getattr(config, "SEPARATE_VIDEO_LIST", True))
+
     print("[LIST-GEN] Indexing every file"
           + (f", except {len(ignored)} type(s): {', '.join(ignored)}"
              if ignored else " - no extensions are being skipped")
           + ".")
+    if split_video:
+        print(f"[LIST-GEN] Film and series go in their own list "
+              f"({len(video_exts)} extension(s)).")
+    else:
+        print("[LIST-GEN] One combined list - SEPARATE_VIDEO_LIST is off.")
 
     for scan_folder in scan_folders:
         # A folder that is not there RIGHT NOW is skipped, not fatal: an
@@ -852,7 +911,21 @@ def generate_master_list():
                         rel_dir = ""
                     rel_dir = (os.path.join(scan_folder.name, rel_dir)
                                if rel_dir else scan_folder.name)
-                    all_files_data.append((rel_dir, file, file_bytes))
+
+                    # WHICH folder may be packed, decided per FILE and
+                    # remembered per folder. A folder earns its !rar row from
+                    # holding something worth packing, not from holding
+                    # anything at all - see RAR_EXTENSIONS.
+                    if is_packable_file(file, packable_exts):
+                        packable_folders.add(rel_dir)
+
+                    # WHICH list the row goes in. With the split off, video
+                    # lands in the same list as everything else, which is the
+                    # behaviour this had before the setting existed.
+                    if split_video and is_video_file(file, video_exts):
+                        video_files_data.append((rel_dir, file, file_bytes))
+                    else:
+                        all_files_data.append((rel_dir, file, file_bytes))
 
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
@@ -868,7 +941,8 @@ def generate_master_list():
     if elapsed_seconds <= 0:
         elapsed_seconds = 0.1
 
-    files_per_second = int(total_files_count / elapsed_seconds)
+    files_per_second = int((total_files_count + len(video_files_data))
+                           / elapsed_seconds)
     def format_total_size(b):
         for unit in ['B','KB','MB','GB','TB']:
             if b < 1024.0: return f"{b:.2f}{unit}"
@@ -877,7 +951,13 @@ def generate_master_list():
     def format_size_human(b):
         return format_total_size(b)
 
+    # The WHOLE library, which is what the side files and the advert want.
     formatted_size = format_total_size(total_bytes)
+    # This list's own share of it. The header below describes this file, and
+    # a music list announcing a size that includes films it does not contain
+    # is a number no reader can reconcile with what they are looking at.
+    music_bytes = sum(size for _folder, _name, size in all_files_data)
+    formatted_music_size = format_total_size(music_bytes)
     
     time_struct = time.gmtime(elapsed_seconds)
     duration_str = time.strftime("%H:%M:%S", time_struct)
@@ -890,7 +970,7 @@ def generate_master_list():
         with open(tmp_txt_path, "w", encoding="utf-8") as f, \
              open(tmp_rar_path, "w", encoding="utf-8") as f_rar:
                  
-            f.write(f"List of {total_files_count:,} Files ({formatted_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n")
+            f.write(f"List of {total_files_count:,} Files ({formatted_music_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n")
             f.write(f"To request a file, copy/paste to the channel... !{config.NICKNAME} FILENAME eg. !{config.NICKNAME} Songname.flac\n")
 
             # The operator's banner and the bot's identity go BELOW the two
@@ -976,7 +1056,16 @@ def generate_master_list():
                     # old "first box word in LIST order" behaviour, which
                     # made the truncation point depend on the order this
                     # list happened to be written in.
-                    if folder and serve_albums:
+                    # A folder earns a !rar row from holding something
+                    # worth PACKING, not from holding anything at all. Before
+                    # this the only conditions were "has a folder" and
+                    # RAR_ENABLED, which read as "album folders" while the
+                    # scan took .mp3 and .flac and nothing else. Once the scan
+                    # took every file, every folder in the library became
+                    # packable - a season of a series, or a folder holding one
+                    # text note - with no size cap anywhere behind a line
+                    # anybody in the channel can paste. See RAR_EXTENSIONS.
+                    if folder and serve_albums and folder in packable_folders:
                         folder_segments = re.split(r'[\\/]', folder)
                         truncate_at = None
                         for seg_index, segment in enumerate(folder_segments):
@@ -1062,6 +1151,46 @@ def generate_master_list():
                 single_file_size = format_size_human(bytes_size)
                 f.write(f"!{config.NICKNAME} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
 
+        # The film and series list. Written after the music one and from the
+        # same walk, exactly as the album list is - a separate file with its
+        # own header, travelling in the same archive.
+        #
+        # Only written when there is something to put in it: a music-only
+        # library should not gain an empty file it has no use for, and every
+        # reader below treats "no video list" as the ordinary case rather than
+        # as a fault.
+        if video_files_data:
+            video_bytes = sum(size for _f, _n, size in video_files_data)
+            with open(tmp_video_path, "w", encoding="utf-8") as f_video:
+                f_video.write(
+                    f"List of {len(video_files_data):,} Films & Series "
+                    f"({format_total_size(video_bytes)}) generated on "
+                    f"{date_header_str}\n")
+                f_video.write(
+                    f"To request one, copy/paste to the channel... "
+                    f"!{config.NICKNAME} FILENAME eg. !{config.NICKNAME} "
+                    f"Some.Film.2021.mkv\n")
+                # Same order as the .txt above, and for the same reason: this
+                # file travels on its own once it is out of the archive, so it
+                # carries its own attribution rather than inheriting one.
+                f_video.write(list_identity_line() + "\n")
+                if operator_header:
+                    f_video.write("\n" + operator_header + "\n")
+                f_video.write("\n")
+
+                video_folder = None
+                for folder, filename, bytes_size in video_files_data:
+                    if folder != video_folder:
+                        video_folder = folder
+                        raw = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
+                        line = _one_line(raw.replace("/", "\\"))
+                        rule = "=" * len(line)
+                        f_video.write(f"\n{rule}\n{line}\n{rule}\n")
+                    f_video.write(
+                        f"!{config.NICKNAME} {_one_line(filename)}"
+                        f"  ::INFO:: {format_size_human(bytes_size)}\n")
+            print(f"[LIST-GEN] Film & series list created: {tmp_video_path}")
+
         print(f"[LIST-GEN] Text list created: {tmp_txt_path}")
         if serve_albums:
             print(f"[LIST-GEN] RAR album list created: {tmp_rar_path}")
@@ -1077,7 +1206,7 @@ def generate_master_list():
         #
         # Accept an empty result only when there is no working index to lose, so a genuine
         # first run on an empty library still succeeds.
-        if total_files_count == 0:
+        if total_files_count == 0 and not video_files_data:
             try:
                 existing = [f for f in os.listdir(config.LOCAL_LIST_DIR)
                             if f.startswith(config.LIST_BASE_NAME)
@@ -1109,6 +1238,11 @@ def generate_master_list():
         # two text files once per rebuild, on the operator's own schedule, is
         # a different job and does not belong behind the same switch.
         members = [(tmp_txt_path, os.path.basename(txt_path))]
+        # The film and series list rides in the same archive, on the same
+        # terms as the album list: present when it has content, absent when
+        # the library has no video, and never a reason to fail the build.
+        if os.path.exists(tmp_video_path) and os.path.getsize(tmp_video_path) > 0:
+            members.append((tmp_video_path, os.path.basename(video_path)))
         if os.path.exists(tmp_rar_path) and os.path.getsize(tmp_rar_path) > 0:
             members.append((tmp_rar_path, os.path.basename(rar_path)))
 
@@ -1133,6 +1267,10 @@ def generate_master_list():
         # has moved. All of them go together or none of them do; see
         # _publish_artifacts().
         swaps = [(tmp_artifact_path, artifact_path), (tmp_txt_path, txt_path)]
+        # Only when it was written. A library with no video has no video list,
+        # and the publish must not try to move a file that was never staged.
+        if os.path.exists(tmp_video_path):
+            swaps.append((tmp_video_path, video_path))
         if serve_albums:
             swaps.append((tmp_rar_path, rar_path))
         _publish_artifacts(swaps)
@@ -1159,6 +1297,15 @@ def generate_master_list():
               f"(download: {os.path.basename(artifact_path)})")
 
         keep = {os.path.basename(txt_path), os.path.basename(artifact_path)}
+        # The film list too, when this run published one. It is named
+        # "<base>-VIDEO-<date>.txt", so the prefix match below picks it up as
+        # a generated list - correctly - and without this it would be swapped
+        # in and deleted again in the same run, every run. The only trace was
+        # a "[LIST-CLEAN] Removed 1 superseded list(s)" line that reads like
+        # housekeeping working, which is exactly how the side files were lost
+        # once already (see _prune_superseded_lists).
+        if os.path.exists(video_path):
+            keep.add(os.path.basename(video_path))
         if serve_albums:
             keep.add(os.path.basename(rar_path))
         # Yesterday's artifact in another format goes with the rest. It is not

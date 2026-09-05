@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Film and series now get their own list.** One scan publishes two: your music list and a separate one for video, both inside the same archive people already get by typing your bot's name — nothing new to learn, and no mixed list of tracks and episodes to sort out afterwards. If your films and music already live in separate folders you may not want this: set `SEPARATE_VIDEO_LIST = No` and everything goes back into one list. The film list is only created when you actually have video.
+
+- **Only album folders can be packed with `!rar` now.** A folder used to become packable just by containing something in the list, which was fine when the list only held `.mp3` and `.flac` — but with everything listed, a single stranger could paste one line and have your bot spend an hour packing a forty-gigabyte film folder, using your CPU, your disk and one of your transfer slots. `RAR_EXTENSIONS` decides what makes a folder packable; films are still listed and still directly requestable by name.
+
 - **Your whole library goes into the list now, not just `.mp3` and `.flac`.** Anything else — video, `.m4a`, `.ogg`, artwork, liner notes — used to be skipped, so a library of it scanned to an empty list and said nothing about why. Everything is listed now, and the new `LIST_IGNORED_EXTENSIONS` setting names what to leave out. Write it however you like: `db,ini,tmp`, `db, ini, tmp` or `.DB, .INI` all mean the same thing. It ships skipping only what is never a real file — `Thumbs.db`, `desktop.ini`, shortcuts, and half-finished downloads. **Worth knowing:** everything under your music directory is now offered to anyone who asks, so keep out of it whatever should not leave.
 
 - **The pre-flight check counts the same files the list build will.** It had its own copy of the old two-format rule, so it could report a healthy library and then build an empty list.

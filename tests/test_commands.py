@@ -495,6 +495,14 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
             "skip is read from settings.conf, and re-reading it is the "
             "whole reason an operator runs !rehash after editing it. "
             "Preserving it would mean the edit did nothing until a restart",
+        "LIST_VIDEO_EXTENSIONS":
+            "the same again: which file types go in the film list rather "
+            "than the music one is a setting, re-read on a rehash",
+        "RAR_EXTENSIONS":
+            "and again: which file types make a folder packable with !rar. "
+            "An operator narrowing this after finding something packable "
+            "that should not be needs the change to take effect on the "
+            "rehash, not on the next restart",
         "vip_queue":
             "transient OUTPUT, not state. commands.py says so explicitly: "
             "restoring it would replay lines addressed to channels the "

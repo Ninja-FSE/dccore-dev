@@ -166,6 +166,79 @@ LIST_IGNORED_EXTENSIONS: list = [
     ".tmp", ".part", ".crdownload", ".!ut",  # downloads still in flight
 ]
 
+# Publish film and series as a SEPARATE list from the music, instead of one
+# list carrying both.
+#
+# Off is a real answer, not a fallback. There are two ways to end up with a
+# music list and a film list, and they suit different libraries:
+#
+#   - This switch, when audio and video are mixed together in the same
+#     folders and only the file itself says which is which.
+#   - Several lists, each over its own set of folders, when the library is
+#     already sorted that way on disk. That is the roadmap's multi-list
+#     feature, and for an operator who keeps films and music apart it is the
+#     better route - the folders already carry the answer, and the lists then
+#     differ in more than content type.
+#
+# Turning this off gives the single combined list again.
+SEPARATE_VIDEO_LIST: bool = True
+
+# WHICH LIST a file goes into, when SEPARATE_VIDEO_LIST is on. One scan
+# publishes two: the music list, and a separate one for film and series.
+# Same comma-separated form as the setting above - dots optional, spacing
+# free, case ignored.
+#
+# They travel together. "@<botnick>" already hands out ONE archive containing
+# several text files (the master list and the !rar album list), so the video
+# list is a third member of the same download: no new trigger, nothing for
+# anyone to learn.
+#
+# The split exists because a list carrying tracks and episodes mixed together
+# is one a person or a script has to sort out afterwards. It follows the
+# pattern already here rather than inventing one - the !rar album list has
+# been a separate file built from the same walk since long before this.
+#
+# Anything that is NOT one of these goes into the music list, including a
+# file with no extension at all. That is the rule for artwork, cue sheets and
+# notes, which sit beside the tracks they belong to; a film's subtitles land
+# there too, which is the one rough edge of deciding per file rather than per
+# folder. Per file is deliberate: a folder holding both an album and a video
+# should not have to pick.
+#
+# The video list is only published when there is video to put in it, so a
+# music-only library never gains an empty file it has no use for.
+LIST_VIDEO_EXTENSIONS: list = [
+    ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",
+    ".flv", ".webm", ".ts", ".m2ts", ".vob", ".divx", ".ogv", ".3gp",
+]
+
+# WHICH FOLDERS may be packed on demand with "!rar <folder>".
+#
+# A folder earns a !rar row only if it holds one of these. Everything else is
+# still listed and still directly requestable by name - this decides packing,
+# nothing else.
+#
+# It is a set of its own, and not simply "whatever is in the list", because
+# for a while it WAS that: a folder became packable if it held any file the
+# scan indexed. While the scan only took .mp3 and .flac that read as "album
+# folders", and it was fine. The moment the scan took everything, every
+# folder in the library became packable - including one holding a single
+# text file, and including a season of a series that is tens of gigabytes.
+#
+# There is no size cap anywhere on packing (see the roadmap), so an
+# unbounded amount of CPU, disk and one transfer slot sat behind a line
+# anybody in the channel could paste. RAR_ENABLED was the only defence and
+# it is all-or-nothing: an operator who wanted albums packable had to accept
+# films packable too.
+#
+# An album is a genuine multi-file collection - tracks, a cover, a cue sheet
+# - which is what makes packing it useful. A film is one large file that can
+# simply be requested by name.
+RAR_EXTENSIONS: list = [
+    ".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wav", ".aac", ".wma",
+    ".ape", ".wv", ".alac", ".aiff", ".aif",
+]
+
 # Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
 # separate from FILE_DIRECTORY: that directory is the served library, scanned
 # by update_list.py and offered to everyone via @find/!<nick> - fetched files
