@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📣 The second announce target really did send a list - the note saying otherwise was wrong
+#272 fixed a `PRIVMSG` target that defaulted to a LIST of channels, and recorded that the sibling site in the global-queue scan "deliberately" kept one, on the grounds that it was only a membership test. **It is not.** `g_chan` is passed to `start_dcc_send()` at the thread spawn a few lines below, which hands it to `announce.send_transfer_complete()`, which builds `f"PRIVMSG {channel} :"`. The reading stopped at the `isinstance` block and never followed the value to the spawn - and the test written then to protect that shape was protecting the identical defect. Found by the full-program audit.
+
+There are two questions and they need two values. *"Which channels prove this user is present"* wants a LIST: the entry may name one, and an entry naming none must be checked against every configured channel. *"Where do we announce the finished transfer"* wants exactly ONE. The membership check keeps its list; the target now comes from `announce_channel_for()`.
+
+**And that helper had the same hole one level down.** It read
+
+```python
+named = next_file.get('channel')
+if named:
+    return named
+```
+
+so a LIST stored in the entry was returned unchanged - it fixed the default and let a stored one straight through. `announce_channel_for({"channel": ["#one", "#two"]})` returned the list, and the wire line was `PRIVMSG ['#one', '#two'] :Sent`. It requires a non-empty string now, strips it (a space ends a PRIVMSG target), and falls back to the configured channel for anything else, because a queue entry whose channel is a list is malformed either way and a predictable fallback beats guessing which entry was meant.
+
 ### 🗂️ A folder picker for the Settings page (#164 step 5 - the last one)
 
 **Four defects in this feature were found by the full-program audit before it merged**, which is why it was held back:

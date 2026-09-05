@@ -147,19 +147,91 @@ class TheAdvertLoopReadsTheChannelsSafely(DCCoreTestCase):
         self.assertIn("irc.configured_channels()", body)
 
 
-class TheMembershipScanStillTakesAList(unittest.TestCase):
-    """The sibling expression that was deliberately left alone. If a later
-    change 'tidies' it to match the one above, the global-queue scan silently
-    starts checking membership of a single channel instead of all of them."""
+class TheGlobalScanSeparatesTheTwoQuestions(unittest.TestCase):
+    """The correction to what this file said when it was written.
 
-    def test_the_global_scan_still_type_switches(self):
+    The first version recorded that the global-queue scan "deliberately" kept
+    a list, on the grounds that it was only a membership test - and asserted
+    that the type-switch on `g_chan` must stay. It was not only a membership
+    test: g_chan is passed to start_dcc_send() at the thread spawn a few lines
+    below, which hands it to announce.send_transfer_complete(), which builds
+    `f"PRIVMSG {channel} :"`. So the test written to protect that shape was
+    protecting the identical defect the rest of this file exists for, and the
+    audit is what caught it.
+
+    There are two questions and they need two values:
+
+      "which channels prove this user is present" wants a LIST - the entry may
+      name one, and an entry naming none must be checked against every
+      configured channel.
+
+      "where do we announce the finished transfer" wants exactly ONE.
+    """
+
+    def source(self):
         with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
-            source = handle.read()
+            return handle.read()
 
-        self.assertIn("elif isinstance(g_chan, list):", source,
+    def test_the_membership_check_still_handles_a_list(self):
+        """Narrowing it to one channel would silently stop the scan finding a
+        user who is present in the second of two."""
+        source = self.source()
+
+        self.assertIn("isinstance(raw_chan, list)", source,
                       "the global-queue scan no longer handles a list of "
-                      "channels - it is a membership test across all of them, "
-                      "not a message target")
+                      "channels for its membership test")
+
+    def test_the_announce_target_comes_from_the_helper(self):
+        """And not from the same value the membership test uses."""
+        source = self.source()
+
+        self.assertIn("g_chan = announce_channel_for(g_next)", source)
+
+    def test_the_scan_no_longer_defaults_the_target_to_a_split(self):
+        source = self.source()
+
+        self.assertNotIn("g_chan = g_next.get('channel', config.CHANNEL.split(','))",
+                         source,
+                         "the global-queue scan is defaulting its announce "
+                         "target to a LIST of channels again")
+
+
+class ATargetIsAlwaysOneChannel(DCCoreTestCase):
+    """announce_channel_for() had the same hole one level down: `if named:`
+    accepted a LIST, so it fixed the default and let a stored one through."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(CHANNEL="#one,#two")
+
+    def test_a_list_stored_in_the_entry_does_not_become_the_target(self):
+        target = dcc.announce_channel_for({"channel": ["#one", "#two"]})
+
+        self.assertIsInstance(target, str)
+        self.assertEqual(target, "#one")
+
+    def test_a_non_string_channel_falls_back(self):
+        for junk in ({}, 12, True, [], ["#x"]):
+            with self.subTest(junk=junk):
+                target = dcc.announce_channel_for({"channel": junk})
+
+                self.assertIsInstance(target, str)
+                self.assertNotIn("[", target)
+
+    def test_a_padded_channel_is_stripped(self):
+        """It goes straight into a PRIVMSG, where a space ends the target."""
+        self.assertEqual(dcc.announce_channel_for({"channel": "  #chosen  "}),
+                         "#chosen")
+
+    def test_the_wire_line_is_never_a_rendered_list(self):
+        for entry in ({"channel": ["#one"]}, {"channel": {}}, {"channel": 5},
+                      {"file": "x"}, "legacy"):
+            with self.subTest(entry=entry):
+                line = f"PRIVMSG {dcc.announce_channel_for(entry)} :Sent x"
+
+                self.assertNotIn("[", line)
+                self.assertNotIn("{", line)
+                self.assertTrue(line.startswith("PRIVMSG #"))
 
 
 if __name__ == "__main__":

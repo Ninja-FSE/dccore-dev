@@ -111,8 +111,14 @@ def announce_channel_for(next_file):
     """
     if isinstance(next_file, dict):
         named = next_file.get('channel')
-        if named:
-            return named
+        # A STRING, specifically. `if named:` accepted a list, which is the
+        # very thing this function exists to stop reaching
+        # `f"PRIVMSG {channel} :"` - it fixed the DEFAULT and let a stored one
+        # straight through. A queue entry whose channel is a list is malformed
+        # either way; falling back to the configured channel is predictable,
+        # where picking one of its entries would be a guess.
+        if isinstance(named, str) and named.strip():
+            return named.strip()
     return default_announce_channel()
 
 
@@ -996,15 +1002,37 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 real_username = g_next.get('user_raw', waiting_user)
 
-                g_chan = g_next.get('channel', config.CHANNEL.split(','))
+                # TWO different questions, and one value used to answer both.
+                #
+                # "which channels prove this user is present" wants a LIST -
+                # the entry may name one, and an entry that names none has to
+                # be checked against every configured channel. "where do we
+                # announce the finished transfer" wants exactly ONE, because
+                # it ends up in `f"PRIVMSG {channel} :"`.
+                #
+                # g_chan answered both, so an entry with no 'channel' key
+                # handed a list to start_dcc_send() below and the wire line was
+                # `PRIVMSG ['#one', '#two'] :Sent ...` - a malformed target,
+                # answered with a numeric nothing here reads, so the
+                # announcement was lost while the transfer it announced had
+                # already succeeded.
+                #
+                # #272 fixed the identical shape at check_queue_and_send()'s
+                # other site and recorded that THIS one deliberately kept a
+                # list, on the grounds that it was only a membership test. It
+                # is not: g_chan is passed to start_dcc_send() at the thread
+                # spawn below. Found by audit, and the test written then to
+                # protect the list form was protecting a defect.
+                g_chan = announce_channel_for(g_next)
                 g_name = g_next.get('file', '')
                 g_path = g_next.get('path', '')
 
+                raw_chan = g_next.get('channel')
                 user_is_globally_active = False
-                if isinstance(g_chan, str):
-                    channels_to_check = [g_chan]
-                elif isinstance(g_chan, list):
-                    channels_to_check = g_chan
+                if isinstance(raw_chan, str) and raw_chan.strip():
+                    channels_to_check = [raw_chan]
+                elif isinstance(raw_chan, list) and raw_chan:
+                    channels_to_check = raw_chan
                 else:
                     channels_to_check = config.CHANNEL.split(',')
 
