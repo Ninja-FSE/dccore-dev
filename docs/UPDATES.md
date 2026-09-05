@@ -14,6 +14,26 @@ Handing `send_from_directory()` the *wrapped* directory does not fix it either, 
 **"Up" from a lowercase drive root left the machine root.** `browse_roots()` builds its entries from the uppercase letters A-Z and `os.path.abspath()` preserves whatever case the caller sent, so `c:\` missed the root list and the parent fell through to `ntpath.dirname("c:")` - which is `"c:"`, a *drive-relative* path meaning "the current directory on C:". Clicking Up from a lowercase drive root browsed the daemon's own working directory.
 
 **A dead "Get folder as .rar" button.** Rendered for every group of a foreign bot's list including the unnamed one, while `requestFolderRar()` drops the click on `if (!bot || !folder)` - so it was there, clickable, and did nothing at all: no request, no message.
+### 🧮 Four ways a configuration change did not mean what it said
+All found by the full-program audit.
+
+**An indented line was swallowed into the setting above it.** configparser treats an indented line as a CONTINUATION, so
+
+```
+NICKNAME = MyBot
+    a stray indented line
+```
+
+gave `NICKNAME` the value `"MyBot
+a stray indented line"` - newline and all - which then went out on the wire, with nothing reporting it. `settings.conf` is one setting per line (`save()` refuses to write a value containing a line break for exactly that reason), so an indented line is always a mistake. `parse()` names the line and refuses now. Indented COMMENTS are still fine - a comment is a comment wherever it sits.
+
+**`ADMIN_CHAT_MODE` was a fixed-choice setting that `CHOICES` did not cover.** adminchat tests for `"listen"` and `"connect"` and treats everything else as `"auto"`, so a typo did not fail - it silently selected the default, and the operator who wrote `lisen` got automatic mode with no indication their setting had not taken. There is also a test that reads adminchat's own branches, so the two lists cannot drift.
+
+**Renaming a folder label split every counter and grew the key.** The counter migration decided a key was "already labelled" by testing its first component against the CURRENT labels, so renaming `Flac` to `Lossless` made every existing key stop matching and get prefixed again - `Flac/Artist/Song.flac` became `Lossless/Flac/Artist/Song.flac`, one component longer each time, with the history split from what new downloads write.
+
+**An absolute key re-migrated on every boot, for ever.** A file counted while it was under no configured folder keeps its absolute path. Its first component is not a label, so it was "migrated" every time - and `os.path.join(label, absolute)` returns the absolute path unchanged, so the file was rewritten and a migration logged on every single start while nothing actually changed.
+
+The last two share a root: **"has this already run?" was being inferred from the shape of the data.** It is recorded now, once, in a marker beside the counters - so a restored backup of the data directory carries its own answer with it. Absolute keys are skipped outright, and a marker that cannot be written is reported rather than fatal, because this runs at startup and refusing to boot over it would be the thing the wrapper exists to prevent.
 
 ### 🔒 A host-shaped hard ban was confirmed, listed, and never enforced
 `check_user_status()` decided a pattern was "hostmask-shaped" only if it contained `!` or `@`. Anything else was matched against the bare NICK - and an IRC nick can never contain a dot, so
