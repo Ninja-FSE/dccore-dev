@@ -10,6 +10,8 @@ It also pins an invariant that is currently load-bearing and undocumented - see
 TheRequestTriggerIsStable.
 """
 
+import contextlib
+import io
 import os
 import sys
 import unittest
@@ -88,18 +90,27 @@ class ScanFindsTheRightFiles(MasterListCase):
         self.assertIn("track.mp3", names)
         self.assertIn("Enter Sandman.flac", names)
 
-    def test_other_files_are_ignored(self):
-        """A music library is full of covers, cue sheets and notes."""
-        for junk in ("Artist/Album/cover.jpg", "Artist/Album/info.nfo",
-                     "Artist/Album/playlist.m3u", "Artist/Album/notes.txt",
-                     "Artist/Album/disc.cue"):
-            self.add(junk, b"junk")
+    def test_the_companions_of_a_music_library_are_listed_too(self):
+        """This asserted the opposite until the rule changed, and the reversal
+        is the point of the change: covers, cue sheets, playlists and notes
+        used to be invisible because they were not .mp3 or .flac.
+
+        People do serve them. An operator who would rather not can name them
+        in LIST_IGNORED_EXTENSIONS; nothing has to guess on their behalf.
+        """
+        for companion in ("Artist/Album/cover.jpg", "Artist/Album/info.nfo",
+                          "Artist/Album/playlist.m3u", "Artist/Album/notes.txt",
+                          "Artist/Album/disc.cue"):
+            self.add(companion, b"data")
+
         self.assertTrue(self.generate())
+
         listing = self.read_list()
-        for junk in ("cover.jpg", "info.nfo", "playlist.m3u", "notes.txt", "disc.cue"):
-            with self.subTest(junk=junk):
-                self.assertNotIn(junk, listing)
-        self.assertEqual(len(self.request_lines()), 2)
+        for companion in ("cover.jpg", "info.nfo", "playlist.m3u",
+                          "notes.txt", "disc.cue"):
+            with self.subTest(file=companion):
+                self.assertIn(companion, listing)
+        self.assertEqual(len(self.request_lines()), 7)
 
     def test_the_extension_test_is_case_insensitive(self):
         """Ripped libraries are full of .FLAC and .Mp3."""
@@ -119,6 +130,331 @@ class ScanFindsTheRightFiles(MasterListCase):
         config.FILE_DIRECTORY = empty
         self.assertTrue(self.generate())
         self.assertEqual(self.request_lines(), [])
+
+
+class EveryFileIsListedUnlessItIsNamed(MasterListCase):
+    """The scan used to be a hardcoded `('.mp3', '.flac')`.
+
+    So a video library - or an .m4a one, or anything else - walked past every
+    file it owned and published nothing, silently: the scan reported success,
+    the list was built, and it was empty. That reads as "the bot cannot see my
+    files" with nothing saying why.
+
+    Naming what to KEEP could never fix that, only move it. The set of things
+    people serve is open-ended, so every format left out of the list is
+    invisible in exactly the same way. Naming what to SKIP is a short, closed
+    list, and getting it wrong costs a file listed that need not have been -
+    not a library that does not appear.
+    """
+
+    def test_a_video_library_is_listed(self):
+        """The defect, stated as the case it failed on."""
+        self.add("Films/Feature/Feature.mkv")
+        self.add("Films/Feature/Extras.mp4")
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        self.assertIn("Feature.mkv", listing)
+        self.assertIn("Extras.mp4", listing)
+
+    def test_a_format_nobody_thought_of_is_listed(self):
+        """The property an include-list cannot have. These are not in any
+        default anywhere, and that is the point: nothing had to predict them."""
+        for name in ("Films/Odd/lecture.m4b", "Films/Odd/tape.ape",
+                     "Films/Odd/scan.djvu", "Films/Odd/game.chd"):
+            self.add(name)
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        for name in ("lecture.m4b", "tape.ape", "scan.djvu", "game.chd"):
+            with self.subTest(file=name):
+                self.assertIn(name, listing)
+
+    def test_a_file_with_no_extension_at_all_is_listed(self):
+        """"Every file" includes the ones with nothing to match on."""
+        self.add("Films/Odd/README")
+
+        self.assertTrue(self.generate())
+
+        self.assertIn("README", self.read_list())
+
+    def test_a_named_extension_is_skipped(self):
+        self.set_config(LIST_IGNORED_EXTENSIONS=[".jpg", ".nfo"])
+        self.add("Films/Feature/Feature.mkv")
+        self.add("Films/Feature/poster.jpg", b"junk")
+        self.add("Films/Feature/info.nfo", b"junk")
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        self.assertIn("Feature.mkv", listing)
+        self.assertNotIn("poster.jpg", listing)
+        self.assertNotIn("info.nfo", listing)
+
+    def test_the_shipped_default_skips_the_droppings_and_nothing_else(self):
+        """Derived from the setting, not a second list of names here. The
+        default is deliberately narrow - only what is never a served file."""
+        for ext in config.SHIPPED_VALUES["LIST_IGNORED_EXTENSIONS"]:
+            self.add("Films/Junk/leftover" + ext, b"junk")
+        self.add("Films/Junk/cover.jpg")
+        self.add("Films/Junk/Feature.mkv")
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        for ext in config.SHIPPED_VALUES["LIST_IGNORED_EXTENSIONS"]:
+            with self.subTest(extension=ext):
+                self.assertNotIn("leftover" + ext, listing)
+        self.assertIn("cover.jpg", listing)
+        self.assertIn("Feature.mkv", listing)
+
+    def test_a_half_finished_download_is_not_offered(self):
+        """The one case where listing a file is actively wrong: the bytes are
+        not all there, so the transfer can only ever hand over a broken file."""
+        self.add("Films/Feature/Feature.mkv.part", b"half")
+
+        self.assertTrue(self.generate())
+
+        self.assertNotIn("Feature.mkv.part", self.read_list())
+
+    def test_an_empty_setting_skips_nothing(self):
+        """A perfectly good answer under this model, and the reason it needs
+        no fallback: an empty INCLUDE list scanned a library to zero files and
+        had to guess its way out. An empty EXCLUDE list just lists the
+        library."""
+        self.set_config(LIST_IGNORED_EXTENSIONS=[])
+        self.add("Films/Junk/Thumbs.db", b"junk")
+        self.add("Films/Feature/Feature.mkv")
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        self.assertIn("Thumbs.db", listing)
+        self.assertIn("Feature.mkv", listing)
+
+    def test_dots_are_optional_and_spacing_does_not_matter(self):
+        """What a person actually types. The setting is reached from
+        settings.conf, admin_config.py and the dashboard's Settings page, and
+        only one of those goes near a validator - so every form of "db, .ini,
+        tmp" has to mean the same thing."""
+        self.set_config(LIST_IGNORED_EXTENSIONS=["db", " .INI ", "tmp"])
+        self.add("Films/Junk/Thumbs.db", b"junk")
+        self.add("Films/Junk/desktop.ini", b"junk")
+        self.add("Films/Junk/half.TMP", b"junk")
+        self.add("Films/Feature/Feature.mkv")
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        for skipped in ("Thumbs.db", "desktop.ini", "half.TMP"):
+            with self.subTest(file=skipped):
+                self.assertNotIn(skipped, listing)
+        self.assertIn("Feature.mkv", listing)
+
+    def test_the_dot_is_what_makes_it_an_extension_and_not_a_suffix(self):
+        """The reason normalisation adds the dot, which is NOT "so the file
+        matches" - `"Thumbs.db".endswith("db")` is already true, and a
+        mutation dropping the dot passed a test that only checked that.
+
+        It is the dot that stops an extension matching the END OF A NAME.
+        Under an exclude-list the cost of getting this wrong is worse than it
+        was under an include-list: a file that merely ENDS in those letters
+        disappears from the library with nothing said.
+        """
+        self.set_config(LIST_IGNORED_EXTENSIONS=["ts"])
+        self.add("Films/Feature/Episode.ts", b"junk")
+        self.add("Films/Feature/credits")
+        self.add("Films/Feature/highlights")
+
+        self.assertTrue(self.generate())
+
+        listing = self.read_list()
+        self.assertNotIn("Episode.ts", listing)
+        self.assertIn("credits", listing)
+        self.assertIn("highlights", listing)
+
+    def test_a_video_row_is_written_exactly_like_an_audio_one(self):
+        """One line, the request trigger, the name, then the ::INFO:: size -
+        no second form for a second kind of file. list.py splits on the marker
+        regardless of extension, and so do the OmenServe bots the convention
+        came from."""
+        self.add("Films/Feature/Feature.mkv", b"\x00" * 4096)
+
+        self.assertTrue(self.generate())
+
+        rows = [line for line in self.request_lines() if "Feature.mkv" in line]
+        self.assertEqual(len(rows), 1, "a video file produced other than one row")
+        self.assertTrue(rows[0].startswith("!" + config.NICKNAME + " "))
+        self.assertIn("  ::INFO:: ", rows[0])
+
+    def test_a_video_file_counts_towards_the_advertised_total(self):
+        """The header total and the advert both read the list back. A file
+        indexed but uncounted would advertise a number the list disagrees
+        with."""
+        self.add("Films/Feature/Feature.mkv")
+
+        self.assertTrue(self.generate())
+
+        count = list_mod.get_file_count_date_size_and_raw_bytes()[0]
+        self.assertEqual(count, len(self.request_lines()))
+
+
+class TheSettingIsResolvedOncePerScan(MasterListCase):
+    """Not once per file.
+
+    is_listed_file() reads the setting, normalises it and builds a tuple.
+    Asked per file, a 719k-file library - the largest this project has
+    measured - does that 719,000 times.
+    """
+
+    def test_it_is_read_once_however_many_files_there_are(self):
+        real = update_list.ignored_extensions
+        calls = []
+
+        def counting():
+            calls.append(1)
+            return real()
+
+        update_list.ignored_extensions = counting
+        self.addCleanup(setattr, update_list, "ignored_extensions", real)
+
+        for i in range(12):
+            self.add(f"Films/Many/clip{i}.mkv")
+
+        self.assertTrue(self.generate())
+
+        self.assertIn("clip11.mkv", self.read_list())
+        self.assertLessEqual(len(calls), 2,
+                             f"the setting was read {len(calls)} times for one "
+                             f"scan of 14 files")
+
+    def test_the_scan_says_what_it_is_skipping(self):
+        """The reported symptom was "my files are not in the list" with
+        nothing anywhere saying why. This line is the answer to it, so it is
+        worth a test rather than being decoration."""
+        self.set_config(LIST_IGNORED_EXTENSIONS=[".db", ".ini"])
+        self.add("Films/Feature/Feature.mkv")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.assertTrue(self.generate())
+
+        output = buffer.getvalue()
+        self.assertIn("Indexing every file", output)
+        self.assertIn(".db", output)
+        self.assertIn(".ini", output)
+
+    def test_it_says_so_when_nothing_is_skipped(self):
+        """An empty setting is a real configuration, not a broken one, and the
+        log should not read as though the line failed to render."""
+        self.set_config(LIST_IGNORED_EXTENSIONS=[])
+        self.add("Films/Feature/Feature.mkv")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.assertTrue(self.generate())
+
+        self.assertIn("no extensions are being skipped", buffer.getvalue())
+
+
+class EditingItAndRehashingIsTheWholeWorkflow(MasterListCase):
+    """The operator's actual sequence: name a format, !rehash, it disappears.
+
+    This covers the reload half: the value in settings.conf reaches config and
+    the scan sees it. The other half - that a rehash does not PRESERVE the old
+    value over the top - lives where that list does, in
+    test_commands.RehashPreservesEveryRuntimeContainer. Split that way because
+    PRESERVE_RUNTIME is applied by the rehash handler rather than by
+    reload_modules_in_order(), so this test never reaches it; a mutation
+    adding the setting to PRESERVE_RUNTIME passed here.
+    """
+
+    def test_a_rehash_picks_up_a_newly_ignored_format(self):
+        path = os.path.join(self.tree.root, "settings.conf")
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write("LIST_IGNORED_EXTENSIONS = jpg\n")
+
+        real = os.environ.get("DCCORE_SETTINGS_FILE")
+        os.environ["DCCORE_SETTINGS_FILE"] = path
+        self.addCleanup(
+            lambda: os.environ.__setitem__("DCCORE_SETTINGS_FILE", real)
+            if real is not None else os.environ.pop("DCCORE_SETTINGS_FILE", None))
+
+        self.set_config(LIST_IGNORED_EXTENSIONS=[])
+        self.assertTrue(update_list.is_listed_file("cover.jpg"))
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            commands.reload_modules_in_order(modules=("defaults",),
+                                             reload_self=False)
+
+        self.assertFalse(update_list.is_listed_file("cover.jpg"),
+                         "the rehash did not pick up the edited setting")
+
+
+class TheWayAnOperatorTypesIt(DCCoreTestCase):
+    """ignored_extensions(), directly - every spelling of the same answer.
+
+    Asked for explicitly: the setting must accept the extensions with or
+    without a leading dot, and with or without a space after the comma.
+    settings.conf arrives already split on commas by settings_file.coerce();
+    admin_config.py may hand over a list or a bare string.
+    """
+
+    def extensions(self, value):
+        self.set_config(LIST_IGNORED_EXTENSIONS=value)
+        return update_list.ignored_extensions()
+
+    def test_with_dots_and_without_are_the_same(self):
+        self.assertEqual(self.extensions(["db", ".ini", "tmp"]),
+                         (".db", ".ini", ".tmp"))
+
+    def test_spacing_around_the_comma_does_not_matter(self):
+        """The three ways a person writes one list."""
+        for written in ("db,ini,tmp", "db, ini, tmp", " db ,  .ini ,tmp  "):
+            with self.subTest(typed=written):
+                self.assertEqual(self.extensions(written),
+                                 (".db", ".ini", ".tmp"))
+
+    def test_case_does_not_matter(self):
+        self.assertEqual(self.extensions([".DB", "INI"]), (".db", ".ini"))
+
+    def test_a_list_and_a_string_mean_the_same_thing(self):
+        """settings.conf gives a list (coerce() splits it); admin_config.py is
+        plain Python and an operator may well write the comma-separated form
+        there, having just seen it in settings.conf."""
+        self.assertEqual(self.extensions("db, .ini"),
+                         self.extensions([" db", ".INI "]))
+
+    def test_blanks_and_duplicates_are_dropped(self):
+        self.assertEqual(self.extensions(["db", "", "  ", ".DB", "db"]),
+                         (".db",))
+
+    def test_an_empty_setting_is_an_empty_answer(self):
+        """No fallback: skipping nothing is what an operator asking for
+        nothing to be skipped should get."""
+        self.assertEqual(self.extensions([]), ())
+        self.assertEqual(self.extensions(""), ())
+
+
+class TheHelperIsTheOnlyPredicate(unittest.TestCase):
+    """scripts/setup_check.py counts the library before the first run.
+
+    It had its own copy of the hardcoded pair, so widening the scan without
+    widening the count would have reported a healthy library and then built an
+    empty list - the same silent shape the setting exists to remove.
+    """
+
+    def test_the_preflight_count_asks_update_list(self):
+        with io.open(os.path.join(REPO_ROOT, "scripts", "setup_check.py"),
+                     encoding="utf-8") as handle:
+            code = "\n".join(line.split("#", 1)[0]
+                              for line in handle.read().splitlines())
+
+        self.assertIn("update_list.is_listed_file(f)", code)
+        self.assertNotIn('(".mp3", ".flac")', code,
+                         "setup_check still carries its own copy of the pair")
 
 
 class WriterAndReaderAgree(MasterListCase):

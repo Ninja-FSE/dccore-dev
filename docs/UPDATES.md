@@ -4,6 +4,132 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎬 The list held two file types out of every library on earth
+
+`update_list.py`'s walk asked `file.lower().endswith(('.mp3', '.flac'))`, and
+that was the only gate on what goes into the list. A video library walked past
+every file it owned and published nothing.
+
+The failure was silent from the operator's side, which is the part worth
+recording: the scan reported success, the list was built, the advert went out.
+It was simply empty. That reads as "the bot cannot see my files" with nothing
+anywhere saying why - no warning, no count, no mention of extensions.
+
+**Every file is listed now, and `LIST_IGNORED_EXTENSIONS` names the
+exceptions.**
+
+The first attempt at this widened the hardcoded pair into a
+`LIST_EXTENSIONS` include-list, defaulting to audio plus the common video
+formats. That was the wrong shape and it is worth writing down why, because it
+looked right: **the set of things people serve is open-ended.** Every format
+left out of an include-list is invisible in exactly the same way `.mkv` was,
+so an include-list does not fix the defect - it moves it to whichever format
+nobody thought of. `.m4b`, `.ape`, `.chd`, a scanned booklet, a text file of
+liner notes.
+
+An exclude-list is a short, closed list, and its failure mode is the mild one:
+a file listed that need not have been, rather than a library that does not
+appear. OmenServe has the same shape (`Exclude = .mpu,.db`), so it is also the
+form operators coming from it already know.
+
+**The default is only what is never a served file** - `.db`, `.ini`, `.lnk`,
+`.url` for the Windows and shell droppings, and `.tmp`, `.part`,
+`.crdownload`, `.!ut` for downloads still in flight. That last group is the
+one case where listing a file is actively wrong: the bytes are not all there,
+so the transfer can only ever hand over something broken.
+
+Covers, `.nfo`, `.cue` and playlists are **not** skipped. People do serve
+them, and an operator who would rather not can say so. `tests/
+test_master_list_generation.py` had a test called
+`test_other_files_are_ignored` asserting the opposite, with the docstring "a
+music library is full of covers, cue sheets and notes" - it now asserts they
+are listed, and says that the reversal is the point.
+
+**Every spelling of the setting means the same thing.** Dots optional, spaces
+around the commas optional, case irrelevant: `db,ini,tmp`, `db, ini, tmp` and
+` .DB , ini ,  .TMP ` all resolve to the same three. Normalised where the
+value is READ rather than where it is written, because it arrives from three
+directions - `settings.conf`, `admin_config.py` and the dashboard's Settings
+page - and only one of those goes anywhere near a validator.
+
+The added dot is not cosmetic, and a mutation had to prove it.
+`"Thumbs.db".endswith("db")` is already true, so the first test of the
+normalisation passed with the dot dropped. What the dot prevents is an
+extension matching the END OF A NAME - and under an exclude-list that is worse
+than it was under an include-list: ignoring `ts` without the dot makes every
+file called `credits` or `highlights` vanish from the library with nothing
+said.
+
+**An empty setting skips nothing**, and needs no fallback. That is the other
+advantage of the inversion: an empty include-list scanned a full library to
+zero files, the zero-files guard then refused to publish, and the bot sat on a
+stale list reporting an empty library it did not have - so it needed a guess
+to recover from. An empty exclude-list just lists the library.
+
+**Resolved once per scan, not once per file.** The first version asked the
+predicate inside the walk, and that function reads the setting, normalises it
+and builds a tuple - so the largest library this project has measured, at 719k
+files, would have done that 719,000 times. The scan resolves it once and
+passes it down, and prints what it is skipping (`Indexing every file, except
+8 type(s): .db, .ini, ...`). The reported symptom was "my files are not in the
+list" with nothing saying why; that line is the answer to it, which is why it
+has a test rather than being decoration.
+
+`scripts/setup_check.py` had its own copy of the hardcoded pair for its "how
+many files can I see" line. It calls `update_list.is_listed_file()` now: a
+count that disagreed with what the build indexes would report a healthy
+library and then publish a list that does not match it.
+
+Two of this repository's own completeness guards caught things on the way,
+which is what they are for. The setting is a list literal in config.py, so
+both the "config defines no containers of its own" scan and the "every runtime
+container is preserved or explicitly excluded" scan flagged it. It is
+allow-listed in each with the reason `ADMIN_HOSTMASKS` already carries: it is
+a **setting**, not runtime state, and re-reading it on a rehash is the point.
+
+A mutation then showed those two lists could disagree without anything
+noticing - the second guard is satisfied by a name being preserved OR
+excluded, so a name in *both* passed while the code did the opposite of what
+its written reason said. Adding the setting to `PRESERVE_RUNTIME` broke
+nothing, and would have meant an operator's edit doing nothing until a full
+restart. There is a guard for that now.
+
+**Two consequences worth stating.** The `!rar` album list is built from folders
+holding listed files, so film folders now appear in it, and there is no size
+cap anywhere on packing a folder for `!rar`. That was always true - it simply
+never mattered when the largest thing anyone could ask for was a lossless
+album. A request for a 40GB folder will be attempted. `RAR_ENABLED` is the
+existing off switch; a size cap is noted in the roadmap rather than invented
+here, because the right number is the operator's.
+
+And **"every file" means exactly that**: anything sitting under
+`FILE_DIRECTORY` is now offered to anyone who asks - a stray backup, a
+document, a private note dropped into the tree by accident. That was already
+the rule for `.mp3` and `.flac`; it is now the rule for everything. The
+setting's own comment says so, and so does INSTALL.md.
+
+**Left for the operator to check:** the list is read by scripts as well as
+people. Every row is `!<nick> <filename>  ::INFO:: <size>`, and this project's
+own parser splits on the `::INFO::` marker regardless of extension, as do the
+OmenServe bots the convention came from. The note at the row write reports
+that AutoQ.mrc strips that tail only for `.mp3` and `.flac`, which if true
+means any other row may reach it with the size still attached. No regression
+is possible either way - there were no such rows at all before this - but an
+operator serving to AutoQ users should confirm it.
+
+### 🔧 The mutation runner scored some mutations against code that was never on disk
+
+Two mutations of the same byte length, applied to one file inside the same
+mtime granularity, let Python reuse the FIRST one's cached bytecode for the
+second run. Two of this batch reported "not caught" against tests that catch
+them perfectly well when run by hand.
+
+A false pass is as available that way as a false failure, so every mutation
+batch in flight - this change's and the List Browser work's alike - was re-run
+with the caches cleared and `-B` before either was believed. The runners clear
+`__pycache__` and pass `-B` as a matter of course now, rather than relying on
+two same-length edits never landing in the same second.
+
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
 

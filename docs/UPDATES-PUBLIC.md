@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Your whole library goes into the list now, not just `.mp3` and `.flac`.** Anything else — video, `.m4a`, `.ogg`, artwork, liner notes — used to be skipped, so a library of it scanned to an empty list and said nothing about why. Everything is listed now, and the new `LIST_IGNORED_EXTENSIONS` setting names what to leave out. Write it however you like: `db,ini,tmp`, `db, ini, tmp` or `.DB, .INI` all mean the same thing. It ships skipping only what is never a real file — `Thumbs.db`, `desktop.ini`, shortcuts, and half-finished downloads. **Worth knowing:** everything under your music directory is now offered to anyone who asks, so keep out of it whatever should not leave.
+
+- **The pre-flight check counts the same files the list build will.** It had its own copy of the old two-format rule, so it could report a healthy library and then build an empty list.
+
 - **The List Browser tells you when a bot's list has moved on.** Pick a bot whose list you hold and, if what they are advertising now differs from what they advertised when you downloaded it, you get a line saying so with both sets of numbers — so you can decide whether to fetch it again. Lists in a busy channel go stale by months, and until now nothing said which.
 
 - **The dashboard's tabs are named for what they do.** "File Lists" is now **List Browser**, "Download" is **Downloads**, and Queue has moved into Stats — where the queue table sits below everything else the bot knows about itself. The order runs from what you use daily to what you touch occasionally.

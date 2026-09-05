@@ -35,6 +35,51 @@ def format_total_size(bytes_size):
         bytes_size /= 1024.0
     return f"{bytes_size:.1f}PiB"
 
+def ignored_extensions():
+    """The extensions to skip, normalised: lower-case and dot-leading.
+
+    Normalised HERE rather than trusted from the setting, because this is
+    reached from three directions - settings.conf, admin_config.py and the
+    dashboard's Settings page - and only one of them goes anywhere near a
+    validator. An operator writing "DB, .ini, tmp" means the obvious thing.
+
+    An empty result is a perfectly good answer under this model - it means
+    skip nothing, list everything - so there is no fallback. That is the whole
+    advantage of naming what to EXCLUDE: an empty include-list scanned a
+    library to zero files and needed a guess to recover from; an empty
+    exclude-list just lists the library.
+    """
+    raw = getattr(config, "LIST_IGNORED_EXTENSIONS", None)
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    cleaned = []
+    for item in (raw or []):
+        text = str(item).strip().lower()
+        if not text:
+            continue
+        cleaned.append(text if text.startswith(".") else "." + text)
+    return tuple(dict.fromkeys(cleaned))
+
+
+def is_listed_file(name, ignored=None):
+    """Does this file go into the list? Everything does, unless it is skipped.
+
+    `ignored` is the hot-path argument: the scan resolves the setting ONCE and
+    passes the result down, because this is asked of every file in the library
+    and a 719k-file library would otherwise rebuild the tuple 719,000 times.
+    Callers with one file to check can leave it out.
+
+    A file with no extension is listed. So is a dotfile, and so is anything
+    else the operator has not named - "every file" is the rule, and the
+    setting is the only exception to it.
+    """
+    if ignored is None:
+        ignored = ignored_extensions()
+    if not ignored:
+        return True
+    return not str(name).lower().endswith(ignored)
+
+
 def _one_line(text):
     """Flatten anything that would break the one-entry-per-line format.
 
@@ -737,6 +782,14 @@ def generate_master_list():
         walk_errors.append(err)
         print(f"[LIST-GEN ERROR] Could not read {err.filename!r} during the scan: {err}")
 
+    # Once, here - see is_listed_file()'s note. Resolving it inside the walk
+    # asked the question per file rather than per scan.
+    ignored = ignored_extensions()
+    print("[LIST-GEN] Indexing every file"
+          + (f", except {len(ignored)} type(s): {', '.join(ignored)}"
+             if ignored else " - no extensions are being skipped")
+          + ".")
+
     for scan_folder in scan_folders:
         # A folder that is not there RIGHT NOW is skipped, not fatal: an
         # unplugged drive or an unmounted share should cost its own contents,
@@ -761,7 +814,7 @@ def generate_master_list():
         for root, dirs, files in os.walk(scan_root, onerror=_on_walk_error):
             # Keep every track under its exact, complete path on disk
             for file in files:
-                if file.lower().endswith(('.mp3', '.flac')):
+                if is_listed_file(file, ignored):
                     full_file_path = os.path.join(root, file)
                     try:
                         file_bytes = os.path.getsize(platform_compat.long_path(full_file_path))

@@ -490,6 +490,11 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
         "ADMIN_HOSTMASKS":
             "a setting read from admin_config.py, not runtime state - it is "
             "SUPPOSED to be re-read from the file on a rehash",
+        "LIST_IGNORED_EXTENSIONS":
+            "the same: a setting, not runtime state. Which file types to "
+            "skip is read from settings.conf, and re-reading it is the "
+            "whole reason an operator runs !rehash after editing it. "
+            "Preserving it would mean the edit did nothing until a restart",
         "vip_queue":
             "transient OUTPUT, not state. commands.py says so explicitly: "
             "restoring it would replay lines addressed to channels the "
@@ -557,6 +562,24 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
                 if isinstance(target, ast.Name):
                     names.append(target.id)
         return names
+
+    def test_nothing_is_both_preserved_and_deliberately_excluded(self):
+        """The two lists are opposite claims, and the test below is satisfied
+        by EITHER - so a name in both passes it while the code does the
+        opposite of what its own reason says.
+
+        Found by mutation: adding LIST_IGNORED_EXTENSIONS to PRESERVE_RUNTIME,
+        while its NOT_PRESERVED entry says re-reading it is the whole point,
+        broke nothing. An operator's edited setting would then do nothing
+        until a full restart, with no error to explain it.
+        """
+        both = sorted(set(self.NOT_PRESERVED) & set(commands.PRESERVE_RUNTIME))
+
+        self.assertEqual(
+            both, [],
+            "these are listed as deliberately NOT preserved across a rehash "
+            "and are preserved anyway, so the reason written beside each one "
+            "is false: " + ", ".join(both))
 
     def test_every_runtime_container_is_preserved_or_explicitly_excluded(self):
         containers = self._config_containers()

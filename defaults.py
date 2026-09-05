@@ -126,6 +126,46 @@ LOCAL_LIST_DIR: str   = "./lists"
 # serve at all.
 LIST_FORMAT: str      = "zip"      # "txt", "zip" or "rar"
 
+# EVERY file under FILE_DIRECTORY goes into the list, except the extensions
+# named here. Comma-separated, with or without the leading dot, matched
+# case-insensitively - ".DB", "db" and ".db" are the same thing. Blank means
+# nothing is skipped.
+#
+# The walk used to ask `endswith(('.mp3', '.flac'))`, which meant a library of
+# anything else - video, .m4a, .ogg - scanned to nothing and published an
+# empty list while reporting success. Naming what to KEEP could never be
+# right: the set of things people serve is open-ended, and every format left
+# out is silently invisible. Naming what to SKIP is a short, closed list, and
+# the failure mode of getting it wrong is a file listed that need not have
+# been, rather than a library that does not appear.
+#
+# OmenServe has the same shape (`Exclude = .mpu,.db`), so this is also the
+# form operators coming from it already know.
+#
+# The default is only what is never a served file: Windows and browser
+# droppings, and the partial-download suffixes. Covers, .nfo, .cue and
+# playlists are NOT skipped - people do serve them, and an operator who does
+# not want them can say so here. Add to this rather than expecting the
+# shipped list to guess.
+#
+# WORTH KNOWING: "every file" means exactly that. Anything sitting under
+# FILE_DIRECTORY is offered to anyone who asks - a stray backup, a document,
+# a private note dropped in the tree by accident. That directory is the
+# public face of the bot; keep out of it whatever should not leave.
+#
+# A note before relying on the list from a script: every row is written
+# "!<nick> <filename>  ::INFO:: <size>". This project's own parser (list.py)
+# splits on the ::INFO:: marker regardless of extension, as do the OmenServe
+# bots the convention came from. AutoQ.mrc is reported to strip that tail
+# only for .mp3 and .flac (see update_list.py's note at the row write), so a
+# row in any other format may reach it with the size still attached. That
+# costs an AutoQ user a failed request they can retry by hand; it does not
+# affect anyone reading the list themselves.
+LIST_IGNORED_EXTENSIONS: list = [
+    ".db", ".ini", ".lnk", ".url",          # Windows and shell droppings
+    ".tmp", ".part", ".crdownload", ".!ut",  # downloads still in flight
+]
+
 # Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
 # separate from FILE_DIRECTORY: that directory is the served library, scanned
 # by update_list.py and offered to everyone via @find/!<nick> - fetched files
