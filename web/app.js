@@ -911,7 +911,13 @@
       // bot's list - browsing our own is direct filesystem access already,
       // same gate folderFilesHtml() already applies to the per-file
       // checkbox column.
-      var fetchable = (state.filelistsSource || "__own__") !== "__own__";
+      // A group with no folder name has nothing to pack: requestFolderRar()
+      // drops the click on `if (!bot || !folder)`, so the button was there,
+      // clickable, and silently did nothing - one click, no request, no
+      // message. Found by audit. A foreign list always has this group when
+      // any of its rows sat above the first folder heading.
+      var fetchable = (state.filelistsSource || "__own__") !== "__own__"
+        && !!group.folder;
       // data-folder-index is safe to string-concatenate: it is this group's
       // own position in the internal `groups` array (an internal loop
       // index), not untrusted content - unlike the bot/folder values

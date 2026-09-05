@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A fetched file with a very long name can be downloaded from the dashboard.** The file arrived, was marked complete and appeared in the list, and its Download button then answered "not found" for ever — on Windows, where the full path was too long for the way that route opened it.
+
+- **Small dashboard repairs:** browsing up from a lowercase drive letter no longer wanders off to wherever the bot was started from, an absurdly long folder path is refused rather than echoed back, and the "Get folder as .rar" button no longer appears on a group of files that has no folder to pack.
 - **An indented line in `settings.conf` is now reported instead of silently joining the setting above it.** A stray indented line became part of the previous value, newline and all — so a nickname could quietly contain a second line and go out that way.
 
 - **A typo in the admin chat mode is refused rather than ignored.** Writing `lisen` selected automatic mode silently; now it tells you the valid options.
