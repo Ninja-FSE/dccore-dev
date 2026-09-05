@@ -57,6 +57,7 @@ import defaults as config
 import db
 import dcc
 import platform_compat
+import runtime
 import list as list_mod
 
 # A real master-list zip (update_list.py's generate_master_list()) contains
@@ -109,6 +110,26 @@ def _ensure_fetched_bot_lists():
 # needs: a nick has neither, and a directory name with fewer moving parts is
 # easier to recognise in a file manager.
 _BOT_DIR_CHARSET_RE = re.compile(r'[^\w\-\.\[\]{}^`]')
+
+
+def _advert_snapshot(bot):
+    """What `bot` is advertising right now, as far as we have seen.
+
+    Only the fields that bot actually published. A missing key means "this bot
+    did not say", never zero - the rule irc.parse_channel_advert() already
+    follows, and the one that keeps a bot which publishes no date from being
+    permanently marked stale against an invented one.
+
+    {} when we have never seen an advert from them, which is an ordinary state:
+    a list can be fetched from a bot whose advert has not come round yet.
+    """
+    entry = dict(runtime.known_bots.get(str(bot).strip().lower()) or {})
+    snapshot = {}
+    for field in ("files", "list_date"):
+        value = entry.get(field)
+        if value not in (None, "", 0):
+            snapshot[field] = value
+    return snapshot
 
 
 def _sanitize_bot_dir_name(bot):
@@ -563,6 +584,20 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
         "list_path": list_path,
         "entry_count": entry_count,
         "source_zip": os.path.basename(zip_path),
+        # WHAT THEY WERE ADVERTISING WHEN WE TOOK THIS COPY (#133).
+        #
+        # Freshness is "their advert then vs their advert now", never "their
+        # advert vs our parsed row count": bots count differently - some
+        # include the header lines, some count album rows separately - and an
+        # off-by-a-few would leave a list permanently marked stale with
+        # nothing actually wrong. Comparing a bot against its own earlier
+        # claim has no such problem.
+        #
+        # Absent when they were not in the registry at fetch time (we can
+        # fetch from a bot whose advert we have not seen yet), and that
+        # absence is the honest answer rather than a zero - see
+        # _advert_snapshot().
+        "advert_when_fetched": _advert_snapshot(bot),
     }
 
     # Persisted immediately, not on a timer: unlike the bot registry (updated

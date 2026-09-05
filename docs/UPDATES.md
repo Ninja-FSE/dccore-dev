@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🟡 The List Browser says when a bot's list has moved on (#133)
+The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
+
+**Their advert then against their advert now.** Not their advert against our own parsed row count, which #133 settled explicitly: bots count differently, some including header lines and some counting album rows apart, so an off-by-a-few would leave a list permanently marked stale with nothing actually wrong. A bot compared against its own earlier claim has no such problem. `list_fetch` records what that bot was advertising at the moment we took the copy; `webserver` compares it with what they advertise now.
+
+**Date first, count second.** A count can coincidentally match after an edit; a date cannot - and 31 of the 32 bots in that capture publish one.
+
+**"Unknown" is a real answer, and renders as nothing at all.** A missing field means "this bot did not say", never zero - the rule `irc.parse_channel_advert()` already follows. We can fetch from a bot whose advert has not come round yet, and a bot that publishes no date should show no freshness claim rather than an invented one. Every list already on disk was fetched without a snapshot, so all of them read "unknown" until re-fetched, which is the honest state rather than a wrong one.
+
+The banner names the numbers, because a verdict alone does not tell an operator whether to act: *"they advertised 7,902 files built 10 Aug, and now advertise 8,110 built 28 Aug"*.
+
+**Not in this change:** the sidebar of bots with coloured dots that the design mockup shows. The source picker is a `<select>`, which cannot carry one, so the marker is in the option text for now and the layout is its own change.
+
+Two things a mutation run corrected here. An early `if not then or not now: return "unknown"` was redundant - the field loop already reaches that answer, and deleting the guard changed nothing any test could see, so it went rather than being propped up. And every test built `fetched_bot_lists` directly, so none of them could see whether the fetch path stored the snapshot at all: replacing that call with `{}` passed all of them until a guard for the wiring was added.
+
 ### 🗃️ The dashboard's nav says what each view is for, and a run of files can be selected at once (#133)
 Two of #133's three remaining slices; the freshness indicators follow separately, because they need something stored that is not stored yet.
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The List Browser tells you when a bot's list has moved on.** Pick a bot whose list you hold and, if what they are advertising now differs from what they advertised when you downloaded it, you get a line saying so with both sets of numbers — so you can decide whether to fetch it again. Lists in a busy channel go stale by months, and until now nothing said which.
+
 - **The dashboard's tabs are named for what they do.** "File Lists" is now **List Browser**, "Download" is **Downloads**, and Queue has moved into Stats — where the queue table sits below everything else the bot knows about itself. The order runs from what you use daily to what you touch occasionally.
 
 - **Pick a run of files in one go.** Tick a file in the List Browser, then shift-click another, and everything between them is selected. Handy for queueing a whole stretch of an album list.

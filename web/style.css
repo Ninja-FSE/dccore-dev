@@ -1540,3 +1540,20 @@ html, body {
 }
 
 .browse-actions { padding-top: 12px; }
+
+/* The List Browser's staleness banner (#133).
+   --status-frozen rather than --danger, because this is not an error: the
+   list works, it is simply not what that bot is offering now. It is also
+   already #f2b84b in every theme block, which is the exact amber the design
+   mockup picked for this - so the palette had the colour, just not under a
+   name that reads like "warning". */
+.filelists-freshness {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--status-frozen);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+}
