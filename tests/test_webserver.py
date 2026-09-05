@@ -1885,11 +1885,27 @@ class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
         self.assertNotIn("innerHTML +=", body)
         self.assertNotIn("innerHTML +", body)
 
-    def test_filelists_switcher_options_are_built_via_dom_apis(self):
-        body = self._extract_function("renderFilelistsSwitcher")
-        self.assertIn(".textContent = row.bot", body)
-        self.assertNotIn("innerHTML +=", body)
-        self.assertNotIn("innerHTML +", body)
+    def test_the_bot_rows_are_built_via_dom_apis(self):
+        """A nick is whatever that bot called itself in a channel, and it
+        reaches this row through two paths now - a list we hold, and an advert
+        from a bot we hold nothing for. Neither may be parsed as markup.
+
+        The nick must arrive at the DOM only through .textContent or
+        .dataset: both assign, neither parses. Asserting the property rather
+        than one expression, because the expression moved once already."""
+        body = self._extract_function("botRow")
+
+        self.assertNotIn("innerHTML", body)
+        self.assertNotIn("insertAdjacentHTML", body)
+        self.assertNotIn("outerHTML", body)
+
+        # Every place the nick is written down.
+        for sink in [line for line in body.splitlines()
+                     if "row.bot" in line and "//" not in line]:
+            self.assertTrue(
+                ".textContent" in sink or ".dataset." in sink
+                or 'row.bot !== "__own__"' in sink,
+                f"a nick reaches the DOM by some other route: {sink.strip()}")
 
     def test_no_new_attribute_built_via_string_concatenated_innerhtml(self):
         """Bot nicks and filenames from the Download tab / File Lists fetch
@@ -1961,9 +1977,10 @@ class FilelistsPaginationJsRegressionTests(unittest.TestCase):
         self.assertIn('el.filelistsNextBtn.addEventListener("click"', self.source)
 
     def test_switching_bot_source_resets_to_the_first_page(self):
-        start = self.source.index('el.filelistsSourceSelect.addEventListener("change"')
-        body = self.source[start:start + 300]
+        start = self.source.index('el.filelistsBotList.addEventListener("click"')
+        body = self.source[start:start + 1200]
         self.assertIn("state.filelistsOffset = 0", body)
+        self.assertIn("state.filelistsHistory = []", body)
 
     def test_load_filelists_requests_offset_and_limit_query_params(self):
         body = self._extract_function("loadFilelists")

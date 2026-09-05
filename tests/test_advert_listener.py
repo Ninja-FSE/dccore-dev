@@ -1450,6 +1450,19 @@ class SurvivingARestart(CaptureTestCase):
 
         self.assertEqual(db.load_known_bots(), {})
 
+    def test_a_malformed_entry_costs_its_own_row_and_no_other(self):
+        """The docstring above promises a corrupt file costs "an empty sidebar
+        and nothing else", but only the TOP level was checked. Every reader
+        treats an entry as a mapping - irc.py copies it with dict(), the
+        dashboard reads fields off it - so one bad line in a hand-edited file
+        raised in all of them, and the List Browser answered 500 on every load
+        until somebody found the file."""
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write('{"broken": 5, "good": {"nick": "Good", "files": 3}}')
+
+        self.assertEqual(db.load_known_bots(),
+                         {"good": {"nick": "Good", "files": 3}})
+
     def test_writes_are_throttled(self):
         """Thirty-three bots on a five-minute cycle is a write every ten
         seconds for nothing - the file is read once, at startup."""

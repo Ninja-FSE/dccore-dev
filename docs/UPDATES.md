@@ -4,6 +4,107 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🟢 The List Browser picks a source from a list of dots, not a dropdown (#133)
+
+The last of #133's slices bar the cross-list filter. The previous entry closed
+with *"not in this change: the sidebar of bots with coloured dots that the
+design mockup shows"* - this is it.
+
+**Why a `<select>` could not do the job.** It holds a nick and a count and
+nothing else, so the freshness verdict shipped last time had to go in the
+option text. Worse, a dropdown lists things you can switch **to**, and one of
+#133's three colours is *not downloaded* - a bot we have seen advertising but
+hold nothing from. There is nowhere in a dropdown to put a row that is not a
+destination.
+
+So the rows now come from two places: the lists we hold, and
+`runtime.known_bots`. A bot in both is one row, the held one - it carries a
+real verdict and a count we parsed ourselves, where the advert row would
+replace both with a claim. The two piles sort together, case-insensitively, on
+the reasoning that an operator is looking for a nick and does not know in
+advance which pile it is in.
+
+**Four states, and grey is the default arm.** Current, their list changed, not
+downloaded, cannot tell. A freshness the page does not recognise renders grey,
+never green - green is the one colour that tells an operator to stop thinking
+about a list, and a state we have never heard of has not earned it. A count
+the bot never published renders as an em dash rather than 0, which is the
+"did not say is not zero" rule the freshness comparison already follows.
+
+**The colour is never the only carrier.** Every dot has a title, the legend
+names all four in words, and the row for a list we do not hold is dimmed.
+Roughly one man in twelve would otherwise be reading an undifferentiated
+column of grey circles.
+
+**Clicking a bot we hold nothing from does not switch to it** - there is no
+list behind it, and the table would come back empty with nothing saying why.
+It puts the nick in the fetch box, focuses it and says so.
+
+The rows are built with `createElement`/`textContent`/`dataset` throughout. A
+nick is whatever that bot called itself in a channel, `escapeHtml()` does not
+encode a quote, and this file has been bitten by exactly that once already.
+
+Two mutations worth recording. The remembered source is now checked against
+`row.held` rather than mere presence: every advertising bot is in the rows now,
+so "is it still in the list" stopped being the question a deleted list fails.
+And the first version of the not-held guard sliced from the check down to the
+source switch and looked for a `return` - a span that also contains the
+"already showing this one" early return, so it passed against code with the
+guard deleted. It reads the brace-matched arm now.
+
+### 🗃️ One malformed line in the bot registry took the whole List Browser down
+
+Found by the change above, in the way these usually are. The sidebar reads
+`runtime.known_bots`, and the moment it started doing so, three tests in
+`test_webserver.py` began failing in the full run and passing alone - one of
+them with a 500.
+
+The cause was a test, and the defect behind it was not. `test_runtime_state.py`
+seeds every container `runtime.py` exposes with `{"probe": 1}` to prove they
+survive a `!rehash`; the containers are shared, module-level and reload-proof
+on purpose, so nothing took the probe back out, and it sat in the bot registry
+for the rest of the run. That test cleans up after itself now, and says why.
+
+What it exposed is real. `data/known_bots.json` is a plain JSON file an
+operator can open, and `db.load_known_bots()` checked only that the **top
+level** was a dict. Every reader treats an entry as a mapping - `irc.py`
+copies it with `dict()`, the dashboard reads fields off it - so
+`{"somebot": 5}` loaded cleanly and then raised in all of them. That file's
+own docstring already promised the opposite: *"a corrupt or hand-edited file
+costs an empty sidebar until then and nothing else"*.
+
+Three places now hold that line rather than one, because the loader is not the
+only way an entry gets in - the advert listener writes to the registry at
+runtime. The loader drops malformed entries, the summary builder skips them,
+and `_advert_now()` uses `isinstance` rather than `or {}`, which does not help
+when the value is a `5` that `dict()` refuses. A bot whose own entry is
+unreadable reads as "cannot tell", not as current: we read nothing, so we know
+nothing.
+
+**And the suite was reading this machine's own registry.** `oserve.start()`
+loads it at boot, so every test that boots the daemon was pulling in whatever
+bots this bot has actually met. The file is gitignored, so it exists on a
+developer's machine and not on CI, and the suite behaved differently in the
+two places - which is how a view that reads the registry came to fail on one
+machine only, with a real nick nobody had put in a fixture sitting in the
+assertion diff. `DCCoreTestCase` redirects `db.KNOWN_BOTS_FILE` to a throwaway
+path now, exactly as it already did for `db.FETCH_HISTORY_FILE` and for the
+same reason.
+
+`known_bots` was also the one container `runtime.py` exposes that the harness
+never reset between tests. Both gaps are derived rather than listed now: one
+test asserts every container `runtime.py` exposes appears in the harness's
+reset list, and another that no test is pointed at the real registry file - so
+the next container added does not have to be found this way.
+
+One more, found while running the suite twice at once to save time.
+`test_dispatch_threads_are_daemons.py` scans every `.py` in the repository
+root, and its own control test writes a `tmp*.py` into that very directory and
+removes it again - so two runs against one checkout fail each other with a
+`FileNotFoundError` naming a file neither of them ships, which reads as a real
+defect and is not one. A name that is gone by the time we open it cannot be a
+source file anyone ships, so the scan skips it.
+
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
 

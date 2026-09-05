@@ -76,6 +76,13 @@ RUNTIME_CONTAINERS = {
     "broadcast_search_results": list,
     "fetch_queue": dict,
     "fetched_bot_lists": dict,
+    # Added late, and the reason is worth keeping: this was the one container
+    # runtime.py exposes that nothing here reset. It cost nothing while only
+    # irc.py read it, and became three failures the day a dashboard view
+    # started reading it too - all of them passing alone and failing in the
+    # full run. test_runtime_state.py now derives the comparison rather than
+    # leaving the next one to be found the same way.
+    "known_bots": dict,
 }
 
 RUNTIME_FLAGS = {
@@ -351,6 +358,15 @@ class DCCoreTestCase(unittest.TestCase):
         self._real_fetch_history_file = db.FETCH_HISTORY_FILE
         db.FETCH_HISTORY_FILE = os.path.join(self._fetch_history_dir, "fetch_history.json")
         dcc_fetch._last_persisted_terminal_snapshot = {}
+        # Same reason, for the bot registry. oserve.start() loads it at boot,
+        # so every test that boots the daemon was reading whatever bots this
+        # machine's own bot has met - which made the suite's behaviour depend
+        # on live local data, passing on CI where the file does not exist and
+        # failing here. The registry is gitignored, so nobody saw it until a
+        # test asserted on the contents of that dict.
+        self._real_known_bots_file = db.KNOWN_BOTS_FILE
+        db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
+                                          "known_bots.json")
 
     def tearDown(self):
         restore_daemon_functions()
@@ -358,6 +374,7 @@ class DCCoreTestCase(unittest.TestCase):
             tree.cleanup()
         import db
         db.FETCH_HISTORY_FILE = self._real_fetch_history_file
+        db.KNOWN_BOTS_FILE = self._real_known_bots_file
         shutil.rmtree(self._fetch_history_dir, ignore_errors=True)
 
     def set_config(self, **overrides):

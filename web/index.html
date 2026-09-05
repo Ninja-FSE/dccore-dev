@@ -204,14 +204,21 @@
                  placeholder="Fetch a bot's list&hellip; (nick)" autocomplete="off">
           <button type="submit" class="btn btn-accent">Fetch</button>
         </form>
-        <div class="filelists-switcher">
-          <label for="filelists-source-select">Showing</label>
-          <select id="filelists-source-select">
-            <option value="__own__">Our own list</option>
-          </select>
-        </div>
       </div>
       <p class="broadcast-status" id="filelists-fetch-status"></p>
+
+      <!-- One row per source, with a dot for whether the copy we hold is
+           still what that bot advertises (#133). Scrolls, because a busy
+           channel has thirty-odd advertisers and every one of them is a row
+           here whether we hold their list or not. -->
+      <div class="bot-list" id="filelists-bot-list"
+           aria-label="Whose list to show"></div>
+      <p class="bot-legend">
+        <span><span class="led is-current"></span> current</span>
+        <span><span class="led is-changed"></span> their list changed</span>
+        <span><span class="led is-not-held"></span> not downloaded</span>
+        <span><span class="led is-unknown"></span> cannot tell</span>
+      </p>
 
       <p class="filelists-freshness" id="filelists-freshness" hidden></p>
       <div class="folder-controls">

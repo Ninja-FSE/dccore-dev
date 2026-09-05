@@ -78,6 +78,14 @@ class ContainersSurviveAReload(DCCoreTestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             importlib.reload(config)
 
+    def _remove_probes(self):
+        for name in CONTAINERS:
+            container = getattr(runtime, name)
+            if isinstance(container, dict):
+                container.pop("probe", None)
+            elif "probe" in container:
+                container.remove("probe")
+
     def test_a_queued_user_is_still_queued_after_a_reload(self):
         config.dcc_queue["someuser"] = ["Track.flac"]
         config.active_transfers.append({"user": "someuser"})
@@ -102,6 +110,12 @@ class ContainersSurviveAReload(DCCoreTestCase):
                 container["probe"] = 1
             else:
                 container.append("probe")
+        # These containers are shared, module-level and survive the reload on
+        # purpose - that is the property under test - so nothing else takes
+        # the probe back out. Leaving it in put {"probe": 1} in the bot
+        # registry for the rest of the run, which cost nothing until
+        # something read that registry and then cost a 500.
+        self.addCleanup(self._remove_probes)
 
         self._reload_config()
 
@@ -111,6 +125,53 @@ class ContainersSurviveAReload(DCCoreTestCase):
                 self.assertIs(after, getattr(runtime, name),
                               "the reload left config detached from runtime")
                 self.assertTrue(after, f"the reload emptied {name}")
+
+    def test_the_probe_does_not_outlive_the_test(self):
+        """These containers are shared and survive a reload on purpose, so
+        nothing else takes the probe out. It sat in the bot registry for the
+        rest of the run and cost three unrelated tests in webserver, one of
+        them a 500, the moment a view started reading that registry."""
+        self.test_every_container_survives_and_stays_attached()
+        self.doCleanups()
+
+        for name in CONTAINERS:
+            container = getattr(runtime, name)
+            with self.subTest(container=name):
+                self.assertNotIn("probe", container)
+
+    def test_no_test_reads_the_operators_own_bot_registry(self):
+        """oserve.start() loads the registry at boot, so every test that boots
+        the daemon was reading `data/known_bots.json` from this working tree -
+        whatever bots this machine's own bot has actually met.
+
+        The file is gitignored, so it exists here and not on CI, and the suite
+        therefore behaved differently in the two places. It is how a route
+        that reads the registry came to fail on one machine only, with a nick
+        no test had ever heard of in the assertion diff.
+        """
+        import db
+
+        self.assertNotEqual(
+            os.path.abspath(db.KNOWN_BOTS_FILE),
+            os.path.abspath(os.path.join(REPO_ROOT, "data", "known_bots.json")),
+            "a test is reading the operator's real bot registry")
+
+    def test_every_container_is_reset_between_tests(self):
+        """Derived, like the test above, and for the same reason it exists.
+
+        A container runtime.py exposes is shared, module-level and outlives
+        every test that writes to it, so one left out of the harness's reset
+        list is a test-order dependency waiting for the day some other module
+        reads it. known_bots was that one: harmless while only irc.py read it,
+        three failures the day a dashboard view did - passing alone, failing
+        in the full run, which is the most expensive way to find anything.
+        """
+        from tests.support import RUNTIME_CONTAINERS
+
+        for name in CONTAINERS:
+            with self.subTest(container=name):
+                self.assertIn(name, RUNTIME_CONTAINERS,
+                              f"runtime.{name} is never reset between tests")
 
     def test_scalars_are_still_reset_by_a_reload(self):
         """Not a regression - a deliberate boundary, asserted so it stays one.

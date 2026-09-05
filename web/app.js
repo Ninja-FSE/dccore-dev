@@ -91,7 +91,7 @@
     filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
     filelistsFreshness: document.getElementById("filelists-freshness"),
-    filelistsSourceSelect: document.getElementById("filelists-source-select"),
+    filelistsBotList: document.getElementById("filelists-bot-list"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
@@ -814,8 +814,27 @@
 
   // Switching which bot's list is shown ------------------------------------
 
-  el.filelistsSourceSelect.addEventListener("change", function () {
-    state.filelistsSource = el.filelistsSourceSelect.value;
+  // Delegated, because the rows are rebuilt on every poll - a listener per
+  // row would be re-attached each time, and the row the operator is aiming
+  // at can be replaced between the mousedown and the click.
+  el.filelistsBotList.addEventListener("click", function (evt) {
+    var row = evt.target.closest ? evt.target.closest(".bot-row") : null;
+    if (!row) { return; }
+
+    // A bot we have only seen advertising has no list to page through. Rather
+    // than switching to a source that would come back empty, put its nick
+    // where fetching one starts.
+    if (row.dataset.held === "no") {
+      el.filelistsFetchInput.value = row.dataset.bot;
+      el.filelistsFetchInput.focus();
+      showFilelistsFetchStatus("No list held for " + row.dataset.bot
+        + " yet. Press Fetch to ask for it.");
+      return;
+    }
+
+    if (row.dataset.bot === state.filelistsSource) { return; }
+    state.filelistsSource = row.dataset.bot;
+    markFilelistsActiveBot();
     state.filelistsOffset = 0;
     state.filelistsHistory = [];
     loadFilelists();
@@ -853,32 +872,101 @@
     }).catch(function () { markConnection(false); });
   }
 
+  // BUILT WITH DOM APIs, not concatenated markup. A bot nick is remote input
+  // - it is whatever that bot called itself in a channel - and escapeHtml()
+  // does not encode a quote, so a nick in an attribute is the break-out this
+  // file already carries several comments about. createElement/textContent
+  // has no HTML-parsing step at all, and the nick is kept in .dataset rather
+  // than in the markup, the same way the file checkboxes carry theirs.
   function renderFilelistsSwitcher(rows) {
-    var select = el.filelistsSourceSelect;
+    var list = el.filelistsBotList;
     var previous = state.filelistsSource || "__own__";
 
-    select.innerHTML = "";
-    var ownOption = document.createElement("option");
-    ownOption.value = "__own__";
-    ownOption.textContent = "Our own list";
-    select.appendChild(ownOption);
-
     state.filelistsBots = {};
+    list.innerHTML = "";
+    list.appendChild(botRow({ bot: "__own__", label: "Our own list",
+                              held: true, freshness: "own" }));
+
     rows.forEach(function (row) {
       state.filelistsBots[row.bot] = row;
-      var opt = document.createElement("option");
-      opt.value = row.bot;
-      // The marker is in the text because this is a <select>, which cannot
-      // carry a coloured dot. #133's sidebar layout replaces it.
-      var marker = row.freshness === "changed" ? " \u2022 theirs changed" : "";
-      opt.textContent = row.bot + " (" + row.count + " files)" + marker;
-      select.appendChild(opt);
+      list.appendChild(botRow(row));
     });
 
-    var stillAvailable = previous === "__own__" ||
-      rows.some(function (row) { return row.bot === previous; });
-    select.value = stillAvailable ? previous : "__own__";
-    state.filelistsSource = select.value;
+    // A source that has gone - the bot dropped out of the registry, or its
+    // list was removed - falls back to our own rather than leaving the view
+    // pointed at nothing.
+    var stillThere = previous === "__own__" ||
+      rows.some(function (row) { return row.bot === previous && row.held; });
+    state.filelistsSource = stillThere ? previous : "__own__";
+    markFilelistsActiveBot();
+  }
+
+  function botRow(row) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "bot-row";
+    button.dataset.bot = row.bot;
+    button.dataset.held = row.held ? "yes" : "no";
+
+    var led = document.createElement("span");
+    led.className = "led " + ledClass(row.freshness);
+    led.title = ledTitle(row.freshness);
+    button.appendChild(led);
+
+    var name = document.createElement("span");
+    name.className = "bot-row-name";
+    name.textContent = row.label || row.bot;
+    button.appendChild(name);
+
+    var count = document.createElement("span");
+    count.className = "bot-row-count";
+    // An em dash, not 0: a bot that published no count did not say, and
+    // saying zero would be a claim they never made.
+    count.textContent = row.count === undefined || row.count === null
+      ? "\u2014" : Number(row.count).toLocaleString();
+    button.appendChild(count);
+
+    if (!row.held && row.bot !== "__own__") {
+      button.title = "You have not downloaded this bot's list. " +
+        "Click to put its nick in the fetch box.";
+    }
+    return button;
+  }
+
+  function ledClass(freshness) {
+    if (freshness === "current" || freshness === "own") { return "is-current"; }
+    if (freshness === "changed") { return "is-changed"; }
+    if (freshness === "not_held") { return "is-not-held"; }
+    return "is-unknown";
+  }
+
+  function ledTitle(freshness) {
+    if (freshness === "changed") {
+      return "Their list has changed since you downloaded it";
+    }
+    if (freshness === "not_held") { return "Not downloaded"; }
+    if (freshness === "unknown") {
+      return "Cannot tell - we have not seen what they advertise, " +
+             "or they publish no date or count";
+    }
+    return "Current";
+  }
+
+  function markFilelistsActiveBot() {
+    var rows = el.filelistsBotList.querySelectorAll(".bot-row");
+    for (var i = 0; i < rows.length; i++) {
+      var active = rows[i].dataset.bot === state.filelistsSource;
+      rows[i].classList.toggle("is-active", active);
+      // aria-current, not aria-selected: these are ordinary buttons the
+      // operator tabs through, not the options of a listbox, and claiming
+      // the listbox role would promise arrow-key navigation we do not
+      // implement.
+      if (active) {
+        rows[i].setAttribute("aria-current", "true");
+      } else {
+        rows[i].removeAttribute("aria-current");
+      }
+    }
   }
 
   // Loading the table itself ------------------------------------------------

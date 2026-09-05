@@ -804,24 +804,97 @@ html, body {
   font-size: 13px;
 }
 
-.filelists-switcher {
+/* Whose list to show. Capped and scrolling rather than growing without
+   limit: this holds a row for every bot seen advertising, and one channel in
+   the capture #133 was written from had thirty-two of them. Six rows is
+   roughly where the table below still starts above the fold. */
+.bot-list {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-}
-
-.filelists-switcher select {
+  flex-direction: column;
+  gap: 2px;
+  max-height: 216px;
+  overflow-y: auto;
+  padding: 6px;
+  margin-bottom: 8px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.bot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 13px;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  outline: none;
+  text-align: left;
+  cursor: pointer;
 }
+
+.bot-row:hover { background: var(--bg-raised); }
+
+.bot-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.bot-row.is-active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A bot with no list held is still worth showing - that is what the red dot
+   is for - but it reads as unavailable rather than as somewhere to go. */
+.bot-row[data-held="no"] .bot-row-name { color: var(--text-dim); }
+
+.bot-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-row-count {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dot is never the only carrier of the state: every one has a title, the
+   row that cannot be browsed is dimmed, and the legend below names all four
+   in words. Colour alone would leave the distinction invisible to about one
+   man in twelve. */
+.led {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: var(--status-empty);
+}
+
+.led.is-current  { background: var(--accent); }
+.led.is-changed  { background: var(--status-frozen); }
+.led.is-not-held { background: var(--danger); }
+.led.is-unknown  { background: var(--status-empty); }
+
+.bot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.bot-legend span { display: flex; align-items: center; gap: 6px; }
 
 .filelists-pager {
   display: flex;

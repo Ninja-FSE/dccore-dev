@@ -708,10 +708,16 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
 
 
 def build_fetched_bot_list_summaries():
-    """GET /api/filelists/bots payload: one row per bot with a fetched list
-    currently available, for the File Lists view's switcher control.
+    """GET /api/filelists/bots payload: one row per source the List Browser
+    can show, for the list of bots above its table.
 
-    "count" reads the "entry_count" field process_fetched_list_zip() computes
+    Two kinds, told apart by "held". A bot whose list we hold can be browsed,
+    and carries a real freshness verdict and the count we parsed at fetch
+    time. A bot we have only seen advertising cannot - it is here because
+    #133 makes "not downloaded" one of the states the list shows, and its
+    count is what THAT BOT claims, absent when it did not say.
+
+    "count" on a held row reads the "entry_count" field process_fetched_list_zip() computes
     ONCE at fetch time (issue #76, option 2) rather than the actual row list -
     which is no longer stored at all - so this stays a cheap dict lookup even
     though the File Lists tab's switcher polls this route every
@@ -731,12 +737,38 @@ def build_fetched_bot_list_summaries():
         now = _advert_now(known, bot)
         rows.append({
             "bot": bot,
+            "held": True,
             "fetched_at": entry.get("fetched_at", 0),
             "count": entry.get("entry_count", 0),
             "freshness": _freshness(then, now),
             "advert_then": then,
             "advert_now": now,
         })
+
+    # AND THE BOTS WE HAVE ONLY SEEN ADVERTISING. #133's colour rule makes
+    # "never downloaded" one of the three states, so the list has to contain
+    # bots there is no list for - that is the whole point of showing it in
+    # red. They cannot be browsed, and the page says so rather than offering
+    # a source that would come back empty.
+    #
+    # `count` is what THEY advertise, not something we parsed, and is absent
+    # when they did not say - the same "did not say is not zero" rule the
+    # freshness comparison follows.
+    for key, entry in known.items():
+        if key in store or not isinstance(entry, dict):
+            continue
+        bot = entry.get("nick") or key
+        now = _advert_now(known, bot)
+        rows.append({
+            "bot": bot,
+            "held": False,
+            "fetched_at": 0,
+            "count": now.get("files"),
+            "freshness": "not_held",
+            "advert_then": {},
+            "advert_now": now,
+        })
+
     rows.sort(key=lambda row: str(row["bot"]).lower())
     return rows
 
@@ -747,7 +779,11 @@ def _advert_now(known, bot):
     Same shape and same rule as list_fetch._advert_snapshot(): only what that
     bot actually published, and a missing key means "did not say".
     """
-    entry = dict(known.get(str(bot).strip().lower()) or {})
+    # isinstance rather than `or {}`: a malformed entry is not falsy, and
+    # dict(5) raises. The held rows read this too, so a hand-edited registry
+    # would take the whole List Browser down and not just its own row.
+    entry = known.get(str(bot).strip().lower())
+    entry = entry if isinstance(entry, dict) else {}
     current = {}
     for field in ("files", "list_date"):
         value = entry.get(field)

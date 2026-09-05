@@ -44,7 +44,7 @@ What DCCore does today, and what it does not do yet.
 
 ### Quality
 
-- **2071 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
+- **2711 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
 - **Two adversarial audits** — an internal audit (32 defects, all fixed) and a pre-publication sweep before the first public release.
 
@@ -88,6 +88,54 @@ This matters most as a prerequisite: step 1 above refactors seven modules that c
 - **`!rehash` rebinds every module-level lock**, so a thread inside a critical section loses mutual exclusion. `runtime.py` already solves this for the containers; the locks need the same treatment.
 - **Timed bans grow without bound** — the flood sweep covers two of the three tracking structures.
 - Roughly forty further verified findings, from a false "MasterList missing" during a concurrent search to a queued `!rar` pack that is never re-dispatched.
+
+### Knowing which bots are out there — open questions
+
+The List Browser's source list is built from two things: lists we have
+fetched, and `runtime.known_bots`, which is filled from the periodic advert
+every serving bot sends in the channel. Both of those assumptions have holes,
+and neither has been decided yet.
+
+**A bot's nick is not a stable identity.** When a bot loses its connection and
+comes back on its alt nick it advertises under the alt nick, so it appears in
+the registry — and in the sidebar — as a second bot. The freshness comparison
+then has nothing to compare: the advert we recorded at fetch time is filed
+under one nick and the advert arriving now under another, so a list that is
+perfectly current reads as "cannot tell", and re-fetching under the alt nick
+gives a second copy of the same library.
+
+The list *contents* do not follow the nick either. A request line inside a
+fetched list is `!nickname <track>`, written by that bot when it built the
+list, so it still names whichever nick was current at build time. Copying that
+line into the channel sends the request to a nick that may not be there.
+
+We have the same problem in the other direction, and it is not hypothetical:
+`update_list.py` writes `!{config.NICKNAME}` into every line of our own list at
+build time, and `irc.py` rebinds `config.NICKNAME` to the alt nick on a 433.
+A rebuild while we are on the alt nick therefore ships a list whose every line
+names the alt nick.
+
+Open: what is the stable identity — the services account, the host, an operator
+mapping in settings? And is the fix to normalise at fetch time, to rewrite the
+request lines on the way out, or only to merge the two rows in the sidebar?
+
+**Some bots we want are not advertising, and some advertising bots are not
+reachable.** Three cases, none of which the registry covers today:
+
+- A bot that answers CTCP but never advertises in the channel. It never
+  reaches `known_bots`, so it does not appear at all — even though `@botnick`
+  and `!botnick <track>` would both work.
+- The opposite: a bot that advertises but does not answer. It appears, and
+  clicking it starts a fetch that goes nowhere.
+- A bot that does neither, where the operator simply knows that `@botname`
+  gets the list and `!botname <track>` gets files, and wants to add it by
+  hand.
+
+So the source list probably needs a manual entry — an operator-added bot,
+persisted separately from the advert-built registry so a prune cannot remove
+it, and marked in the sidebar as added rather than seen. Open: whether a
+manual entry should be probed to confirm it answers, and what the sidebar
+should say about one that has never replied.
 
 ### Smaller things worth having
 
