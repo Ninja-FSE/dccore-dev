@@ -707,6 +707,105 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     return 200, {"created": [request_id]}
 
 
+def build_crosslist_search_payload(term, limit=None):
+    """GET /api/filelists/search: one term against every list we hold.
+
+    Returns the SAME shape as GET /api/filelists - {"folders": [...]} of
+    {"folder", "count", "entries"} - plus "matched"/"empty" for the sidebar.
+    Deliberately the same: the browser's folder rendering, its checkboxes and
+    its "Download selected" all work on that shape already, and the row's
+    "source" field is the bot, so selecting across several lists at once needs
+    no new plumbing. A second row shape here would have been a second renderer
+    and a second selection path to keep in step.
+
+    GROUPED BY BOT AND FOLDER, not by folder alone. list.group_rows_by_folder()
+    keys on the folder string, which is right for one list and wrong across
+    several: two bots can easily both have "D:\\MUSIC\\Metallica\\", and
+    merging those would put one bot's files under another's heading and point
+    the folder's !rar button at whichever bot happened to be first.
+
+    "matched" and "empty" are asked separately rather than derived from the
+    rows, because the page is capped: a bot whose matches all fall past the cap
+    would look empty when it is not. See list_index.bots_with_a_match() for why
+    the second question is cheap enough to ask on every keystroke.
+
+    Scoped to the lists actually held, never to whatever is in the index. The
+    two can drift - a list file removed by hand, a reset store - and a row for
+    a list we no longer have offers a file that cannot be requested.
+    """
+    import list as list_mod
+    import list_index
+
+    terms = [word for word in str(term or "").lower().split() if word]
+    held = {}
+    for key, entry in (dict(getattr(config, "fetched_bot_lists", {}) or {})
+                       ).items():
+        name = str(entry.get("bot") or key).strip()
+        if name:
+            held[name.lower()] = name
+
+    empty_payload = {
+        "term": str(term or ""),
+        "folders": [],
+        "total": 0,
+        "total_files": 0,
+        "returned": 0,
+        "truncated": False,
+        "matched": [],
+        "empty": sorted(held),
+    }
+    if not terms or not held:
+        return empty_payload
+
+    names = list(held.values())
+    rows = list_index.search(terms, limit=limit, bots=names)
+    matched, empty = list_index.bots_with_a_match(terms, names)
+
+    # One group per (bot, folder), in the order the index returned them so
+    # that a bot's own list order survives rather than being re-sorted into
+    # one the operator does not recognise.
+    order = []
+    groups = {}
+    for row in rows:
+        bot = str(row.get("bot") or "")
+        folder = str(row.get("folder") or "")
+        key = (bot.lower(), folder.lower())
+        group = groups.get(key)
+        if group is None:
+            group = {"folder": folder, "bot": bot, "count": 0, "entries": []}
+            groups[key] = group
+            order.append(key)
+        filename = str(row.get("filename") or "")
+        group["entries"].append({
+            "title": filename,
+            "size": str(row.get("size") or ""),
+            "format": os.path.splitext(filename)[1].lstrip(".").upper(),
+            # The BOT, which is what makes cross-list selection work: the
+            # checkbox takes its bot from here, so a page of results from
+            # four different bots queues correctly without the frontend
+            # knowing anything about which list a row came from.
+            "source": bot,
+            "folder": folder,
+        })
+        group["count"] += 1
+
+    folders = [groups[key] for key in order]
+    payload = dict(empty_payload)
+    payload.update({
+        "folders": folders,
+        "total": len(folders),
+        "total_files": sum(group["count"] for group in folders),
+        "returned": len(folders),
+        # The cap was reached, so there are probably more. Said plainly rather
+        # than implied by a count the reader would need to know the cap to
+        # interpret.
+        "truncated": len(rows) >= (limit or list_index.DEFAULT_SEARCH_LIMIT),
+        "matched": sorted(matched),
+        "empty": sorted(empty),
+    })
+    return payload
+
+
 def build_fetched_bot_list_summaries():
     """GET /api/filelists/bots payload: one row per source the List Browser
     can show, for the list of bots above its table.
@@ -1284,6 +1383,7 @@ SETTINGS_CATEGORIES = (
                                                 "LIST_FORMAT", "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
+                                                "LIST_INDEX_FILE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES",
@@ -1353,6 +1453,7 @@ SETTINGS_LABELS = {
     "STATS_FILE": "Stats file",
     "HARD_BANS_FILE": "Hard bans file",
     "KNOWN_BOTS_FILE": "Known bots file",
+    "LIST_INDEX_FILE": "Cross-list search index",
     "DOWNLOAD_COUNTS_FILE": "Download counts file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "FETCH_HISTORY_FILE": "Fetch history file",
@@ -2158,6 +2259,17 @@ if HAVE_FLASK:
         @app.route("/api/filelists/bots")
         def api_filelists_bots():
             return jsonify(build_fetched_bot_list_summaries())
+
+        @app.route("/api/filelists/search")
+        def api_filelists_search():
+            # Read-only, and it stays that way: this answers a question about
+            # lists already on disk and queues nothing. Selecting a result and
+            # queueing it goes through the existing POST /api/fetch/enqueue,
+            # which is where the admission control for that already lives.
+            _offset, limit = parse_pagination_params(
+                None, request.args.get("limit"))
+            return jsonify(build_crosslist_search_payload(
+                request.args.get("q", ""), limit))
 
         @app.route("/api/filelists/bot/<nick>")
         def api_filelists_bot(nick):

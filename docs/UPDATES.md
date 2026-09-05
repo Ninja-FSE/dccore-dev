@@ -4,6 +4,101 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔎 One filter across every list you hold (#133)
+
+The last of #133's slices. Type in the List Browser and matches from every
+fetched list appear together; bots with nothing matching grey out in the
+sidebar.
+
+**Why there is an index at all.** `list_fetch` re-parses a list fresh on every
+call - deliberately, since #76 removed unbounded retention - so searching every
+held list by re-reading them is arithmetically out of reach rather than merely
+slow. #133 measured one 719k-file list at 2.0s and ten held lists at about
+11s. No amount of debouncing turns eleven seconds into typing.
+
+**#133 named SQLite and it was right, but its numbers were not.** The issue
+proposed an ordinary indexed table and called it "milliseconds across millions
+of rows". That is true of one of the two queries this feature needs and false
+of the other, and the false half is the headline behaviour. Measured here
+against 4,000,000 rows in ten lists, the sizes #133's own channel capture
+recorded:
+
+| | page of results | which bots have nothing |
+|---|---|---|
+| plain table, `LIKE '%term%'` | 1-41 ms | **1150-1400 ms** |
+| FTS5, per-bot `LIMIT 1` | 1-4 ms | **2-4 ms** |
+
+Paging is fast either way, because `LIMIT` stops the scan early. "Which bots
+have nothing" - the question that greys the sidebar - must prove a negative
+for every bot and has no such escape. Asked as one `DISTINCT` over every match
+it is a full scan per keystroke; asked once per bot with `LIMIT 1`, each stops
+at its first hit. That one change is the difference between a filter bar and a
+search button.
+
+**Written from a parse that was already happening.** The fetch path walked the
+whole list to count it and threw the rows away; it indexes them on the way
+past now. A second walk of a 719k-line file would not have been free.
+
+**What it costs, said plainly.** Two things:
+
+- **FTS5 tokenises where `find_matching_entries()` does substring**, so a
+  mid-word fragment no longer matches - "andma" does not find "Sandman". Whole
+  words and prefixes both do, and the last word typed gets a prefix wildcard so
+  results appear before it is finished. Substring matching over four million
+  rows IS the 1.4-second query above, so this is what buys the feature.
+  `@find` over our own list is untouched.
+- **The index is roughly the size of the lists again.** 4,000,000 rows
+  measured at 452MB. An operator holding ten large lists should know that
+  before it appears, rather than after.
+
+**Best-effort throughout.** A missing, locked or corrupt index costs the
+filter bar and nothing else: the lists are on disk, the browser still pages
+them, `@find` still works, and the next fetch rebuilds it. Nothing in the
+serving path reads the file, so it is never a reason to refuse to start or to
+fail a fetch. "No index" is also not "no bot matches" - claiming every list is
+empty would cross out the whole sidebar and read as a definite answer, and the
+wrong one.
+
+**The index is not the record of what is held.** `fetched_bot_lists` is, and
+the two can drift - a list file removed by hand, a reset store. Every query is
+scoped to the lists currently held, because a row for a list we no longer have
+offers a file that cannot be requested.
+
+The results reuse the browse view's own payload shape, so the folder
+rendering, the checkboxes and "Download selected" all worked unchanged - each
+row's `source` is its bot, which is what makes selecting across four lists at
+once need no new plumbing. Two adjustments were needed: groups are keyed by
+**bot and folder** rather than folder alone, since two bots can both have
+`D:\MUSIC\Metallica\` and merging them would put one bot's files under
+another's heading; and the folder's `!rar` button now takes its bot from its
+own group rather than from whichever list the sidebar has selected.
+
+Four mutations corrected tests rather than code, and three shared one cause:
+`search()` swallows its own failures by design, so "it did not raise" passes
+whether the query was built correctly or not. The syntax test now asserts the
+ANSWER for a term like `AC-DC`; the empty-term test asserts that no query is
+built at all; and the limit clamp is tested against more rows than the cap,
+because with five rows in the table every limit returns five. The fourth was
+this file's own recurring failure: a guard for `LIMIT 1` matched the docstring
+that explains why `LIMIT 1` is there, and passed with the clause deleted.
+
+**Clicking a bot toggles its results in or out** while a term is set, with
+"Show all lists" and "Show none" beside the box - the rest of what #133 asks
+of the filter. Done over the answer already held rather than by asking again:
+the issue calls the toggling trivial precisely because the rows are in the
+browser, and a round trip per click would be slower than the search that
+fetched them. A bot switched off by the operator is marked differently from
+one with nothing to show; one is a choice and reversible, the other is an
+answer. A new term clears the choices, because it is a new question.
+
+While a term is set the sidebar answers a different question, so the click
+does a different thing - there is no "switch to this list" when the table is
+showing all of them at once.
+
+One behaviour was corrected on the way: a non-positive `limit` returned a
+single row, where `webserver.parse_pagination_params()` already states the
+house rule that non-positive means "omitted".
+
 ### 🟢 The List Browser picks a source from a list of dots, not a dropdown (#133)
 
 The last of #133's slices bar the cross-list filter. The previous entry closed

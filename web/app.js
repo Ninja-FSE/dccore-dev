@@ -26,6 +26,11 @@
   // sync if either changes, so a page here always lines up with a page the
   // server actually hands back.
   var FILELISTS_PAGE_SIZE = 200;
+  // Short, because the query behind it is measured in single-digit
+  // milliseconds - the index exists so this can be a filter rather than a
+  // search button. It is not zero: a keystroke still costs a round trip, and
+  // a fast typist should not queue one per character.
+  var FILELISTS_FILTER_DEBOUNCE_MS = 120;
 
   var views = {
     search:    { title: "Search",     sub: "Find a file across the current master list." },
@@ -55,6 +60,15 @@
     // closed; open, it carries the row it will write back into.
     foldersBrowserEnabled: false, browse: null,
     active: "search", filelistsLoaded: false, filelistsSource: "__own__",
+    // The live filter term, and the token that decides whether a reply is
+    // still wanted. Typing fast enough puts several requests in flight, and
+    // the slowest is not necessarily the oldest.
+    filelistsFilter: "", filelistsFilterToken: 0,
+    // Which bots the operator has switched OFF while filtering, and the last
+    // answer the server gave. Toggling re-renders from that answer rather
+    // than asking again: the rows are already here, and a round trip per
+    // click would be slower than the search that produced them.
+    filelistsExcluded: {}, filelistsFilterPayload: null,
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
     filelistsHistory: [],
     settingsLoaded: false, settingsCategories: [], settingsActiveCategory: null,
@@ -71,6 +85,12 @@
     searchBody:   document.getElementById("search-body"),
     queueBody:    document.getElementById("queue-body"),
     filelistsBody:document.getElementById("filelists-body"),
+    filelistsFilterInput: document.getElementById("filelists-filter-input"),
+    filelistsFilterClear: document.getElementById("filelists-filter-clear"),
+    filelistsFilterStatus: document.getElementById("filelists-filter-status"),
+    filelistsFilterActions: document.getElementById("filelists-filter-actions"),
+    filelistsFilterAll: document.getElementById("filelists-filter-all"),
+    filelistsFilterNone: document.getElementById("filelists-filter-none"),
     statSlots:    document.getElementById("stat-slots"),
     statFiles:    document.getElementById("stat-files"),
     statUsers:    document.getElementById("stat-users"),
@@ -832,12 +852,47 @@
       return;
     }
 
+    // WHILE FILTERING the sidebar answers a different question, so the click
+    // does a different thing: the table is showing every list at once, so
+    // "switch to this one" has nothing to mean. Clicking toggles whether
+    // that bot's matches are on screen instead.
+    if ((state.filelistsFilter || "").trim() && row.dataset.bot !== "__own__") {
+      var key = String(row.dataset.bot || "").toLowerCase();
+      if (state.filelistsExcluded[key]) {
+        delete state.filelistsExcluded[key];
+      } else {
+        state.filelistsExcluded[key] = true;
+      }
+      rerenderFromFilterPayload();
+      return;
+    }
+
     if (row.dataset.bot === state.filelistsSource) { return; }
     state.filelistsSource = row.dataset.bot;
     markFilelistsActiveBot();
     state.filelistsOffset = 0;
     state.filelistsHistory = [];
     loadFilelists();
+  });
+
+  el.filelistsFilterInput.addEventListener("input", function () {
+    state.filelistsFilter = el.filelistsFilterInput.value;
+    runFilelistsFilter();
+  });
+
+  el.filelistsFilterAll.addEventListener("click", function () {
+    setEveryListShown(true);
+  });
+
+  el.filelistsFilterNone.addEventListener("click", function () {
+    setEveryListShown(false);
+  });
+
+  el.filelistsFilterClear.addEventListener("click", function () {
+    el.filelistsFilterInput.value = "";
+    state.filelistsFilter = "";
+    runFilelistsFilter();
+    el.filelistsFilterInput.focus();
   });
 
   el.filelistsPrevBtn.addEventListener("click", function () {
@@ -1215,7 +1270,12 @@
         var index = parseInt(button.dataset.folderIndex, 10);
         var group = groups[index];
         if (!group) { continue; }
-        button.dataset.bot = state.filelistsSource;
+        // The GROUP's bot when it has one. A cross-list filter shows
+        // groups from several bots at once, and state.filelistsSource is
+        // whichever list the sidebar has selected - not the one this folder
+        // came from. Requesting the right folder from the wrong bot is a
+        // request that cannot succeed.
+        button.dataset.bot = group.bot || state.filelistsSource;
         button.dataset.folder = group.folder;
       }
     }
@@ -1284,6 +1344,127 @@
   // webserver._freshness). "unknown" renders as nothing at all: a bot that
   // publishes no date, or one whose advert we have not seen, should show no
   // freshness claim rather than an invented one.
+  // Greys out the bots with nothing to show for the current term, and
+  // clears every mark again when the term goes. Driven by what the server
+  // said rather than by what came back in the page: the page is capped, so a
+  // bot whose matches all fall past the cap would look empty when it is not.
+  function applyFilterHighlight(payload) {
+    var rows = el.filelistsBotList.querySelectorAll(".bot-row");
+    var filtering = !!(state.filelistsFilter || "").trim();
+    var empty = {};
+    if (payload && Array.isArray(payload.empty)) {
+      payload.empty.forEach(function (name) { empty[String(name).toLowerCase()] = true; });
+    }
+    for (var i = 0; i < rows.length; i++) {
+      var bot = String(rows[i].dataset.bot || "").toLowerCase();
+      // Our own list is not one of the lists the filter searches - it covers
+      // lists FETCHED from other bots - so it is never greyed by it.
+      var dim = filtering && bot !== "__own__" && empty[bot] === true;
+      rows[i].classList.toggle("is-filtered-out", dim);
+      // Switched off BY THE OPERATOR, which is a different thing from having
+      // nothing to show and reads differently: one is an answer, the other is
+      // a choice, and the choice is reversible by clicking again.
+      rows[i].classList.toggle(
+        "is-excluded",
+        filtering && !!state.filelistsExcluded[bot]);
+    }
+
+    if (!filtering) {
+      el.filelistsFilterStatus.hidden = true;
+      el.filelistsFilterStatus.textContent = "";
+      return;
+    }
+    var files = (payload && payload.total_files) || 0;
+    var matched = (payload && payload.matched && payload.matched.length) || 0;
+    var text = files
+      ? files.toLocaleString() + (payload && payload.truncated ? "+" : "") +
+        " match" + (files === 1 ? "" : "es") + " in " + matched +
+        " list" + (matched === 1 ? "" : "s")
+      : "No matches in any list you hold";
+    if (payload && payload.truncated) {
+      text += " \u2014 showing the first " + files + ", narrow the term to see the rest";
+    }
+    el.filelistsFilterStatus.hidden = false;
+    el.filelistsFilterStatus.textContent = text;
+  }
+
+  // Every group the current answer holds, minus the bots switched off.
+  // Client-side on purpose: #133 calls the toggling trivial precisely because
+  // the rows are already in the browser, and re-asking the server for a
+  // narrower set would be slower than the search that fetched them.
+  function visibleFilterGroups(groups) {
+    if (!(state.filelistsFilter || "").trim()) { return groups; }
+    return groups.filter(function (group) {
+      return !state.filelistsExcluded[String(group.bot || "").toLowerCase()];
+    });
+  }
+
+  function renderFilelistGroups(allGroups, filtering) {
+    var groups = visibleFilterGroups(allGroups);
+    if (!groups.length) {
+      el.filelistsBody.innerHTML = emptyRow(5, filtering
+        ? (allGroups.length
+            ? "Every list with a match is switched off."
+            : "Nothing in any list you hold matches that.")
+        : "No files published yet.");
+      updateFilelistsDownloadSelectedState();
+      return;
+    }
+    el.filelistsBody.innerHTML = groups.map(function (group, index) {
+      return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
+    }).join("");
+    attachFilelistsCheckboxData(groups);
+    attachFilelistsFolderRarData(groups);
+    updateFilelistsDownloadSelectedState();
+  }
+
+  // Re-renders from the answer already held. Used by the sidebar toggle and
+  // by the two buttons, none of which change what MATCHES - only which of
+  // the matching lists is on screen.
+  function rerenderFromFilterPayload() {
+    var payload = state.filelistsFilterPayload;
+    if (!payload) { return; }
+    applyFilterHighlight(payload);
+    renderFilelistGroups(folderGroupsFrom(payload), true);
+  }
+
+  function setEveryListShown(shown) {
+    state.filelistsExcluded = {};
+    if (!shown) {
+      var payload = state.filelistsFilterPayload;
+      var names = (payload && payload.matched) || [];
+      names.forEach(function (name) {
+        state.filelistsExcluded[String(name).toLowerCase()] = true;
+      });
+    }
+    rerenderFromFilterPayload();
+  }
+
+  function runFilelistsFilter() {
+    // Every reply carries the token it was issued with, and only the newest
+    // is allowed to render. Typing fast puts several requests in flight and
+    // the slowest is not necessarily the oldest - without this, stopping
+    // typing can leave an earlier term's results on screen under the later
+    // term in the box.
+    state.filelistsFilterToken += 1;
+    var token = state.filelistsFilterToken;
+    var term = (state.filelistsFilter || "").trim();
+
+    el.filelistsFilterClear.hidden = !term;
+    el.filelistsFilterActions.hidden = !term;
+    // A new term is a new question, so nothing carries over: a bot switched
+    // off while looking for one thing should not be silently switched off
+    // while looking for the next.
+    state.filelistsExcluded = {};
+    state.filelistsOffset = 0;
+    state.filelistsHistory = [];
+
+    window.setTimeout(function () {
+      if (token !== state.filelistsFilterToken) { return; }
+      loadFilelists();
+    }, term ? FILELISTS_FILTER_DEBOUNCE_MS : 0);
+  }
+
   function renderFilelistsFreshness() {
     var banner = el.filelistsFreshness;
     if (!banner) { return; }
@@ -1314,32 +1495,34 @@
       el.filelistsBody.innerHTML = emptyRow(5, "Loading…");
       var source = state.filelistsSource || "__own__";
       var offset = state.filelistsOffset || 0;
-      var base = (source === "__own__")
-        ? "/api/filelists"
-        : "/api/filelists/bot/" + encodeURIComponent(source);
-      var url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+      var filter = (state.filelistsFilter || "").trim();
+      var url;
+      if (filter) {
+        // The filter replaces the browse view rather than narrowing it: it
+        // spans every list held, so "which bot am I looking at" stops being
+        // the question while a term is set. The sidebar still shows which
+        // bots have matches - see applyFilterHighlight().
+        url = "/api/filelists/search?q=" + encodeURIComponent(filter);
+      } else {
+        var base = (source === "__own__")
+          ? "/api/filelists"
+          : "/api/filelists/bot/" + encodeURIComponent(source);
+        url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+      }
 
       fetchJson(url)
         .then(function (payload) {
           markConnection(true);
           state.filelistsLoaded = true;
           var groups = folderGroupsFrom(payload);
+          applyFilterHighlight(payload);
           state.filelistsTotal = Array.isArray(payload)
             ? groups.length : (payload.total || 0);
           state.filelistsReturned = groups.length;
           renderFilelistsPager(Array.isArray(payload)
             ? payload.length : (payload.total_files || 0));
-          if (!groups.length) {
-            el.filelistsBody.innerHTML = emptyRow(5, "No files published yet.");
-            updateFilelistsDownloadSelectedState();
-            return;
-          }
-          el.filelistsBody.innerHTML = groups.map(function (group, index) {
-            return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
-          }).join("");
-          attachFilelistsCheckboxData(groups);
-          attachFilelistsFolderRarData(groups);
-          updateFilelistsDownloadSelectedState();
+          state.filelistsFilterPayload = filter ? payload : null;
+          renderFilelistGroups(groups, !!filter);
         })
         .catch(function (err) {
           markConnection(false);

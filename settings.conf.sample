@@ -194,6 +194,21 @@
 # columns is exactly the shape that turns "add a field" into a migration.
 #KNOWN_BOTS_FILE = ./data/known_bots.json
 
+# The cross-list search index: every fetched bot list in one SQLite database,
+# so the List Browser's filter can search all of them at once.
+# 
+# SQLite rather than JSON because this one is not tens of rows - ten held
+# lists is millions - and re-reading the list FILES to search them is out of
+# reach rather than merely slow: #133 measured that at two to eleven seconds
+# per keystroke. sqlite3 is stdlib, so the no-third-party-packages property
+# holds. See list_index.py for why it is FTS5 specifically.
+# 
+# EXPECT IT TO BE LARGE. Roughly the size of the lists again - four million
+# rows measured at 452MB. Built as each list is fetched, and safe to delete:
+# the filter stops working until the next fetch rebuilds it, and nothing else
+# reads it.
+#LIST_INDEX_FILE = ./data/list_index.db
+
 # One row per thing this bot has ever sent, {relative path or archive name ->
 # {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not
 # bounded on purpose: a bot can only send what it shares, so the row count is

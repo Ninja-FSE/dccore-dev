@@ -1789,9 +1789,32 @@ class FolderRarButtonTests(unittest.TestCase):
         self.assertNotIn('data-folder="', body)
 
     def test_attach_folder_rar_data_uses_dataset_assignment(self):
+        """The property, not the expression. A folder name is remote input -
+        it is whatever a foreign bot wrote in its own list - and escapeHtml()
+        does not encode a quote, so it must reach the DOM by assignment and
+        never through parsed markup.
+
+        This asserted the exact right-hand side until the cross-list filter
+        made it `group.bot || state.filelistsSource`, and failed on a change
+        that altered nothing it exists to protect."""
         body = self._extract_function("attachFilelistsFolderRarData")
-        self.assertIn(".dataset.bot = state.filelistsSource", body)
+
+        self.assertIn(".dataset.bot =", body)
         self.assertIn(".dataset.folder = group.folder", body)
+        for unsafe in ("innerHTML", "insertAdjacentHTML", "outerHTML",
+                       'data-bot="', 'data-folder="'):
+            with self.subTest(unsafe=unsafe):
+                self.assertNotIn(unsafe, body)
+
+    def test_the_folder_rar_button_prefers_its_own_group_s_bot(self):
+        """A cross-list filter shows folders from several bots at once, so
+        the selected source is not necessarily the bot a given folder came
+        from. Taking the source would send the right folder to the wrong bot -
+        a request that cannot succeed and reads as the feature being broken."""
+        body = self._extract_function("attachFilelistsFolderRarData")
+
+        self.assertIn("group.bot ||", body,
+                      "the folder request ignores which bot the folder is from")
 
     def test_attach_folder_rar_data_is_called_alongside_the_checkbox_attach(self):
         """Per the brief: wired in right alongside attachFilelistsCheckboxData(),
@@ -1977,8 +2000,25 @@ class FilelistsPaginationJsRegressionTests(unittest.TestCase):
         self.assertIn('el.filelistsNextBtn.addEventListener("click"', self.source)
 
     def test_switching_bot_source_resets_to_the_first_page(self):
+        """Offset 40 of the previous bot's list is not a page of this one.
+
+        The handler is brace-matched rather than sliced to a fixed width: it
+        was 1200 characters when this was written and outgrew that the moment
+        the filter's toggling was added, failing on a change that altered
+        nothing it tests."""
         start = self.source.index('el.filelistsBotList.addEventListener("click"')
-        body = self.source[start:start + 1200]
+        depth = 0
+        body = None
+        for i in range(self.source.index("{", start), len(self.source)):
+            if self.source[i] == "{":
+                depth += 1
+            elif self.source[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    body = self.source[start:i + 1]
+                    break
+        self.assertIsNotNone(body, "unbalanced braces in the click handler")
+
         self.assertIn("state.filelistsOffset = 0", body)
         self.assertIn("state.filelistsHistory = []", body)
 

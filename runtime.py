@@ -177,6 +177,14 @@ config_reload_lock = threading.RLock()
 rehash_lock = threading.Lock()
 
 
+# The cross-list search index's connection cache -----------------------------
+# list_index.py keeps one sqlite3 connection open and reuses it; this guards
+# that cache, not the database (sqlite3 serialises writers itself). Here for
+# the reason every other lock in this file is: !rehash re-executes the module
+# that would otherwise construct it, and a fresh Lock() on every reload lets
+# two callers both believe they hold it.
+list_index_lock = threading.Lock()
+
 # Other bots advertising in our channels ------------------------------------
 # nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",
 #                  "last_seen"}, built from the periodic advert every

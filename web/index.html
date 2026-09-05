@@ -207,6 +207,25 @@
       </div>
       <p class="broadcast-status" id="filelists-fetch-status"></p>
 
+      <!-- One term against every list held at once (#133). Live as you type:
+           the search index makes both the results and the "which bots have
+           nothing" answer a couple of milliseconds even across four million
+           rows, which is what this bar needs to exist at all. -->
+      <div class="filelists-filter">
+        <input type="search" id="filelists-filter-input" class="search-input"
+               placeholder="Filter every list you hold&hellip;"
+               autocomplete="off" aria-describedby="filelists-filter-status">
+        <button type="button" class="btn btn-small" id="filelists-filter-clear"
+                hidden>Clear</button>
+      </div>
+      <p class="filelists-filter-status" id="filelists-filter-status" hidden></p>
+      <div class="filelists-filter-actions" id="filelists-filter-actions" hidden>
+        <button type="button" class="btn btn-small"
+                id="filelists-filter-all">Show all lists</button>
+        <button type="button" class="btn btn-small"
+                id="filelists-filter-none">Show none</button>
+      </div>
+
       <!-- One row per source, with a dot for whether the copy we hold is
            still what that bot advertises (#133). Scrolls, because a busy
            channel has thirty-odd advertisers and every one of them is a row

@@ -804,6 +804,56 @@ html, body {
   font-size: 13px;
 }
 
+.filelists-filter {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.filelists-filter .search-input {
+  flex: 1;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.filelists-filter-status {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A bot with nothing matching the current filter. Dimmed rather than hidden:
+   the sidebar is also the answer to "who has this", and a row that vanished
+   would take that answer with it. */
+.bot-row.is-filtered-out {
+  opacity: 0.4;
+}
+
+/* Switched off by the operator, not by the search. Kept visually distinct
+   from is-filtered-out: one says "this list has nothing", the other says
+   "you asked me to hide this one", and clicking again undoes only the
+   second. */
+.bot-row.is-excluded {
+  opacity: 0.55;
+  border-style: dashed;
+  border-color: var(--border);
+}
+
+.bot-row.is-excluded .bot-row-count { visibility: hidden; }
+
+.filelists-filter-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.bot-row.is-filtered-out .bot-row-name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
 /* Whose list to show. Capped and scrolling rather than growing without
    limit: this holds a row for every bot seen advertising, and one channel in
    the capture #133 was written from had thirty-two of them. Six rows is

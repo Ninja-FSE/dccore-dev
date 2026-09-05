@@ -59,6 +59,7 @@ import dcc
 import platform_compat
 import runtime
 import list as list_mod
+import list_index
 
 # A real master-list zip (update_list.py's generate_master_list()) contains
 # at most two files. A few hundred is a generous ceiling that still rejects
@@ -560,13 +561,33 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
     # outside the extraction guard, on a file that is plainly there.
     #
     # This is the ONE courtesy parse - see process_fetched_list_zip()'s
-    # docstring. `rows` is only ever used for its length below; nothing here
-    # keeps a reference to it (or to `entries`) once entry_count is taken, so
-    # both are free to be garbage-collected as soon as this function returns.
+    # docstring. `rows` was only ever used for its length; nothing keeps a
+    # reference to it (or to `entries`) once the count is taken and the index
+    # below has been written, so both are free to be garbage-collected as soon
+    # as this function returns.
     entries, _total = list_mod.find_matching_entries(
         [], limit=None, list_path=platform_compat.long_path(list_path))
     rows = list_mod.entries_to_filelist_rows(entries, str(bot).strip())
     entry_count = len(rows)
+
+    # THE SEARCH INDEX (#133 step 5), written from the parse that was already
+    # happening. The dashboard's filter bar searches every held list at once,
+    # and re-reading the files to do it is out of reach rather than merely
+    # slow - #133 measured ten held lists at about eleven seconds a keystroke.
+    #
+    # Deliberately here and not in a pass of its own: this walk of the whole
+    # file is a cost already paid, and the rows are about to be discarded.
+    #
+    # Best-effort by design. index_bot_list() swallows its own failures and
+    # returns 0, because an index that cannot be written costs the filter bar
+    # and nothing else - the list is on disk, the browser still pages it, and
+    # the next fetch tries again. A fetch that succeeded must not be reported
+    # as failed over it.
+    indexed = list_index.index_bot_list(str(bot).strip(), rows)
+    if indexed != entry_count:
+        print(f"[LIST-FETCH] {bot}'s list was stored but only {indexed} of "
+              f"{entry_count} entries reached the search index; the "
+              f"cross-list filter may not show it until the next fetch.")
 
     store = _ensure_fetched_bot_lists()
     store[str(bot).strip().lower()] = {
