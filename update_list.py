@@ -503,6 +503,40 @@ def _write_zip_artifact(tmp_path, members):
 _STAGING_PREFIX = ".listpack-"
 
 
+def _discard_stale_temps():
+    """Remove ".new" staging files a previous run was killed in the middle of.
+
+    Only names the builder itself stages: "<LIST_BASE_NAME>-...new", in the
+    lists directory. Nothing reads these - find_latest_list() globs "*.txt"
+    and is_list_artifact() ends in the real extension, so a leftover has never
+    been served or counted - which is exactly why nothing removed them either.
+
+    Called at the START of a build, where this run has staged nothing yet, so
+    the only file it can reach belongs to a run that is no longer alive. (Two
+    builds running at once already write the SAME temp paths as each other, so
+    this adds no hazard that concurrency does not already have.)
+    """
+    base = str(getattr(config, "LIST_BASE_NAME", "") or "")
+    if not base:
+        return
+    try:
+        entries = os.listdir(config.LOCAL_LIST_DIR)
+    except OSError:
+        return
+    removed = 0
+    for name in entries:
+        if not (name.startswith(base + "-") and name.endswith(".new")):
+            continue
+        try:
+            os.remove(os.path.join(config.LOCAL_LIST_DIR, name))
+            removed += 1
+        except OSError as err:
+            print(f"[LIST-CLEAN ERROR] Could not remove {name}: {err}")
+    if removed:
+        print(f"[LIST-CLEAN] Removed {removed} leftover staging file(s) "
+              f"from an interrupted run.")
+
+
 def _discard_stale_staging():
     """Remove staging directories a previous run was killed in the middle of."""
     try:
@@ -793,6 +827,14 @@ def generate_master_list():
     tmp_index_paths = (tmp_txt_path, tmp_rar_path, tmp_video_path)
     tmp_artifact_paths = tuple(_artifact_paths(f, today)[1] for f in list_mod.LIST_FORMATS)
     tmp_all_paths = tmp_index_paths + tmp_artifact_paths
+    # Before anything of THIS run exists. A run that fails discards its own
+    # temporaries; a run that is KILLED - the machine goes down mid-scan,
+    # which on a large library is a window of minutes - cannot, and those
+    # files carry the date they were staged on, so the next day's run stages
+    # different names and never touches them again. They accumulate one set
+    # per killed run, for ever, in the directory the operator looks at to see
+    # whether their lists are being built.
+    _discard_stale_temps()
 
     scan_folders = library.folders()
     print("[LIST-GEN] Scanning the library in "

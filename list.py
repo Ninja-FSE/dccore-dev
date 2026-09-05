@@ -63,6 +63,34 @@ def list_artifact_name(fmt, date_str):
     return f"{config.LIST_BASE_NAME}-{date_str}.{fmt}"
 
 
+def _is_dated(name, prefix, suffix):
+    """True if `name` is exactly "<prefix><a date><suffix>".
+
+    THE PREFIX ALONE WAS NOT ENOUGH, and the docstring below already said why
+    it needed to be: a library file is only kept out of the lists directory if
+    the test can tell one apart from a real artifact. With LIST_BASE_NAME
+    derived from a nickname - "Muzik", say - a shared file called
+    "Muzik-Collection.rar" starts with that prefix and ends in that
+    extension, so a request for it was looked for among the lists, found
+    missing, and refused for ever, while the file sat in the library being
+    advertised. The extension case was guarded and the prefix case, which is
+    the likelier of the two, was not.
+    """
+    if not (name.startswith(prefix) and name.endswith(suffix)):
+        return False
+    middle = name[len(prefix):len(name) - len(suffix)]
+    # Parsed with the FORMAT THE BUILDER WRITES, rather than a pattern that
+    # resembles it: update_list.py names every list
+    # `datetime.now().strftime("%Y-%m-%d")`, so if that ever changes this
+    # stops matching loudly instead of drifting apart quietly. (`re` is not
+    # importable this far up the file - see the second import block below.)
+    try:
+        datetime.datetime.strptime(middle, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
 def is_list_artifact(filename, fmt):
     """True if `filename` is a delivered master list in `fmt`.
 
@@ -73,9 +101,8 @@ def is_list_artifact(filename, fmt):
     """
     name = os.path.basename(str(filename))
     if fmt == "txt":
-        return (name.startswith(config.LIST_BASE_NAME + FULL_LIST_MARKER)
-                and name.endswith(".txt"))
-    return name.startswith(config.LIST_BASE_NAME + "-") and name.endswith("." + fmt)
+        return _is_dated(name, config.LIST_BASE_NAME + FULL_LIST_MARKER, ".txt")
+    return _is_dated(name, config.LIST_BASE_NAME + "-", "." + fmt)
 
 
 def is_list_artifact_name(filename):
@@ -201,6 +228,23 @@ def strip_control_codes(text):
     return _CONTROL_CODE_RE.sub('', clean)
 
 
+def _has_marker(path, marker):
+    """True if the builder's `marker` appears in the part of the name it owns.
+
+    THE MARKERS ARE THE BUILDER'S, AND THEY SIT AFTER THE BASE NAME - so
+    testing the whole path for them let the operator's own choices decide
+    whether this bot has a list at all. A LIST_BASE_NAME containing "-VIDEO-"
+    or "-RAR-" excluded the master list from its own search: @find answered
+    "No MasterList found" and the advert published 0 files, permanently, with
+    the file sitting right there. A LOCAL_LIST_DIR with "-FULL-" somewhere in
+    its path did the same to every list under it.
+    """
+    name = os.path.basename(str(path))
+    base = str(getattr(config, "LIST_BASE_NAME", "") or "")
+    tail = name[len(base):] if base and name.startswith(base) else name
+    return marker in tail
+
+
 def find_latest_list():
     """Find the newest master text list in the lists directory.
 
@@ -229,9 +273,9 @@ def find_latest_list():
         # offer album rows as though they were tracks and the advert would count
         # the albums as files.
         true_master_lists = [f for f in all_txt_files
-                             if "-RAR-" not in f
-                             and f"-{VIDEO_LIST_MARKER}-" not in f
-                             and FULL_LIST_MARKER not in f]
+                             if not _has_marker(f, "-RAR-")
+                             and not _has_marker(f, f"-{VIDEO_LIST_MARKER}-")
+                             and not _has_marker(f, FULL_LIST_MARKER)]
         if true_master_lists:
             return true_master_lists[-1]
     except Exception as e:

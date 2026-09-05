@@ -666,6 +666,99 @@ class FilmAndSeriesGetTheirOwnList(MasterListCase):
         self.assertIn("A Film.mkv", self.read_video_list())
 
 
+class TheOperatorsOwnNameDoesNotHideTheirList(MasterListCase):
+    """LIST_BASE_NAME is whatever the operator's nickname makes it, and the
+    builder's markers sit AFTER it. Testing the whole path for them let a
+    perfectly ordinary name decide this bot had no list at all."""
+
+    def test_a_base_name_containing_the_film_marker_still_finds_the_master(self):
+        """`-VIDEO-` in the name excluded the master list from its own search:
+        @find answered "No MasterList found" and the advert published 0 files,
+        permanently, with the list sitting right there in the directory."""
+        config.LIST_BASE_NAME = "Bot-VIDEO-Archive"
+        self.add(os.path.join("Artist", "Album", "01 - Track.flac"))
+        self.assertTrue(self.generate())
+
+        found = list_mod.find_latest_list()
+
+        self.assertIsNotNone(found, "the master list was excluded by its own name")
+        self.assertNotIn(f"-{list_mod.VIDEO_LIST_MARKER}-",
+                         os.path.basename(found)[len(config.LIST_BASE_NAME):])
+
+    def test_and_one_containing_the_album_marker_does_too(self):
+        config.LIST_BASE_NAME = "RAR-RADIO-RAR"
+        self.add(os.path.join("Artist", "Album", "01 - Track.flac"))
+        self.assertTrue(self.generate())
+
+        self.assertIsNotNone(list_mod.find_latest_list())
+
+    def test_the_film_list_is_still_kept_out_when_the_name_is_ordinary(self):
+        """The guard this replaces was doing a real job - a mutation that
+        simply deleted it has to fail."""
+        self.add(os.path.join("Films", "Some Film (2019).mkv"))
+        self.add(os.path.join("Artist", "Album", "01 - Track.flac"))
+        self.assertTrue(self.generate())
+
+        found = list_mod.find_latest_list()
+
+        self.assertNotIn(f"-{list_mod.VIDEO_LIST_MARKER}-", os.path.basename(found))
+
+
+class WhatAKilledRunLeavesBehind(MasterListCase):
+    """A run that FAILS discards its own staging files. A run that is killed -
+    the machine goes down mid-scan - cannot."""
+
+    def leftovers(self):
+        return sorted(n for n in os.listdir(self.tree.lists) if n.endswith(".new"))
+
+    def test_the_next_build_sweeps_them(self):
+        """They carry the date they were staged on, so the next day's run
+        stages different names and never touches them again: one set per
+        killed run, for ever, in the directory the operator looks at to see
+        whether their lists are being built."""
+        for name in ("DCCore-2020-01-01.txt.new", "DCCore-RAR-2020-01-01.txt.new",
+                     "DCCore-VIDEO-2020-01-01.txt.new", "DCCore-2020-01-01.zip.new"):
+            with open(os.path.join(self.tree.lists, name), "w") as handle:
+                handle.write("half a scan")
+
+        self.add(os.path.join("Artist", "Album", "01 - Track.flac"))
+        self.assertTrue(self.generate())
+
+        self.assertEqual(self.leftovers(), [])
+
+    def test_it_leaves_everything_that_is_not_its_own_staging_file(self):
+        """Only names the builder itself stages, in the lists directory."""
+        # No real list among these: an old "DCCore-<date>.txt" IS superseded
+        # and _prune_superseded_lists removes it at the end of the build, by
+        # design. This is about the sweep not reaching past its own names.
+        keep = ("notes.new", "Someone-Else-2020-01-01.txt.new", "not-mine.zip.new")
+        for name in keep:
+            with open(os.path.join(self.tree.lists, name), "w") as handle:
+                handle.write("not mine")
+
+        self.add(os.path.join("Artist", "Album", "01 - Track.flac"))
+        self.assertTrue(self.generate())
+
+        for name in keep:
+            with self.subTest(name=name):
+                self.assertTrue(
+                    os.path.exists(os.path.join(self.tree.lists, name)),
+                    f"{name} was removed and does not belong to this builder")
+
+    def test_the_sweep_says_what_it_removed(self):
+        """Silent housekeeping is how the size side files were lost once
+        already - the log line read like it was working."""
+        with open(os.path.join(self.tree.lists, "DCCore-2020-01-01.txt.new"), "w") as handle:
+            handle.write("half a scan")
+
+        self.add(os.path.join("Artist", "Album", "01 - Track.flac"))
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.generate()
+
+        self.assertIn("interrupted run", buffer.getvalue())
+
+
 class StillRequestableAfterTheSplit(MasterListCase):
     """The regression the split could so easily have been.
 

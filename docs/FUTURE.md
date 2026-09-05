@@ -93,6 +93,7 @@ What remains is narrower and does not show up in that number. Several "the wirin
 
 - **PER-LIST file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them per list. `LIST_IGNORED_EXTENSIONS` does this globally; scoping it to one folder is the part still missing.
 - **A size cap on `!rar` packing.** There is none: a request packs whatever the folder holds, however large. `RAR_EXTENSIONS` now keeps film folders out of the album list entirely, which removes the worst case, but a genuinely enormous album is still a request nobody sized before accepting.
+- **A fetched list keeps only the peer's master.** Since the film-and-series split, a DCCore bot's archive carries two `.txt` files, and `list_fetch` picks one - now the master rather than whichever is larger. The films in the other are dropped from the fetched copy. Reading both into one fetched list changes what `_pick_list_file()` returns and the size ceiling that guards it, so it is a change of its own rather than part of the fix.
 - **A "what's new" list** — files added in the last N days, generated alongside the main one.
 - **A list validator** run at build time, reporting anything a requester will not actually be able to get — duplicate filenames across folders being the common case.
 - **An OmenServe migration path** offered on first run, since almost everyone this is aimed at is running OmenServe today.

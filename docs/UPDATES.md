@@ -8,8 +8,12 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 Thirteen agents over the four unmerged branches, then a refutation pass over
 everything the first pass had not tested. Of 41 unique findings, 30 survived
-an attempt to refute them. Three of the ones in this branch are fixed here,
+an attempt to refute them. Seven of the ones in this branch are fixed here,
 and one of them reframed what the audit called its most severe finding.
+
+The four below were found after the first three, and they share a shape: the
+film-and-series split introduced a SECOND generated list, and every place that
+had one name to reason about now has two.
 
 **`!update` reported "0 files, added 0" on every rebuild.**
 `commands.count_from_master_list()` kept its own glob of the lists directory
@@ -73,6 +77,50 @@ now go through `find_latest_list()`, which is where the exclusions live. Their
 fixtures gained real request rows: a header with no rows is a file no
 generator produces, and it made those tests turn on the counting mechanism
 rather than on the behaviour.
+
+**A library file starting with the bot's own name was looked for among the
+lists.** `is_list_artifact()` matched "starts with LIST_BASE_NAME, ends in
+.rar" - and its docstring already explained why the extension alone was not
+enough, having been written for exactly this class. The prefix half is the
+likelier of the two: LIST_BASE_NAME comes from the nickname, so it is an
+ordinary word, and a shared "Muzik-Collection.rar" was routed to the lists
+directory, found missing there, and refused for ever, while the file sat in
+the library being advertised and counted. A real artifact carries the date the
+builder writes into it, and that is what the test reads now - parsed with
+`strptime` against the builder's own format string, so a change to one breaks
+loudly rather than drifting from the other.
+
+**A base name containing `-VIDEO-` hid the bot's entire list from itself.**
+The markers are the builder's and they sit after the base name, but they were
+matched against the whole path - so `Bot-VIDEO-Archive` excluded the master
+list from its own search. @find answered "No MasterList found" and the advert
+published 0 files, permanently, with the list sitting right there. `-RAR-` and
+`-FULL-` did the same, and a LOCAL_LIST_DIR with any of the three somewhere in
+its path did it to every list underneath. The name is now read from after the
+base, which is the only part the builder owns.
+
+**A peer's film list could be taken for their master.** This bot's own archive
+now carries two `.txt` files, so a bot running DCCore is the ORDINARY case for
+`list_fetch._pick_list_file()`, not an exotic one - and its tiebreak picks the
+largest. From a bot whose films outweigh its music we would have indexed the
+films, shown them as that bot's whole catalogue, and reported its music as
+absent. `-VIDEO-` is excluded alongside `-RAR-` now, which drops those films
+from the fetched copy rather than merging them in; reading both into one
+fetched list changes what that function returns and the ceiling that guards
+it, so it is recorded on the roadmap rather than smuggled in here.
+
+**A killed run left staging files behind for ever.** A run that FAILS discards
+its own `.new` temporaries; a run killed mid-scan - minutes, on a large
+library - cannot, and they carry the date they were staged on, so the next
+day's run stages different names and never looks at them again. Nothing ever
+served or counted them, which is precisely why nothing removed them either.
+Swept at the start of the next build, where this run has staged nothing yet
+and the only file the sweep can reach belongs to a run that is no longer
+alive.
+
+One test of mine was wrong and the suite said so: it asserted an old
+`DCCore-<date>.txt` survived the temp sweep, when the prune correctly removes
+a superseded list at the end of every build.
 
 ### 🎬 The list held two file types out of every library on earth
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed: a file in your library whose name starts with your bot's name could never be sent.** Anything called, say, `Muzik-Collection.rar` when your list is named after `Muzik` was looked for among your list files instead of in your library — so it was advertised, counted, requested, and answered "file not found", every time, for ever.
+
+- **Fixed: some bot names and folder paths made the bot report an empty list.** If the name your lists are built under, or the folder you keep them in, happened to contain `-RAR-` or `-FULL-`, the bot skipped over its own list: `@find` answered "no list found" and your advert published 0 files while the list sat there complete.
+
 - **Fixed: `!update` reported “0 files, added 0” every time.** It was reading the new film list instead of your music list. It now counts across every list you publish, so `!update` and the channel advert always agree — and the warning that tells you your library has SHRUNK works again, which is what you want when a drive comes back half-mounted.
 
 - **Fixed: `!rar` packed folders it was told not to.** `RAR_EXTENSIONS` decided which folders got a row in the album list, but the bot would still pack any folder somebody named — including a film folder, whose path the new film list publishes. Those are refused now, and the files inside are still requestable by name.
