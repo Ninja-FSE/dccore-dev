@@ -4,6 +4,72 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📥 The list request answers AutoQ's own menu item
+
+Read out of `AutoQ.mrc`, the queue script these channels actually use. Its
+"Get Listfile" item sends:
+
+```
+msg $chan $+(@,$snick($chan,%i))  ::^C4,0Auto^C12,0^BQ^B^C1,0::
+```
+
+`@<nick>` with two spaces and a colour-coded tag. OmenServe answers that;
+`irc.py` compared for equality, so DCCore was **silent** for every user of
+that item - no reply, no error, and nothing in the log to say a request had
+been made and ignored. The failure looks exactly like a bot that is down.
+
+`is_list_request()` now takes `@<nick>` exactly, or `@<nick>` followed by a
+space and anything at all. **The space is what makes a suffix safe**, and it
+is the whole argument: none of the names this has to stay distinct from
+contains one. `@<nick>-que`, `-remove`, `-help`, `-stats` and `-top` are this
+bot's own commands, each still matched exactly by its own branch below.
+`@<nick>2` and `@<nick>_away` are a DIFFERENT bot whose nick merely starts
+with ours, and answering those would send our list to somebody asking
+somebody else for theirs.
+
+`@find` and `@locator` are excluded explicitly, for the bot whose nickname IS
+"find": a search there must keep meaning a search. The cost is stated rather
+than hidden - for that one bot, AutoQ's menu item searches for "::AutoQ::"
+instead of sending the list.
+
+**The gate and the dispatch are one function.** They were two copies of the
+same comparison, and the flood gate's own test class exists because a gate
+narrower than the dispatch is an unmetered command path. Widening one and not
+the other would have re-created exactly that, so both call
+`is_list_request()`, and `tests/test_irc_dispatch.py` binds the real function
+into the namespace it evaluates the lifted gate expression in - the way it
+already binds `bot_aliases`.
+
+**One test was rewritten rather than deleted.** It asserted the request "stays
+an exact match", and gave its reason: `@DCCore-que` must not be swallowed.
+That reason still holds and is now met by the space; the exactness itself was
+the defect. Every case it pinned is still there, with `@DCCore please` moved
+to the other side and AutoQ's real payload added.
+
+**And two source-reading guards were sliced wrong.** `test_help_command` and
+`test_stats_top_commands` read the flood gate with
+`block[:block.index(")
+")]`, which stopped at the first closing paren in the
+text - fine until the gate called a function, at which point the block ended
+after one line and both failed while the metering they check was perfectly
+intact. They walk to the gate's own closing paren now.
+
+**Not changed: "Que Status".** AutoQ sends `<nick>-que` with no leading `@`,
+which DCCore does not answer. Left alone deliberately - a bare word as a
+channel trigger is a wider change than a suffix on a request already
+addressed to us. AutoQ's own non-buffer branch for it is broken anyway: it
+sends a literal `+(Nick,-que)`, missing the `$`. Written up in INSTALL.md so
+an operator knows to type `@<nick>-que` instead.
+
+**Also documented: rows AutoQ drops.** Its file branch truncates a line at the
+end of the first accepted extension it finds - which is how `::INFO::` and the
+size get stripped - but that `aline` sits INSIDE the extension test. A row
+whose type is not in mIRC's `[text] accept` list is queued nowhere and
+reported nowhere. AutoQ adds only `*.mp3` and `*.rar` on load, so now that
+DCCore lists every file type, a `.flac` or `.mkv` row silently vanishes for
+any user who has not added it. Nothing to fix here - the row is correct and
+the client discards it - but operators need to know, so INSTALL.md says which
+mIRC setting to change.
 ### 🔒 A timed ban on somebody who never came back stayed for ever
 
 The last of the audit's flood-tracking findings, and the one the roadmap has

@@ -1037,6 +1037,46 @@ def get_bot_aliases():
     return aliases
 
 
+def is_list_request(msg, msg_lower):
+    """True if this message is asking THIS bot for its list.
+
+    "@<nick>" exactly, or "@<nick>" followed by a space and anything at all.
+
+    THE SUFFIX IS THE POINT. AutoQ.mrc - the queue script this channel's users
+    actually paste list rows into - has a "Get Listfile" menu item, and what it
+    sends is:
+
+        msg $chan $+(@,$snick($chan,%i))  ::^C4,0Auto^C12,0^BQ^B^C1,0::
+
+    i.e. "@<nick>  ::AutoQ::" with the tag colour-coded. OmenServe answers
+    that; a dispatcher comparing for equality does not, so DCCore was simply
+    SILENT for every user of that menu item - no reply, no error, and nothing
+    in the log to say a request had been made and ignored.
+
+    The SPACE is what makes a suffix safe to accept. None of the names this
+    bot must stay distinct from contains one:
+
+      * "@<nick>-que", "-remove", "-help", "-stats", "-top" - this bot's own
+        commands, each still matched exactly by its own branch;
+      * "@<nick>2", "@<nick>_away" - a DIFFERENT bot whose nick merely starts
+        with ours, which must never have its list request answered by us.
+
+    @find and @locator are excluded explicitly. They are the only triggers
+    whose first word could also be a nickname, and for a bot actually named
+    "find" a search must keep meaning a search. Tested case-sensitively here
+    because the dispatcher tests them that way too: excluding more than it
+    dispatches would silently drop a request instead of answering it.
+    """
+    nick = str(getattr(config, "NICKNAME", "") or "").strip().lower()
+    if not nick:
+        return False
+    if msg_lower == f"@{nick}":
+        return True
+    if not msg_lower.startswith(f"@{nick} "):
+        return False
+    return not (msg.startswith("@find ") or msg.startswith("@locator "))
+
+
 def take_complete_lines(buffer, chunk):
     """Add `chunk` to `buffer` and return (leftover_bytes, [decoded lines]).
 
@@ -1774,7 +1814,7 @@ def irc_loop():
                         # `ctcp_upper = ...` line before this block, tried first) is invisible
                         # to that harness and breaks it with a NameError.
                         is_bot_command = (
-                            msg_lower == f"@{config.NICKNAME.lower()}"
+                            is_list_request(msg, msg_lower)
                             or msg_lower == f"@{config.NICKNAME.lower()}-help"
                             or msg_lower == f"@{config.NICKNAME.lower()}-stats"
                             or msg_lower == f"@{config.NICKNAME.lower()}-top"
@@ -1850,7 +1890,7 @@ def irc_loop():
                                 elif ctcp_cmd == "REMOVE":
                                     threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
                                     continue
-                            elif msg_lower == f"@{config.NICKNAME.lower()}":
+                            elif is_list_request(msg, msg_lower):
                                 threading.Thread(target=list.send_file_list, args=(s, user, target_chan),
                                                  daemon=True).start()
                             elif msg_lower == f"@{config.NICKNAME.lower()}-help":
