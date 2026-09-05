@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Banning a host now actually bans it.** `!ban *.some.isp.net` was accepted, reported as successful and listed among your active bans — and never enforced, because a pattern without `!` or `@` was compared against the nickname, which can never contain a dot. Write it either way now; both work.
+
+- **Fetching a list from a bot whose nick contains `|` works.** Nicks like `Bot|Away` are ordinary on IRC and illegal in a Windows folder name, so the fetch downloaded the whole list and then failed at the last step, every time, for that bot. Same for `*`, `"`, `<`, `>`, `?` and `:`.
 - **Your library's total size no longer vanishes from the advert.** If your bot's nickname made the list's base name a prefix of the size files' names, every rebuild wrote those files and then deleted them again — so the advert published `Files (0B)` for ever, while the log said it had tidied up some old lists.
 
 - **A custom list banner can no longer break the list it sits on.** A banner line made only of `=` reads as a folder separator, which shifted every folder heading after it by one; a line starting with `!` reads as a file, so it was counted in your file total and returned by searches as something nobody could download. Both are handled now — a rule line is redrawn in `-`, a `!` line is left out — and the bot tells you which line and why, so you can adjust the banner.

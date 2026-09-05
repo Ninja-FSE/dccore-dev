@@ -240,14 +240,47 @@ def check_user_status(user, hostmask=None):
                         continue
 
                     regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
-                    # A nick can never contain "!" or "@", so a pattern
-                    # containing either is a hostmask form and must be
-                    # matched against the full mask, not the bare nick -
-                    # falls back to the nick if no hostmask was supplied
-                    # (an older/other caller), same as before this existed.
-                    is_hostmask_pattern = "!" in pattern or "@" in pattern
-                    candidate = (full_mask_lower if is_hostmask_pattern and full_mask_lower
-                                 else user_lower)
+                    # THREE shapes of pattern, and they match three different
+                    # things. A nick can never contain "!", "@", "." or ":" -
+                    # RFC 2812 allows letters, digits and the specials
+                    # []\\`_^{|} and nothing else - so what a pattern contains
+                    # says what it is about.
+                    #
+                    #   contains "!" or "@"  -> a full hostmask; match the mask
+                    #   contains "." or ":"  -> a host or IP; match the HOST
+                    #   otherwise            -> a nick; match the nick
+                    #
+                    # THE MIDDLE ONE IS THE FIX. Only "!" and "@" counted, so
+                    # an admin who typed the obvious thing -
+                    #
+                    #     !ban *.dialup.example.com
+                    #
+                    # got a pattern matched against the bare NICK, which can
+                    # never contain a dot and so could never match. !ban
+                    # accepted it, reported success, and db.load_hard_bans()
+                    # listed it among the active bans for ever, while the host
+                    # it names walked straight in. Found by audit; the same
+                    # shape as #225, where the confirmation and the
+                    # enforcement disagreed silently.
+                    #
+                    # Matched against the HOST and not the whole mask, which
+                    # is the difference between working and appearing to. A
+                    # full mask is "nick!ident@host", so "192.168.1.*" anchored
+                    # over the whole of it cannot match anything -
+                    # "*.dialup.example.com" only appeared to work because its
+                    # leading star happened to swallow the "nick!ident@" part.
+                    is_full_mask = "!" in pattern or "@" in pattern
+                    is_host_pattern = not is_full_mask and any(
+                        ch in pattern for ch in ".:")
+
+                    if is_full_mask and full_mask_lower:
+                        candidate = full_mask_lower
+                    elif is_host_pattern and full_mask_lower and "@" in full_mask_lower:
+                        candidate = full_mask_lower.split("@", 1)[1]
+                    else:
+                        # No mask supplied by this caller, or a plain nick
+                        # pattern. Same fallback as before this existed.
+                        candidate = user_lower
                     if re.match(regex_pattern, candidate):
                         matched_pattern = pattern
                         break
