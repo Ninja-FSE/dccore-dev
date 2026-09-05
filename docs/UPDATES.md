@@ -5,6 +5,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 ## 🟨 Unreleased
 
 ### 🗂️ A folder picker for the Settings page (#164 step 5 - the last one)
+
+**Four defects in this feature were found by the full-program audit before it merged**, which is why it was held back:
+
+- **The editor's CSS class names collided with the File Lists table.** `app.js` has built `<tr class="folder-row">` with a `<span class="folder-name">` for that table since long before the folder editor existed, and `.folder-row { display: flex }` is a global rule - so styling the editor turned the File Lists folder headings into flex boxes. The editor's own classes are prefixed `served-` now; the older markup keeps the names it had first.
+- **The picker wrote the chosen path into whichever row now sat at the index it opened on.** The panel stays open while the rows behind it can be added to, removed and reordered, and every one of those renumbers the draft. It holds the row OBJECT now, with a check that the row is still in the draft before writing - a reference survives reordering but not removal, and writing into an orphaned object would look like it worked while changing nothing.
+- **Every browse error reached the operator as "HTTP 400".** `fetchJson()` turns a non-2xx into `throw new Error("HTTP " + status)`, discarding the JSON body - so the sentence the route is built to produce ("... is not a folder on this machine") could never be displayed. `fetchJsonAllowingError()` takes the same posture `postJson()` already did.
+- And one the fix itself introduced: renaming the markup attribute to `data-served-folder-index` did not rename the three readers, which said `dataset.folderIndex` - a literal the rename could not match. `parseInt(undefined)` is `NaN`, and every row button silently stopped working. **A file-wide pairing check passes straight through that**, because the File Lists table legitimately emits `data-folder-index` and reads `dataset.folderIndex`; only a check scoped to the editor sees it. There is one now.
+
+Three of the four are invisible to every existing test, because nothing in this project executes JavaScript.
+
 The issue puts this last and on its own *"given the exposure"*, and that is the whole design question: the listing itself is twenty lines.
 
 **What it grants that nothing else did.** An authenticated dashboard session can list the NAMES of directories on the machine the daemon runs on, anywhere it can read - not only under the served folders, because the point is to find a folder that is not served yet. Never files, never contents, never sizes or timestamps: a name, and whether it can be opened, is the whole of what a picker needs.
