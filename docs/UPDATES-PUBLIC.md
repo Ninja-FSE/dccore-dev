@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Asking for your list from AutoQ's menu now works.** Its "Get Listfile" button sends `@yourbot` with a small tag added on the end, and the bot only answered a bare `@yourbot` — so it stayed silent, which looks exactly like a bot that is down. It answers now. Note "Que Status" in the same menu still does not work: it sends `yourbot-que` without the `@`, and `@yourbot-que` typed by hand is the form the bot reads.
+
+- **If your users queue with AutoQ, check their mIRC accept list.** AutoQ silently drops any list row whose file type is not in mIRC's own accept list, and it only adds `*.mp3` and `*.rar` itself. Now that lists carry every file type, a `.flac` or `.mkv` row pasted into a queue just vanishes with nothing said. [INSTALL.md](docs/INSTALL.md) has the setting to change.
+
 - **The List Browser tells you when a bot's list has moved on.** Pick a bot whose list you hold and, if what they are advertising now differs from what they advertised when you downloaded it, you get a line saying so with both sets of numbers — so you can decide whether to fetch it again. Lists in a busy channel go stale by months, and until now nothing said which.
 
 - **The dashboard's tabs are named for what they do.** "File Lists" is now **List Browser**, "Download" is **Downloads**, and Queue has moved into Stats — where the queue table sits below everything else the bot knows about itself. The order runs from what you use daily to what you touch occasionally.

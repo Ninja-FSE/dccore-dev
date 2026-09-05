@@ -98,6 +98,31 @@ python3 update_list.py
 
 or `!update` from IRC, or the dashboard's **Update list** button. On a large library this takes a while; the advert will report the real file count once it finishes.
 
+### If your users queue with AutoQ
+
+AutoQ (the mIRC queue script most of these channels use) pastes list rows into
+a queue window and sends them one at a time. Two things about it are worth
+knowing when you decide which file types to serve.
+
+**It only queues rows whose extension is in mIRC's own accept list.** AutoQ
+adds `*.mp3` and `*.rar` to that list when it loads, and nothing else. A row
+for any other type — `.flac`, `.mkv`, `.m4a`, `.zip` — is **silently dropped**
+when pasted: no line appears in the queue, and nothing says why. The row on
+your list is correct; the client discards it.
+
+Since DCCore lists every file in your library by default (minus
+`LIST_IGNORED_EXTENSIONS`), tell your users to add the types you actually
+serve. In mIRC that is **Options → DCC → the accept list**, or by hand in
+`mirc.ini` under `[text] accept`, as a comma-separated list of `*.ext`
+patterns. If most of your library is `.flac`, this is the difference between
+your list working for them and half of it appearing to do nothing.
+
+**Requesting your list from AutoQ's menu works.** Its "Get Listfile" item
+sends `@yourbotname` with a tag appended, and DCCore answers a list request
+with anything after the nickname. Its "Que Status" item sends
+`yourbotname-que` without the leading `@`, which DCCore does **not** answer —
+`@yourbotname-que` typed by hand is the form that works.
+
 ### Putting your own banner on it
 
 Every generated list starts with the file count, the request instructions, and a line naming the bot and this project. Below that you can put anything you like — a greeting, your channel, ASCII art — by creating one file:

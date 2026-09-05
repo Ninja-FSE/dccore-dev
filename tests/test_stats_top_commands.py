@@ -300,8 +300,18 @@ class ItIsReachable(unittest.TestCase):
         and -help. Left out, they would be the user commands anybody could
         repeat without limit - and -top reads a file on every call."""
         source = self.source("irc.py")
-        block = source[source.index("is_bot_command = ("):]
-        block = block[:block.index(")\n")]
+        # Walked line by line to the gate's OWN closing paren, not sliced to
+        # the first ")\n" in the text. That slice broke the moment the gate
+        # called a helper: the first line became "is_list_request(msg,
+        # msg_lower)" and the block ended there, so this failed while the
+        # metering it checks was perfectly intact.
+        lines = source[source.index("is_bot_command = ("):].splitlines()
+        body = []
+        for raw in lines[1:]:
+            if raw.strip() == ")":
+                break
+            body.append(raw)
+        block = "\n".join(body)
 
         self.assertIn("-stats", block)
         self.assertIn("-top", block)
