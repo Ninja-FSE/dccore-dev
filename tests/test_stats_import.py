@@ -256,6 +256,90 @@ class WritingIt(ImportCase):
                          45902)
 
 
+class WhatTheAuditFound(ImportCase):
+    """Three from the audit of this branch, all in reading numbers out of a
+    file somebody hand-edits."""
+
+    def test_a_present_zero_does_not_wipe_a_real_total(self):
+        """The worst thing this feature could do, and it was doing it.
+
+        `number is not None` let a present zero through, so a fresh OmenServe
+        install's `%mx.rartsent 0` silently replaced a real DCCore total - while
+        the note beside it promised "the total size will stay as it is". A zero
+        carries no history across, which is the entire point of the feature, so
+        it can only destroy.
+        """
+        self.given_existing(files=45902, total_bytes=16295360049140, record=5)
+
+        preview = webserver.build_stats_import_preview(
+            "n1=%mx.rarsent 0\nn2=%mx.rartsent 0\n")
+
+        self.assertEqual(preview["values"], {})
+        webserver.apply_stats_import(preview["values"])
+        self.assertEqual(webserver.current_importable_stats()["total_bytes"],
+                         16295360049140)
+
+    def test_a_present_zero_is_still_shown_and_explained(self):
+        """The operator can see that number in their own file. A row that
+        quietly vanished would read as a parse failure."""
+        preview = webserver.build_stats_import_preview("n1=%mx.rarsent 0\n")
+
+        row = [r for r in preview["rows"] if r["variable"] == "%mx.rarsent"][0]
+        self.assertEqual(row["value"], 0)
+        self.assertFalse(row["imported"])
+        self.assertTrue(any("zero" in note for note in preview["notes"]),
+                        preview["notes"])
+
+    def test_a_value_that_floats_to_infinity_does_not_crash_the_preview(self):
+        """"1e999" parses as a float perfectly well and becomes inf;
+        int(round(inf)) raises OverflowError, not ValueError, so it escaped
+        the except and reached the route as a 500 on a hand-edited file."""
+        preview = webserver.build_stats_import_preview("n1=%mx.rarsent 1e999\n")
+
+        self.assertEqual(preview["values"], {})
+        self.assertTrue(any("not a number" in n for n in preview["notes"]),
+                        preview["notes"])
+
+    def test_a_thousands_separator_is_read_rather_than_truncated(self):
+        """`split(",")[0]` is what %SDmaxspeed's "<bytes>,<nick>" needs, and
+        the `.replace(",", "")` after it could never see a comma - dead. So a
+        value written "45,902" became 45: silently, plausibly, and three
+        orders of magnitude wrong."""
+        import omenserve_import
+
+        self.assertEqual(omenserve_import._as_int("45,902"), 45902)
+        # And the speed record's own shape still works: a comma followed by a
+        # nick is a separator between fields, not inside a number.
+        self.assertEqual(omenserve_import._as_int("48762663,SomeNick"), 48762663)
+
+    def test_a_write_that_did_not_land_is_reported_as_a_failure(self):
+        """Both writers swallow their own errors and return None - correct for
+        them, since a failed stats write must not take the daemon down - which
+        meant a 200 and "imported" for figures that never reached the disk.
+        The operator would be told their history came across and find half of
+        it, with nothing to say which half."""
+        import db
+
+        real = db.save_speed_record
+        db.save_speed_record = lambda *_a, **_k: None
+        self.addCleanup(setattr, db, "save_speed_record", real)
+
+        status, result = webserver.apply_stats_import(
+            {"total_files": 45902, "speed_record": 48762663})
+
+        self.assertEqual(status, 500)
+        self.assertEqual(result["failed"], ["speed_record"])
+        self.assertEqual(result["imported"], ["total_files"])
+
+    def test_a_write_that_landed_is_still_reported_as_success(self):
+        """Control: the failure path must not fire on an ordinary import."""
+        status, result = webserver.apply_stats_import(
+            {"total_files": 45902, "speed_record": 48762663})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["imported"], ["speed_record", "total_files"])
+
+
 class ThePageSendsOnlyTheCounters(unittest.TestCase):
     """The real file held 280 variables - nicks, channels, paths, passwords.
 

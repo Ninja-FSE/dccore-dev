@@ -131,7 +131,21 @@ def _as_int(raw):
     Floats round rather than fail: %OSL.MbToday is "34.56", and a preview row
     reading 34 is more useful than one reading "could not read".
     """
-    text = str(raw or "").split(",")[0].strip().replace(",", "")
+    # split(",")[0] already removed everything from the first comma on, which
+    # is what %SDmaxspeed's "<bytes>,<nick>" needs - so a later replace(",",
+    # "") could never see one and was dead. That mattered: a value written
+    # "45,902" by a thousands-separating add-on truncated to 45, silently and
+    # plausibly. Separators are stripped BEFORE the split, so both shapes work.
+    text = str(raw or "")
+    if "," in text:
+        head, _sep, tail = text.partition(",")
+        # A comma followed by a NICK is the speed record's shape; a comma
+        # inside digits is a thousands separator. Told apart by what follows.
+        if tail.strip()[:1].isdigit():
+            text = text.replace(",", "")
+        else:
+            text = head
+    text = text.strip()
     if not text:
         return None
     try:
@@ -139,8 +153,17 @@ def _as_int(raw):
     except ValueError:
         pass
     try:
-        return int(round(float(text)))
+        number = float(text)
     except ValueError:
+        return None
+    try:
+        return int(round(number))
+    # OverflowError, not ValueError, which is why this escaped: "1e999" parses
+    # as a float perfectly well and becomes inf, and int(round(inf)) raises -
+    # reaching the preview route as a 500 on a file somebody hand-edited. NaN
+    # arrives the same way with a ValueError of its own. Both mean "not a
+    # number I can use", which is what None already says here.
+    except (OverflowError, ValueError):
         return None
 
 
@@ -175,11 +198,28 @@ def read_install(text):
             "label": field.label,
             "unit": field.unit,
             "value": number,
-            "imported": bool(field.target) and number is not None,
+            # Shown either way; "imported" is the narrower question. A zero
+            # appears in the preview with the others and is marked as not
+            # imported, because the operator can see it in their own file and
+            # a row that quietly vanished would read as a parse failure.
+            "imported": bool(field.target) and bool(number),
         })
 
-        if field.target and number is not None:
+        # A PRESENT ZERO IS NOT A FIGURE TO IMPORT. `number is not None` let
+        # one through, and the whole point of this feature is to carry history
+        # ACROSS - a zero carries none and can only destroy what is already
+        # here. The note below even promised the opposite ("the total will
+        # stay as it is") while a present `%mx.rartsent 0` silently replaced
+        # a real one.
+        #
+        # This is the same rule the module already states for an ABSENT
+        # variable, applied to the value that means the same thing: an
+        # OmenServe install that has sent nothing has nothing to give.
+        if field.target and number:
             values[field.target] = number
+        elif field.target and number == 0:
+            notes.append(f"{field.variable} is present but zero - skipped, "
+                         f"so your own {field.label.lower()} is left alone.")
 
     if not values:
         notes.append("Nothing recognisable was found. This reads mIRC's "

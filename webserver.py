@@ -435,8 +435,25 @@ def apply_stats_import(raw):
     if "speed_record" in clean:
         db.save_speed_record(clean["speed_record"])
 
-    return 200, {"before": before, "after": current_importable_stats(),
-                 "imported": sorted(clean)}
+    # WHAT ACTUALLY LANDED, compared against what was asked for. Both writers
+    # swallow their own errors and return None - correct for them, since a
+    # failed stats write must not take the daemon down - which meant this
+    # returned 200 and "imported: [...]" for figures that never reached the
+    # disk. The operator would have been told their history came across and
+    # found half of it, with nothing to say which half.
+    after = current_importable_stats()
+    landed = [name for name in sorted(clean) if after.get(name) == clean[name]]
+    missing = [name for name in sorted(clean) if name not in landed]
+    if missing:
+        return 500, {
+            "error": "Some figures could not be written: "
+                     + ", ".join(missing)
+                     + ". Check the daemon log and the data directory.",
+            "before": before, "after": after, "imported": landed,
+            "failed": missing,
+        }
+
+    return 200, {"before": before, "after": after, "imported": landed}
 
 
 def build_stats_payload():

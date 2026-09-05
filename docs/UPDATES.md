@@ -38,7 +38,7 @@ total is wrong once it looks plausible. `True` is refused explicitly, since
 `int(True)` is 1 and a JSON `true` would otherwise import as a file count of
 one.
 
-**An absent figure is left alone, never zeroed.** That rule runs from the
+**An absent figure is left alone, never zeroed - and so is a zero.** That rule runs from the
 parser to the write: the counters come from ADD-ONS rather than from OmenServe
 itself, so an operator running one and not another imports what they have and
 keeps the rest. Writing a zero over a real total would be the worst thing this
@@ -62,6 +62,51 @@ half-valid case. And the fixture wrote an empty date in the stats row's
 seventh column, which makes it six columns, which the loader correctly treats
 as corrupt - so every "an existing figure is preserved" test failed against
 code that was preserving it perfectly well.
+
+### 🔍 Four audit findings in the import, three of them in reading one number
+
+From the multi-agent audit of the same day's work. Every one of them is in the
+few lines that turn text somebody hand-edited into an integer, which is worth
+noting on its own: that is the whole attack surface of this feature and it is
+about twenty lines long.
+
+**A present zero overwrote a real lifetime total.** The rule this feature was
+built on - never write a zero over somebody's history - was enforced on an
+ABSENT variable and not on a zero, because the check read `number is not
+None`. A fresh OmenServe install writes `%mx.rartsent 0`, and importing from
+one replaced a real DCCore total with nothing, while the note beside it
+promised "the total size will stay as it is". A zero carries no history
+across, which is the entire point of the feature, so it can only destroy. It
+is now read, shown in the preview marked as not imported, and explained -
+silently dropping the row would have read as a parse failure to an operator
+looking at that number in their own file.
+
+**`1e999` reached the route as a 500.** It parses as a float perfectly well
+and becomes `inf`, and `int(round(inf))` raises `OverflowError` - not
+`ValueError`, which is what the conversion caught. NaN arrives the same way.
+Both mean "not a number I can use", which is what `None` already says here.
+
+**A thousands separator truncated the number by three orders of magnitude.**
+`split(",")[0]` is what `%SDmaxspeed`'s `<bytes>,<nick>` shape needs, and the
+`.replace(",", "")` written after it could therefore never see a comma - dead
+code that looked like the handling for the case it was not handling. So a
+value written `45,902` imported as `45`: silently, plausibly, and wrongly. The
+two shapes are told apart by what follows the comma - a digit is a separator,
+a nick is a field boundary.
+
+**A half-written import reported success.** Both writers swallow their own
+errors and return `None`, which is right for them - a failed stats write must
+not take the daemon down - and meant this route answered 200 with
+`imported: [...]` for figures that never reached the disk. The operator would
+have been told their history came across and found half of it, with nothing to
+say which half. The response is now built from what is actually on disk
+afterwards, compared against what was asked for, and names the ones that did
+not land.
+
+One of the four fixes was written twice. The first version guarded `inf` and
+NaN explicitly and then caught `OverflowError` underneath, and the mutation run
+showed the guard was dead: deleting it changed nothing, because the catch
+below already answered both. The catch stayed and the guard went.
 
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
