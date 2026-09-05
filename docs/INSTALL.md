@@ -175,6 +175,18 @@ This checks the configuration without connecting to IRC, so a mistake surfaces b
 
 The master list is only regenerated when you ask. If a release changes what the list contains, the file you are serving keeps its old content until the next `!update` — which looks like the upgrade did nothing.
 
+### Coming from v1.11.0 or earlier
+
+The list build changed what it puts in the list, so three things are worth knowing before you restart.
+
+**Your list will not change until you rebuild it.** The daemon keeps serving the list already on disk; run `!update` (or press **Update list** on the dashboard) when you are ready. That is your chance to look at the result before anyone else does.
+
+**It will then contain everything under `FILE_DIRECTORY`, not just `.mp3` and `.flac`.** Video, `.m4a`, artwork, cue sheets, text files — all of it. Check what is actually in that directory first: anything sitting there is offered to anyone who asks. `LIST_IGNORED_EXTENSIONS` names what to leave out, and ships skipping only what is never a real file (`.db`, `.ini`, `.lnk`, `.url`, and half-finished downloads).
+
+**Some folders will stop being `!rar`-packable.** A folder used to become packable by containing anything in the list; now it needs a file in `RAR_EXTENSIONS`, which ships as the audio formats. So a folder of video or documents no longer gets a row in the album list — deliberately, since packing has no size cap and a film folder is a request to compress tens of gigabytes. Individual files in those folders are still listed and still requestable by name.
+
+If you keep video, it also gets its own list from now on, travelling in the same archive people already receive. `SEPARATE_VIDEO_LIST = No` puts everything back in one list.
+
 ### Coming from a version before the `config.py` → `defaults.py` rename
 
 Your own overrides file was called `local_config.py` and is gitignored, so `git pull` cannot rename it for you. **Do not copy `admin_config.py.sample` over the top** — that strands your real settings. Just start the daemon once and it renames the file itself, keeping every setting in it. The launchers and the pre-flight check both say so if they meet that state.

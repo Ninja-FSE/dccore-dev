@@ -188,6 +188,35 @@ gate broke nothing. The gate is now tested where it does the work - with
 `SEPARATE_VIDEO_LIST` off, which is the configuration an operator who keeps
 film in its own folders will run.
 
+### 📋 The roadmap said a closed defect class was still open
+
+Release-checklist work, done early because that checklist says it is: *"check
+`docs/FUTURE.md` for anything the release implements that is still listed as
+planned or not-yet-done. A roadmap calling a shipped thing missing makes the
+changelog look like it is overclaiming - this drifted once and reached the
+public repo before it was caught."*
+
+`!rehash` rebinding module-level locks was listed under "from the audits, not
+yet done". It is neither: every lock in a module `!rehash` reloads is
+allocated in `runtime.py` and bound by name, and
+`tests/test_no_reloaded_module_owns_a_lock.py` fails if a new one appears -
+so the class is closed rather than the four original instances merely fixed.
+Moved to Quality, where the other structural guards are recorded.
+
+Checked rather than assumed, and the neighbouring entry survived the same
+check: **timed bans really do still grow without bound.** `banned_users` is
+pruned only when that same nick is looked at again, and the flood sweep covers
+`user_requests` and `muted_until` but not it - so a timed ban on a nick that
+never comes back stays for ever, which is the normal case, because the ban is
+what made them leave.
+
+An operator upgrade note also landed in `docs/INSTALL.md`, for the same
+reason: this change alters what the list CONTAINS, and that is exactly the
+class of thing the checklist asks whether an existing operator has to act on.
+They do - the list does not change until they run `!update`, everything under
+`FILE_DIRECTORY` is offered once it does, and folders that used to be
+`!rar`-packable may no longer be.
+
 ### 🔧 The mutation runner scored some mutations against code that was never on disk
 
 Two mutations of the same byte length, applied to one file inside the same

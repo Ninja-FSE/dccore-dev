@@ -46,6 +46,7 @@ What DCCore does today, and what it does not do yet.
 
 - **2732 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
+- **No reloaded module owns a lock** — `!rehash` re-executes a module body, so a module-level `threading.Lock()` is rebound while a thread is still inside it. Every lock in a reloaded module is allocated in `runtime.py` and bound by name, and `tests/test_no_reloaded_module_owns_a_lock.py` fails if a new one appears — the class, not the four instances that prompted it.
 - **Two adversarial audits** — an internal audit (32 defects, all fixed) and a pre-publication sweep before the first public release.
 
 ---
@@ -87,7 +88,6 @@ This matters most as a prerequisite: step 1 above refactors seven modules that c
 
 ### From the audits, not yet done
 
-- **`!rehash` rebinds every module-level lock**, so a thread inside a critical section loses mutual exclusion. `runtime.py` already solves this for the containers; the locks need the same treatment.
 - **Timed bans grow without bound** — the flood sweep covers two of the three tracking structures.
 - Roughly forty further verified findings, from a false "MasterList missing" during a concurrent search to a queued `!rar` pack that is never re-dispatched.
 
