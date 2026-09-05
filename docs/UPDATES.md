@@ -21,6 +21,16 @@ which by then was false.
 
 A mutation run also corrected a comment here: the rollback walks its list in reverse because that is the convention for undoing a sequence, not because it is required. Each swap touches only its own destination and that destination's `.previous`, so no two of them can collide - flipping the order broke nothing, and the comment that claimed otherwise now says so.
 
+### 🧹 The last four dashboard findings of the audit
+**A fetched file with a long remote-chosen name could not be downloaded.** `dcc_fetch` fits a stored name to `MAX_NAME_BYTES` (255) and touches every path through `platform_compat.long_path()`. The dashboard's download route was the one that did not, so on Windows the file was written, marked "complete", listed in the UI - and its Download button answered **404 for ever**, while the file sat there the whole time.
+
+Handing `send_from_directory()` the *wrapped* directory does not fix it either, which is worth recording because it looks like it should: werkzeug's `safe_join()` joins with a **forward slash**, and a `\?\` path is the one kind Windows will not accept those in. The path is built here now, with a backslash, and wrapped after - and the containment `safe_join()` was providing is kept explicitly with `dcc.is_safe_path()`, which additionally resolves symlinks.
+
+**A served-folder path had no length cap.** `apply_folder_changes()` bounded the NUMBER of folders and not the length of any one path, and `library.problems()` embeds each offending path verbatim in up to two messages per entry - so the 400 response was roughly twice the request that caused it. Every other web input in the module was already bounded.
+
+**"Up" from a lowercase drive root left the machine root.** `browse_roots()` builds its entries from the uppercase letters A-Z and `os.path.abspath()` preserves whatever case the caller sent, so `c:\` missed the root list and the parent fell through to `ntpath.dirname("c:")` - which is `"c:"`, a *drive-relative* path meaning "the current directory on C:". Clicking Up from a lowercase drive root browsed the daemon's own working directory.
+
+**A dead "Get folder as .rar" button.** Rendered for every group of a foreign bot's list including the unnamed one, while `requestFolderRar()` drops the click on `if (!bot || !folder)` - so it was there, clickable, and did nothing at all: no request, no message.
 ### 🧮 Four ways a configuration change did not mean what it said
 All found by the full-program audit.
 
