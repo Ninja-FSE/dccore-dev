@@ -707,6 +707,70 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     return 200, {"created": [request_id]}
 
 
+def fetch_marks_by_bot():
+    """{bot: {filename: "requested"|"received"}}, both keys lower-cased.
+
+    What #133 calls "mark what you already requested", and it wants two states
+    rather than one:
+
+      requested  the row is still in flight - dcc_fetch groups exactly these
+                 as _UNRESOLVED_FETCH_STATES (pending, offered, listening,
+                 receiving), and reusing that tuple is what stops this drifting
+                 the day a state is added there.
+      received   complete.
+      nothing    FAILED, on purpose. A failed fetch is not a thing you have,
+                 and marking it would discourage the one useful action left,
+                 which is to ask again.
+
+    Only file requests are marked. A "list" or "folder" row is a request for
+    the whole list or a packed archive, not for any row shown in the table, so
+    marking a filename from one would claim something that never happened.
+    """
+    import dcc_fetch
+
+    marks = {}
+    for row in list((getattr(config, "fetch_queue", {}) or {}).values()):
+        if not isinstance(row, dict):
+            continue
+        if row.get("request_type") != "file":
+            continue
+        bot = str(row.get("bot") or "").strip().lower()
+        filename = str(row.get("requested_filename") or "").strip().lower()
+        if not bot or not filename:
+            continue
+        state = row.get("state")
+        if state in dcc_fetch._UNRESOLVED_FETCH_STATES:
+            mark = "requested"
+        elif state == "complete":
+            mark = "received"
+        else:
+            continue
+        # "received" wins over "requested" for the same file: asking twice and
+        # having it once is a thing you HAVE, and that is the more useful of
+        # the two answers to show.
+        if marks.setdefault(bot, {}).get(filename) != "received":
+            marks[bot][filename] = mark
+    return marks
+
+
+def mark_rows_with_fetch_state(rows, marks, bot=None):
+    """Stamp each row with what we have already asked that bot for.
+
+    `bot` when every row belongs to one list (a fetched bot's page); left out
+    when they do not (the cross-list filter), where each row's own "source"
+    says which bot it came from.
+
+    Rows with no mark get one anyway, as "". The frontend then has one field to
+    read rather than having to know whether its absence means "not requested"
+    or "this payload does not carry marks".
+    """
+    for row in rows:
+        owner = str(bot if bot is not None else row.get("source", "")).strip().lower()
+        name = str(row.get("title") or "").strip().lower()
+        row["mark"] = marks.get(owner, {}).get(name, "")
+    return rows
+
+
 def build_crosslist_search_payload(term, limit=None):
     """GET /api/filelists/search: one term against every list we hold.
 
@@ -788,6 +852,10 @@ def build_crosslist_search_payload(term, limit=None):
             "folder": folder,
         })
         group["count"] += 1
+
+    marks = fetch_marks_by_bot()
+    for group in groups.values():
+        mark_rows_with_fetch_state(group["entries"], marks)
 
     folders = [groups[key] for key in order]
     payload = dict(empty_payload)
@@ -951,6 +1019,13 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None):
         entry, offset, limit)
     if error:
         return 502, {"error": error}
+
+    # What we have already asked this bot for. One list, so the bot is passed
+    # in rather than read per row - every row here belongs to it.
+    marks = fetch_marks_by_bot()
+    for group in page:
+        mark_rows_with_fetch_state(group.get("entries", []), marks,
+                                   bot=entry.get("bot", nick))
 
     return 200, {
         "bot": entry.get("bot", nick),

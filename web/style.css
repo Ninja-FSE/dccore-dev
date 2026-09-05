@@ -843,6 +843,31 @@ html, body {
 
 .bot-row.is-excluded .bot-row-count { visibility: hidden; }
 
+/* What has already been asked of this bot. Deliberately quiet: it is an
+   annotation on a row, not a status of its own, and the table is read by
+   scanning filenames. */
+.file-mark {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.file-mark.is-requested {
+  color: var(--status-queued);
+  border: 1px solid var(--status-queued);
+}
+
+.file-mark.is-received {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
 .filelists-filter-actions {
   display: flex;
   gap: 8px;

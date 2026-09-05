@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The List Browser now shows what you have already asked for.** A file you have requested is tagged **asked** while it is on its way and **have it** once it has arrived, so a long list does not leave you guessing whether you already queued something. A failed request is not tagged at all — the useful thing to do with one is ask again. Tags are per bot: two bots can hold a file of the same name, and asking one says nothing about the other.
+
+- **Fixed: filtering before picking a bot left you unable to queue anything.** Results appeared with no tick boxes and no folder buttons, because the page was deciding what you could request from whichever list was selected rather than from the results in front of you.
+
 - **Search every bot list you hold at once.** Type in the List Browser's filter box and matches from every list you have downloaded appear together, live as you type. Bots with nothing matching are crossed out in the sidebar, so you can see at a glance who has what. Click a bot while filtering to show or hide its results, or use “Show all lists” / “Show none”. Tick results from several different bots and queue them in one go. Two things worth knowing: the filter matches whole words and the beginnings of words, so typing the middle of a word will not find it (`@find` in the channel is unchanged); and the search index it needs is roughly as big again as the lists themselves, so ten large lists cost noticeably more disk than before. If the index is ever missing or damaged the filter simply stops working until your next fetch — nothing else is affected.
 
 - **The List Browser now shows every bot as a row with a coloured dot.** Green means the list you hold is still what that bot advertises, amber means theirs has changed since you downloaded it, red means you have not downloaded it at all, and grey means there is not enough to say either way. Bots you have only seen advertising in the channel are listed too — clicking one puts its nick in the fetch box rather than opening an empty table. Every dot also says what it means when you hover it, and the legend names all four, so the colour is never the only thing telling you.

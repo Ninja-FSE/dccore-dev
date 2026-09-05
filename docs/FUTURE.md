@@ -44,7 +44,7 @@ What DCCore does today, and what it does not do yet.
 
 ### Quality
 
-- **2750 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
+- **2762 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
 - **A cross-list search index** — SQLite FTS5, built as each bot list is fetched, so the dashboard can filter every held list live rather than re-reading them at 2-11 seconds a keystroke.
 - **Two adversarial audits** — an internal audit (32 defects, all fixed) and a pre-publication sweep before the first public release.

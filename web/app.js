@@ -1072,7 +1072,14 @@
       // clickable, and silently did nothing - one click, no request, no
       // message. Found by audit. A foreign list always has this group when
       // any of its rows sat above the first folder heading.
-      var fetchable = (state.filelistsSource || "__own__") !== "__own__"
+      // Same rule as the file rows below, and for the same reason: while
+      // FILTERING there is no single source, so asking whether the SELECTED
+      // one is another bot's list answers the wrong question. Every group in
+      // a filter result belongs to another bot by definition, and this
+      // suppressed the folder button on all of them.
+      var fetchable = ((state.filelistsFilter || "").trim()
+        ? true
+        : (state.filelistsSource || "__own__") !== "__own__")
         && !!group.folder;
       // data-folder-index is safe to string-concatenate: it is this group's
       // own position in the internal `groups` array (an internal loop
@@ -1101,7 +1108,15 @@
       // A file is only fetchable when it belongs to someone ELSE's list -
       // browsing our own is direct filesystem access already, and
       // /api/fetch/enqueue exists to reach another bot over IRC, not this one.
-      var fetchable = (state.filelistsSource || "__own__") !== "__own__";
+      //
+      // While FILTERING there is no single source: the rows come from every
+      // list held, and every one of them is another bot's by definition. This
+      // asked only about the selected source, which defaults to our own list -
+      // so filtering before picking a bot rendered every result with no
+      // checkbox and no way to queue any of it.
+      var fetchable = (state.filelistsFilter || "").trim()
+        ? true
+        : (state.filelistsSource || "__own__") !== "__own__";
       var rows = entries.map(function (row) {
         // No data-bot/data-filename attribute here, and no bot/filename text
         // anywhere in this markup fragment: `row.source`/`row.title` come
@@ -1116,9 +1131,22 @@
         var checkCell = fetchable
           ? "<td class=\"col-check\"><input type=\"checkbox\" class=\"filelists-check\"></td>"
           : "<td class=\"col-check\"></td>";
+        // Two states, never three: "requested" while it is still in
+        // flight, "received" once it has arrived, and nothing at all for a
+        // failed one - a failure is not a thing you have, and marking it
+        // would discourage the one useful action left, which is to ask
+        // again. The server decides which; this only renders it.
+        //
+        // escapeHtml() on the mark as well, even though it comes from a
+        // fixed set: the day it does not, this line should already be safe.
+        var mark = row.mark === "received" || row.mark === "requested"
+          ? " <span class=\"file-mark is-" + row.mark + "\">" +
+            escapeHtml(row.mark === "received" ? "have it" : "asked") +
+            "</span>"
+          : "";
         return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
           checkCell +
-          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + "</td>" +
+          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + mark + "</td>" +
           "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
           "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
           "<td class=\"col-dim col-mono\">" + escapeHtml(row.source) + "</td>" +
@@ -1315,6 +1343,12 @@
           showFilelistsFetchStatus(
             "Queued " + res.data.created.length + " file(s) for fetch - see Queue → Downloads.", false);
           Array.prototype.forEach.call(checked, function (box) { box.checked = false; });
+          // Re-read the page so the rows just queued say so. The marks are
+          // stamped server-side when a page is built, so without this they
+          // would not appear until something else caused a reload - and the
+          // one moment an operator most wants to see "asked" is immediately
+          // after asking.
+          loadFilelists();
         }
         updateFilelistsDownloadSelectedState();
         loadDownloads();

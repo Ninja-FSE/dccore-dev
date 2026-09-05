@@ -4,6 +4,52 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📌 The List Browser says what you have already asked for (#133)
+
+The last unbuilt item in the issue, and it wants two states rather than one:
+**asked** while a request is still in flight, **have it** once it has arrived,
+and **nothing at all** for a failed one - a failure is not a thing you have,
+and marking it would discourage the one useful action left, which is to ask
+again.
+
+The three map onto states `dcc_fetch` already keeps. "Asked" is exactly its
+`_UNRESOLVED_FETCH_STATES` tuple rather than a second list of the same names,
+which is what stops this drifting the day a state is added there. Only file
+requests mark anything: a "list" or "folder" row asks for the whole list or a
+packed archive, not for any row in the table.
+
+A mark belongs to one bot. Two bots can hold a file of the same name, and
+asking one says nothing about the other. "Have it" beats "asked" for the same
+file, because having it is the more useful of the two answers.
+
+**A defect in the cross-list filter, found while wiring this up.** A row is
+only fetchable when it belongs to someone else's list - browsing our own is
+filesystem access already. That decision asked whether the SELECTED SOURCE is
+another bot's list, and the source defaults to our own. So filtering before
+picking a bot rendered every result with **no checkbox and no way to queue any
+of it**, which is the entire point of finding them. The folder's `!rar` button
+had the same defect at its own call site, suppressed on every group in a
+filter result.
+
+Both are fixed, and the guard is derived rather than sliced from the first
+occurrence it finds - the first version of it checked one site and reported on
+the other, failing while pointing at code that was already correct.
+
+**One row shape, still.** `mark` is declared in
+`list.entries_to_filelist_rows()` rather than added by whichever payload
+happens to know about it. Our own list and a fetched one go through that
+function precisely so the frontend sees one shape, and a key present in one
+and absent in the other is how that stops being true - it is always `""` for
+our own list, which is correct rather than a placeholder, since nothing is
+ever requested from ourselves.
+
+Two mutations corrected tests. The row-shape test listed its five keys by name
+and went stale the moment a sixth was added, failing on a change that kept the
+property it exists to protect; it derives the shape from that one function
+now. And the "have it beats asked" test happened to put the completed row
+last, so "last row wins" gave the right answer for the wrong reason and the
+guard could be deleted without failing it.
+
 ### 🔎 One filter across every list you hold (#133)
 
 The last of #133's slices. Type in the List Browser and matches from every

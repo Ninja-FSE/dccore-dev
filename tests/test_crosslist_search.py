@@ -492,6 +492,141 @@ class SwitchingOneListOffWhileFiltering(unittest.TestCase):
         self.assertIn("Nothing in any list you hold matches that.", body)
 
 
+class MarkingWhatYouAlreadyAskedFor(IndexCase):
+    """#133: "mark what you already requested", and it wants two states.
+
+    requested  still in flight. dcc_fetch groups exactly these as
+               _UNRESOLVED_FETCH_STATES, and reusing that tuple is what stops
+               this drifting the day a state is added there.
+    received   complete.
+    nothing    FAILED, deliberately. A failure is not a thing you have, and
+               marking it would discourage the one useful action left.
+    """
+
+    def queue(self, **rows):
+        self.set_config(fetch_queue={
+            key: dict(row) for key, row in rows.items()})
+
+    def marks_for(self, term="flac"):
+        payload = webserver.build_crosslist_search_payload(term)
+        return {entry["title"]: entry["mark"]
+                for group in payload["folders"] for entry in group["entries"]}
+
+    def setUp(self):
+        super().setUp()
+        self.index("BigTruck", "Asked.flac", "Have.flac", "Failed.flac",
+                   "Untouched.flac")
+        self.hold("BigTruck")
+
+    def test_an_in_flight_request_reads_as_asked(self):
+        for state in ("pending", "offered", "listening", "receiving"):
+            with self.subTest(state=state):
+                self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+                              "request_type": "file", "state": state})
+                self.assertEqual(self.marks_for()["Asked.flac"], "requested")
+
+    def test_every_unresolved_state_dcc_fetch_knows_is_covered(self):
+        """Derived from dcc_fetch's own tuple rather than listed again here:
+        a state added there must not silently stop being marked."""
+        import dcc_fetch
+
+        for state in dcc_fetch._UNRESOLVED_FETCH_STATES:
+            with self.subTest(state=state):
+                self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+                              "request_type": "file", "state": state})
+                self.assertEqual(self.marks_for()["Asked.flac"], "requested")
+
+    def test_a_completed_one_reads_as_received(self):
+        self.queue(a={"bot": "BigTruck", "requested_filename": "Have.flac",
+                      "request_type": "file", "state": "complete"})
+
+        self.assertEqual(self.marks_for()["Have.flac"], "received")
+
+    def test_a_failed_one_is_not_marked_at_all(self):
+        """The useful action is to ask again, and a mark would discourage
+        it."""
+        self.queue(a={"bot": "BigTruck", "requested_filename": "Failed.flac",
+                      "request_type": "file", "state": "failed"})
+
+        self.assertEqual(self.marks_for()["Failed.flac"], "")
+
+    def test_a_file_never_asked_for_is_not_marked(self):
+        self.queue()
+
+        self.assertEqual(self.marks_for()["Untouched.flac"], "")
+
+    def test_having_it_wins_over_having_asked(self):
+        """Asked twice, arrived once. "You have this" is the more useful of
+        the two answers."""
+        # The COMPLETED one first, so that "last row wins" would give the
+        # wrong answer. Ordered the other way this passed with the guard
+        # deleted - the completed row happened to be seen last and won by
+        # accident rather than by rule.
+        self.queue(
+            a={"bot": "BigTruck", "requested_filename": "Have.flac",
+               "request_type": "file", "state": "complete"},
+            b={"bot": "BigTruck", "requested_filename": "Have.flac",
+               "request_type": "file", "state": "receiving"})
+
+        self.assertEqual(self.marks_for()["Have.flac"], "received")
+
+    def test_a_mark_belongs_to_one_bot_only(self):
+        """Two bots can hold a file of the same name. Asking one for it says
+        nothing about the other, and marking both would claim a request that
+        was never made."""
+        self.index("Vibessono", "Asked.flac")
+        self.hold("BigTruck", "Vibessono")
+        self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+                      "request_type": "file", "state": "receiving"})
+
+        payload = webserver.build_crosslist_search_payload("asked")
+        marks = {(group["bot"], entry["title"]): entry["mark"]
+                 for group in payload["folders"] for entry in group["entries"]}
+
+        self.assertEqual(marks[("BigTruck", "Asked.flac")], "requested")
+        self.assertEqual(marks[("Vibessono", "Asked.flac")], "")
+
+    def test_a_whole_list_request_does_not_mark_a_file(self):
+        """A "list" row asks for the bot's list, not for any row in the
+        table. Marking a filename from one would claim something that never
+        happened - and the filename field of such a row is empty anyway."""
+        self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+                      "request_type": "list", "state": "receiving"})
+
+        self.assertEqual(self.marks_for()["Asked.flac"], "")
+
+    def test_a_folder_request_does_not_mark_a_file_either(self):
+        self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+                      "request_type": "folder", "state": "receiving"})
+
+        self.assertEqual(self.marks_for()["Asked.flac"], "")
+
+    def test_the_match_ignores_case(self):
+        """The list writes whatever that bot wrote; the request carries
+        whatever was clicked. They agree in practice and must not depend on
+        it."""
+        self.queue(a={"bot": "bigtruck", "requested_filename": "ASKED.FLAC",
+                      "request_type": "file", "state": "receiving"})
+
+        self.assertEqual(self.marks_for()["Asked.flac"], "requested")
+
+
+class TheRowShapeIsOne(unittest.TestCase):
+    """Our own list and a fetched one go through list.entries_to_filelist_rows()
+    precisely so the frontend sees one row shape. A key present in one and
+    absent in the other is how that stops being true."""
+
+    def test_mark_is_part_of_the_shape_rather_than_added_by_a_payload(self):
+        import list as list_mod
+
+        rows = list_mod.entries_to_filelist_rows(
+            [{"filename": "A.flac", "size": "1MB", "folder": "F"}], "Someone")
+
+        self.assertIn("mark", rows[0])
+        self.assertEqual(rows[0]["mark"], "",
+                         "our own list is never something we requested")
+
+
 class TheIndexIsWrittenByTheFetch(unittest.TestCase):
     """Read out of the source: driving a real fetch needs a socket, a zip and
     a peer, and the one thing that matters is that it happens in the parse
