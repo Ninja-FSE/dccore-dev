@@ -183,6 +183,13 @@ IRC_LINE_FIELD_MAX_LEN = 300
 # is the only unbounded input - which is the one this is for.
 FETCH_ENQUEUE_MAX_ITEMS = 500
 
+# A ceiling on the served-folder list, for the same reason every other list
+# this module accepts has one: a POST body is not a promise. Far above any
+# real library - an operator with more than this has a drive letter problem,
+# not a folder list - and low enough that the O(n^2) pairwise nesting check in
+# library.problems() cannot be turned into a way to occupy the process.
+MAX_SERVED_FOLDERS = 64
+
 
 def reject_if_unsafe_for_irc_line(value, field_name, max_len=IRC_LINE_FIELD_MAX_LEN):
     """Return an error string if `value` is not safe to interpolate into an
@@ -1379,6 +1386,131 @@ def _settings_payload_unlocked(settings_file):
 SETTINGS_RESTART_ONLY = {"WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"}
 
 
+# ---------------------------------------------------------------------
+# SERVED FOLDERS
+#
+# A list of {label, path} pairs, which is why it is not on the Settings page
+# with everything else: every other setting there is one scalar an operator
+# types into one box, and settings_file.save() writes exactly that. This is
+# ordered, validated as a SET (two folders can each be fine and still conflict
+# with each other), and stored as JSON in its own file - so it gets its own
+# endpoint pair rather than being bent into the settings shape.
+#
+# #164 step 4. Steps 1-3 shipped in v1.11.0 and made the daemon serve from a
+# list of folders; until now the only way to WRITE that list was to create
+# data/library_folders.json by hand, so the feature existed and no operator
+# could reach it.
+#
+# `library` is imported inside each function, never at module scope: see
+# tests/test_import_graph.py, which holds this module to a short list of
+# imports that must work with no daemon running.
+# ---------------------------------------------------------------------
+
+def build_folders_payload():
+    """GET /api/folders: the served folders, and where they came from.
+
+    `source` is the honest answer to "what is this bot serving", which the
+    folder list alone cannot give:
+
+      "file"           - data/library_folders.json exists and is being used
+      "file_directory" - no folder list; the single FILE_DIRECTORY is served
+      "none"           - neither, so nothing is served at all
+
+    An operator looking at one folder needs to know which of the first two
+    they are in, because editing the list is what switches them.
+    """
+    import library
+
+    stored = library.load_folders()
+    single = str(getattr(config, "FILE_DIRECTORY", "") or "").strip()
+    if stored:
+        source = "file"
+    elif single:
+        source = "file_directory"
+    else:
+        source = "none"
+
+    return {
+        "folders": [{"name": entry.name, "path": entry.path}
+                    for entry in library.folders()],
+        "source": source,
+        "file_directory": single,
+        "path": library.folders_file(),
+    }
+
+
+def apply_folder_changes(payload):
+    """POST /api/folders: validate the whole set, then write it.
+
+    Returns (http_status, payload_dict).
+
+    THE WHOLE SET, not each row. Two folders can each be perfectly good and
+    still be an invalid pair - one nested inside the other lists every file
+    under it twice, and two sharing a label make the label useless for telling
+    them apart. library.problems() returns every fault at once for the same
+    reason: an operator fixing three things should be told about three things.
+
+    AN EMPTY LIST IS ALLOWED and means "go back to the single Music
+    directory". The file is REMOVED rather than written as [], because
+    library.load_folders() already returns None for an empty list and falls
+    back - so writing [] would leave a file on disk that does nothing, and the
+    next operator to read it would have to work that out.
+
+    NO REHASH. Unlike a settings save, nothing here needs reloading:
+    library.folders() re-reads the file on every call, so the running daemon
+    picks this up immediately. What it does NOT do is rebuild the published
+    list, and a folder nobody can see in the list is not really served yet -
+    hence rebuild_required, which the page turns into a sentence rather than
+    leaving the operator to discover it.
+    """
+    import library
+
+    if not isinstance(payload, dict):
+        return 400, {"error": "Expected an object with a 'folders' list."}
+    rows = payload.get("folders")
+    if not isinstance(rows, list):
+        return 400, {"error": "'folders' must be a list."}
+    if len(rows) > MAX_SERVED_FOLDERS:
+        return 400, {"error": f"At most {MAX_SERVED_FOLDERS} folders."}
+
+    entries = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return 400, {"error": "Each folder must be an object with "
+                                  "'name' and 'path'."}
+        raw_path = str(row.get("path", "") or "").strip()
+        raw_name = str(row.get("name", "") or "").strip()
+        # An unnamed folder is named after itself, exactly as the file format
+        # does - so an operator who only wants to add a path can.
+        entries.append(library.Folder(raw_name or library.default_label(raw_path),
+                                      raw_path))
+
+    faults = library.problems(entries)
+    if faults:
+        return 400, {"error": "Those folders cannot be served.",
+                     "problems": faults}
+
+    target = library.folders_file()
+    if not entries:
+        try:
+            if os.path.exists(target):
+                os.remove(target)
+        except OSError as err:
+            return 400, {"error": f"Could not remove {os.path.basename(target)}: {err}"}
+        return 200, dict(build_folders_payload(), written=0,
+                         rebuild_required=True)
+
+    try:
+        library.save_folders(entries)
+    except (ValueError, OSError) as err:
+        return 400, {"error": str(err)}
+
+    return 200, dict(build_folders_payload(), written=len(entries),
+                     rebuild_required=True)
+
+
+
+
 def _save_settings_and_rehash(changes):
     """Write `changes` to settings.conf and dispatch a rehash on its own
     daemon thread. The shared tail of apply_settings_changes() (POST
@@ -1870,6 +2002,16 @@ if HAVE_FLASK:
         def api_settings_save():
             body = json_object(request.get_json(silent=True))
             status, result = apply_settings_changes(body)
+            return jsonify(result), status
+
+        @app.route("/api/folders")
+        def api_folders():
+            return jsonify(build_folders_payload())
+
+        @app.route("/api/folders", methods=["POST"])
+        def api_folders_save():
+            body = json_object(request.get_json(silent=True))
+            status, result = apply_folder_changes(body)
             return jsonify(result), status
 
         @app.route("/api/settings/password", methods=["POST"])

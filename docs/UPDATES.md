@@ -4,6 +4,30 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📁 The served folders are editable from the dashboard (#164 step 4)
+Steps 1-3 shipped in v1.11.0 and made the daemon serve from a *list* of folders: `library.py` as the single accessor, the list built from every folder in the operator's order, `!rar` and search resolving a request back to the right one by its label. **The only way to write that list was to create `data/library_folders.json` by hand**, so the feature existed and no operator could reach it. The Settings page offered one "Music directory" box - which is the single-folder FALLBACK - and nothing said so.
+
+Found by an operator looking at that page and asking why there was only one box.
+
+**Its own endpoint pair, not a setting.** Every other field on that page is one scalar typed into one box, and `settings_file.save()` writes exactly that. A folder list is ordered, validated as a SET, and stored as JSON. Bending it into the settings shape would mean either one comma-joined string (which cannot carry labels, and breaks the moment a path contains a comma) or one setting per folder (which cannot be reordered). So: `GET/POST /api/folders`.
+
+`library` is imported inside each handler rather than at module scope - `tests/test_import_graph.py` holds `webserver.py` to a short list of imports that must work with no daemon running.
+
+**Validated as a set, because that is the only way these faults exist.** Two folders can each be perfectly good and still be an invalid pair: one nested inside the other lists every file under it twice, and two sharing a label make the label useless for telling them apart. `library.problems()` already took the whole set and returned every fault at once; the page renders one line per fault rather than "invalid folder list", which tells an operator with eight folders nothing about which two to look at.
+
+**`source` is reported, not just the folders.** `"file"`, `"file_directory"` or `"none"` - because a page showing one folder cannot otherwise say whether that is a one-entry list or the fallback, and editing the list is exactly what switches between them.
+
+**An empty list is allowed** and means "go back to the single Music directory". The file is REMOVED rather than written as `[]`, because `library.load_folders()` already returns `None` for an empty list and falls back - so a written `[]` would be a file on disk that does nothing.
+
+**No rehash, but a rebuild.** `library.folders()` re-reads the file on every call, so a running daemon picks a saved list up immediately. What it does not do is rebuild the *published* list, and a folder nobody can see in the list is not really being served - so the response carries `rebuild_required` and the page turns it into a sentence instead of leaving the operator to find out.
+
+**Deliberately not in this pass: the server-side folder browser.** Letting the dashboard enumerate the filesystem over HTTP is a separate surface and deserves its own design rather than being tacked onto this. Paths are typed and validated server-side, and "not a folder on this machine" is a clear enough answer to a typo.
+
+#### Two defects in this change, found before it shipped
+The first was mine and would have broken the page on its first successful save: `postJson()` resolves with `{ ok, status, data }`, and the editor was written against `res.body` - `undefined` on every one of those objects, so the save would have thrown a `TypeError` inside a promise with no catch and the page would have gone quiet. **Exactly the shape of #267**, and every test in the suite passed straight through it, because nothing here executes JavaScript. Found by checking the helper's contract instead of assuming it, and there is now an assertion in `tests/test_web_assets.py` that no caller reads `res.body`, plus one that `postJson` still returns that shape so the rule cannot quietly become wrong.
+
+The second came out of the mutation run: deleting the `library.problems()` call from the handler changed nothing a test could see, because `library.save_folders()` validates again and raises. The refusal still happened - as one error string rather than the list the page renders line by line. The test now pins the STRUCTURE rather than the fact of refusal.
+
 ### 🧭 One odd folder name made every file after it invisible
 `find_matching_entries()` walks the master list with a three-state machine, because the format wraps each folder heading in a pair of rule lines. A rule line is "every character is `=`" - so a folder whose NAME is also all `=` reads as a *second* rule line. The machine treats that as a malformed doubled rule, keeps waiting for a heading, and takes the next line it gets - a FILE line - as the heading instead.
 
