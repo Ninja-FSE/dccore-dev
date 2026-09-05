@@ -47,6 +47,7 @@
 # formatting variance (see strip_info_suffix()'s own docstring) applies here
 # automatically, for free.
 import os
+import re
 import shutil
 import threading
 import time
@@ -103,14 +104,39 @@ def _ensure_fetched_bot_lists():
     return config.fetched_bot_lists
 
 
+# What may appear in a directory name built from a bot's nick. Mirrors
+# dcc_fetch._FILENAME_CHARSET_RE, minus the space and parentheses a filename
+# needs: a nick has neither, and a directory name with fewer moving parts is
+# easier to recognise in a file manager.
+_BOT_DIR_CHARSET_RE = re.compile(r'[^\w\-\.\[\]{}^`]')
+
+
 def _sanitize_bot_dir_name(bot):
     """Never trust a bot nick as a literal path component either - the same
     discipline dcc_fetch._sanitize_offer_filename() applies to a filename,
-    applied here to what becomes a directory name instead."""
+    applied here to what becomes a directory name instead.
+
+    A WHITELIST, which is what that claim always meant and what this was not.
+    It used to strip a blacklist - NUL, the two separators, ".." and
+    surrounding dots - and pass everything else through. But "|" is a perfectly
+    ordinary IRC nick character (RFC 2812's specials are []\\`_^{|}, and
+    "Bot|Away" is one of the commonest nick shapes on the network) and is
+    ILLEGAL in a Windows path.
+
+    So os.makedirs() on the extraction directory failed with WinError 123 -
+    AFTER the zip had already been fetched over DCC. The transfer worked, the
+    bytes were on disk, and the fetch failed at the last step, every time, for
+    that bot. Found by audit.
+
+    Same charset as dcc_fetch, for the same reason: what is legal in a nick and
+    what is legal in a path are different sets, and only one of them is ours to
+    choose.
+    """
     name = list_mod.strip_control_codes(str(bot))
     name = name.replace('\x00', '')
     name = name.replace('/', '_').replace('\\', '_')
     name = name.replace('..', '')
+    name = _BOT_DIR_CHARSET_RE.sub('_', name)
     name = name.strip().strip('.').strip()
     return name or "unknown_bot"
 
