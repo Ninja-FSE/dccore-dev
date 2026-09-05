@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A list rebuild that fails partway no longer leaves you advertising one list and handing out another.** If someone was downloading your list when a rebuild ran, the rebuild could publish the new index while the archive people actually received stayed last week's — with the file count, the size and the search all reporting the new scan. It said "the previous list was left untouched" while that was no longer true. The rebuild now either lands completely or not at all.
+
 - **A fetched file with a very long name can be downloaded from the dashboard.** The file arrived, was marked complete and appeared in the list, and its Download button then answered "not found" for ever — on Windows, where the full path was too long for the way that route opened it.
 
 - **Small dashboard repairs:** browsing up from a lowercase drive letter no longer wanders off to wherever the bot was started from, an absurdly long folder path is refused rather than echoed back, and the "Get folder as .rar" button no longer appears on a group of files that has no folder to pack.

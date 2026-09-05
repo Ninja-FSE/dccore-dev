@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔄 A rebuild that failed partway published half of itself, and said it had not
+`generate_master_list()` published the master index, the album index and the download artifact as three independent `os.replace` calls, then wrote the two size side files and the base-name marker, then pruned. **No rollback anywhere.**
+
+The ordinary way to reach it, on Windows: `os.replace` onto a file another handle has open raises `PermissionError`, and `dcc.py` holds the published artifact open for the whole duration of a DCC send. `PAUSE_ON_UPDATE` only refuses NEW requests, so a transfer already in flight keeps that handle - and somebody downloading the list when the scheduled rebuild lands is not an edge case on a bot with several slots.
+
+What that produced: the master index replaced, so `@find`, the advert count and `commands.count_from_master_list()` all reported the **new** scan - while the archive users actually received was the **previous** one, the size side files still carried the previous numbers, the base-name marker was not updated, and `_prune_superseded_lists` never ran. Nothing recovered it; the artifact stayed stale until some later rebuild happened to run with no transfer in progress. And the failure branch printed
+
+```
+[LIST-GEN] The previous list was left untouched and is still in use.
+```
+
+which by then was false.
+
+`_publish_artifacts()` moves each destination **aside** before its replacement lands, so a failure can put back exactly what was there. That also makes the locked case fail at the safest possible moment: renaming a file another process holds open fails on Windows too, so the lock is discovered while moving the old file out of the way - **before anything observable has changed**. The download artifact goes first, because it is the one a DCC send holds open.
+
+A mutation run also corrected a comment here: the rollback walks its list in reverse because that is the convention for undoing a sequence, not because it is required. Each swap touches only its own destination and that destination's `.previous`, so no two of them can collide - flipping the order broke nothing, and the comment that claimed otherwise now says so.
+
 ### 🧹 The last four dashboard findings of the audit
 **A fetched file with a long remote-chosen name could not be downloaded.** `dcc_fetch` fits a stored name to `MAX_NAME_BYTES` (255) and touches every path through `platform_compat.long_path()`. The dashboard's download route was the one that did not, so on Windows the file was written, marked "complete", listed in the UI - and its Download button answered **404 for ever**, while the file sat there the whole time.
 

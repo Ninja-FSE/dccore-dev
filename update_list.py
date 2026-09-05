@@ -74,6 +74,78 @@ def _discard_temp_lists(*paths):
             print(f"[LIST-CLEAN ERROR] Could not remove {path}: {err}")
 
 
+def _publish_artifacts(swaps):
+    """Move every (temporary, destination) pair into place, or none of them.
+
+    THE PUBLISH USED TO BE FIVE INDEPENDENT REPLACEMENTS, so a failure partway
+    through left the bot advertising one scan and handing out another. The
+    ordinary way to reach it, on Windows: os.replace onto a file another
+    handle has open raises PermissionError, and dcc.py holds the published
+    artifact open for the whole duration of a DCC send. PAUSE_ON_UPDATE only
+    refuses NEW requests, so a transfer already in flight keeps that handle -
+    and somebody downloading the list when the scheduled rebuild lands is not
+    an edge case on a bot with several slots.
+
+    What that produced: the master index replaced, so @find, the advert count
+    and commands.count_from_master_list() all reported the new scan - while
+    the archive users actually received was the previous one, the size side
+    files still carried the previous numbers, the base-name marker was not
+    updated, and the prune never ran. Nothing recovered it; the artifact
+    stayed stale until some later rebuild happened to run with no transfer in
+    progress. And the failure branch then printed "The previous list was left
+    untouched and is still in use", which by then was false.
+
+    Each destination is moved ASIDE before its replacement lands, so a failure
+    can put back exactly what was there. That also makes the locked case fail
+    at the safest possible moment: renaming a file another process holds open
+    fails on Windows too, so the lock is discovered while moving the old file
+    out of the way - before anything observable has changed.
+
+    Raises whatever the underlying replace raised, after rolling back. The
+    caller's message about the previous list still being in use is then true
+    again, which is the point.
+    """
+    done = []
+    try:
+        for temporary, destination in swaps:
+            backup = None
+            if os.path.exists(platform_compat.long_path(destination)):
+                backup = destination + ".previous"
+                platform_compat.replace_with_retry(destination, backup)
+            platform_compat.replace_with_retry(temporary, destination)
+            done.append((destination, backup))
+    except Exception:
+        # Reverse order because that is the convention for undoing a
+        # sequence, not because it is required here: each swap touches only
+        # its own destination and that destination's .previous, so no two of
+        # them can collide. A mutation run flipped the order and nothing
+        # failed, which is the honest reading - the comment that used to sit
+        # here claimed a necessity there is not one of.
+        for destination, backup in reversed(done):
+            try:
+                if backup:
+                    platform_compat.replace_with_retry(backup, destination)
+                else:
+                    # There was nothing here before; leaving the new file
+                    # would publish half a rebuild.
+                    os.remove(platform_compat.long_path(destination))
+            except OSError as undo_err:
+                print(f"[LIST-GEN ERROR] Could not roll {destination} back: "
+                      f"{undo_err}")
+        raise
+
+    for _destination, backup in done:
+        if not backup:
+            continue
+        try:
+            os.remove(platform_compat.long_path(backup))
+        except OSError:
+            # A leftover .previous is clutter, not a failure - the publish
+            # itself succeeded and that is what the caller is waiting on.
+            pass
+    return True
+
+
 def _prune_superseded_lists(keep):
     """Delete older generated lists once the new ones are safely in place.
 
@@ -996,16 +1068,21 @@ def generate_master_list():
         # ones. os.replace overwrites atomically on both POSIX and Windows, where os.rename
         # would raise because the destination already exists.
         #
-        platform_compat.replace_with_retry(tmp_txt_path, txt_path)
-        if serve_albums:
-            platform_compat.replace_with_retry(tmp_rar_path, rar_path)
-        else:
+        if not serve_albums:
             # Not published, and not left behind either: an empty album list
             # in lists/ reads as "this bot offers no albums" to anything
             # counting the file, which is a different claim from "it does
             # not offer them at all".
             _discard_temp_lists(tmp_rar_path)
-        platform_compat.replace_with_retry(tmp_artifact_path, artifact_path)
+
+        # THE DOWNLOAD ARTIFACT FIRST, because it is the one a DCC send holds
+        # open - so the likeliest failure is discovered before anything else
+        # has moved. All of them go together or none of them do; see
+        # _publish_artifacts().
+        swaps = [(tmp_artifact_path, artifact_path), (tmp_txt_path, txt_path)]
+        if serve_albums:
+            swaps.append((tmp_rar_path, rar_path))
+        _publish_artifacts(swaps)
 
         # The two side files are published HERE, AFTER every swap above has
         # already succeeded, and atomically. They used to be written before
