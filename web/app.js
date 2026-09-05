@@ -29,12 +29,11 @@
 
   var views = {
     search:    { title: "Search",     sub: "Find a file across the current master list." },
-    queue:     { title: "Queue",      sub: "Who is waiting, who is sending, right now." },
-    download:  { title: "Download",   sub: "Bulk-paste \"!<bot> <filename>\" requests and track their progress." },
-    filelists: { title: "File Lists", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
+    download:  { title: "Downloads",  sub: "What you have asked other bots for, and how it is going." },
+    filelists: { title: "List Browser", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
     tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." },
     settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." },
-    stats:     { title: "Stats",      sub: "Everything this bot knows about itself." },
+    stats:     { title: "Stats",      sub: "Everything this bot knows about itself, including who is waiting." },
     console:   { title: "Console",    sub: "The DCC CHAT admin console's commands and live log, in the browser." }
   };
 
@@ -43,6 +42,10 @@
     // showing and `folders` is what the server last confirmed - kept apart
     // so switching category and back does not silently discard an edit,
     // and so a failed save leaves the operator's rows exactly as typed.
+    // The last checkbox the operator touched, as the anchor for a
+    // shift-click range. A DOM node, so it is cleared whenever the
+    // table is rebuilt.
+    filelistsLastChecked: null,
     folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
     // The folder picker (#164 step 5). `browse` is null when the panel is
     // closed; open, it carries the row it will write back into.
@@ -214,7 +217,6 @@
     el.pageTitle.textContent = views[name].title;
     el.pageSub.textContent = views[name].sub;
 
-    if (name === "queue") { loadQueue(); }
     if (name === "download") { loadDownloads(); }
     if (name === "filelists") {
       pollFilelistsBots();
@@ -1024,8 +1026,46 @@
     // listener attached per-checkbox would need re-attaching every time.
     el.filelistsBody.addEventListener("change", function (evt) {
       if (evt.target.classList && evt.target.classList.contains("filelists-check")) {
+        state.filelistsLastChecked = evt.target;
         updateFilelistsDownloadSelectedState();
       }
+    });
+
+    // SHIFT EXTENDS A RANGE (#133). Handled on click rather than change,
+    // because the range has to be computed against the state BEFORE the
+    // browser toggles the clicked box - and because shift-clicking a checkbox
+    // also selects text across the rows it spans, which looks broken.
+    //
+    // The anchor is the last box the operator actually touched, which is what
+    // every file manager means by it. Ctrl needs no code at all: a checkbox
+    // toggles one box on its own, which is already ctrl's behaviour.
+    //
+    // A rebuild of the table drops the anchor (the element is gone), so
+    // renderFilelists clears it rather than leaving a reference to a node
+    // that is no longer in the document.
+    el.filelistsBody.addEventListener("click", function (evt) {
+      var box = evt.target;
+      if (!box.classList || !box.classList.contains("filelists-check")) { return; }
+      var anchor = state.filelistsLastChecked;
+      if (!evt.shiftKey || !anchor || anchor === box) { return; }
+
+      var boxes = Array.prototype.slice.call(
+        el.filelistsBody.querySelectorAll(".filelists-check"));
+      var from = boxes.indexOf(anchor);
+      var to = boxes.indexOf(box);
+      if (from === -1 || to === -1) { return; }
+
+      evt.preventDefault();
+      window.getSelection && window.getSelection().removeAllRanges();
+
+      // The clicked box takes the anchor's state, and so does everything
+      // between them - "extend the selection to here", not "toggle each".
+      var wanted = anchor.checked;
+      if (from > to) { var swap = from; from = to; to = swap; }
+      for (var i = from; i <= to; i++) {
+        boxes[i].checked = wanted;
+      }
+      updateFilelistsDownloadSelectedState();
     });
 
     function updateFilelistsDownloadSelectedState() {
@@ -1044,6 +1084,8 @@
     // render shares the same `fetchable` value, so a render either produces
     // zero checkboxes or exactly one per row, never a mix to line up against.
     function attachFilelistsCheckboxData(groups) {
+      // The old anchor pointed into the table that has just been replaced.
+      state.filelistsLastChecked = null;
       var boxes = el.filelistsBody.querySelectorAll(".filelists-check");
       if (!boxes.length) { return; }
       var i = 0;
@@ -1903,7 +1945,10 @@
     fetchJson("/api/queue").then(function (rows) {
       markConnection(true);
       renderSidebarStatus(rows);
-      if (state.active === "queue") {
+      // The queue table lives on Stats now (#133). Same rule as before -
+      // refresh the visible table only when it is the one showing, so a
+      // background poll never clobbers what the operator is reading.
+      if (state.active === "stats") {
         renderQueueStats(rows);
         renderQueueTable(rows);
       }

@@ -35,27 +35,28 @@
       <span class="brand-name" id="brand-name">DCCore</span>
     </div>
 
+    <!-- Ordered by how often a view is used, not by how central its
+         information feels (#133). The daily work is at the top; Stats is a
+         glance, and Settings and Console are admin surfaces reached
+         occasionally. Queue is gone as a tab - it lives in Stats now. -->
     <nav class="nav">
       <button class="nav-item is-active" data-view="search">
         <span class="nav-icon">&#9906;</span> Search
       </button>
-      <button class="nav-item" data-view="queue">
-        <span class="nav-icon">&#8801;</span> Queue
-      </button>
       <button class="nav-item" data-view="download">
-        <span class="nav-icon">&#8595;</span> Download
+        <span class="nav-icon">&#8595;</span> Downloads
       </button>
       <button class="nav-item" data-view="filelists">
-        <span class="nav-icon">&#9776;</span> File Lists
+        <span class="nav-icon">&#9776;</span> List Browser
       </button>
       <button class="nav-item" data-view="tools">
         <span class="nav-icon">&#9881;</span> Tools
       </button>
-      <button class="nav-item" data-view="settings">
-        <span class="nav-icon">&#9998;</span> Settings
-      </button>
       <button class="nav-item" data-view="stats">
         <span class="nav-icon">&#9673;</span> Stats
+      </button>
+      <button class="nav-item" data-view="settings">
+        <span class="nav-icon">&#9998;</span> Settings
       </button>
       <button class="nav-item" data-view="console">
         <span class="nav-icon">&#10095;</span> Console
@@ -154,38 +155,6 @@
       </div>
     </section>
 
-    <section class="view" id="view-queue">
-      <div class="stat-row">
-        <div class="stat-card">
-          <div class="stat-value" id="stat-slots">&mdash;</div>
-          <div class="stat-label">Active slots</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-files">&mdash;</div>
-          <div class="stat-label">Files queued</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-users">&mdash;</div>
-          <div class="stat-label">Users waiting</div>
-        </div>
-      </div>
-
-      <div class="table-wrap">
-        <table class="data-table" id="queue-table">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Next file</th>
-              <th>Count</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="queue-body">
-            <tr class="empty-row"><td colspan="4">Loading&hellip;</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
 
     <section class="view" id="view-download">
       <div class="table-wrap bulk-fetch-wrap">
@@ -247,7 +216,7 @@
       <div class="folder-controls">
         <button type="button" class="btn btn-small" id="filelists-expand-all">Expand all</button>
         <button type="button" class="btn btn-small" id="filelists-collapse-all">Collapse all</button>
-        <button type="button" class="btn btn-accent btn-small" id="filelists-download-selected-btn" disabled>Download selected</button>
+        <button type="button" class="btn btn-accent btn-small" id="filelists-download-selected-btn" disabled title="Tick the files you want. Shift-click a second box to take everything between it and the last one you touched.">Download selected</button>
       </div>
 
       <div class="table-wrap">
@@ -369,6 +338,42 @@
       </p>
 
       <p class="stat-foot" id="st-foot"></p>
+
+      <!-- Queue, folded in from its own tab (#133): "everything the bot
+           knows about itself, with the queue table keeping its place in
+           the lower half of the view". The ids are unchanged, so
+           renderQueueStats()/renderQueueTable() go on finding them. -->
+      <div class="stat-group-label">Queue</div>
+      <div class="stat-row">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-slots">&mdash;</div>
+          <div class="stat-label">Active slots</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-files">&mdash;</div>
+          <div class="stat-label">Files queued</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-users">&mdash;</div>
+          <div class="stat-label">Users waiting</div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table" id="queue-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Next file</th>
+              <th>Count</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="queue-body">
+            <tr class="empty-row"><td colspan="4">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section class="view" id="view-console">

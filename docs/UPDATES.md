@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗃️ The dashboard's nav says what each view is for, and a run of files can be selected at once (#133)
+Two of #133's three remaining slices; the freshness indicators follow separately, because they need something stored that is not stored yet.
+
+**Queue is folded into Stats.** #133's own words: *"everything the bot knows about itself, with the queue table keeping its place in the lower half of the view"*. The table and its three counters moved as they were - `renderQueueStats()` and `renderQueueTable()` still find the same ids - and the poll that refreshes them followed, keeping the rule it already had: refresh the visible table only when it is the one showing, so a background poll never clobbers what the operator is reading.
+
+**Renamed and reordered.** `Download` is `Downloads`, `File Lists` is `List Browser`, and the order is `Search · Downloads · List Browser · Tools · Stats · Settings · Console` - by how often a view is used rather than by how central its information feels. Settings and Console sit after Stats because they are admin surfaces reached occasionally; #133 does not place them, and the same principle does.
+
+That change touched three lists at once - `views` in app.js, the nav buttons, and the view sections - and a half-applied rename would have been invisible until somebody clicked. `tests/test_web_assets.py` now asserts the three name the same set, which is the #267 class stated generally: `activateView()` looks up `view-<key>` for every key in `views`, so a missing section is a null dereference on EVERY view switch rather than just that one.
+
+**Shift-click extends a selection** in the List Browser. Ctrl needed no code - a checkbox already toggles exactly one box - and there is a test saying so, in case somebody later adds a `ctrlKey` branch that fights the browser.
+
+Shift is handled on **click** rather than change, for two reasons worth recording: the range has to be computed against the state BEFORE the browser toggles the clicked box, and shift-clicking across rows also selects the text between them, which reads as the page having broken. The anchor is the last box the operator actually touched, and it is dropped whenever the table is rebuilt - it is a live DOM node, and a stale one would leave `indexOf()` never finding it, so the next shift-click would silently do nothing.
+
+The button carries a `title` explaining it, because an interaction nobody can see is one nobody uses.
+
 ### 🔌 A handful of CTCPs could take every DCC port for a minute
 The last finding of the full-program audit.
 

@@ -398,5 +398,61 @@ class APostJsonResultIsReadTheWayPostJsonReturnsIt(unittest.TestCase):
         self.assertIn("data: data", body)
 
 
+class TheNavTheViewsAndTheSectionsAgree(unittest.TestCase):
+    """Three lists that have to name the same set, and nothing checks them at
+    runtime because nothing here executes JavaScript.
+
+    activateView() walks every key in `views` and looks up "view-" + key, so a
+    key with no section is a null dereference that takes the whole router
+    down - which is exactly what #267 was. A nav button with no `views` entry
+    reads `views[name].title` on undefined. And a section nobody can reach is
+    dead markup that still costs a lookup on every switch.
+
+    Written when Queue was folded into Stats and three tabs were renamed
+    (#133), because that change touched all three lists at once and a
+    half-applied rename would have been invisible until somebody clicked.
+    """
+
+    def sets(self):
+        import re
+
+        js = read("app.js")
+        html = read("index.html")
+        block = js.split("var views = {", 1)[1].split("};", 1)[0]
+        return (set(re.findall(r"^\s*([a-z]+):", block, re.M)),
+                set(re.findall(r'id="view-([a-z]+)"', html)),
+                set(re.findall(r'data-view="([a-z]+)"', html)))
+
+    def test_every_views_key_has_a_section(self):
+        views, sections, _nav = self.sets()
+
+        self.assertEqual(sorted(views - sections), [],
+                         "activateView() looks up view-<key> for every key in "
+                         "`views`; a missing section is a null dereference on "
+                         "EVERY view switch, not just that one")
+
+    def test_every_nav_button_has_a_views_entry(self):
+        views, _sections, nav = self.sets()
+
+        self.assertEqual(sorted(nav - views), [],
+                         "activateView() reads views[name].title, which is a "
+                         "TypeError for a nav button with no entry")
+
+    def test_every_section_is_reachable(self):
+        _views, sections, nav = self.sets()
+
+        self.assertEqual(sorted(sections - nav), [],
+                         "a view section with no nav button cannot be opened")
+
+    def test_the_default_view_exists(self):
+        """state.active starts at "search" before any click."""
+        views, sections, nav = self.sets()
+
+        for name, group in (("views", views), ("sections", sections),
+                            ("nav", nav)):
+            with self.subTest(group=name):
+                self.assertIn("search", group)
+
+
 if __name__ == "__main__":
     unittest.main()
