@@ -69,7 +69,7 @@ The design is settled:
 - A private message uses the list marked primary, since a PM carries no channel.
 - A channel with no list bound gets nothing: no advert, no requests answered.
 
-**Multi-folder is largely built.** `library.py` answers which folders and in what order, resolution reads a folder's label out of a heading, and the scan builds one list from all of them — configurable today by editing `data/library_folders.json`. What is left is the Settings page: a reorderable list of folders with a validated add and a folder browser, so it does not need hand-edited JSON.
+**Multi-folder is done.** `library.py` answers which folders and in what order, resolution reads a folder's label out of a heading, and the scan builds one list from all of them. The Settings page landed with it — a reorderable list with a validated add and a folder browser (`GET`/`POST /api/folders`, `GET /api/folders/browse`), so `data/library_folders.json` no longer needs hand-editing.
 
 Multi-list then follows: allow more than one list object, with per-channel adverts falling out nearly free. The folder set moves inside a list at that point, which is why every caller goes through one accessor rather than reading a setting directly — the move rebinds the accessor instead of touching 54 call sites a second time.
 
@@ -80,11 +80,9 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 
 ### Test coverage where it is thinnest
 
-The pre-publication audit found that **21 daemon functions have no behavioural coverage at all** — including `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop and `configure.py`'s entry point. Each can be replaced with a statement that raises while all tests still pass.
+The pre-publication audit found **21 daemon functions with no behavioural coverage at all** — `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop, `configure.py`'s entry point. That gap is closed: `scripts/function_coverage.py` reports **2 of 257 uncovered, both on the allowlist with a written reason**, and it fails the build on a third.
 
-Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would not be noticed. Nine dashboard routes are never requested by any test.
-
-This matters most as a prerequisite: step 1 above refactors seven modules that call `find_latest_list()`, and doing that across code the suite does not exercise is how a regression ships quietly.
+What remains is narrower and does not show up in that number. Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would still not be noticed — this file's own history has three such guards that passed against deliberately broken code. Nine dashboard routes were never requested by any test; that count has not been re-measured since.
 
 ### From the audits, not yet done
 

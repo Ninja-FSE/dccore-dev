@@ -203,6 +203,20 @@ allocated in `runtime.py` and bound by name, and
 so the class is closed rather than the four original instances merely fixed.
 Moved to Quality, where the other structural guards are recorded.
 
+Two more found by asking the same question of the rest of the file, which the
+first pass did not: it read the bullet list and not the prose around it.
+
+- The coverage section still said **"21 daemon functions have no behavioural
+  coverage at all"**. `scripts/function_coverage.py` reports 2 of 257, both
+  allowlisted with a written reason, and it fails the build on a third. What
+  genuinely remains there is narrower and does not show up in that number -
+  source-reading guards that do not execute what they check, which this file
+  has three recorded instances of passing against deliberately broken code.
+- The multi-list section called the multi-folder **Settings page** the thing
+  still to do. It shipped: `GET`/`POST /api/folders`, `GET
+  /api/folders/browse`, and a reorderable editor with a folder picker.
+  `data/library_folders.json` has not needed hand-editing for some time.
+
 Checked rather than assumed, and the neighbouring entry survived the same
 check: **timed bans really do still grow without bound.** `banned_users` is
 pruned only when that same nick is looked at again, and the flood sweep covers
