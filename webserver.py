@@ -291,6 +291,171 @@ def count_rar_album_folders():
         return None
 
 
+# The ceilings the import refuses beyond. A stray digit from a hand-edited
+# text file is far likelier than a genuine value up here, and importing one
+# silently is worse than refusing it - the operator can retype a number, but
+# they cannot tell that a total is wrong once it looks plausible.
+#
+# 2^63 is where a 64-bit counter stops meaning anything; a byte total past a
+# petabyte and a speed record past 10 GB/s are both past any real DCC link by
+# orders of magnitude, and both are what a mis-parsed field looks like.
+MAX_IMPORT_FILES = 2 ** 63 - 1
+MAX_IMPORT_BYTES = 1 << 50           # 1 PiB
+MAX_IMPORT_SPEED = 10 * 1000 ** 3    # 10 GB/s
+
+_IMPORT_LIMITS = {
+    "total_files": (MAX_IMPORT_FILES, "files sent"),
+    "total_bytes": (MAX_IMPORT_BYTES, "bytes sent"),
+    "speed_record": (MAX_IMPORT_SPEED, "speed record"),
+}
+
+
+def current_importable_stats():
+    """What the three importable figures are right now.
+
+    Read through the same accessors the Stats page uses, so the "before" column
+    of the preview cannot disagree with the page the operator is looking at.
+    """
+    import db
+
+    row = db.load_advanced_stats() or [0] * 7
+    try:
+        total_files = int(row[0])
+    except (IndexError, TypeError, ValueError):
+        total_files = 0
+    try:
+        total_bytes = int(row[1])
+    except (IndexError, TypeError, ValueError):
+        total_bytes = 0
+    try:
+        record = int(db.get_speed_record() or 0)
+    except (TypeError, ValueError):
+        record = 0
+    return {"total_files": total_files, "total_bytes": total_bytes,
+            "speed_record": record}
+
+
+def validate_import_values(raw):
+    """(clean, errors) for the three figures an import may carry.
+
+    Every field optional - an operator missing an add-on imports what they
+    have - but a field that IS present must be a whole number in range.
+    Checked HERE and not only in the page: the page is convenience, this is
+    the boundary, and everything arriving is from a text file somebody may
+    have hand-edited.
+    """
+    clean = {}
+    errors = []
+    for name, (ceiling, label) in _IMPORT_LIMITS.items():
+        if name not in (raw or {}):
+            continue
+        value = raw[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            errors.append(f"{label}: expected a whole number.")
+            continue
+        try:
+            # str() first so "45902" works and 45902.0 does not silently
+            # truncate a fraction somebody meant to be there.
+            number = int(str(value).strip())
+        except (TypeError, ValueError):
+            errors.append(f"{label}: {value!r} is not a whole number.")
+            continue
+        if number < 0:
+            errors.append(f"{label}: cannot be negative.")
+            continue
+        if number > ceiling:
+            errors.append(f"{label}: {number:,} is beyond anything real "
+                          f"(the limit is {ceiling:,}). A stray digit in a "
+                          f"hand-edited file looks exactly like this.")
+            continue
+        clean[name] = number
+    return clean, errors
+
+
+def build_stats_import_preview(text):
+    """POST /api/stats/import/preview: what a vars.ini would do, changing nothing.
+
+    Separate from the write for the reason the issue gives: on a fresh install
+    nobody reads the sentence about overwriting, and on a used one it is the
+    only thing that matters. The page shows before and after side by side and
+    the operator confirms.
+    """
+    import omenserve_import
+
+    found = omenserve_import.read_install(text)
+    clean, errors = validate_import_values(found.get("values") or {})
+    return {
+        "rows": found.get("rows", []),
+        "notes": list(found.get("notes", [])) + errors,
+        "current": current_importable_stats(),
+        "values": clean,
+        # OVERWRITTEN, NOT COMBINED, and said where the page can put it in
+        # front of the operator rather than buried in prose they will not read
+        # on a fresh install and cannot miss on a used one.
+        "replaces": {name: value for name, value in clean.items()
+                     if current_importable_stats().get(name)},
+    }
+
+
+def apply_stats_import(raw):
+    """(http_status, payload) for POST /api/stats/import.
+
+    Writes through db.save_advanced_stats() and db.save_speed_record(), which
+    already take the disk lock and write atomically - a caller, not a second
+    implementation of either.
+
+    Returns the before and after, so the page reports what actually happened
+    rather than what it asked for.
+    """
+    import db
+
+    clean, errors = validate_import_values(raw)
+    if errors:
+        return 400, {"error": errors[0], "errors": errors}
+    if not clean:
+        return 400, {"error": "Nothing to import - no recognised figure was "
+                              "supplied."}
+
+    before = current_importable_stats()
+
+    if "total_files" in clean or "total_bytes" in clean:
+        # The 7-column row read-modify-written as a whole: the day columns and
+        # the date belong to the daemon's own rotation and are not this
+        # feature's to touch. Importing a lifetime total must not reset what
+        # the bot did today.
+        row = list(db.load_advanced_stats() or [0] * 7)
+        while len(row) < 7:
+            row.append(0)
+        if "total_files" in clean:
+            row[0] = clean["total_files"]
+        if "total_bytes" in clean:
+            row[1] = clean["total_bytes"]
+        db.save_advanced_stats(row)
+
+    if "speed_record" in clean:
+        db.save_speed_record(clean["speed_record"])
+
+    # WHAT ACTUALLY LANDED, compared against what was asked for. Both writers
+    # swallow their own errors and return None - correct for them, since a
+    # failed stats write must not take the daemon down - which meant this
+    # returned 200 and "imported: [...]" for figures that never reached the
+    # disk. The operator would have been told their history came across and
+    # found half of it, with nothing to say which half.
+    after = current_importable_stats()
+    landed = [name for name in sorted(clean) if after.get(name) == clean[name]]
+    missing = [name for name in sorted(clean) if name not in landed]
+    if missing:
+        return 500, {
+            "error": "Some figures could not be written: "
+                     + ", ".join(missing)
+                     + ". Check the daemon log and the data directory.",
+            "before": before, "after": after, "imported": landed,
+            "failed": missing,
+        }
+
+    return 200, {"before": before, "after": after, "imported": landed}
+
+
 def build_stats_payload():
     """Everything the Stats view shows, in one request.
 
@@ -2051,6 +2216,31 @@ if HAVE_FLASK:
         @app.route("/api/queue")
         def api_queue():
             return jsonify(build_queue_payload(user=request.args.get("user")))
+
+        @app.route("/api/stats/import/variables")
+        def api_stats_import_variables():
+            # Served rather than written into app.js so the page's filter and
+            # the parser cannot drift: a field added to omenserve_import.FIELDS
+            # is kept by the page without the JavaScript changing at all. If
+            # they disagreed, the page would strip out a counter the parser
+            # was waiting for, and the operator would be told their file has
+            # nothing in it.
+            import omenserve_import
+            return jsonify({"variables": list(omenserve_import.variable_names())})
+
+        @app.route("/api/stats/import/preview", methods=["POST"])
+        def api_stats_import_preview():
+            # Reads and writes nothing. POST rather than GET because the
+            # vars.ini text travels in the body - it is a file's contents,
+            # not an identifier.
+            body = json_object(request.get_json(silent=True))
+            return jsonify(build_stats_import_preview(body.get("text", "")))
+
+        @app.route("/api/stats/import", methods=["POST"])
+        def api_stats_import():
+            body = json_object(request.get_json(silent=True))
+            status, result = apply_stats_import(body)
+            return jsonify(result), status
 
         @app.route("/api/stats")
         def api_stats():
