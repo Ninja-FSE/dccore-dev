@@ -330,8 +330,14 @@ class TheFileIsNotTouchedUnlessItIsRight(WriterTestCase):
 
         why = self.refuse({"NICKNAME": "DCCoreWin"})
 
-        self.assertIn("NICKNAME", why)
-        self.assertIn("read back", why)
+        # The refusal now names the INDENTATION rather than the value that
+        # would not read back. parse() rejects a continuation line outright,
+        # so the edited text is refused before the read-back comparison it
+        # used to fail at - an earlier point and a reason an operator can act
+        # on. The guarantee this class exists for is unchanged and is checked
+        # by refuse() itself: the file on disk is byte-for-byte as it was.
+        self.assertIn("would not be readable", why)
+        self.assertIn("indented", why)
 
     def test_a_setting_the_edit_makes_disappear_entirely(self):
         """The other half of the same hazard. An indented setting is not a
@@ -344,8 +350,13 @@ class TheFileIsNotTouchedUnlessItIsRight(WriterTestCase):
 
         why = self.refuse({"MAX_DCC_SLOTS": 9})
 
-        self.assertIn("MAX_DCC_SLOTS", why)
-        self.assertIn("did not survive", why)
+        # Same change of reason as the test above, from the other direction:
+        # the indented COMMENT is legal, and uncommenting it is what produces
+        # an indented SETTING. parse() names that now, where before the value
+        # simply vanished into the line above and the edit was caught by the
+        # setting having disappeared.
+        self.assertIn("would not be readable", why)
+        self.assertIn("indented", why)
 
     def test_the_operators_own_mistake_is_reported_before_the_files(self):
         """Values are checked before the file is even read, so somebody who

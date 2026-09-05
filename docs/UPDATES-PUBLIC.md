@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **An indented line in `settings.conf` is now reported instead of silently joining the setting above it.** A stray indented line became part of the previous value, newline and all — so a nickname could quietly contain a second line and go out that way.
+
+- **A typo in the admin chat mode is refused rather than ignored.** Writing `lisen` selected automatic mode silently; now it tells you the valid options.
+
+- **Download counters survive renaming a folder's label**, and no longer rewrite themselves on every start.
+
 - **Your library's total size no longer vanishes from the advert.** If your bot's nickname made the list's base name a prefix of the size files' names, every rebuild wrote those files and then deleted them again — so the advert published `Files (0B)` for ever, while the log said it had tidied up some old lists.
 
 - **A custom list banner can no longer break the list it sits on.** A banner line made only of `=` reads as a folder separator, which shifted every folder heading after it by one; a line starting with `!` reads as a file, so it was counted in your file total and returned by searches as something nobody could download. Both are handled now — a rule line is redrawn in `-`, a `!` line is left out — and the bot tells you which line and why, so you can adjust the banner.
