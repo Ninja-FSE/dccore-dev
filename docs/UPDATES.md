@@ -4,6 +4,390 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔍 Thirteen audit findings, and the worst made the filter match nothing
+
+From the multi-agent audit of the same day's work, plus the refutation pass
+over what it had not tested.
+
+**The cross-list filter never matched anything in production.**
+`list_index.index_bot_list()` read `row["filename"]`;
+`list.entries_to_filelist_rows()` writes `row["title"]`, and has never written
+`"filename"`. Every row went into the index with an empty name.
+
+Forty-nine tests passed over it, because the fixture built its own dicts with
+a `"filename"` key — the only caller in the codebase that did not go through
+the producer. It goes through it now, so a key renamed on either side fails
+here.
+
+**Bot identity: one cause wearing two hats.**
+
+The `DELETE` that makes a refetch REPLACE a list used SQLite's binary `=` on
+whatever the operator typed, while every reader case-folds —
+`fetched_bot_lists` is keyed lower-case, `indexed_bots()` lowers, FTS5 MATCH
+folds. Fetch from `Dude`, refetch from `DUDE` (the ordinary case: the sidebar
+prefills the nick and a refetch is retyped by hand) and both copies stayed.
+The stale one answered searches beside the new one, `indexed_bots()` reported
+a single bot so nothing could see it, and nothing could free it. The key is
+normalised on both sides now, and the payload maps back through
+`fetched_bot_lists` so the operator still sees the nick as that bot spells it.
+
+And `bot:"name"` is an FTS5 **phrase** over a tokenised column, not equality:
+unicode61 splits on punctuation, so `Bot` matches `Bot-2`, `Bot_away` and
+`Bot|gone`. Holding both with only `Bot-2` matching, the sidebar left `Bot`
+undimmed and the status line said "1 match in 2 lists". The MATCH is a cheap
+pre-filter now, with the bot column compared for equality on the rows that
+come back. Every fixture was token-disjoint, which is why they passed.
+
+**A stale reply repainted the table.** `runFilelistsFilter()` had a token and
+its comment claimed *"only the newest is allowed to render"* — but it was
+compared inside the debounce callback, before `loadFilelists()` was called. It
+decided which request to SEND; nothing decided which reply to DRAW. At 120ms
+of debounce a broad term is slow and one more character is fast, so the narrow
+reply arrives first and the broad one repaints under the later term — and
+caches itself, so every later re-render keeps serving it. The load carries its
+own token now, checked in both the `then` and the `catch`.
+
+**The four-second bot poll undid the filter.** The sidebar is rebuilt from
+scratch every `FILELISTS_BOTS_POLL_MS`, and everything the filter puts on it
+lives in classes on those rows — so the greying, the crossed-out names and the
+operator's own switched-off choices vanished four seconds after appearing,
+repeatedly, while they were still typing. The scroll position and keyboard
+focus went with them, which on a thirty-two-advertiser channel means the list
+jumps back to the top while being read. The rebuild restores all three.
+
+**Nothing backfilled the index.** `index_bot_list()` has one caller — a fetch
+completing — while held lists survive restarts. So an operator upgrading with
+lists already fetched had a full `fetched_bot_lists` and an empty index, and
+this module's "we cannot tell" guard did not cover it: `_connect()` creates
+the database on demand, so the connection is not None, every per-bot query
+simply misses, and the page states **positively** that no list holds a match.
+A filter that reads as working and answers wrongly. `oserve` now indexes what
+is missing at startup, through the same parse the fetch uses.
+
+Two notes on the tests themselves. A guard matched this session's own prose
+for the fifth time — a comment explaining the attribute-injection rule
+contained the literal it warns about, so the XSS scan fired on the
+explanation. And a source-reading test passed against a dead branch: the
+mutation moved the call behind `if (false)` and the test only checked the call
+existed. It asserts the call and its guard as one sequence now, which is as
+close to "reachable" as reading source gets.
+
+**Seven more, from the same audit.** Six of them share a shape worth naming:
+each is a place where "we could not tell" was reported as a definite answer.
+
+**A list that could not be checked was greyed out as holding no match.** One
+`except Exception: continue` in the per-bot loop, and that bot fell out of
+`matched` and straight into `empty` - which the page renders as a POSITIVE
+statement, greying the list and counting it in "no match in N lists". The same
+false claim the "no index" branch three lines above already refuses to make,
+reached by a different route. A failed query now leaves the list unmarked and
+says so in the log.
+
+**The fetch queue was read without its lock.** `fetch_marks_by_bot()`
+iterates `config.fetch_queue` on Flask's thread while `enqueue_fetch()`
+inserts into it from the transfer thread - "dictionary changed size during
+iteration", which here is a 500 on the List Browser at the exact moment
+somebody starts a fetch, which is when they are most likely to be looking at
+it. `build_fetch_status_payload()` was already written this way, with a
+comment explaining why; this one simply had not been.
+
+**A count too large to carry was repeated as though exact.** For a bot we
+have not fetched from, `count` is THEIR advert text parsed with
+`irc._as_int()`, which builds a Python int of any size. JSON has no limit and
+JavaScript does: `JSON.parse()` rounds anything past 2^53 to the nearest float
+before the page sees it, so a bot advertising twenty-three digits had a
+DIFFERENT twenty-three digit number rendered beside its nick, in thousands
+separators, looking precise. Dropped rather than clamped, because the rule
+here throughout is that an absent field means "they did not say" - which is
+the truthful reading of a number we cannot carry.
+
+**`hidden` did not hide.** `.filelists-filter-actions { display: flex }`
+outranks the UA stylesheet's `display: none` for the attribute, so the row of
+buttons showed from first paint while the markup, the script and the reviewer
+all said it was hidden. The guard for it is general: every class in
+`index.html` that carries `hidden` and sets `display` must also carry a
+`[hidden]` rule, and the test fails if it finds nothing in scope to examine.
+
+**No ceiling on the request body.** Flask reads one into memory before any
+route decides what to do with it, and this daemon shares a machine with
+transfers it must not starve. 8MB - far above the largest legitimate body
+here, a pasted `vars.ini` - and it applies before authentication, which is
+where the daemon has the least reason to trust what it is handed.
+
+**The index write no longer holds a second copy of the list in memory.** The
+rows stream into `executemany` rather than being materialised into a list
+first; at the four million rows this index is measured against that was
+hundreds of megabytes of tuples held for the length of the write. The LOCK
+stays held for the whole write, deliberately, and now says so: it is the
+transaction boundary as well as the connection guard, and releasing it between
+the delete and the insert would let a search read a list that had been emptied
+and not yet refilled - the same false "empty" as the first finding above.
+
+**A connection that could not be set up was dropped without being closed** -
+and I had read this finding, decided it was already handled, and moved on. The
+suite disagreed: a `ResourceWarning` out of preflight pointed straight at it.
+`sqlite3.connect()` is LAZY, succeeding on a corrupt file, a text file, on
+anything openable at all, so the failure lands on the first `execute()` with a
+real open handle already in hand. Returning None without closing it leaked one
+per call, and `_connect()` is called on every search: an operator with a
+damaged index leaked one for every keystroke in the filter bar. On Windows the
+file also stays locked until the object is collected, so the next attempt
+fails for a NEW reason and the log stops describing the original one.
+
+The test harness closes that connection after every test too. It is cached at
+module level and kept for the life of the process, which is right for the
+daemon and wrong for a run of 2,799 tests: one opened indirectly - by a fetch
+completing, or a dashboard route - stayed open pointing at a temp directory the
+teardown was about to delete, and surfaced at interpreter shutdown with no test
+name attached to it. That is how the leak above was found.
+
+**One finding the audit reported was genuinely already handled**, and now has
+a guard so it stays that way: a `!rehash` moving `LIST_INDEX_FILE` takes
+effect, because `_index_path()` reads config on every call and `_connect()`
+compares it against the cached one. Capturing the path at import is the
+obvious tidy-up and would send every write to a file nothing reads.
+
+### 📌 The List Browser says what you have already asked for (#133)
+
+The last unbuilt item in the issue, and it wants two states rather than one:
+**asked** while a request is still in flight, **have it** once it has arrived,
+and **nothing at all** for a failed one - a failure is not a thing you have,
+and marking it would discourage the one useful action left, which is to ask
+again.
+
+The three map onto states `dcc_fetch` already keeps. "Asked" is exactly its
+`_UNRESOLVED_FETCH_STATES` tuple rather than a second list of the same names,
+which is what stops this drifting the day a state is added there. Only file
+requests mark anything: a "list" or "folder" row asks for the whole list or a
+packed archive, not for any row in the table.
+
+A mark belongs to one bot. Two bots can hold a file of the same name, and
+asking one says nothing about the other. "Have it" beats "asked" for the same
+file, because having it is the more useful of the two answers.
+
+**A defect in the cross-list filter, found while wiring this up.** A row is
+only fetchable when it belongs to someone else's list - browsing our own is
+filesystem access already. That decision asked whether the SELECTED SOURCE is
+another bot's list, and the source defaults to our own. So filtering before
+picking a bot rendered every result with **no checkbox and no way to queue any
+of it**, which is the entire point of finding them. The folder's `!rar` button
+had the same defect at its own call site, suppressed on every group in a
+filter result.
+
+Both are fixed, and the guard is derived rather than sliced from the first
+occurrence it finds - the first version of it checked one site and reported on
+the other, failing while pointing at code that was already correct.
+
+**One row shape, still.** `mark` is declared in
+`list.entries_to_filelist_rows()` rather than added by whichever payload
+happens to know about it. Our own list and a fetched one go through that
+function precisely so the frontend sees one shape, and a key present in one
+and absent in the other is how that stops being true - it is always `""` for
+our own list, which is correct rather than a placeholder, since nothing is
+ever requested from ourselves.
+
+Two mutations corrected tests. The row-shape test listed its five keys by name
+and went stale the moment a sixth was added, failing on a change that kept the
+property it exists to protect; it derives the shape from that one function
+now. And the "have it beats asked" test happened to put the completed row
+last, so "last row wins" gave the right answer for the wrong reason and the
+guard could be deleted without failing it.
+
+### 🔎 One filter across every list you hold (#133)
+
+The last of #133's slices. Type in the List Browser and matches from every
+fetched list appear together; bots with nothing matching grey out in the
+sidebar.
+
+**Why there is an index at all.** `list_fetch` re-parses a list fresh on every
+call - deliberately, since #76 removed unbounded retention - so searching every
+held list by re-reading them is arithmetically out of reach rather than merely
+slow. #133 measured one 719k-file list at 2.0s and ten held lists at about
+11s. No amount of debouncing turns eleven seconds into typing.
+
+**#133 named SQLite and it was right, but its numbers were not.** The issue
+proposed an ordinary indexed table and called it "milliseconds across millions
+of rows". That is true of one of the two queries this feature needs and false
+of the other, and the false half is the headline behaviour. Measured here
+against 4,000,000 rows in ten lists, the sizes #133's own channel capture
+recorded:
+
+| | page of results | which bots have nothing |
+|---|---|---|
+| plain table, `LIKE '%term%'` | 1-41 ms | **1150-1400 ms** |
+| FTS5, per-bot `LIMIT 1` | 1-4 ms | **2-4 ms** |
+
+Paging is fast either way, because `LIMIT` stops the scan early. "Which bots
+have nothing" - the question that greys the sidebar - must prove a negative
+for every bot and has no such escape. Asked as one `DISTINCT` over every match
+it is a full scan per keystroke; asked once per bot with `LIMIT 1`, each stops
+at its first hit. That one change is the difference between a filter bar and a
+search button.
+
+**Written from a parse that was already happening.** The fetch path walked the
+whole list to count it and threw the rows away; it indexes them on the way
+past now. A second walk of a 719k-line file would not have been free.
+
+**What it costs, said plainly.** Two things:
+
+- **FTS5 tokenises where `find_matching_entries()` does substring**, so a
+  mid-word fragment no longer matches - "andma" does not find "Sandman". Whole
+  words and prefixes both do, and the last word typed gets a prefix wildcard so
+  results appear before it is finished. Substring matching over four million
+  rows IS the 1.4-second query above, so this is what buys the feature.
+  `@find` over our own list is untouched.
+- **The index is roughly the size of the lists again.** 4,000,000 rows
+  measured at 452MB. An operator holding ten large lists should know that
+  before it appears, rather than after.
+
+**Best-effort throughout.** A missing, locked or corrupt index costs the
+filter bar and nothing else: the lists are on disk, the browser still pages
+them, `@find` still works, and the next fetch rebuilds it. Nothing in the
+serving path reads the file, so it is never a reason to refuse to start or to
+fail a fetch. "No index" is also not "no bot matches" - claiming every list is
+empty would cross out the whole sidebar and read as a definite answer, and the
+wrong one.
+
+**The index is not the record of what is held.** `fetched_bot_lists` is, and
+the two can drift - a list file removed by hand, a reset store. Every query is
+scoped to the lists currently held, because a row for a list we no longer have
+offers a file that cannot be requested.
+
+The results reuse the browse view's own payload shape, so the folder
+rendering, the checkboxes and "Download selected" all worked unchanged - each
+row's `source` is its bot, which is what makes selecting across four lists at
+once need no new plumbing. Two adjustments were needed: groups are keyed by
+**bot and folder** rather than folder alone, since two bots can both have
+`D:\MUSIC\Metallica\` and merging them would put one bot's files under
+another's heading; and the folder's `!rar` button now takes its bot from its
+own group rather than from whichever list the sidebar has selected.
+
+Four mutations corrected tests rather than code, and three shared one cause:
+`search()` swallows its own failures by design, so "it did not raise" passes
+whether the query was built correctly or not. The syntax test now asserts the
+ANSWER for a term like `AC-DC`; the empty-term test asserts that no query is
+built at all; and the limit clamp is tested against more rows than the cap,
+because with five rows in the table every limit returns five. The fourth was
+this file's own recurring failure: a guard for `LIMIT 1` matched the docstring
+that explains why `LIMIT 1` is there, and passed with the clause deleted.
+
+**Clicking a bot toggles its results in or out** while a term is set, with
+"Show all lists" and "Show none" beside the box - the rest of what #133 asks
+of the filter. Done over the answer already held rather than by asking again:
+the issue calls the toggling trivial precisely because the rows are in the
+browser, and a round trip per click would be slower than the search that
+fetched them. A bot switched off by the operator is marked differently from
+one with nothing to show; one is a choice and reversible, the other is an
+answer. A new term clears the choices, because it is a new question.
+
+While a term is set the sidebar answers a different question, so the click
+does a different thing - there is no "switch to this list" when the table is
+showing all of them at once.
+
+One behaviour was corrected on the way: a non-positive `limit` returned a
+single row, where `webserver.parse_pagination_params()` already states the
+house rule that non-positive means "omitted".
+
+### 🟢 The List Browser picks a source from a list of dots, not a dropdown (#133)
+
+The last of #133's slices bar the cross-list filter. The previous entry closed
+with *"not in this change: the sidebar of bots with coloured dots that the
+design mockup shows"* - this is it.
+
+**Why a `<select>` could not do the job.** It holds a nick and a count and
+nothing else, so the freshness verdict shipped last time had to go in the
+option text. Worse, a dropdown lists things you can switch **to**, and one of
+#133's three colours is *not downloaded* - a bot we have seen advertising but
+hold nothing from. There is nowhere in a dropdown to put a row that is not a
+destination.
+
+So the rows now come from two places: the lists we hold, and
+`runtime.known_bots`. A bot in both is one row, the held one - it carries a
+real verdict and a count we parsed ourselves, where the advert row would
+replace both with a claim. The two piles sort together, case-insensitively, on
+the reasoning that an operator is looking for a nick and does not know in
+advance which pile it is in.
+
+**Four states, and grey is the default arm.** Current, their list changed, not
+downloaded, cannot tell. A freshness the page does not recognise renders grey,
+never green - green is the one colour that tells an operator to stop thinking
+about a list, and a state we have never heard of has not earned it. A count
+the bot never published renders as an em dash rather than 0, which is the
+"did not say is not zero" rule the freshness comparison already follows.
+
+**The colour is never the only carrier.** Every dot has a title, the legend
+names all four in words, and the row for a list we do not hold is dimmed.
+Roughly one man in twelve would otherwise be reading an undifferentiated
+column of grey circles.
+
+**Clicking a bot we hold nothing from does not switch to it** - there is no
+list behind it, and the table would come back empty with nothing saying why.
+It puts the nick in the fetch box, focuses it and says so.
+
+The rows are built with `createElement`/`textContent`/`dataset` throughout. A
+nick is whatever that bot called itself in a channel, `escapeHtml()` does not
+encode a quote, and this file has been bitten by exactly that once already.
+
+Two mutations worth recording. The remembered source is now checked against
+`row.held` rather than mere presence: every advertising bot is in the rows now,
+so "is it still in the list" stopped being the question a deleted list fails.
+And the first version of the not-held guard sliced from the check down to the
+source switch and looked for a `return` - a span that also contains the
+"already showing this one" early return, so it passed against code with the
+guard deleted. It reads the brace-matched arm now.
+
+### 🗃️ One malformed line in the bot registry took the whole List Browser down
+
+Found by the change above, in the way these usually are. The sidebar reads
+`runtime.known_bots`, and the moment it started doing so, three tests in
+`test_webserver.py` began failing in the full run and passing alone - one of
+them with a 500.
+
+The cause was a test, and the defect behind it was not. `test_runtime_state.py`
+seeds every container `runtime.py` exposes with `{"probe": 1}` to prove they
+survive a `!rehash`; the containers are shared, module-level and reload-proof
+on purpose, so nothing took the probe back out, and it sat in the bot registry
+for the rest of the run. That test cleans up after itself now, and says why.
+
+What it exposed is real. `data/known_bots.json` is a plain JSON file an
+operator can open, and `db.load_known_bots()` checked only that the **top
+level** was a dict. Every reader treats an entry as a mapping - `irc.py`
+copies it with `dict()`, the dashboard reads fields off it - so
+`{"somebot": 5}` loaded cleanly and then raised in all of them. That file's
+own docstring already promised the opposite: *"a corrupt or hand-edited file
+costs an empty sidebar until then and nothing else"*.
+
+Three places now hold that line rather than one, because the loader is not the
+only way an entry gets in - the advert listener writes to the registry at
+runtime. The loader drops malformed entries, the summary builder skips them,
+and `_advert_now()` uses `isinstance` rather than `or {}`, which does not help
+when the value is a `5` that `dict()` refuses. A bot whose own entry is
+unreadable reads as "cannot tell", not as current: we read nothing, so we know
+nothing.
+
+**And the suite was reading this machine's own registry.** `oserve.start()`
+loads it at boot, so every test that boots the daemon was pulling in whatever
+bots this bot has actually met. The file is gitignored, so it exists on a
+developer's machine and not on CI, and the suite behaved differently in the
+two places - which is how a view that reads the registry came to fail on one
+machine only, with a real nick nobody had put in a fixture sitting in the
+assertion diff. `DCCoreTestCase` redirects `db.KNOWN_BOTS_FILE` to a throwaway
+path now, exactly as it already did for `db.FETCH_HISTORY_FILE` and for the
+same reason.
+
+`known_bots` was also the one container `runtime.py` exposes that the harness
+never reset between tests. Both gaps are derived rather than listed now: one
+test asserts every container `runtime.py` exposes appears in the harness's
+reset list, and another that no test is pointed at the real registry file - so
+the next container added does not have to be found this way.
+
+One more, found while running the suite twice at once to save time.
+`test_dispatch_threads_are_daemons.py` scans every `.py` in the repository
+root, and its own control test writes a `tmp*.py` into that very directory and
+removes it again - so two runs against one checkout fail each other with a
+`FileNotFoundError` naming a file neither of them ships, which reads as a real
+defect and is not one. A name that is gone by the time we open it cannot be a
+source file anyone ships, so the scan skips it.
 ### 🔍 What a multi-agent audit found in the same day's work
 
 Thirteen agents over the four unmerged branches, then a refutation pass over

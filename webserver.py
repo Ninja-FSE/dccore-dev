@@ -872,11 +872,201 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     return 200, {"created": [request_id]}
 
 
-def build_fetched_bot_list_summaries():
-    """GET /api/filelists/bots payload: one row per bot with a fetched list
-    currently available, for the File Lists view's switcher control.
+def fetch_marks_by_bot():
+    """{bot: {filename: "requested"|"received"}}, both keys lower-cased.
 
-    "count" reads the "entry_count" field process_fetched_list_zip() computes
+    What #133 calls "mark what you already requested", and it wants two states
+    rather than one:
+
+      requested  the row is still in flight - dcc_fetch groups exactly these
+                 as _UNRESOLVED_FETCH_STATES (pending, offered, listening,
+                 receiving), and reusing that tuple is what stops this drifting
+                 the day a state is added there.
+      received   complete.
+      nothing    FAILED, on purpose. A failed fetch is not a thing you have,
+                 and marking it would discourage the one useful action left,
+                 which is to ask again.
+
+    Only file requests are marked. A "list" or "folder" row is a request for
+    the whole list or a packed archive, not for any row shown in the table, so
+    marking a filename from one would claim something that never happened.
+    """
+    import dcc_fetch
+
+    # Under the SAME LOCK the writers use, exactly as
+    # build_fetch_status_payload() does: enqueue_fetch() inserts rows from the
+    # transfer thread while this runs on Flask's, and iterating a dict being
+    # inserted into raises "dictionary changed size during iteration" - which
+    # here is a 500 on the List Browser at the precise moment somebody starts
+    # a fetch, which is the moment they are most likely to be looking at it.
+    with dcc_fetch._fetch_lock():
+        queued = [dict(row) for row in (getattr(config, "fetch_queue", {}) or {}).values()
+                  if isinstance(row, dict)]
+
+    marks = {}
+    for row in queued:
+        if not isinstance(row, dict):
+            continue
+        if row.get("request_type") != "file":
+            continue
+        bot = str(row.get("bot") or "").strip().lower()
+        filename = str(row.get("requested_filename") or "").strip().lower()
+        if not bot or not filename:
+            continue
+        state = row.get("state")
+        if state in dcc_fetch._UNRESOLVED_FETCH_STATES:
+            mark = "requested"
+        elif state == "complete":
+            mark = "received"
+        else:
+            continue
+        # "received" wins over "requested" for the same file: asking twice and
+        # having it once is a thing you HAVE, and that is the more useful of
+        # the two answers to show.
+        if marks.setdefault(bot, {}).get(filename) != "received":
+            marks[bot][filename] = mark
+    return marks
+
+
+def mark_rows_with_fetch_state(rows, marks, bot=None):
+    """Stamp each row with what we have already asked that bot for.
+
+    `bot` when every row belongs to one list (a fetched bot's page); left out
+    when they do not (the cross-list filter), where each row's own "source"
+    says which bot it came from.
+
+    Rows with no mark get one anyway, as "". The frontend then has one field to
+    read rather than having to know whether its absence means "not requested"
+    or "this payload does not carry marks".
+    """
+    for row in rows:
+        owner = str(bot if bot is not None else row.get("source", "")).strip().lower()
+        name = str(row.get("title") or "").strip().lower()
+        row["mark"] = marks.get(owner, {}).get(name, "")
+    return rows
+
+
+def build_crosslist_search_payload(term, limit=None):
+    """GET /api/filelists/search: one term against every list we hold.
+
+    Returns the SAME shape as GET /api/filelists - {"folders": [...]} of
+    {"folder", "count", "entries"} - plus "matched"/"empty" for the sidebar.
+    Deliberately the same: the browser's folder rendering, its checkboxes and
+    its "Download selected" all work on that shape already, and the row's
+    "source" field is the bot, so selecting across several lists at once needs
+    no new plumbing. A second row shape here would have been a second renderer
+    and a second selection path to keep in step.
+
+    GROUPED BY BOT AND FOLDER, not by folder alone. list.group_rows_by_folder()
+    keys on the folder string, which is right for one list and wrong across
+    several: two bots can easily both have "D:\\MUSIC\\Metallica\\", and
+    merging those would put one bot's files under another's heading and point
+    the folder's !rar button at whichever bot happened to be first.
+
+    "matched" and "empty" are asked separately rather than derived from the
+    rows, because the page is capped: a bot whose matches all fall past the cap
+    would look empty when it is not. See list_index.bots_with_a_match() for why
+    the second question is cheap enough to ask on every keystroke.
+
+    Scoped to the lists actually held, never to whatever is in the index. The
+    two can drift - a list file removed by hand, a reset store - and a row for
+    a list we no longer have offers a file that cannot be requested.
+    """
+    import list as list_mod
+    import list_index
+
+    terms = [word for word in str(term or "").lower().split() if word]
+    held = {}
+    for key, entry in (dict(getattr(config, "fetched_bot_lists", {}) or {})
+                       ).items():
+        name = str(entry.get("bot") or key).strip()
+        if name:
+            held[name.lower()] = name
+
+    empty_payload = {
+        "term": str(term or ""),
+        "folders": [],
+        "total": 0,
+        "total_files": 0,
+        "returned": 0,
+        "truncated": False,
+        "matched": [],
+        "empty": sorted(held),
+    }
+    if not terms or not held:
+        return empty_payload
+
+    names = list(held.values())
+    rows = list_index.search(terms, limit=limit, bots=names)
+    matched, empty = list_index.bots_with_a_match(terms, names)
+
+    # One group per (bot, folder), in the order the index returned them so
+    # that a bot's own list order survives rather than being re-sorted into
+    # one the operator does not recognise.
+    order = []
+    groups = {}
+    for row in rows:
+        # The index stores a bot under one NORMALISED key, so that a refetch
+        # under different capitalisation replaces the list rather than
+        # doubling it. The operator should still see the nick as that bot
+        # spells it, and the fetch should be addressed that way - so the
+        # display name comes back from `held`, which is keyed the same way and
+        # holds the real spelling.
+        bot = held.get(str(row.get("bot") or "").strip().lower(),
+                       str(row.get("bot") or ""))
+        folder = str(row.get("folder") or "")
+        key = (bot.lower(), folder.lower())
+        group = groups.get(key)
+        if group is None:
+            group = {"folder": folder, "bot": bot, "count": 0, "entries": []}
+            groups[key] = group
+            order.append(key)
+        filename = str(row.get("filename") or "")
+        group["entries"].append({
+            "title": filename,
+            "size": str(row.get("size") or ""),
+            "format": os.path.splitext(filename)[1].lstrip(".").upper(),
+            # The BOT, which is what makes cross-list selection work: the
+            # checkbox takes its bot from here, so a page of results from
+            # four different bots queues correctly without the frontend
+            # knowing anything about which list a row came from.
+            "source": bot,
+            "folder": folder,
+        })
+        group["count"] += 1
+
+    marks = fetch_marks_by_bot()
+    for group in groups.values():
+        mark_rows_with_fetch_state(group["entries"], marks)
+
+    folders = [groups[key] for key in order]
+    payload = dict(empty_payload)
+    payload.update({
+        "folders": folders,
+        "total": len(folders),
+        "total_files": sum(group["count"] for group in folders),
+        "returned": len(folders),
+        # The cap was reached, so there are probably more. Said plainly rather
+        # than implied by a count the reader would need to know the cap to
+        # interpret.
+        "truncated": len(rows) >= (limit or list_index.DEFAULT_SEARCH_LIMIT),
+        "matched": sorted(matched),
+        "empty": sorted(empty),
+    })
+    return payload
+
+
+def build_fetched_bot_list_summaries():
+    """GET /api/filelists/bots payload: one row per source the List Browser
+    can show, for the list of bots above its table.
+
+    Two kinds, told apart by "held". A bot whose list we hold can be browsed,
+    and carries a real freshness verdict and the count we parsed at fetch
+    time. A bot we have only seen advertising cannot - it is here because
+    #133 makes "not downloaded" one of the states the list shows, and its
+    count is what THAT BOT claims, absent when it did not say.
+
+    "count" on a held row reads the "entry_count" field process_fetched_list_zip() computes
     ONCE at fetch time (issue #76, option 2) rather than the actual row list -
     which is no longer stored at all - so this stays a cheap dict lookup even
     though the File Lists tab's switcher polls this route every
@@ -896,14 +1086,45 @@ def build_fetched_bot_list_summaries():
         now = _advert_now(known, bot)
         rows.append({
             "bot": bot,
+            "held": True,
             "fetched_at": entry.get("fetched_at", 0),
             "count": entry.get("entry_count", 0),
             "freshness": _freshness(then, now),
             "advert_then": then,
             "advert_now": now,
         })
+
+    # AND THE BOTS WE HAVE ONLY SEEN ADVERTISING. #133's colour rule makes
+    # "never downloaded" one of the three states, so the list has to contain
+    # bots there is no list for - that is the whole point of showing it in
+    # red. They cannot be browsed, and the page says so rather than offering
+    # a source that would come back empty.
+    #
+    # `count` is what THEY advertise, not something we parsed, and is absent
+    # when they did not say - the same "did not say is not zero" rule the
+    # freshness comparison follows.
+    for key, entry in known.items():
+        if key in store or not isinstance(entry, dict):
+            continue
+        bot = entry.get("nick") or key
+        now = _advert_now(known, bot)
+        rows.append({
+            "bot": bot,
+            "held": False,
+            "fetched_at": 0,
+            "count": now.get("files"),
+            "freshness": "not_held",
+            "advert_then": {},
+            "advert_now": now,
+        })
+
     rows.sort(key=lambda row: str(row["bot"]).lower())
     return rows
+
+
+# JavaScript's Number.MAX_SAFE_INTEGER. Past this a JSON number no longer
+# survives the trip into the page unchanged.
+_MAX_SAFE_JS_INT = 2 ** 53 - 1
 
 
 def _advert_now(known, bot):
@@ -912,12 +1133,29 @@ def _advert_now(known, bot):
     Same shape and same rule as list_fetch._advert_snapshot(): only what that
     bot actually published, and a missing key means "did not say".
     """
-    entry = dict(known.get(str(bot).strip().lower()) or {})
+    # isinstance rather than `or {}`: a malformed entry is not falsy, and
+    # dict(5) raises. The held rows read this too, so a hand-edited registry
+    # would take the whole List Browser down and not just its own row.
+    entry = known.get(str(bot).strip().lower())
+    entry = entry if isinstance(entry, dict) else {}
     current = {}
     for field in ("files", "list_date"):
         value = entry.get(field)
-        if value not in (None, "", 0):
-            current[field] = value
+        if value in (None, "", 0):
+            continue
+        # A COUNT WE CANNOT REPEAT FAITHFULLY IS ONE WE DO NOT REPEAT. This
+        # is another bot's advert text, parsed with irc._as_int(), which
+        # builds a Python int of any size at all. JSON has no such limit and
+        # JavaScript does: JSON.parse() turns anything past 2**53 into the
+        # nearest float before the page ever sees it, so a bot advertising
+        # twenty-three digits had a DIFFERENT twenty-three digit number
+        # rendered beside its nick, in thousands separators, looking exact.
+        # Dropped rather than clamped: this module's rule throughout is that
+        # an absent field means "they did not say", which is the truthful
+        # reading of a number we cannot carry.
+        if field == "files" and isinstance(value, int) and abs(value) > _MAX_SAFE_JS_INT:
+            continue
+        current[field] = value
     return current
 
 
@@ -981,6 +1219,13 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None):
         entry, offset, limit)
     if error:
         return 502, {"error": error}
+
+    # What we have already asked this bot for. One list, so the bot is passed
+    # in rather than read per row - every row here belongs to it.
+    marks = fetch_marks_by_bot()
+    for group in page:
+        mark_rows_with_fetch_state(group.get("entries", []), marks,
+                                   bot=entry.get("bot", nick))
 
     return 200, {
         "bot": entry.get("bot", nick),
@@ -1415,6 +1660,7 @@ SETTINGS_CATEGORIES = (
                                                 "RAR_ENABLED", "RAR_BINARY", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
                                                 "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
+                                                "LIST_INDEX_FILE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES",
@@ -1488,6 +1734,7 @@ SETTINGS_LABELS = {
     "STATS_FILE": "Stats file",
     "HARD_BANS_FILE": "Hard bans file",
     "KNOWN_BOTS_FILE": "Known bots file",
+    "LIST_INDEX_FILE": "Cross-list search index",
     "DOWNLOAD_COUNTS_FILE": "Download counts file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "FETCH_HISTORY_FILE": "Fetch history file",
@@ -2175,6 +2422,16 @@ if HAVE_FLASK:
         # all POST; Lax is the app's own decision instead of whatever the
         # visitor's browser happens to default to.
         app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+        # A CEILING ON THE REQUEST BODY. Without one, Flask reads whatever is
+        # sent into memory before any route decides what to do with it, and
+        # this daemon shares a machine with transfers it must not starve.
+        # 8MB is far above every legitimate body here - the largest by a wide
+        # margin is a pasted vars.ini, a text file of a few hundred lines -
+        # and Flask answers anything past it with 413 rather than buffering
+        # it. The login page is behind this too, which is the point: the
+        # ceiling applies before authentication, where the daemon has the
+        # least reason to trust what it is being handed.
+        app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
         @app.before_request
         def require_login():
@@ -2318,6 +2575,17 @@ if HAVE_FLASK:
         @app.route("/api/filelists/bots")
         def api_filelists_bots():
             return jsonify(build_fetched_bot_list_summaries())
+
+        @app.route("/api/filelists/search")
+        def api_filelists_search():
+            # Read-only, and it stays that way: this answers a question about
+            # lists already on disk and queues nothing. Selecting a result and
+            # queueing it goes through the existing POST /api/fetch/enqueue,
+            # which is where the admission control for that already lives.
+            _offset, limit = parse_pagination_params(
+                None, request.args.get("limit"))
+            return jsonify(build_crosslist_search_payload(
+                request.args.get("q", ""), limit))
 
         @app.route("/api/filelists/bot/<nick>")
         def api_filelists_bot(nick):

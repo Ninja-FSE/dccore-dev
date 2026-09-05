@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **The dashboard now refuses an oversized request instead of reading it into memory.** Anything over 8MB — far more than any page here sends — is turned away before it is read, and the limit applies to the login page too. On a machine that is also sending files, memory the bot does not need to hold is memory transfers can use.
+
+- **Fixed: the cross-list filter found nothing at all.** It was storing every file under an empty name, so typing anything returned no matches from any list. It works now — and if you already had lists downloaded before this update, they are indexed automatically when the bot next starts, rather than staying invisible to the filter until you re-fetch each one by hand.
+
+- **Fixed: re-downloading a bot's list could leave the old copy searchable.** If you typed the nick with different capitalisation the second time, both copies stayed in the index, the stale one turned up in results, and nothing could clear it. Related: a bot whose name contains another's — `Bot` and `Bot-2` — could be credited with the other's matches.
+
+- **Fixed: the bot list reset itself every four seconds while you were using it.** The filter's highlighting, your scroll position and keyboard focus were all lost on each refresh. Typing quickly could also leave an earlier search's results on screen under a newer term.
+
+- **The List Browser now shows what you have already asked for.** A file you have requested is tagged **asked** while it is on its way and **have it** once it has arrived, so a long list does not leave you guessing whether you already queued something. A failed request is not tagged at all — the useful thing to do with one is ask again. Tags are per bot: two bots can hold a file of the same name, and asking one says nothing about the other.
+
+- **Fixed: filtering before picking a bot left you unable to queue anything.** Results appeared with no tick boxes and no folder buttons, because the page was deciding what you could request from whichever list was selected rather than from the results in front of you.
+
+- **Search every bot list you hold at once.** Type in the List Browser's filter box and matches from every list you have downloaded appear together, live as you type. Bots with nothing matching are crossed out in the sidebar, so you can see at a glance who has what. Click a bot while filtering to show or hide its results, or use “Show all lists” / “Show none”. Tick results from several different bots and queue them in one go. Two things worth knowing: the filter matches whole words and the beginnings of words, so typing the middle of a word will not find it (`@find` in the channel is unchanged); and the search index it needs is roughly as big again as the lists themselves, so ten large lists cost noticeably more disk than before. If the index is ever missing or damaged the filter simply stops working until your next fetch — nothing else is affected.
+
+- **The List Browser now shows every bot as a row with a coloured dot.** Green means the list you hold is still what that bot advertises, amber means theirs has changed since you downloaded it, red means you have not downloaded it at all, and grey means there is not enough to say either way. Bots you have only seen advertising in the channel are listed too — clicking one puts its nick in the fetch box rather than opening an empty table. Every dot also says what it means when you hover it, and the legend names all four, so the colour is never the only thing telling you.
+
+- **A hand-edited `data/known_bots.json` no longer breaks the List Browser.** One malformed entry in that file used to make the whole view fail to load, every time, until somebody found and fixed the file. A bad entry now costs its own row and nothing else — and that row comes back on its own within minutes, from the next advert that bot sends.
 - **Fixed: a file in your library whose name starts with your bot's name could never be sent.** Anything called, say, `Muzik-Collection.rar` when your list is named after `Muzik` was looked for among your list files instead of in your library — so it was advertised, counted, requested, and answered "file not found", every time, for ever.
 
 - **Fixed: some bot names and folder paths made the bot report an empty list.** If the name your lists are built under, or the folder you keep them in, happened to contain `-RAR-` or `-FULL-`, the bot skipped over its own list: `@find` answered "no list found" and your advert published 0 files while the list sat there complete.

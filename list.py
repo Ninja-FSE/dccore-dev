@@ -742,6 +742,18 @@ def entries_to_filelist_rows(entries, source):
             "format": ext,
             "source": source,
             "folder": folder,
+            # What we have already asked this bot for: "requested",
+            # "received", or "" for neither. Declared HERE, empty, rather
+            # than added by whichever payload happens to know - both this
+            # bot's own list and a fetched one go through this function
+            # precisely so the frontend sees one row shape, and a key present
+            # in one and absent in the other is how that stops being true.
+            #
+            # Always "" for our own list, which is correct rather than a
+            # placeholder: nothing is ever requested from ourselves.
+            # webserver.mark_rows_with_fetch_state() fills it in for the two
+            # payloads where the question means something.
+            "mark": "",
         })
     return rows
 

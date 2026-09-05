@@ -240,6 +240,59 @@ class TheScriptAndThePageAgree(unittest.TestCase):
 
 
 
+class HiddenActuallyHides(unittest.TestCase):
+    """`hidden` is not a class, it is an attribute, and the UA stylesheet
+    gives it `display: none` at the lowest specificity there is.
+
+    So ANY class rule that sets `display` on the same element outranks it, and
+    the element stays on screen while the markup, the script and the reviewer
+    all say it is hidden. `.filelists-filter-actions { display: flex }` did
+    exactly this: the row of buttons was visible from first paint, before
+    anything had been selected for them to act on.
+    """
+
+    @staticmethod
+    def classes_with_hidden():
+        """Every class on an element that carries the `hidden` attribute."""
+        html = read("index.html")
+        found = set()
+        for tag in re.findall(r"<[a-zA-Z][^>]*>", html):
+            if not re.search(r"[\s\"']hidden(?=[\s>=])", tag):
+                continue
+            match = re.search(r'class="([^"]*)"', tag)
+            if match:
+                found.update(match.group(1).split())
+        return found
+
+    @staticmethod
+    def sets_display(css, selector):
+        for block in re.findall(
+                re.escape(selector) + r"\s*\{([^}]*)\}", css):
+            if re.search(r"(?<![-\w])display\s*:", block):
+                return True
+        return False
+
+    def test_every_hideable_element_wins_against_its_own_display_rule(self):
+        css = strip_css_comments(read("style.css"))
+        for name in sorted(self.classes_with_hidden()):
+            if not self.sets_display(css, "." + name):
+                continue
+            with self.subTest(css_class=name):
+                self.assertTrue(
+                    self.sets_display(css, ".%s[hidden]" % name),
+                    "." + name + " sets display, so `hidden` on that element "
+                    "does nothing without a matching .%s[hidden] rule" % name)
+
+    def test_the_check_can_see_a_class_that_needs_the_pair(self):
+        """The guard is only worth having if something is actually in its
+        scope - an empty sweep passes for the wrong reason."""
+        css = strip_css_comments(read("style.css"))
+        needing = [n for n in self.classes_with_hidden()
+                   if self.sets_display(css, "." + n)]
+
+        self.assertTrue(needing, "nothing was examined")
+
+
 class RulesThatOverrideActuallyWin(unittest.TestCase):
     """A CSS rule can be present, well-formed, and still do nothing.
 

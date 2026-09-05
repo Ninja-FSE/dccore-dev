@@ -26,6 +26,11 @@
   // sync if either changes, so a page here always lines up with a page the
   // server actually hands back.
   var FILELISTS_PAGE_SIZE = 200;
+  // Short, because the query behind it is measured in single-digit
+  // milliseconds - the index exists so this can be a filter rather than a
+  // search button. It is not zero: a keystroke still costs a round trip, and
+  // a fast typist should not queue one per character.
+  var FILELISTS_FILTER_DEBOUNCE_MS = 120;
 
   var views = {
     search:    { title: "Search",     sub: "Find a file across the current master list." },
@@ -59,6 +64,20 @@
     // closed; open, it carries the row it will write back into.
     foldersBrowserEnabled: false, browse: null,
     active: "search", filelistsLoaded: false, filelistsSource: "__own__",
+    // The live filter term, and the token that decides whether a reply is
+    // still wanted. Typing fast enough puts several requests in flight, and
+    // the slowest is not necessarily the oldest.
+    filelistsFilter: "", filelistsFilterToken: 0,
+    // Which LOAD is allowed to render. Separate from filelistsFilterToken,
+    // which decides which debounced keystroke gets to send a request at all -
+    // two different questions, and conflating them is what let a stale reply
+    // through.
+    filelistsLoadToken: 0,
+    // Which bots the operator has switched OFF while filtering, and the last
+    // answer the server gave. Toggling re-renders from that answer rather
+    // than asking again: the rows are already here, and a round trip per
+    // click would be slower than the search that produced them.
+    filelistsExcluded: {}, filelistsFilterPayload: null,
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
     filelistsHistory: [],
     settingsLoaded: false, settingsCategories: [], settingsActiveCategory: null,
@@ -75,6 +94,12 @@
     searchBody:   document.getElementById("search-body"),
     queueBody:    document.getElementById("queue-body"),
     filelistsBody:document.getElementById("filelists-body"),
+    filelistsFilterInput: document.getElementById("filelists-filter-input"),
+    filelistsFilterClear: document.getElementById("filelists-filter-clear"),
+    filelistsFilterStatus: document.getElementById("filelists-filter-status"),
+    filelistsFilterActions: document.getElementById("filelists-filter-actions"),
+    filelistsFilterAll: document.getElementById("filelists-filter-all"),
+    filelistsFilterNone: document.getElementById("filelists-filter-none"),
     statSlots:    document.getElementById("stat-slots"),
     statFiles:    document.getElementById("stat-files"),
     statUsers:    document.getElementById("stat-users"),
@@ -95,7 +120,7 @@
     filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
     filelistsFreshness: document.getElementById("filelists-freshness"),
-    filelistsSourceSelect: document.getElementById("filelists-source-select"),
+    filelistsBotList: document.getElementById("filelists-bot-list"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
@@ -830,11 +855,65 @@
 
   // Switching which bot's list is shown ------------------------------------
 
-  el.filelistsSourceSelect.addEventListener("change", function () {
-    state.filelistsSource = el.filelistsSourceSelect.value;
+  // Delegated, because the rows are rebuilt on every poll - a listener per
+  // row would be re-attached each time, and the row the operator is aiming
+  // at can be replaced between the mousedown and the click.
+  el.filelistsBotList.addEventListener("click", function (evt) {
+    var row = evt.target.closest ? evt.target.closest(".bot-row") : null;
+    if (!row) { return; }
+
+    // A bot we have only seen advertising has no list to page through. Rather
+    // than switching to a source that would come back empty, put its nick
+    // where fetching one starts.
+    if (row.dataset.held === "no") {
+      el.filelistsFetchInput.value = row.dataset.bot;
+      el.filelistsFetchInput.focus();
+      showFilelistsFetchStatus("No list held for " + row.dataset.bot
+        + " yet. Press Fetch to ask for it.");
+      return;
+    }
+
+    // WHILE FILTERING the sidebar answers a different question, so the click
+    // does a different thing: the table is showing every list at once, so
+    // "switch to this one" has nothing to mean. Clicking toggles whether
+    // that bot's matches are on screen instead.
+    if ((state.filelistsFilter || "").trim() && row.dataset.bot !== "__own__") {
+      var key = String(row.dataset.bot || "").toLowerCase();
+      if (state.filelistsExcluded[key]) {
+        delete state.filelistsExcluded[key];
+      } else {
+        state.filelistsExcluded[key] = true;
+      }
+      rerenderFromFilterPayload();
+      return;
+    }
+
+    if (row.dataset.bot === state.filelistsSource) { return; }
+    state.filelistsSource = row.dataset.bot;
+    markFilelistsActiveBot();
     state.filelistsOffset = 0;
     state.filelistsHistory = [];
     loadFilelists();
+  });
+
+  el.filelistsFilterInput.addEventListener("input", function () {
+    state.filelistsFilter = el.filelistsFilterInput.value;
+    runFilelistsFilter();
+  });
+
+  el.filelistsFilterAll.addEventListener("click", function () {
+    setEveryListShown(true);
+  });
+
+  el.filelistsFilterNone.addEventListener("click", function () {
+    setEveryListShown(false);
+  });
+
+  el.filelistsFilterClear.addEventListener("click", function () {
+    el.filelistsFilterInput.value = "";
+    state.filelistsFilter = "";
+    runFilelistsFilter();
+    el.filelistsFilterInput.focus();
   });
 
   el.filelistsPrevBtn.addEventListener("click", function () {
@@ -869,32 +948,136 @@
     }).catch(function () { markConnection(false); });
   }
 
+  // BUILT WITH DOM APIs, not concatenated markup. A bot nick is remote input
+  // - it is whatever that bot called itself in a channel - and escapeHtml()
+  // does not encode a quote, so a nick in an attribute is the break-out this
+  // file already carries several comments about. createElement/textContent
+  // has no HTML-parsing step at all, and the nick is kept in .dataset rather
+  // than in the markup, the same way the file checkboxes carry theirs.
   function renderFilelistsSwitcher(rows) {
-    var select = el.filelistsSourceSelect;
+    // The bot list is rebuilt from scratch every FILELISTS_BOTS_POLL_MS, and
+    // everything the filter put on it lives in classes on those rows - so
+    // without the restore at the end of this function the greying, the
+    // crossed-out names and the operator's own switched-off choices all
+    // vanished four seconds after they appeared, repeatedly. The scroll
+    // position went with them, which on a channel with thirty-odd
+    // advertisers means the list jumps back to the top while being read.
+    var keptScroll = el.filelistsBotList.scrollTop;
+    var keptFocus = document.activeElement;
+    var refocusBot = (keptFocus && keptFocus.classList
+      && keptFocus.classList.contains("bot-row"))
+      ? keptFocus.dataset.bot : null;
+
+    var list = el.filelistsBotList;
     var previous = state.filelistsSource || "__own__";
 
-    select.innerHTML = "";
-    var ownOption = document.createElement("option");
-    ownOption.value = "__own__";
-    ownOption.textContent = "Our own list";
-    select.appendChild(ownOption);
-
     state.filelistsBots = {};
+    list.innerHTML = "";
+    list.appendChild(botRow({ bot: "__own__", label: "Our own list",
+                              held: true, freshness: "own" }));
+
     rows.forEach(function (row) {
       state.filelistsBots[row.bot] = row;
-      var opt = document.createElement("option");
-      opt.value = row.bot;
-      // The marker is in the text because this is a <select>, which cannot
-      // carry a coloured dot. #133's sidebar layout replaces it.
-      var marker = row.freshness === "changed" ? " \u2022 theirs changed" : "";
-      opt.textContent = row.bot + " (" + row.count + " files)" + marker;
-      select.appendChild(opt);
+      list.appendChild(botRow(row));
     });
 
-    var stillAvailable = previous === "__own__" ||
-      rows.some(function (row) { return row.bot === previous; });
-    select.value = stillAvailable ? previous : "__own__";
-    state.filelistsSource = select.value;
+    // A source that has gone - the bot dropped out of the registry, or its
+    // list was removed - falls back to our own rather than leaving the view
+    // pointed at nothing.
+    var stillThere = previous === "__own__" ||
+      rows.some(function (row) { return row.bot === previous && row.held; });
+    state.filelistsSource = stillThere ? previous : "__own__";
+    markFilelistsActiveBot();
+
+    // Put back what the rebuild just discarded.
+    if (state.filelistsFilterPayload) {
+      applyFilterHighlight(state.filelistsFilterPayload);
+    }
+    el.filelistsBotList.scrollTop = keptScroll;
+    if (refocusBot) {
+      // Found by WALKING the rows and comparing .dataset, not by building a
+      // selector with the nick in it. A nick is remote input, and this file's
+      // rule is that one never gets concatenated into anything that is then
+      // parsed. The XSS guards in test_webserver.py scan for a data attribute
+      // being opened in a concatenation and do not care whether the result is
+      // markup or a selector - which is the right amount of strict, and is
+      // why this walks instead.
+      var candidates = el.filelistsBotList.querySelectorAll(".bot-row");
+      for (var r = 0; r < candidates.length; r++) {
+        if (candidates[r].dataset.bot === refocusBot) {
+          candidates[r].focus();
+          break;
+        }
+      }
+    }
+  }
+
+  function botRow(row) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "bot-row";
+    button.dataset.bot = row.bot;
+    button.dataset.held = row.held ? "yes" : "no";
+
+    var led = document.createElement("span");
+    led.className = "led " + ledClass(row.freshness);
+    led.title = ledTitle(row.freshness);
+    button.appendChild(led);
+
+    var name = document.createElement("span");
+    name.className = "bot-row-name";
+    name.textContent = row.label || row.bot;
+    button.appendChild(name);
+
+    var count = document.createElement("span");
+    count.className = "bot-row-count";
+    // An em dash, not 0: a bot that published no count did not say, and
+    // saying zero would be a claim they never made.
+    count.textContent = row.count === undefined || row.count === null
+      ? "\u2014" : Number(row.count).toLocaleString();
+    button.appendChild(count);
+
+    if (!row.held && row.bot !== "__own__") {
+      button.title = "You have not downloaded this bot's list. " +
+        "Click to put its nick in the fetch box.";
+    }
+    return button;
+  }
+
+  function ledClass(freshness) {
+    if (freshness === "current" || freshness === "own") { return "is-current"; }
+    if (freshness === "changed") { return "is-changed"; }
+    if (freshness === "not_held") { return "is-not-held"; }
+    return "is-unknown";
+  }
+
+  function ledTitle(freshness) {
+    if (freshness === "changed") {
+      return "Their list has changed since you downloaded it";
+    }
+    if (freshness === "not_held") { return "Not downloaded"; }
+    if (freshness === "unknown") {
+      return "Cannot tell - we have not seen what they advertise, " +
+             "or they publish no date or count";
+    }
+    return "Current";
+  }
+
+  function markFilelistsActiveBot() {
+    var rows = el.filelistsBotList.querySelectorAll(".bot-row");
+    for (var i = 0; i < rows.length; i++) {
+      var active = rows[i].dataset.bot === state.filelistsSource;
+      rows[i].classList.toggle("is-active", active);
+      // aria-current, not aria-selected: these are ordinary buttons the
+      // operator tabs through, not the options of a listbox, and claiming
+      // the listbox role would promise arrow-key navigation we do not
+      // implement.
+      if (active) {
+        rows[i].setAttribute("aria-current", "true");
+      } else {
+        rows[i].removeAttribute("aria-current");
+      }
+    }
   }
 
   // Loading the table itself ------------------------------------------------
@@ -945,7 +1128,14 @@
       // clickable, and silently did nothing - one click, no request, no
       // message. Found by audit. A foreign list always has this group when
       // any of its rows sat above the first folder heading.
-      var fetchable = (state.filelistsSource || "__own__") !== "__own__"
+      // Same rule as the file rows below, and for the same reason: while
+      // FILTERING there is no single source, so asking whether the SELECTED
+      // one is another bot's list answers the wrong question. Every group in
+      // a filter result belongs to another bot by definition, and this
+      // suppressed the folder button on all of them.
+      var fetchable = ((state.filelistsFilter || "").trim()
+        ? true
+        : (state.filelistsSource || "__own__") !== "__own__")
         && !!group.folder;
       // data-folder-index is safe to string-concatenate: it is this group's
       // own position in the internal `groups` array (an internal loop
@@ -974,7 +1164,15 @@
       // A file is only fetchable when it belongs to someone ELSE's list -
       // browsing our own is direct filesystem access already, and
       // /api/fetch/enqueue exists to reach another bot over IRC, not this one.
-      var fetchable = (state.filelistsSource || "__own__") !== "__own__";
+      //
+      // While FILTERING there is no single source: the rows come from every
+      // list held, and every one of them is another bot's by definition. This
+      // asked only about the selected source, which defaults to our own list -
+      // so filtering before picking a bot rendered every result with no
+      // checkbox and no way to queue any of it.
+      var fetchable = (state.filelistsFilter || "").trim()
+        ? true
+        : (state.filelistsSource || "__own__") !== "__own__";
       var rows = entries.map(function (row) {
         // No data-bot/data-filename attribute here, and no bot/filename text
         // anywhere in this markup fragment: `row.source`/`row.title` come
@@ -989,9 +1187,22 @@
         var checkCell = fetchable
           ? "<td class=\"col-check\"><input type=\"checkbox\" class=\"filelists-check\"></td>"
           : "<td class=\"col-check\"></td>";
+        // Two states, never three: "requested" while it is still in
+        // flight, "received" once it has arrived, and nothing at all for a
+        // failed one - a failure is not a thing you have, and marking it
+        // would discourage the one useful action left, which is to ask
+        // again. The server decides which; this only renders it.
+        //
+        // escapeHtml() on the mark as well, even though it comes from a
+        // fixed set: the day it does not, this line should already be safe.
+        var mark = row.mark === "received" || row.mark === "requested"
+          ? " <span class=\"file-mark is-" + row.mark + "\">" +
+            escapeHtml(row.mark === "received" ? "have it" : "asked") +
+            "</span>"
+          : "";
         return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
           checkCell +
-          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + "</td>" +
+          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + mark + "</td>" +
           "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
           "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
           "<td class=\"col-dim col-mono\">" + escapeHtml(row.source) + "</td>" +
@@ -1143,7 +1354,12 @@
         var index = parseInt(button.dataset.folderIndex, 10);
         var group = groups[index];
         if (!group) { continue; }
-        button.dataset.bot = state.filelistsSource;
+        // The GROUP's bot when it has one. A cross-list filter shows
+        // groups from several bots at once, and state.filelistsSource is
+        // whichever list the sidebar has selected - not the one this folder
+        // came from. Requesting the right folder from the wrong bot is a
+        // request that cannot succeed.
+        button.dataset.bot = group.bot || state.filelistsSource;
         button.dataset.folder = group.folder;
       }
     }
@@ -1183,6 +1399,12 @@
           showFilelistsFetchStatus(
             "Queued " + res.data.created.length + " file(s) for fetch - see Queue → Downloads.", false);
           Array.prototype.forEach.call(checked, function (box) { box.checked = false; });
+          // Re-read the page so the rows just queued say so. The marks are
+          // stamped server-side when a page is built, so without this they
+          // would not appear until something else caused a reload - and the
+          // one moment an operator most wants to see "asked" is immediately
+          // after asking.
+          loadFilelists();
         }
         updateFilelistsDownloadSelectedState();
         loadDownloads();
@@ -1212,6 +1434,127 @@
   // webserver._freshness). "unknown" renders as nothing at all: a bot that
   // publishes no date, or one whose advert we have not seen, should show no
   // freshness claim rather than an invented one.
+  // Greys out the bots with nothing to show for the current term, and
+  // clears every mark again when the term goes. Driven by what the server
+  // said rather than by what came back in the page: the page is capped, so a
+  // bot whose matches all fall past the cap would look empty when it is not.
+  function applyFilterHighlight(payload) {
+    var rows = el.filelistsBotList.querySelectorAll(".bot-row");
+    var filtering = !!(state.filelistsFilter || "").trim();
+    var empty = {};
+    if (payload && Array.isArray(payload.empty)) {
+      payload.empty.forEach(function (name) { empty[String(name).toLowerCase()] = true; });
+    }
+    for (var i = 0; i < rows.length; i++) {
+      var bot = String(rows[i].dataset.bot || "").toLowerCase();
+      // Our own list is not one of the lists the filter searches - it covers
+      // lists FETCHED from other bots - so it is never greyed by it.
+      var dim = filtering && bot !== "__own__" && empty[bot] === true;
+      rows[i].classList.toggle("is-filtered-out", dim);
+      // Switched off BY THE OPERATOR, which is a different thing from having
+      // nothing to show and reads differently: one is an answer, the other is
+      // a choice, and the choice is reversible by clicking again.
+      rows[i].classList.toggle(
+        "is-excluded",
+        filtering && !!state.filelistsExcluded[bot]);
+    }
+
+    if (!filtering) {
+      el.filelistsFilterStatus.hidden = true;
+      el.filelistsFilterStatus.textContent = "";
+      return;
+    }
+    var files = (payload && payload.total_files) || 0;
+    var matched = (payload && payload.matched && payload.matched.length) || 0;
+    var text = files
+      ? files.toLocaleString() + (payload && payload.truncated ? "+" : "") +
+        " match" + (files === 1 ? "" : "es") + " in " + matched +
+        " list" + (matched === 1 ? "" : "s")
+      : "No matches in any list you hold";
+    if (payload && payload.truncated) {
+      text += " \u2014 showing the first " + files + ", narrow the term to see the rest";
+    }
+    el.filelistsFilterStatus.hidden = false;
+    el.filelistsFilterStatus.textContent = text;
+  }
+
+  // Every group the current answer holds, minus the bots switched off.
+  // Client-side on purpose: #133 calls the toggling trivial precisely because
+  // the rows are already in the browser, and re-asking the server for a
+  // narrower set would be slower than the search that fetched them.
+  function visibleFilterGroups(groups) {
+    if (!(state.filelistsFilter || "").trim()) { return groups; }
+    return groups.filter(function (group) {
+      return !state.filelistsExcluded[String(group.bot || "").toLowerCase()];
+    });
+  }
+
+  function renderFilelistGroups(allGroups, filtering) {
+    var groups = visibleFilterGroups(allGroups);
+    if (!groups.length) {
+      el.filelistsBody.innerHTML = emptyRow(5, filtering
+        ? (allGroups.length
+            ? "Every list with a match is switched off."
+            : "Nothing in any list you hold matches that.")
+        : "No files published yet.");
+      updateFilelistsDownloadSelectedState();
+      return;
+    }
+    el.filelistsBody.innerHTML = groups.map(function (group, index) {
+      return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
+    }).join("");
+    attachFilelistsCheckboxData(groups);
+    attachFilelistsFolderRarData(groups);
+    updateFilelistsDownloadSelectedState();
+  }
+
+  // Re-renders from the answer already held. Used by the sidebar toggle and
+  // by the two buttons, none of which change what MATCHES - only which of
+  // the matching lists is on screen.
+  function rerenderFromFilterPayload() {
+    var payload = state.filelistsFilterPayload;
+    if (!payload) { return; }
+    applyFilterHighlight(payload);
+    renderFilelistGroups(folderGroupsFrom(payload), true);
+  }
+
+  function setEveryListShown(shown) {
+    state.filelistsExcluded = {};
+    if (!shown) {
+      var payload = state.filelistsFilterPayload;
+      var names = (payload && payload.matched) || [];
+      names.forEach(function (name) {
+        state.filelistsExcluded[String(name).toLowerCase()] = true;
+      });
+    }
+    rerenderFromFilterPayload();
+  }
+
+  function runFilelistsFilter() {
+    // Every reply carries the token it was issued with, and only the newest
+    // is allowed to render. Typing fast puts several requests in flight and
+    // the slowest is not necessarily the oldest - without this, stopping
+    // typing can leave an earlier term's results on screen under the later
+    // term in the box.
+    state.filelistsFilterToken += 1;
+    var token = state.filelistsFilterToken;
+    var term = (state.filelistsFilter || "").trim();
+
+    el.filelistsFilterClear.hidden = !term;
+    el.filelistsFilterActions.hidden = !term;
+    // A new term is a new question, so nothing carries over: a bot switched
+    // off while looking for one thing should not be silently switched off
+    // while looking for the next.
+    state.filelistsExcluded = {};
+    state.filelistsOffset = 0;
+    state.filelistsHistory = [];
+
+    window.setTimeout(function () {
+      if (token !== state.filelistsFilterToken) { return; }
+      loadFilelists();
+    }, term ? FILELISTS_FILTER_DEBOUNCE_MS : 0);
+  }
+
   function renderFilelistsFreshness() {
     var banner = el.filelistsFreshness;
     if (!banner) { return; }
@@ -1239,38 +1582,61 @@
   }
 
   function loadFilelists() {
+      // THE REPLY's token, not the timer's. runFilelistsFilter() already had
+      // one and its comment claimed "only the newest is allowed to render" -
+      // but it was compared inside the debounce callback, BEFORE this
+      // function was even called, so it decided which request to send and
+      // nothing decided which reply to draw.
+      //
+      // Two requests are easily in flight at 120ms of debounce: a broad term
+      // is slow, one more character is narrow and fast, and the narrow reply
+      // arrives first. The broad one then lands and repaints the table and
+      // the sidebar under the later term still in the box - and because it
+      // also caches itself as filelistsFilterPayload, every later re-render
+      // keeps serving it until the next keystroke.
+      state.filelistsLoadToken += 1;
+      var loadToken = state.filelistsLoadToken;
+
       el.filelistsBody.innerHTML = emptyRow(5, "Loading…");
       var source = state.filelistsSource || "__own__";
       var offset = state.filelistsOffset || 0;
-      var base = (source === "__own__")
-        ? "/api/filelists"
-        : "/api/filelists/bot/" + encodeURIComponent(source);
-      var url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+      var filter = (state.filelistsFilter || "").trim();
+      var url;
+      if (filter) {
+        // The filter replaces the browse view rather than narrowing it: it
+        // spans every list held, so "which bot am I looking at" stops being
+        // the question while a term is set. The sidebar still shows which
+        // bots have matches - see applyFilterHighlight().
+        url = "/api/filelists/search?q=" + encodeURIComponent(filter);
+      } else {
+        var base = (source === "__own__")
+          ? "/api/filelists"
+          : "/api/filelists/bot/" + encodeURIComponent(source);
+        url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+      }
 
       fetchJson(url)
         .then(function (payload) {
           markConnection(true);
+          if (loadToken !== state.filelistsLoadToken) { return; }
           state.filelistsLoaded = true;
           var groups = folderGroupsFrom(payload);
+          applyFilterHighlight(payload);
           state.filelistsTotal = Array.isArray(payload)
             ? groups.length : (payload.total || 0);
           state.filelistsReturned = groups.length;
           renderFilelistsPager(Array.isArray(payload)
             ? payload.length : (payload.total_files || 0));
-          if (!groups.length) {
-            el.filelistsBody.innerHTML = emptyRow(5, "No files published yet.");
-            updateFilelistsDownloadSelectedState();
-            return;
-          }
-          el.filelistsBody.innerHTML = groups.map(function (group, index) {
-            return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
-          }).join("");
-          attachFilelistsCheckboxData(groups);
-          attachFilelistsFolderRarData(groups);
-          updateFilelistsDownloadSelectedState();
+          state.filelistsFilterPayload = filter ? payload : null;
+          renderFilelistGroups(groups, !!filter);
         })
         .catch(function (err) {
           markConnection(false);
+          // A superseded request failing is not this view's problem: the
+          // newer one is what the operator is waiting for, and painting an
+          // error over its results would be the same staleness bug wearing
+          // an error message.
+          if (loadToken !== state.filelistsLoadToken) { return; }
           el.filelistsBody.innerHTML = emptyRow(5, "Could not load file lists: " + err.message);
           updateFilelistsDownloadSelectedState();
         });

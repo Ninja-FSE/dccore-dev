@@ -787,7 +787,14 @@ def load_known_bots():
     try:
         with io.open(KNOWN_BOTS_FILE, "r", encoding="utf-8") as handle:
             loaded = json.load(handle)
-        return loaded if isinstance(loaded, dict) else {}
+        if not isinstance(loaded, dict):
+            return {}
+        # Every reader treats an entry as a mapping - irc.py copies it with
+        # dict(), webserver reads fields off it - so one malformed entry in a
+        # hand-edited file would raise in all of them rather than costing the
+        # "empty sidebar" this docstring promises. Adverts rebuild it.
+        return {key: value for key, value in loaded.items()
+                if isinstance(value, dict)}
     except Exception as err:
         print(f"[DB ERROR] Could not read the bot registry, starting empty: {err}")
         return {}

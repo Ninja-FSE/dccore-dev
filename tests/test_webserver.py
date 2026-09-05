@@ -1267,11 +1267,16 @@ class ListFetchRoutesTests(DCCoreTestCase):
         self.assertEqual(result["bot"], "GoodBot")
         rows = [r for g in result["folders"] for r in g["entries"]]
         self.assertEqual(rows[0]["title"], "A.flac")
-        # Exactly the row shape build_filelists_payload() uses for our own
-        # list - same five keys, nothing more, nothing less. "folder" joined
-        # them when the views became folder-grouped.
-        self.assertEqual(set(rows[0].keys()),
-                         {"title", "size", "format", "source", "folder"})
+        # Exactly the row shape our own list uses - nothing more, nothing
+        # less. DERIVED from list.entries_to_filelist_rows(), which is the one
+        # place that shape is defined, rather than restated here: this listed
+        # five keys by name and went stale the day a sixth was added, failing
+        # on a change that kept the property it exists to protect.
+        import list as list_mod
+        canonical = list_mod.entries_to_filelist_rows(
+            [{"filename": "A.flac", "size": "1MB", "folder": "F"}], "GoodBot")
+
+        self.assertEqual(set(rows[0].keys()), set(canonical[0].keys()))
         self.assertEqual(result["total"], 1, "one folder in this fixture")
         self.assertEqual(result["total_files"], 1)
         self.assertEqual(result["offset"], 0)
@@ -1789,9 +1794,32 @@ class FolderRarButtonTests(unittest.TestCase):
         self.assertNotIn('data-folder="', body)
 
     def test_attach_folder_rar_data_uses_dataset_assignment(self):
+        """The property, not the expression. A folder name is remote input -
+        it is whatever a foreign bot wrote in its own list - and escapeHtml()
+        does not encode a quote, so it must reach the DOM by assignment and
+        never through parsed markup.
+
+        This asserted the exact right-hand side until the cross-list filter
+        made it `group.bot || state.filelistsSource`, and failed on a change
+        that altered nothing it exists to protect."""
         body = self._extract_function("attachFilelistsFolderRarData")
-        self.assertIn(".dataset.bot = state.filelistsSource", body)
+
+        self.assertIn(".dataset.bot =", body)
         self.assertIn(".dataset.folder = group.folder", body)
+        for unsafe in ("innerHTML", "insertAdjacentHTML", "outerHTML",
+                       'data-bot="', 'data-folder="'):
+            with self.subTest(unsafe=unsafe):
+                self.assertNotIn(unsafe, body)
+
+    def test_the_folder_rar_button_prefers_its_own_group_s_bot(self):
+        """A cross-list filter shows folders from several bots at once, so
+        the selected source is not necessarily the bot a given folder came
+        from. Taking the source would send the right folder to the wrong bot -
+        a request that cannot succeed and reads as the feature being broken."""
+        body = self._extract_function("attachFilelistsFolderRarData")
+
+        self.assertIn("group.bot ||", body,
+                      "the folder request ignores which bot the folder is from")
 
     def test_attach_folder_rar_data_is_called_alongside_the_checkbox_attach(self):
         """Per the brief: wired in right alongside attachFilelistsCheckboxData(),
@@ -1885,11 +1913,27 @@ class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
         self.assertNotIn("innerHTML +=", body)
         self.assertNotIn("innerHTML +", body)
 
-    def test_filelists_switcher_options_are_built_via_dom_apis(self):
-        body = self._extract_function("renderFilelistsSwitcher")
-        self.assertIn(".textContent = row.bot", body)
-        self.assertNotIn("innerHTML +=", body)
-        self.assertNotIn("innerHTML +", body)
+    def test_the_bot_rows_are_built_via_dom_apis(self):
+        """A nick is whatever that bot called itself in a channel, and it
+        reaches this row through two paths now - a list we hold, and an advert
+        from a bot we hold nothing for. Neither may be parsed as markup.
+
+        The nick must arrive at the DOM only through .textContent or
+        .dataset: both assign, neither parses. Asserting the property rather
+        than one expression, because the expression moved once already."""
+        body = self._extract_function("botRow")
+
+        self.assertNotIn("innerHTML", body)
+        self.assertNotIn("insertAdjacentHTML", body)
+        self.assertNotIn("outerHTML", body)
+
+        # Every place the nick is written down.
+        for sink in [line for line in body.splitlines()
+                     if "row.bot" in line and "//" not in line]:
+            self.assertTrue(
+                ".textContent" in sink or ".dataset." in sink
+                or 'row.bot !== "__own__"' in sink,
+                f"a nick reaches the DOM by some other route: {sink.strip()}")
 
     def test_no_new_attribute_built_via_string_concatenated_innerhtml(self):
         """Bot nicks and filenames from the Download tab / File Lists fetch
@@ -1961,13 +2005,75 @@ class FilelistsPaginationJsRegressionTests(unittest.TestCase):
         self.assertIn('el.filelistsNextBtn.addEventListener("click"', self.source)
 
     def test_switching_bot_source_resets_to_the_first_page(self):
-        start = self.source.index('el.filelistsSourceSelect.addEventListener("change"')
-        body = self.source[start:start + 300]
+        """Offset 40 of the previous bot's list is not a page of this one.
+
+        The handler is brace-matched rather than sliced to a fixed width: it
+        was 1200 characters when this was written and outgrew that the moment
+        the filter's toggling was added, failing on a change that altered
+        nothing it tests."""
+        start = self.source.index('el.filelistsBotList.addEventListener("click"')
+        depth = 0
+        body = None
+        for i in range(self.source.index("{", start), len(self.source)):
+            if self.source[i] == "{":
+                depth += 1
+            elif self.source[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    body = self.source[start:i + 1]
+                    break
+        self.assertIsNotNone(body, "unbalanced braces in the click handler")
+
         self.assertIn("state.filelistsOffset = 0", body)
+        self.assertIn("state.filelistsHistory = []", body)
 
     def test_load_filelists_requests_offset_and_limit_query_params(self):
         body = self._extract_function("loadFilelists")
         self.assertIn('"?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE', body)
+
+
+class FilelistsFetchableRegressionTests(unittest.TestCase):
+    """A row only gets a checkbox when it is somebody ELSE's file - browsing
+    our own list is filesystem access already, and /api/fetch/enqueue exists
+    to reach another bot.
+
+    That test asked only about the SELECTED SOURCE, which defaults to our own
+    list. The cross-list filter has no single source: its rows come from every
+    list held and every one belongs to another bot - so filtering before
+    picking a bot rendered every result with no checkbox and no way to queue
+    any of it, which is the whole point of finding them.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"),
+                  encoding="utf-8") as handle:
+            cls.source = handle.read()
+
+    def test_a_filtered_row_is_fetchable_without_choosing_a_source(self):
+        """EVERY such decision, derived rather than the first one found.
+
+        There are two - the file row's checkbox and the folder's !rar button -
+        and they had the same defect. A test that sliced from the first
+        occurrence checked one and reported on the other, so it failed while
+        pointing at code that was already fixed."""
+        clauses = []
+        start = 0
+        while True:
+            found = self.source.find("var fetchable =", start)
+            if found == -1:
+                break
+            clauses.append(self.source[found:self.source.index(";", found)])
+            start = found + 1
+
+        self.assertEqual(len(clauses), 2,
+                         "a third fetchable decision appeared; it needs the "
+                         "same rule or its own reason not to")
+        for clause in clauses:
+            with self.subTest(clause=clause.splitlines()[0]):
+                self.assertIn("state.filelistsFilter", clause,
+                              "a cross-list result is only fetchable when a "
+                              "bot happens to be selected")
 
 
 class OptionalFlaskDependencyTests(unittest.TestCase):

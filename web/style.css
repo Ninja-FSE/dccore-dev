@@ -804,24 +804,180 @@ html, body {
   font-size: 13px;
 }
 
-.filelists-switcher {
+.filelists-filter {
   display: flex;
+  gap: 10px;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  color: var(--text-dim);
+  margin-bottom: 6px;
 }
 
-.filelists-switcher select {
+.filelists-filter .search-input {
+  flex: 1;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.filelists-filter-status {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A bot with nothing matching the current filter. Dimmed rather than hidden:
+   the sidebar is also the answer to "who has this", and a row that vanished
+   would take that answer with it. */
+.bot-row.is-filtered-out {
+  opacity: 0.4;
+}
+
+/* Switched off by the operator, not by the search. Kept visually distinct
+   from is-filtered-out: one says "this list has nothing", the other says
+   "you asked me to hide this one", and clicking again undoes only the
+   second. */
+.bot-row.is-excluded {
+  opacity: 0.55;
+  border-style: dashed;
+  border-color: var(--border);
+}
+
+.bot-row.is-excluded .bot-row-count { visibility: hidden; }
+
+/* What has already been asked of this bot. Deliberately quiet: it is an
+   annotation on a row, not a status of its own, and the table is read by
+   scanning filenames. */
+.file-mark {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.file-mark.is-requested {
+  color: var(--status-queued);
+  border: 1px solid var(--status-queued);
+}
+
+.file-mark.is-received {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+/* `display` and `hidden` on the same element: the attribute sets
+   `display: none` from the UA stylesheet, which ANY class rule outranks, so
+   the row of buttons showed while the markup said it was hidden. Every
+   element in here that carries `hidden` needs this pair. */
+.filelists-filter-actions[hidden] {
+  display: none;
+}
+
+.filelists-filter-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.bot-row.is-filtered-out .bot-row-name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Whose list to show. Capped and scrolling rather than growing without
+   limit: this holds a row for every bot seen advertising, and one channel in
+   the capture #133 was written from had thirty-two of them. Six rows is
+   roughly where the table below still starts above the fold. */
+.bot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 216px;
+  overflow-y: auto;
+  padding: 6px;
+  margin-bottom: 8px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.bot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 13px;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  outline: none;
+  text-align: left;
+  cursor: pointer;
 }
+
+.bot-row:hover { background: var(--bg-raised); }
+
+.bot-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.bot-row.is-active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A bot with no list held is still worth showing - that is what the red dot
+   is for - but it reads as unavailable rather than as somewhere to go. */
+.bot-row[data-held="no"] .bot-row-name { color: var(--text-dim); }
+
+.bot-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-row-count {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dot is never the only carrier of the state: every one has a title, the
+   row that cannot be browsed is dimmed, and the legend below names all four
+   in words. Colour alone would leave the distinction invisible to about one
+   man in twelve. */
+.led {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: var(--status-empty);
+}
+
+.led.is-current  { background: var(--accent); }
+.led.is-changed  { background: var(--status-frozen); }
+.led.is-not-held { background: var(--danger); }
+.led.is-unknown  { background: var(--status-empty); }
+
+.bot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.bot-legend span { display: flex; align-items: center; gap: 6px; }
 
 .filelists-pager {
   display: flex;

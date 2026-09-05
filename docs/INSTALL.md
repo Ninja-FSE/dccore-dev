@@ -54,6 +54,10 @@ Three things are deliberately *not* required:
 - **`SERVER`** and **`DEBUG_CHANNEL`** — their shipped values are already right for almost every install, so requiring them would only make you retype something correct. `DEBUG_CHANNEL` ships blank, and blank means no debug channel is joined.
 - **`FILE_DIRECTORY`** — requiring it would block the daemon from reaching the dashboard, which is the easiest place to set it. A blank one warns, at the pre-flight check and again at boot, and the bot serves nothing until it has one.
 
+### Disk the dashboard uses
+
+The List Browser's filter searches every bot list you have downloaded at once, which needs a search index at `data/list_index.db`. It is built as each list is fetched and is roughly the size of the lists again — ten large lists can mean several hundred megabytes. `LIST_INDEX_FILE` moves it. Deleting it is safe: the filter stops working until the next fetch rebuilds it, and nothing else uses it.
+
 ## Check before you start
 
 Verify the setup without connecting to IRC. This catches the mistakes that actually cause trouble — most often a music directory that is set but does not exist:
