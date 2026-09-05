@@ -190,6 +190,12 @@ FETCH_ENQUEUE_MAX_ITEMS = 500
 # library.problems() cannot be turned into a way to occupy the process.
 MAX_SERVED_FOLDERS = 64
 
+# One directory listing. A music library's top level can hold thousands of
+# artist folders, and every one of them would be rendered into a panel nobody
+# can scroll usefully - so the listing is capped and SAYS it was capped, which
+# is the part that stops an operator concluding a folder is missing.
+FOLDER_BROWSE_MAX_ENTRIES = 500
+
 
 def reject_if_unsafe_for_irc_line(value, field_name, max_len=IRC_LINE_FIELD_MAX_LEN):
     """Return an error string if `value` is not safe to interpolate into an
@@ -1196,7 +1202,8 @@ SETTINGS_CATEGORIES = (
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
-                                                "WEBUI_CONSOLE_ENABLED"]),
+                                                "WEBUI_CONSOLE_ENABLED",
+                                                "WEBUI_FOLDER_BROWSER_ENABLED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE",
                                                 "PROJECT_URL"]),
 )
@@ -1285,6 +1292,7 @@ SETTINGS_LABELS = {
     "WEBUI_ENABLED": "Enable web dashboard",
     "WEBUI_HOST": "Host",
     "WEBUI_PORT": "Port",
+    "WEBUI_FOLDER_BROWSER_ENABLED": "Folder picker on the Settings page",
     "WEBUI_CONSOLE_ENABLED": "Enable the Console page (remote admin)",
 
     "DEBUG_MODE": "Debug mode",
@@ -1436,6 +1444,92 @@ def build_folders_payload():
         "source": source,
         "file_directory": single,
         "path": library.folders_file(),
+        # So the page can offer a Browse button, or say plainly why there
+        # isn't one, instead of the operator wondering.
+        "browser_enabled": bool(getattr(config, "WEBUI_FOLDER_BROWSER_ENABLED",
+                                        False)),
+    }
+
+
+def browse_roots():
+    """The top of the tree: drive letters on Windows, "/" everywhere else.
+
+    Probed rather than assumed. A machine has the drives it has, and a letter
+    that is mapped but disconnected raises rather than answering, which is why
+    each one is tested individually and a failure just leaves it out.
+    """
+    if not platform_compat.IS_WINDOWS:
+        return ["/"]
+
+    found = []
+    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        root = f"{letter}:\\"
+        try:
+            if os.path.isdir(platform_compat.long_path(root)):
+                found.append(root)
+        except OSError:
+            continue
+    return found
+
+
+def build_folder_browse_payload(raw_path):
+    """GET /api/folders/browse: the immediate SUBDIRECTORIES of `raw_path`.
+
+    DIRECTORIES ONLY, NEVER FILES. The caller is choosing a folder to serve;
+    listing files would expose far more of the machine and answer nothing the
+    picker asks. This is also why there are no sizes, no timestamps and no
+    contents anywhere in the payload - a name and whether it can be opened is
+    the whole of what a picker needs.
+
+    An empty path means the top of the tree rather than the working directory,
+    because "where does the operator start" has no sensible relative answer.
+
+    Every entry is tested individually and a failure drops that entry rather
+    than the listing: a directory holding one item the daemon may not stat -
+    a system folder, a dead symlink, a disconnected network mount - must still
+    list the other forty.
+    """
+    target = str(raw_path or "").strip()
+    roots = browse_roots()
+
+    if not target:
+        return {"path": "", "parent": None, "at_root": True,
+                "entries": [{"name": root, "path": root} for root in roots],
+                "truncated": False}
+
+    target = os.path.abspath(target)
+    if not os.path.isdir(platform_compat.long_path(target)):
+        return {"error": f"{target} is not a folder on this machine."}
+
+    names = []
+    try:
+        with os.scandir(platform_compat.long_path(target)) as scan:
+            for entry in scan:
+                try:
+                    if entry.is_dir():
+                        names.append(entry.name)
+                except OSError:
+                    continue
+    except OSError as err:
+        return {"error": f"Could not read {target}: {err}"}
+
+    names.sort(key=str.lower)
+    truncated = len(names) > FOLDER_BROWSE_MAX_ENTRIES
+    names = names[:FOLDER_BROWSE_MAX_ENTRIES]
+
+    parent = os.path.dirname(target.rstrip(os.sep)) or None
+    # At a drive root, dirname() answers the drive itself and the operator
+    # would climb to where they already are. "" sends them to the root list.
+    if parent == target or target in roots:
+        parent = ""
+
+    return {
+        "path": target,
+        "parent": parent,
+        "at_root": False,
+        "entries": [{"name": name, "path": os.path.join(target, name)}
+                    for name in names],
+        "truncated": truncated,
     }
 
 
@@ -2007,6 +2101,20 @@ if HAVE_FLASK:
         @app.route("/api/folders")
         def api_folders():
             return jsonify(build_folders_payload())
+
+        # 404 rather than 403 when it is off, for the reason the console
+        # routes give: 403 confirms the route exists and is merely disabled,
+        # which tells anyone probing that this build has one worth returning
+        # for.
+        def _browser_is_available():
+            return bool(getattr(config, "WEBUI_FOLDER_BROWSER_ENABLED", False))
+
+        @app.route("/api/folders/browse")
+        def api_folders_browse():
+            if not _browser_is_available():
+                return jsonify({"error": "not found"}), 404
+            payload = build_folder_browse_payload(request.args.get("path", ""))
+            return jsonify(payload), (400 if "error" in payload else 200)
 
         @app.route("/api/folders", methods=["POST"])
         def api_folders_save():

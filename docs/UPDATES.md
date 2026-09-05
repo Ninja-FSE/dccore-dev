@@ -4,6 +4,36 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ A folder picker for the Settings page (#164 step 5 - the last one)
+
+**Four defects in this feature were found by the full-program audit before it merged**, which is why it was held back:
+
+- **The editor's CSS class names collided with the File Lists table.** `app.js` has built `<tr class="folder-row">` with a `<span class="folder-name">` for that table since long before the folder editor existed, and `.folder-row { display: flex }` is a global rule - so styling the editor turned the File Lists folder headings into flex boxes. The editor's own classes are prefixed `served-` now; the older markup keeps the names it had first.
+- **The picker wrote the chosen path into whichever row now sat at the index it opened on.** The panel stays open while the rows behind it can be added to, removed and reordered, and every one of those renumbers the draft. It holds the row OBJECT now, with a check that the row is still in the draft before writing - a reference survives reordering but not removal, and writing into an orphaned object would look like it worked while changing nothing.
+- **Every browse error reached the operator as "HTTP 400".** `fetchJson()` turns a non-2xx into `throw new Error("HTTP " + status)`, discarding the JSON body - so the sentence the route is built to produce ("... is not a folder on this machine") could never be displayed. `fetchJsonAllowingError()` takes the same posture `postJson()` already did.
+- And one the fix itself introduced: renaming the markup attribute to `data-served-folder-index` did not rename the three readers, which said `dataset.folderIndex` - a literal the rename could not match. `parseInt(undefined)` is `NaN`, and every row button silently stopped working. **A file-wide pairing check passes straight through that**, because the File Lists table legitimately emits `data-folder-index` and reads `dataset.folderIndex`; only a check scoped to the editor sees it. There is one now.
+
+Three of the four are invisible to every existing test, because nothing in this project executes JavaScript.
+
+The issue puts this last and on its own *"given the exposure"*, and that is the whole design question: the listing itself is twenty lines.
+
+**What it grants that nothing else did.** An authenticated dashboard session can list the NAMES of directories on the machine the daemon runs on, anywhere it can read - not only under the served folders, because the point is to find a folder that is not served yet. Never files, never contents, never sizes or timestamps: a name, and whether it can be opened, is the whole of what a picker needs.
+
+Without it the same session can already **probe** a path - saving a folder answers "not a folder on this machine" - which tells you about one path you already guessed. **Enumeration is different in kind**, so `WEBUI_FOLDER_BROWSER_ENABLED` ships **off** and is an explicit yes.
+
+**Why its own switch and not the console's.** Suggested during review: gate it on `WEBUI_CONSOLE_ENABLED`, so turning the web console on also turns the picker on and nobody grows a second setting. Rejected, because the console is strictly the more dangerous of the two - it runs `ban`, `clearqueue`, `rehash` and `update`. Gating the weaker feature behind the stronger one means an operator who wants a folder picker, and specifically does *not* want a web admin console, has to enable the console to get it: **more risk accepted to obtain less capability**. `defaults.py` states the rule three lines above the console's own switch - "an admin surface reachable from a weaker path gets its own switch and a written reason for its default" - and this is that.
+
+The cost of leaving it off is typing a path instead of clicking one; the folder rows from step 4 work either way, and the page says so rather than leaving an operator to wonder where the button is.
+
+**404 rather than 403 when it is off**, for the reason the console routes already give: 403 confirms the route exists and is merely disabled, which tells anyone probing that this build has one worth returning for.
+
+**No path is ever put in an HTML attribute.** A directory name on Linux may contain a double quote, and `escapeHtml()` is `textContent -> innerHTML`, which does not encode one. Browse entries are addressed by their **index** into `state.browse.entries` and the handler looks the path up from there - the same rule the folder rows and the file lists already follow, and there is a test that keeps it that way.
+
+Listings are capped at `FOLDER_BROWSE_MAX_ENTRIES` and **say they were capped**: a library's top level can hold thousands of artist folders, and silently showing the first few hundred reads as "that folder is missing". Every entry is tested individually so one item the daemon cannot stat - a system folder, a dead symlink, a disconnected mount - drops that entry rather than the whole listing.
+
+A mutation found one weak test, again: dropping the `isdir()` check still fails, because `scandir()` raises and the handler catches it. What the check buys is the **message** - "not a folder on this machine" rather than "[WinError 267] The directory name is invalid", which is an OS string and localised into whatever language the machine runs in. The test pins the sentence now.
+
+**#164 is complete with this.** All five steps of its order of work have landed.
 ### 🚨 A served folder that is a drive root refused every file under it
 `dcc.is_safe_path()` and `library.is_inside()` both compared with `path.startswith(base + os.sep)` - and `os.path.realpath("D:\\")` is `"D:\\"`, which already ends in a separator. So that built `"D:\\\\"`, a doubled separator no real path can start with, and **every file on a drive served whole was refused**.
 

@@ -1399,32 +1399,32 @@ html, body {
 /* same tokens as every other control here, so it follows the theme    */
 /* toggle and both prefers-color-scheme states without its own rules.  */
 /* ------------------------------------------------------------------ */
-.folder-section {
+.served-folder-section {
   padding-bottom: 22px;
   margin-bottom: 18px;
   border-bottom: 1px solid var(--border-soft);
 }
 
-.folder-summary {
+.served-folder-summary {
   color: var(--text-dim);
   font-size: 13px;
   margin: 0 0 14px;
   max-width: 68ch;
 }
 
-.folder-rows {
+.served-folder-rows {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.folder-row {
+.served-folder-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.folder-row input {
+.served-folder-row input {
   background: var(--bg-inset);
   border: 1px solid var(--border);
   color: var(--text);
@@ -1434,16 +1434,16 @@ html, body {
   min-width: 0;          /* or a long path stretches the row past the panel */
 }
 
-.folder-row input:focus {
+.served-folder-row input:focus {
   border-color: var(--accent);
   outline: none;
 }
 
 /* The label is one word; the path is everything else. */
-.folder-row .folder-name { flex: 0 0 160px; }
-.folder-row .folder-path { flex: 1 1 auto; }
+.served-folder-row .served-folder-name { flex: 0 0 160px; }
+.served-folder-row .served-folder-path { flex: 1 1 auto; }
 
-.folder-btn {
+.served-folder-btn {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -1453,35 +1453,90 @@ html, body {
   padding: 8px 10px;
 }
 
-.folder-btn:hover {
+.served-folder-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.folder-btn:focus-visible {
+.served-folder-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.folder-actions {
+.served-folder-actions {
   display: flex;
   gap: 10px;
   padding-top: 14px;
 }
 
-.folder-note {
+.served-folder-note {
   font-size: 13px;
   line-height: 1.6;
   margin: 14px 0 0;
   max-width: 68ch;
 }
 
-.folder-note.is-ok    { color: var(--accent); }
-.folder-note.is-error { color: var(--danger); }
+.served-folder-note.is-ok    { color: var(--accent); }
+.served-folder-note.is-error { color: var(--danger); }
 
 @media (max-width: 720px) {
   /* A path field 160px wide is unusable; stack instead. */
-  .folder-row { flex-wrap: wrap; }
-  .folder-row .folder-name { flex: 1 1 100%; }
-  .folder-row .folder-path { flex: 1 1 100%; }
+  .served-folder-row { flex-wrap: wrap; }
+  .served-folder-row .served-folder-name { flex: 1 1 100%; }
+  .served-folder-row .served-folder-path { flex: 1 1 100%; }
 }
+
+/* The folder picker (#164 step 5). Same tokens as the rows above it. */
+.browse-panel {
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.browse-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+}
+
+.browse-where {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;   /* a deep path must wrap, not widen the panel */
+}
+
+.browse-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.browse-entry {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 5px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.browse-entry:hover { background: var(--accent-dim); color: var(--accent); }
+.browse-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.browse-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 10px 0 0;
+}
+
+.browse-actions { padding-top: 12px; }
