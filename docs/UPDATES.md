@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛑 The counter migration can no longer stop the daemon booting
+Found by the full-program audit, in code merged the same day. `migrate_download_counts_to_labels()` merged a legacy row onto its labelled key with
+
+```python
+if new_key in counts:
+    counts[new_key]["count"] = int(counts[new_key].get("count", 0)) + ...
+```
+
+which is an `AttributeError` the moment the value already sitting under that key is not a dict - a hand-edit, a half-restored backup, a truncated write. It runs from `oserve.startup()`, so **the whole daemon refused to boot** over one bad line in a file whose own loader is written to shrug off corruption. `load_download_counts()` states the posture two functions up: losing these counters "is a cosmetic failure - which is exactly why it must not be a loud one". A migration that raises is a louder failure than the thing it was migrating.
+
+Two changes. The merge now checks `isinstance(existing, dict)` and, where it is not, keeps the legacy row - that one came through the type check above and is real data; whatever was there did not. And the whole migration is wrapped, so anything a future edit gets wrong in it leaves the counters untouched and the daemon running.
+
 ### 📊 The download counters name their folder (#164's last cost-table row)
 The one place #164's own cost table listed that steps 1-4 never came back to:
 

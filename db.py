@@ -548,7 +548,30 @@ def load_download_counts():
 
 
 def migrate_download_counts_to_labels():
-    """Carry existing counters onto the labelled key, once.
+    """Carry existing counters onto the labelled key, once - and never at the
+    cost of the daemon starting.
+
+    The wrapper is not decoration. This runs from oserve.startup(), and
+    load_download_counts() two functions up states the posture every other
+    reader of this file keeps: "a file that will not parse costs an empty
+    'most downloaded' table, not a refusal to start. These counters describe
+    history and nothing else reads them, so losing them is a cosmetic failure
+    - which is exactly why it must not be a loud one."
+
+    A migration that raises is a louder failure than the thing it was
+    migrating. Found by audit: one non-dict value under a key a legacy row
+    migrated onto raised AttributeError and the bot would not boot.
+    """
+    try:
+        return _migrate_download_counts_to_labels()
+    except Exception as err:                              # noqa: BLE001
+        print(f"[DB ERROR] Could not migrate the download counters: {err}. "
+              f"They are left exactly as they were, and the daemon carries on.")
+        return 0
+
+
+def _migrate_download_counts_to_labels():
+    """The migration itself.
 
     Returns how many rows moved, for the caller's log and for the tests.
 
@@ -597,15 +620,26 @@ def migrate_download_counts_to_labels():
 
         for old_key, new_key in moves.items():
             row = counts.pop(old_key)
-            if new_key in counts:
+            existing = counts.get(new_key)
+            if isinstance(existing, dict):
                 # Both spellings present: add rather than let one win, because
                 # either way round would discard real downloads.
                 try:
-                    counts[new_key]["count"] = (int(counts[new_key].get("count", 0))
-                                                + int(row.get("count", 0)))
+                    existing["count"] = (int(existing.get("count", 0))
+                                         + int(row.get("count", 0)))
                 except (TypeError, ValueError):
-                    pass
+                    existing["count"] = row.get("count", 0)
             else:
+                # Either nothing was there, or what was there is not a row
+                # anything in this file wrote - a hand-edit, or a half-restored
+                # backup. `row` came through the isinstance check above and is
+                # real data; that is not. Keep the real one.
+                #
+                # This used to be `if new_key in counts:` followed by
+                # counts[new_key].get(...), which is an AttributeError the
+                # moment the existing value is a string. That ran at STARTUP,
+                # so the whole daemon refused to boot over one bad line in a
+                # file whose own loader is written to shrug off corruption.
                 counts[new_key] = row
 
         try:

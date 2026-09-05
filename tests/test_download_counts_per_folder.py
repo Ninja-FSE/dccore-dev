@@ -286,5 +286,86 @@ class TheMigrationRunsAtStartup(unittest.TestCase):
                       "nothing increments again")
 
 
+class TheMigrationCannotStopTheDaemonBooting(CounterTestCase):
+    """It runs from oserve.startup(), so anything it raises is a bot that will
+    not start - over a file whose own loader is written to shrug off
+    corruption. load_download_counts() states the posture: losing these
+    counters "is a cosmetic failure - which is exactly why it must not be a
+    loud one".
+
+    Found by audit. The merge branch read counts[new_key].get(...) after only
+    checking `new_key in counts`, which is an AttributeError the moment the
+    value sitting there is not a dict.
+    """
+
+    def test_a_non_dict_row_under_the_target_key_does_not_raise(self):
+        """The exact defect: a legacy row migrates ONTO a key whose existing
+        value is a string."""
+        self.set_folders(("Flac", self.flac))
+        bare = os.path.join("Artist", "Song.flac")
+        labelled = os.path.join("Flac", "Artist", "Song.flac")
+        self.write_counts({
+            bare: {"name": "Song.flac", "kind": "file", "count": 4},
+            labelled: "corrupted-not-a-dict",
+        })
+
+        moved = db.migrate_download_counts_to_labels()
+
+        self.assertEqual(moved, 1)
+
+    def test_the_real_row_survives_the_corrupt_one(self):
+        """`row` came through the isinstance check and is real data; whatever
+        was sitting under the target key did not."""
+        self.set_folders(("Flac", self.flac))
+        bare = os.path.join("Artist", "Song.flac")
+        labelled = os.path.join("Flac", "Artist", "Song.flac")
+        self.write_counts({
+            bare: {"name": "Song.flac", "kind": "file", "count": 4},
+            labelled: "corrupted-not-a-dict",
+        })
+
+        db.migrate_download_counts_to_labels()
+
+        self.assertEqual(db.load_download_counts()[labelled]["count"], 4)
+
+    def test_every_shape_of_junk_under_the_target_key(self):
+        for junk in ("string", 12, None, [], [1, 2], True):
+            with self.subTest(junk=junk):
+                self.set_folders(("Flac", self.flac))
+                bare = os.path.join("Artist", "Song.flac")
+                labelled = os.path.join("Flac", "Artist", "Song.flac")
+                self.write_counts({
+                    bare: {"name": "Song.flac", "kind": "file", "count": 4},
+                    labelled: junk,
+                })
+
+                db.migrate_download_counts_to_labels()
+
+    def test_a_count_that_is_not_a_number_does_not_lose_the_row(self):
+        self.set_folders(("Flac", self.flac))
+        bare = os.path.join("Artist", "Song.flac")
+        labelled = os.path.join("Flac", "Artist", "Song.flac")
+        self.write_counts({
+            bare: {"name": "Song.flac", "kind": "file", "count": 9},
+            labelled: {"name": "Song.flac", "kind": "file", "count": "lots"},
+        })
+
+        db.migrate_download_counts_to_labels()
+
+        # The legacy row's real count wins over the unusable one, rather than
+        # the row merely surviving with "lots" still in it.
+        self.assertEqual(db.load_download_counts()[labelled]["count"], 9)
+
+    def test_anything_that_still_escapes_is_caught_and_reported(self):
+        """The backstop. Whatever a future edit gets wrong in here, the daemon
+        still boots and the counters are left as they were."""
+        original = db._migrate_download_counts_to_labels
+        db._migrate_download_counts_to_labels = lambda: 1 / 0
+        self.addCleanup(setattr, db, "_migrate_download_counts_to_labels",
+                        original)
+
+        self.assertEqual(db.migrate_download_counts_to_labels(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
