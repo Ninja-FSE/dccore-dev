@@ -5,6 +5,7 @@
 - **Asking for your list from AutoQ's menu now works.** Its "Get Listfile" button sends `@yourbot` with a small tag added on the end, and the bot only answered a bare `@yourbot` — so it stayed silent, which looks exactly like a bot that is down. It answers now. Note "Que Status" in the same menu still does not work: it sends `yourbot-que` without the `@`, and `@yourbot-que` typed by hand is the form the bot reads.
 
 - **If your users queue with AutoQ, check their mIRC accept list.** AutoQ silently drops any list row whose file type is not in mIRC's own accept list, and it only adds `*.mp3` and `*.rar` itself. Now that lists carry every file type, a `.flac` or `.mkv` row pasted into a queue just vanishes with nothing said. [INSTALL.md](docs/INSTALL.md) has the setting to change.
+- **Expired bans are cleared even if the person never comes back.** A timed ban used to be forgotten only when that same nick asked for something again — which is exactly what a banned person stops doing — so `data/bans.txt` grew one dead row per flooder and never shrank. Nothing changes about who is banned or for how long; the expired ones are now tidied away on their own.
 
 - **The List Browser tells you when a bot's list has moved on.** Pick a bot whose list you hold and, if what they are advertising now differs from what they advertised when you downloaded it, you get a line saying so with both sets of numbers — so you can decide whether to fetch it again. Lists in a busy channel go stale by months, and until now nothing said which.
 

@@ -70,6 +70,39 @@ DCCore lists every file type, a `.flac` or `.mkv` row silently vanishes for
 any user who has not added it. Nothing to fix here - the row is correct and
 the client discards it - but operators need to know, so INSTALL.md says which
 mIRC setting to change.
+### 🔒 A timed ban on somebody who never came back stayed for ever
+
+The last of the audit's flood-tracking findings, and the one the roadmap has
+been carrying as outstanding.
+
+`banned_users` was expired **lazily**: the check that reads it deletes an
+expired row, but only on the next request FROM THAT SAME NICK. A banned nick
+not coming back is the normal case - the ban is what made them leave - so the
+entry stayed in memory and in `bans.txt` for good, and the file grew one
+permanent row per flooder.
+
+The flood sweep already ran every sixty seconds and already cleaned
+`user_requests` and `muted_until`. This is the third structure it was always
+meant to include; it is the same expiry rule applied to the nicks that never
+return, not a new policy.
+
+Three things it has to get right, each with a test:
+
+- **The same reading of an expiry as the per-request check**, from one
+  function. Two copies of that coercion could drift into disagreeing about
+  when a ban ends, which means either a ban enforced but never cleared or one
+  cleared while still being enforced. A row that will not parse as a number is
+  swept, exactly as the lazy path would have deleted it - a row nothing can
+  read is not a ban anyone is serving.
+- **The file is rewritten.** Unlike the other two structures this one is
+  persisted, so clearing memory alone would let every swept ban return at the
+  next restart and the file would go on growing regardless.
+- **Only when something actually expired.** A sweep runs every minute for the
+  life of the daemon; writing the ban file each time would be a disk write a
+  minute, for ever, to record no change at all.
+
+`docs/FUTURE.md`'s "from the audits, not yet done" section is now down to the
+one line about the remaining verified findings.
 
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
