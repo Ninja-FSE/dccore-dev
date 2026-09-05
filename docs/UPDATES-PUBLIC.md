@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Serving a whole drive works.** If you pointed DCCore at `D:\` rather than a folder inside it, the list advertised every file and then refused to send any of them, reporting each request as a security violation. Both the check that decides whether a folder can be saved and the one that decides whether a file can be sent had the same fault.
+
+- **Two settings saves in quick succession can no longer make the bot leave every channel.** Each save triggers a reload, and two overlapping ones could leave one of them believing no channels were configured — so it parted all of them, cleared its user lists, joined nothing back, and logged that the sync had completed successfully. Every queue then froze, because the bot no longer believed anyone was present. Reloads are now serialised, and the second one waits rather than being skipped, so a save's changes are never lost.
+
 - **A damaged download-counts file can no longer stop the bot starting.** One unreadable line in `data/download_counts.json` — from a hand-edit or an interrupted write — could make the daemon refuse to boot while carrying its own counters across. It now keeps what it can, says so, and starts.
 
 - **Download counts are kept per folder, and survive a library move.** With more than one folder configured, two files with the same name in the same relative position — `Artist/Album/track.flac` in each — were counted as one, and the counts could end up recorded against wherever the bot happened to be started from. Counts now name the folder they belong to. **Your existing counts are carried over automatically on the first start**, so nothing is lost.

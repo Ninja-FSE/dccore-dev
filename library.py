@@ -112,7 +112,12 @@ def is_inside(base, path):
     path_n = _normalise(path)
     if not base_n or not path_n:
         return False
-    return path_n == base_n or path_n.startswith(base_n + os.sep)
+    # The separator is appended only when the base does not already end in
+    # one - a drive root ("D:\\", or "/" on POSIX) already does, and appending
+    # a second built a boundary nothing could match. dcc.is_safe_path() had
+    # the identical defect; see its comment.
+    boundary = base_n if base_n.endswith(os.sep) else base_n + os.sep
+    return path_n == base_n or path_n.startswith(boundary)
 
 
 def problems(entries):

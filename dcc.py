@@ -52,10 +52,21 @@ def is_safe_path(base_dir, path, follow_symlinks=True):
 
     base = os.path.realpath(base_dir)
 
-    # FIXED: compares per directory step, rather than a plain startswith.
-    # With startswith alone, "/srv/library-backup" would wrongly be accepted
-    # as part of "/srv/library", because the string happens to begin the same way.
-    return matchpath == base or matchpath.startswith(base + os.sep)
+    # Compares per directory step, rather than a plain startswith. With
+    # startswith alone, "/srv/library-backup" would wrongly be accepted as
+    # part of "/srv/library", because the string happens to begin the same way.
+    #
+    # The separator is appended only when the base does not already end in
+    # one, which a DRIVE ROOT always does: os.path.realpath("D:\\") is
+    # "D:\\", so `base + os.sep` built "D:\\\\" - a doubled separator no real
+    # path can start with - and this returned False for every file on the
+    # drive. Found by audit, and reachable the moment an operator serves a
+    # whole drive: the master list advertises every file on it and every
+    # request for one is refused as a path violation, with the refusal logged
+    # as a security event rather than as the configuration problem it is.
+    # "/" on POSIX is the same shape.
+    boundary = base if base.endswith(os.sep) else base + os.sep
+    return matchpath == base or matchpath.startswith(boundary)
 
 def default_announce_channel():
     """The one channel to announce in when a queue entry does not name one.
