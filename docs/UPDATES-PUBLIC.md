@@ -3,8 +3,15 @@
 ## Unreleased
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 - **A folder picker on the Settings page, if you want one.** Instead of typing the full path to each served folder you can browse for it — drives, then folders, then "Use this folder". It is **off by default** and turned on with "Folder picker on the Settings page" under Web dashboard, because it lets anyone logged into your dashboard see the names of folders on your machine, which nothing else there does. Leaving it off costs you nothing except typing the path yourself.
 =======
+=======
+- **Serving a whole drive works.** If you pointed DCCore at `D:\` rather than a folder inside it, the list advertised every file and then refused to send any of them, reporting each request as a security violation. Both the check that decides whether a folder can be saved and the one that decides whether a file can be sent had the same fault.
+
+- **Two settings saves in quick succession can no longer make the bot leave every channel.** Each save triggers a reload, and two overlapping ones could leave one of them believing no channels were configured — so it parted all of them, cleared its user lists, joined nothing back, and logged that the sync had completed successfully. Every queue then froze, because the bot no longer believed anyone was present. Reloads are now serialised, and the second one waits rather than being skipped, so a save's changes are never lost.
+
+>>>>>>> origin/main
 - **A damaged download-counts file can no longer stop the bot starting.** One unreadable line in `data/download_counts.json` — from a hand-edit or an interrupted write — could make the daemon refuse to boot while carrying its own counters across. It now keeps what it can, says so, and starts.
 >>>>>>> origin/main
 

@@ -536,16 +536,55 @@ def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
 
 
 def handle_rehash_request(user, target_chan, authorised=False):
-    """Reload the modules live, in memory, without reading anything back from disk."""
+    """Reload the modules live, in memory - one rehash at a time.
+
+    THE SERIALISATION IS THE POINT OF THIS WRAPPER. The body below reloads
+    the modules and then compares the channel list it reads AFTERWARDS
+    against the one it read before, to decide what to JOIN and what to
+    PART. Two rehashes overlapping is not merely wasteful: the second
+    one's reload puts config.CHANNEL back to its literal None for about a
+    millisecond (see runtime.config_reload_lock), and a first rehash that
+    reads its "new" channel list inside that window sees NO CHANNELS - so
+    every channel the bot is in falls into the PART branch.
+
+    Measured by audit: the bot PARTed every channel including the debug
+    channel, sent no JOIN and no NAMES, emptied channel_users, and logged
+    "[REHASH SYNC] Channel sync completed successfully." dcc.py treats
+    channel_users as proof a user is present, so every queue then froze.
+    Nothing raised. Reproduced with nothing patched in 4 of 60 runs.
+
+    Reachable without trying: irc.py spawns an unguarded thread per
+    "!rehash", adminchat.py does the same from the console, and
+    webserver.py fires one on EVERY Settings save and every password
+    change - two separate endpoints.
+
+    WAITS, rather than dropping the second one. A second rehash is often
+    the one that matters: a dashboard save writes settings.conf and THEN
+    triggers it, and the rehash already running may have read the file
+    before that write landed. Dropping it would silently lose the
+    operator's change; waiting applies it.
+    """
+    if not authorised and not is_admin(user):
+        print(f"[REHASH SECURITY] Ignored a rehash attempt from an unauthorised user: {user}")
+        return
+
+    if not runtime.rehash_lock.acquire(blocking=False):
+        print("[REHASH] Another rehash is still running - waiting for it "
+              "to finish before starting this one.")
+        runtime.rehash_lock.acquire()
+    try:
+        return _handle_rehash_request(user, target_chan)
+    finally:
+        runtime.rehash_lock.release()
+
+
+def _handle_rehash_request(user, target_chan):
+    """The rehash itself. Only ever called with runtime.rehash_lock held."""
     import importlib
     import sys
     import defaults as config
     import announce
     import copy
-    
-    if not authorised and not is_admin(user):
-        print(f"[REHASH SECURITY] Ignored a rehash attempt from an unauthorised user: {user}")
-        return
 
     # =====================================================================
     # 1. Back EVERY piece of live state up into local variables
