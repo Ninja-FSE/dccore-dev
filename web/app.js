@@ -46,6 +46,10 @@
     // shift-click range. A DOM node, so it is cleared whenever the
     // table is rebuilt.
     filelistsLastChecked: null,
+    // One row per held list, keyed by bot, as /api/filelists/bots last
+    // reported it - so the staleness banner can be rendered for whichever
+    // source is selected without asking again.
+    filelistsBots: {},
     folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
     // The folder picker (#164 step 5). `browse` is null when the panel is
     // closed; open, it carries the row it will write back into.
@@ -86,6 +90,7 @@
     filelistsFetchForm:   document.getElementById("filelists-fetch-form"),
     filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
+    filelistsFreshness: document.getElementById("filelists-freshness"),
     filelistsSourceSelect: document.getElementById("filelists-source-select"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
@@ -844,6 +849,7 @@
     fetchJson("/api/filelists/bots").then(function (rows) {
       markConnection(true);
       renderFilelistsSwitcher(rows);
+      renderFilelistsFreshness();
     }).catch(function () { markConnection(false); });
   }
 
@@ -857,10 +863,15 @@
     ownOption.textContent = "Our own list";
     select.appendChild(ownOption);
 
+    state.filelistsBots = {};
     rows.forEach(function (row) {
+      state.filelistsBots[row.bot] = row;
       var opt = document.createElement("option");
       opt.value = row.bot;
-      opt.textContent = row.bot + " (" + row.count + " files)";
+      // The marker is in the text because this is a <select>, which cannot
+      // carry a coloured dot. #133's sidebar layout replaces it.
+      var marker = row.freshness === "changed" ? " \u2022 theirs changed" : "";
+      opt.textContent = row.bot + " (" + row.count + " files)" + marker;
       select.appendChild(opt);
     });
 
@@ -1180,7 +1191,38 @@
       return rows.length ? [{ folder: "", count: rows.length, entries: rows }] : [];
     }
 
-    function loadFilelists() {
+    // Their advert THEN against their advert NOW - never against our own
+  // parsed row count, which is a different thing counted a different way (see
+  // webserver._freshness). "unknown" renders as nothing at all: a bot that
+  // publishes no date, or one whose advert we have not seen, should show no
+  // freshness claim rather than an invented one.
+  function renderFilelistsFreshness() {
+    var banner = el.filelistsFreshness;
+    if (!banner) { return; }
+    var row = state.filelistsBots[state.filelistsSource];
+    if (!row || row.freshness !== "changed") {
+      banner.hidden = true;
+      banner.textContent = "";
+      return;
+    }
+
+    var then = row.advert_then || {};
+    var now = row.advert_now || {};
+    banner.hidden = false;
+    banner.textContent =
+      "Their list has changed since you downloaded it \u2014 they advertised " +
+      describeAdvert(then) + ", and now advertise " + describeAdvert(now) +
+      ". Fetch it again to see what they are offering now.";
+  }
+
+  function describeAdvert(advert) {
+    var parts = [];
+    if (advert.files) { parts.push(Number(advert.files).toLocaleString() + " files"); }
+    if (advert.list_date) { parts.push("built " + advert.list_date); }
+    return parts.length ? parts.join(", ") : "nothing we could read";
+  }
+
+  function loadFilelists() {
       el.filelistsBody.innerHTML = emptyRow(5, "Loading…");
       var source = state.filelistsSource || "__own__";
       var offset = state.filelistsOffset || 0;

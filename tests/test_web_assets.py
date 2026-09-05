@@ -454,5 +454,53 @@ class TheNavTheViewsAndTheSectionsAgree(unittest.TestCase):
                 self.assertIn("search", group)
 
 
+class EveryElementReferenceIsDeclared(unittest.TestCase):
+    """`el` is built once at load from getElementById calls, and every use goes
+    through it. A property that was never declared is `undefined`, and what
+    happens next is the whole problem:
+
+      * `el.thing.textContent = x` is a TypeError inside whatever handler ran
+      * `if (!el.thing) { return; }` - the careful form - makes the feature a
+        SILENT NO-OP: the element exists in the page, the code runs, and
+        nothing ever appears
+
+    The second is worse and is what this caught. The List Browser's staleness
+    banner was written against `el.filelistsFreshness` without adding it to the
+    map, so the guard at the top of its render function returned every time and
+    the banner could never have shown - on a page nothing in this project
+    executes.
+
+    The id check above cannot see it: that reads getElementById("literal")
+    calls, and a missing declaration means there is no such call to find.
+    """
+
+    def sets(self):
+        import re
+
+        js = read("app.js")
+        used = set(re.findall(r"\bel\.([A-Za-z][A-Za-z0-9]*)", js))
+        block = js.split("var el = {", 1)[1].split("\n  };", 1)[0]
+        declared = set(re.findall(r"^\s*([A-Za-z][A-Za-z0-9]*):", block, re.M))
+        return used, declared
+
+    def test_nothing_reads_an_undeclared_element(self):
+        used, declared = self.sets()
+
+        self.assertEqual(sorted(used - declared), [],
+                         "app.js reads el.<name> for a name the el map never "
+                         "declares - undefined, so the feature is either a "
+                         "TypeError or, if guarded, silently does nothing")
+
+    def test_the_map_is_not_full_of_things_nobody_uses(self):
+        """The other direction. A declared element nobody reads is a lookup on
+        every page load for nothing, and usually the leftover of a removed
+        feature - the Queue view's ids were checked against this when that tab
+        was folded into Stats."""
+        used, declared = self.sets()
+
+        self.assertEqual(sorted(declared - used), [],
+                         "the el map declares element(s) nothing reads")
+
+
 if __name__ == "__main__":
     unittest.main()

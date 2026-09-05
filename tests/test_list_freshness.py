@@ -1,0 +1,244 @@
+"""#133's freshness signal: is the list you hold still what that bot offers?
+
+THE RULE, AND THE ONE IT REPLACED
+
+Compare **their advert then against their advert now** — not their advert
+against our own parsed row count.
+
+#133 settled that against the obvious alternative for a concrete reason: bots
+count differently (some include header lines, some count album rows
+separately), so an off-by-a-few would leave a list permanently marked stale
+with nothing actually wrong. A bot compared against its own earlier claim has
+no such problem.
+
+**Date first, count second.** A count can coincidentally match after an edit; a
+date cannot. And from the capture #133 records, 31 of 32 bots advertising in
+one channel publish a date, so it is very nearly universal.
+
+WHY "UNKNOWN" IS A REAL ANSWER
+
+A missing field means "this bot did not say", never zero — the rule
+irc.parse_channel_advert() already follows. We can fetch a list from a bot
+whose advert has not come round yet, and a bot that publishes no date should
+show no freshness claim rather than an invented one. Saying "we cannot tell"
+is honest; the page renders it as nothing at all.
+"""
+
+import io
+import os
+import sys
+import unittest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+if os.path.join(REPO_ROOT, "tests") not in sys.path:
+    sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
+
+import list_fetch  # noqa: E402
+import runtime  # noqa: E402
+import webserver  # noqa: E402
+
+from tests.support import DCCoreTestCase  # noqa: E402
+
+
+class WhatTheyAdvertisedWhenWeFetched(DCCoreTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.original = dict(runtime.known_bots)
+        runtime.known_bots.clear()
+        self.addCleanup(lambda: (runtime.known_bots.clear(),
+                                 runtime.known_bots.update(self.original)))
+
+    def test_it_records_what_that_bot_published(self):
+        runtime.known_bots["vibessono"] = {
+            "nick": "Vibessono", "files": 12004, "list_date": "Aug 28th"}
+
+        self.assertEqual(list_fetch._advert_snapshot("Vibessono"),
+                         {"files": 12004, "list_date": "Aug 28th"})
+
+    def test_a_bot_we_have_never_seen_records_nothing(self):
+        """An ordinary state: a list can be fetched from a bot whose advert has
+        not come round yet."""
+        self.assertEqual(list_fetch._advert_snapshot("NeverSeen"), {})
+
+    def test_a_field_the_bot_did_not_publish_is_absent_not_zero(self):
+        """Zero would be a claim they never made, and would then compare
+        unequal against every later advert for ever."""
+        runtime.known_bots["quietbot"] = {"nick": "QuietBot", "files": 900}
+
+        snapshot = list_fetch._advert_snapshot("QuietBot")
+
+        self.assertEqual(snapshot, {"files": 900})
+        self.assertNotIn("list_date", snapshot)
+
+    def test_the_lookup_is_case_insensitive(self):
+        """known_bots is keyed by nick.lower(); the bot argument is whatever
+        the operator or the advert spelled."""
+        runtime.known_bots["bigtruck"] = {"nick": "BigTruck", "files": 1}
+
+        self.assertEqual(list_fetch._advert_snapshot("  BIGTRUCK  "),
+                         {"files": 1})
+
+
+class TheirAdvertThenAgainstTheirAdvertNow(unittest.TestCase):
+
+    def verdict(self, then, now):
+        return webserver._freshness(then, now)
+
+    def test_an_unchanged_advert_is_current(self):
+        advert = {"files": 12004, "list_date": "Aug 28th"}
+
+        self.assertEqual(self.verdict(advert, dict(advert)), "current")
+
+    def test_a_new_date_is_changed(self):
+        self.assertEqual(
+            self.verdict({"files": 7902, "list_date": "Aug 10th"},
+                         {"files": 8110, "list_date": "Aug 28th"}), "changed")
+
+    def test_the_date_decides_before_the_count(self):
+        """A count can coincidentally match after an edit; a date cannot. So a
+        rebuilt list with the same total is still a changed list."""
+        self.assertEqual(
+            self.verdict({"files": 8110, "list_date": "Aug 10th"},
+                         {"files": 8110, "list_date": "Aug 28th"}), "changed")
+
+    def test_the_count_is_used_when_neither_side_gives_a_date(self):
+        self.assertEqual(self.verdict({"files": 900}, {"files": 900}), "current")
+        self.assertEqual(self.verdict({"files": 900}, {"files": 950}), "changed")
+
+    def test_nothing_recorded_is_unknown(self):
+        self.assertEqual(self.verdict({}, {"files": 1}), "unknown")
+
+    def test_nothing_advertised_now_is_unknown(self):
+        """They may simply not have advertised since the daemon started."""
+        self.assertEqual(self.verdict({"files": 1}, {}), "unknown")
+
+    def test_two_adverts_with_no_field_in_common_are_unknown(self):
+        """Not "changed". We have no basis to say either way, and claiming
+        staleness would send the operator to re-fetch for nothing."""
+        self.assertEqual(
+            self.verdict({"list_date": "Aug 10th"}, {"files": 900}), "unknown")
+
+
+class TheSummariesCarryIt(DCCoreTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.original = dict(runtime.known_bots)
+        runtime.known_bots.clear()
+        self.addCleanup(lambda: (runtime.known_bots.clear(),
+                                 runtime.known_bots.update(self.original)))
+        runtime.known_bots.update({
+            "vibessono": {"nick": "Vibessono", "files": 12004,
+                          "list_date": "Aug 28th"},
+            "bigtruck": {"nick": "BigTruck", "files": 8110,
+                         "list_date": "Aug 28th"},
+        })
+        self.set_config(fetched_bot_lists={
+            "vibessono": {"bot": "Vibessono", "fetched_at": 1,
+                          "entry_count": 12004,
+                          "advert_when_fetched": {"files": 12004,
+                                                  "list_date": "Aug 28th"}},
+            "bigtruck": {"bot": "BigTruck", "fetched_at": 1,
+                         "entry_count": 7902,
+                         "advert_when_fetched": {"files": 7902,
+                                                 "list_date": "Aug 10th"}},
+        })
+
+    def rows(self):
+        return {row["bot"]: row
+                for row in webserver.build_fetched_bot_list_summaries()}
+
+    def test_an_unchanged_list_reads_current(self):
+        self.assertEqual(self.rows()["Vibessono"]["freshness"], "current")
+
+    def test_a_changed_list_reads_changed(self):
+        self.assertEqual(self.rows()["BigTruck"]["freshness"], "changed")
+
+    def test_both_adverts_are_returned_so_the_page_can_say_what_changed(self):
+        """The banner names the numbers - "they advertised 7,902 files built
+        10 Aug, and now advertise 8,110 built 28 Aug" - which it cannot do
+        from a verdict alone."""
+        row = self.rows()["BigTruck"]
+
+        self.assertEqual(row["advert_then"]["files"], 7902)
+        self.assertEqual(row["advert_now"]["files"], 8110)
+
+    def test_a_list_recorded_before_this_existed_is_unknown(self):
+        """Every list already on disk was fetched without an advert snapshot.
+        It must read as "we cannot tell", not as stale."""
+        self.set_config(fetched_bot_lists={
+            "old": {"bot": "OldBot", "fetched_at": 1, "entry_count": 5}})
+
+        self.assertEqual(self.rows()["OldBot"]["freshness"], "unknown")
+
+    def test_the_existing_fields_are_untouched(self):
+        """The switcher renders bot and count; adding freshness must not
+        disturb what was already there."""
+        row = self.rows()["Vibessono"]
+
+        self.assertEqual(row["count"], 12004)
+        self.assertEqual(row["fetched_at"], 1)
+
+
+class TheFetchRecordsIt(unittest.TestCase):
+    """The wiring, read out of the source.
+
+    Every other test here builds `fetched_bot_lists` directly, so none of them
+    can see whether the fetch path stores the snapshot at all - a mutation
+    replacing the call with {} passed all of them. Driving the real fetch
+    needs a socket, a zip and a peer; this pins the one line that matters
+    instead, and says plainly that is what it is.
+    """
+
+    def source(self):
+        with io.open(os.path.join(REPO_ROOT, "list_fetch.py"),
+                     encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_stored_record_carries_the_advert(self):
+        code = "\n".join(line.split("#", 1)[0]
+                         for line in self.source().splitlines())
+
+        self.assertIn('"advert_when_fetched": _advert_snapshot(bot)', code,
+                      "the fetch no longer records what that bot was "
+                      "advertising, so every held list reads as \"unknown\" "
+                      "for ever")
+
+    def test_it_is_recorded_beside_the_rest_of_the_entry(self):
+        """In the same dict literal that is persisted, not somewhere a later
+        failure could skip."""
+        code = self.source()
+        entry = code.split("store[str(bot).strip().lower()] = {", 1)[1]
+        entry = entry.split("\n    }", 1)[0]
+
+        self.assertIn("advert_when_fetched", entry)
+
+
+class ThePageRendersItHonestly(unittest.TestCase):
+    """Read out of the source: nothing here executes JavaScript."""
+
+    def js(self):
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"),
+                     encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_only_a_changed_list_shows_the_banner(self):
+        """"unknown" must render as nothing at all - no freshness claim is the
+        honest output when we cannot tell."""
+        block = self.js().split("function renderFilelistsFreshness(", 1)[1]
+        block = block.split("function describeAdvert(", 1)[0]
+
+        self.assertIn('row.freshness !== "changed"', block)
+        self.assertIn("banner.hidden = true;", block)
+
+    def test_an_advert_with_nothing_readable_says_so(self):
+        block = self.js().split("function describeAdvert(", 1)[1][:400]
+
+        self.assertIn("nothing we could read", block)
+
+
+if __name__ == "__main__":
+    unittest.main()

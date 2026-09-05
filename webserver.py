@@ -719,17 +719,68 @@ def build_fetched_bot_list_summaries():
     Re-parsing each bot's whole list from disk just to report a count on every
     poll would defeat much of the point of no longer retaining it in memory.
     """
+    import runtime
+
     store = dict(getattr(config, "fetched_bot_lists", {}) or {})
-    rows = [
-        {
-            "bot": entry.get("bot", key),
+    known = dict(getattr(runtime, "known_bots", {}) or {})
+
+    rows = []
+    for key, entry in store.items():
+        bot = entry.get("bot", key)
+        then = dict(entry.get("advert_when_fetched") or {})
+        now = _advert_now(known, bot)
+        rows.append({
+            "bot": bot,
             "fetched_at": entry.get("fetched_at", 0),
             "count": entry.get("entry_count", 0),
-        }
-        for key, entry in store.items()
-    ]
+            "freshness": _freshness(then, now),
+            "advert_then": then,
+            "advert_now": now,
+        })
     rows.sort(key=lambda row: str(row["bot"]).lower())
     return rows
+
+
+def _advert_now(known, bot):
+    """The fields `bot` is advertising at this moment, or {}.
+
+    Same shape and same rule as list_fetch._advert_snapshot(): only what that
+    bot actually published, and a missing key means "did not say".
+    """
+    entry = dict(known.get(str(bot).strip().lower()) or {})
+    current = {}
+    for field in ("files", "list_date"):
+        value = entry.get(field)
+        if value not in (None, "", 0):
+            current[field] = value
+    return current
+
+
+def _freshness(then, now):
+    """"current", "changed", or "unknown" for one held list.
+
+    DATE FIRST, COUNT SECOND. #133 settled this against the obvious
+    alternative: a count can coincidentally match after an edit, a date
+    cannot - and 31 of the 32 bots observed advertising in one channel publish
+    a date, so it is very nearly universal.
+
+    "unknown" whenever either side is missing the field being compared, and
+    that is not a hedge: we fetch from bots whose advert we have not seen, and
+    a bot that publishes no date at all should show no freshness claim rather
+    than an invented one. Saying "we cannot tell" is the honest answer and the
+    page renders it as such.
+    """
+    # No early return for an empty advert: the loop below already reaches
+    # "unknown" for one, because every field is missing on one side, every
+    # iteration continues, and the fall-through says so. A guard here changed
+    # no answer a test could see, which is what a mutation run showed.
+    for field in ("list_date", "files"):
+        before, after = then.get(field), now.get(field)
+        if before in (None, "") or after in (None, ""):
+            continue
+        return "current" if str(before) == str(after) else "changed"
+
+    return "unknown"
 
 
 def build_fetched_bot_list_payload(nick, offset=0, limit=None):
