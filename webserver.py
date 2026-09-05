@@ -72,7 +72,8 @@ import platform_compat
 import runtime
 
 try:
-    from flask import Flask, jsonify, redirect, request, send_from_directory, session
+    from flask import (Flask, jsonify, redirect, request, send_file,
+                       send_from_directory, session)
     HAVE_FLASK = True
 except ImportError:
     HAVE_FLASK = False
@@ -189,6 +190,15 @@ FETCH_ENQUEUE_MAX_ITEMS = 500
 # not a folder list - and low enough that the O(n^2) pairwise nesting check in
 # library.problems() cannot be turned into a way to occupy the process.
 MAX_SERVED_FOLDERS = 64
+
+# And one path. library.problems() embeds each offending path verbatim in up
+# to two messages per entry, so without this a 400 response is roughly twice
+# the request that caused it. Every other web input in this module is bounded
+# (IRC_LINE_FIELD_MAX_LEN, FETCH_ENQUEUE_MAX_ITEMS, FOLDER_BROWSE_MAX_ENTRIES);
+# this one was not. Far longer than any real path - Windows stops at 32767
+# even through the \\?\ prefix - so it bounds the absurd without touching the
+# possible.
+MAX_FOLDER_PATH_LEN = 4096
 
 # One directory listing. A music library's top level can hold thousands of
 # artist folders, and every one of them would be rendered into a panel nobody
@@ -1520,7 +1530,16 @@ def build_folder_browse_payload(raw_path):
     parent = os.path.dirname(target.rstrip(os.sep)) or None
     # At a drive root, dirname() answers the drive itself and the operator
     # would climb to where they already are. "" sends them to the root list.
-    if parent == target or target in roots:
+    #
+    # Compared with normcase, because browse_roots() builds its entries from
+    # the uppercase letters A-Z while os.path.abspath() preserves whatever
+    # case the caller sent. "c:\\" therefore missed the root list, and the
+    # parent fell through to ntpath.dirname("c:") - which is "c:", a
+    # DRIVE-RELATIVE path meaning "the current directory on C:". Clicking Up
+    # from a lowercase drive root browsed the daemon's own working directory.
+    # Found by audit.
+    normalised_roots = {os.path.normcase(root) for root in roots}
+    if parent == target or os.path.normcase(target) in normalised_roots:
         parent = ""
 
     return {
@@ -1574,6 +1593,9 @@ def apply_folder_changes(payload):
                                   "'name' and 'path'."}
         raw_path = str(row.get("path", "") or "").strip()
         raw_name = str(row.get("name", "") or "").strip()
+        if len(raw_path) > MAX_FOLDER_PATH_LEN or len(raw_name) > MAX_FOLDER_PATH_LEN:
+            return 400, {"error": f"A folder path or label is longer than "
+                                  f"{MAX_FOLDER_PATH_LEN} characters."}
         # An unnamed folder is named after itself, exactly as the file format
         # does - so an operator who only wants to add a path can.
         entries.append(library.Folder(raw_name or library.default_label(raw_path),
@@ -2079,9 +2101,40 @@ if HAVE_FLASK:
             # filename through dcc.is_safe_path()) is what actually gets
             # opened.
             directory = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
-            return send_from_directory(
-                directory, stored_filename, as_attachment=True,
-                download_name=download_name)
+
+            # NOT send_from_directory(), and the reason is specific.
+            #
+            # dcc_fetch fits a stored name to MAX_NAME_BYTES (255) and touches
+            # every path through platform_compat.long_path(). This route was
+            # the one that did not, so on Windows a fetch with a long
+            # remote-chosen name was written, marked "complete", listed in the
+            # UI - and its Download button answered 404 for ever, while the
+            # file sat there the whole time. Found by audit.
+            #
+            # Handing send_from_directory() the WRAPPED directory does not fix
+            # it either: werkzeug's safe_join() joins with a FORWARD SLASH, and
+            # a \\?\ path is the one kind Windows will not accept those in. So
+            # the path is built here, with a backslash, and wrapped after.
+            #
+            # The containment safe_join() was providing is kept explicitly:
+            # dcc.is_safe_path() is the same gate every request path in the
+            # project uses, and it resolves symlinks, which safe_join() does
+            # not. `import dcc` is deferred exactly like `import dcc_fetch`
+            # above - see tests/test_import_graph.py.
+            import dcc
+
+            candidate = os.path.join(directory, stored_filename)
+            if not dcc.is_safe_path(directory, candidate):
+                print(f"[WEB SECURITY] Refused a fetch download outside "
+                      f"{directory}: {stored_filename!r}")
+                return jsonify({"error": "Unknown, incomplete, or failed fetch."}), 404
+
+            wrapped = platform_compat.long_path(candidate)
+            if not os.path.isfile(wrapped):
+                return jsonify({"error": "The fetched file is no longer on disk."}), 404
+
+            return send_file(wrapped, as_attachment=True,
+                             download_name=download_name)
 
         @app.route("/api/fetch/<request_id>/delete", methods=["POST"])
         def api_fetch_delete(request_id):

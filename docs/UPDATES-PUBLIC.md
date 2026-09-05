@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A fetched file with a very long name can be downloaded from the dashboard.** The file arrived, was marked complete and appeared in the list, and its Download button then answered "not found" for ever — on Windows, where the full path was too long for the way that route opened it.
+
+- **Small dashboard repairs:** browsing up from a lowercase drive letter no longer wanders off to wherever the bot was started from, an absurdly long folder path is refused rather than echoed back, and the "Get folder as .rar" button no longer appears on a group of files that has no folder to pack.
+
 - **Banning a host now actually bans it.** `!ban *.some.isp.net` was accepted, reported as successful and listed among your active bans — and never enforced, because a pattern without `!` or `@` was compared against the nickname, which can never contain a dot. Write it either way now; both work.
 
 - **Fetching a list from a bot whose nick contains `|` works.** Nicks like `Bot|Away` are ordinary on IRC and illegal in a Windows folder name, so the fetch downloaded the whole list and then failed at the last step, every time, for that bot. Same for `*`, `"`, `<`, `>`, `?` and `:`.
