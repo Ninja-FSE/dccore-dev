@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Fixed: a file in your library whose name starts with your bot's name could never be sent.** Anything called, say, `Muzik-Collection.rar` when your list is named after `Muzik` was looked for among your list files instead of in your library — so it was advertised, counted, requested, and answered "file not found", every time, for ever.
+
+- **Fixed: some bot names and folder paths made the bot report an empty list.** If the name your lists are built under, or the folder you keep them in, happened to contain `-RAR-` or `-FULL-`, the bot skipped over its own list: `@find` answered "no list found" and your advert published 0 files while the list sat there complete.
+
+- **Fixed: `!update` reported “0 files, added 0” every time.** It was reading the new film list instead of your music list. It now counts across every list you publish, so `!update` and the channel advert always agree — and the warning that tells you your library has SHRUNK works again, which is what you want when a drive comes back half-mounted.
+
+- **Fixed: `!rar` packed folders it was told not to.** `RAR_EXTENSIONS` decided which folders got a row in the album list, but the bot would still pack any folder somebody named — including a film folder, whose path the new film list publishes. Those are refused now, and the files inside are still requestable by name.
+
+- **Fixed: deleting a film and rebuilding the same day left it in the list.** It still turned up in searches and still counted towards your advertised total, while being absent from the archive people actually download.
+
+- **Film and series now get their own list.** One scan publishes two: your music list and a separate one for video, both inside the same archive people already get by typing your bot's name — nothing new to learn, and no mixed list of tracks and episodes to sort out afterwards. If your films and music already live in separate folders you may not want this: set `SEPARATE_VIDEO_LIST = No` and everything goes back into one list. The film list is only created when you actually have video.
+
+- **Only album folders can be packed with `!rar` now.** A folder used to become packable just by containing something in the list, which was fine when the list only held `.mp3` and `.flac` — but with everything listed, a single stranger could paste one line and have your bot spend an hour packing a forty-gigabyte film folder, using your CPU, your disk and one of your transfer slots. `RAR_EXTENSIONS` decides what makes a folder packable; films are still listed and still directly requestable by name.
+
+- **Your whole library goes into the list now, not just `.mp3` and `.flac`.** Anything else — video, `.m4a`, `.ogg`, artwork, liner notes — used to be skipped, so a library of it scanned to an empty list and said nothing about why. Everything is listed now, and the new `LIST_IGNORED_EXTENSIONS` setting names what to leave out. Write it however you like: `db,ini,tmp`, `db, ini, tmp` or `.DB, .INI` all mean the same thing. It ships skipping only what is never a real file — `Thumbs.db`, `desktop.ini`, shortcuts, and half-finished downloads. **Worth knowing:** everything under your music directory is now offered to anyone who asks, so keep out of it whatever should not leave.
+
+- **The pre-flight check counts the same files the list build will.** It had its own copy of the old two-format rule, so it could report a healthy library and then build an empty list.
 - **Coming from OmenServe? Bring your totals with you.** The Stats page can now read your files sent, bytes sent and speed record straight out of mIRC's `scripts/vars.ini` — choose the file, see exactly what would change, and confirm. Your counters come from the OmenServe add-ons rather than OmenServe itself, so it takes whatever is there and leaves the rest alone; nothing you are missing, and nothing sitting at zero, overwrites a total you already have. If any figure cannot be written it says which, rather than reporting success. Only the counter lines ever leave your machine — the rest of that file, including your nicks and passwords, is filtered out in the browser before anything is sent. Note it **replaces** your current figures rather than adding to them, and the page says so when you have some.
 - **Asking for your list from AutoQ's menu now works.** Its "Get Listfile" button sends `@yourbot` with a small tag added on the end, and the bot only answered a bare `@yourbot` — so it stayed silent, which looks exactly like a bot that is down. It answers now. Note "Que Status" in the same menu still does not work: it sends `yourbot-que` without the `@`, and `@yourbot-que` typed by hand is the form the bot reads.
 

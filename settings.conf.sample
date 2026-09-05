@@ -147,6 +147,110 @@
 # "txt", "zip" or "rar"
 #LIST_FORMAT = zip
 
+# EVERY file under FILE_DIRECTORY goes into the list, except the extensions
+# named here. Comma-separated, with or without the leading dot, matched
+# case-insensitively - ".DB", "db" and ".db" are the same thing. Blank means
+# nothing is skipped.
+# 
+# The walk used to ask `endswith(('.mp3', '.flac'))`, which meant a library of
+# anything else - video, .m4a, .ogg - scanned to nothing and published an
+# empty list while reporting success. Naming what to KEEP could never be
+# right: the set of things people serve is open-ended, and every format left
+# out is silently invisible. Naming what to SKIP is a short, closed list, and
+# the failure mode of getting it wrong is a file listed that need not have
+# been, rather than a library that does not appear.
+# 
+# OmenServe has the same shape (`Exclude = .mpu,.db`), so this is also the
+# form operators coming from it already know.
+# 
+# The default is only what is never a served file: Windows and browser
+# droppings, and the partial-download suffixes. Covers, .nfo, .cue and
+# playlists are NOT skipped - people do serve them, and an operator who does
+# not want them can say so here. Add to this rather than expecting the
+# shipped list to guess.
+# 
+# WORTH KNOWING: "every file" means exactly that. Anything sitting under
+# FILE_DIRECTORY is offered to anyone who asks - a stray backup, a document,
+# a private note dropped in the tree by accident. That directory is the
+# public face of the bot; keep out of it whatever should not leave.
+# 
+# A note before relying on the list from a script: every row is written
+# "!<nick> <filename>  ::INFO:: <size>". This project's own parser (list.py)
+# splits on the ::INFO:: marker regardless of extension, as do the OmenServe
+# bots the convention came from. AutoQ.mrc is reported to strip that tail
+# only for .mp3 and .flac (see update_list.py's note at the row write), so a
+# row in any other format may reach it with the size still attached. That
+# costs an AutoQ user a failed request they can retry by hand; it does not
+# affect anyone reading the list themselves.
+#LIST_IGNORED_EXTENSIONS = .db, .ini, .lnk, .url, .tmp, .part, .crdownload, .!ut
+
+# Publish film and series as a SEPARATE list from the music, instead of one
+# list carrying both.
+# 
+# Off is a real answer, not a fallback. There are two ways to end up with a
+# music list and a film list, and they suit different libraries:
+# 
+# - This switch, when audio and video are mixed together in the same
+# folders and only the file itself says which is which.
+# - Several lists, each over its own set of folders, when the library is
+# already sorted that way on disk. That is the roadmap's multi-list
+# feature, and for an operator who keeps films and music apart it is the
+# better route - the folders already carry the answer, and the lists then
+# differ in more than content type.
+# 
+# Turning this off gives the single combined list again.
+#SEPARATE_VIDEO_LIST = true
+
+# WHICH LIST a file goes into, when SEPARATE_VIDEO_LIST is on. One scan
+# publishes two: the music list, and a separate one for film and series.
+# Same comma-separated form as the setting above - dots optional, spacing
+# free, case ignored.
+# 
+# They travel together. "@<botnick>" already hands out ONE archive containing
+# several text files (the master list and the !rar album list), so the video
+# list is a third member of the same download: no new trigger, nothing for
+# anyone to learn.
+# 
+# The split exists because a list carrying tracks and episodes mixed together
+# is one a person or a script has to sort out afterwards. It follows the
+# pattern already here rather than inventing one - the !rar album list has
+# been a separate file built from the same walk since long before this.
+# 
+# Anything that is NOT one of these goes into the music list, including a
+# file with no extension at all. That is the rule for artwork, cue sheets and
+# notes, which sit beside the tracks they belong to; a film's subtitles land
+# there too, which is the one rough edge of deciding per file rather than per
+# folder. Per file is deliberate: a folder holding both an album and a video
+# should not have to pick.
+# 
+# The video list is only published when there is video to put in it, so a
+# music-only library never gains an empty file it has no use for.
+#LIST_VIDEO_EXTENSIONS = .mkv, .mp4, .avi, .m4v, .mov, .wmv, .mpg, .mpeg, .flv, .webm, .ts, .m2ts, .vob, .divx, .ogv, .3gp
+
+# WHICH FOLDERS may be packed on demand with "!rar <folder>".
+# 
+# A folder earns a !rar row only if it holds one of these. Everything else is
+# still listed and still directly requestable by name - this decides packing,
+# nothing else.
+# 
+# It is a set of its own, and not simply "whatever is in the list", because
+# for a while it WAS that: a folder became packable if it held any file the
+# scan indexed. While the scan only took .mp3 and .flac that read as "album
+# folders", and it was fine. The moment the scan took everything, every
+# folder in the library became packable - including one holding a single
+# text file, and including a season of a series that is tens of gigabytes.
+# 
+# There is no size cap anywhere on packing (see the roadmap), so an
+# unbounded amount of CPU, disk and one transfer slot sat behind a line
+# anybody in the channel could paste. RAR_ENABLED was the only defence and
+# it is all-or-nothing: an operator who wanted albums packable had to accept
+# films packable too.
+# 
+# An album is a genuine multi-file collection - tracks, a cover, a cue sheet
+# - which is what makes packing it useful. A film is one large file that can
+# simply be requested by name.
+#RAR_EXTENSIONS = .mp3, .flac, .m4a, .ogg, .opus, .wav, .aac, .wma, .ape, .wv, .alac, .aiff, .aif
+
 # Where files fetched FROM other bots (dcc_fetch.py) land. Deliberately
 # separate from FILE_DIRECTORY: that directory is the served library, scanned
 # by update_list.py and offered to everyone via @find/!<nick> - fetched files

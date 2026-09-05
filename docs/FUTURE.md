@@ -44,8 +44,9 @@ What DCCore does today, and what it does not do yet.
 
 ### Quality
 
-- **2071 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
+- **2732 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
+- **No reloaded module owns a lock** — `!rehash` re-executes a module body, so a module-level `threading.Lock()` is rebound while a thread is still inside it. Every lock in a reloaded module is allocated in `runtime.py` and bound by name, and `tests/test_no_reloaded_module_owns_a_lock.py` fails if a new one appears — the class, not the four instances that prompted it.
 - **Two adversarial audits** — an internal audit (32 defects, all fixed) and a pre-publication sweep before the first public release.
 
 ---
@@ -58,6 +59,8 @@ Ordered by what unblocks what, not by preference.
 
 The largest gap against OmenServe, which has had both since long before this project started. DCCore now serves **several** directories into **one** list; more than one list is still to come.
 
+`SEPARATE_VIDEO_LIST` is not that feature and does not pre-empt it: it splits one scan's output by content type, where this splits by folder set and binds each list to a channel. An operator whose film and music already live in separate folders wants this one, and turns that switch off.
+
 The design is settled:
 
 - One trigger, unchanged. `@<botnick>` everywhere; no new syntax for anybody to learn.
@@ -66,7 +69,7 @@ The design is settled:
 - A private message uses the list marked primary, since a PM carries no channel.
 - A channel with no list bound gets nothing: no advert, no requests answered.
 
-**Multi-folder is largely built.** `library.py` answers which folders and in what order, resolution reads a folder's label out of a heading, and the scan builds one list from all of them — configurable today by editing `data/library_folders.json`. What is left is the Settings page: a reorderable list of folders with a validated add and a folder browser, so it does not need hand-edited JSON.
+**Multi-folder is done.** `library.py` answers which folders and in what order, resolution reads a folder's label out of a heading, and the scan builds one list from all of them. The Settings page landed with it — a reorderable list with a validated add and a folder browser (`GET`/`POST /api/folders`, `GET /api/folders/browse`), so `data/library_folders.json` no longer needs hand-editing.
 
 Multi-list then follows: allow more than one list object, with per-channel adverts falling out nearly free. The folder set moves inside a list at that point, which is why every caller goes through one accessor rather than reading a setting directly — the move rebinds the accessor instead of touching 54 call sites a second time.
 
@@ -77,20 +80,19 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 
 ### Test coverage where it is thinnest
 
-The pre-publication audit found that **21 daemon functions have no behavioural coverage at all** — including `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop and `configure.py`'s entry point. Each can be replaced with a statement that raises while all tests still pass.
+The pre-publication audit found **21 daemon functions with no behavioural coverage at all** — `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop, `configure.py`'s entry point. That gap is closed: `scripts/function_coverage.py` reports **2 of 257 uncovered, both on the allowlist with a written reason**, and it fails the build on a third.
 
-Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would not be noticed. Nine dashboard routes are never requested by any test.
-
-This matters most as a prerequisite: step 1 above refactors seven modules that call `find_latest_list()`, and doing that across code the suite does not exercise is how a regression ships quietly.
+What remains is narrower and does not show up in that number. Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would still not be noticed — this file's own history has three such guards that passed against deliberately broken code. Nine dashboard routes were never requested by any test; that count has not been re-measured since.
 
 ### From the audits, not yet done
 
-- **`!rehash` rebinds every module-level lock**, so a thread inside a critical section loses mutual exclusion. `runtime.py` already solves this for the containers; the locks need the same treatment.
 - Roughly forty further verified findings, from a false "MasterList missing" during a concurrent search to a queued `!rar` pack that is never re-dispatched.
 
 ### Smaller things worth having
 
-- **Per-list file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them; everything under the root is currently offered.
+- **PER-LIST file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them per list. `LIST_IGNORED_EXTENSIONS` does this globally; scoping it to one folder is the part still missing.
+- **A size cap on `!rar` packing.** There is none: a request packs whatever the folder holds, however large. `RAR_EXTENSIONS` now keeps film folders out of the album list entirely, which removes the worst case, but a genuinely enormous album is still a request nobody sized before accepting.
+- **A fetched list keeps only the peer's master.** Since the film-and-series split, a DCCore bot's archive carries two `.txt` files, and `list_fetch` picks one - now the master rather than whichever is larger. The films in the other are dropped from the fetched copy. Reading both into one fetched list changes what `_pick_list_file()` returns and the size ceiling that guards it, so it is a change of its own rather than part of the fix.
 - **A "what's new" list** — files added in the last N days, generated alongside the main one.
 - **A list validator** run at build time, reporting anything a requester will not actually be able to get — duplicate filenames across folders being the common case.
 - **An OmenServe migration path offered on FIRST RUN.** The Stats page can import an operator's totals from `vars.ini` today; what is missing is `configure.py` offering it during setup, when somebody migrating is actually looking.

@@ -490,6 +490,19 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
         "ADMIN_HOSTMASKS":
             "a setting read from admin_config.py, not runtime state - it is "
             "SUPPOSED to be re-read from the file on a rehash",
+        "LIST_IGNORED_EXTENSIONS":
+            "the same: a setting, not runtime state. Which file types to "
+            "skip is read from settings.conf, and re-reading it is the "
+            "whole reason an operator runs !rehash after editing it. "
+            "Preserving it would mean the edit did nothing until a restart",
+        "LIST_VIDEO_EXTENSIONS":
+            "the same again: which file types go in the film list rather "
+            "than the music one is a setting, re-read on a rehash",
+        "RAR_EXTENSIONS":
+            "and again: which file types make a folder packable with !rar. "
+            "An operator narrowing this after finding something packable "
+            "that should not be needs the change to take effect on the "
+            "rehash, not on the next restart",
         "vip_queue":
             "transient OUTPUT, not state. commands.py says so explicitly: "
             "restoring it would replay lines addressed to channels the "
@@ -557,6 +570,24 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
                 if isinstance(target, ast.Name):
                     names.append(target.id)
         return names
+
+    def test_nothing_is_both_preserved_and_deliberately_excluded(self):
+        """The two lists are opposite claims, and the test below is satisfied
+        by EITHER - so a name in both passes it while the code does the
+        opposite of what its own reason says.
+
+        Found by mutation: adding LIST_IGNORED_EXTENSIONS to PRESERVE_RUNTIME,
+        while its NOT_PRESERVED entry says re-reading it is the whole point,
+        broke nothing. An operator's edited setting would then do nothing
+        until a full restart, with no error to explain it.
+        """
+        both = sorted(set(self.NOT_PRESERVED) & set(commands.PRESERVE_RUNTIME))
+
+        self.assertEqual(
+            both, [],
+            "these are listed as deliberately NOT preserved across a rehash "
+            "and are preserved anyway, so the reason written beside each one "
+            "is false: " + ", ".join(both))
 
     def test_every_runtime_container_is_preserved_or_explicitly_excluded(self):
         containers = self._config_containers()
@@ -947,8 +978,22 @@ class ListUpdateTimeoutTests(DCCoreTestCase):
         share was told nothing happened."""
         tree = self.make_tree()
         list_path = os.path.join(tree.lists, "DCCore-2026-09-02.txt")
-        with open(list_path, "w", encoding="utf-8") as handle:
-            handle.write("List of 100 Files\n")
+
+        def write_list(path, count):
+            """A list with real REQUEST ROWS, not a bare header line.
+
+            The count is taken by counting rows across every published list,
+            the same way the advert counts - so the two can never report
+            different totals for one library. A fixture writing only a header
+            is a file no generator produces, and it made this test turn on the
+            counting mechanism rather than on the behaviour it is about.
+            """
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("List of %d Files\n" % count)
+                for i in range(count):
+                    handle.write("!DCCore Track %d.flac  ::INFO:: 4.00MB\n" % i)
+
+        write_list(list_path, 100)
 
         def fake_run(cmd, **kwargs):
             import types
@@ -957,8 +1002,7 @@ class ListUpdateTimeoutTests(DCCoreTestCase):
             # started with - a partial mount failure that still found SOME
             # files is exactly the case generate_master_list()'s all-or-
             # nothing zero-file guard does not catch.
-            with open(list_path, "w", encoding="utf-8") as handle:
-                handle.write("List of 40 Files\n")
+            write_list(list_path, 40)
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
         import subprocess

@@ -63,6 +63,34 @@ def list_artifact_name(fmt, date_str):
     return f"{config.LIST_BASE_NAME}-{date_str}.{fmt}"
 
 
+def _is_dated(name, prefix, suffix):
+    """True if `name` is exactly "<prefix><a date><suffix>".
+
+    THE PREFIX ALONE WAS NOT ENOUGH, and the docstring below already said why
+    it needed to be: a library file is only kept out of the lists directory if
+    the test can tell one apart from a real artifact. With LIST_BASE_NAME
+    derived from a nickname - "Muzik", say - a shared file called
+    "Muzik-Collection.rar" starts with that prefix and ends in that
+    extension, so a request for it was looked for among the lists, found
+    missing, and refused for ever, while the file sat in the library being
+    advertised. The extension case was guarded and the prefix case, which is
+    the likelier of the two, was not.
+    """
+    if not (name.startswith(prefix) and name.endswith(suffix)):
+        return False
+    middle = name[len(prefix):len(name) - len(suffix)]
+    # Parsed with the FORMAT THE BUILDER WRITES, rather than a pattern that
+    # resembles it: update_list.py names every list
+    # `datetime.now().strftime("%Y-%m-%d")`, so if that ever changes this
+    # stops matching loudly instead of drifting apart quietly. (`re` is not
+    # importable this far up the file - see the second import block below.)
+    try:
+        datetime.datetime.strptime(middle, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
 def is_list_artifact(filename, fmt):
     """True if `filename` is a delivered master list in `fmt`.
 
@@ -73,9 +101,8 @@ def is_list_artifact(filename, fmt):
     """
     name = os.path.basename(str(filename))
     if fmt == "txt":
-        return (name.startswith(config.LIST_BASE_NAME + FULL_LIST_MARKER)
-                and name.endswith(".txt"))
-    return name.startswith(config.LIST_BASE_NAME + "-") and name.endswith("." + fmt)
+        return _is_dated(name, config.LIST_BASE_NAME + FULL_LIST_MARKER, ".txt")
+    return _is_dated(name, config.LIST_BASE_NAME + "-", "." + fmt)
 
 
 def is_list_artifact_name(filename):
@@ -122,20 +149,25 @@ def get_file_count_date_size_and_raw_bytes():
         
     try:
         count = 0
-        with open(latest_list, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line_strip = line.strip()
-                # Count only real request lines, skipping the "===" folder separators,
-                # blank lines and text headers.
-                #
-                # This matches on "!" alone rather than on f"!{config.NICKNAME} ". The list
-                # is written with whatever nick was current at generation time, so after a
-                # 433 fallback the old test matched nothing and the advert reported 0 files
-                # even though the list was fine. Every request line in the generated file
-                # starts with "!" (update_list.py:156) and no header or separator does, so
-                # this is the same filter execute_search already applies to the same file.
-                if line_strip.startswith("!"):
-                    count += 1
+        # EVERY list, not just the master. Film and series moved into their
+        # own file, and counting one of two would advertise a number smaller
+        # than the library the bot actually serves - and smaller than what a
+        # user sees when they open the archive. The date below still comes
+        # from the master list, which is the one always present.
+        # Count only real request lines, skipping the "===" folder separators,
+        # blank lines and text headers.
+        #
+        # This matches on "!" alone rather than on f"!{config.NICKNAME} ". The list
+        # is written with whatever nick was current at generation time, so after a
+        # 433 fallback the old test matched nothing and the advert reported 0 files
+        # even though the list was fine. Every request line in the generated file
+        # starts with "!" (update_list.py:156) and no header or separator does, so
+        # this is the same filter execute_search already applies to the same file.
+        for one_list in all_list_paths():
+            with open(one_list, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.strip().startswith("!"):
+                        count += 1
             
         mtime = os.path.getmtime(latest_list)
         dt = datetime.datetime.fromtimestamp(mtime)
@@ -196,6 +228,23 @@ def strip_control_codes(text):
     return _CONTROL_CODE_RE.sub('', clean)
 
 
+def _has_marker(path, marker):
+    """True if the builder's `marker` appears in the part of the name it owns.
+
+    THE MARKERS ARE THE BUILDER'S, AND THEY SIT AFTER THE BASE NAME - so
+    testing the whole path for them let the operator's own choices decide
+    whether this bot has a list at all. A LIST_BASE_NAME containing "-VIDEO-"
+    or "-RAR-" excluded the master list from its own search: @find answered
+    "No MasterList found" and the advert published 0 files, permanently, with
+    the file sitting right there. A LOCAL_LIST_DIR with "-FULL-" somewhere in
+    its path did the same to every list under it.
+    """
+    name = os.path.basename(str(path))
+    base = str(getattr(config, "LIST_BASE_NAME", "") or "")
+    tail = name[len(base):] if base and name.startswith(base) else name
+    return marker in tail
+
+
 def find_latest_list():
     """Find the newest master text list in the lists directory.
 
@@ -224,12 +273,60 @@ def find_latest_list():
         # offer album rows as though they were tracks and the advert would count
         # the albums as files.
         true_master_lists = [f for f in all_txt_files
-                             if "-RAR-" not in f and FULL_LIST_MARKER not in f]
+                             if not _has_marker(f, "-RAR-")
+                             and not _has_marker(f, f"-{VIDEO_LIST_MARKER}-")
+                             and not _has_marker(f, FULL_LIST_MARKER)]
         if true_master_lists:
             return true_master_lists[-1]
     except Exception as e:
         print(f"[SEARCH ERROR] Could not find the latest list: {e}")
     return None
+
+# The film-and-series list's name marker. update_list.py names that file
+# "<base>-VIDEO-<date>.txt", which the glob in find_latest_list() matches and
+# which sorts AFTER "<base>-<date>.txt" - so without a guard it would win the
+# [-1] and become "the" master list that @find searches and the advert counts.
+# Exactly the failure the comment there already records for "-RAR-".
+VIDEO_LIST_MARKER = "VIDEO"
+
+
+def find_latest_video_list():
+    """The newest film-and-series list, or None if the library has no video.
+
+    None is the ordinary case, not a fault: the file is only published when
+    there is video to put in it, and SEPARATE_VIDEO_LIST can be off entirely.
+    Every caller treats a missing one as "nothing extra to read".
+    """
+    try:
+        pattern = os.path.join(
+            glob.escape(config.LOCAL_LIST_DIR),
+            f"{glob.escape(config.LIST_BASE_NAME)}-{VIDEO_LIST_MARKER}-*.txt")
+        found = sorted(glob.glob(pattern))
+        if found:
+            return found[-1]
+    except Exception as e:
+        print(f"[SEARCH ERROR] Could not find the latest film list: {e}")
+    return None
+
+
+def all_list_paths():
+    """Every list a REQUEST may be answered from, newest master first.
+
+    This is the seam the split turns on. A file request and an @find both used
+    to read find_latest_list() alone; once film and series moved to their own
+    file, reading only that one would have left every video in the library
+    listed, advertised, and impossible to actually get - the exact opposite of
+    what publishing it is for.
+
+    Returns one path when there is no film list, which is what a music-only
+    library and a switched-off SEPARATE_VIDEO_LIST both look like.
+    """
+    paths = []
+    for path in (find_latest_list(), find_latest_video_list()):
+        if path and os.path.exists(path):
+            paths.append(path)
+    return paths
+
 
 _INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
 
@@ -322,10 +419,28 @@ def find_matching_entries(search_words, limit=None, list_path=None):
     string}; `total_matches` counts every match regardless of the cap, which is
     what the IRC search header reports even when only a handful are shown.
     """
+    if list_path is None:
+        # OUR OWN lists, all of them. Film and series live in a second file
+        # since SEPARATE_VIDEO_LIST, and searching only the master would leave
+        # every video listed and advertised but unfindable by @find - and,
+        # through the same seam in dcc.py, unrequestable.
+        entries = []
+        total_matches = 0
+        for path in all_list_paths():
+            found, matched = find_matching_entries(
+                search_words,
+                limit=None if limit is None else max(0, limit - len(entries)),
+                list_path=path)
+            entries.extend(found)
+            # Counted across every list, not per file: the search header
+            # reports the true total even when the cap hides most of it.
+            total_matches += matched
+        return entries, total_matches
+
     entries = []
     total_matches = 0
 
-    current_list_path = list_path if list_path is not None else find_latest_list()
+    current_list_path = list_path
     if not current_list_path or not os.path.exists(current_list_path):
         return entries, total_matches
 

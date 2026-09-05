@@ -98,6 +98,15 @@ python3 update_list.py
 
 or `!update` from IRC, or the dashboard's **Update list** button. On a large library this takes a while; the advert will report the real file count once it finishes.
 
+**Everything under `FILE_DIRECTORY` goes into the list** — every format, and files with no extension at all. `LIST_IGNORED_EXTENSIONS` names what to leave out; write it however you like, since dots and spacing are optional and case does not matter (`db,ini,tmp` and `.DB, .INI, .TMP` are the same list). It ships skipping only what is never a real file: `.db`, `.ini`, `.lnk`, `.url`, and the `.tmp`/`.part`/`.crdownload`/`.!ut` suffixes of downloads still in flight. The scan prints what it is skipping before it starts.
+
+Because everything is listed, **anything you leave in that directory is offered to anyone who asks.** It is the public face of the bot — keep out of it whatever should not leave.
+
+Two settings decide how the result is split up:
+
+- **`SEPARATE_VIDEO_LIST`** — publishes film and series as their own list rather than mixing them in with the music. Both travel in the same archive people get by typing your bot's name, so there is no second command to learn. `LIST_VIDEO_EXTENSIONS` says which formats count. Turn it off if your films and music are already in separate folders and you would rather split by folder.
+- **`RAR_EXTENSIONS`** — which formats make a folder packable with `!rar`. A folder needs one of these to get a row in the album list. Everything else stays listed and directly requestable; this only decides what can be packed, and packing has no size limit, so it is worth keeping narrow.
+
 ### If your users queue with AutoQ
 
 AutoQ (the mIRC queue script most of these channels use) pastes list rows into
@@ -190,6 +199,18 @@ This checks the configuration without connecting to IRC, so a mistake surfaces b
 ```
 
 The master list is only regenerated when you ask. If a release changes what the list contains, the file you are serving keeps its old content until the next `!update` — which looks like the upgrade did nothing.
+
+### Coming from v1.11.0 or earlier
+
+The list build changed what it puts in the list, so three things are worth knowing before you restart.
+
+**Your list will not change until you rebuild it.** The daemon keeps serving the list already on disk; run `!update` (or press **Update list** on the dashboard) when you are ready. That is your chance to look at the result before anyone else does.
+
+**It will then contain everything under `FILE_DIRECTORY`, not just `.mp3` and `.flac`.** Video, `.m4a`, artwork, cue sheets, text files — all of it. Check what is actually in that directory first: anything sitting there is offered to anyone who asks. `LIST_IGNORED_EXTENSIONS` names what to leave out, and ships skipping only what is never a real file (`.db`, `.ini`, `.lnk`, `.url`, and half-finished downloads).
+
+**Some folders will stop being `!rar`-packable.** A folder used to become packable by containing anything in the list; now it needs a file in `RAR_EXTENSIONS`, which ships as the audio formats. So a folder of video or documents no longer gets a row in the album list — deliberately, since packing has no size cap and a film folder is a request to compress tens of gigabytes. Individual files in those folders are still listed and still requestable by name.
+
+If you keep video, it also gets its own list from now on, travelling in the same archive people already receive. `SEPARATE_VIDEO_LIST = No` puts everything back in one list.
 
 ### Coming from a version before the `config.py` → `defaults.py` rename
 
