@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Banning a host now actually bans it.** `!ban *.some.isp.net` was accepted, reported as successful and listed among your active bans — and never enforced, because a pattern without `!` or `@` was compared against the nickname, which can never contain a dot. Write it either way now; both work.
+
+- **Fetching a list from a bot whose nick contains `|` works.** Nicks like `Bot|Away` are ordinary on IRC and illegal in a Windows folder name, so the fetch downloaded the whole list and then failed at the last step, every time, for that bot. Same for `*`, `"`, `<`, `>`, `?` and `:`.
+
 - **A folder picker on the Settings page, if you want one.** Instead of typing the full path to each served folder you can browse for it — drives, then folders, then "Use this folder". It is **off by default** and turned on with "Folder picker on the Settings page" under Web dashboard, because it lets anyone logged into your dashboard see the names of folders on your machine, which nothing else there does. Leaving it off costs you nothing except typing the path yourself.
 - **Serving a whole drive works.** If you pointed DCCore at `D:\` rather than a folder inside it, the list advertised every file and then refused to send any of them, reporting each request as a security violation. Both the check that decides whether a folder can be saved and the one that decides whether a file can be sent had the same fault.
 

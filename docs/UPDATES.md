@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 A host-shaped hard ban was confirmed, listed, and never enforced
+`check_user_status()` decided a pattern was "hostmask-shaped" only if it contained `!` or `@`. Anything else was matched against the bare NICK - and an IRC nick can never contain a dot, so
+
+```
+!ban *.dialup.example.com
+```
+
+could not match anything, ever. But `!ban` accepted it, reported success, and `db.load_hard_bans()` listed it among the active bans. The admin believed a host was banned; the host walked straight in. The same shape as #225, where the confirmation and the enforcement disagreed silently.
+
+**Three shapes now, matched against three different things.** A pattern containing `!` or `@` is a full hostmask and matches the mask; one containing `.` or `:` is a host or IP and matches **the host portion**; anything else is a nick and matches the nick. RFC 2812 allows a nick letters, digits and the specials `[]\`_^{|}` - so what a pattern contains says what it is about.
+
+Matching the host and not the whole mask is the difference between working and appearing to: a full mask is `nick!ident@host`, so `192.168.1.*` anchored over the whole of it cannot match anything. The first attempt at this fix matched the full mask and passed the `*.dialup.example.com` case purely because that pattern's leading star swallowed the `nick!ident@` part - the IP test is what caught it.
+
+### 🗄️ A bot nick containing "|" broke every cross-bot fetch from that bot
+`_sanitize_bot_dir_name()` claimed in its own docstring to apply "the same discipline" as `dcc_fetch._sanitize_offer_filename()`, which is a **whitelist**. It was a blacklist: NUL, the two separators, `..` and surrounding dots.
+
+`|` is an ordinary IRC nick character - RFC 2812's specials are `[]\`_^{|}`, and `Bot|Away` is one of the commonest nick shapes on the network - and is illegal in a Windows path. So `os.makedirs()` on the extraction directory failed with `WinError 123` **after the zip had already come over DCC**. The transfer worked, the bytes were on disk, and the fetch failed at the last step, every time, for that bot. `*`, `"`, `<`, `>`, `?` and `:` do the same.
+
+A whitelist now, as the docstring always claimed. Legal nick specials that are also legal in a path (`[]{}^\`_-.`) are kept, so the directory is still recognisably that bot's.
+
 ### 📣 The second announce target really did send a list - the note saying otherwise was wrong
 #272 fixed a `PRIVMSG` target that defaulted to a LIST of channels, and recorded that the sibling site in the global-queue scan "deliberately" kept one, on the grounds that it was only a membership test. **It is not.** `g_chan` is passed to `start_dcc_send()` at the thread spawn a few lines below, which hands it to `announce.send_transfer_complete()`, which builds `f"PRIVMSG {channel} :"`. The reading stopped at the `isinstance` block and never followed the value to the spawn - and the test written then to protect that shape was protecting the identical defect. Found by the full-program audit.
 
