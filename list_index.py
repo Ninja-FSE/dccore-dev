@@ -200,10 +200,26 @@ def index_bot_list(bot, rows):
     parse walked the whole file only to count it and threw the rows away, so
     the index costs one pass that was already happening.
 
-    `rows` are the dicts entries_to_filelist_rows() produces. Returns the
-    number indexed, or 0 if the index is unavailable.
+    `rows` are the dicts list.entries_to_filelist_rows() produces, whose
+    filename key is "title" - NOT "filename". This read "filename" at first,
+    which is not a key that function has ever produced, so every row went into
+    the index with an empty name and the whole cross-list filter matched
+    nothing in production. The tests missed it by building their own rows with
+    a "filename" key instead of calling the producer.
+
+    Returns the number indexed, or 0 if the index is unavailable.
     """
-    name = str(bot or "").strip()
+    # NORMALISED, and the same normalisation on both sides of the delete.
+    #
+    # This stored whatever the operator typed and deleted with SQLite's binary
+    # `=`, while every reader case-folds: fetched_bot_lists is keyed
+    # lower-case, indexed_bots() lowers, and FTS5 MATCH folds. So fetching
+    # from "Dude" and then re-fetching from "DUDE" - the ordinary case, since
+    # the sidebar prefills the nick and a refetch is retyped by hand - left
+    # BOTH copies in the index. The stale one answered searches beside the new
+    # one, indexed_bots() reported a single bot, and nothing could ever free
+    # it: at the sizes this project measures, ~80MB per orphan.
+    name = str(bot or "").strip().lower()
     if not name:
         return 0
 
@@ -220,8 +236,12 @@ def index_bot_list(bot, rows):
             conn.executemany(
                 "INSERT INTO entries (bot, filename, folder, size) "
                 "VALUES (?, ?, ?, ?)",
+                # "title" is the key entries_to_filelist_rows() writes;
+                # "filename" is accepted too because find_matching_entries()
+                # uses that name and a future caller may reasonably pass its
+                # rows straight through.
                 [(name,
-                  str(row.get("filename") or ""),
+                  str(row.get("title") or row.get("filename") or ""),
                   str(row.get("folder") or ""),
                   str(row.get("size") or ""))
                  for row in rows])
@@ -239,7 +259,7 @@ def index_bot_list(bot, rows):
 
 def drop_bot(bot):
     """Forget one bot's list. Called when its fetched list is deleted."""
-    name = str(bot or "").strip()
+    name = str(bot or "").strip().lower()
     if not name:
         return False
     with _conn_lock:
@@ -291,14 +311,26 @@ def bots_with_a_match(terms, bots):
             # would grey out the whole sidebar and read as a broken filter.
             return set(), set()
         for bot in candidates:
+            # The MATCH is a cheap PRE-FILTER, not the answer. `bot:"name"` is
+            # an FTS5 PHRASE over a tokenised column, not equality: "Bot"
+            # matches "Bot-2", "Bot_away" and "Bot|gone", because unicode61
+            # splits on the punctuation. Holding both Bot and Bot-2 with only
+            # Bot-2 matching, the sidebar left Bot undimmed and the status
+            # line said "1 match in 2 lists". Every fixture in the tests was
+            # token-disjoint, which is why they passed.
+            #
+            # So the row's own bot column is compared for equality before the
+            # bot counts as matched. LIMIT stays small rather than 1: a
+            # near-miss neighbour can occupy the first row.
+            wanted = bot.strip().lower()
             try:
-                row = conn.execute(
-                    "SELECT 1 FROM entries WHERE entries MATCH ? LIMIT 1",
-                    (f"bot:{_quote(bot)} AND {query}",)).fetchone()
+                rows = conn.execute(
+                    "SELECT bot FROM entries WHERE entries MATCH ? LIMIT 25",
+                    (f"bot:{_quote(wanted)} AND {query}",)).fetchall()
             except Exception:
                 continue
-            if row:
-                matched.add(bot.lower())
+            if any(str(r[0]).strip().lower() == wanted for r in rows):
+                matched.add(wanted)
     empty = {b.lower() for b in candidates} - matched
     return matched, empty
 
@@ -325,8 +357,11 @@ def search(terms, limit=None, bots=None):
         held = [str(b).strip() for b in bots if str(b).strip()]
         if not held:
             return []
-        query = ("(" + " OR ".join(f"bot:{_quote(b)}" for b in held) + ")"
-                 " AND " + query)
+        # Same pre-filter, same reason - the equality check is below, on the
+        # rows that come back, because bot:"Bot" also matches "Bot-2".
+        held_keys = {b.strip().lower() for b in held}
+        query = ("(" + " OR ".join(f"bot:{_quote(b)}" for b in sorted(held_keys))
+                 + ") AND " + query)
 
     if limit is None:
         limit = DEFAULT_SEARCH_LIMIT
@@ -355,8 +390,68 @@ def search(terms, limit=None, bots=None):
                   f"rather than a partial answer.")
             return []
 
-    return [{"bot": row[0], "filename": row[1], "folder": row[2],
+    rows = [{"bot": row[0], "filename": row[1], "folder": row[2],
              "size": row[3]} for row in found]
+    if bots is not None:
+        # The MATCH above is a phrase filter; this is the equality. Without
+        # it, holding "Bot" would return "Bot-2"'s files and offer a download
+        # from a list we do not have.
+        rows = [row for row in rows
+                if str(row["bot"]).strip().lower() in held_keys]
+    return rows
+
+
+def backfill_missing(held, log=print):
+    """Index any held list that is not in the index yet. Returns how many.
+
+    THE UPGRADE CASE, and it is the ordinary one. `index_bot_list()` has
+    exactly one caller in the daemon - a fetch completing - while held lists
+    survive restarts, because `list_fetch` persists them and `oserve` restores
+    them at startup. So an operator who upgrades with lists already fetched
+    has a full `fetched_bot_lists` and an empty index.
+
+    That is worse than it sounds, because the "we cannot tell" guard does not
+    cover it: `_connect()` creates the database on demand, so the connection
+    is NOT None, every per-bot query simply misses, and the page states
+    positively that no list holds a match. The filter reads as working and
+    answers wrongly, for lists that are full of matches, until each is
+    re-fetched by hand.
+
+    `held` is `config.fetched_bot_lists`. Each entry carries the `list_path`
+    the fetch stored, and re-parsing it here is the same one-pass parse
+    `list_fetch` does - not a second implementation of it.
+
+    Best-effort per bot: one unreadable list costs its own row in the filter
+    and nothing else, which is the posture the whole module already takes.
+    """
+    import list as list_mod
+    import platform_compat
+
+    already = indexed_bots()
+    done = 0
+    for key, entry in (held or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        bot = str(entry.get("bot") or key).strip()
+        if not bot or bot.lower() in already:
+            continue
+        path = entry.get("list_path")
+        if not path or not os.path.exists(platform_compat.long_path(path)):
+            continue
+        try:
+            entries, _total = list_mod.find_matching_entries(
+                [], limit=None, list_path=platform_compat.long_path(path))
+            rows = list_mod.entries_to_filelist_rows(entries, bot)
+        except Exception as err:
+            log(f"[LIST-INDEX] Could not re-read {bot}'s list to index it "
+                f"({err}); the filter will not see it until the next fetch.")
+            continue
+        if index_bot_list(bot, rows):
+            done += 1
+    if done:
+        log(f"[LIST-INDEX] Indexed {done} list(s) held from before the search "
+            f"index existed.")
+    return done
 
 
 def reset_for_tests():

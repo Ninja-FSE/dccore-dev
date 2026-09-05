@@ -4,6 +4,74 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔍 Six audit findings, and the worst made the filter match nothing
+
+From the multi-agent audit of the same day's work, plus the refutation pass
+over what it had not tested.
+
+**The cross-list filter never matched anything in production.**
+`list_index.index_bot_list()` read `row["filename"]`;
+`list.entries_to_filelist_rows()` writes `row["title"]`, and has never written
+`"filename"`. Every row went into the index with an empty name.
+
+Forty-nine tests passed over it, because the fixture built its own dicts with
+a `"filename"` key — the only caller in the codebase that did not go through
+the producer. It goes through it now, so a key renamed on either side fails
+here.
+
+**Bot identity: one cause wearing two hats.**
+
+The `DELETE` that makes a refetch REPLACE a list used SQLite's binary `=` on
+whatever the operator typed, while every reader case-folds —
+`fetched_bot_lists` is keyed lower-case, `indexed_bots()` lowers, FTS5 MATCH
+folds. Fetch from `Dude`, refetch from `DUDE` (the ordinary case: the sidebar
+prefills the nick and a refetch is retyped by hand) and both copies stayed.
+The stale one answered searches beside the new one, `indexed_bots()` reported
+a single bot so nothing could see it, and nothing could free it. The key is
+normalised on both sides now, and the payload maps back through
+`fetched_bot_lists` so the operator still sees the nick as that bot spells it.
+
+And `bot:"name"` is an FTS5 **phrase** over a tokenised column, not equality:
+unicode61 splits on punctuation, so `Bot` matches `Bot-2`, `Bot_away` and
+`Bot|gone`. Holding both with only `Bot-2` matching, the sidebar left `Bot`
+undimmed and the status line said "1 match in 2 lists". The MATCH is a cheap
+pre-filter now, with the bot column compared for equality on the rows that
+come back. Every fixture was token-disjoint, which is why they passed.
+
+**A stale reply repainted the table.** `runFilelistsFilter()` had a token and
+its comment claimed *"only the newest is allowed to render"* — but it was
+compared inside the debounce callback, before `loadFilelists()` was called. It
+decided which request to SEND; nothing decided which reply to DRAW. At 120ms
+of debounce a broad term is slow and one more character is fast, so the narrow
+reply arrives first and the broad one repaints under the later term — and
+caches itself, so every later re-render keeps serving it. The load carries its
+own token now, checked in both the `then` and the `catch`.
+
+**The four-second bot poll undid the filter.** The sidebar is rebuilt from
+scratch every `FILELISTS_BOTS_POLL_MS`, and everything the filter puts on it
+lives in classes on those rows — so the greying, the crossed-out names and the
+operator's own switched-off choices vanished four seconds after appearing,
+repeatedly, while they were still typing. The scroll position and keyboard
+focus went with them, which on a thirty-two-advertiser channel means the list
+jumps back to the top while being read. The rebuild restores all three.
+
+**Nothing backfilled the index.** `index_bot_list()` has one caller — a fetch
+completing — while held lists survive restarts. So an operator upgrading with
+lists already fetched had a full `fetched_bot_lists` and an empty index, and
+this module's "we cannot tell" guard did not cover it: `_connect()` creates
+the database on demand, so the connection is not None, every per-bot query
+simply misses, and the page states **positively** that no list holds a match.
+A filter that reads as working and answers wrongly. `oserve` now indexes what
+is missing at startup, through the same parse the fetch uses.
+
+Two notes on the tests themselves. A guard matched this session's own prose
+for the fifth time — a comment explaining the attribute-injection rule
+contained the literal it warns about, so the XSS scan fired on the
+explanation. And a source-reading test passed against a dead branch: the
+mutation moved the call behind `if (false)` and the test only checked the call
+existed. It asserts the call and its guard as one sequence now, which is as
+close to "reachable" as reading source gets.
+
 ### 📌 The List Browser says what you have already asked for (#133)
 
 The last unbuilt item in the issue, and it wants two states rather than one:

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fixed: the cross-list filter found nothing at all.** It was storing every file under an empty name, so typing anything returned no matches from any list. It works now — and if you already had lists downloaded before this update, they are indexed automatically when the bot next starts, rather than staying invisible to the filter until you re-fetch each one by hand.
+
+- **Fixed: re-downloading a bot's list could leave the old copy searchable.** If you typed the nick with different capitalisation the second time, both copies stayed in the index, the stale one turned up in results, and nothing could clear it. Related: a bot whose name contains another's — `Bot` and `Bot-2` — could be credited with the other's matches.
+
+- **Fixed: the bot list reset itself every four seconds while you were using it.** The filter's highlighting, your scroll position and keyboard focus were all lost on each refresh. Typing quickly could also leave an earlier search's results on screen under a newer term.
+
 - **The List Browser now shows what you have already asked for.** A file you have requested is tagged **asked** while it is on its way and **have it** once it has arrived, so a long list does not leave you guessing whether you already queued something. A failed request is not tagged at all — the useful thing to do with one is ask again. Tags are per bot: two bots can hold a file of the same name, and asking one says nothing about the other.
 
 - **Fixed: filtering before picking a bot left you unable to queue anything.** Results appeared with no tick boxes and no folder buttons, because the page was deciding what you could request from whichever list was selected rather than from the results in front of you.

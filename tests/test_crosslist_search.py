@@ -31,6 +31,7 @@ what buys the feature: substring matching over four million rows is the 1.4s
 query above. @find over our own list is untouched.
 """
 
+import io
 import os
 import sys
 import tempfile
@@ -60,9 +61,25 @@ class IndexCase(DCCoreTestCase):
         self.addCleanup(list_index.reset_for_tests)
 
     def index(self, bot, *filenames, folder="D:\\MUSIC\\Some Folder\\"):
-        return list_index.index_bot_list(
-            bot, [{"filename": name, "folder": folder, "size": "4.00MB"}
-                  for name in filenames])
+        """Indexed through the REAL producer, not a hand-built dict.
+
+        This built its own rows carrying a "filename" key, which
+        list.entries_to_filelist_rows() has never produced - it writes
+        "title". So every test here passed while the production feed path
+        (list_fetch -> entries_to_filelist_rows -> index_bot_list) put an
+        EMPTY name on every row, and the cross-list filter matched nothing at
+        all for a real operator. An audit found it; this suite could not,
+        because it was the only caller that did not use the producer.
+
+        Going through the producer is what stops that repeating: a key
+        renamed on either side now fails here.
+        """
+        import list as list_mod
+
+        rows = list_mod.entries_to_filelist_rows(
+            [{"filename": name, "size": "4.00MB", "folder": folder}
+             for name in filenames], bot)
+        return list_index.index_bot_list(bot, rows)
 
     def hold(self, *bots):
         self.set_config(fetched_bot_lists={
@@ -244,9 +261,14 @@ class WhichBotsHaveNothing(IndexCase):
         # once per bot with LIMIT 1" - so a bare search for "LIMIT 1" matched
         # the explanation of the code rather than the code, and passed with
         # the clause deleted.
-        self.assertIn("MATCH ? LIMIT 1", block,
+        # BOUNDED, and small. It was LIMIT 1 until the bot column turned out
+        # to be matched as an FTS5 phrase rather than compared for equality -
+        # "Bot" matches "Bot-2" - so a near-miss neighbour can occupy the
+        # first row and the equality check needs a few to look at. The
+        # property is unchanged: this must not enumerate every match.
+        self.assertIn("MATCH ? LIMIT 25", block,
                       "the existence query enumerates every match instead of "
-                      "stopping at the first")
+                      "stopping after a bounded look")
 
     def test_no_term_greys_nobody(self):
         self.index("BigTruck", "Enter Sandman.flac")
@@ -265,12 +287,55 @@ class TheIndexIsNotTheRecordOfWhatIsHeld(IndexCase):
     """
 
     def test_a_search_is_scoped_to_the_lists_held(self):
+        """The index answers with its NORMALISED key.
+
+        A bot is stored under one lower-cased key so that a refetch typed with
+        different capitalisation replaces its list rather than leaving both
+        copies searchable for ever. Recovering the nick as that bot spells it
+        is the payload's job - build_crosslist_search_payload maps back
+        through `fetched_bot_lists`, which is keyed the same way and holds the
+        real spelling."""
         self.index("BigTruck", "Enter Sandman.flac")
         self.index("GoneBot", "Enter Sandman.flac")
 
         found = list_index.search(["sandman"], bots=["BigTruck"])
 
-        self.assertEqual([row["bot"] for row in found], ["BigTruck"])
+        self.assertEqual([row["bot"] for row in found], ["bigtruck"])
+
+    def test_a_refetch_typed_differently_replaces_rather_than_doubles(self):
+        """The reason the key is normalised at all.
+
+        SQLite's `=` is binary, so the delete matched only the exact spelling
+        while every reader case-folds. Fetch from "Dude", refetch from "DUDE" -
+        the ordinary case, since the sidebar prefills the nick and a refetch is
+        retyped by hand - and both copies stayed. The stale one answered
+        searches beside the new one while indexed_bots() reported a single
+        bot, so nothing could see it and nothing could free it."""
+        self.index("Dude", "Old Song.flac")
+        self.index("DUDE", "New Song.flac")
+
+        found = [row["filename"] for row in list_index.search(["song"])]
+
+        self.assertEqual(found, ["New Song.flac"])
+        self.assertEqual(list_index.indexed_bots(), {"dude"})
+
+    def test_a_bot_whose_name_contains_another_is_not_mistaken_for_it(self):
+        """`bot:"Bot"` is an FTS5 PHRASE over a tokenised column, not
+        equality - unicode61 splits on the punctuation, so it matches "Bot-2",
+        "Bot_away" and "Bot|gone". Hold Bot and Bot-2 with only Bot-2
+        matching, and the sidebar left Bot undimmed while the status line said
+        "1 match in 2 lists". Every fixture here was token-disjoint, which is
+        why this passed."""
+        self.index("Bot", "Alpha.flac")
+        self.index("Bot-2", "Target.flac")
+
+        matched, empty = list_index.bots_with_a_match(
+            ["target"], ["Bot", "Bot-2"])
+
+        self.assertEqual(matched, {"bot-2"})
+        self.assertEqual(empty, {"bot"})
+        self.assertEqual(list_index.search(["target"], bots=["Bot"]), [],
+                         "holding only Bot returned Bot-2's file")
 
     def test_holding_nothing_finds_nothing_however_full_the_index(self):
         self.index("GoneBot", "Enter Sandman.flac")
@@ -625,6 +690,237 @@ class TheRowShapeIsOne(unittest.TestCase):
         self.assertIn("mark", rows[0])
         self.assertEqual(rows[0]["mark"], "",
                          "our own list is never something we requested")
+
+
+class ListsHeldFromBeforeTheIndexExisted(IndexCase):
+    """The upgrade case, and it is the ordinary one.
+
+    index_bot_list() has exactly one caller in the daemon - a fetch
+    completing - while held lists survive restarts, because list_fetch
+    persists them and oserve restores them. So an operator upgrading with
+    lists already fetched had a full fetched_bot_lists and an empty index.
+
+    Worse than it sounds, because the module's "we cannot tell" guard does not
+    cover it: _connect() creates the database on demand, so the connection is
+    NOT None, every per-bot query simply misses, and the page states
+    positively that no list holds a match. The filter reads as working and
+    answers wrongly, for lists that are full of matches, until each is
+    re-fetched by hand.
+    """
+
+    def held_list(self, bot, *filenames):
+        """A list file on disk and an entry pointing at it - what a restart
+        leaves behind, with nothing in the index."""
+        path = os.path.join(self.index_dir, f"{bot}-list.txt")
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"List of {len(filenames)} Files\n\n")
+            handle.write("=" * 20 + "\n")
+            handle.write("D:\\MUSIC\\Some Folder\\\n")
+            handle.write("=" * 20 + "\n")
+            for name in filenames:
+                handle.write(f"!{bot} {name}  ::INFO:: 4.00MB\n")
+        return {"bot": bot, "fetched_at": 1, "entry_count": len(filenames),
+                "list_path": path}
+
+    def test_a_held_list_is_indexed_at_startup(self):
+        held = {"bigtruck": self.held_list("BigTruck", "Enter Sandman.flac")}
+        self.assertEqual(list_index.search(["sandman"]), [])
+
+        list_index.backfill_missing(held, log=lambda _m: None)
+
+        self.assertEqual([row["filename"] for row in list_index.search(["sandman"])],
+                         ["Enter Sandman.flac"])
+
+    def test_it_reads_the_list_the_same_way_the_fetch_does(self):
+        """Through find_matching_entries + entries_to_filelist_rows, not a
+        second parser - which is also what stops the row-key mismatch that
+        made every indexed name empty from happening again on this path."""
+        held = {"bigtruck": self.held_list("BigTruck", "A Song.flac")}
+
+        list_index.backfill_missing(held, log=lambda _m: None)
+
+        row = list_index.search(["song"])[0]
+        self.assertEqual(row["filename"], "A Song.flac")
+        self.assertEqual(row["folder"], "D:\\MUSIC\\Some Folder\\")
+
+    def test_a_list_already_indexed_is_not_read_again(self):
+        """Idempotent, because this runs on every start. Re-indexing every
+        held list at boot would re-parse hundreds of megabytes to arrive
+        where it already was."""
+        self.index("BigTruck", "Enter Sandman.flac")
+        held = {"bigtruck": self.held_list("BigTruck", "Something Else.flac")}
+
+        self.assertEqual(list_index.backfill_missing(held, log=lambda _m: None), 0)
+        self.assertEqual([row["filename"] for row in list_index.search(["sandman"])],
+                         ["Enter Sandman.flac"],
+                         "the backfill overwrote a list that was already indexed")
+
+    def test_an_entry_whose_file_has_gone_is_skipped(self):
+        """The extracted list can be deleted while the entry survives. That
+        costs its own row in the filter, not the startup."""
+        entry = self.held_list("BigTruck", "Enter Sandman.flac")
+        os.remove(entry["list_path"])
+
+        self.assertEqual(
+            list_index.backfill_missing({"bigtruck": entry}, log=lambda _m: None), 0)
+
+    def test_one_unreadable_list_does_not_stop_the_others(self):
+        held = {
+            "broken": {"bot": "Broken", "list_path": None},
+            "bigtruck": self.held_list("BigTruck", "Enter Sandman.flac"),
+        }
+
+        self.assertEqual(list_index.backfill_missing(held, log=lambda _m: None), 1)
+        self.assertEqual(len(list_index.search(["sandman"])), 1)
+
+    def test_the_daemon_runs_it_at_startup(self):
+        """Read out of oserve.py: driving a real startup opens sockets, and
+        the one thing that matters is that the call is there at all."""
+        with io.open(os.path.join(REPO_ROOT, "oserve.py"),
+                     encoding="utf-8") as handle:
+            code = "\n".join(line.split("#", 1)[0]
+                              for line in handle.read().splitlines())
+
+        self.assertIn("list_index.backfill_missing(config.fetched_bot_lists)", code,
+                      "nothing indexes lists held from before the index "
+                      "existed, so the filter reports no matches for lists "
+                      "that are full of them")
+
+
+class TheFourSecondPollKeepsWhatTheFilterDid(unittest.TestCase):
+    """The sidebar is rebuilt from scratch every FILELISTS_BOTS_POLL_MS.
+
+    Everything the filter puts on it lives in classes on those rows, so
+    without a restore the greying, the crossed-out names and the operator's
+    own switched-off choices all vanished four seconds after appearing -
+    repeatedly, while they were still typing. The scroll position went with
+    them, which on the thirty-two-advertiser channel #133 was written from
+    means the list jumps back to the top while being read.
+
+    Read out of app.js: nothing here executes JavaScript.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"),
+                  encoding="utf-8") as handle:
+            cls.js = handle.read()
+
+    def switcher(self):
+        start = self.js.index("function renderFilelistsSwitcher(")
+        depth = 0
+        for i in range(self.js.index("{", start), len(self.js)):
+            if self.js[i] == "{":
+                depth += 1
+            elif self.js[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.js[start:i + 1]
+        raise AssertionError("unbalanced braces")
+
+    def test_the_rebuild_reapplies_the_filter_marks(self):
+        body = self.switcher()
+
+        # The CALL AND ITS GUARD as one sequence. Asserting only that the call
+        # appears passed against a mutation that put it behind `if (false)` -
+        # present in the source, unreachable at runtime, which is exactly the
+        # distinction a source-reading test is worst at making.
+        guarded = "\n".join([
+            "if (state.filelistsFilterPayload) {",
+            "      applyFilterHighlight(state.filelistsFilterPayload);",
+            "    }",
+        ])
+
+        self.assertIn(guarded, body,
+                      "the rebuild does not reapply the filter's marks")
+
+    def test_the_rebuild_keeps_the_scroll_position(self):
+        body = self.switcher()
+
+        self.assertIn("var keptScroll = el.filelistsBotList.scrollTop", body)
+        self.assertIn("el.filelistsBotList.scrollTop = keptScroll", body)
+
+    def test_the_rebuild_keeps_keyboard_focus_on_the_row(self):
+        """Tabbing to a bot and having focus thrown to the document four
+        seconds later makes the list unusable from the keyboard."""
+        body = self.switcher()
+
+        self.assertIn("refocusBot", body)
+        self.assertIn(".focus()", body)
+
+    def test_the_row_is_found_without_building_a_selector_from_a_nick(self):
+        """A nick is remote input. This file's rule is that one never gets
+        concatenated into anything that is then parsed - and the XSS guards
+        do not care whether the result is markup or a CSS selector."""
+        body = self.switcher()
+
+        self.assertIn("dataset.bot === refocusBot", body)
+        self.assertNotIn("querySelector(", body.split("refocusBot")[-1])
+
+
+class OnlyTheNewestReplyIsDrawn(unittest.TestCase):
+    """Two requests are easily in flight at 120ms of debounce.
+
+    A broad term is slow; one more character is narrow and fast, and the
+    narrow reply arrives first. The broad one then lands and repaints the
+    table and the sidebar under the LATER term still in the box - and because
+    it also caches itself as filelistsFilterPayload, every later re-render
+    keeps serving it until the next keystroke.
+
+    runFilelistsFilter() already had a token and its comment claimed "only the
+    newest is allowed to render", but it was compared inside the debounce
+    callback, before loadFilelists() was called at all: it decided which
+    request to SEND and nothing decided which reply to DRAW.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"),
+                  encoding="utf-8") as handle:
+            cls.js = handle.read()
+
+    def loader(self):
+        start = self.js.index("function loadFilelists()")
+        depth = 0
+        for i in range(self.js.index("{", start), len(self.js)):
+            if self.js[i] == "{":
+                depth += 1
+            elif self.js[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.js[start:i + 1]
+        raise AssertionError("unbalanced braces")
+
+    def test_the_load_takes_a_token_of_its_own(self):
+        body = self.loader()
+
+        self.assertIn("state.filelistsLoadToken += 1", body)
+        self.assertIn("var loadToken = state.filelistsLoadToken", body)
+
+    def test_a_superseded_reply_does_not_render(self):
+        body = self.loader()
+        after_then = body.split(".then(function (payload)", 1)[1]
+
+        self.assertIn("if (loadToken !== state.filelistsLoadToken) { return; }",
+                      after_then.split("state.filelistsLoaded")[0],
+                      "a stale reply repaints the table")
+
+    def test_a_superseded_failure_does_not_render_either(self):
+        """The same staleness wearing an error message: a request the operator
+        has already moved on from failing must not paint over the results of
+        the one they are waiting for."""
+        body = self.loader()
+        after_catch = body.split(".catch(function (err)", 1)[1]
+
+        self.assertIn("if (loadToken !== state.filelistsLoadToken) { return; }",
+                      after_catch)
+
+    def test_it_is_not_the_debounce_token(self):
+        """Two different questions - which keystroke may send a request, and
+        which reply may draw. Conflating them is what let this through."""
+        body = self.loader()
+
+        self.assertNotIn("filelistsFilterToken", body)
 
 
 class TheIndexIsWrittenByTheFetch(unittest.TestCase):

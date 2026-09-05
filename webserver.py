@@ -831,7 +831,14 @@ def build_crosslist_search_payload(term, limit=None):
     order = []
     groups = {}
     for row in rows:
-        bot = str(row.get("bot") or "")
+        # The index stores a bot under one NORMALISED key, so that a refetch
+        # under different capitalisation replaces the list rather than
+        # doubling it. The operator should still see the nick as that bot
+        # spells it, and the fetch should be addressed that way - so the
+        # display name comes back from `held`, which is keyed the same way and
+        # holds the real spelling.
+        bot = held.get(str(row.get("bot") or "").strip().lower(),
+                       str(row.get("bot") or ""))
         folder = str(row.get("folder") or "")
         key = (bot.lower(), folder.lower())
         group = groups.get(key)

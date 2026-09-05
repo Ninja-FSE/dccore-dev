@@ -188,6 +188,20 @@ def startup():
     if config.fetched_bot_lists:
         print(f"[STARTUP] Fetched lists: {len(config.fetched_bot_lists)} bot(s) remembered.")
 
+        # And index any of them the search index has never seen. Only a fetch
+        # writes that index, while these lists survive restarts - so an
+        # operator upgrading with lists already held had a full map and an
+        # empty index, and the dashboard's filter stated positively that no
+        # list matched anything. Once per start, and only for what is
+        # missing; a library already indexed costs one query.
+        try:
+            import list_index
+            list_index.backfill_missing(config.fetched_bot_lists)
+        except Exception as err:
+            print(f"[STARTUP] Could not check the search index ({err}); the "
+                  f"dashboard's cross-list filter may be incomplete until the "
+                  f"next fetch.")
+
     # Finished cross-bot fetches (complete or failed), same restart-survival
     # reasoning as fetched_bot_lists just above: the actual files under
     # FETCHED_FILES_DIR were untouched by a restart, but the Downloads

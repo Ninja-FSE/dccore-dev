@@ -64,6 +64,11 @@
     // still wanted. Typing fast enough puts several requests in flight, and
     // the slowest is not necessarily the oldest.
     filelistsFilter: "", filelistsFilterToken: 0,
+    // Which LOAD is allowed to render. Separate from filelistsFilterToken,
+    // which decides which debounced keystroke gets to send a request at all -
+    // two different questions, and conflating them is what let a stale reply
+    // through.
+    filelistsLoadToken: 0,
     // Which bots the operator has switched OFF while filtering, and the last
     // answer the server gave. Toggling re-renders from that answer rather
     // than asking again: the rows are already here, and a round trip per
@@ -934,6 +939,19 @@
   // has no HTML-parsing step at all, and the nick is kept in .dataset rather
   // than in the markup, the same way the file checkboxes carry theirs.
   function renderFilelistsSwitcher(rows) {
+    // The bot list is rebuilt from scratch every FILELISTS_BOTS_POLL_MS, and
+    // everything the filter put on it lives in classes on those rows - so
+    // without the restore at the end of this function the greying, the
+    // crossed-out names and the operator's own switched-off choices all
+    // vanished four seconds after they appeared, repeatedly. The scroll
+    // position went with them, which on a channel with thirty-odd
+    // advertisers means the list jumps back to the top while being read.
+    var keptScroll = el.filelistsBotList.scrollTop;
+    var keptFocus = document.activeElement;
+    var refocusBot = (keptFocus && keptFocus.classList
+      && keptFocus.classList.contains("bot-row"))
+      ? keptFocus.dataset.bot : null;
+
     var list = el.filelistsBotList;
     var previous = state.filelistsSource || "__own__";
 
@@ -954,6 +972,28 @@
       rows.some(function (row) { return row.bot === previous && row.held; });
     state.filelistsSource = stillThere ? previous : "__own__";
     markFilelistsActiveBot();
+
+    // Put back what the rebuild just discarded.
+    if (state.filelistsFilterPayload) {
+      applyFilterHighlight(state.filelistsFilterPayload);
+    }
+    el.filelistsBotList.scrollTop = keptScroll;
+    if (refocusBot) {
+      // Found by WALKING the rows and comparing .dataset, not by building a
+      // selector with the nick in it. A nick is remote input, and this file's
+      // rule is that one never gets concatenated into anything that is then
+      // parsed. The XSS guards in test_webserver.py scan for a data attribute
+      // being opened in a concatenation and do not care whether the result is
+      // markup or a selector - which is the right amount of strict, and is
+      // why this walks instead.
+      var candidates = el.filelistsBotList.querySelectorAll(".bot-row");
+      for (var r = 0; r < candidates.length; r++) {
+        if (candidates[r].dataset.bot === refocusBot) {
+          candidates[r].focus();
+          break;
+        }
+      }
+    }
   }
 
   function botRow(row) {
@@ -1526,6 +1566,21 @@
   }
 
   function loadFilelists() {
+      // THE REPLY's token, not the timer's. runFilelistsFilter() already had
+      // one and its comment claimed "only the newest is allowed to render" -
+      // but it was compared inside the debounce callback, BEFORE this
+      // function was even called, so it decided which request to send and
+      // nothing decided which reply to draw.
+      //
+      // Two requests are easily in flight at 120ms of debounce: a broad term
+      // is slow, one more character is narrow and fast, and the narrow reply
+      // arrives first. The broad one then lands and repaints the table and
+      // the sidebar under the later term still in the box - and because it
+      // also caches itself as filelistsFilterPayload, every later re-render
+      // keeps serving it until the next keystroke.
+      state.filelistsLoadToken += 1;
+      var loadToken = state.filelistsLoadToken;
+
       el.filelistsBody.innerHTML = emptyRow(5, "Loading…");
       var source = state.filelistsSource || "__own__";
       var offset = state.filelistsOffset || 0;
@@ -1547,6 +1602,7 @@
       fetchJson(url)
         .then(function (payload) {
           markConnection(true);
+          if (loadToken !== state.filelistsLoadToken) { return; }
           state.filelistsLoaded = true;
           var groups = folderGroupsFrom(payload);
           applyFilterHighlight(payload);
@@ -1560,6 +1616,11 @@
         })
         .catch(function (err) {
           markConnection(false);
+          // A superseded request failing is not this view's problem: the
+          // newer one is what the operator is waiting for, and painting an
+          // error over its results would be the same staleness bug wearing
+          // an error message.
+          if (loadToken !== state.filelistsLoadToken) { return; }
           el.filelistsBody.innerHTML = emptyRow(5, "Could not load file lists: " + err.message);
           updateFilelistsDownloadSelectedState();
         });
