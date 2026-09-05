@@ -90,7 +90,26 @@ def _prune_superseded_lists(keep):
     for item in entries:
         if item in keep:
             continue
-        if not item.startswith(config.LIST_BASE_NAME):
+        # The HYPHEN is the point. Every generated list is
+        # f"{LIST_BASE_NAME}-{today}.txt" or f"{LIST_BASE_NAME}-RAR-{today}.txt",
+        # so the separator is always there - and matching on the bare prefix
+        # also matched the side files, which live in this same directory.
+        #
+        # With LIST_BASE_NAME derived from a nickname like "dccore" or "dcc",
+        # the size side file starts with that prefix too, so every rebuild
+        # wrote the side files and then deleted them again. The library's size
+        # then disappeared from every public surface permanently: the advert
+        # published "Files (0B)" and the CTCP SLOTS payload published 0 raw
+        # bytes, on every interval, for ever - and the log line for it read
+        # "[LIST-CLEAN] Removed 2 superseded list(s)", which sounds like
+        # housekeeping working. Found by audit.
+        if not item.startswith(config.LIST_BASE_NAME + "-"):
+            continue
+
+        # Belt and braces: never remove a file this run just wrote, whatever
+        # the name matching decides.
+        if item in (os.path.basename(str(getattr(config, "LIST_SIZE_FILE", ""))),
+                    os.path.basename(str(getattr(config, "LIST_RAWBYTES_FILE", "")))):
             continue
         # ".rar" is here because LIST_FORMAT can publish one. Only names that
         # also start with LIST_BASE_NAME are considered, and this is the lists
@@ -448,15 +467,40 @@ def list_identity_line(nickname=None):
     return f"Served by {nickname} - {detail}" if detail else f"Served by {nickname}"
 
 
-def read_operator_header(path=None, max_bytes=None):
+def read_operator_header(path=None, max_bytes=None, log=print):
     """The operator's own banner for the top of the list, or "" if there is none.
 
     Free-form: several lines, ASCII art, a channel name - whatever should greet
-    whoever opens the file. Returned VERBATIM apart from line-ending
-    normalisation. Everything else written into the list goes through
+    whoever opens the file. Everything else written into the list goes through
     _one_line(), which flattens control characters; doing that here would
     destroy the art this exists to carry, so the banner deliberately bypasses
     it.
+
+    TWO LINE SHAPES ARE NEUTRALISED, because the banner is written into the
+    body of the master index and the index has a grammar of its own. Found by
+    audit, both with the banner working exactly as documented:
+
+      A line that is entirely "=" is a folder RULE to every reader. A banner
+      with an odd number of them leaves list.find_matching_entries()'s
+      rule/heading/rule machine mid-block, so the next banner line is taken as
+      a folder heading and the REAL heading after it is swallowed - every file
+      in the first folder is then attributed to a folder that does not exist.
+      That value is not cosmetic: the dashboard's duplicate-finder and the
+      File Lists view both resolve it. Rewritten to the same width in "-", so
+      the box still looks like a box.
+
+      A line beginning with "!" is a request ROW to every reader - the count in
+      the advert, the CTCP SLOTS payload, and @find. A banner line like
+      "!!! NEW RELEASES !!!" was counted as a file and returned as a genuine
+      search hit, so a user could request it and receive nothing. Dropped
+      rather than rewritten: there is no edit that keeps such a line looking
+      like itself while stopping it being read as a row.
+
+    Both are reported with the offending line, so the operator can change the
+    banner rather than wonder what happened to it. Neutralised HERE rather
+    than at the point of writing because _split_master_list() removes the
+    banner from each split part by matching the exact text this function
+    returned - so both sides have to be the same text.
 
     "" on anything unreadable, matching read_list_base_marker()'s reasoning: a
     banner is decoration, and no decoration should ever stop a list being
@@ -494,7 +538,45 @@ def read_operator_header(path=None, max_bytes=None):
     # Normalise line endings, drop trailing blank lines so this function owns
     # the spacing around the banner rather than inheriting whatever the file
     # happened to end with.
-    return "\n".join(text.splitlines()).rstrip("\n")
+    text = "\n".join(text.splitlines()).rstrip("\n")
+    return _neutralise_banner(text, log=log)
+
+
+def _neutralise_banner(text, log=print):
+    """The banner with any line the index's own grammar would misread made
+    safe. See read_operator_header()'s docstring for what and why.
+
+    Returns the text unchanged when there is nothing to do, which is the
+    overwhelmingly common case - most banners are prose and ASCII art that
+    happens not to be a bare rule.
+    """
+    if not text:
+        return text
+
+    safe = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+
+        # A row, to every reader in the project.
+        if stripped.startswith("!"):
+            log(f"[LIST-GEN] A banner line starting with '!' was left out of "
+                f"the list: every reader counts it as a file, and @find would "
+                f"return it as a match nobody can download. The line was: "
+                f"{stripped[:60]!r}")
+            continue
+
+        # A folder rule, to every reader in the project.
+        if stripped and set(stripped) == {"="}:
+            log(f"[LIST-GEN] A banner line of only '=' was rewritten with '-': "
+                f"it reads as a folder rule and would shift every folder "
+                f"heading after it by one. The line was {len(stripped)} "
+                f"characters wide.")
+            safe.append(line.replace("=", "-"))
+            continue
+
+        safe.append(line)
+
+    return "\n".join(safe).rstrip("\n")
 
 
 def generate_master_list():

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Your library's total size no longer vanishes from the advert.** If your bot's nickname made the list's base name a prefix of the size files' names, every rebuild wrote those files and then deleted them again — so the advert published `Files (0B)` for ever, while the log said it had tidied up some old lists.
+
+- **A custom list banner can no longer break the list it sits on.** A banner line made only of `=` reads as a folder separator, which shifted every folder heading after it by one; a line starting with `!` reads as a file, so it was counted in your file total and returned by searches as something nobody could download. Both are handled now — a rule line is redrawn in `-`, a `!` line is left out — and the bot tells you which line and why, so you can adjust the banner.
+
 - **A folder picker on the Settings page, if you want one.** Instead of typing the full path to each served folder you can browse for it — drives, then folders, then "Use this folder". It is **off by default** and turned on with "Folder picker on the Settings page" under Web dashboard, because it lets anyone logged into your dashboard see the names of folders on your machine, which nothing else there does. Leaving it off costs you nothing except typing the path yourself.
 - **Serving a whole drive works.** If you pointed DCCore at `D:\` rather than a folder inside it, the list advertised every file and then refused to send any of them, reporting each request as a security violation. Both the check that decides whether a folder can be saved and the one that decides whether a file can be sent had the same fault.
 
