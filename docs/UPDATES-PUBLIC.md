@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A list rebuild that fails partway no longer leaves you advertising one list and handing out another.** If someone was downloading your list when a rebuild ran, the rebuild could publish the new index while the archive people actually received stayed last week's — with the file count, the size and the search all reporting the new scan. It said "the previous list was left untouched" while that was no longer true. The rebuild now either lands completely or not at all.
+
 - **An indented line in `settings.conf` is now reported instead of silently joining the setting above it.** A stray indented line became part of the previous value, newline and all — so a nickname could quietly contain a second line and go out that way.
 
 - **A typo in the admin chat mode is refused rather than ignored.** Writing `lisen` selected automatic mode silently; now it tells you the valid options.
