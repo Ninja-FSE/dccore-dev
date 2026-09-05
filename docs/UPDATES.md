@@ -4,6 +4,37 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚨 A served folder that is a drive root refused every file under it
+`dcc.is_safe_path()` and `library.is_inside()` both compared with `path.startswith(base + os.sep)` - and `os.path.realpath("D:\\")` is `"D:\\"`, which already ends in a separator. So that built `"D:\\\\"`, a doubled separator no real path can start with, and **every file on a drive served whole was refused**.
+
+Refused, not admitted: the direction is safe, which is exactly why it could sit there unnoticed. The master list advertised every file on the drive, every request for one came back as a path violation, and the refusal was logged as a **security event** rather than the configuration problem it actually was.
+
+Latent until #164 step 4 shipped, and reachable the moment it did - the folder editor accepts a drive root with a 200. The separator is now appended only when the base does not already end in one. The sibling-prefix trap the boundary exists for (`/srv/library-backup` is not inside `/srv/library`) is unchanged, and tested alongside it.
+
+Both functions, because the two disagreeing is its own bug: `is_inside()` decides whether a folder set may be SAVED and `is_safe_path()` decides whether a file may be SENT.
+
+### 🚨 Two overlapping rehashes made one of them PART every channel
+`handle_rehash_request()` reloads the modules, then compares the channel list it reads **afterwards** against the one it read before to decide what to JOIN and what to PART. A second rehash's reload puts `config.CHANNEL` back to its literal `None` for about a millisecond (see `runtime.config_reload_lock`), and a first rehash reading its "new" list inside that window saw **no channels at all** - so every channel the bot was in fell into the PART branch.
+
+What the audit observed, with nothing patched, in 4 of 60 overlapping runs:
+
+```
+[REHASH SYNC] Channel sync completed successfully.
+   'PART #one :Removed from DDCore'
+   'PART #two :Removed from DDCore'
+   'PART #dbg :Removed from DDCore'
+CHANNEL after everything: '#one,#two'
+channel_users after everything: {}
+```
+
+No JOIN, no NAMES, no exception, no error line - and `dcc.py` treats `channel_users` as proof a user is present, so every queue then froze. The bot sat in no channels, believing it was in two.
+
+Reachable without trying: `webserver.py` fires a rehash on **every** Settings save and every password change - two separate endpoints - and `irc.py` and `adminchat.py` each spawn an unguarded thread per `!rehash`.
+
+`runtime.rehash_lock` serialises them. **Waits rather than dropping the second one**: a dashboard save writes `settings.conf` and *then* triggers the rehash, and the one already running may have read the file before that write landed - so a dropped second rehash would silently lose the operator's change. The lock lives in `runtime.py` because `commands.py` is one of the modules a rehash reloads, so a lock allocated there would be a new lock every time.
+
+`handle_rehash_request()` is now a wrapper around `_handle_rehash_request()` rather than the body being re-indented under a `with`, which keeps the diff to the header and leaves the 300-line body untouched for review.
+
 ### 🛑 The counter migration can no longer stop the daemon booting
 Found by the full-program audit, in code merged the same day. `migrate_download_counts_to_labels()` merged a legacy row onto its labelled key with
 

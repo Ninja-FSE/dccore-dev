@@ -148,6 +148,34 @@ disk_lock          = threading.Lock()  # db.py's serialised on-disk writes
 # this one is held BY the rehash.
 config_reload_lock = threading.RLock()
 
+# Only one rehash at a time.
+#
+# handle_rehash_request() reloads modules AND then compares the channel list it
+# reads afterwards against the one it read before, to work out what to JOIN and
+# what to PART. Two of them overlapping is not merely wasteful: the second
+# one's reload puts config.CHANNEL back to its literal None for the ~1ms window
+# described on config_reload_lock above, and if the FIRST one reads its "new"
+# channel list inside that window it sees no channels at all - so every channel
+# the bot is in falls into the PART branch. Measured by audit: the bot PARTed
+# every channel including the debug channel, sent no JOIN and no NAMES, emptied
+# channel_users, and logged "[REHASH SYNC] Channel sync completed successfully."
+# dcc.py treats channel_users as proof a user is present, so every queue then
+# freezes. Reproduced with nothing patched in 4 of 60 overlapping runs.
+#
+# Overlapping rehashes are easy to reach: irc.py spawns an unguarded thread per
+# "!rehash", adminchat.py does the same from the console, and webserver.py
+# fires one on EVERY Settings save and every password change.
+#
+# SERIALISED, not skipped. A second rehash is often the one that matters - a
+# dashboard save writes settings.conf and then triggers it, and the rehash
+# already running may have read the file before that write. Dropping it would
+# lose the operator's change; waiting applies it.
+#
+# Here rather than in commands.py because commands.py is one of the modules a
+# rehash reloads, so a lock allocated there would be a new lock every time -
+# the founding reason this module exists.
+rehash_lock = threading.Lock()
+
 
 # Other bots advertising in our channels ------------------------------------
 # nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",
