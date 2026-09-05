@@ -165,6 +165,25 @@
   // routes (broadcast/enqueue) return a meaningful JSON error body (409
   // already-in-progress, 429 cooldown, 503 IRC down, 400 bad input) that the
   // caller wants to show the operator, not treat as a network failure.
+  // Like fetchJson, but a non-2xx is DATA rather than a throw - the same
+  // posture postJson already takes below, and for the same reason: these
+  // routes answer a bad request with a JSON body that says what was wrong,
+  // and fetchJson's `throw new Error("HTTP " + res.status)` discards it. The
+  // folder browser's "... is not a folder on this machine" reached the
+  // operator as "HTTP 400" until this existed.
+  function fetchJsonAllowingError(url) {
+    return fetch(url, { headers: { Accept: "application/json" } })
+      .then(function (res) {
+        if (res.status === 401) {
+          window.location.href = "/login";
+          return new Promise(function () {});
+        }
+        return res.json().then(function (data) {
+          return { ok: res.ok, status: res.status, data: data };
+        });
+      });
+  }
+
   function postJson(url, body) {
     return fetch(url, {
       method: "POST",
@@ -1401,21 +1420,21 @@
   function foldersSectionHtml() {
     var draft = state.foldersDraft || [];
     var rows = draft.map(function (_row, index) {
-      return '<div class="folder-row" data-folder-index="' + index + '">' +
-        '<input type="text" class="folder-name" placeholder="Label" aria-label="Folder label">' +
-        '<input type="text" class="folder-path" placeholder="Full path to the folder" aria-label="Folder path">' +
+      return '<div class="served-folder-row" data-served-folder-index="' + index + '">' +
+        '<input type="text" class="served-folder-name" placeholder="Label" aria-label="Folder label">' +
+        '<input type="text" class="served-folder-path" placeholder="Full path to the folder" aria-label="Folder path">' +
         (state.foldersBrowserEnabled
-          ? '<button type="button" class="folder-btn folder-browse" title="Browse for a folder">Browse</button>'
+          ? '<button type="button" class="served-folder-btn served-folder-browse" title="Browse for a folder">Browse</button>'
           : "") +
-        '<button type="button" class="folder-btn folder-up" title="Move up" aria-label="Move up">\u2191</button>' +
-        '<button type="button" class="folder-btn folder-down" title="Move down" aria-label="Move down">\u2193</button>' +
-        '<button type="button" class="folder-btn folder-remove" title="Remove" aria-label="Remove">\u00d7</button>' +
+        '<button type="button" class="served-folder-btn served-folder-up" title="Move up" aria-label="Move up">\u2191</button>' +
+        '<button type="button" class="served-folder-btn served-folder-down" title="Move down" aria-label="Move down">\u2193</button>' +
+        '<button type="button" class="served-folder-btn served-folder-remove" title="Remove" aria-label="Remove">\u00d7</button>' +
         "</div>";
     }).join("");
 
     var note = "";
     if (state.foldersNote) {
-      note = '<p class="folder-note ' + (state.foldersNote.ok ? "is-ok" : "is-error") + '">' +
+      note = '<p class="served-folder-note ' + (state.foldersNote.ok ? "is-ok" : "is-error") + '">' +
         escapeHtml(state.foldersNote.text) +
         (state.foldersNote.problems || []).map(function (line) {
           return "<br>\u2022 " + escapeHtml(line);
@@ -1444,7 +1463,7 @@
       var b = state.browse;
       var list;
       if (b.error) {
-        list = '<p class="folder-note is-error">' + escapeHtml(b.error) + "</p>";
+        list = '<p class="served-folder-note is-error">' + escapeHtml(b.error) + "</p>";
       } else if (!b.entries.length) {
         list = '<p class="browse-empty">No folders in here.</p>';
       } else {
@@ -1476,20 +1495,20 @@
 
     var offNote = "";
     if (!state.foldersBrowserEnabled) {
-      offNote = '<p class="folder-summary">Type the full path to each folder. ' +
+      offNote = '<p class="served-folder-summary">Type the full path to each folder. ' +
         "A folder picker is available if you turn on \u201cFolder picker on the " +
         "Settings page\u201d under Web dashboard.</p>";
     }
 
-    return '<div class="folder-section">' +
+    return '<div class="served-folder-section">' +
       '<h2 class="settings-category-title">Served folders</h2>' +
-      '<p class="folder-summary">' + escapeHtml(summary) + "</p>" +
+      '<p class="served-folder-summary">' + escapeHtml(summary) + "</p>" +
       offNote +
-      '<div class="folder-rows">' + rows + "</div>" +
+      '<div class="served-served-folder-rows">' + rows + "</div>" +
       browsePanel +
-      '<div class="folder-actions">' +
-        '<button type="button" class="btn folder-add">Add folder</button>' +
-        '<button type="button" class="btn btn-accent folder-save">Save folders</button>' +
+      '<div class="served-folder-actions">' +
+        '<button type="button" class="btn served-folder-add">Add folder</button>' +
+        '<button type="button" class="btn btn-accent served-folder-save">Save folders</button>' +
       "</div>" + note + "</div>";
   }
 
@@ -1498,11 +1517,11 @@
   // each keystroke would take the caret with it.
   function attachFolderRows() {
     var draft = state.foldersDraft || [];
-    el.settingsFields.querySelectorAll(".folder-row").forEach(function (row) {
-      var index = parseInt(row.dataset.folderIndex, 10);
+    el.settingsFields.querySelectorAll(".served-folder-row").forEach(function (row) {
+      var index = parseInt(row.dataset.servedFolderIndex, 10);
       var entry = draft[index] || { name: "", path: "" };
-      var nameInput = row.querySelector(".folder-name");
-      var pathInput = row.querySelector(".folder-path");
+      var nameInput = row.querySelector(".served-folder-name");
+      var pathInput = row.querySelector(".served-folder-path");
       nameInput.value = entry.name || "";
       pathInput.value = entry.path || "";
       nameInput.addEventListener("input", function () {
@@ -1533,11 +1552,23 @@
       .catch(function () { /* the settings page still works without it */ });
   }
 
-  function openBrowse(rowIndex, path) {
-    fetchJson("/api/folders/browse?path=" + encodeURIComponent(path || ""))
-      .then(function (payload) {
+  // Addressed by the ROW OBJECT, not its index.
+  //
+  // The picker is a panel that stays open while the rows behind it can still
+  // be added to, removed and reordered - every one of those renumbers the
+  // draft. An index captured when the panel opened therefore points at
+  // whichever row happens to sit there by the time "Use this folder" is
+  // pressed, and the chosen path lands in the wrong one. Found by audit.
+  //
+  // The draft entries are objects, so holding the reference survives any
+  // amount of reordering. The indexOf() check before writing covers the one
+  // case a reference cannot survive: the row having been removed.
+  function openBrowse(row, path) {
+    fetchJsonAllowingError("/api/folders/browse?path=" + encodeURIComponent(path || ""))
+      .then(function (res) {
+        var payload = res.data || {};
         state.browse = {
-          rowIndex: rowIndex,
+          row: row,
           path: payload.path || "",
           parent: payload.parent,
           at_root: !!payload.at_root,
@@ -1548,7 +1579,7 @@
         renderSettingsCategory();
       })
       .catch(function (err) {
-        state.browse = { rowIndex: rowIndex, path: path || "", parent: "",
+        state.browse = { row: row, path: path || "", parent: "",
                          at_root: false, entries: [], truncated: false,
                          error: err.message };
         renderSettingsCategory();
@@ -1714,26 +1745,29 @@
   // rebuilt from scratch every time it is.
   el.settingsFields.addEventListener("click", function (evt) {
     var browseButton = evt.target.closest(
-      ".folder-browse, .browse-entry, .browse-up, .browse-use, .browse-close");
+      ".served-folder-browse, .browse-entry, .browse-up, .browse-use, .browse-close");
     if (browseButton) {
       var open = state.browse;
-      if (browseButton.classList.contains("folder-browse")) {
-        var row = browseButton.closest(".folder-row");
-        var index = parseInt(row.dataset.folderIndex, 10);
-        var current = (state.foldersDraft[index] || {}).path || "";
-        openBrowse(index, current);
+      if (browseButton.classList.contains("served-folder-browse")) {
+        var rowEl = browseButton.closest(".served-folder-row");
+        var index = parseInt(rowEl.dataset.servedFolderIndex, 10);
+        var entryRow = state.foldersDraft[index];
+        if (entryRow) { openBrowse(entryRow, entryRow.path || ""); }
       } else if (browseButton.classList.contains("browse-close")) {
         state.browse = null;
         renderSettingsCategory();
       } else if (browseButton.classList.contains("browse-up")) {
-        openBrowse(open.rowIndex, open.parent || "");
+        openBrowse(open.row, open.parent || "");
       } else if (browseButton.classList.contains("browse-entry")) {
         // By index, never by a path read out of an attribute.
         var entry = open.entries[parseInt(browseButton.dataset.browseIndex, 10)];
-        if (entry) { openBrowse(open.rowIndex, entry.path); }
+        if (entry) { openBrowse(open.row, entry.path); }
       } else if (browseButton.classList.contains("browse-use")) {
-        var target = state.foldersDraft[open.rowIndex];
-        if (target) {
+        var target = open.row;
+        // Still in the draft? The row can have been removed while the panel
+        // was open, and writing into an orphaned object would look like it
+        // worked while changing nothing on screen.
+        if (target && state.foldersDraft.indexOf(target) !== -1) {
           target.path = open.path;
           if (!target.name) {
             // The label the server would derive anyway, shown now so the
@@ -1749,23 +1783,23 @@
       return;
     }
 
-    var button = evt.target.closest(".folder-add, .folder-save, .folder-remove, .folder-up, .folder-down");
+    var button = evt.target.closest(".served-folder-add, .served-folder-save, .served-folder-remove, .served-folder-up, .served-folder-down");
     if (!button) { return; }
     var draft = state.foldersDraft || (state.foldersDraft = []);
 
-    if (button.classList.contains("folder-add")) {
+    if (button.classList.contains("served-folder-add")) {
       draft.push({ name: "", path: "" });
-    } else if (button.classList.contains("folder-save")) {
+    } else if (button.classList.contains("served-folder-save")) {
       saveFolders();
       return;
     } else {
-      var row = button.closest(".folder-row");
-      var index = parseInt(row.dataset.folderIndex, 10);
-      if (button.classList.contains("folder-remove")) {
+      var row = button.closest(".served-folder-row");
+      var index = parseInt(row.dataset.servedFolderIndex, 10);
+      if (button.classList.contains("served-folder-remove")) {
         draft.splice(index, 1);
-      } else if (button.classList.contains("folder-up") && index > 0) {
+      } else if (button.classList.contains("served-folder-up") && index > 0) {
         draft.splice(index - 1, 0, draft.splice(index, 1)[0]);
-      } else if (button.classList.contains("folder-down") && index < draft.length - 1) {
+      } else if (button.classList.contains("served-folder-down") && index < draft.length - 1) {
         draft.splice(index + 1, 0, draft.splice(index, 1)[0]);
       }
     }

@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+<<<<<<< HEAD
 - **A folder picker on the Settings page, if you want one.** Instead of typing the full path to each served folder you can browse for it — drives, then folders, then "Use this folder". It is **off by default** and turned on with "Folder picker on the Settings page" under Web dashboard, because it lets anyone logged into your dashboard see the names of folders on your machine, which nothing else there does. Leaving it off costs you nothing except typing the path yourself.
+=======
+- **A damaged download-counts file can no longer stop the bot starting.** One unreadable line in `data/download_counts.json` — from a hand-edit or an interrupted write — could make the daemon refuse to boot while carrying its own counters across. It now keeps what it can, says so, and starts.
+>>>>>>> origin/main
 
 - **Download counts are kept per folder, and survive a library move.** With more than one folder configured, two files with the same name in the same relative position — `Artist/Album/track.flac` in each — were counted as one, and the counts could end up recorded against wherever the bot happened to be started from. Counts now name the folder they belong to. **Your existing counts are carried over automatically on the first start**, so nothing is lost.
 

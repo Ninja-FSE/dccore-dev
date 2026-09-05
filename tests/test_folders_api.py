@@ -304,5 +304,173 @@ class TheRoutesAreRegisteredAndGuarded(unittest.TestCase):
                       content_type="application/json").status_code, 200)
 
 
+class TheEditorsMarkupAndItsReadersAgree(unittest.TestCase):
+    """Scoped to the served-folder editor, because a whole-file check cannot
+    catch this.
+
+    Renaming the editor's classes to a "served-" prefix (they collided with
+    the File Lists table's own .folder-row / .folder-name, so styling the
+    editor reformatted that table) changed the markup attribute from
+    data-folder-index to data-served-folder-index. The three readers said
+    dataset.folderIndex, which does not contain that literal and so was not
+    renamed with it - leaving parseInt(undefined) === NaN and an editor where
+    no row button did anything.
+
+    A file-wide pairing check passes straight through that, because the File
+    Lists table legitimately emits data-folder-index and reads
+    dataset.folderIndex. Only a check scoped to the editor sees the mismatch,
+    and nothing in this project executes the file to notice.
+    """
+
+    def editor_source(self):
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"),
+                     encoding="utf-8") as handle:
+            source = handle.read()
+        # Everything the editor and picker own lives from here to the end.
+        return source.split("function foldersSectionHtml(", 1)[1]
+
+    @staticmethod
+    def camel(kebab):
+        head, *rest = kebab.split("-")
+        return head + "".join(part[:1].upper() + part[1:] for part in rest)
+
+    @staticmethod
+    def without_comments(js):
+        """Comments out, before anything scans for markup.
+
+        This project keeps long explanatory comments, and several of them
+        quote the very construct they are warning against - the comment above
+        the browse entries says a path "concatenated into data-path=..." would
+        break out of the attribute. A scan that reads prose finds that and
+        reports it as emitted markup. Three separate guards written today
+        matched a comment instead of code before this was accounted for.
+        """
+        import re
+
+        js = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+        return "\n".join(re.sub(r"//.*$", "", line) for line in js.split("\n"))
+
+    def test_every_attribute_the_editor_emits_is_read_by_that_name(self):
+        """Emitted -> read, which is the direction the defect went.
+
+        Reader -> emitted is the wrong way round to check here: the settings
+        form reads dataset.setting from markup built earlier in the file, so
+        scoping that direction to the editor reports a false miss.
+        """
+        import re
+
+        editor = self.without_comments(self.editor_source())
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"),
+                     encoding="utf-8") as handle:
+            whole = self.without_comments(handle.read())
+
+        emitted = set(re.findall(r'data-([a-z][a-z0-9-]*)\s*=', editor))
+        unread = []
+        for name in sorted(emitted):
+            accessor = "dataset." + self.camel(name)
+            if accessor in whole:
+                continue
+            if 'getAttribute("data-%s")' % name in whole or "[data-%s" % name in whole:
+                continue
+            unread.append("data-%s (nothing reads %s)" % (name, accessor))
+
+        self.assertEqual(unread, [],
+                         "the editor emits an attribute nothing reads by that "
+                         "name: " + "; ".join(unread) + ". parseInt(undefined) "
+                         "is NaN, and every row button silently does nothing.")
+
+    def test_the_editor_does_not_reuse_the_file_lists_class_names(self):
+        """.folder-row and .folder-name belong to the File Lists table and
+        predate the editor by a long way. `.folder-row { display: flex }` is a
+        global rule, so sharing the name reformatted that table."""
+        import re
+
+        editor = self.editor_source()
+        taken = {"folder-row", "folder-name"}
+        used = set(re.findall(r'class=\\?"([^"\\]+)', editor))
+        clash = sorted({name for chunk in used for name in chunk.split()
+                        if name in taken})
+
+        self.assertEqual(clash, [],
+                         f"the served-folder editor is using {clash}, which the "
+                         f"File Lists table already owns")
+
+    def test_the_file_lists_table_kept_its_own_names(self):
+        """The other half: the rename must not have been applied to the older
+        markup, which is the one that was there first."""
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"),
+                     encoding="utf-8") as handle:
+            source = handle.read()
+        before_editor = source.split("function foldersSectionHtml(", 1)[0]
+
+        self.assertIn('class=\\"folder-row\\"', before_editor)
+        self.assertIn("dataset.folderIndex", before_editor)
+
+
+class ThePickerWritesIntoTheRowItWasOpenedOn(unittest.TestCase):
+    """The panel stays open while the rows behind it can be added to, removed
+    and reordered - each of which renumbers the draft. An index captured when
+    the panel opened points at whichever row later sits there.
+
+    Read out of the source: this is behaviour of a file no test executes."""
+
+    def source(self):
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"),
+                     encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_open_panel_holds_the_row_not_its_index(self):
+        js = self.source()
+
+        self.assertNotIn("rowIndex", js,
+                         "the picker is storing a row INDEX again - it is "
+                         "invalidated by add, remove and reorder while the "
+                         "panel is open")
+        # The absence of a name is not the presence of the behaviour: a
+        # mutation that read state.foldersDraft[0] instead passed the check
+        # above, because it reintroduced no such literal. Pin the write.
+        self.assertIn("var target = open.row;", js,
+                      "the chosen path is not being written into the row the "
+                      "panel was opened on")
+
+    def test_the_write_checks_the_row_is_still_in_the_draft(self):
+        """A reference survives reordering but not removal, and writing into an
+        orphaned object looks like it worked while changing nothing."""
+        js = self.source().replace("\n", " ")
+
+        self.assertIn("state.foldersDraft.indexOf(target) !== -1", js)
+
+
+class BrowseErrorsReachTheOperator(unittest.TestCase):
+    """fetchJson() turns any non-2xx into `throw new Error("HTTP " + status)`,
+    which discards the JSON body. The browse route answers a bad path with a
+    sentence - "... is not a folder on this machine" - and the operator saw
+    "HTTP 400"."""
+
+    def source(self):
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"),
+                     encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_browser_does_not_use_the_throwing_fetch(self):
+        js = self.source()
+        block = js.split("function openBrowse(", 1)[1].split("function saveFolders(", 1)[0]
+
+        self.assertNotIn('fetchJson("/api/folders/browse', block,
+                         "openBrowse is back on fetchJson, which throws away "
+                         "the server's explanation on a 400")
+        self.assertIn("fetchJsonAllowingError(", block)
+
+    def test_the_helper_returns_the_body_on_a_non_2xx(self):
+        """The assertion above only means something while this is true."""
+        js = self.source()
+        body = js.split("function fetchJsonAllowingError(", 1)[1]
+        body = body.split("function postJson(", 1)[0]
+
+        self.assertIn("ok: res.ok", body)
+        self.assertIn("data: data", body)
+        self.assertNotIn("throw new Error", body)
+
+
 if __name__ == "__main__":
     unittest.main()
