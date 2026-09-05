@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A folder picker on the Settings page, if you want one.** Instead of typing the full path to each served folder you can browse for it — drives, then folders, then "Use this folder". It is **off by default** and turned on with "Folder picker on the Settings page" under Web dashboard, because it lets anyone logged into your dashboard see the names of folders on your machine, which nothing else there does. Leaving it off costs you nothing except typing the path yourself.
+
 - **Download counts are kept per folder, and survive a library move.** With more than one folder configured, two files with the same name in the same relative position — `Artist/Album/track.flac` in each — were counted as one, and the counts could end up recorded against wherever the bot happened to be started from. Counts now name the folder they belong to. **Your existing counts are carried over automatically on the first start**, so nothing is lost.
 
 - **You can add, remove and reorder your served folders from the dashboard.** DCCore has been able to serve several folders since v1.11.0, but the list could only be created by hand-editing a JSON file — the Settings page showed a single "Music directory" box, which is really just the fallback used when no list exists. There is now a proper editor at the top of Paths & storage: add a folder, give it a label, drag the order you want them listed in. Bad combinations are refused with a line explaining each one — a folder inside another folder would list every file twice, and two folders sharing a label cannot be told apart in the list. Clearing the list puts you back to the single Music directory. After saving, rebuild the list from Tools for the new folders to appear in it.

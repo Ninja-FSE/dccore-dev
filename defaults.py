@@ -575,6 +575,31 @@ WEBUI_ENABLED: bool = False
 # reason for its default.
 WEBUI_CONSOLE_ENABLED: bool = False
 
+# The Settings page's folder picker (#164 step 5). Off, and its own switch
+# rather than riding along with WEBUI_CONSOLE_ENABLED, for the rule three
+# lines above: an admin surface reachable from a weaker path gets its own
+# switch and a written reason for its default.
+#
+# WHAT IT GRANTS. An authenticated dashboard session can list the names of
+# directories on the machine the daemon runs on - anywhere it can read, not
+# only under the served folders, because the whole point is to find a folder
+# that is not being served yet. Never files, never contents, never sizes.
+#
+# WHY THAT IS A NEW THING AND NOT A CONVENIENCE ON AN OLD ONE. Without it the
+# same session can already PROBE a path - saving a folder answers "not a
+# folder on this machine" - which tells you about one path you already
+# guessed. ENUMERATION is different in kind, and worth an explicit yes.
+#
+# WHY NOT GATED ON THE CONSOLE. The console is strictly the more dangerous of
+# the two: it runs ban, clearqueue, rehash and update. Gating the weaker
+# feature behind the stronger one would mean an operator who wants a folder
+# picker, and specifically does not want a web admin console, has to enable
+# the console to get it.
+#
+# The cost of leaving it off is typing a path instead of clicking one: the
+# folder rows on the Settings page work either way.
+WEBUI_FOLDER_BROWSER_ENABLED: bool = False
+
 # LOGIN REQUIRED, shared with the DCC CHAT admin console: every route,
 # including static assets, needs a session started by POSTing the password
 # for ADMIN_PASSWORD_HASH to /login (see webserver.py's module docstring).

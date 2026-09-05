@@ -1485,3 +1485,58 @@ html, body {
   .folder-row .folder-name { flex: 1 1 100%; }
   .folder-row .folder-path { flex: 1 1 100%; }
 }
+
+/* The folder picker (#164 step 5). Same tokens as the rows above it. */
+.browse-panel {
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.browse-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+}
+
+.browse-where {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;   /* a deep path must wrap, not widen the panel */
+}
+
+.browse-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.browse-entry {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 5px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.browse-entry:hover { background: var(--accent-dim); color: var(--accent); }
+.browse-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.browse-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 10px 0 0;
+}
+
+.browse-actions { padding-top: 12px; }

@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ A folder picker for the Settings page (#164 step 5 - the last one)
+The issue puts this last and on its own *"given the exposure"*, and that is the whole design question: the listing itself is twenty lines.
+
+**What it grants that nothing else did.** An authenticated dashboard session can list the NAMES of directories on the machine the daemon runs on, anywhere it can read - not only under the served folders, because the point is to find a folder that is not served yet. Never files, never contents, never sizes or timestamps: a name, and whether it can be opened, is the whole of what a picker needs.
+
+Without it the same session can already **probe** a path - saving a folder answers "not a folder on this machine" - which tells you about one path you already guessed. **Enumeration is different in kind**, so `WEBUI_FOLDER_BROWSER_ENABLED` ships **off** and is an explicit yes.
+
+**Why its own switch and not the console's.** Suggested during review: gate it on `WEBUI_CONSOLE_ENABLED`, so turning the web console on also turns the picker on and nobody grows a second setting. Rejected, because the console is strictly the more dangerous of the two - it runs `ban`, `clearqueue`, `rehash` and `update`. Gating the weaker feature behind the stronger one means an operator who wants a folder picker, and specifically does *not* want a web admin console, has to enable the console to get it: **more risk accepted to obtain less capability**. `defaults.py` states the rule three lines above the console's own switch - "an admin surface reachable from a weaker path gets its own switch and a written reason for its default" - and this is that.
+
+The cost of leaving it off is typing a path instead of clicking one; the folder rows from step 4 work either way, and the page says so rather than leaving an operator to wonder where the button is.
+
+**404 rather than 403 when it is off**, for the reason the console routes already give: 403 confirms the route exists and is merely disabled, which tells anyone probing that this build has one worth returning for.
+
+**No path is ever put in an HTML attribute.** A directory name on Linux may contain a double quote, and `escapeHtml()` is `textContent -> innerHTML`, which does not encode one. Browse entries are addressed by their **index** into `state.browse.entries` and the handler looks the path up from there - the same rule the folder rows and the file lists already follow, and there is a test that keeps it that way.
+
+Listings are capped at `FOLDER_BROWSE_MAX_ENTRIES` and **say they were capped**: a library's top level can hold thousands of artist folders, and silently showing the first few hundred reads as "that folder is missing". Every entry is tested individually so one item the daemon cannot stat - a system folder, a dead symlink, a disconnected mount - drops that entry rather than the whole listing.
+
+A mutation found one weak test, again: dropping the `isdir()` check still fails, because `scandir()` raises and the handler catches it. What the check buys is the **message** - "not a folder on this machine" rather than "[WinError 267] The directory name is invalid", which is an OS string and localised into whatever language the machine runs in. The test pins the sentence now.
+
+**#164 is complete with this.** All five steps of its order of work have landed.
+
 ### 📊 The download counters name their folder (#164's last cost-table row)
 The one place #164's own cost table listed that steps 1-4 never came back to:
 

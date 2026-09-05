@@ -44,6 +44,9 @@
     // so switching category and back does not silently discard an edit,
     // and so a failed save leaves the operator's rows exactly as typed.
     folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
+    // The folder picker (#164 step 5). `browse` is null when the panel is
+    // closed; open, it carries the row it will write back into.
+    foldersBrowserEnabled: false, browse: null,
     active: "search", filelistsLoaded: false, filelistsSource: "__own__",
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
     filelistsHistory: [],
@@ -1401,6 +1404,9 @@
       return '<div class="folder-row" data-folder-index="' + index + '">' +
         '<input type="text" class="folder-name" placeholder="Label" aria-label="Folder label">' +
         '<input type="text" class="folder-path" placeholder="Full path to the folder" aria-label="Folder path">' +
+        (state.foldersBrowserEnabled
+          ? '<button type="button" class="folder-btn folder-browse" title="Browse for a folder">Browse</button>'
+          : "") +
         '<button type="button" class="folder-btn folder-up" title="Move up" aria-label="Move up">\u2191</button>' +
         '<button type="button" class="folder-btn folder-down" title="Move down" aria-label="Move down">\u2193</button>' +
         '<button type="button" class="folder-btn folder-remove" title="Remove" aria-label="Remove">\u00d7</button>' +
@@ -1427,10 +1433,60 @@
       summary = "Nothing is being served yet. Add a folder here, or set Music directory below.";
     }
 
+    // NO PATH IN ANY ATTRIBUTE. An entry is addressed by its INDEX into
+    // state.browse.entries, and the handler looks the path up from there.
+    // escapeHtml() is textContent -> innerHTML and leaves a double quote
+    // alone, and a directory name on Linux may contain one - so a path
+    // concatenated into data-path="…" would break out of the attribute. Same
+    // rule the folder rows and the file lists already follow.
+    var browsePanel = "";
+    if (state.browse) {
+      var b = state.browse;
+      var list;
+      if (b.error) {
+        list = '<p class="folder-note is-error">' + escapeHtml(b.error) + "</p>";
+      } else if (!b.entries.length) {
+        list = '<p class="browse-empty">No folders in here.</p>';
+      } else {
+        list = '<ul class="browse-list">' + b.entries.map(function (entry, index) {
+          return '<li><button type="button" class="browse-entry" data-browse-index="' +
+            index + '">' + escapeHtml(entry.name) + "</button></li>";
+        }).join("") + "</ul>";
+      }
+
+      browsePanel = '<div class="browse-panel">' +
+        '<div class="browse-head">' +
+          '<span class="browse-where">' +
+            escapeHtml(b.at_root ? "This machine" : b.path) + "</span>" +
+          '<button type="button" class="btn btn-small browse-close">Close</button>' +
+        "</div>" +
+        (b.at_root ? "" :
+          '<button type="button" class="btn btn-small browse-up">\u2191 Up</button>') +
+        list +
+        (b.truncated
+          ? '<p class="browse-empty">Only the first ' + b.entries.length +
+            " folders are shown.</p>"
+          : "") +
+        (b.at_root ? "" :
+          '<div class="browse-actions">' +
+            '<button type="button" class="btn btn-accent browse-use">Use this folder</button>' +
+          "</div>") +
+        "</div>";
+    }
+
+    var offNote = "";
+    if (!state.foldersBrowserEnabled) {
+      offNote = '<p class="folder-summary">Type the full path to each folder. ' +
+        "A folder picker is available if you turn on \u201cFolder picker on the " +
+        "Settings page\u201d under Web dashboard.</p>";
+    }
+
     return '<div class="folder-section">' +
       '<h2 class="settings-category-title">Served folders</h2>' +
       '<p class="folder-summary">' + escapeHtml(summary) + "</p>" +
+      offNote +
       '<div class="folder-rows">' + rows + "</div>" +
+      browsePanel +
       '<div class="folder-actions">' +
         '<button type="button" class="btn folder-add">Add folder</button>' +
         '<button type="button" class="btn btn-accent folder-save">Save folders</button>' +
@@ -1463,6 +1519,7 @@
       .then(function (payload) {
         state.folders = payload.folders || [];
         state.foldersSource = payload.source || "";
+        state.foldersBrowserEnabled = !!payload.browser_enabled;
         // Only seeded from the server when there is no edit in progress.
         if (state.foldersDraft === null) {
           state.foldersDraft = state.folders.map(function (f) {
@@ -1474,6 +1531,28 @@
         }
       })
       .catch(function () { /* the settings page still works without it */ });
+  }
+
+  function openBrowse(rowIndex, path) {
+    fetchJson("/api/folders/browse?path=" + encodeURIComponent(path || ""))
+      .then(function (payload) {
+        state.browse = {
+          rowIndex: rowIndex,
+          path: payload.path || "",
+          parent: payload.parent,
+          at_root: !!payload.at_root,
+          entries: payload.entries || [],
+          truncated: !!payload.truncated,
+          error: payload.error || null
+        };
+        renderSettingsCategory();
+      })
+      .catch(function (err) {
+        state.browse = { rowIndex: rowIndex, path: path || "", parent: "",
+                         at_root: false, entries: [], truncated: false,
+                         error: err.message };
+        renderSettingsCategory();
+      });
   }
 
   function saveFolders() {
@@ -1634,6 +1713,42 @@
   // rows only exist after the paths category has been rendered, and they are
   // rebuilt from scratch every time it is.
   el.settingsFields.addEventListener("click", function (evt) {
+    var browseButton = evt.target.closest(
+      ".folder-browse, .browse-entry, .browse-up, .browse-use, .browse-close");
+    if (browseButton) {
+      var open = state.browse;
+      if (browseButton.classList.contains("folder-browse")) {
+        var row = browseButton.closest(".folder-row");
+        var index = parseInt(row.dataset.folderIndex, 10);
+        var current = (state.foldersDraft[index] || {}).path || "";
+        openBrowse(index, current);
+      } else if (browseButton.classList.contains("browse-close")) {
+        state.browse = null;
+        renderSettingsCategory();
+      } else if (browseButton.classList.contains("browse-up")) {
+        openBrowse(open.rowIndex, open.parent || "");
+      } else if (browseButton.classList.contains("browse-entry")) {
+        // By index, never by a path read out of an attribute.
+        var entry = open.entries[parseInt(browseButton.dataset.browseIndex, 10)];
+        if (entry) { openBrowse(open.rowIndex, entry.path); }
+      } else if (browseButton.classList.contains("browse-use")) {
+        var target = state.foldersDraft[open.rowIndex];
+        if (target) {
+          target.path = open.path;
+          if (!target.name) {
+            // The label the server would derive anyway, shown now so the
+            // operator can change it before saving rather than after.
+            var parts = open.path.replace(/[\\/]+$/, "").split(/[\\/]/);
+            target.name = parts[parts.length - 1] || open.path;
+          }
+        }
+        state.browse = null;
+        state.foldersNote = null;
+        renderSettingsCategory();
+      }
+      return;
+    }
+
     var button = evt.target.closest(".folder-add, .folder-save, .folder-remove, .folder-up, .folder-down");
     if (!button) { return; }
     var draft = state.foldersDraft || (state.foldersDraft = []);
