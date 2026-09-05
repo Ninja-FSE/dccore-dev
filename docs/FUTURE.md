@@ -94,7 +94,7 @@ This matters most as a prerequisite: step 1 above refactors seven modules that c
 - **Per-list file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them; everything under the root is currently offered.
 - **A "what's new" list** — files added in the last N days, generated alongside the main one.
 - **A list validator** run at build time, reporting anything a requester will not actually be able to get — duplicate filenames across folders being the common case.
-- **An OmenServe migration path** offered on first run, since almost everyone this is aimed at is running OmenServe today.
+- **An OmenServe migration path offered on FIRST RUN.** The Stats page can import an operator's totals from `vars.ini` today; what is missing is `configure.py` offering it during setup, when somebody migrating is actually looking.
 - **Stealth channels** — serve a channel while advertising nothing in it.
 - **Multi-network** — real in OmenServe, and it would touch every socket path here.
 

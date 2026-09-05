@@ -4,6 +4,65 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Bringing an OmenServe operator's history across (#69)
+
+The single biggest barrier to trying this bot is not features - it is
+abandoning years of totals. `omenserve_import.py` could already read those
+numbers; this is the half that puts them somewhere.
+
+**Three routes in, one parser.** Choose `vars.ini`, paste its contents, or -
+for an install nobody's parser understands - the figures are shown so they can
+be checked by eye. All of it goes through `read_install()`, so the fallbacks
+are not a second code path that can behave differently.
+
+**The page filters before it uploads, and that is not tidiness.** The live
+install #69 was written from held **280 variables** - nicks, channels, paths,
+add-on settings and passwords among them. Only the counter lines are sent, and
+the page asks the server which variables those are rather than hard-coding
+them: a field added to `FIELDS` is then kept without the JavaScript changing,
+where a hard-coded list would have silently stripped it out and told the
+operator their file has nothing in it.
+
+**Overwritten, not combined - said only when it matters.** On a fresh install
+nobody reads that sentence and on a used one it is the only thing that does,
+so the preview names which figures already have a value and the warning
+appears exactly then.
+
+**Nothing is taken on trust.** A `vars.ini` is a plain text file people
+hand-edit, and the operator confirming a number is not the same as the number
+being sane. Refused at the endpoint and not only in the page: negatives,
+non-numbers, and magnitudes past anything a real link could have produced - a
+stray digit looks exactly like that, and importing one silently is worse than
+refusing it, because the operator can retype a number but cannot tell that a
+total is wrong once it looks plausible. `True` is refused explicitly, since
+`int(True)` is 1 and a JSON `true` would otherwise import as a file count of
+one.
+
+**An absent figure is left alone, never zeroed.** That rule runs from the
+parser to the write: the counters come from ADD-ONS rather than from OmenServe
+itself, so an operator running one and not another imports what they have and
+keeps the rest. Writing a zero over a real total would be the worst thing this
+feature could do.
+
+**The day columns are not touched.** They belong to the daemon's own rotation,
+and importing a lifetime total must not reset what the bot did today. They
+could not have been imported anyway: `%OSL.Today` is `Friday` and
+`%mx.rarday` is `Wednesday` - a weekday NAME, so "today or six days ago" is
+not answerable from the file at all.
+
+The write goes through `db.save_advanced_stats()` and `db.save_speed_record()`
+- a caller, not a second implementation of either - and the response carries
+the before and after, so the page reports what actually happened rather than
+what it asked for.
+
+Two mutations corrected tests. One targeted the "reject the whole import"
+guard at a case where every field was invalid, so the "nothing to import"
+check answered it and the guard could be deleted; it belongs on the
+half-valid case. And the fixture wrote an empty date in the stats row's
+seventh column, which makes it six columns, which the loader correctly treats
+as corrupt - so every "an existing figure is preserved" test failed against
+code that was preserving it perfectly well.
+
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
 

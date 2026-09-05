@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Coming from OmenServe? Bring your totals with you.** The Stats page can now read your files sent, bytes sent and speed record straight out of mIRC's `scripts/vars.ini` — choose the file, see exactly what would change, and confirm. Your counters come from the OmenServe add-ons rather than OmenServe itself, so it takes whatever is there and leaves the rest alone; nothing you are missing gets zeroed. Only the counter lines ever leave your machine — the rest of that file, including your nicks and passwords, is filtered out in the browser before anything is sent. Note it **replaces** your current figures rather than adding to them, and the page says so when you have some.
+
 - **The List Browser tells you when a bot's list has moved on.** Pick a bot whose list you hold and, if what they are advertising now differs from what they advertised when you downloaded it, you get a line saying so with both sets of numbers — so you can decide whether to fetch it again. Lists in a busy channel go stale by months, and until now nothing said which.
 
 - **The dashboard's tabs are named for what they do.** "File Lists" is now **List Browser**, "Download" is **Downloads**, and Queue has moved into Stats — where the queue table sits below everything else the bot knows about itself. The order runs from what you use daily to what you touch occasionally.
