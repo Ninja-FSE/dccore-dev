@@ -257,14 +257,20 @@ def main(platform):
         fail(f"FILE_DIRECTORY does not exist: {music}  "
              f"(the daemon exits at startup if this is set but missing)")
     else:
+        # The SAME predicate the list build uses, not a second copy of it.
+        # A count here that disagreed with what update_list.py indexes would
+        # report a healthy library and then publish a list that does not
+        # match it - which is the shape of the defect that made this a
+        # setting at all.
+        import update_list
         count = 0
         for _root, _dirs, files in os.walk(music):
-            count += sum(1 for f in files if f.lower().endswith((".mp3", ".flac")))
+            count += sum(1 for f in files if update_list.is_listed_file(f))
             if count > 5000:
                 break
         ok(f"music directory {music}")
-        ok(f"{'over 5000' if count > 5000 else count} audio file(s) visible - "
-           f"the first scan walks all of them")
+        ok(f"{'over 5000' if count > 5000 else count} file(s) would be "
+           f"listed - the first scan walks all of them")
 
     for label, path in (("lists", getattr(config, "LOCAL_LIST_DIR", "")),
                         ("temp archives", getattr(config, "TMP_ZIP_DIR", ""))):

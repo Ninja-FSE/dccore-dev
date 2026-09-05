@@ -11,6 +11,7 @@ import subprocess
 
 import defaults as config
 import platform_compat
+import update_list
 import list as list_mod
 import announce
 import db
@@ -1204,6 +1205,49 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 announce_mod.send_debug(f"Pack error: Directory not found on disk storage for {user}.", category="PART")
                 return
 
+            # RAR_EXTENSIONS, ENFORCED HERE - the only place enforcing it
+            # means anything.
+            #
+            # That setting decides whether update_list.py WRITES a
+            # "!<nick> !rar <folder>" row. It never decided whether one would
+            # be honoured: this path's whole gate was RAR_ENABLED, containment,
+            # and "not an artist root". A folder with no row in the album list
+            # was packed perfectly happily by anyone who named it.
+            #
+            # Harmless while nobody could name one. The film list publishes
+            # folder headings in the archive every user downloads, and
+            # list_heading_parts() strips the prefix, so a heading can be
+            # pasted straight back as a request - which is how a folder that
+            # was deliberately kept OUT of the album list became reachable.
+            # There is no size cap anywhere, so that is an unbounded pack
+            # behind a line anybody in the channel can send.
+            #
+            # Checked with scandir and stopped at the first match: the pack
+            # about to run walks this whole folder anyway.
+            packable = update_list.rar_extensions()
+            if packable:
+                try:
+                    has_packable = any(
+                        entry.is_file()
+                        and update_list.is_packable_file(entry.name, packable)
+                        for entry in os.scandir(
+                            platform_compat.long_path(true_source_dir)))
+                except OSError as scan_err:
+                    print(f"[PACK] Could not read {true_source_dir!r} to check "
+                          f"what is in it: {scan_err}")
+                    has_packable = False
+                if not has_packable:
+                    print(f"[PACK] Refused {relative_to_root!r} for {user}: "
+                          f"it holds nothing in RAR_EXTENSIONS.")
+                    announce_mod.send_pack_error_notice(irc_sock, user)
+                    announce_mod.send_debug(
+                        f"Pack denied for {user}: "
+                        f"{config.C_BOLD}{relative_to_root}{config.C_RESET} "
+                        f"holds no packable file type. The files in it can "
+                        f"still be requested by name.",
+                        category="PART")
+                    return
+
             with queue_lock:
                 total_global_queued = get_total_queued_count()
                 user_queued_count = len(config.dcc_queue.get(user_key, []))
@@ -1313,11 +1357,27 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
         is_master_zip = list_mod.is_list_artifact_name(requested_file)
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
-            latest_list_path = list_mod.find_latest_list()
-            if latest_list_path and os.path.exists(latest_list_path):
+            # EVERY list, not just the master one. This is the lookup that
+            # turns a bare "!<nick> Some.Film.mkv" into a path on disk, and
+            # film and series moved into their own list file - so reading only
+            # the master would leave every video in the library listed,
+            # advertised and searchable, and impossible to actually get. The
+            # split would have been a regression dressed as a feature.
+            #
+            # Concatenated rather than searched file by file: the scan below
+            # reads folder headings and rows in order, and each list carries
+            # its own headings above its own rows, so joining them end to end
+            # leaves that state machine correct with nothing else changed.
+            # Master first, so a name in both resolves the same way it did
+            # before - the first copy the list names wins.
+            list_paths = list_mod.all_list_paths()
+            if list_paths:
                 try:
-                    with open(latest_list_path, "r", encoding="utf-8", errors="ignore") as lf:
-                        lines = lf.readlines()
+                    lines = []
+                    for one_list in list_paths:
+                        with open(one_list, "r", encoding="utf-8",
+                                  errors="ignore") as lf:
+                            lines.extend(lf.readlines())
                     target_folder = None
                     fallback_folder = None
                     clean_req = str(requested_file).lower().strip()

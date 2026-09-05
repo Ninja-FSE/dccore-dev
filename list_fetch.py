@@ -340,7 +340,23 @@ def _pick_list_file(extract_dir):
     if not txt_files:
         return None
 
-    candidates = [p for p in txt_files if "-rar-" not in os.path.basename(p).lower()]
+    # "-video-" alongside "-rar-", and for the same reason twice over. Since
+    # the film-and-series split, THIS bot's own archive carries two .txt
+    # files - the master and "<base>-VIDEO-<date>.txt" - so a peer running
+    # DCCore is the ORDINARY case here, not an exotic one. Without this the
+    # largest-wins tiebreak below decides which is "the" list, and a bot whose
+    # films outweigh its music hands us its film list as its master: we would
+    # index the films, show them as that bot's whole catalogue, and report its
+    # music as absent.
+    #
+    # Excluding it drops those films from the fetched copy rather than
+    # merging them in, which is the same thing find_latest_list() does locally
+    # with the album list. Reading both into one fetched list is a change to
+    # what this function returns and to the size ceiling that guards it; it is
+    # recorded in docs/FUTURE.md rather than smuggled in here.
+    skip = ("-rar-", f"-{list_mod.VIDEO_LIST_MARKER.lower()}-")
+    candidates = [p for p in txt_files
+                  if not any(m in os.path.basename(p).lower() for m in skip)]
     if not candidates:
         candidates = txt_files
 

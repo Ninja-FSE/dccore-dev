@@ -1279,5 +1279,50 @@ class FolderPaging(unittest.TestCase):
         self.assertEqual(len(set(seen)), 200, "and none was served twice")
 
 
+class APeerRunningDCCoreSendsTwoLists(unittest.TestCase):
+    """Since the film-and-series split this bot's OWN archive carries two .txt
+    files, so a peer running DCCore is the ordinary case here."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+
+    def write(self, name, size):
+        with open(os.path.join(self.dir, name), "w", encoding="utf-8") as handle:
+            handle.write("x" * size)
+
+    def test_the_film_list_is_not_taken_for_the_master(self):
+        """The tiebreak picks the largest, and a bot whose films outweigh its
+        music hands us its film list as its whole catalogue - we would index
+        the films, show them as everything that bot has, and report its music
+        as absent."""
+        self.write("TheirBot-2026-08-30.txt", 400)
+        self.write("TheirBot-VIDEO-2026-08-30.txt", 4000)
+
+        picked = list_fetch._pick_list_file(self.dir)
+
+        self.assertEqual(os.path.basename(picked), "TheirBot-2026-08-30.txt")
+
+    def test_the_album_list_is_still_excluded_too(self):
+        self.write("TheirBot-2026-08-30.txt", 400)
+        self.write("TheirBot-RAR-2026-08-30.txt", 4000)
+
+        picked = list_fetch._pick_list_file(self.dir)
+
+        self.assertEqual(os.path.basename(picked), "TheirBot-2026-08-30.txt")
+
+    def test_a_film_list_on_its_own_is_still_better_than_nothing(self):
+        """Excluding a marker must not turn "one list we can read" into "no
+        recognisable list file": the fallback that already exists for an
+        album-only archive covers this one too."""
+        self.write("TheirBot-VIDEO-2026-08-30.txt", 4000)
+
+        picked = list_fetch._pick_list_file(self.dir)
+
+        self.assertEqual(os.path.basename(picked), "TheirBot-VIDEO-2026-08-30.txt")
+
+
 if __name__ == "__main__":
     unittest.main()

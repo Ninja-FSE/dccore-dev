@@ -290,7 +290,15 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
         # none of which are ast.Dict/ast.List literals any more, so the scan
         # below no longer even considers them and there is nothing left to
         # allow-list here.
-        allowed = {"ADMIN_HOSTMASKS"}
+        # LIST_IGNORED_EXTENSIONS joins it on the same grounds, and the
+        # distinction is worth stating because the shape is identical: it is a
+        # list literal in config.py that a rehash rebinds. That is CORRECT for
+        # a setting. The rule exists for runtime STATE - a queue, a transfer
+        # list - where rebinding loses work in progress. Re-reading which file
+        # types to skip is the whole reason an operator runs !rehash after
+        # editing it.
+        allowed = {"ADMIN_HOSTMASKS", "LIST_IGNORED_EXTENSIONS",
+                   "LIST_VIDEO_EXTENSIONS", "RAR_EXTENSIONS"}
 
         with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())

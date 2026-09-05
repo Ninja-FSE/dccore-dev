@@ -43,6 +43,10 @@
   };
 
   var state = {
+    // What the previewed OmenServe import would write, held between the
+    // preview and the confirm so the button sends exactly what was shown -
+    // not a second parse that could have moved on from it.
+    importValues: null,
     // Served folders (#164 step 4). `foldersDraft` is what the rows are
     // showing and `folders` is what the server last confirmed - kept apart
     // so switching category and back does not silently discard an edit,
@@ -141,6 +145,18 @@
     stBuilt:               document.getElementById("st-built"),
     stFoot:                document.getElementById("st-foot"),
     stTopFiles:            document.getElementById("st-top-files"),
+    importFile:            document.getElementById("import-file"),
+    importPasteToggle:     document.getElementById("import-paste-toggle"),
+    importPaste:           document.getElementById("import-paste"),
+    importPasteActions:    document.getElementById("import-paste-actions"),
+    importPasteRead:       document.getElementById("import-paste-read"),
+    importStatus:          document.getElementById("import-status"),
+    importPreviewWrap:     document.getElementById("import-preview-wrap"),
+    importPreview:         document.getElementById("import-preview"),
+    importWarning:         document.getElementById("import-warning"),
+    importConfirm:         document.getElementById("import-confirm"),
+    importApply:           document.getElementById("import-apply"),
+    importCancel:          document.getElementById("import-cancel"),
     stTopAlbums:           document.getElementById("st-top-albums"),
     stTopAlbumsWrap:       document.getElementById("st-top-albums-wrap"),
     stTopAlbumsLabel:      document.getElementById("st-top-albums-label"),
@@ -1625,6 +1641,188 @@
           updateFilelistsDownloadSelectedState();
         });
     }
+
+  // ------------------------------------------- Coming from OmenServe (#69)
+
+  // What the server says it recognises. Fetched once and cached: the filter
+  // below has to keep exactly the lines the parser knows about, and hard-
+  // coding that list here is how the two would drift - a field added to
+  // omenserve_import.FIELDS would then be stripped out before it arrived.
+  var importVariableNames = null;
+
+  function importVariables() {
+    if (importVariableNames) { return Promise.resolve(importVariableNames); }
+    return fetchJson("/api/stats/import/variables").then(function (payload) {
+      importVariableNames = (payload && payload.variables) || [];
+      return importVariableNames;
+    });
+  }
+
+  // KEEP ONLY THE COUNTER LINES. A real vars.ini on the install #69 was
+  // written from held 280 variables: nicks, channel names, paths, add-on
+  // settings and passwords among them. None of that is any of the bot's
+  // business, and none of it needs to cross the network for this to work.
+  //
+  // Done here rather than server-side for exactly that reason: the filtering
+  // has to happen before the upload, or it is not filtering.
+  function keepOnlyCounterLines(text, names) {
+    var wanted = {};
+    names.forEach(function (name) { wanted[String(name).toLowerCase()] = true; });
+    return String(text || "").split(/\r?\n/).filter(function (line) {
+      var match = /^\s*n\d+\s*=\s*(%\S+)/i.exec(line);
+      return !!match && wanted[match[1].toLowerCase()] === true;
+    }).join("\n");
+  }
+
+  function showImportStatus(text, isError) {
+    el.importStatus.hidden = !text;
+    el.importStatus.textContent = text || "";
+    el.importStatus.classList.toggle("is-error", !!isError);
+  }
+
+  function resetImportPreview() {
+    state.importValues = null;
+    el.importPreviewWrap.hidden = true;
+    el.importPreview.innerHTML = "";
+    el.importWarning.hidden = true;
+    el.importWarning.textContent = "";
+    el.importConfirm.hidden = true;
+  }
+
+  function renderImportPreview(payload) {
+    var current = payload.current || {};
+    var values = payload.values || {};
+    var byTarget = {
+      "Files sent": "total_files",
+      "Bytes sent": "total_bytes",
+      "Speed record": "speed_record"
+    };
+
+    var body = "";
+    (payload.rows || []).forEach(function (row) {
+      if (row.value === null || row.value === undefined) { return; }
+      var target = byTarget[row.label];
+      var now = target ? (current[target] || 0) : null;
+      var after = target && values[target] !== undefined ? values[target] : null;
+      body += "<tr>" +
+        "<td>" + escapeHtml(row.label) +
+          (target ? "" : " <span class=\"import-skipped\">not imported</span>") +
+        "</td>" +
+        "<td class=\"col-num col-mono\">" +
+          (now === null ? "&mdash;" : Number(now).toLocaleString()) + "</td>" +
+        "<td class=\"col-num col-mono\">" +
+          (after === null ? "&mdash;" : Number(after).toLocaleString()) + "</td>" +
+        "</tr>";
+    });
+
+    if (!body) {
+      resetImportPreview();
+      showImportStatus((payload.notes || []).join(" ") ||
+        "Nothing recognisable was found in that file.", true);
+      return;
+    }
+
+    el.importPreview.innerHTML = body;
+    el.importPreviewWrap.hidden = false;
+    state.importValues = values;
+
+    // OVERWRITTEN, NOT COMBINED - and said only when it matters. On a fresh
+    // install nobody reads that sentence; on a used one it is the only thing
+    // that does. `replaces` is the server's answer to "which of these already
+    // has a non-zero value", so the warning appears exactly then.
+    var replacing = Object.keys(payload.replaces || {});
+    var notes = (payload.notes || []).slice();
+    if (replacing.length) {
+      notes.unshift("Your current figures will be REPLACED, not added to.");
+    }
+    el.importWarning.hidden = !notes.length;
+    el.importWarning.textContent = notes.join(" ");
+    el.importConfirm.hidden = false;
+    showImportStatus("");
+  }
+
+  function previewImportText(text) {
+    if (!String(text || "").trim()) {
+      resetImportPreview();
+      showImportStatus("That file was empty.", true);
+      return;
+    }
+    importVariables().then(function (names) {
+      var kept = keepOnlyCounterLines(text, names);
+      if (!kept.trim()) {
+        resetImportPreview();
+        showImportStatus("No OmenServe counters were found in that file. The " +
+          "totals come from the add-ons (mxrarserver, OS-Limits), so an " +
+          "install without them has nothing to bring across.", true);
+        return;
+      }
+      return postJson("/api/stats/import/preview", { text: kept })
+        .then(function (res) {
+          if (!res.ok) {
+            resetImportPreview();
+            showImportStatus(res.data.error || ("HTTP " + res.status), true);
+            return;
+          }
+          renderImportPreview(res.data);
+        });
+    }).catch(function (err) {
+      resetImportPreview();
+      showImportStatus("Could not read that: " + err.message, true);
+    });
+  }
+
+  el.importFile.addEventListener("change", function () {
+    var file = el.importFile.files && el.importFile.files[0];
+    if (!file) { return; }
+    var reader = new FileReader();
+    reader.onload = function () { previewImportText(reader.result); };
+    reader.onerror = function () {
+      showImportStatus("Could not read that file.", true);
+    };
+    reader.readAsText(file);
+    // Cleared so choosing the SAME file again still fires a change event -
+    // otherwise a second attempt after an error looks like a dead button.
+    el.importFile.value = "";
+  });
+
+  el.importPasteToggle.addEventListener("click", function () {
+    var showing = el.importPaste.hidden;
+    el.importPaste.hidden = !showing;
+    el.importPasteActions.hidden = !showing;
+    if (showing) { el.importPaste.focus(); }
+  });
+
+  el.importPasteRead.addEventListener("click", function () {
+    previewImportText(el.importPaste.value);
+  });
+
+  el.importCancel.addEventListener("click", function () {
+    resetImportPreview();
+    showImportStatus("");
+  });
+
+  el.importApply.addEventListener("click", function () {
+    if (!state.importValues) { return; }
+    el.importApply.disabled = true;
+    postJson("/api/stats/import", state.importValues).then(function (res) {
+      el.importApply.disabled = false;
+      if (!res.ok) {
+        showImportStatus(res.data.error || ("HTTP " + res.status), true);
+        return;
+      }
+      resetImportPreview();
+      // What ACTUALLY happened, from the server's own before/after, rather
+      // than what the page asked for.
+      var after = res.data.after || {};
+      showImportStatus("Imported. Files sent is now " +
+        Number(after.total_files || 0).toLocaleString() + ", and the speed " +
+        "record " + Number(after.speed_record || 0).toLocaleString() + " B/s.");
+      loadStats();
+    }).catch(function (err) {
+      el.importApply.disabled = false;
+      showImportStatus("Import failed: " + err.message, true);
+    });
+  });
 
   // ---------------------------------------------------------------- Tools
 

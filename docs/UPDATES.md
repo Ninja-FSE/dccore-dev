@@ -388,6 +388,565 @@ removes it again - so two runs against one checkout fail each other with a
 `FileNotFoundError` naming a file neither of them ships, which reads as a real
 defect and is not one. A name that is gone by the time we open it cannot be a
 source file anyone ships, so the scan skips it.
+### 🔍 What a multi-agent audit found in the same day's work
+
+Thirteen agents over the four unmerged branches, then a refutation pass over
+everything the first pass had not tested. Of 41 unique findings, 30 survived
+an attempt to refute them. Seven of the ones in this branch are fixed here,
+and one of them reframed what the audit called its most severe finding.
+
+The four below were found after the first three, and they share a shape: the
+film-and-series split introduced a SECOND generated list, and every place that
+had one name to reason about now has two.
+
+**`!update` reported "0 files, added 0" on every rebuild.**
+`commands.count_from_master_list()` kept its own glob of the lists directory
+rather than calling `list.find_latest_list()`, and every time that function
+learned to exclude another name this one did not - #234 was that story with
+the delivered `-FULL-` copy. The film list was it again, and worse:
+`<base>-VIDEO-<date>.txt` sorts after a plain date ("V" > "2"), so this picked
+the film list, whose header reads "List of N Films & Series" and never matched
+the "List of N Files" pattern it was looking for.
+
+Worse than a wrong number. The #230 shrink guard fires on `added_files < 0`,
+and `0 - 0` is never negative - so the one warning that catches **a partial
+mount failure publishing a truncated index** could not fire again.
+
+**Which reframes the audit's own P1.** It reported that an unmounted music
+share beside a local Films folder now publishes an empty index over a working
+one, and called it a regression the zero-files guard should have caught. It is
+not: `update_list.py`'s folder skip documents the opposite decision
+deliberately - *"an unplugged drive or an unmounted share should cost its own
+contents, not take the whole list - and the bot - off the air"* - and
+`commands.py` names the real net for exactly that case, *"a partial mount
+failure that still returns SOME files"*. `main` refused that scan only by
+accident, because film was not indexed at all so the count reached zero. The
+branch's behaviour matches the design; what actually broke was the warning
+underneath it, and fixing the counter restores it.
+
+The counter now calls `list.get_file_count_date_size_and_raw_bytes()`, which
+counts request rows across every published list - so `!update` and the advert
+cannot report different totals for one library by construction, rather than by
+two copies of the filtering being kept in step by hand.
+
+**A same-day rebuild kept a stale film list.** The keep set asked whether a
+file existed at `video_path`, and that path carries today's date - so on a
+second rebuild it was the earlier run's own output. A run that found no film
+kept it: films that are gone, still searchable, still counted by the advert,
+and absent from the archive users download. It self-corrects across a date
+boundary, which is why the single-build test never saw it. One flag now
+records whether THIS run published a film list, and all three sites ask it.
+
+**`RAR_EXTENSIONS` was not a gate.** It decided whether a `!rar` row was
+WRITTEN; it never decided whether one would be honoured. `dcc.py`'s whole gate
+was `RAR_ENABLED`, containment, and "not an artist root", so a folder kept
+deliberately out of the album list was packed happily by anyone who named it.
+
+Harmless while nobody could name one - and this branch is what changed that.
+The film list publishes folder headings inside the archive every user
+downloads, and `list_heading_parts()` strips the prefix, so a heading pastes
+straight back as a request. With no size cap anywhere, that is an unbounded
+pack behind a line anybody in the channel can send. `defaults.py`,
+`INSTALL.md`, the public changelog and a test all asserted this was the
+defence while it was not implemented. It is now, on the request path, where
+the claim is made - and the refusal says the files in that folder are still
+requestable by name, because refusing a pack is not refusing the content.
+
+**Ten tests failed on the counter fix, and were right to.** They pinned "the
+counter reads the same FILE as everything else" from #234, which was exactly
+right while there was one list. With two, the invariant is that the counter
+and the advert give the same ANSWER - strictly stronger, and what #234 was
+really protecting. Every case they encoded is preserved, because both sides
+now go through `find_latest_list()`, which is where the exclusions live. Their
+fixtures gained real request rows: a header with no rows is a file no
+generator produces, and it made those tests turn on the counting mechanism
+rather than on the behaviour.
+
+**A library file starting with the bot's own name was looked for among the
+lists.** `is_list_artifact()` matched "starts with LIST_BASE_NAME, ends in
+.rar" - and its docstring already explained why the extension alone was not
+enough, having been written for exactly this class. The prefix half is the
+likelier of the two: LIST_BASE_NAME comes from the nickname, so it is an
+ordinary word, and a shared "Muzik-Collection.rar" was routed to the lists
+directory, found missing there, and refused for ever, while the file sat in
+the library being advertised and counted. A real artifact carries the date the
+builder writes into it, and that is what the test reads now - parsed with
+`strptime` against the builder's own format string, so a change to one breaks
+loudly rather than drifting from the other.
+
+**A base name containing `-VIDEO-` hid the bot's entire list from itself.**
+The markers are the builder's and they sit after the base name, but they were
+matched against the whole path - so `Bot-VIDEO-Archive` excluded the master
+list from its own search. @find answered "No MasterList found" and the advert
+published 0 files, permanently, with the list sitting right there. `-RAR-` and
+`-FULL-` did the same, and a LOCAL_LIST_DIR with any of the three somewhere in
+its path did it to every list underneath. The name is now read from after the
+base, which is the only part the builder owns.
+
+**A peer's film list could be taken for their master.** This bot's own archive
+now carries two `.txt` files, so a bot running DCCore is the ORDINARY case for
+`list_fetch._pick_list_file()`, not an exotic one - and its tiebreak picks the
+largest. From a bot whose films outweigh its music we would have indexed the
+films, shown them as that bot's whole catalogue, and reported its music as
+absent. `-VIDEO-` is excluded alongside `-RAR-` now, which drops those films
+from the fetched copy rather than merging them in; reading both into one
+fetched list changes what that function returns and the ceiling that guards
+it, so it is recorded on the roadmap rather than smuggled in here.
+
+**A killed run left staging files behind for ever.** A run that FAILS discards
+its own `.new` temporaries; a run killed mid-scan - minutes, on a large
+library - cannot, and they carry the date they were staged on, so the next
+day's run stages different names and never looks at them again. Nothing ever
+served or counted them, which is precisely why nothing removed them either.
+Swept at the start of the next build, where this run has staged nothing yet
+and the only file the sweep can reach belongs to a run that is no longer
+alive.
+
+One test of mine was wrong and the suite said so: it asserted an old
+`DCCore-<date>.txt` survived the temp sweep, when the prune correctly removes
+a superseded list at the end of every build.
+
+### 🎬 The list held two file types out of every library on earth
+
+`update_list.py`'s walk asked `file.lower().endswith(('.mp3', '.flac'))`, and
+that was the only gate on what goes into the list. A video library walked past
+every file it owned and published nothing.
+
+The failure was silent from the operator's side, which is the part worth
+recording: the scan reported success, the list was built, the advert went out.
+It was simply empty. That reads as "the bot cannot see my files" with nothing
+anywhere saying why - no warning, no count, no mention of extensions.
+
+**Every file is listed now, and `LIST_IGNORED_EXTENSIONS` names the
+exceptions.**
+
+The first attempt at this widened the hardcoded pair into a
+`LIST_EXTENSIONS` include-list, defaulting to audio plus the common video
+formats. That was the wrong shape and it is worth writing down why, because it
+looked right: **the set of things people serve is open-ended.** Every format
+left out of an include-list is invisible in exactly the same way `.mkv` was,
+so an include-list does not fix the defect - it moves it to whichever format
+nobody thought of. `.m4b`, `.ape`, `.chd`, a scanned booklet, a text file of
+liner notes.
+
+An exclude-list is a short, closed list, and its failure mode is the mild one:
+a file listed that need not have been, rather than a library that does not
+appear. OmenServe has the same shape (`Exclude = .mpu,.db`), so it is also the
+form operators coming from it already know.
+
+**The default is only what is never a served file** - `.db`, `.ini`, `.lnk`,
+`.url` for the Windows and shell droppings, and `.tmp`, `.part`,
+`.crdownload`, `.!ut` for downloads still in flight. That last group is the
+one case where listing a file is actively wrong: the bytes are not all there,
+so the transfer can only ever hand over something broken.
+
+Covers, `.nfo`, `.cue` and playlists are **not** skipped. People do serve
+them, and an operator who would rather not can say so. `tests/
+test_master_list_generation.py` had a test called
+`test_other_files_are_ignored` asserting the opposite, with the docstring "a
+music library is full of covers, cue sheets and notes" - it now asserts they
+are listed, and says that the reversal is the point.
+
+**Every spelling of the setting means the same thing.** Dots optional, spaces
+around the commas optional, case irrelevant: `db,ini,tmp`, `db, ini, tmp` and
+` .DB , ini ,  .TMP ` all resolve to the same three. Normalised where the
+value is READ rather than where it is written, because it arrives from three
+directions - `settings.conf`, `admin_config.py` and the dashboard's Settings
+page - and only one of those goes anywhere near a validator.
+
+The added dot is not cosmetic, and a mutation had to prove it.
+`"Thumbs.db".endswith("db")` is already true, so the first test of the
+normalisation passed with the dot dropped. What the dot prevents is an
+extension matching the END OF A NAME - and under an exclude-list that is worse
+than it was under an include-list: ignoring `ts` without the dot makes every
+file called `credits` or `highlights` vanish from the library with nothing
+said.
+
+**An empty setting skips nothing**, and needs no fallback. That is the other
+advantage of the inversion: an empty include-list scanned a full library to
+zero files, the zero-files guard then refused to publish, and the bot sat on a
+stale list reporting an empty library it did not have - so it needed a guess
+to recover from. An empty exclude-list just lists the library.
+
+**Resolved once per scan, not once per file.** The first version asked the
+predicate inside the walk, and that function reads the setting, normalises it
+and builds a tuple - so the largest library this project has measured, at 719k
+files, would have done that 719,000 times. The scan resolves it once and
+passes it down, and prints what it is skipping (`Indexing every file, except
+8 type(s): .db, .ini, ...`). The reported symptom was "my files are not in the
+list" with nothing saying why; that line is the answer to it, which is why it
+has a test rather than being decoration.
+
+`scripts/setup_check.py` had its own copy of the hardcoded pair for its "how
+many files can I see" line. It calls `update_list.is_listed_file()` now: a
+count that disagreed with what the build indexes would report a healthy
+library and then publish a list that does not match it.
+
+Two of this repository's own completeness guards caught things on the way,
+which is what they are for. The setting is a list literal in config.py, so
+both the "config defines no containers of its own" scan and the "every runtime
+container is preserved or explicitly excluded" scan flagged it. It is
+allow-listed in each with the reason `ADMIN_HOSTMASKS` already carries: it is
+a **setting**, not runtime state, and re-reading it on a rehash is the point.
+
+A mutation then showed those two lists could disagree without anything
+noticing - the second guard is satisfied by a name being preserved OR
+excluded, so a name in *both* passed while the code did the opposite of what
+its written reason said. Adding the setting to `PRESERVE_RUNTIME` broke
+nothing, and would have meant an operator's edit doing nothing until a full
+restart. There is a guard for that now.
+
+**Two consequences worth stating.** The `!rar` album list is built from folders
+holding listed files, so film folders now appear in it, and there is no size
+cap anywhere on packing a folder for `!rar`. That was always true - it simply
+never mattered when the largest thing anyone could ask for was a lossless
+album. A request for a 40GB folder will be attempted. `RAR_ENABLED` is the
+existing off switch; a size cap is noted in the roadmap rather than invented
+here, because the right number is the operator's.
+
+And **"every file" means exactly that**: anything sitting under
+`FILE_DIRECTORY` is now offered to anyone who asks - a stray backup, a
+document, a private note dropped into the tree by accident. That was already
+the rule for `.mp3` and `.flac`; it is now the rule for everything. The
+setting's own comment says so, and so does INSTALL.md.
+
+**Left for the operator to check:** the list is read by scripts as well as
+people. Every row is `!<nick> <filename>  ::INFO:: <size>`, and this project's
+own parser splits on the `::INFO::` marker regardless of extension, as do the
+OmenServe bots the convention came from. The note at the row write reports
+that AutoQ.mrc strips that tail only for `.mp3` and `.flac`, which if true
+means any other row may reach it with the size still attached. No regression
+is possible either way - there were no such rows at all before this - but an
+operator serving to AutoQ users should confirm it.
+
+### 🎬 Film and series get their own list, and only albums are packable
+
+Both from the review of the change above.
+
+**`!rar` eligibility had no format gate at all.** A folder earned a `!rar`
+row from holding any file the scan indexed, with `RAR_ENABLED` the only
+switch. That read as "album folders" while the scan took `.mp3` and `.flac`
+and nothing else. The moment it took everything, every folder in the library
+became packable - a season of a series, a folder holding one text note - and
+there is no size cap anywhere on packing, so an unbounded amount of CPU, disk
+and one transfer slot sat behind a line anybody in the channel can paste.
+
+`RAR_EXTENSIONS` decides it now, as its own set rather than "whatever the scan
+indexed". An album is a genuine multi-file collection - tracks, a cover, a cue
+sheet - which is what makes packing it useful; a film is one large file that
+can simply be requested by name, and still can.
+
+**Film and series publish as their own list**, `<base>-VIDEO-<date>.txt`,
+built from the same walk. No new trigger and nothing for anyone to learn:
+`@<botnick>` already hands out one archive containing the master list and the
+`!rar` album list, so this is a third member of the same download. The pattern
+is not new here either - the album list has been a separate file from the same
+scan since long before this.
+
+`SEPARATE_VIDEO_LIST` turns it off, and off is a real answer rather than a
+fallback. There are two ways to end up with a music list and a film list: this
+switch, when the two are mixed in the same folders and only the file says
+which is which; or several lists over their own folder sets, which is the
+roadmap's multi-list feature and the better route for a library already sorted
+that way on disk. The video list is only published when there is video to put
+in it, so a music-only library never gains an empty file.
+
+**The regression this could so easily have been.** A file request
+(`dcc.py:1316`), an `@find` (`list.py:328`) and the advert's count
+(`list.py:119`) all read `find_latest_list()` alone. Moving film into a second
+file without touching those would have left every video in the library listed,
+advertised and impossible to get - a feature that reads as working right up
+until somebody asks for something. `all_list_paths()` is the seam; all three
+go through it, and `dcc.py` concatenates the lists rather than searching them
+one at a time, so the folder-heading state machine below it is untouched.
+
+`find_latest_list()` needed a guard of its own: it globs `<base>-*.txt` and
+takes the LAST, and `-VIDEO-` sorts after a bare date, so the film list would
+have quietly become "the" master list. That is the failure its own comment
+already records for `-RAR-`. The test fixture had the identical blind spot -
+its `list_path()` helper globbed the same way - which is how the hazard was
+confirmed rather than merely reasoned about.
+
+Two more, found by the same walk:
+
+- **The music list's header claimed the whole library's size**, films
+  included: a number no reader can reconcile with the file in front of them.
+  The side files and the advert still report the library total, which is what
+  they are for.
+- **An all-film library refused to REBUILD.** The zero-files guard counts the
+  music list, so such a library looks empty to it. On a first run it finds no
+  previous index and publishes anyway, so nothing looks wrong; it is the
+  second run that fails with "scan found 0 files but an index already exists
+  (mount unavailable?)" - one working list, then every `!update` refused for
+  ever, blaming a mount that is fine.
+
+Three mutations corrected tests here rather than code. `"1.00KB"` is a
+substring of `"41.00KB"`, so the header assertion passed against exactly the
+combined figure it existed to reject. The all-film test ran the scan once and
+so never reached the guard. And the `!rar` gate turned out to be untested by
+the film case at all: with the split on, a film is not even in the data the
+`!rar` rows are built from, so the split alone keeps it out and deleting the
+gate broke nothing. The gate is now tested where it does the work - with
+`SEPARATE_VIDEO_LIST` off, which is the configuration an operator who keeps
+film in its own folders will run.
+
+### 📋 The roadmap said a closed defect class was still open
+
+Release-checklist work, done early because that checklist says it is: *"check
+`docs/FUTURE.md` for anything the release implements that is still listed as
+planned or not-yet-done. A roadmap calling a shipped thing missing makes the
+changelog look like it is overclaiming - this drifted once and reached the
+public repo before it was caught."*
+
+`!rehash` rebinding module-level locks was listed under "from the audits, not
+yet done". It is neither: every lock in a module `!rehash` reloads is
+allocated in `runtime.py` and bound by name, and
+`tests/test_no_reloaded_module_owns_a_lock.py` fails if a new one appears -
+so the class is closed rather than the four original instances merely fixed.
+Moved to Quality, where the other structural guards are recorded.
+
+Two more found by asking the same question of the rest of the file, which the
+first pass did not: it read the bullet list and not the prose around it.
+
+- The coverage section still said **"21 daemon functions have no behavioural
+  coverage at all"**. `scripts/function_coverage.py` reports 2 of 257, both
+  allowlisted with a written reason, and it fails the build on a third. What
+  genuinely remains there is narrower and does not show up in that number -
+  source-reading guards that do not execute what they check, which this file
+  has three recorded instances of passing against deliberately broken code.
+- The multi-list section called the multi-folder **Settings page** the thing
+  still to do. It shipped: `GET`/`POST /api/folders`, `GET
+  /api/folders/browse`, and a reorderable editor with a folder picker.
+  `data/library_folders.json` has not needed hand-editing for some time.
+
+Checked rather than assumed, and the neighbouring entry survived the same
+check: **timed bans really do still grow without bound.** `banned_users` is
+pruned only when that same nick is looked at again, and the flood sweep covers
+`user_requests` and `muted_until` but not it - so a timed ban on a nick that
+never comes back stays for ever, which is the normal case, because the ban is
+what made them leave.
+
+An operator upgrade note also landed in `docs/INSTALL.md`, for the same
+reason: this change alters what the list CONTAINS, and that is exactly the
+class of thing the checklist asks whether an existing operator has to act on.
+They do - the list does not change until they run `!update`, everything under
+`FILE_DIRECTORY` is offered once it does, and folders that used to be
+`!rar`-packable may no longer be.
+
+### 🔧 The mutation runner scored some mutations against code that was never on disk
+
+Two mutations of the same byte length, applied to one file inside the same
+mtime granularity, let Python reuse the FIRST one's cached bytecode for the
+second run. Two of this batch reported "not caught" against tests that catch
+them perfectly well when run by hand.
+
+A false pass is as available that way as a false failure, so every mutation
+batch in flight - this change's and the List Browser work's alike - was re-run
+with the caches cleared and `-B` before either was believed. The runners clear
+`__pycache__` and pass `-B` as a matter of course now, rather than relying on
+two same-length edits never landing in the same second.
+### 📦 Bringing an OmenServe operator's history across (#69)
+
+The single biggest barrier to trying this bot is not features - it is
+abandoning years of totals. `omenserve_import.py` could already read those
+numbers; this is the half that puts them somewhere.
+
+**Three routes in, one parser.** Choose `vars.ini`, paste its contents, or -
+for an install nobody's parser understands - the figures are shown so they can
+be checked by eye. All of it goes through `read_install()`, so the fallbacks
+are not a second code path that can behave differently.
+
+**The page filters before it uploads, and that is not tidiness.** The live
+install #69 was written from held **280 variables** - nicks, channels, paths,
+add-on settings and passwords among them. Only the counter lines are sent, and
+the page asks the server which variables those are rather than hard-coding
+them: a field added to `FIELDS` is then kept without the JavaScript changing,
+where a hard-coded list would have silently stripped it out and told the
+operator their file has nothing in it.
+
+**Overwritten, not combined - said only when it matters.** On a fresh install
+nobody reads that sentence and on a used one it is the only thing that does,
+so the preview names which figures already have a value and the warning
+appears exactly then.
+
+**Nothing is taken on trust.** A `vars.ini` is a plain text file people
+hand-edit, and the operator confirming a number is not the same as the number
+being sane. Refused at the endpoint and not only in the page: negatives,
+non-numbers, and magnitudes past anything a real link could have produced - a
+stray digit looks exactly like that, and importing one silently is worse than
+refusing it, because the operator can retype a number but cannot tell that a
+total is wrong once it looks plausible. `True` is refused explicitly, since
+`int(True)` is 1 and a JSON `true` would otherwise import as a file count of
+one.
+
+**An absent figure is left alone, never zeroed - and so is a zero.** That rule runs from the
+parser to the write: the counters come from ADD-ONS rather than from OmenServe
+itself, so an operator running one and not another imports what they have and
+keeps the rest. Writing a zero over a real total would be the worst thing this
+feature could do.
+
+**The day columns are not touched.** They belong to the daemon's own rotation,
+and importing a lifetime total must not reset what the bot did today. They
+could not have been imported anyway: `%OSL.Today` is `Friday` and
+`%mx.rarday` is `Wednesday` - a weekday NAME, so "today or six days ago" is
+not answerable from the file at all.
+
+The write goes through `db.save_advanced_stats()` and `db.save_speed_record()`
+- a caller, not a second implementation of either - and the response carries
+the before and after, so the page reports what actually happened rather than
+what it asked for.
+
+Two mutations corrected tests. One targeted the "reject the whole import"
+guard at a case where every field was invalid, so the "nothing to import"
+check answered it and the guard could be deleted; it belongs on the
+half-valid case. And the fixture wrote an empty date in the stats row's
+seventh column, which makes it six columns, which the loader correctly treats
+as corrupt - so every "an existing figure is preserved" test failed against
+code that was preserving it perfectly well.
+
+### 🔍 Four audit findings in the import, three of them in reading one number
+
+From the multi-agent audit of the same day's work. Every one of them is in the
+few lines that turn text somebody hand-edited into an integer, which is worth
+noting on its own: that is the whole attack surface of this feature and it is
+about twenty lines long.
+
+**A present zero overwrote a real lifetime total.** The rule this feature was
+built on - never write a zero over somebody's history - was enforced on an
+ABSENT variable and not on a zero, because the check read `number is not
+None`. A fresh OmenServe install writes `%mx.rartsent 0`, and importing from
+one replaced a real DCCore total with nothing, while the note beside it
+promised "the total size will stay as it is". A zero carries no history
+across, which is the entire point of the feature, so it can only destroy. It
+is now read, shown in the preview marked as not imported, and explained -
+silently dropping the row would have read as a parse failure to an operator
+looking at that number in their own file.
+
+**`1e999` reached the route as a 500.** It parses as a float perfectly well
+and becomes `inf`, and `int(round(inf))` raises `OverflowError` - not
+`ValueError`, which is what the conversion caught. NaN arrives the same way.
+Both mean "not a number I can use", which is what `None` already says here.
+
+**A thousands separator truncated the number by three orders of magnitude.**
+`split(",")[0]` is what `%SDmaxspeed`'s `<bytes>,<nick>` shape needs, and the
+`.replace(",", "")` written after it could therefore never see a comma - dead
+code that looked like the handling for the case it was not handling. So a
+value written `45,902` imported as `45`: silently, plausibly, and wrongly. The
+two shapes are told apart by what follows the comma - a digit is a separator,
+a nick is a field boundary.
+
+**A half-written import reported success.** Both writers swallow their own
+errors and return `None`, which is right for them - a failed stats write must
+not take the daemon down - and meant this route answered 200 with
+`imported: [...]` for figures that never reached the disk. The operator would
+have been told their history came across and found half of it, with nothing to
+say which half. The response is now built from what is actually on disk
+afterwards, compared against what was asked for, and names the ones that did
+not land.
+
+One of the four fixes was written twice. The first version guarded `inf` and
+NaN explicitly and then caught `OverflowError` underneath, and the mutation run
+showed the guard was dead: deleting it changed nothing, because the catch
+below already answered both. The catch stayed and the guard went.
+### 📥 The list request answers AutoQ's own menu item
+
+Read out of `AutoQ.mrc`, the queue script these channels actually use. Its
+"Get Listfile" item sends:
+
+```
+msg $chan $+(@,$snick($chan,%i))  ::^C4,0Auto^C12,0^BQ^B^C1,0::
+```
+
+`@<nick>` with two spaces and a colour-coded tag. OmenServe answers that;
+`irc.py` compared for equality, so DCCore was **silent** for every user of
+that item - no reply, no error, and nothing in the log to say a request had
+been made and ignored. The failure looks exactly like a bot that is down.
+
+`is_list_request()` now takes `@<nick>` exactly, or `@<nick>` followed by a
+space and anything at all. **The space is what makes a suffix safe**, and it
+is the whole argument: none of the names this has to stay distinct from
+contains one. `@<nick>-que`, `-remove`, `-help`, `-stats` and `-top` are this
+bot's own commands, each still matched exactly by its own branch below.
+`@<nick>2` and `@<nick>_away` are a DIFFERENT bot whose nick merely starts
+with ours, and answering those would send our list to somebody asking
+somebody else for theirs.
+
+`@find` and `@locator` are excluded explicitly, for the bot whose nickname IS
+"find": a search there must keep meaning a search. The cost is stated rather
+than hidden - for that one bot, AutoQ's menu item searches for "::AutoQ::"
+instead of sending the list.
+
+**The gate and the dispatch are one function.** They were two copies of the
+same comparison, and the flood gate's own test class exists because a gate
+narrower than the dispatch is an unmetered command path. Widening one and not
+the other would have re-created exactly that, so both call
+`is_list_request()`, and `tests/test_irc_dispatch.py` binds the real function
+into the namespace it evaluates the lifted gate expression in - the way it
+already binds `bot_aliases`.
+
+**One test was rewritten rather than deleted.** It asserted the request "stays
+an exact match", and gave its reason: `@DCCore-que` must not be swallowed.
+That reason still holds and is now met by the space; the exactness itself was
+the defect. Every case it pinned is still there, with `@DCCore please` moved
+to the other side and AutoQ's real payload added.
+
+**And two source-reading guards were sliced wrong.** `test_help_command` and
+`test_stats_top_commands` read the flood gate with
+`block[:block.index(")
+")]`, which stopped at the first closing paren in the
+text - fine until the gate called a function, at which point the block ended
+after one line and both failed while the metering they check was perfectly
+intact. They walk to the gate's own closing paren now.
+
+**Not changed: "Que Status".** AutoQ sends `<nick>-que` with no leading `@`,
+which DCCore does not answer. Left alone deliberately - a bare word as a
+channel trigger is a wider change than a suffix on a request already
+addressed to us. AutoQ's own non-buffer branch for it is broken anyway: it
+sends a literal `+(Nick,-que)`, missing the `$`. Written up in INSTALL.md so
+an operator knows to type `@<nick>-que` instead.
+
+**Also documented: rows AutoQ drops.** Its file branch truncates a line at the
+end of the first accepted extension it finds - which is how `::INFO::` and the
+size get stripped - but that `aline` sits INSIDE the extension test. A row
+whose type is not in mIRC's `[text] accept` list is queued nowhere and
+reported nowhere. AutoQ adds only `*.mp3` and `*.rar` on load, so now that
+DCCore lists every file type, a `.flac` or `.mkv` row silently vanishes for
+any user who has not added it. Nothing to fix here - the row is correct and
+the client discards it - but operators need to know, so INSTALL.md says which
+mIRC setting to change.
+### 🔒 A timed ban on somebody who never came back stayed for ever
+
+The last of the audit's flood-tracking findings, and the one the roadmap has
+been carrying as outstanding.
+
+`banned_users` was expired **lazily**: the check that reads it deletes an
+expired row, but only on the next request FROM THAT SAME NICK. A banned nick
+not coming back is the normal case - the ban is what made them leave - so the
+entry stayed in memory and in `bans.txt` for good, and the file grew one
+permanent row per flooder.
+
+The flood sweep already ran every sixty seconds and already cleaned
+`user_requests` and `muted_until`. This is the third structure it was always
+meant to include; it is the same expiry rule applied to the nicks that never
+return, not a new policy.
+
+Three things it has to get right, each with a test:
+
+- **The same reading of an expiry as the per-request check**, from one
+  function. Two copies of that coercion could drift into disagreeing about
+  when a ban ends, which means either a ban enforced but never cleared or one
+  cleared while still being enforced. A row that will not parse as a number is
+  swept, exactly as the lazy path would have deleted it - a row nothing can
+  read is not a ban anyone is serving.
+- **The file is rewritten.** Unlike the other two structures this one is
+  persisted, so clearing memory alone would let every swept ban return at the
+  next restart and the file would go on growing regardless.
+- **Only when something actually expired.** A sweep runs every minute for the
+  life of the daemon; writing the ban file each time would be a disk write a
+  minute, for ever, to record no change at all.
+
+`docs/FUTURE.md`'s "from the audits, not yet done" section is now down to the
+one line about the remaining verified findings.
 
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
