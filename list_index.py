@@ -115,6 +115,7 @@ def _connect():
         # check_same_thread=False: the dashboard answers on Flask's threads
         # while a fetch completing writes from the transfer thread, and every
         # caller here holds _conn_lock for the whole operation anyway.
+        conn = None
         conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(
@@ -130,6 +131,20 @@ def _connect():
                      (str(_SCHEMA_VERSION),))
         conn.commit()
     except Exception as err:
+        # THE HANDLE IS CLOSED BEFORE IT IS DROPPED. sqlite3.connect() is
+        # lazy - it succeeds on a corrupt file, on a text file, on anything
+        # openable - and the failure lands on the first execute() below, with
+        # a real open handle already in hand. Returning None without closing
+        # it leaked one connection PER CALL, and this function is called on
+        # every search: an operator whose index file is damaged leaks one for
+        # every keystroke in the filter bar. On Windows the file also stays
+        # locked until the object is collected, so the next attempt fails for
+        # a new reason and the log stops describing the original one.
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
         print(f"[LIST-INDEX] Unavailable ({err}); the cross-list filter is "
               f"off until the next fetch. Browsing and @find are unaffected.")
         _connection = None
@@ -228,6 +243,15 @@ def index_bot_list(bot, rows):
         if conn is None:
             return 0
         try:
+            # THE LOCK IS HELD FOR THE WHOLE WRITE, deliberately. It is the
+            # transaction boundary as well as the connection guard: releasing
+            # it between the delete and the insert would let a search on
+            # Flask's thread read a list that had been emptied and not yet
+            # refilled, and report that bot as holding no match - the same
+            # false "empty" bots_with_a_match() takes care to avoid. A fetch
+            # completing is rare and a search is cheap; blocking one for the
+            # length of one write is the right side of that trade.
+            #
             # Delete first, in the same transaction as the insert: a refetch
             # that replaced a list must not leave the old rows searchable
             # beside the new ones, and a crash between the two must not leave
@@ -240,11 +264,16 @@ def index_bot_list(bot, rows):
                 # "filename" is accepted too because find_matching_entries()
                 # uses that name and a future caller may reasonably pass its
                 # rows straight through.
-                [(name,
+                # A GENERATOR, not a list: executemany consumes it a row at
+                # a time, where a comprehension built a second complete copy
+                # of the list in memory first - at the four million rows this
+                # index is measured against, hundreds of megabytes of tuples
+                # held for the length of the write and for no reason.
+                ((name,
                   str(row.get("title") or row.get("filename") or ""),
                   str(row.get("folder") or ""),
                   str(row.get("size") or ""))
-                 for row in rows])
+                 for row in rows))
             conn.commit()
             return len(rows)
         except Exception as err:
@@ -304,6 +333,14 @@ def bots_with_a_match(terms, bots):
         return set(), set()
 
     matched = set()
+    # A bot whose own query FAILED is neither matched nor empty. Falling out
+    # of `matched` used to put it straight into `empty` below, and `empty` is
+    # rendered as a positive statement - the list greys out and the status
+    # line counts it as holding no match. That is the same false claim the
+    # "no index" branch two lines down already refuses to make, arrived at by
+    # a different route: one sqlite error and a list that DOES match is shown
+    # to the operator as one that does not.
+    unknown = set()
     with _conn_lock:
         conn = _connect()
         if conn is None:
@@ -327,11 +364,15 @@ def bots_with_a_match(terms, bots):
                 rows = conn.execute(
                     "SELECT bot FROM entries WHERE entries MATCH ? LIMIT 25",
                     (f"bot:{_quote(wanted)} AND {query}",)).fetchall()
-            except Exception:
+            except Exception as err:
+                print(f"[LIST-INDEX] Could not check {bot!r} against the "
+                      f"filter ({err}); its list is left unmarked rather "
+                      f"than shown as empty.")
+                unknown.add(wanted)
                 continue
             if any(str(r[0]).strip().lower() == wanted for r in rows):
                 matched.add(wanted)
-    empty = {b.lower() for b in candidates} - matched
+    empty = {b.lower() for b in candidates} - matched - unknown
     return matched, empty
 
 

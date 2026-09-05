@@ -4,7 +4,7 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
-### 🔍 Six audit findings, and the worst made the filter match nothing
+### 🔍 Thirteen audit findings, and the worst made the filter match nothing
 
 From the multi-agent audit of the same day's work, plus the refutation pass
 over what it had not tested.
@@ -71,6 +71,81 @@ explanation. And a source-reading test passed against a dead branch: the
 mutation moved the call behind `if (false)` and the test only checked the call
 existed. It asserts the call and its guard as one sequence now, which is as
 close to "reachable" as reading source gets.
+
+**Seven more, from the same audit.** Six of them share a shape worth naming:
+each is a place where "we could not tell" was reported as a definite answer.
+
+**A list that could not be checked was greyed out as holding no match.** One
+`except Exception: continue` in the per-bot loop, and that bot fell out of
+`matched` and straight into `empty` - which the page renders as a POSITIVE
+statement, greying the list and counting it in "no match in N lists". The same
+false claim the "no index" branch three lines above already refuses to make,
+reached by a different route. A failed query now leaves the list unmarked and
+says so in the log.
+
+**The fetch queue was read without its lock.** `fetch_marks_by_bot()`
+iterates `config.fetch_queue` on Flask's thread while `enqueue_fetch()`
+inserts into it from the transfer thread - "dictionary changed size during
+iteration", which here is a 500 on the List Browser at the exact moment
+somebody starts a fetch, which is when they are most likely to be looking at
+it. `build_fetch_status_payload()` was already written this way, with a
+comment explaining why; this one simply had not been.
+
+**A count too large to carry was repeated as though exact.** For a bot we
+have not fetched from, `count` is THEIR advert text parsed with
+`irc._as_int()`, which builds a Python int of any size. JSON has no limit and
+JavaScript does: `JSON.parse()` rounds anything past 2^53 to the nearest float
+before the page sees it, so a bot advertising twenty-three digits had a
+DIFFERENT twenty-three digit number rendered beside its nick, in thousands
+separators, looking precise. Dropped rather than clamped, because the rule
+here throughout is that an absent field means "they did not say" - which is
+the truthful reading of a number we cannot carry.
+
+**`hidden` did not hide.** `.filelists-filter-actions { display: flex }`
+outranks the UA stylesheet's `display: none` for the attribute, so the row of
+buttons showed from first paint while the markup, the script and the reviewer
+all said it was hidden. The guard for it is general: every class in
+`index.html` that carries `hidden` and sets `display` must also carry a
+`[hidden]` rule, and the test fails if it finds nothing in scope to examine.
+
+**No ceiling on the request body.** Flask reads one into memory before any
+route decides what to do with it, and this daemon shares a machine with
+transfers it must not starve. 8MB - far above the largest legitimate body
+here, a pasted `vars.ini` - and it applies before authentication, which is
+where the daemon has the least reason to trust what it is handed.
+
+**The index write no longer holds a second copy of the list in memory.** The
+rows stream into `executemany` rather than being materialised into a list
+first; at the four million rows this index is measured against that was
+hundreds of megabytes of tuples held for the length of the write. The LOCK
+stays held for the whole write, deliberately, and now says so: it is the
+transaction boundary as well as the connection guard, and releasing it between
+the delete and the insert would let a search read a list that had been emptied
+and not yet refilled - the same false "empty" as the first finding above.
+
+**A connection that could not be set up was dropped without being closed** -
+and I had read this finding, decided it was already handled, and moved on. The
+suite disagreed: a `ResourceWarning` out of preflight pointed straight at it.
+`sqlite3.connect()` is LAZY, succeeding on a corrupt file, a text file, on
+anything openable at all, so the failure lands on the first `execute()` with a
+real open handle already in hand. Returning None without closing it leaked one
+per call, and `_connect()` is called on every search: an operator with a
+damaged index leaked one for every keystroke in the filter bar. On Windows the
+file also stays locked until the object is collected, so the next attempt
+fails for a NEW reason and the log stops describing the original one.
+
+The test harness closes that connection after every test too. It is cached at
+module level and kept for the life of the process, which is right for the
+daemon and wrong for a run of 2,799 tests: one opened indirectly - by a fetch
+completing, or a dashboard route - stayed open pointing at a temp directory the
+teardown was about to delete, and surfaced at interpreter shutdown with no test
+name attached to it. That is how the leak above was found.
+
+**One finding the audit reported was genuinely already handled**, and now has
+a guard so it stays that way: a `!rehash` moving `LIST_INDEX_FILE` takes
+effect, because `_index_path()` reads config on every call and `_connect()`
+compares it against the cached one. Capturing the path at import is the
+obvious tidy-up and would send every write to a file nothing reads.
 
 ### 📌 The List Browser says what you have already asked for (#133)
 

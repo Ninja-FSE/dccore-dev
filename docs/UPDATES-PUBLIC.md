@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The dashboard now refuses an oversized request instead of reading it into memory.** Anything over 8MB — far more than any page here sends — is turned away before it is read, and the limit applies to the login page too. On a machine that is also sending files, memory the bot does not need to hold is memory transfers can use.
+
 - **Fixed: the cross-list filter found nothing at all.** It was storing every file under an empty name, so typing anything returned no matches from any list. It works now — and if you already had lists downloaded before this update, they are indexed automatically when the bot next starts, rather than staying invisible to the filter until you re-fetch each one by hand.
 
 - **Fixed: re-downloading a bot's list could leave the old copy searchable.** If you typed the nick with different capitalisation the second time, both copies stayed in the index, the stale one turned up in results, and nothing could clear it. Related: a bot whose name contains another's — `Bot` and `Bot-2` — could be credited with the other's matches.

@@ -32,6 +32,8 @@ query above. @find over our own list is untouched.
 """
 
 import io
+import sqlite3
+import contextlib
 import os
 import sys
 import tempfile
@@ -469,6 +471,40 @@ class WhenTheIndexIsNotThere(IndexCase):
 
         self.assertEqual(list_index.search(["anything"]), [])
         self.assertEqual(list_index.index_bot_list("BigTruck", []), 0)
+
+    def test_the_handle_it_could_not_use_is_closed_before_it_is_dropped(self):
+        """sqlite3.connect() is LAZY - it succeeds on a corrupt file, on a
+        text file, on anything openable - so the failure lands on the first
+        execute() with a real open handle already in hand. Returning None
+        without closing it leaked one connection per call, and this is called
+        on every search: an operator with a damaged index leaked one for every
+        keystroke in the filter bar. On Windows the file stays locked until
+        the object is collected, so the next attempt then fails for a new
+        reason and the log stops describing the original one.
+        """
+        import sqlite3 as sqlite3_mod
+
+        opened = []
+        real = sqlite3_mod.connect
+
+        def watched(*args, **kwargs):
+            conn = real(*args, **kwargs)
+            opened.append(conn)
+            return conn
+
+        path = os.path.join(self.index_dir, "corrupt3.db")
+        with open(path, "wb") as handle:
+            handle.write(b"not a database")
+        self.set_config(LIST_INDEX_FILE=path)
+        list_index.reset_for_tests()
+
+        list_index.sqlite3.connect = watched
+        self.addCleanup(setattr, list_index.sqlite3, "connect", real)
+        self.assertEqual(list_index.search(["anything"]), [])
+
+        self.assertEqual(len(opened), 1, "the failing path opened nothing")
+        with self.assertRaises(sqlite3_mod.ProgrammingError):
+            opened[0].execute("SELECT 1")
 
     def test_no_index_does_not_grey_out_every_bot(self):
         """"We cannot tell" is not "nobody has it". Crossing out the whole
@@ -952,6 +988,185 @@ class TheIndexIsWrittenByTheFetch(unittest.TestCase):
         self.assertIn("list_index.index_bot_list(", block)
         self.assertNotIn("find_matching_entries(", block,
                          "the index is built from a second parse of its own")
+
+
+class AQueryThatFailedIsNotAListThatIsEmpty(IndexCase):
+    """`empty` is rendered as a POSITIVE statement - the list greys out and
+    the status line counts it as holding no match. Only something we actually
+    established may go in it."""
+
+    def test_a_bot_whose_query_raised_is_left_unmarked(self):
+        """One sqlite error and a list that DOES match was shown to the
+        operator as one that does not."""
+        self.index("keeper", "Blue Monday.mp3")
+        self.index("broken", "Blue Monday.mp3")
+
+        real = list_index._connect
+
+        class OneBotFails(object):
+            def __init__(self, conn):
+                self.conn = conn
+
+            def execute(self, sql, params=()):
+                if "broken" in str(params):
+                    raise sqlite3.OperationalError("no such column")
+                return self.conn.execute(sql, params)
+
+            def __getattr__(self, name):
+                return getattr(self.conn, name)
+
+        list_index._connect = lambda: OneBotFails(real())
+        self.addCleanup(setattr, list_index, "_connect", real)
+
+        matched, empty = list_index.bots_with_a_match(["blue"], ["keeper", "broken"])
+
+        self.assertEqual(matched, {"keeper"})
+        self.assertNotIn("broken", empty)
+
+    def test_and_the_operator_is_told_rather_than_shown_nothing(self):
+        real = list_index._connect
+
+        class AlwaysFails(object):
+            def __init__(self, conn):
+                self.conn = conn
+
+            def execute(self, sql, params=()):
+                if "MATCH" in sql:
+                    raise sqlite3.OperationalError("no such column")
+                return self.conn.execute(sql, params)
+
+            def __getattr__(self, name):
+                return getattr(self.conn, name)
+
+        self.index("broken", "Blue Monday.mp3")
+        list_index._connect = lambda: AlwaysFails(real())
+        self.addCleanup(setattr, list_index, "_connect", real)
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            list_index.bots_with_a_match(["blue"], ["broken"])
+
+        self.assertIn("rather than shown as empty", buffer.getvalue())
+
+    def test_a_bot_that_genuinely_has_no_match_is_still_empty(self):
+        """The distinction is the whole point: "we could not tell" and "we
+        checked and there is nothing" must not collapse into each other."""
+        self.index("keeper", "Blue Monday.mp3")
+        self.index("other", "Temptation.mp3")
+
+        matched, empty = list_index.bots_with_a_match(["blue"], ["keeper", "other"])
+
+        self.assertEqual(matched, {"keeper"})
+        self.assertEqual(empty, {"other"})
+
+
+class MovingTheIndexFileTakesEffect(IndexCase):
+    """!rehash can repoint LIST_INDEX_FILE, and this module caches a
+    connection - which is exactly the pair that goes wrong quietly."""
+
+    def test_the_next_call_reconnects_rather_than_writing_to_the_old_file(self):
+        """The audit flagged this as unhandled and it is handled: _index_path()
+        is read through config on every call rather than captured at import,
+        and _connect() compares it against the cached one. Guarded here so it
+        stays that way - caching the path at import is the obvious tidy-up and
+        would leave the operator's writes going to a file nothing reads."""
+        self.index("dude", "Blue Monday.mp3")
+        first = list_index._connection_path
+
+        moved = os.path.join(self.index_dir, "moved.db")
+        self.set_config(LIST_INDEX_FILE=moved)
+        self.index("dude", "Temptation.mp3")
+
+        self.assertEqual(list_index._connection_path, moved)
+        self.assertNotEqual(first, moved)
+        self.assertTrue(os.path.exists(moved))
+        # And the old connection is not left open beside the new one.
+        self.assertEqual(list_index.search(["temptation"])[0]["filename"],
+                         "Temptation.mp3")
+        self.assertEqual(list_index.search(["blue"]), [])
+
+
+class TheQueueIsReadUnderTheLockItsWritersUse(DCCoreTestCase):
+    """enqueue_fetch() inserts rows from the transfer thread while the List
+    Browser reads them on Flask's."""
+
+    def test_the_marks_are_built_inside_it(self):
+        """Iterating a dict being inserted into raises "dictionary changed
+        size during iteration" - here, a 500 on the List Browser at the exact
+        moment somebody starts a fetch, which is when they are most likely to
+        be looking at it. build_fetch_status_payload() already reads the queue
+        this way; this one did not."""
+        import dcc_fetch
+
+        depth = []
+        seen = []
+
+        class WatchedLock(object):
+            def __enter__(self):
+                depth.append(True)
+                return self
+
+            def __exit__(self, *_exc):
+                depth.pop()
+                return False
+
+        class WatchedQueue(dict):
+            def values(self):
+                seen.append(bool(depth))
+                return dict.values(self)
+
+        queue = WatchedQueue({"r1": {"request_type": "file", "bot": "Dude",
+                                     "requested_filename": "Song.mp3",
+                                     "state": "complete"}})
+        self.set_config(fetch_queue=queue, fetch_queue_lock=WatchedLock())
+
+        marks = webserver.fetch_marks_by_bot()
+
+        self.assertEqual(seen, [True],
+                         "the queue was read outside its lock")
+        self.assertEqual(marks, {"dude": {"song.mp3": "received"}})
+
+
+class TheRequestBodyHasACeiling(DCCoreTestCase):
+    """Flask reads a body into memory before any route decides what to do
+    with it, and this daemon shares a machine with transfers it must not
+    starve."""
+
+    def setUp(self):
+        super().setUp()
+        if not webserver.HAVE_FLASK:
+            self.skipTest("Flask is not installed")
+        import adminchat
+        self.set_config(
+            ADMIN_PASSWORD_HASH=adminchat.make_password_hash("pw", iterations=1000))
+        self.app = webserver.create_app()
+
+    def test_it_is_set_and_is_room_enough_for_the_largest_real_body(self):
+        """A pasted vars.ini is the biggest legitimate one, and it is a text
+        file of a few hundred lines."""
+        ceiling = self.app.config.get("MAX_CONTENT_LENGTH")
+
+        self.assertIsNotNone(ceiling, "no ceiling on the request body")
+        self.assertGreaterEqual(ceiling, 1024 * 1024)
+
+    def test_a_body_past_it_is_refused_rather_than_buffered(self):
+        client = self.app.test_client()
+
+        resp = client.post("/login",
+                           data={"password": "x" * (self.app.config["MAX_CONTENT_LENGTH"] + 1)})
+
+        self.assertEqual(resp.status_code, 413)
+
+    def test_a_body_within_it_still_reaches_the_route(self):
+        """A ceiling that refused ordinary traffic would be worse than none.
+        The 413 above is posted to /login WITHOUT a session, which is the
+        case that matters: it applies before authentication, where the daemon
+        has the least reason to trust what it is handed."""
+        client = self.app.test_client()
+
+        resp = client.post("/login", data={"password": "wrong"})
+
+        self.assertNotEqual(resp.status_code, 413)
 
 
 if __name__ == "__main__":

@@ -353,5 +353,41 @@ class TheLegendTheDotsAndTheStylesheetAgree(unittest.TestCase):
                 self.assertIn("var(--", line, line.strip())
 
 
+class ANumberTooLargeToCarryIsNotRepeated(TheRowsComeFromBothPlaces):
+    """`count` for a bot we have not fetched from is THEIR advert text, parsed
+    with irc._as_int(), which builds a Python int of any size at all."""
+
+    def test_an_absurd_advertised_count_reads_as_did_not_say(self):
+        """JSON has no size limit and JavaScript does: JSON.parse() turns
+        anything past 2**53 into the nearest float before the page sees it, so
+        a bot advertising twenty-three digits had a DIFFERENT twenty-three
+        digit number rendered beside its nick, in thousands separators,
+        looking exact."""
+        runtime.known_bots["loud"] = {"nick": "Loud", "files": 10 ** 23}
+
+        self.set_config(fetched_bot_lists={})
+
+        row = self.rows()["Loud"]
+
+        self.assertIsNone(row["count"])
+        self.assertNotIn("files", row["advert_now"])
+
+    def test_a_real_count_is_untouched(self):
+        """The largest lists seen advertising are a few million rows; nothing
+        legitimate is anywhere near the ceiling."""
+        runtime.known_bots["big"] = {"nick": "Big", "files": 7902000}
+
+        self.set_config(fetched_bot_lists={})
+
+        self.assertEqual(self.rows()["Big"]["count"], 7902000)
+
+    def test_the_boundary_itself_is_carried(self):
+        runtime.known_bots["edge"] = {"nick": "Edge", "files": 2 ** 53 - 1}
+
+        self.set_config(fetched_bot_lists={})
+
+        self.assertEqual(self.rows()["Edge"]["count"], 2 ** 53 - 1)
+
+
 if __name__ == "__main__":
     unittest.main()

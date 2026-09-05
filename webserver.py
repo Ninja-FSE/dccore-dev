@@ -728,8 +728,18 @@ def fetch_marks_by_bot():
     """
     import dcc_fetch
 
+    # Under the SAME LOCK the writers use, exactly as
+    # build_fetch_status_payload() does: enqueue_fetch() inserts rows from the
+    # transfer thread while this runs on Flask's, and iterating a dict being
+    # inserted into raises "dictionary changed size during iteration" - which
+    # here is a 500 on the List Browser at the precise moment somebody starts
+    # a fetch, which is the moment they are most likely to be looking at it.
+    with dcc_fetch._fetch_lock():
+        queued = [dict(row) for row in (getattr(config, "fetch_queue", {}) or {}).values()
+                  if isinstance(row, dict)]
+
     marks = {}
-    for row in list((getattr(config, "fetch_queue", {}) or {}).values()):
+    for row in queued:
         if not isinstance(row, dict):
             continue
         if row.get("request_type") != "file":
@@ -947,6 +957,11 @@ def build_fetched_bot_list_summaries():
     return rows
 
 
+# JavaScript's Number.MAX_SAFE_INTEGER. Past this a JSON number no longer
+# survives the trip into the page unchanged.
+_MAX_SAFE_JS_INT = 2 ** 53 - 1
+
+
 def _advert_now(known, bot):
     """The fields `bot` is advertising at this moment, or {}.
 
@@ -961,8 +976,21 @@ def _advert_now(known, bot):
     current = {}
     for field in ("files", "list_date"):
         value = entry.get(field)
-        if value not in (None, "", 0):
-            current[field] = value
+        if value in (None, "", 0):
+            continue
+        # A COUNT WE CANNOT REPEAT FAITHFULLY IS ONE WE DO NOT REPEAT. This
+        # is another bot's advert text, parsed with irc._as_int(), which
+        # builds a Python int of any size at all. JSON has no such limit and
+        # JavaScript does: JSON.parse() turns anything past 2**53 into the
+        # nearest float before the page ever sees it, so a bot advertising
+        # twenty-three digits had a DIFFERENT twenty-three digit number
+        # rendered beside its nick, in thousands separators, looking exact.
+        # Dropped rather than clamped: this module's rule throughout is that
+        # an absent field means "they did not say", which is the truthful
+        # reading of a number we cannot carry.
+        if field == "files" and isinstance(value, int) and abs(value) > _MAX_SAFE_JS_INT:
+            continue
+        current[field] = value
     return current
 
 
@@ -2223,6 +2251,16 @@ if HAVE_FLASK:
         # all POST; Lax is the app's own decision instead of whatever the
         # visitor's browser happens to default to.
         app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+        # A CEILING ON THE REQUEST BODY. Without one, Flask reads whatever is
+        # sent into memory before any route decides what to do with it, and
+        # this daemon shares a machine with transfers it must not starve.
+        # 8MB is far above every legitimate body here - the largest by a wide
+        # margin is a pasted vars.ini, a text file of a few hundred lines -
+        # and Flask answers anything past it with 413 rather than buffering
+        # it. The login page is behind this too, which is the point: the
+        # ceiling applies before authentication, where the daemon has the
+        # least reason to trust what it is being handed.
+        app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
         @app.before_request
         def require_login():

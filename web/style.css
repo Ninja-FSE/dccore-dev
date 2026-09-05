@@ -868,6 +868,14 @@ html, body {
   border: 1px solid var(--accent);
 }
 
+/* `display` and `hidden` on the same element: the attribute sets
+   `display: none` from the UA stylesheet, which ANY class rule outranks, so
+   the row of buttons showed while the markup said it was hidden. Every
+   element in here that carries `hidden` needs this pair. */
+.filelists-filter-actions[hidden] {
+  display: none;
+}
+
 .filelists-filter-actions {
   display: flex;
   gap: 8px;
