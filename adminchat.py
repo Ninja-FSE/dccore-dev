@@ -104,6 +104,7 @@ PBKDF2_ITERATIONS = 200_000
 # --------------------------------------------------------------------------
 _session = None               # the one authenticated session, or None
 _pending = None               # at most one connected-but-unauthenticated session
+_listening = False            # at most one passive listener WAITING to be dialled
 _state_lock = threading.Lock()
 
 _bad_ips = {}                 # ip -> [failure_count, blocked_until]
@@ -1091,6 +1092,45 @@ def _listen_and_serve(irc_sock, nick, host, token=None):
     """
     import dcc
 
+    global _listening
+
+    # ONE LISTENER AT A TIME, and this is the earliest point it can be
+    # enforced.
+    #
+    # Every other limit on this path runs AFTER accept(): is_bad_ip() is
+    # consulted on the connecting address, and the single-_pending rule inside
+    # _serve() applies to a session that already exists. Nothing bounded how
+    # many listeners could be OPEN at once - and irc.py deliberately leaves
+    # DCC CHAT out of the set security.is_flooding() meters, so the CTCPs that
+    # start them are not rate-limited either.
+    #
+    # So a handful of passive DCC CHAT offers took every port in
+    # DCC_PORT_START..DCC_PORT_END and held them for LISTEN_TIMEOUT, which is
+    # the same range DCC SEND needs: the bot stops being able to send files at
+    # all, and recovers only when the listeners time out. Found by audit.
+    #
+    # The same shape as the _pending rule one step further on - "at most one
+    # connected-but-unauthenticated session" - applied to the step before it.
+    # A refused offer costs the sender nothing but another CTCP once the
+    # current one resolves, and a real operator makes one at a time.
+    with _state_lock:
+        if _listening:
+            print(f"[ADMINCHAT] A console listener is already waiting to be "
+                  f"dialled; ignoring the offer from {nick}.")
+            return
+        _listening = True
+    try:
+        _listen_and_serve_locked(irc_sock, nick, host, token)
+    finally:
+        with _state_lock:
+            _listening = False
+
+
+def _listen_and_serve_locked(irc_sock, nick, host, token=None):
+    """The listener itself. Only ever called with _listening set, so at most
+    one of these holds a port at a time."""
+    import dcc
+
     ip_long = dcc.get_public_ip_long()
     if not ip_long:
         print("[ADMINCHAT] Cannot offer a DCC CHAT: the bot's own public IP is unknown "
@@ -1161,11 +1201,15 @@ def active_session():
 
 def reset_state_for_tests():
     """Drop all sessions and bad-IP records. Tests only."""
-    global _session, _pending
+    global _session, _pending, _listening
     with _state_lock:
         sessions = [s for s in (_session, _pending) if s is not None]
         _session = None
         _pending = None
+        # The one-listener flag is module state like the two above, and a test
+        # whose listener thread outlives it would otherwise refuse every
+        # passive offer in every test that ran afterwards.
+        _listening = False
     for session in sessions:
         session.close(announce_text=None)
     with _bad_lock:

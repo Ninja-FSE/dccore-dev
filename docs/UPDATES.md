@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔌 A handful of CTCPs could take every DCC port for a minute
+The last finding of the full-program audit.
+
+`handle_dcc_chat()`'s passive branch spawns `_listen_and_serve()` immediately, and **every other limit on that path runs after `accept()`**: `is_bad_ip()` is consulted on the connecting address, which does not exist until somebody connects; the single-`_pending` rule inside `_serve()` applies to a session that already exists; and `irc.py` deliberately leaves DCC CHAT out of the set `security.is_flooding()` meters, so the CTCPs that start them are not rate-limited either.
+
+Nothing bounded how many listeners could be OPEN at once. So a handful of passive DCC CHAT offers took every port in `DCC_PORT_START..DCC_PORT_END` and held them for `LISTEN_TIMEOUT` - **the same range DCC SEND needs**. The bot stops being able to send files at all, and recovers only when the listeners time out.
+
+One listener at a time now, which is the same shape as the `_pending` rule one step further on - "at most one connected-but-unauthenticated session" - applied to the step before it. A refused offer costs the sender nothing but another CTCP once the current one resolves, and a real operator makes one at a time.
+
+The flag is cleared in `reset_state_for_tests()` alongside `_session` and `_pending`, because it is module state exactly like them: a test whose listener thread outlived it refused every passive offer in every test that ran afterwards, which is how the omission was found - the suite went from green to four failures that all passed in isolation.
+
 ### 🧹 The last four dashboard findings of the audit
 **A fetched file with a long remote-chosen name could not be downloaded.** `dcc_fetch` fits a stored name to `MAX_NAME_BYTES` (255) and touches every path through `platform_compat.long_path()`. The dashboard's download route was the one that did not, so on Windows the file was written, marked "complete", listed in the UI - and its Download button answered **404 for ever**, while the file sat there the whole time.
 

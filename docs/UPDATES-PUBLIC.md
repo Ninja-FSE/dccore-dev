@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A burst of DCC CHAT requests can no longer stop the bot sending files.** Each passive request opened a listening port immediately, before any check — so a handful of them took every port reserved for transfers and held it for a minute. Only one is opened at a time now; the rest are declined and can simply be retried.
+
 - **A fetched file with a very long name can be downloaded from the dashboard.** The file arrived, was marked complete and appeared in the list, and its Download button then answered "not found" for ever — on Windows, where the full path was too long for the way that route opened it.
 
 - **Small dashboard repairs:** browsing up from a lowercase drive letter no longer wanders off to wherever the bot was started from, an absurdly long folder path is refused rather than echoed back, and the "Get folder as .rar" button no longer appears on a group of files that has no folder to pack.
