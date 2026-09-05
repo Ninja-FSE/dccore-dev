@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **A burst of DCC CHAT requests can no longer stop the bot sending files.** Each passive request opened a listening port immediately, before any check — so a handful of them took every port reserved for transfers and held it for a minute. Only one is opened at a time now; the rest are declined and can simply be retried.
+- **A list rebuild that fails partway no longer leaves you advertising one list and handing out another.** If someone was downloading your list when a rebuild ran, the rebuild could publish the new index while the archive people actually received stayed last week's — with the file count, the size and the search all reporting the new scan. It said "the previous list was left untouched" while that was no longer true. The rebuild now either lands completely or not at all.
 
 - **A fetched file with a very long name can be downloaded from the dashboard.** The file arrived, was marked complete and appeared in the list, and its Download button then answered "not found" for ever — on Windows, where the full path was too long for the way that route opened it.
 
