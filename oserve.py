@@ -136,6 +136,9 @@ def startup():
     # flac-serv-* names if this install predates the rename. A no-op on every
     # run after the first, and on any install that never had them.
     db.migrate_legacy_side_files()
+    # After the side files and before anything serves: the counters are read
+    # by the dashboard and -stats, and both would show a half-migrated table.
+    db.migrate_download_counts_to_labels()
 
     # Before find_latest_list() below: defaults.py's LIST_BASE_NAME derivation
     # (an untouched value takes NICKNAME's own value once NICKNAME is set)

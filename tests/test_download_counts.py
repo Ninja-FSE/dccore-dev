@@ -361,12 +361,22 @@ class WhatEachSendIsCountedAs(DCCoreTestCase):
 
     def test_the_key_is_relative_to_the_library(self):
         """So moving the library, or reading the file on another machine, does
-        not orphan every count that came before."""
+        not orphan every count that came before.
+
+        The key now begins with the served folder's LABEL rather than nothing
+        - see tests/test_download_counts_per_folder.py for why - so this used
+        to assert `"MUSIC" not in key` as a proxy for "no absolute path in
+        here" and that proxy stopped meaning what it said the moment the
+        library's own folder name became the label. Asserting the intent
+        directly instead: the key must not carry the library's LOCATION,
+        whatever that location happens to be called.
+        """
         key, _name, _kind = dcc.download_count_identity(
             os.path.join(config.FILE_DIRECTORY, "Dolch", "Nacht", "01 - Intro.flac"),
             "01 - Intro.flac")
 
-        self.assertNotIn("MUSIC", key)
+        self.assertNotIn(config.FILE_DIRECTORY, key)
+        self.assertFalse(os.path.isabs(key))
         self.assertIn("Dolch", key)
 
     def test_an_archive_from_the_temp_directory_is_an_album(self):

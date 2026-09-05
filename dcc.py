@@ -126,14 +126,51 @@ def download_count_identity(file_path, file_name):
         name = file_name[:-4] if str(file_name).lower().endswith(".rar") else file_name
         return file_name, name, "album"
 
-    try:
-        key = os.path.relpath(file_path, config.FILE_DIRECTORY)
-    except ValueError:
-        # A different drive on Windows: relpath refuses rather than returning
-        # something wrong. The full path still identifies the file uniquely,
-        # which is all a key has to do.
-        key = file_path
-    return key, file_name, "file"
+    return library_count_key(file_path), file_name, "file"
+
+
+def library_count_key(file_path):
+    """The download-counter key for a served file: label, then the path
+    beneath that folder.
+
+    THE LABEL IS PART OF THE IDENTITY, and used not to be. The key was
+
+        os.path.relpath(file_path, config.FILE_DIRECTORY)
+
+    which is one root, and #164's own cost table listed this as one of the
+    places that assumed there was only one. With several folders configured it
+    went wrong two different ways, neither of them loudly:
+
+      * FILE_DIRECTORY unset - which is now ordinary, since the dashboard can
+        write data/library_folders.json and never touch FILE_DIRECTORY at all -
+        makes relpath() measure from the CURRENT WORKING DIRECTORY, so the key
+        described where the daemon was started from rather than the library.
+      * FILE_DIRECTORY set to the first folder keys a file in the second as
+        "..\\Second\\Artist\\Album\\track.flac", and raises ValueError
+        outright when the two are on different drives - falling back to the
+        ABSOLUTE path, which is the one thing #151 made these keys relative to
+        avoid, because it breaks every counter the moment a library moves.
+
+    Keyed on the label rather than the folder's path for that same reason: an
+    operator who moves D:\\Flac to E:\\Flac and updates the folder list keeps
+    their history, because the label did not change.
+
+    library.is_inside() rather than dcc.is_safe_path(): this is attribution,
+    not the request-time security gate, and it runs after the transfer has
+    already completed. is_safe_path() stays the gate on the request path.
+
+    A file under none of the configured folders keeps its absolute path as the
+    key. That is a temp archive or a folder removed from the list mid-session;
+    it is not a reason to lose the row.
+    """
+    for folder in library.folders():
+        if library.is_inside(folder.path, file_path):
+            try:
+                relative = os.path.relpath(file_path, folder.path)
+            except ValueError:
+                break
+            return os.path.join(folder.name, relative)
+    return file_path
 
 
 def _sanitize_rar_leaf_name(folder_leaf):

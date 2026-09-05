@@ -4,6 +4,28 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📊 The download counters name their folder (#164's last cost-table row)
+The one place #164's own cost table listed that steps 1-4 never came back to:
+
+```python
+key = os.path.relpath(file_path, config.FILE_DIRECTORY)
+```
+
+One root. With several folders configured that goes wrong two ways, neither loudly:
+
+* **`FILE_DIRECTORY` unset** - ordinary now that the dashboard writes `data/library_folders.json` and need never touch `FILE_DIRECTORY` at all. `os.path.relpath(path, None)` measures from the **current working directory**, so the key described where the daemon was started from rather than where the library is.
+* **`FILE_DIRECTORY` set to the first folder** - a file in the second keys as `..\\Second\\Artist\\Album\\track.flac`, and on a different drive `relpath` raises `ValueError` outright and the old code fell back to the **absolute** path. That is precisely what #151 made these keys relative to avoid: every counter breaks the moment the library moves.
+
+The key is now `<label>/<path beneath that folder>`. Keyed on the **label** and not the folder's path for that same reason - an operator who moves `D:\\Flac` to `E:\\Flac` and updates the folder list keeps their history, because the label did not change. And it settles the identity ambiguity #164 named: two roots can both hold `Artist/Album/track.flac`, and before this one credited the other.
+
+`library.is_inside()` rather than `dcc.is_safe_path()`: this is attribution, running after a transfer has already completed, not the request-time security gate. That gate is unchanged.
+
+**With a migration, because the alternative is a silent reset.** Changing the key leaves every accumulated row under a key nothing will increment again, while the "most downloaded" table starts from nothing and still shows the old entries. #164 settled the principle for exactly this shape of change - one break at the moment the operator upgrades beats a quiet second one weeks later - and a migration means there is no break at all. Every install with counters today is single-folder, because multi-folder was unreachable until the dashboard could write the list, so the old bare key is unambiguously a file in the first configured folder. `db.migrate_download_counts_to_labels()` runs from `oserve.startup()` next to the side-file migration.
+
+Idempotent by inspection: a key whose first component is already a configured label is left alone. **One honest gap** - a library whose own top-level subfolder happens to share the library's label (`D:\\Flac` containing a folder also called `Flac`) has legacy keys that already start with `Flac`, so they are skipped and stay unlabelled, splitting that folder's counters between two keys. Rare and cosmetic, and documented rather than solved with a schema marker in a file whose every other key is a real row.
+
+An existing test asserted `"MUSIC" not in key` as a proxy for "no absolute path in here". That proxy stopped meaning what it said the moment the library's own folder name became the label, so it now asserts the intent directly: the key must not carry the library's location, whatever that location is called.
+
 ### 📁 The served folders are editable from the dashboard (#164 step 4)
 Steps 1-3 shipped in v1.11.0 and made the daemon serve from a *list* of folders: `library.py` as the single accessor, the list built from every folder in the operator's order, `!rar` and search resolving a request back to the right one by its label. **The only way to write that list was to create `data/library_folders.json` by hand**, so the feature existed and no operator could reach it. The Settings page offered one "Music directory" box - which is the single-folder FALLBACK - and nothing said so.
 
