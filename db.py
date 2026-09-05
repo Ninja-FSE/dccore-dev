@@ -547,6 +547,80 @@ def load_download_counts():
         return _load_download_counts_unlocked()
 
 
+def migrate_download_counts_to_labels():
+    """Carry existing counters onto the labelled key, once.
+
+    Returns how many rows moved, for the caller's log and for the tests.
+
+    Every install that has counters today is a single-folder one: multi-folder
+    was unreachable until the dashboard could write the folder list. So the
+    old bare key "Artist/Album/track.flac" is unambiguously a file in the
+    FIRST configured folder, and gains that folder's label.
+
+    Without this the change is a silent reset: every row an operator has
+    accumulated stays under a key nothing will ever increment again, and the
+    "most downloaded" table starts from nothing while still showing the old
+    entries. #164 settled the principle for exactly this shape of change -
+    one break at the moment the operator upgrades beats a quiet second one
+    weeks later - and a migration means there is no break at all.
+
+    IDEMPOTENT BY INSPECTION, with one honest gap. A key whose first component
+    is already a configured label is left alone, so a second run does nothing.
+    The gap: a library whose own top-level subfolder happens to share the
+    library's label - D:\\Flac containing a folder also called "Flac" - has
+    legacy keys that already start with "Flac", and those are skipped and stay
+    unlabelled. That splits one folder's counters between two keys. Rare, and
+    cosmetic when it happens, which is why it is documented rather than
+    solved with a schema marker in a file whose every other key is a real row.
+    """
+    import library
+
+    folders = library.folders()
+    if not folders:
+        return 0
+    labels = {str(entry.name).lower() for entry in folders}
+    primary = folders[0].name
+
+    with _disk_lock:
+        counts = _load_download_counts_unlocked()
+        moves = {}
+        for key, row in counts.items():
+            if not isinstance(row, dict) or row.get("kind") != "file":
+                continue
+            head = str(key).replace("\\", "/").split("/", 1)[0]
+            if head.lower() in labels:
+                continue
+            moves[key] = os.path.join(primary, key)
+
+        if not moves:
+            return 0
+
+        for old_key, new_key in moves.items():
+            row = counts.pop(old_key)
+            if new_key in counts:
+                # Both spellings present: add rather than let one win, because
+                # either way round would discard real downloads.
+                try:
+                    counts[new_key]["count"] = (int(counts[new_key].get("count", 0))
+                                                + int(row.get("count", 0)))
+                except (TypeError, ValueError):
+                    pass
+            else:
+                counts[new_key] = row
+
+        try:
+            _atomic_write(DOWNLOAD_COUNTS_FILE,
+                          json.dumps(counts, indent=1, sort_keys=True,
+                                     ensure_ascii=False))
+        except Exception as err:
+            print(f"[DB ERROR] Could not save the migrated download counts: {err}")
+            return 0
+
+    print(f"[MIGRATE] Moved {len(moves)} download counter(s) onto the "
+          f"{primary!r} folder label.")
+    return len(moves)
+
+
 def record_download(key, name, kind):
     """Count one completed send against `key`, and save.
 
