@@ -361,6 +361,208 @@ batch in flight - this change's and the List Browser work's alike - was re-run
 with the caches cleared and `-B` before either was believed. The runners clear
 `__pycache__` and pass `-B` as a matter of course now, rather than relying on
 two same-length edits never landing in the same second.
+### 📦 Bringing an OmenServe operator's history across (#69)
+
+The single biggest barrier to trying this bot is not features - it is
+abandoning years of totals. `omenserve_import.py` could already read those
+numbers; this is the half that puts them somewhere.
+
+**Three routes in, one parser.** Choose `vars.ini`, paste its contents, or -
+for an install nobody's parser understands - the figures are shown so they can
+be checked by eye. All of it goes through `read_install()`, so the fallbacks
+are not a second code path that can behave differently.
+
+**The page filters before it uploads, and that is not tidiness.** The live
+install #69 was written from held **280 variables** - nicks, channels, paths,
+add-on settings and passwords among them. Only the counter lines are sent, and
+the page asks the server which variables those are rather than hard-coding
+them: a field added to `FIELDS` is then kept without the JavaScript changing,
+where a hard-coded list would have silently stripped it out and told the
+operator their file has nothing in it.
+
+**Overwritten, not combined - said only when it matters.** On a fresh install
+nobody reads that sentence and on a used one it is the only thing that does,
+so the preview names which figures already have a value and the warning
+appears exactly then.
+
+**Nothing is taken on trust.** A `vars.ini` is a plain text file people
+hand-edit, and the operator confirming a number is not the same as the number
+being sane. Refused at the endpoint and not only in the page: negatives,
+non-numbers, and magnitudes past anything a real link could have produced - a
+stray digit looks exactly like that, and importing one silently is worse than
+refusing it, because the operator can retype a number but cannot tell that a
+total is wrong once it looks plausible. `True` is refused explicitly, since
+`int(True)` is 1 and a JSON `true` would otherwise import as a file count of
+one.
+
+**An absent figure is left alone, never zeroed - and so is a zero.** That rule runs from the
+parser to the write: the counters come from ADD-ONS rather than from OmenServe
+itself, so an operator running one and not another imports what they have and
+keeps the rest. Writing a zero over a real total would be the worst thing this
+feature could do.
+
+**The day columns are not touched.** They belong to the daemon's own rotation,
+and importing a lifetime total must not reset what the bot did today. They
+could not have been imported anyway: `%OSL.Today` is `Friday` and
+`%mx.rarday` is `Wednesday` - a weekday NAME, so "today or six days ago" is
+not answerable from the file at all.
+
+The write goes through `db.save_advanced_stats()` and `db.save_speed_record()`
+- a caller, not a second implementation of either - and the response carries
+the before and after, so the page reports what actually happened rather than
+what it asked for.
+
+Two mutations corrected tests. One targeted the "reject the whole import"
+guard at a case where every field was invalid, so the "nothing to import"
+check answered it and the guard could be deleted; it belongs on the
+half-valid case. And the fixture wrote an empty date in the stats row's
+seventh column, which makes it six columns, which the loader correctly treats
+as corrupt - so every "an existing figure is preserved" test failed against
+code that was preserving it perfectly well.
+
+### 🔍 Four audit findings in the import, three of them in reading one number
+
+From the multi-agent audit of the same day's work. Every one of them is in the
+few lines that turn text somebody hand-edited into an integer, which is worth
+noting on its own: that is the whole attack surface of this feature and it is
+about twenty lines long.
+
+**A present zero overwrote a real lifetime total.** The rule this feature was
+built on - never write a zero over somebody's history - was enforced on an
+ABSENT variable and not on a zero, because the check read `number is not
+None`. A fresh OmenServe install writes `%mx.rartsent 0`, and importing from
+one replaced a real DCCore total with nothing, while the note beside it
+promised "the total size will stay as it is". A zero carries no history
+across, which is the entire point of the feature, so it can only destroy. It
+is now read, shown in the preview marked as not imported, and explained -
+silently dropping the row would have read as a parse failure to an operator
+looking at that number in their own file.
+
+**`1e999` reached the route as a 500.** It parses as a float perfectly well
+and becomes `inf`, and `int(round(inf))` raises `OverflowError` - not
+`ValueError`, which is what the conversion caught. NaN arrives the same way.
+Both mean "not a number I can use", which is what `None` already says here.
+
+**A thousands separator truncated the number by three orders of magnitude.**
+`split(",")[0]` is what `%SDmaxspeed`'s `<bytes>,<nick>` shape needs, and the
+`.replace(",", "")` written after it could therefore never see a comma - dead
+code that looked like the handling for the case it was not handling. So a
+value written `45,902` imported as `45`: silently, plausibly, and wrongly. The
+two shapes are told apart by what follows the comma - a digit is a separator,
+a nick is a field boundary.
+
+**A half-written import reported success.** Both writers swallow their own
+errors and return `None`, which is right for them - a failed stats write must
+not take the daemon down - and meant this route answered 200 with
+`imported: [...]` for figures that never reached the disk. The operator would
+have been told their history came across and found half of it, with nothing to
+say which half. The response is now built from what is actually on disk
+afterwards, compared against what was asked for, and names the ones that did
+not land.
+
+One of the four fixes was written twice. The first version guarded `inf` and
+NaN explicitly and then caught `OverflowError` underneath, and the mutation run
+showed the guard was dead: deleting it changed nothing, because the catch
+below already answered both. The catch stayed and the guard went.
+### 📥 The list request answers AutoQ's own menu item
+
+Read out of `AutoQ.mrc`, the queue script these channels actually use. Its
+"Get Listfile" item sends:
+
+```
+msg $chan $+(@,$snick($chan,%i))  ::^C4,0Auto^C12,0^BQ^B^C1,0::
+```
+
+`@<nick>` with two spaces and a colour-coded tag. OmenServe answers that;
+`irc.py` compared for equality, so DCCore was **silent** for every user of
+that item - no reply, no error, and nothing in the log to say a request had
+been made and ignored. The failure looks exactly like a bot that is down.
+
+`is_list_request()` now takes `@<nick>` exactly, or `@<nick>` followed by a
+space and anything at all. **The space is what makes a suffix safe**, and it
+is the whole argument: none of the names this has to stay distinct from
+contains one. `@<nick>-que`, `-remove`, `-help`, `-stats` and `-top` are this
+bot's own commands, each still matched exactly by its own branch below.
+`@<nick>2` and `@<nick>_away` are a DIFFERENT bot whose nick merely starts
+with ours, and answering those would send our list to somebody asking
+somebody else for theirs.
+
+`@find` and `@locator` are excluded explicitly, for the bot whose nickname IS
+"find": a search there must keep meaning a search. The cost is stated rather
+than hidden - for that one bot, AutoQ's menu item searches for "::AutoQ::"
+instead of sending the list.
+
+**The gate and the dispatch are one function.** They were two copies of the
+same comparison, and the flood gate's own test class exists because a gate
+narrower than the dispatch is an unmetered command path. Widening one and not
+the other would have re-created exactly that, so both call
+`is_list_request()`, and `tests/test_irc_dispatch.py` binds the real function
+into the namespace it evaluates the lifted gate expression in - the way it
+already binds `bot_aliases`.
+
+**One test was rewritten rather than deleted.** It asserted the request "stays
+an exact match", and gave its reason: `@DCCore-que` must not be swallowed.
+That reason still holds and is now met by the space; the exactness itself was
+the defect. Every case it pinned is still there, with `@DCCore please` moved
+to the other side and AutoQ's real payload added.
+
+**And two source-reading guards were sliced wrong.** `test_help_command` and
+`test_stats_top_commands` read the flood gate with
+`block[:block.index(")
+")]`, which stopped at the first closing paren in the
+text - fine until the gate called a function, at which point the block ended
+after one line and both failed while the metering they check was perfectly
+intact. They walk to the gate's own closing paren now.
+
+**Not changed: "Que Status".** AutoQ sends `<nick>-que` with no leading `@`,
+which DCCore does not answer. Left alone deliberately - a bare word as a
+channel trigger is a wider change than a suffix on a request already
+addressed to us. AutoQ's own non-buffer branch for it is broken anyway: it
+sends a literal `+(Nick,-que)`, missing the `$`. Written up in INSTALL.md so
+an operator knows to type `@<nick>-que` instead.
+
+**Also documented: rows AutoQ drops.** Its file branch truncates a line at the
+end of the first accepted extension it finds - which is how `::INFO::` and the
+size get stripped - but that `aline` sits INSIDE the extension test. A row
+whose type is not in mIRC's `[text] accept` list is queued nowhere and
+reported nowhere. AutoQ adds only `*.mp3` and `*.rar` on load, so now that
+DCCore lists every file type, a `.flac` or `.mkv` row silently vanishes for
+any user who has not added it. Nothing to fix here - the row is correct and
+the client discards it - but operators need to know, so INSTALL.md says which
+mIRC setting to change.
+### 🔒 A timed ban on somebody who never came back stayed for ever
+
+The last of the audit's flood-tracking findings, and the one the roadmap has
+been carrying as outstanding.
+
+`banned_users` was expired **lazily**: the check that reads it deletes an
+expired row, but only on the next request FROM THAT SAME NICK. A banned nick
+not coming back is the normal case - the ban is what made them leave - so the
+entry stayed in memory and in `bans.txt` for good, and the file grew one
+permanent row per flooder.
+
+The flood sweep already ran every sixty seconds and already cleaned
+`user_requests` and `muted_until`. This is the third structure it was always
+meant to include; it is the same expiry rule applied to the nicks that never
+return, not a new policy.
+
+Three things it has to get right, each with a test:
+
+- **The same reading of an expiry as the per-request check**, from one
+  function. Two copies of that coercion could drift into disagreeing about
+  when a ban ends, which means either a ban enforced but never cleared or one
+  cleared while still being enforced. A row that will not parse as a number is
+  swept, exactly as the lazy path would have deleted it - a row nothing can
+  read is not a ban anyone is serving.
+- **The file is rewritten.** Unlike the other two structures this one is
+  persisted, so clearing memory alone would let every swept ban return at the
+  next restart and the file would go on growing regardless.
+- **Only when something actually expired.** A sweep runs every minute for the
+  life of the daemon; writing the ban file each time would be a disk write a
+  minute, for ever, to record no change at all.
+
+`docs/FUTURE.md`'s "from the audits, not yet done" section is now down to the
+one line about the remaining verified findings.
 
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.

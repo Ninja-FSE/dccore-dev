@@ -39,7 +39,7 @@ with open(IRC_SOURCE_PATH, "r", encoding="utf-8") as _handle:
 # each. The live-nick fragment keeps its closing quote attached so it does NOT
 # match the "-que"/"-remove" variants further down the chain.
 ALIAS_FRAGMENT = 'startswith(f"!{alias} ")'
-LIVE_NICK_FRAGMENT = 'msg_lower == f"@{config.NICKNAME.lower()}"'
+LIVE_NICK_FRAGMENT = 'is_list_request(msg, msg_lower)'
 
 
 def _elif_conditions(fragment=None):
@@ -110,6 +110,12 @@ def _evaluate(source, msg, target_chan=None):
         "msg": msg,
         "msg_lower": msg.lower(),
         "bot_aliases": irc.get_bot_aliases(),
+        # Pulled from irc.py itself, exactly as bot_aliases above is. The
+        # lifted expression is evaluated with THIS namespace as its globals,
+        # so a module-level name it calls has to be bound here - and binding
+        # the real function rather than a copy of its logic is what stops the
+        # two drifting apart.
+        "is_list_request": irc.is_list_request,
         "config": config,
         "target_chan": target_chan if target_chan is not None else config.NICKNAME,
     }
@@ -200,7 +206,7 @@ class TriggerExpressionTests(DCCoreTestCase):
         these fragments no longer appear, this module must fail loudly rather
         than silently testing nothing."""
         self.assertIn("bot_aliases", ALIAS_CONDITION)
-        self.assertIn("config.NICKNAME", LIVE_NICK_CONDITION)
+        self.assertIn("is_list_request", LIVE_NICK_CONDITION)
         self.assertIn("bot_aliases", FLOOD_GATE_SOURCE)
         # The alias dispatch sits in the chain, below the list-request branch.
         self.assertGreater(ALIAS_LINE, LIVE_NICK_LINE)
@@ -225,15 +231,48 @@ class TriggerExpressionTests(DCCoreTestCase):
                                  msg.lower().startswith("!dccore "))
 
     def test_main_nick_list_request_matches(self):
-        """Defect guard: "@<nick>" is the master-list request and stays an exact
-        match, so "@DCCore-que" is not swallowed by it."""
+        """"@<nick>", and "@<nick> " followed by anything.
+
+        This asserted an EXACT match, and the reason given was that
+        "@DCCore-que" must not be swallowed by it. That reason is still met -
+        by the SPACE, which none of the names this must stay distinct from
+        contains - and the exactness itself turned out to be a defect: AutoQ's
+        own "Get Listfile" menu item sends "@<nick>  ::AutoQ::" with the tag
+        colour-coded, so this bot was silent for every user of it. Every case
+        the old test pinned is still here; "@DCCore please" moved sides, and
+        is the case that was broken.
+        """
         reset_config(NICKNAME="DCCore", ORIGINAL_NICK="DCCore")
-        self.assertTrue(_evaluate(LIVE_NICK_CONDITION, "@DCCore"))
-        self.assertTrue(_evaluate(LIVE_NICK_CONDITION, "@dccore"))
-        for msg in ("@DCCore-que", "@DCCore-remove", "@DCCore please",
-                    "@DCCoreX", "DCCore"):
+        for msg in ("@DCCore", "@dccore", "@DCCore please",
+                    # What AutoQ.mrc actually sends, control codes and all.
+                    "@DCCore  ::4,0Auto12,0Q1,0::"):
+            with self.subTest(msg=msg):
+                self.assertTrue(_evaluate(LIVE_NICK_CONDITION, msg))
+        for msg in ("@DCCore-que", "@DCCore-remove", "@DCCore-help",
+                    "@DCCore-stats", "@DCCore-top",
+                    # A DIFFERENT bot whose nick merely starts with ours. It
+                    # must never have its list request answered by us, and
+                    # that is what the space requirement buys.
+                    "@DCCoreX", "@DCCoreX please", "@DCCore_away files",
+                    "DCCore"):
             with self.subTest(msg=msg):
                 self.assertFalse(_evaluate(LIVE_NICK_CONDITION, msg))
+
+    def test_a_bot_actually_named_find_still_searches(self):
+        """@find and @locator are the only triggers whose first word could
+        also be a nickname. For a bot named "find", a search must keep meaning
+        a search rather than becoming a request for its whole list."""
+        reset_config(NICKNAME="find", ORIGINAL_NICK="find")
+
+        self.assertFalse(_evaluate(LIVE_NICK_CONDITION, "@find Blue Monday"))
+        self.assertTrue(_evaluate(LIVE_NICK_CONDITION, "@find"))
+        # And the AutoQ tag goes the same way, which is the honest cost of the
+        # ambiguity rather than an oversight: for THIS bot alone, "Get
+        # Listfile" searches for "::AutoQ::" instead of sending the list.
+        # Preferring the search preserves what the dispatcher does today; the
+        # alternative silently changes the meaning of every @find in a channel
+        # where somebody happens to be running a bot called "find".
+        self.assertFalse(_evaluate(LIVE_NICK_CONDITION, "@find  ::AutoQ::"))
 
     # --- during a 433 fallback ---------------------------------------------
 
@@ -309,7 +348,12 @@ class FloodGateCoverageTests(DCCoreTestCase):
         for nickname, original in (("DCCore", "DCCore"), ("DCCore_", "DCCore")):
             reset_config(NICKNAME=nickname, ORIGINAL_NICK=original)
             for msg in ("@" + nickname, "@find metallica", "@locator metallica",
-                        "!" + nickname + " Song.flac", "!DCCore Song.flac"):
+                        "!" + nickname + " Song.flac", "!DCCore Song.flac",
+                        # A list request carrying AutoQ's tag is dispatched,
+                        # so it must be metered. The two widened together or
+                        # the tag becomes an unmetered command path - exactly
+                        # the defect this class exists for.
+                        "@" + nickname + "  ::AutoQ::"):
                 with self.subTest(nick=nickname, msg=msg):
                     self.assertTrue(self._gate(msg))
 
@@ -319,7 +363,9 @@ class FloodGateCoverageTests(DCCoreTestCase):
         corpus = ["!DCCore Song.flac", "!DCCore_ Song.flac", "!dccore x",
                   "!DCCore !rar Artist/Album", "!DCCoreX Song.flac",
                   "!DCCore2 Song.flac", "@DCCore", "@DCCore_", "@DCCore2",
-                  "@find x", "@locator x", "hello world", "!ping"]
+                  "@find x", "@locator x", "hello world", "!ping",
+                  "@DCCore  ::AutoQ::", "@DCCore_  ::AutoQ::",
+                  "@DCCore please", "@DCCore2  ::AutoQ::"]
         for nickname, original, previous in (("DCCore", "DCCore", None),
                                              ("DCCore_", "DCCore", None),
                                              ("DCCore2", "DCCore2", "DCCore")):
@@ -761,6 +807,64 @@ class SearchHeaderStats(DCCoreTestCase):
         self.assertNotIn("filename", header)
         self.assertEqual(result["filename"], "14 - Testament - Souls Of Black.mp3")
         self.assertNotIn("header", result)
+
+
+class TheHelperItselfIsTheRule(DCCoreTestCase):
+    """is_list_request() is called from two places - the flood gate and the
+    dispatch - so its own answer is what both of them mean."""
+
+    def setUp(self):
+        super().setUp()
+        reset_config(NICKNAME="DCCore", ORIGINAL_NICK="DCCore")
+
+    def ask(self, msg):
+        return irc.is_list_request(msg, msg.lower())
+
+    def test_what_autoq_actually_sends_is_answered(self):
+        """Read off AutoQ.mrc's "Get Listfile" menu item:
+
+            msg $chan $+(@,$snick($chan,%i))  ::^C4,0Auto^C12,0^BQ^B^C1,0::
+
+        Two spaces and a colour-coded tag. OmenServe answers it; comparing for
+        equality did not, so this bot was silent for every user of that menu
+        item - no reply, no error, nothing in the log.
+        """
+        payload = "@DCCore  ::4,0Auto12,0Q1,0::"
+
+        self.assertTrue(self.ask(payload))
+
+    def test_the_plain_request_still_works(self):
+        for msg in ("@DCCore", "@dccore", "@DCCORE"):
+            with self.subTest(msg=msg):
+                self.assertTrue(self.ask(msg))
+
+    def test_a_longer_nick_is_not_us(self):
+        """The space is what buys this. Answering "@DCCore2" would send OUR
+        list to somebody asking a different bot for theirs."""
+        for msg in ("@DCCore2", "@DCCore2 please", "@DCCore_away",
+                    "@DCCore_away files", "@DCCoreX  ::AutoQ::"):
+            with self.subTest(msg=msg):
+                self.assertFalse(self.ask(msg))
+
+    def test_this_bots_own_suffix_commands_are_not_swallowed(self):
+        """Each has its own branch below this one in the chain, and none of
+        them contains a space - which is why widening to a suffix is safe."""
+        for msg in ("@DCCore-que", "@DCCore-remove", "@DCCore-help",
+                    "@DCCore-stats", "@DCCore-top"):
+            with self.subTest(msg=msg):
+                self.assertFalse(self.ask(msg))
+
+    def test_a_bare_nick_is_not_a_request(self):
+        self.assertFalse(self.ask("DCCore"))
+        self.assertFalse(self.ask("hello @DCCore please"))
+
+    def test_no_nickname_configured_answers_nothing(self):
+        """A blank NICKNAME would make the prefix "@ ", which every line
+        beginning with "@ " would then match."""
+        reset_config(NICKNAME="", ORIGINAL_NICK="")
+
+        self.assertFalse(self.ask("@ anything"))
+        self.assertFalse(self.ask("@"))
 
 
 if __name__ == "__main__":

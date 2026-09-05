@@ -375,6 +375,50 @@
           </tbody>
         </table>
       </div>
+
+      <!-- Bringing an OmenServe operator's history across (#69). The numbers
+           live in mIRC's own scripts/vars.ini, written by whichever add-ons
+           they run - so this reads what is there and skips what is not.
+
+           The file is read IN THE PAGE and only the recognised lines are
+           sent, so an operator's other ~268 variables - their nicks,
+           channels, paths and passwords - never cross the network. -->
+      <div class="stat-group-label">Coming from OmenServe</div>
+      <div class="import-panel">
+        <p class="import-intro">
+          Bring your totals across from OmenServe. Your counters live in
+          mIRC's <code>scripts/vars.ini</code> &mdash; choose it below and you
+          will see exactly what would change before anything is written.
+          Only the counter lines are sent; the rest of the file stays on your
+          machine.
+        </p>
+        <div class="import-actions">
+          <label class="btn btn-small" for="import-file">Choose vars.ini&hellip;</label>
+          <input type="file" id="import-file" accept=".ini,.txt,text/plain" hidden>
+          <button type="button" class="btn btn-small" id="import-paste-toggle">Paste it instead</button>
+        </div>
+        <textarea id="import-paste" class="import-paste" rows="6" hidden
+                  placeholder="Paste the contents of vars.ini here&hellip;"></textarea>
+        <div class="import-paste-actions" id="import-paste-actions" hidden>
+          <button type="button" class="btn btn-small" id="import-paste-read">Read it</button>
+        </div>
+
+        <p class="import-status" id="import-status" hidden></p>
+
+        <div class="table-wrap" id="import-preview-wrap" hidden>
+          <table class="data-table">
+            <thead>
+              <tr><th>Figure</th><th class="col-num">Now</th><th class="col-num">After import</th></tr>
+            </thead>
+            <tbody id="import-preview"></tbody>
+          </table>
+        </div>
+        <p class="import-warning" id="import-warning" hidden></p>
+        <div class="import-confirm" id="import-confirm" hidden>
+          <button type="button" class="btn btn-accent btn-small" id="import-apply">Import these figures</button>
+          <button type="button" class="btn btn-small" id="import-cancel">Cancel</button>
+        </div>
+      </div>
     </section>
 
     <section class="view" id="view-console">

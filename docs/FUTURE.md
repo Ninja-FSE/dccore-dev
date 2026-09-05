@@ -86,7 +86,6 @@ What remains is narrower and does not show up in that number. Several "the wirin
 
 ### From the audits, not yet done
 
-- **Timed bans grow without bound** — the flood sweep covers two of the three tracking structures.
 - Roughly forty further verified findings, from a false "MasterList missing" during a concurrent search to a queued `!rar` pack that is never re-dispatched.
 
 ### Smaller things worth having
@@ -96,7 +95,7 @@ What remains is narrower and does not show up in that number. Several "the wirin
 - **A fetched list keeps only the peer's master.** Since the film-and-series split, a DCCore bot's archive carries two `.txt` files, and `list_fetch` picks one - now the master rather than whichever is larger. The films in the other are dropped from the fetched copy. Reading both into one fetched list changes what `_pick_list_file()` returns and the size ceiling that guards it, so it is a change of its own rather than part of the fix.
 - **A "what's new" list** — files added in the last N days, generated alongside the main one.
 - **A list validator** run at build time, reporting anything a requester will not actually be able to get — duplicate filenames across folders being the common case.
-- **An OmenServe migration path** offered on first run, since almost everyone this is aimed at is running OmenServe today.
+- **An OmenServe migration path offered on FIRST RUN.** The Stats page can import an operator's totals from `vars.ini` today; what is missing is `configure.py` offering it during setup, when somebody migrating is actually looking.
 - **Stealth channels** — serve a channel while advertising nothing in it.
 - **Multi-network** — real in OmenServe, and it would touch every socket path here.
 

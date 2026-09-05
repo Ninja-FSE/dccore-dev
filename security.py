@@ -180,10 +180,11 @@ def check_user_status(user, hostmask=None):
     # ---------------------------------------------------------------------
     expire_ts = config.banned_users.get(user_lower)
     if expire_ts is not None:
-        try:
-            expire_ts = float(expire_ts)
-        except (TypeError, ValueError):
-            expire_ts = 0.0
+        # The same reading the sweep uses, from one function - see
+        # _ban_expiry(). Two copies of this coercion could drift into
+        # disagreeing about when a ban ends, which means either a ban
+        # enforced but never cleared, or one cleared while still enforced.
+        expire_ts = _ban_expiry(expire_ts)
 
         if time.time() < expire_ts:
             until = time.strftime("%H:%M:%S", time.localtime(expire_ts))
@@ -354,6 +355,20 @@ _FLOOD_SWEEP_EVERY = 60.0
 _last_flood_sweep = 0.0
 
 
+def _ban_expiry(value):
+    """One ban's expiry as a float, or 0.0 for anything unreadable.
+
+    Shared by the sweep and the per-request check so the two cannot disagree
+    about when a ban ends - a value one treats as live and the other as
+    expired would mean a ban that is enforced but never cleared, or cleared
+    while still being enforced.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _prune_flood_tracking(now):
     """Drop flood-tracking entries that can no longer affect a decision.
 
@@ -376,6 +391,36 @@ def _prune_flood_tracking(now):
     for nick in [nick for nick, until in config.muted_until.items() if now >= until]:
         del config.muted_until[nick]
         dropped += 1
+
+    # THE THIRD STRUCTURE. banned_users was expired lazily and only ever on
+    # the next request FROM THAT SAME NICK - and a banned nick not coming back
+    # is the normal case, because the ban is what made them leave. So a timed
+    # ban on somebody who never returns sat in memory and in bans.txt for
+    # ever, and the file grew one permanent row per flooder.
+    #
+    # Same expiry test the lazy path applies, including its coercion: a value
+    # that will not parse as a number is treated as 0.0 and swept, exactly as
+    # that path would have deleted it. A row nothing can read is not a ban
+    # anyone is serving.
+    expired_bans = [nick for nick, until in config.banned_users.items()
+                    if now >= _ban_expiry(until)]
+    for nick in expired_bans:
+        del config.banned_users[nick]
+        # The "already told them" marker goes with the ban it belongs to.
+        # _NotifiedNicks expires its own entries on a TTL, so this is tidiness
+        # rather than a leak - but leaving it would let a returning nick be
+        # silently not-notified about a ban that no longer exists.
+        _ban_notified.discard(nick)
+        dropped += 1
+
+    # ONCE, and only if something actually expired. Unlike the two dicts
+    # above, this one is persisted: clearing memory alone would let every
+    # swept ban come back at the next restart. save_bans_to_file() takes the
+    # disk lock and swallows its own errors, and the lazy path already calls
+    # it from this same thread - so this is the existing write, batched
+    # instead of one per expiry.
+    if expired_bans:
+        db.save_bans_to_file()
 
     return dropped
 
