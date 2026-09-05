@@ -39,6 +39,11 @@
   };
 
   var state = {
+    // Served folders (#164 step 4). `foldersDraft` is what the rows are
+    // showing and `folders` is what the server last confirmed - kept apart
+    // so switching category and back does not silently discard an edit,
+    // and so a failed save leaves the operator's rows exactly as typed.
+    folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
     active: "search", filelistsLoaded: false, filelistsSource: "__own__",
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
     filelistsHistory: [],
@@ -1385,6 +1390,122 @@
       : (count + (count === 1 ? " unsaved change" : " unsaved changes"));
   }
 
+  // The served-folder editor. Markup only - NO VALUES - for the reason the
+  // whole of this file repeats: escapeHtml() is textContent -> innerHTML,
+  // which leaves a double quote alone, so a path containing one would close
+  // value="…" and everything after it would be parsed as markup. Every value
+  // here is assigned as a .value PROPERTY by attachFolderRows() below.
+  function foldersSectionHtml() {
+    var draft = state.foldersDraft || [];
+    var rows = draft.map(function (_row, index) {
+      return '<div class="folder-row" data-folder-index="' + index + '">' +
+        '<input type="text" class="folder-name" placeholder="Label" aria-label="Folder label">' +
+        '<input type="text" class="folder-path" placeholder="Full path to the folder" aria-label="Folder path">' +
+        '<button type="button" class="folder-btn folder-up" title="Move up" aria-label="Move up">\u2191</button>' +
+        '<button type="button" class="folder-btn folder-down" title="Move down" aria-label="Move down">\u2193</button>' +
+        '<button type="button" class="folder-btn folder-remove" title="Remove" aria-label="Remove">\u00d7</button>' +
+        "</div>";
+    }).join("");
+
+    var note = "";
+    if (state.foldersNote) {
+      note = '<p class="folder-note ' + (state.foldersNote.ok ? "is-ok" : "is-error") + '">' +
+        escapeHtml(state.foldersNote.text) +
+        (state.foldersNote.problems || []).map(function (line) {
+          return "<br>\u2022 " + escapeHtml(line);
+        }).join("") + "</p>";
+    }
+
+    var summary;
+    if (state.foldersSource === "file") {
+      summary = "Serving " + draft.length + " folder" + (draft.length === 1 ? "" : "s") +
+        ", in this order. The label is what users see as the first part of every path.";
+    } else if (state.foldersSource === "file_directory") {
+      summary = "No folder list yet \u2014 serving the single Music directory below. " +
+        "Add a folder here to serve more than one.";
+    } else {
+      summary = "Nothing is being served yet. Add a folder here, or set Music directory below.";
+    }
+
+    return '<div class="folder-section">' +
+      '<h2 class="settings-category-title">Served folders</h2>' +
+      '<p class="folder-summary">' + escapeHtml(summary) + "</p>" +
+      '<div class="folder-rows">' + rows + "</div>" +
+      '<div class="folder-actions">' +
+        '<button type="button" class="btn folder-add">Add folder</button>' +
+        '<button type="button" class="btn btn-accent folder-save">Save folders</button>' +
+      "</div>" + note + "</div>";
+  }
+
+  // Assigns every row's values as properties and keeps the draft in step with
+  // typing. Typing deliberately does NOT re-render: rebuilding the rows on
+  // each keystroke would take the caret with it.
+  function attachFolderRows() {
+    var draft = state.foldersDraft || [];
+    el.settingsFields.querySelectorAll(".folder-row").forEach(function (row) {
+      var index = parseInt(row.dataset.folderIndex, 10);
+      var entry = draft[index] || { name: "", path: "" };
+      var nameInput = row.querySelector(".folder-name");
+      var pathInput = row.querySelector(".folder-path");
+      nameInput.value = entry.name || "";
+      pathInput.value = entry.path || "";
+      nameInput.addEventListener("input", function () {
+        draft[index].name = nameInput.value;
+      });
+      pathInput.addEventListener("input", function () {
+        draft[index].path = pathInput.value;
+      });
+    });
+  }
+
+  function loadFolders() {
+    return fetchJson("/api/folders")
+      .then(function (payload) {
+        state.folders = payload.folders || [];
+        state.foldersSource = payload.source || "";
+        // Only seeded from the server when there is no edit in progress.
+        if (state.foldersDraft === null) {
+          state.foldersDraft = state.folders.map(function (f) {
+            return { name: f.name, path: f.path };
+          });
+        }
+        if (state.active === "settings" && state.settingsActiveCategory === "paths") {
+          renderSettingsCategory();
+        }
+      })
+      .catch(function () { /* the settings page still works without it */ });
+  }
+
+  function saveFolders() {
+    var rows = (state.foldersDraft || []).filter(function (entry) {
+      return String(entry.path || "").trim() !== "";
+    });
+    postJson("/api/folders", { folders: rows }).then(function (res) {
+      if (res.ok) {
+        state.folders = res.data.folders || [];
+        state.foldersSource = res.data.source || "";
+        state.foldersDraft = state.folders.map(function (f) {
+          return { name: f.name, path: f.path };
+        });
+        state.foldersNote = {
+          ok: true,
+          text: res.data.written
+            ? "Saved " + res.data.written + " folder" +
+              (res.data.written === 1 ? "" : "s") +
+              ". Rebuild the list from Tools before they appear in it."
+            : "Folder list cleared \u2014 back to the single Music directory."
+        };
+      } else {
+        state.foldersNote = {
+          ok: false,
+          text: (res.data && res.data.error) || "Could not save the folders.",
+          problems: (res.data && res.data.problems) || []
+        };
+      }
+      renderSettingsCategory();
+    });
+  }
+
   function renderSettingsCategory() {
     var category = (state.settingsCategories || []).filter(function (c) {
       return c.id === state.settingsActiveCategory;
@@ -1400,7 +1521,14 @@
     if (category.id === "admin-console") {
       html += settingsPasswordSectionHtml();
     }
+    if (category.id === "paths") {
+      // ABOVE the fields, because "Served folders" is what an operator comes
+      // to this category for and Music directory is now only the fallback
+      // used when the list is empty.
+      html = foldersSectionHtml() + html;
+    }
     el.settingsFields.innerHTML = html;
+    if (category.id === "paths") { attachFolderRows(); }
 
     // Values are assigned as PROPERTIES here, not concatenated into value="…"
     // in the markup above. escapeHtml() is textContent -> innerHTML, which
@@ -1471,6 +1599,7 @@
         state.settingsLoaded = true;
         state.settingsCategories = payload.categories || [];
         state.settingsAdminPasswordSet = !!payload.admin_password_set;
+        loadFolders();
 
         var baseline = {};
         state.settingsCategories.forEach(function (category) {
@@ -1501,6 +1630,34 @@
   // Delegated on the static container, once - see settingsPasswordSectionHtml()'s
   // comment for why (the toggle/form/note only exist after the admin-console
   // category has actually been rendered at least once).
+  // Delegated for the same reason as the password toggle below: the folder
+  // rows only exist after the paths category has been rendered, and they are
+  // rebuilt from scratch every time it is.
+  el.settingsFields.addEventListener("click", function (evt) {
+    var button = evt.target.closest(".folder-add, .folder-save, .folder-remove, .folder-up, .folder-down");
+    if (!button) { return; }
+    var draft = state.foldersDraft || (state.foldersDraft = []);
+
+    if (button.classList.contains("folder-add")) {
+      draft.push({ name: "", path: "" });
+    } else if (button.classList.contains("folder-save")) {
+      saveFolders();
+      return;
+    } else {
+      var row = button.closest(".folder-row");
+      var index = parseInt(row.dataset.folderIndex, 10);
+      if (button.classList.contains("folder-remove")) {
+        draft.splice(index, 1);
+      } else if (button.classList.contains("folder-up") && index > 0) {
+        draft.splice(index - 1, 0, draft.splice(index, 1)[0]);
+      } else if (button.classList.contains("folder-down") && index < draft.length - 1) {
+        draft.splice(index + 1, 0, draft.splice(index, 1)[0]);
+      }
+    }
+    state.foldersNote = null;
+    renderSettingsCategory();
+  });
+
   el.settingsFields.addEventListener("click", function (evt) {
     var toggle = evt.target.closest(".settings-password-toggle");
     if (!toggle) { return; }

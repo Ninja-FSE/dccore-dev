@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **You can add, remove and reorder your served folders from the dashboard.** DCCore has been able to serve several folders since v1.11.0, but the list could only be created by hand-editing a JSON file — the Settings page showed a single "Music directory" box, which is really just the fallback used when no list exists. There is now a proper editor at the top of Paths & storage: add a folder, give it a label, drag the order you want them listed in. Bad combinations are refused with a line explaining each one — a folder inside another folder would list every file twice, and two folders sharing a label cannot be told apart in the list. Clearing the list puts you back to the single Music directory. After saving, rebuild the list from Tools for the new folders to appear in it.
+
 - **A strangely named folder in another bot's list no longer hides the rest of it.** If a fetched list contained a folder whose name was made only of `=` characters, it looked like part of the list's own formatting — and everything after it silently disappeared from search and from the File Lists page, including files in perfectly ordinary folders. Only lists fetched from other bots were affected; your own was never at risk.
 
 - **Files with very long names now fetch.** A file offered by another bot whose name ran past the filesystem's limit failed every time with an unhelpful "transfer error", because the length check the code believed it had only covered the full path, not the name itself. Long names are now shortened to fit, keeping the file extension.

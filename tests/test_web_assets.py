@@ -363,5 +363,40 @@ class RulesThatOverrideActuallyWin(unittest.TestCase):
         self.assertEqual(wrong, [], "; ".join(wrong))
 
 
+class APostJsonResultIsReadTheWayPostJsonReturnsIt(unittest.TestCase):
+    """postJson() resolves with { ok, status, data } - and nothing here
+    executes JavaScript, so reading a property it does not have is silent.
+
+    Found by writing it wrong. The served-folder editor (#164 step 4) was
+    written against `res.body`, which is `undefined` on every one of those
+    objects: the save would have thrown a TypeError on its first success, in a
+    handler with no catch, and the page would have gone quiet with no error
+    anywhere. Exactly the shape of #267 - a JavaScript defect that every test
+    in this suite passed straight through, found by a real click.
+
+    Cheap to state as a rule, so it is stated as one rather than left to the
+    next author to remember which of the two helpers returns which shape.
+    """
+
+    def test_no_caller_reads_res_body(self):
+        source = read("app.js")
+
+        self.assertNotIn("res.body", source,
+                         "postJson() resolves with { ok, status, data } - "
+                         "res.body is undefined, and reading through it throws "
+                         "inside a promise nothing catches")
+
+    def test_the_helper_still_returns_that_shape(self):
+        """The assertion above is only meaningful while this is true. If
+        postJson ever does return `body`, this fails first and says so, rather
+        than the rule silently becoming wrong."""
+        source = read("app.js")
+
+        body = source.split("function postJson(", 1)[1].split("\n  }", 1)[0]
+
+        self.assertIn("ok: res.ok", body)
+        self.assertIn("data: data", body)
+
+
 if __name__ == "__main__":
     unittest.main()

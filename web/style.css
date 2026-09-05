@@ -1391,3 +1391,97 @@ html, body {
 .settings-password-form input[type="password"]:focus {
   border-color: var(--accent);
 }
+
+/* ------------------------------------------------------------------ */
+/* SERVED FOLDERS (#164 step 4)                                        */
+/*                                                                     */
+/* Sits at the top of the Paths & storage category. Built from the     */
+/* same tokens as every other control here, so it follows the theme    */
+/* toggle and both prefers-color-scheme states without its own rules.  */
+/* ------------------------------------------------------------------ */
+.folder-section {
+  padding-bottom: 22px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.folder-summary {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0 0 14px;
+  max-width: 68ch;
+}
+
+.folder-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-row input {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  min-width: 0;          /* or a long path stretches the row past the panel */
+}
+
+.folder-row input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* The label is one word; the path is everything else. */
+.folder-row .folder-name { flex: 0 0 160px; }
+.folder-row .folder-path { flex: 1 1 auto; }
+
+.folder-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 8px 10px;
+}
+
+.folder-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.folder-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.folder-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.folder-note {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 14px 0 0;
+  max-width: 68ch;
+}
+
+.folder-note.is-ok    { color: var(--accent); }
+.folder-note.is-error { color: var(--danger); }
+
+@media (max-width: 720px) {
+  /* A path field 160px wide is unusable; stack instead. */
+  .folder-row { flex-wrap: wrap; }
+  .folder-row .folder-name { flex: 1 1 100%; }
+  .folder-row .folder-path { flex: 1 1 100%; }
+}
