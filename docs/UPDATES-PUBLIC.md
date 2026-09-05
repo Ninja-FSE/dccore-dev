@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The dashboard's tabs are named for what they do.** "File Lists" is now **List Browser**, "Download" is **Downloads**, and Queue has moved into Stats — where the queue table sits below everything else the bot knows about itself. The order runs from what you use daily to what you touch occasionally.
+
+- **Pick a run of files in one go.** Tick a file in the List Browser, then shift-click another, and everything between them is selected. Handy for queueing a whole stretch of an album list.
+
 - **A burst of DCC CHAT requests can no longer stop the bot sending files.** Each passive request opened a listening port immediately, before any check — so a handful of them took every port reserved for transfers and held it for a minute. Only one is opened at a time now; the rest are declined and can simply be retried.
 - **A list rebuild that fails partway no longer leaves you advertising one list and handing out another.** If someone was downloading your list when a rebuild ran, the rebuild could publish the new index while the archive people actually received stayed last week's — with the file count, the size and the search all reporting the new scan. It said "the previous list was left untouched" while that was no longer true. The rebuild now either lands completely or not at all.
 
