@@ -563,11 +563,42 @@ def migrate_download_counts_to_labels():
     migrated onto raised AttributeError and the bot would not boot.
     """
     try:
-        return _migrate_download_counts_to_labels()
+        marker = _counter_migration_marker()
+        if os.path.exists(marker):
+            return 0
+        moved = _migrate_download_counts_to_labels()
+        _write_counter_migration_marker(marker)
+        return moved
     except Exception as err:                              # noqa: BLE001
         print(f"[DB ERROR] Could not migrate the download counters: {err}. "
               f"They are left exactly as they were, and the daemon carries on.")
         return 0
+
+
+def _counter_migration_marker():
+    """Where "this migration has already run" is recorded.
+
+    Beside the counters it describes, so a restored backup of the data
+    directory carries its own answer with it.
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(DOWNLOAD_COUNTS_FILE)),
+                        ".download_counts_labelled")
+
+
+def _write_counter_migration_marker(marker):
+    try:
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        with io.open(marker, "w", encoding="utf-8") as handle:
+            handle.write("Written by db.migrate_download_counts_to_labels().\n"
+                         "Its presence means the download counters already "
+                         "carry their folder label.\nDelete it only if you "
+                         "want that one-time migration attempted again.\n")
+    except OSError as err:
+        # Not fatal: the migration itself is idempotent enough to survive a
+        # second run, and refusing to start over a marker would be the very
+        # thing this whole function exists not to do.
+        print(f"[DB] Could not record that the counter migration ran ({err}); "
+              f"it will be attempted again on the next start.")
 
 
 def _migrate_download_counts_to_labels():
@@ -610,6 +641,14 @@ def _migrate_download_counts_to_labels():
         for key, row in counts.items():
             if not isinstance(row, dict) or row.get("kind") != "file":
                 continue
+            # An ABSOLUTE key is not a relative path missing its label - it
+            # is a file that was under no configured folder when it was
+            # counted. os.path.join(label, absolute) returns the absolute path
+            # unchanged, so "migrating" it rewrote the file and logged a
+            # migration on every single boot while changing nothing.
+            if os.path.isabs(str(key)):
+                continue
+
             head = str(key).replace("\\", "/").split("/", 1)[0]
             if head.lower() in labels:
                 continue

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **An indented line in `settings.conf` is now reported instead of silently joining the setting above it.** A stray indented line became part of the previous value, newline and all — so a nickname could quietly contain a second line and go out that way.
+
+- **A typo in the admin chat mode is refused rather than ignored.** Writing `lisen` selected automatic mode silently; now it tells you the valid options.
+
+- **Download counters survive renaming a folder's label**, and no longer rewrite themselves on every start.
+
 - **Banning a host now actually bans it.** `!ban *.some.isp.net` was accepted, reported as successful and listed among your active bans — and never enforced, because a pattern without `!` or `@` was compared against the nickname, which can never contain a dot. Write it either way now; both work.
 
 - **Fetching a list from a bot whose nick contains `|` works.** Nicks like `Bot|Away` are ordinary on IRC and illegal in a Windows folder name, so the fetch downloaded the whole list and then failed at the last step, every time, for that bot. Same for `*`, `"`, `<`, `>`, `?` and `:`.

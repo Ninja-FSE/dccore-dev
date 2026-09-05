@@ -197,6 +197,11 @@ _FALSE = {"0", "false", "no", "off"}
 CHOICES = {
     "LIST_FORMAT": ("txt", "zip", "rar"),
     "THEME": ("classic", "midnight", "forest", "orchid", "plain"),
+    # adminchat.handle_dcc_chat() tests for "listen" and "connect" and treats
+    # everything else as "auto", so a typo did not fail - it silently selected
+    # the default. The operator who wrote "lisen" got automatic mode and no
+    # indication their setting had not taken. Found by audit.
+    "ADMIN_CHAT_MODE": ("auto", "listen", "connect"),
 }
 
 
@@ -253,6 +258,32 @@ def parse(text):
     # interpolation=None: configparser otherwise treats '%' as a reference and
     # a Windows path or a password containing one fails in a way that reads
     # like a corrupt file.
+    # An INDENTED line is a continuation to configparser, and silently becomes
+    # part of the previous value - newline and all. settings.conf is one
+    # setting per line (save() refuses to write a value containing a line
+    # break for exactly that reason), so an indented line is always a mistake,
+    # and the mistake was invisible:
+    #
+    #     NICKNAME = MyBot
+    #         a stray indented line
+    #
+    # gave NICKNAME the value "MyBot\na stray indented line", which then went
+    # out on the wire. Found by audit. Refused here, naming the line, rather
+    # than left to be discovered as a nickname the server rejects.
+    #
+    # Indented COMMENTS are still fine - they are comments wherever they sit.
+    for number, raw_line in enumerate(text.split("\n"), start=1):
+        if not raw_line[:1] in (" ", "\t"):
+            continue
+        stripped = raw_line.strip()
+        if not stripped or stripped[0] in "#;":
+            continue
+        raise SettingsError(
+            f"line {number} is indented: {stripped[:60]!r}. Every setting "
+            f"starts at the beginning of its own line - an indented line is "
+            f"read as a continuation of the setting above it, which is almost "
+            f"never what was meant.")
+
     parser = configparser.ConfigParser(interpolation=None)
     # Keep the case of keys. Settings are uppercase; the default optionxform
     # lowercases everything and nothing would ever match.
