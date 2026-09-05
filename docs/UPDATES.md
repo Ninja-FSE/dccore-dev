@@ -4,6 +4,76 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔍 What a multi-agent audit found in the same day's work
+
+Thirteen agents over the four unmerged branches, then a refutation pass over
+everything the first pass had not tested. Of 41 unique findings, 30 survived
+an attempt to refute them. Three of the ones in this branch are fixed here,
+and one of them reframed what the audit called its most severe finding.
+
+**`!update` reported "0 files, added 0" on every rebuild.**
+`commands.count_from_master_list()` kept its own glob of the lists directory
+rather than calling `list.find_latest_list()`, and every time that function
+learned to exclude another name this one did not - #234 was that story with
+the delivered `-FULL-` copy. The film list was it again, and worse:
+`<base>-VIDEO-<date>.txt` sorts after a plain date ("V" > "2"), so this picked
+the film list, whose header reads "List of N Films & Series" and never matched
+the "List of N Files" pattern it was looking for.
+
+Worse than a wrong number. The #230 shrink guard fires on `added_files < 0`,
+and `0 - 0` is never negative - so the one warning that catches **a partial
+mount failure publishing a truncated index** could not fire again.
+
+**Which reframes the audit's own P1.** It reported that an unmounted music
+share beside a local Films folder now publishes an empty index over a working
+one, and called it a regression the zero-files guard should have caught. It is
+not: `update_list.py`'s folder skip documents the opposite decision
+deliberately - *"an unplugged drive or an unmounted share should cost its own
+contents, not take the whole list - and the bot - off the air"* - and
+`commands.py` names the real net for exactly that case, *"a partial mount
+failure that still returns SOME files"*. `main` refused that scan only by
+accident, because film was not indexed at all so the count reached zero. The
+branch's behaviour matches the design; what actually broke was the warning
+underneath it, and fixing the counter restores it.
+
+The counter now calls `list.get_file_count_date_size_and_raw_bytes()`, which
+counts request rows across every published list - so `!update` and the advert
+cannot report different totals for one library by construction, rather than by
+two copies of the filtering being kept in step by hand.
+
+**A same-day rebuild kept a stale film list.** The keep set asked whether a
+file existed at `video_path`, and that path carries today's date - so on a
+second rebuild it was the earlier run's own output. A run that found no film
+kept it: films that are gone, still searchable, still counted by the advert,
+and absent from the archive users download. It self-corrects across a date
+boundary, which is why the single-build test never saw it. One flag now
+records whether THIS run published a film list, and all three sites ask it.
+
+**`RAR_EXTENSIONS` was not a gate.** It decided whether a `!rar` row was
+WRITTEN; it never decided whether one would be honoured. `dcc.py`'s whole gate
+was `RAR_ENABLED`, containment, and "not an artist root", so a folder kept
+deliberately out of the album list was packed happily by anyone who named it.
+
+Harmless while nobody could name one - and this branch is what changed that.
+The film list publishes folder headings inside the archive every user
+downloads, and `list_heading_parts()` strips the prefix, so a heading pastes
+straight back as a request. With no size cap anywhere, that is an unbounded
+pack behind a line anybody in the channel can send. `defaults.py`,
+`INSTALL.md`, the public changelog and a test all asserted this was the
+defence while it was not implemented. It is now, on the request path, where
+the claim is made - and the refusal says the files in that folder are still
+requestable by name, because refusing a pack is not refusing the content.
+
+**Ten tests failed on the counter fix, and were right to.** They pinned "the
+counter reads the same FILE as everything else" from #234, which was exactly
+right while there was one list. With two, the invariant is that the counter
+and the advert give the same ANSWER - strictly stronger, and what #234 was
+really protecting. Every case they encoded is preserved, because both sides
+now go through `find_latest_list()`, which is where the exclusions live. Their
+fixtures gained real request rows: a header with no rows is a file no
+generator produces, and it made those tests turn on the counting mechanism
+rather than on the behaviour.
+
 ### 🎬 The list held two file types out of every library on earth
 
 `update_list.py`'s walk asked `file.lower().endswith(('.mp3', '.flac'))`, and

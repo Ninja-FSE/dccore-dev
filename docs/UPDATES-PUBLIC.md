@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fixed: `!update` reported “0 files, added 0” every time.** It was reading the new film list instead of your music list. It now counts across every list you publish, so `!update` and the channel advert always agree — and the warning that tells you your library has SHRUNK works again, which is what you want when a drive comes back half-mounted.
+
+- **Fixed: `!rar` packed folders it was told not to.** `RAR_EXTENSIONS` decided which folders got a row in the album list, but the bot would still pack any folder somebody named — including a film folder, whose path the new film list publishes. Those are refused now, and the files inside are still requestable by name.
+
+- **Fixed: deleting a film and rebuilding the same day left it in the list.** It still turned up in searches and still counted towards your advertised total, while being absent from the archive people actually download.
+
 - **Film and series now get their own list.** One scan publishes two: your music list and a separate one for video, both inside the same archive people already get by typing your bot's name — nothing new to learn, and no mixed list of tracks and episodes to sort out afterwards. If your films and music already live in separate folders you may not want this: set `SEPARATE_VIDEO_LIST = No` and everything goes back into one list. The film list is only created when you actually have video.
 
 - **Only album folders can be packed with `!rar` now.** A folder used to become packable just by containing something in the list, which was fine when the list only held `.mp3` and `.flac` — but with everything listed, a single stranger could paste one line and have your bot spend an hour packing a forty-gigabyte film folder, using your CPU, your disk and one of your transfer slots. `RAR_EXTENSIONS` decides what makes a folder packable; films are still listed and still directly requestable by name.

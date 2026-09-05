@@ -1016,65 +1016,42 @@ def subprocess_failure_message(stderr, stdout):
 
 # Reads ONLY line 1 of the real master list, so it costs almost nothing
 def count_from_master_list():
-    """The file count on line 1 of the newest master list, or 0.
+    """How many files this bot is currently offering, across every list.
 
     Lifted out of handle_list_update_request() so it can be called directly.
     It was a closure over nothing - it reads config and the disk - and being
     one meant the only way to reach it was to run a real !update, subprocess
-    and all. A glob-escaping fix to this very function could not be proved
-    by any test until it moved out here.
+    and all. A glob-escaping fix to this very function could not be proved by
+    any test until it moved out here.
 
-    The three imports are local because they were local in the enclosing
-    function, and the closure was reading them out of ITS scope - lifting the
-    body out without them raised NameError('os') on the first call, caught by
-    the broad except below and reported as a count of 0. Which is to say the
-    extraction reproduced the exact bug it was made to prove was fixed.
+    ONE FINDER, not a second copy of one. This used to glob the lists
+    directory and filter for itself, and every time list.py learned to exclude
+    another name this did not. #234 was that story with the delivered "-FULL-"
+    copy. The film list was it again, and worse: "<base>-VIDEO-<date>.txt"
+    sorts after a plain date ("V" > "2"), so this picked the film list, whose
+    header reads "List of N Films & Series" and does not match the "List of N
+    Files" pattern it was looking for. Every !update reported "0 files, added
+    0" while the advert published the real total.
+
+    Worse than a wrong number. The #230 shrink guard in the caller fires on
+    `added_files < 0`, and 0 - 0 is never negative - so the one warning that
+    catches a partial mount failure publishing a truncated index could never
+    fire again. update_list.py's decision to let a missing folder cost only
+    its own contents is safe BECAUSE that warning exists; breaking it removed
+    the net underneath a deliberate choice, silently.
+
+    Counting rows across every list rather than reading the master list's own
+    header is the other half: with film in a list of its own, the header
+    reports the music half alone, and !update would announce a smaller number
+    than the advert publishes for the same library.
     """
-    import glob
-    import os
-    import re
+    import list as _list_mod
 
     try:
-        # Find every text file in the directory matching the bot's name
-        # LIST_BASE_NAME, not NICKNAME: irc.py rebinds NICKNAME on a 433 fallback, and
-        # update_list.py names the files with LIST_BASE_NAME. Keyed off the live nick this
-        # counted 0 both before and after a rebuild, so !update reported "0 files, added 0"
-        # while the advert reported the real total. Matches list.find_latest_list().
-        # glob.escape both halves: "[" and "]" are a character class to glob, and
-        # both are ordinary in the two values interpolated here. Bot[GR] is a
-        # standard IRC nick, and LIST_BASE_NAME follows NICKNAME by default; a
-        # music share under D:\Lists[FLAC]\ is the same bug from the other side.
-        # Unescaped, the pattern matched nothing and never errored: @find answered
-        # "No MasterList found" and the advert published "0 Files" forever.
-        pattern = os.path.join(glob.escape(config.LOCAL_LIST_DIR),
-                               f"{glob.escape(config.LIST_BASE_NAME)}-*.txt")
-        all_txt_files = sorted(glob.glob(pattern))
-        
-        # Both markers, matching list.find_latest_list(). Excluding only
-        # "-RAR-" left the DELIVERED "-FULL-" copy in the running, and it sorts
-        # after any plain date suffix - so this counted a different file from the
-        # one @find and the advert read. It agreed only because that copy happens
-        # to carry the same header (#234).
-        import list as _list_mod
-        true_master_lists = [f for f in all_txt_files
-                             if "-RAR-" not in f
-                             and _list_mod.FULL_LIST_MARKER not in f]
-        
-        if true_master_lists:
-            list_path = true_master_lists[-1]  # The very newest master list
-            if os.path.exists(list_path):
-                with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
-                    first_line = f.readline().strip()
-                    
-                    # Look for the "List of X Files" pattern
-                    match = re.search(r"List of\s+([\d,.]+)\s+Files", first_line, re.IGNORECASE)
-                    if match:
-                        raw_num = match.group(1).replace(",", "").replace(".", "")
-                        if raw_num.isdigit():
-                            return int(raw_num)
+        return _list_mod.get_file_count_date_size_and_raw_bytes()[0]
     except Exception as e:
-        print(f"[LIST READ ERROR] Could not read line 1: {e}")
-    return 0
+        print(f"[LIST READ ERROR] Could not count the list: {e}")
+        return 0
 
 
 def handle_list_update_request(user, target_chan, authorised=False):

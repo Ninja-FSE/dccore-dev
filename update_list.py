@@ -1159,7 +1159,11 @@ def generate_master_list():
         # library should not gain an empty file it has no use for, and every
         # reader below treats "no video list" as the ordinary case rather than
         # as a fault.
-        if video_files_data:
+        # The one decision the three sites below all ask about: did THIS run
+        # publish a film list? Asking the filesystem instead let a stale file
+        # from an earlier rebuild answer for a run that produced nothing.
+        wrote_video_list = bool(video_files_data)
+        if wrote_video_list:
             video_bytes = sum(size for _f, _n, size in video_files_data)
             with open(tmp_video_path, "w", encoding="utf-8") as f_video:
                 f_video.write(
@@ -1241,7 +1245,7 @@ def generate_master_list():
         # The film and series list rides in the same archive, on the same
         # terms as the album list: present when it has content, absent when
         # the library has no video, and never a reason to fail the build.
-        if os.path.exists(tmp_video_path) and os.path.getsize(tmp_video_path) > 0:
+        if wrote_video_list:
             members.append((tmp_video_path, os.path.basename(video_path)))
         if os.path.exists(tmp_rar_path) and os.path.getsize(tmp_rar_path) > 0:
             members.append((tmp_rar_path, os.path.basename(rar_path)))
@@ -1269,7 +1273,7 @@ def generate_master_list():
         swaps = [(tmp_artifact_path, artifact_path), (tmp_txt_path, txt_path)]
         # Only when it was written. A library with no video has no video list,
         # and the publish must not try to move a file that was never staged.
-        if os.path.exists(tmp_video_path):
+        if wrote_video_list:
             swaps.append((tmp_video_path, video_path))
         if serve_albums:
             swaps.append((tmp_rar_path, rar_path))
@@ -1304,7 +1308,14 @@ def generate_master_list():
         # a "[LIST-CLEAN] Removed 1 superseded list(s)" line that reads like
         # housekeeping working, which is exactly how the side files were lost
         # once already (see _prune_superseded_lists).
-        if os.path.exists(video_path):
+        # THIS RUN's decision, not "a file is sitting at that path". video_path
+        # carries today's date, so on a second rebuild the same day that file
+        # is the EARLIER run's output - and a run that found no video would
+        # have kept it, leaving a film list describing films that are gone:
+        # still searchable, still counted by the advert, and absent from the
+        # archive users actually download. It self-corrected across a date
+        # boundary, which is why a single-build test never saw it.
+        if wrote_video_list:
             keep.add(os.path.basename(video_path))
         if serve_albums:
             keep.add(os.path.basename(rar_path))

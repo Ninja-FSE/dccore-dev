@@ -564,6 +564,35 @@ class FilmAndSeriesGetTheirOwnList(MasterListCase):
         self.assertIn(os.path.basename(self.list_path()), members)
         self.assertIn(os.path.basename(self.video_list_path()), members)
 
+    def test_a_rebuild_that_finds_no_film_drops_the_previous_film_list(self):
+        """SAME DAY, which is the whole difference.
+
+        The keep set asked whether a file existed at video_path - and that
+        path carries today's date, so on a second rebuild it is the EARLIER
+        run's output. A run that found no film kept it: a film list naming
+        films that are gone, still searchable, still counted by the advert,
+        and absent from the archive users actually download.
+
+        It self-corrects across a date boundary, which is exactly why a
+        single-build test never saw it. Found by audit.
+        """
+        self.use_empty_library()
+        self.add("Music/Artist/Album/Track.flac")
+        self.add("Films/Feature/Feature.mkv")
+        self.assertTrue(self.generate())
+        self.assertTrue(self.has_video_list())
+
+        os.remove(os.path.join(self.tree.music, "Films", "Feature", "Feature.mkv"))
+        self.assertTrue(self.generate())
+
+        self.assertFalse(self.has_video_list(),
+                         "a film list from an earlier run the same day "
+                         "survived a rebuild that found no film")
+        count = list_mod.get_file_count_date_size_and_raw_bytes()[0]
+        self.assertEqual(count, 1, "the advert still counts the deleted film")
+        _entries, total = list_mod.find_matching_entries(["feature"])
+        self.assertEqual(total, 0, "the deleted film is still findable")
+
     def test_the_film_list_survives_the_prune_that_follows_it(self):
         """It is named "<base>-VIDEO-<date>.txt", so _prune_superseded_lists()
         sees it as a generated list and would remove it - published and
@@ -814,6 +843,53 @@ class OnlyWhatIsWorthPackingIsPackable(MasterListCase):
         self.assertTrue(self.generate())
 
         self.assertEqual(self.rar_rows(), [])
+
+
+class RarExtensionsIsAGateNotADisplayRule(MasterListCase):
+    """The claim four places in this branch make, finally enforced.
+
+    RAR_EXTENSIONS decided whether update_list WROTE a "!<nick> !rar <folder>"
+    row. It never decided whether one would be HONOURED - dcc.py's whole gate
+    was RAR_ENABLED, containment, and "not an artist root", so a folder kept
+    deliberately out of the album list was packed happily by anyone who named
+    it.
+
+    Harmless while nobody could name one. The film list publishes folder
+    headings inside the archive every user downloads, and list_heading_parts()
+    strips the prefix, so a heading pastes straight back as a request - which
+    is exactly how a folder excluded from the album list became reachable.
+    There is no size cap anywhere, so that is an unbounded pack behind a line
+    anybody in the channel can send.
+
+    Found by audit. defaults.py, INSTALL.md, the public changelog and
+    test_a_film_folder_is_not_packable_with_the_split_turned_off all asserted
+    this was the defence while it was not implemented.
+    """
+
+    def test_the_gate_is_asked_on_the_request_path_not_only_the_writer(self):
+        """Read out of dcc.py: driving a real pack needs a socket, a peer and
+        a rar binary, and the one thing that matters is that the request path
+        consults the setting at all. It did not."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as fh:
+            code = "\n".join(line.split("#", 1)[0]
+                              for line in fh.read().splitlines())
+
+        rar_block = code.split('if requested_file.lower().startswith("!rar ")', 1)[1]
+        rar_block = rar_block.split("def ", 1)[0]
+
+        self.assertIn("rar_extensions()", rar_block,
+                      "the !rar request path never consults RAR_EXTENSIONS, so "
+                      "a folder kept out of the album list is still packable "
+                      "by anyone who names it")
+        self.assertIn("is_packable_file(", rar_block)
+
+    def test_the_refusal_says_the_files_are_still_available(self):
+        """Refusing a pack must not read as refusing the content: every file
+        in that folder is still listed and still requestable by name."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as fh:
+            source = fh.read()
+
+        self.assertIn("still be requested by name", source)
 
 
 class TheHelperIsTheOnlyPredicate(unittest.TestCase):

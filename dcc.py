@@ -11,6 +11,7 @@ import subprocess
 
 import defaults as config
 import platform_compat
+import update_list
 import list as list_mod
 import announce
 import db
@@ -1203,6 +1204,49 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             if not os.path.exists(platform_compat.long_path(true_source_dir)) or not os.path.isdir(platform_compat.long_path(true_source_dir)):
                 announce_mod.send_debug(f"Pack error: Directory not found on disk storage for {user}.", category="PART")
                 return
+
+            # RAR_EXTENSIONS, ENFORCED HERE - the only place enforcing it
+            # means anything.
+            #
+            # That setting decides whether update_list.py WRITES a
+            # "!<nick> !rar <folder>" row. It never decided whether one would
+            # be honoured: this path's whole gate was RAR_ENABLED, containment,
+            # and "not an artist root". A folder with no row in the album list
+            # was packed perfectly happily by anyone who named it.
+            #
+            # Harmless while nobody could name one. The film list publishes
+            # folder headings in the archive every user downloads, and
+            # list_heading_parts() strips the prefix, so a heading can be
+            # pasted straight back as a request - which is how a folder that
+            # was deliberately kept OUT of the album list became reachable.
+            # There is no size cap anywhere, so that is an unbounded pack
+            # behind a line anybody in the channel can send.
+            #
+            # Checked with scandir and stopped at the first match: the pack
+            # about to run walks this whole folder anyway.
+            packable = update_list.rar_extensions()
+            if packable:
+                try:
+                    has_packable = any(
+                        entry.is_file()
+                        and update_list.is_packable_file(entry.name, packable)
+                        for entry in os.scandir(
+                            platform_compat.long_path(true_source_dir)))
+                except OSError as scan_err:
+                    print(f"[PACK] Could not read {true_source_dir!r} to check "
+                          f"what is in it: {scan_err}")
+                    has_packable = False
+                if not has_packable:
+                    print(f"[PACK] Refused {relative_to_root!r} for {user}: "
+                          f"it holds nothing in RAR_EXTENSIONS.")
+                    announce_mod.send_pack_error_notice(irc_sock, user)
+                    announce_mod.send_debug(
+                        f"Pack denied for {user}: "
+                        f"{config.C_BOLD}{relative_to_root}{config.C_RESET} "
+                        f"holds no packable file type. The files in it can "
+                        f"still be requested by name.",
+                        category="PART")
+                    return
 
             with queue_lock:
                 total_global_queued = get_total_queued_count()

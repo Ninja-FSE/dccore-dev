@@ -978,8 +978,22 @@ class ListUpdateTimeoutTests(DCCoreTestCase):
         share was told nothing happened."""
         tree = self.make_tree()
         list_path = os.path.join(tree.lists, "DCCore-2026-09-02.txt")
-        with open(list_path, "w", encoding="utf-8") as handle:
-            handle.write("List of 100 Files\n")
+
+        def write_list(path, count):
+            """A list with real REQUEST ROWS, not a bare header line.
+
+            The count is taken by counting rows across every published list,
+            the same way the advert counts - so the two can never report
+            different totals for one library. A fixture writing only a header
+            is a file no generator produces, and it made this test turn on the
+            counting mechanism rather than on the behaviour it is about.
+            """
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("List of %d Files\n" % count)
+                for i in range(count):
+                    handle.write("!DCCore Track %d.flac  ::INFO:: 4.00MB\n" % i)
+
+        write_list(list_path, 100)
 
         def fake_run(cmd, **kwargs):
             import types
@@ -988,8 +1002,7 @@ class ListUpdateTimeoutTests(DCCoreTestCase):
             # started with - a partial mount failure that still found SOME
             # files is exactly the case generate_master_list()'s all-or-
             # nothing zero-file guard does not catch.
-            with open(list_path, "w", encoding="utf-8") as handle:
-                handle.write("List of 40 Files\n")
+            write_list(list_path, 40)
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
         import subprocess
