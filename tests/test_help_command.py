@@ -161,8 +161,18 @@ class ItIsReachable(unittest.TestCase):
         beside -que and -remove. Left out, it would be the one user command
         somebody could repeat without limit."""
         source = self.source("irc.py")
-        block = source[source.index("is_bot_command = ("):]
-        block = block[:block.index(")\n")]
+        # Walked line by line to the gate's OWN closing paren, not sliced to
+        # the first ")\n" in the text. That slice broke the moment the gate
+        # called a helper: the first line became "is_list_request(msg,
+        # msg_lower)" and the block ended there, so this failed while the
+        # metering it checks was perfectly intact.
+        lines = source[source.index("is_bot_command = ("):].splitlines()
+        body = []
+        for raw in lines[1:]:
+            if raw.strip() == ")":
+                break
+            body.append(raw)
+        block = "\n".join(body)
 
         self.assertIn("-help", block)
         self.assertIn("-que", block, "the block being checked is the wrong one")

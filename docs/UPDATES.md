@@ -107,6 +107,105 @@ One of the four fixes was written twice. The first version guarded `inf` and
 NaN explicitly and then caught `OverflowError` underneath, and the mutation run
 showed the guard was dead: deleting it changed nothing, because the catch
 below already answered both. The catch stayed and the guard went.
+### 📥 The list request answers AutoQ's own menu item
+
+Read out of `AutoQ.mrc`, the queue script these channels actually use. Its
+"Get Listfile" item sends:
+
+```
+msg $chan $+(@,$snick($chan,%i))  ::^C4,0Auto^C12,0^BQ^B^C1,0::
+```
+
+`@<nick>` with two spaces and a colour-coded tag. OmenServe answers that;
+`irc.py` compared for equality, so DCCore was **silent** for every user of
+that item - no reply, no error, and nothing in the log to say a request had
+been made and ignored. The failure looks exactly like a bot that is down.
+
+`is_list_request()` now takes `@<nick>` exactly, or `@<nick>` followed by a
+space and anything at all. **The space is what makes a suffix safe**, and it
+is the whole argument: none of the names this has to stay distinct from
+contains one. `@<nick>-que`, `-remove`, `-help`, `-stats` and `-top` are this
+bot's own commands, each still matched exactly by its own branch below.
+`@<nick>2` and `@<nick>_away` are a DIFFERENT bot whose nick merely starts
+with ours, and answering those would send our list to somebody asking
+somebody else for theirs.
+
+`@find` and `@locator` are excluded explicitly, for the bot whose nickname IS
+"find": a search there must keep meaning a search. The cost is stated rather
+than hidden - for that one bot, AutoQ's menu item searches for "::AutoQ::"
+instead of sending the list.
+
+**The gate and the dispatch are one function.** They were two copies of the
+same comparison, and the flood gate's own test class exists because a gate
+narrower than the dispatch is an unmetered command path. Widening one and not
+the other would have re-created exactly that, so both call
+`is_list_request()`, and `tests/test_irc_dispatch.py` binds the real function
+into the namespace it evaluates the lifted gate expression in - the way it
+already binds `bot_aliases`.
+
+**One test was rewritten rather than deleted.** It asserted the request "stays
+an exact match", and gave its reason: `@DCCore-que` must not be swallowed.
+That reason still holds and is now met by the space; the exactness itself was
+the defect. Every case it pinned is still there, with `@DCCore please` moved
+to the other side and AutoQ's real payload added.
+
+**And two source-reading guards were sliced wrong.** `test_help_command` and
+`test_stats_top_commands` read the flood gate with
+`block[:block.index(")
+")]`, which stopped at the first closing paren in the
+text - fine until the gate called a function, at which point the block ended
+after one line and both failed while the metering they check was perfectly
+intact. They walk to the gate's own closing paren now.
+
+**Not changed: "Que Status".** AutoQ sends `<nick>-que` with no leading `@`,
+which DCCore does not answer. Left alone deliberately - a bare word as a
+channel trigger is a wider change than a suffix on a request already
+addressed to us. AutoQ's own non-buffer branch for it is broken anyway: it
+sends a literal `+(Nick,-que)`, missing the `$`. Written up in INSTALL.md so
+an operator knows to type `@<nick>-que` instead.
+
+**Also documented: rows AutoQ drops.** Its file branch truncates a line at the
+end of the first accepted extension it finds - which is how `::INFO::` and the
+size get stripped - but that `aline` sits INSIDE the extension test. A row
+whose type is not in mIRC's `[text] accept` list is queued nowhere and
+reported nowhere. AutoQ adds only `*.mp3` and `*.rar` on load, so now that
+DCCore lists every file type, a `.flac` or `.mkv` row silently vanishes for
+any user who has not added it. Nothing to fix here - the row is correct and
+the client discards it - but operators need to know, so INSTALL.md says which
+mIRC setting to change.
+### 🔒 A timed ban on somebody who never came back stayed for ever
+
+The last of the audit's flood-tracking findings, and the one the roadmap has
+been carrying as outstanding.
+
+`banned_users` was expired **lazily**: the check that reads it deletes an
+expired row, but only on the next request FROM THAT SAME NICK. A banned nick
+not coming back is the normal case - the ban is what made them leave - so the
+entry stayed in memory and in `bans.txt` for good, and the file grew one
+permanent row per flooder.
+
+The flood sweep already ran every sixty seconds and already cleaned
+`user_requests` and `muted_until`. This is the third structure it was always
+meant to include; it is the same expiry rule applied to the nicks that never
+return, not a new policy.
+
+Three things it has to get right, each with a test:
+
+- **The same reading of an expiry as the per-request check**, from one
+  function. Two copies of that coercion could drift into disagreeing about
+  when a ban ends, which means either a ban enforced but never cleared or one
+  cleared while still being enforced. A row that will not parse as a number is
+  swept, exactly as the lazy path would have deleted it - a row nothing can
+  read is not a ban anyone is serving.
+- **The file is rewritten.** Unlike the other two structures this one is
+  persisted, so clearing memory alone would let every swept ban return at the
+  next restart and the file would go on growing regardless.
+- **Only when something actually expired.** A sweep runs every minute for the
+  life of the daemon; writing the ban file each time would be a disk write a
+  minute, for ever, to record no change at all.
+
+`docs/FUTURE.md`'s "from the audits, not yet done" section is now down to the
+one line about the remaining verified findings.
 
 ### 🟡 The List Browser says when a bot's list has moved on (#133)
 The third of #133's remaining slices. A list you hold can be months out of date - from the channel capture the issue records: `Deepdiver` Apr 29th, `Hiroshima` Feb 20th, `FlacMe` Jan 2nd - and nothing said so.
