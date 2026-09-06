@@ -744,7 +744,30 @@
 # Same shape as ADMIN_CHANNEL_COMMANDS, which exists for the same reason: an
 # admin surface reachable from a weaker path gets its own switch and a written
 # reason for its default.
-#WEBUI_CONSOLE_ENABLED = false
+# UNSET, not False. The default is now decided by EXPOSURE rather than being
+# a flat no - see webserver.console_is_enabled().
+# 
+# The reasoning above is about the console being reachable through the weaker
+# door. When the dashboard is bound to loopback, there is no weaker door: the
+# only person who can reach it is somebody already sitting at the machine,
+# who can edit admin_config.py and read every served file anyway. Gating it
+# there protects nothing and costs the operator a setting they have to find.
+# 
+# When WEBUI_HOST is anything else, the paragraph above applies in full and
+# the answer stays no until the operator says otherwise.
+# 
+# An explicit True or False in settings.conf always wins, so nobody who has
+# already made this choice has it made again for them.
+#WEBUI_CONSOLE_ENABLED = 
+
+# Open the dashboard in the default browser when the daemon starts.
+# 
+# Only ever when the dashboard is on AND bound to loopback: a browser on a
+# machine reachable from the LAN is as likely to be a headless box as a
+# desktop, and a daemon that tries to spawn one there is doing something
+# nobody asked for. Failure is ignored either way - a machine with no browser
+# is not a reason to stop the bot starting.
+#WEBUI_OPEN_BROWSER = true
 
 # The Settings page's folder picker (#164 step 5). Off, and its own switch
 # rather than riding along with WEBUI_CONSOLE_ENABLED, for the rule three
