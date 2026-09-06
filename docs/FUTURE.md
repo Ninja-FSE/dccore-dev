@@ -151,7 +151,6 @@ should say about one that has never replied.
 
 - **PER-LIST file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them per list. `LIST_IGNORED_EXTENSIONS` does this globally; scoping it to one folder is the part still missing.
 - **A fetched list keeps only the peer's master.** Since the film-and-series split, a DCCore bot's archive carries two `.txt` files, and `list_fetch` picks one - now the master rather than whichever is larger. The films in the other are dropped from the fetched copy. Reading both into one fetched list changes what `_pick_list_file()` returns and the size ceiling that guards it, so it is a change of its own rather than part of the fix.
-- **A "what's new" list** — files added in the last N days, generated alongside the main one.
 - **Stealth channels** — serve a channel while advertising nothing in it.
 - **Multi-network** — real in OmenServe, and it would touch every socket path here.
 
