@@ -14,9 +14,60 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 
 ## Before you start
 
-**Python 3.10 or newer.** Install from python.org and tick *Add python.exe to
-PATH*. Nothing else is required — the daemon and its test suite are stdlib-only,
-which is why they run on a bare machine with no `pip install` step.
+**Python 3.10 or newer.** Nothing else is required — the daemon and its test
+suite are stdlib-only, which is why they run on a bare machine with no
+`pip install` step.
+
+1. **Download Python.** [Python 3.10.0 (64-bit)](https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe),
+   or any later 3.10+ from [python.org](https://www.python.org/downloads/windows/).
+
+2. **Tick both boxes in the installer:** *Add Python to PATH* and *py launcher*.
+   They are what make steps 3 onwards work from any directory — see the note on
+   `py` below for why the launcher in particular matters here.
+
+3. **Check it took.** In a *new* Command Prompt — an open one still has the old
+   PATH:
+
+   ```cmd
+   python --version
+   py --version
+   where python
+   where py
+   ```
+
+   `where` printing a path under `WindowsApps` and nothing else means the
+   installer's PATH box was not ticked: that is the App Execution Alias, not
+   Python. Re-run the installer and choose *Modify*.
+
+4. **Only if you want the web dashboard:**
+
+   ```cmd
+   pip install -r requirements-web.txt
+   ```
+
+   Skip it otherwise. The daemon starts and serves files without Flask; the
+   dashboard is the only thing that needs it.
+
+5. **Configure it:**
+
+   ```cmd
+   py configure.py
+   ```
+
+6. **Check before the first real start:**
+
+   ```cmd
+   scripts\windows\start-dccore.bat check
+   ```
+
+7. **Start it:**
+
+   ```cmd
+   scripts\windows\start-dccore.bat
+   ```
+
+   If you did step 4, look for `[WEB ENABLED]` in the output — that is the
+   dashboard confirming Flask was found and the server is up.
 
 **WinRAR is optional.** Without it, single-file transfers work normally and only
 whole-album (`!rar`) packing fails. If you have it, no configuration is needed:
