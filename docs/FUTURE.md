@@ -78,7 +78,9 @@ Multi-list then follows: allow more than one list object, with per-channel adver
 
 **Stage 2 is in.** A list's files live in its own directory: the primary keeps `LOCAL_LIST_DIR` itself — so nothing moves and no upgrade migrates anything — and every other list gets a subdirectory named after it. The list is in the *path*, not the filename, so the `-RAR-`/`-VIDEO-`/`-FULL-` markers and everything that parses them are untouched. `generate_master_list()` takes a list name and `generate_all_lists()` builds every one, each independently: one failing does not stop the rest, and the failures are named.
 
-What is left, in order: routing a request to the list bound to the channel it arrived in; per-channel adverts; and the Settings page for defining them.
+**Stage 3 is in.** A request is answered from the list bound to the channel it arrived in. The rule has three parts: an explicitly bound channel gets its list; otherwise the primary answers *if it binds no channels of its own*, which is what every install today is and what stops this being an upgrade that silences every bot; otherwise nothing, which is what makes binding mean something. A private message is always the primary, since it carries nothing to route on. The list request, `@find` and file requests all route; a channel bound to nothing is answered with silence rather than an error, because an error implies something went wrong and nothing did.
+
+What is left: per-channel adverts, and the Settings page for defining lists.
 
 Two pieces were worth doing carefully rather than quickly, and one of them turned out the opposite way to what this section used to predict:
 

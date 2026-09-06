@@ -201,6 +201,46 @@ def list_for_channel(channel):
     return None
 
 
+def list_for_request(channel=None):
+    """The list a request arriving in `channel` belongs to, or None.
+
+    THE RULE, and the reason it is not simply list_for_channel():
+
+      1. A channel explicitly bound to a list gets that list.
+      2. Otherwise the PRIMARY answers, but only if it binds no channels of
+         its own - that makes it the catch-all, which is what every install
+         today is: one list, no bindings, answering everywhere.
+      3. Otherwise nothing. Once the primary names its own channels the
+         operator has said where each list belongs, and #26 is explicit that a
+         channel with no list bound gets no advert and no requests answered.
+
+    Rule 2 is what stops this being an upgrade that silences every bot. Rule 3
+    is what makes binding mean something. Without both, either every existing
+    install stops answering or binding a channel does nothing.
+
+    A request with no channel - a private message - is the primary by
+    definition, since a PM carries nothing to route on. That is the same
+    answer rule 2 gives, but it holds even when the primary does bind
+    channels: a PM is not "a channel with nothing bound", it is not a channel.
+    """
+    name = str(channel or "").strip()
+    if not name or not name.startswith(("#", "&")):
+        return primary_list()
+
+    bound = list_for_channel(name)
+    if bound is not None:
+        return bound
+
+    fallback = primary_list()
+    return fallback if not fallback.channels else None
+
+
+def list_name_for_request(channel=None):
+    """Just the name, or None. What the list-reading functions actually take."""
+    chosen = list_for_request(channel)
+    return chosen.name if chosen else None
+
+
 def list_by_name(name):
     """The list an operator named, or None. Case-insensitive: the name is
     typed into a dashboard field, not compared against anything on the wire."""
@@ -480,7 +520,7 @@ def folder_paths():
     return [entry.path for entry in folders()]
 
 
-def folder_for_label(label):
+def folder_for_label(label, name=None):
     """The folder a list path's first component names, or None.
 
     Matched case-insensitively: the label is written into paths that users
@@ -490,7 +530,7 @@ def folder_for_label(label):
     wanted = str(label or "").strip().lower()
     if not wanted:
         return None
-    for entry in folders():
+    for entry in folders(name):
         if entry.name.lower() == wanted:
             return entry
     return None

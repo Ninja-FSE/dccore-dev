@@ -826,9 +826,16 @@ class StillRequestableAfterTheSplit(MasterListCase):
             code = "\n".join(line.split("#", 1)[0]
                               for line in fh.read().splitlines())
 
-        self.assertIn("list_mod.all_list_paths()", code,
-                      "dcc.py resolves requests against one list, so every "
-                      "film in the library is listed and un-downloadable")
+        self.assertIn("list_mod.all_list_paths(", code,
+                      "dcc.py resolves requests against one list file, so "
+                      "every film in the library is listed and un-downloadable")
+        # The ARGUMENT is #26's half of the same question: all_list_paths()
+        # reads every FILE of one list, and this says which list. Asserted as
+        # one sequence, because reading every file of the wrong list is its
+        # own way of answering a request with somebody else's library.
+        self.assertIn("list_mod.all_list_paths(wanted_list)", code,
+                      "dcc.py reads the primary's lists whatever channel the "
+                      "request arrived in")
 
 
 class OnlyWhatIsWorthPackingIsPackable(MasterListCase):

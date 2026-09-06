@@ -360,5 +360,203 @@ class ALessThanObviousName(ListCase):
         self.assertTrue(list_mod.list_slug("   "))
 
 
+class WhichListARequestIsAnsweredFrom(ListCase):
+    """#26 stage 3. The rule has three parts and each exists to stop a
+    different thing going wrong."""
+
+    def test_one_list_with_no_bindings_answers_everywhere(self):
+        """Every install today. Without this rule, adding routing would be an
+        upgrade that silences every bot in existence."""
+        self.assertEqual(library.list_for_request("#anywhere").name,
+                         library.DEFAULT_LIST_NAME)
+        self.assertEqual(library.list_for_request("#somewhere-else").name,
+                         library.DEFAULT_LIST_NAME)
+
+    def test_a_bound_channel_gets_its_own_list(self):
+        self.write([self.one(name="Music", primary=True, channels=["#music"]),
+                    self.one(name="Films", primary=False, channels=["#films"])])
+
+        self.assertEqual(library.list_for_request("#films").name, "Films")
+        self.assertEqual(library.list_for_request("#music").name, "Music")
+
+    def test_an_unbound_channel_gets_nothing_once_the_primary_names_its_own(self):
+        """What makes binding mean something. The operator has said where each
+        list belongs, so a channel they did not name is one this bot does not
+        serve - #26's own rule."""
+        self.write([self.one(name="Music", primary=True, channels=["#music"]),
+                    self.one(name="Films", primary=False, channels=["#films"])])
+
+        self.assertIsNone(library.list_for_request("#lobby"))
+
+    def test_a_primary_that_binds_nothing_is_the_catch_all(self):
+        """The useful middle: one list for everywhere, plus a list for one
+        channel. Without it an operator adding a second list would silence
+        every channel they had not thought to name."""
+        self.write([self.one(name="Music", primary=True, channels=[]),
+                    self.one(name="Films", primary=False, channels=["#films"])])
+
+        self.assertEqual(library.list_for_request("#anything").name, "Music")
+        self.assertEqual(library.list_for_request("#films").name, "Films")
+
+    def test_a_private_message_is_always_the_primary(self):
+        """A PM carries nothing to route on. This holds even when the primary
+        binds channels - a PM is not "a channel with nothing bound", it is not
+        a channel at all."""
+        self.write([self.one(name="Music", primary=True, channels=["#music"]),
+                    self.one(name="Films", primary=False, channels=["#films"])])
+
+        for target in (None, "", "SomeNick"):
+            with self.subTest(target=target):
+                self.assertEqual(library.list_for_request(target).name, "Music")
+
+    def test_the_name_helper_gives_none_for_an_unbound_channel(self):
+        """The list-reading functions take a name, and None has to survive the
+        trip - a helper that turned it into the primary's name would undo the
+        rule at the point it is used."""
+        self.write([self.one(name="Music", primary=True, channels=["#music"])])
+
+        self.assertIsNone(library.list_name_for_request("#lobby"))
+        self.assertEqual(library.list_name_for_request("#music"), "Music")
+
+
+class TheHandlersAskThatQuestion(ListCase):
+    """Read out of the source. Driving a real request needs a socket, a peer
+    and a DCC engine; what matters here is that each entry point routes at
+    all, and that a channel bound to nothing is answered with silence."""
+
+    def source(self, name):
+        with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_every_folder_lookup_in_the_request_path_is_scoped(self):
+        """COUNTED, not merely present. There are two library.folders() calls
+        in that function - the "is there anywhere to look" guard and the roots
+        a bare filename is searched in - and asserting one was there passed a
+        mutation run while the other still read the primary's."""
+        code = self.source("dcc.py")
+        body = code.split("def handle_download_request(", 1)[1].split(chr(10) + "def ", 1)[0]
+
+        self.assertGreater(body.count("library.folders("), 0)
+        self.assertEqual(body.count("library.folders("),
+                         body.count("library.folders(wanted_list)"),
+                         "a library.folders() call in the request path is not "
+                         "scoped to this request's list")
+
+    def test_the_artifact_comes_from_the_requests_own_list_directory(self):
+        """Every list writes its archive under the SAME name, in its own
+        directory - so looking in the root answers "file not found" for every
+        list but one, which is the whole of what send_file_list() just
+        offered them. Found by a test that drove the real path."""
+        code = self.source("dcc.py")
+        body = code.split("def handle_download_request(", 1)[1].split(chr(10) + "def ", 1)[0]
+
+        self.assertIn("list_mod.list_dir(wanted_list)", body)
+
+    def test_the_search_routes(self):
+        code = self.source("list.py")
+        body = code.split("def execute_search(", 1)[1].split("\ndef ", 1)[0]
+
+        self.assertIn("list_name_for_request(channel)", body)
+        self.assertIn("find_latest_list(wanted)", body)
+
+    def test_the_file_request_routes(self):
+        code = self.source("dcc.py")
+        body = code.split("def handle_download_request(", 1)[1].split("\ndef ", 1)[0]
+
+        self.assertIn("list_name_for_request(target_chan)", body)
+        self.assertIn("library.folders(wanted_list)", body)
+        self.assertIn("all_list_paths(wanted_list)", body)
+
+    def test_the_file_request_resolves_the_list_before_it_uses_it(self):
+        """Two things need the same answer - the folders a bare filename is
+        looked for in, and the list the name is resolved against - and they
+        must not disagree. One resolution, above both uses."""
+        code = self.source("dcc.py")
+        body = code.split("def handle_download_request(", 1)[1].split("\ndef ", 1)[0]
+
+        self.assertLess(body.index("wanted_list = library.list_name_for_request"),
+                        body.index("library.folders(wanted_list)"))
+        self.assertLess(body.index("wanted_list = library.list_name_for_request"),
+                        body.index("all_list_paths(wanted_list)"))
+
+    def test_a_heading_is_resolved_against_its_own_lists_folders(self):
+        """A label names a folder OF a list. Resolving one list's heading
+        against another's folders would send a request into the wrong
+        library."""
+        code = self.source("dcc.py")
+
+        self.assertIn("resolve_list_folder_with_root(\n                win_path, wanted_list)",
+                      code)
+
+
+class SendingTheListArchive(ListCase):
+    """send_file_list() driven for real. The two source-reading checks it used
+    to have both survived a mutation that broke it, which is what a weak
+    assertion looks like."""
+
+    def setUp(self):
+        super().setUp()
+        self.lists_dir = os.path.join(self.tree.root, "lists")
+        os.makedirs(self.lists_dir, exist_ok=True)
+        # send_file_list() hands off to dcc.handle_download_request(), which
+        # refuses a target_chan this bot is not configured to be in - so the
+        # fixture has to be in the channels it is testing.
+        self.set_config(LOCAL_LIST_DIR=self.lists_dir, LIST_BASE_NAME="DCCore",
+                        NICKNAME="DCCore", update_inprogress=False,
+                        CHANNEL="#music,#films,#lobby,#anywhere")
+        # list.py bound `oserve` at IMPORT time, so the fake the harness puts
+        # in sys.modules is not the object it calls. Point the module's own
+        # reference at the fake instead - patching sys.modules alone leaves
+        # every notice going to the real one, which is how this test spent
+        # three runs asserting on an empty list.
+        import dcc
+        self.addCleanup(setattr, list_mod, "oserve", list_mod.oserve)
+        list_mod.oserve = self.oserve
+        real_send = dcc.start_dcc_send
+        dcc.start_dcc_send = lambda *a, **k: None
+        self.addCleanup(setattr, dcc, "start_dcc_send", real_send)
+
+    @property
+    def sent(self):
+        return [(user, message) for user, message, _vip in self.oserve.queued]
+
+    def artifact(self, directory, date="2026-09-06"):
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, f"DCCore-{date}.zip")
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write("archive")
+        return path
+
+    def test_an_unbound_channel_is_answered_with_silence(self):
+        """Not an error: an error implies something went wrong, and nothing
+        did - this bot does not serve there."""
+        self.write([self.one(name="Music", primary=True, channels=["#music"])])
+        self.artifact(self.lists_dir)
+
+        list_mod.send_file_list(None, "someone", "#lobby")
+
+        self.assertEqual(self.sent, [])
+
+    def test_a_bound_channel_is_sent_its_own_lists_archive(self):
+        self.write([self.one(name="Music", primary=True, channels=["#music"]),
+                    self.one(name="Films", primary=False, channels=["#films"])])
+        self.artifact(self.lists_dir)
+        films = self.artifact(os.path.join(self.lists_dir, "Films"), "2026-09-05")
+
+        list_mod.send_file_list(None, "someone", "#films")
+
+        notices = [msg for who, msg in self.sent if who == "someone"]
+        self.assertTrue(notices, "nothing was sent at all")
+        self.assertIn(os.path.basename(films), notices[0])
+
+    def test_a_single_list_install_still_gets_its_archive(self):
+        """The case every operator is in."""
+        self.artifact(self.lists_dir)
+
+        list_mod.send_file_list(None, "someone", "#anywhere")
+
+        self.assertTrue([m for who, m in self.sent if who == "someone"])
+
+
 if __name__ == "__main__":
     unittest.main()

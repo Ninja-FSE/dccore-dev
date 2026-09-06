@@ -1090,6 +1090,25 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
               f"target_chan {target_chan!r} is not a channel this bot is in.")
         return
     # ---------------------------------------------------------------------
+    # WHICH LIST THIS REQUEST BELONGS TO (#26).
+    # ---------------------------------------------------------------------
+    # Resolved once, here, because two things below need the same answer and
+    # they must not disagree: the folders a bare filename is looked for in, and
+    # the list the filename is resolved against. A request is answered from the
+    # list it was advertised from - otherwise a name that exists in two lists
+    # sends the wrong file to somebody who copied the right row.
+    #
+    # None means no list is bound to this channel and the primary is not the
+    # catch-all: #26's "a channel with no list bound gets nothing". Silence
+    # rather than an error, because an error implies something went wrong and
+    # nothing did - this bot does not serve here.
+    import library
+    wanted_list = library.list_name_for_request(target_chan)
+    if wanted_list is None:
+        print(f"[DCC] No list is bound to {target_chan!r}; ignoring the "
+              f"request from {user}.")
+        return
+    # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------
     # update_inprogress, NOT search_inprogress (#214). Both are set by !update,
@@ -1136,7 +1155,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # list_mod.resolve_list_folder()/is_safe_path() below fail on a
             # None base and fall through to the bare except at the bottom of
             # this function, which told the requester nothing at all.
-            if not library.folders():
+            if not library.folders(wanted_list):
                 announce_mod.send_dcc_error(user, "not_configured")
                 return
 
@@ -1165,7 +1184,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # it inside ANY configured folder" would be a weaker test than the
             # one this line has always had. Resolving to a single root keeps
             # the check exactly as strong as it is today.
-            resolved_dir, source_folder = list_mod.resolve_list_folder_with_root(win_path)
+            resolved_dir, source_folder = list_mod.resolve_list_folder_with_root(
+                win_path, wanted_list)
             true_source_dir = os.path.normpath(resolved_dir)
 
             # ---------------------------------------------------------------------
@@ -1352,10 +1372,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # "Someone - DCCore Sessions.rar" would otherwise be looked for among
         # the lists and never found.
         if list_mod.is_list_artifact_name(requested_file):
-            base_directory = os.path.abspath(config.LOCAL_LIST_DIR)
+            # THIS REQUEST'S LIST directory, not LOCAL_LIST_DIR. Every list
+            # writes its archive under the same name, and a non-primary list
+            # writes it in its own subdirectory - so looking in the root would
+            # answer "file not found" for every list but one, which is the
+            # whole of what send_file_list() just offered them.
+            base_directory = os.path.abspath(list_mod.list_dir(wanted_list))
             full_path = os.path.join(base_directory, requested_file)
-            # One root, and deliberately so: the lists live in exactly one
-            # place regardless of how many folders the library spans.
+            # One root per list, and deliberately so: a list's files live in
+            # exactly one place regardless of how many folders it spans.
             search_roots = [base_directory]
         else:
             # Same reasoning as the !rar branch above: FILE_DIRECTORY can
@@ -1365,7 +1390,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # without it. Checked explicitly rather than letting
             # os.path.abspath(None) raise into the bare except below, which
             # left the requester with no response of any kind.
-            if not library.folders():
+            if not library.folders(wanted_list):
                 announce.send_dcc_error(user, "not_configured")
                 return
             # Every configured folder, in the operator's order (#164). The
@@ -1373,7 +1398,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # what a single-folder install has always done; the rest are what
             # the list lookup and the walk below fall through to.
             search_roots = [os.path.abspath(folder.path)
-                            for folder in library.folders()]
+                            for folder in library.folders(wanted_list)]
             base_directory = search_roots[0]
             full_path = os.path.join(base_directory, requested_file)
 
@@ -1392,7 +1417,10 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # leaves that state machine correct with nothing else changed.
             # Master first, so a name in both resolves the same way it did
             # before - the first copy the list names wins.
-            list_paths = list_mod.all_list_paths()
+            # Resolved at the top of this function, so the list a name is
+            # looked up in and the folders it is then looked for in cannot
+            # disagree.
+            list_paths = list_mod.all_list_paths(wanted_list)
             if list_paths:
                 try:
                     lines = []
@@ -1437,7 +1465,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                         # there is more than one (#164), and
                                         # pinning it to base_directory would
                                         # resolve every heading into the first.
-                                        found_folder = list_mod.resolve_list_folder(back_line)
+                                        found_folder = list_mod.resolve_list_folder(
+                                            back_line, name=wanted_list)
                                         break
                                 if found_folder is None:
                                     continue
