@@ -4,6 +4,48 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The bot refused the answer to its own question
+
+From Neo's log, requesting from the dashboard:
+
+```
+[FETCH] Requested 'BBCRadio - Under Milk Wood - Richard Burton.mp3
+        ::INFO:: 79.53MB' from FlacMeDCC (request f96ba6b77dff).
+[FETCH] Rejected unsolicited DCC SEND from FlacMeDCC
+        ('BBCRadio_-_Under_Milk_Wood_-_Richard_Burton.mp3'):
+        no matching pending request.
+```
+
+We asked. They answered. We threw it away as unsolicited.
+
+**The `::INFO::` suffix was part of the stored filename.** The dashboard sends
+what the operator clicked, and what they clicked is a row out of another bot's
+list - `<filename>  ::INFO:: <size>`. `dcc.py` has stripped that on the SERVING
+side since #234, where a request arrives; the fetching side never learned to,
+so the size went into the row as part of the name and out onto the wire with
+it.
+
+**The normaliser was not the gap, which is worth saying because it looks like
+it should have been.** `_claim_matching_offer_locked()` already compares
+underscore/space-normalised, exactly to survive the one transformation every
+DCC client applies - the peer's underscores were never the problem. A size that
+only one side is carrying is not whitespace, and a test pins that the
+normaliser alone could not have bridged it.
+
+**Stripped at row creation, not at match time**, because that value is also
+what goes out on the wire. The peer above coped with the suffix; a stricter one
+would not have.
+
+**"file" rows only.** A folder row's `requested_filename` is the literal
+`!rar <path>` request text, which `new_fetch_row()`'s own docstring depends on
+being preserved. A mutation showed that restriction was not falsifiable at
+first - a `!rar` path has no `::INFO::` in it - so the test now uses a folder
+path that does. It is odd, but the path is built from a heading in ANOTHER
+bot's list and is not ours to predict; stripping it would turn a request they
+could have answered into one they cannot.
+
+Five tests, three mutations, all caught.
+
 ### 🔓 The fetch size caps can be turned off (#302)
 
 Neo asked for two of them to be removed outright:

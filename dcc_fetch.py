@@ -192,7 +192,33 @@ def new_fetch_row(bot, filename, now=None, request_type="file"):
     actually sends, exactly as it already does for "list" rows.
     """
     now = time.time() if now is None else now
+
+    # THE ::INFO:: SUFFIX COMES OFF HERE. A row copied out of another bot's
+    # list reads "Some Track.mp3  ::INFO:: 79.53MB", and the dashboard sends
+    # what the operator clicked - so the whole line, size and all, was being
+    # stored as the filename and asked for on the wire.
+    #
+    # The serving side has stripped this since #234 (dcc.py, where a request
+    # ARRIVES); the fetching side never learned to, and the failure was
+    # invisible until a peer answered:
+    #
+    #   Requested 'BBCRadio - Under Milk Wood.mp3  ::INFO:: 79.53MB' ...
+    #   Rejected unsolicited DCC SEND ('BBCRadio_-_Under_Milk_Wood.mp3'):
+    #   no matching pending request.
+    #
+    # _normalize_filename_for_match() already handles the space/underscore
+    # swap every DCC client applies - it could never bridge a size that only
+    # one side was carrying. Stripped at row creation rather than at match
+    # time, because this value is also what goes out on the wire: the peer
+    # above coped with the suffix, and a stricter one would not have.
     clean_filename = str(filename).strip()
+    if request_type == "file":
+        # Only for "file" rows. A "folder" row's requested_filename is the
+        # literal "!rar <path>" request text, which has no ::INFO:: and must
+        # survive untouched - new_fetch_row()'s own docstring depends on it.
+        import list as list_mod
+
+        clean_filename = str(list_mod.strip_info_suffix(clean_filename)[0]).strip()
     return {
         "bot": str(bot).strip(),
         "filename": clean_filename,
