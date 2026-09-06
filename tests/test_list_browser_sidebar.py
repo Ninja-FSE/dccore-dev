@@ -56,15 +56,15 @@ class TheRowsComeFromBothPlaces(DCCoreTestCase):
                 for row in webserver.build_fetched_bot_list_summaries()}
 
     def test_a_bot_we_hold_a_list_from_is_held(self):
-        runtime.known_bots["vibessono"] = {
-            "nick": "Vibessono", "files": 12004, "list_date": "Aug 28th"}
+        runtime.known_bots["tapedeck"] = {
+            "nick": "TapeDeck", "files": 12004, "list_date": "Aug 28th"}
         self.set_config(fetched_bot_lists={
-            "vibessono": {"bot": "Vibessono", "fetched_at": 1,
+            "tapedeck": {"bot": "TapeDeck", "fetched_at": 1,
                           "entry_count": 12004,
                           "advert_when_fetched": {"files": 12004,
                                                   "list_date": "Aug 28th"}}})
 
-        row = self.rows()["Vibessono"]
+        row = self.rows()["TapeDeck"]
 
         self.assertIs(row["held"], True)
         self.assertEqual(row["freshness"], "current")

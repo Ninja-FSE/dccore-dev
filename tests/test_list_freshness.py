@@ -52,10 +52,10 @@ class WhatTheyAdvertisedWhenWeFetched(DCCoreTestCase):
                                  runtime.known_bots.update(self.original)))
 
     def test_it_records_what_that_bot_published(self):
-        runtime.known_bots["vibessono"] = {
-            "nick": "Vibessono", "files": 12004, "list_date": "Aug 28th"}
+        runtime.known_bots["tapedeck"] = {
+            "nick": "TapeDeck", "files": 12004, "list_date": "Aug 28th"}
 
-        self.assertEqual(list_fetch._advert_snapshot("Vibessono"),
+        self.assertEqual(list_fetch._advert_snapshot("TapeDeck"),
                          {"files": 12004, "list_date": "Aug 28th"})
 
     def test_a_bot_we_have_never_seen_records_nothing(self):
@@ -131,13 +131,13 @@ class TheSummariesCarryIt(DCCoreTestCase):
         self.addCleanup(lambda: (runtime.known_bots.clear(),
                                  runtime.known_bots.update(self.original)))
         runtime.known_bots.update({
-            "vibessono": {"nick": "Vibessono", "files": 12004,
+            "tapedeck": {"nick": "TapeDeck", "files": 12004,
                           "list_date": "Aug 28th"},
             "bigtruck": {"nick": "BigTruck", "files": 8110,
                          "list_date": "Aug 28th"},
         })
         self.set_config(fetched_bot_lists={
-            "vibessono": {"bot": "Vibessono", "fetched_at": 1,
+            "tapedeck": {"bot": "TapeDeck", "fetched_at": 1,
                           "entry_count": 12004,
                           "advert_when_fetched": {"files": 12004,
                                                   "list_date": "Aug 28th"}},
@@ -152,7 +152,7 @@ class TheSummariesCarryIt(DCCoreTestCase):
                 for row in webserver.build_fetched_bot_list_summaries()}
 
     def test_an_unchanged_list_reads_current(self):
-        self.assertEqual(self.rows()["Vibessono"]["freshness"], "current")
+        self.assertEqual(self.rows()["TapeDeck"]["freshness"], "current")
 
     def test_a_changed_list_reads_changed(self):
         self.assertEqual(self.rows()["BigTruck"]["freshness"], "changed")
@@ -177,7 +177,7 @@ class TheSummariesCarryIt(DCCoreTestCase):
     def test_the_existing_fields_are_untouched(self):
         """The switcher renders bot and count; adding freshness must not
         disturb what was already there."""
-        row = self.rows()["Vibessono"]
+        row = self.rows()["TapeDeck"]
 
         self.assertEqual(row["count"], 12004)
         self.assertEqual(row["fetched_at"], 1)
