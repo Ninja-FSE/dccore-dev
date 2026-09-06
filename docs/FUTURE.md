@@ -80,7 +80,9 @@ Multi-list then follows: allow more than one list object, with per-channel adver
 
 **Stage 3 is in.** A request is answered from the list bound to the channel it arrived in. The rule has three parts: an explicitly bound channel gets its list; otherwise the primary answers *if it binds no channels of its own*, which is what every install today is and what stops this being an upgrade that silences every bot; otherwise nothing, which is what makes binding mean something. A private message is always the primary, since it carries nothing to route on. The list request, `@find` and file requests all route; a channel bound to nothing is answered with silence rather than an error, because an error implies something went wrong and nothing did.
 
-What is left: per-channel adverts, and the Settings page for defining lists.
+**Stage 4 is in.** Each channel advertises the list it actually serves. The advert loop already read the figures once per channel — it just read the same ones every time — so this is the loop asking which list first, and skipping a channel with none bound. The advert is where #26's rule is most visible: a bot silently present in a channel it does not serve, rather than one announcing a library it will refuse to send from.
+
+What is left: the Settings page for defining lists.
 
 Two pieces were worth doing carefully rather than quickly, and one of them turned out the opposite way to what this section used to predict:
 

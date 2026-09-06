@@ -558,5 +558,86 @@ class SendingTheListArchive(ListCase):
         self.assertTrue([m for who, m in self.sent if who == "someone"])
 
 
+class TheAdvertFollowsTheChannel(ListCase):
+    """#26 stage 4. The advert loop already read the figures once per channel;
+    it just read the same ones every time."""
+
+    def source(self):
+        with io.open(os.path.join(REPO_ROOT, "announce.py"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_the_figures_are_read_for_that_channels_list(self):
+        """A count and a size from another channel's library is a claim
+        nobody there can act on."""
+        body = self.source()
+
+        self.assertIn("list_name_for_request(chan)", body)
+        self.assertIn("get_file_count_date_size_and_raw_bytes(wanted)", body)
+
+    def test_a_channel_with_no_list_is_not_advertised_in(self):
+        """The advert is where #26's rule is most visible: a bot silently
+        present in a channel it does not serve, rather than one announcing a
+        library it will refuse to send from."""
+        body = self.source()
+        after = body.split("list_name_for_request(chan)", 1)[1][:300]
+
+        self.assertIn("if wanted is None:", after)
+        self.assertIn("continue", after)
+
+    def test_the_lookup_precedes_the_figures(self):
+        """Reading the figures first and discarding them would still be
+        correct, and would also mean every channel paid for a list read it
+        was never going to use."""
+        body = self.source()
+
+        self.assertLess(body.index("list_name_for_request(chan)"),
+                        body.index("get_file_count_date_size_and_raw_bytes(wanted)"))
+
+    def test_the_counter_reads_the_list_it_is_asked_for(self):
+        """Behavioural, under the source checks above: the advert is only as
+        right as this is."""
+        lists_dir = os.path.join(self.tree.root, "lists")
+        films_dir = os.path.join(lists_dir, "Films")
+        os.makedirs(films_dir, exist_ok=True)
+        self.set_config(LOCAL_LIST_DIR=lists_dir, LIST_BASE_NAME="DCCore",
+                        NICKNAME="DCCore")
+        self.write([self.one(name="Music", primary=True, channels=["#music"]),
+                    self.one(name="Films", primary=False, channels=["#films"])])
+        with io.open(os.path.join(lists_dir, "DCCore-2026-09-06.txt"),
+                     "w", encoding="utf-8") as handle:
+            handle.write("header" + chr(10) + "!DCCore One.flac" + chr(10))
+        with io.open(os.path.join(films_dir, "DCCore-2026-09-06.txt"),
+                     "w", encoding="utf-8") as handle:
+            handle.write("header" + chr(10)
+                         + "!DCCore A.mkv" + chr(10)
+                         + "!DCCore B.mkv" + chr(10))
+
+        self.assertEqual(
+            list_mod.get_file_count_date_size_and_raw_bytes("Music")[0], 1)
+        self.assertEqual(
+            list_mod.get_file_count_date_size_and_raw_bytes("Films")[0], 2)
+
+    def test_a_list_with_no_index_says_so_even_when_another_has_one(self):
+        """The existence check and the date come from THIS list's index. With
+        them reading the primary's, a list that had never been built would
+        report the primary's date and be advertised as though it had - which
+        is the sentinel the advert skips on, so the channel would advertise a
+        library that does not exist."""
+        lists_dir = os.path.join(self.tree.root, "lists")
+        os.makedirs(lists_dir, exist_ok=True)
+        self.set_config(LOCAL_LIST_DIR=lists_dir, LIST_BASE_NAME="DCCore",
+                        NICKNAME="DCCore")
+        self.write([self.one(name="Music", primary=True, channels=["#music"]),
+                    self.one(name="Films", primary=False, channels=["#films"])])
+        with io.open(os.path.join(lists_dir, "DCCore-2026-09-06.txt"),
+                     "w", encoding="utf-8") as handle:
+            handle.write("header" + chr(10) + "!DCCore One.flac" + chr(10))
+
+        count, date, _size, _raw = list_mod.get_file_count_date_size_and_raw_bytes("Films")
+
+        self.assertEqual(date, "No List")
+        self.assertEqual(count, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
