@@ -1817,8 +1817,6 @@ def _settings_field(name, declared, value):
     if name in settings_file.CHOICES:
         field["choices"] = list(settings_file.CHOICES[name])
     return field
-
-
 def build_settings_payload():
     """GET /api/settings payload: every editable setting, grouped for the
     Settings view's category rail, plus whether an admin password is set.
@@ -1892,7 +1890,30 @@ def _settings_payload_unlocked(settings_file):
 # commands.py's CORE_MODULES, so a rehash after saving one of these three
 # cannot apply it live. Surfaced in the save response's "restart_required" so
 # the frontend can tell the operator, rather than implying "rehash" fixed it.
-SETTINGS_RESTART_ONLY = {"WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT"}
+# Settings a running daemon cannot pick up, whatever it reloads.
+#
+# NOT "everything to do with the network" - most of it IS live, and listing
+# those here would train an operator to ignore the notice. The DCC port range
+# is read per send, so a rehash applies it to the very next transfer; the
+# channel list is compared and JOIN/PARTed by the rehash itself.
+#
+# What is genuinely stuck is anything read ONCE, against a socket already open:
+#
+#   WEBUI_*        oserve.startup() starts the dashboard thread once, bound to
+#                  the host and port it read then. Changing them from inside
+#                  that dashboard cannot move it.
+#   SERVER / PORT  irc.py reads these in connect(), and the connection the bot
+#                  is on was made with the old ones. #302 named this exactly -
+#                  "when a user changes ports ... the changes do not take
+#                  effect immediately" - and they were the two missing here, so
+#                  the save said nothing and the operator was left to work out
+#                  why the bot was still on the old server.
+#
+# A restart is PROMPTED, not performed. #302 offered either; restarting a
+# process from inside itself while it holds live transfers is a different order
+# of risk from telling the operator what to do next.
+SETTINGS_RESTART_ONLY = {"WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
+                         "SERVER", "PORT"}
 
 
 # ---------------------------------------------------------------------

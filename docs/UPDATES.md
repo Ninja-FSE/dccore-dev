@@ -4,6 +4,36 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 Changing the server or port now says a restart is needed (#302)
+
+> when a user changes ports or other core configurations that affect `irc.py`
+> and `dcc.py`, the changes do not take effect immediately
+
+**Most of this already existed**, which is the useful part of the finding. The
+save already returns `restart_required` and the Settings page already turns it
+into a sentence - `SETTINGS_RESTART_ONLY` just did not contain `SERVER` or
+`PORT`. So the two settings the issue actually names were the two saved in
+silence, leaving an operator to work out for themselves why the bot was still
+on the old server.
+
+**What is deliberately NOT in that set matters as much as what is.** Most
+network settings ARE live: the DCC port range is read per send, so a rehash
+applies it to the very next transfer, and the channel list is compared and
+JOIN/PARTed by the rehash itself. Listing those would train an operator to
+ignore the notice, and a notice nobody reads is worse than none - so a test
+pins their absence as well as SERVER and PORT's presence.
+
+**Prompted, not performed.** #302 offered either, and restarting a process from
+inside itself while it holds live transfers is a different order of risk from
+telling the operator what to do next.
+
+One thing I did and undid: I wrote a second set, `SETTINGS_NEEDING_RESTART`,
+before finding the one that was already there. Two answers to "does this need a
+restart" is precisely how they drift, so it went - and a test now asserts there
+is only one.
+
+Five tests, three mutations, all caught.
+
 ### 🧊 A rehash was spending the queue's retries
 
 Neo:
