@@ -2023,6 +2023,129 @@ def build_folder_browse_payload(raw_path):
     }
 
 
+MAX_SERVED_LISTS = 16
+
+
+def build_lists_payload():
+    """GET /api/lists: every configured list, and whether one is implied.
+
+    `source` answers "is this what I configured, or what the daemon fell back
+    to", which the rows alone cannot: with no lists.json there is still
+    exactly one list in this payload - the implicit one, over whatever
+    FILE_DIRECTORY or the folder file resolved to - and an operator needs to
+    know that editing it is what makes it real.
+    """
+    import library
+
+    stored = library.load_lists()
+    rows = []
+    for entry in library.lists():
+        rows.append({
+            "name": entry.name,
+            "primary": entry.primary,
+            "channels": list(entry.channels),
+            "folders": [{"name": f.name, "path": f.path} for f in entry.folders],
+        })
+    return {
+        "lists": rows,
+        "source": "file" if stored else "implied",
+        "max_lists": MAX_SERVED_LISTS,
+    }
+
+
+def apply_list_changes(payload):
+    """POST /api/lists: validate the whole set, then write it.
+
+    Returns (http_status, payload_dict).
+
+    THE WHOLE SET, not each row, for the reason apply_folder_changes() gives
+    and one more of its own: two lists can each be perfectly good and still be
+    an invalid pair - the same channel bound to both, or the same name twice -
+    and only the set can show that.
+
+    AN EMPTY LIST IS ALLOWED and means "go back to one list over the
+    configured folders". The file is REMOVED rather than written as [],
+    because library.load_lists() already returns None for an empty file and
+    falls back - so writing [] would leave a file on disk that does nothing.
+
+    NO REHASH, same as folders: library.lists() re-reads on every call, so the
+    running daemon picks this up immediately. It does NOT rebuild the
+    published lists, and a list with no index is one nobody can request from -
+    hence rebuild_required.
+    """
+    import library
+
+    if not isinstance(payload, dict):
+        return 400, {"error": "Expected an object with a 'lists' list."}
+    rows = payload.get("lists")
+    if not isinstance(rows, list):
+        return 400, {"error": "'lists' must be a list."}
+    if len(rows) > MAX_SERVED_LISTS:
+        return 400, {"error": f"At most {MAX_SERVED_LISTS} lists."}
+
+    entries = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return 400, {"error": "Each list must be an object with a 'name'."}
+        name = str(row.get("name", "") or "").strip()
+        if len(name) > MAX_FOLDER_PATH_LEN:
+            return 400, {"error": f"A list name is longer than "
+                                  f"{MAX_FOLDER_PATH_LEN} characters."}
+        raw_channels = row.get("channels")
+        if raw_channels is None:
+            raw_channels = []
+        if not isinstance(raw_channels, list):
+            return 400, {"error": f"{name or 'A list'}: 'channels' must be a list."}
+        raw_folders = row.get("folders")
+        if raw_folders is None:
+            raw_folders = []
+        if not isinstance(raw_folders, list):
+            return 400, {"error": f"{name or 'A list'}: 'folders' must be a list."}
+        if len(raw_folders) > MAX_SERVED_FOLDERS:
+            return 400, {"error": f"{name or 'A list'}: at most "
+                                  f"{MAX_SERVED_FOLDERS} folders."}
+
+        folders = []
+        for folder in raw_folders:
+            if not isinstance(folder, dict):
+                return 400, {"error": "Each folder must be an object with "
+                                      "'name' and 'path'."}
+            raw_path = str(folder.get("path", "") or "").strip()
+            raw_name = str(folder.get("name", "") or "").strip()
+            if (len(raw_path) > MAX_FOLDER_PATH_LEN
+                    or len(raw_name) > MAX_FOLDER_PATH_LEN):
+                return 400, {"error": f"A folder path or label is longer than "
+                                      f"{MAX_FOLDER_PATH_LEN} characters."}
+            folders.append(library.Folder(
+                raw_name or library.default_label(raw_path), raw_path))
+
+        entries.append(library.ServedList(
+            name, bool(row.get("primary")),
+            [str(c).strip() for c in raw_channels if str(c).strip()],
+            folders))
+
+    if not entries:
+        import os as os_mod
+        try:
+            os_mod.remove(library.lists_file())
+        except OSError:
+            pass
+        return 200, {"lists": build_lists_payload()["lists"],
+                     "rebuild_required": True,
+                     "message": "Back to one list over the configured folders."}
+
+    try:
+        library.save_lists(entries)
+    except ValueError as err:
+        return 400, {"error": str(err)}
+    except OSError as err:
+        return 500, {"error": f"Could not write the list definitions: {err}"}
+
+    return 200, {"lists": build_lists_payload()["lists"],
+                 "rebuild_required": True,
+                 "message": "Saved. Rebuild the lists to publish them."}
+
+
 def apply_folder_changes(payload):
     """POST /api/folders: validate the whole set, then write it.
 
@@ -2690,6 +2813,16 @@ if HAVE_FLASK:
         def api_folders_save():
             body = json_object(request.get_json(silent=True))
             status, result = apply_folder_changes(body)
+            return jsonify(result), status
+
+        @app.route("/api/lists")
+        def api_lists():
+            return jsonify(build_lists_payload())
+
+        @app.route("/api/lists", methods=["POST"])
+        def api_lists_save():
+            body = json_object(request.get_json(silent=True))
+            status, result = apply_list_changes(body)
             return jsonify(result), status
 
         @app.route("/api/settings/password", methods=["POST"])

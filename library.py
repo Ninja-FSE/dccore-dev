@@ -469,6 +469,130 @@ def save_folders(entries, path=None):
     return entries
 
 
+def list_problems(entries):
+    """Every reason `entries` could not be served as a set of lists.
+
+    Returns [] when they are usable. Each message names the specific other
+    entry it conflicts with, for the same reason problems() does: "invalid
+    list configuration" tells an operator with four lists nothing about which
+    two to look at.
+
+    The FOLDER rules are not repeated here - problems() already owns them, and
+    each list's folders are put through it so a bad label is reported the same
+    way whichever screen it was typed on. Only the rules that are about lists
+    live here.
+    """
+    found = []
+    seen_names = {}
+    seen_channels = {}
+
+    for index, entry in enumerate(entries):
+        position = index + 1
+        name = str(getattr(entry, "name", "") or "").strip()
+
+        if not name:
+            found.append(f"list {position}: no name given. A list is bound to "
+                         f"channels and picked in this page by its name, so it "
+                         f"cannot be blank.")
+            continue
+
+        key = name.lower()
+        if key in seen_names:
+            # Case-insensitively, because list_by_name() matches that way and
+            # because on Windows two directories differing only in case are
+            # one directory.
+            found.append(f"{name!r}: there is already a list called "
+                         f"{seen_names[key]!r}.")
+        seen_names[key] = name
+
+        # No directory-collision check here. list.list_slug() is one-to-one by
+        # construction - a name it had to change carries a digest of the
+        # original - so two distinct names cannot share a directory, and a
+        # rule that can never fire is a branch no test can cover. The
+        # invariant is asserted where it lives, in list_slug()'s own tests.
+
+        for channel in getattr(entry, "channels", None) or []:
+            channel = str(channel).strip()
+            if not channel:
+                continue
+            if not channel.startswith(("#", "&")):
+                found.append(f"{name!r}: {channel!r} is not a channel name - "
+                             f"it must start with # or &.")
+                continue
+            low = channel.lower()
+            if low in seen_channels and seen_channels[low].lower() != key:
+                found.append(f"{channel} is bound to both {seen_channels[low]!r} "
+                             f"and {name!r}. A channel can only serve one list.")
+            seen_channels[low] = name
+
+        found.extend(f"{name!r}: {line}"
+                     for line in problems(getattr(entry, "folders", None) or []))
+
+    if entries and not any(getattr(e, "primary", False) for e in entries):
+        # Not fatal on LOAD - load_lists() promotes the first - but on a SAVE
+        # the operator is looking at the screen and can be told, because a
+        # private message has no channel and the primary is the only answer to
+        # which list it means.
+        found.append("no list is marked primary. A private message carries no "
+                     "channel, so one list has to be the one it means.")
+
+    return found
+
+
+def save_lists(entries, path=None):
+    """Write the list definitions, refusing a set that could not be served.
+
+    Raises ValueError naming every problem at once rather than the first, so
+    an operator fixing three things is told about three things.
+
+    Written to a temporary file and renamed, through the same
+    replace_with_retry() every other file here uses: a half-written lists file
+    read at startup would serve part of a configuration with no indication
+    anything was wrong.
+    """
+    prepared = []
+    for entry in entries:
+        folders_in = [Folder(getattr(f, "name", "") or default_label(getattr(f, "path", "")),
+                             getattr(f, "path", ""))
+                      for f in (getattr(entry, "folders", None) or [])]
+        prepared.append(ServedList(
+            str(getattr(entry, "name", "") or "").strip(),
+            bool(getattr(entry, "primary", False)),
+            [str(c).strip().lower() for c in (getattr(entry, "channels", None) or [])
+             if str(c).strip()],
+            folders_in))
+
+    found = list_problems(prepared)
+    if found:
+        raise ValueError("\n".join(found))
+
+    target = lists_file() if path is None else path
+    directory = os.path.dirname(os.path.abspath(target)) or "."
+    os.makedirs(platform_compat.long_path(directory), exist_ok=True)
+
+    payload = json.dumps(
+        [{"name": e.name, "primary": e.primary, "channels": list(e.channels),
+          "folders": [{"name": f.name, "path": f.path} for f in e.folders]}
+         for e in prepared],
+        indent=2, ensure_ascii=False)
+
+    handle = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", newline="\n", dir=directory,
+        prefix=".lists-", suffix=".tmp", delete=False)
+    try:
+        with handle:
+            handle.write(payload + "\n")
+        platform_compat.replace_with_retry(handle.name, target)
+    except BaseException:
+        try:
+            os.remove(handle.name)
+        except OSError:
+            pass
+        raise
+
+    return prepared
+
+
 def _configured_folders():
     """The folder set as configured, before lists existed.
 

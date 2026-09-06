@@ -872,6 +872,46 @@ html, body {
    `display: none` from the UA stylesheet, which ANY class rule outranks, so
    the row of buttons showed while the markup said it was hidden. Every
    element in here that carries `hidden` needs this pair. */
+/* #26's list blocks reuse the served-folder controls, so only what is new
+   to them is styled here. */
+.served-list-block {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.served-list-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.served-list-name {
+  flex: 1 1 auto;
+}
+
+.served-list-primary-label {
+  white-space: nowrap;
+  font-size: 0.9em;
+}
+
+.served-list-channels {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.list-folder-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.list-folder-path {
+  flex: 1 1 auto;
+}
+
 .filelists-filter-actions[hidden] {
   display: none;
 }

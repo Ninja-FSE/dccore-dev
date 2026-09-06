@@ -28,6 +28,7 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
 import defaults as config  # noqa: E402
 import library  # noqa: E402
 import list as list_mod  # noqa: E402
+import webserver  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 
@@ -637,6 +638,127 @@ class TheAdvertFollowsTheChannel(ListCase):
 
         self.assertEqual(date, "No List")
         self.assertEqual(count, 0)
+
+
+class DefiningListsFromTheDashboard(ListCase):
+    """#26 stage 5. The rules an operator meets the first time they define a
+    second list, and the endpoint pair that writes them."""
+
+    def entry(self, name, primary=False, channels=(), folders=None):
+        return {"name": name, "primary": primary, "channels": list(channels),
+                "folders": folders if folders is not None
+                else [{"name": "M", "path": self.tree.music}]}
+
+    def save(self, rows):
+        return webserver.apply_list_changes({"lists": rows})
+
+    def test_a_valid_set_is_written_and_read_back(self):
+        status, result = self.save([
+            self.entry("Music", primary=True, channels=["#music"]),
+            self.entry("Films", channels=["#films"])])
+
+        self.assertEqual(status, 200, result)
+        self.assertEqual([e.name for e in library.lists()], ["Music", "Films"])
+        self.assertEqual(library.list_for_request("#films").name, "Films")
+
+    def test_the_same_channel_twice_is_refused_by_name(self):
+        """"Invalid list configuration" tells an operator with four lists
+        nothing about which two to look at."""
+        status, result = self.save([
+            self.entry("Music", primary=True, channels=["#shared"]),
+            self.entry("Films", channels=["#SHARED"])])
+
+        self.assertEqual(status, 400)
+        self.assertIn("Music", result["error"])
+        self.assertIn("Films", result["error"])
+
+    def test_two_lists_with_the_same_name_are_refused(self):
+        """Case-insensitively: list_by_name() matches that way, and on Windows
+        two directories differing only in case are one directory."""
+        status, result = self.save([self.entry("Music", primary=True),
+                                    self.entry("music")])
+
+        self.assertEqual(status, 400)
+        self.assertIn("already a list called", result["error"])
+
+    def test_a_nameless_list_is_refused(self):
+        status, result = self.save([self.entry("", primary=True)])
+
+        self.assertEqual(status, 400)
+        self.assertIn("no name given", result["error"])
+
+    def test_something_that_is_not_a_channel_is_refused(self):
+        status, result = self.save([
+            self.entry("Music", primary=True, channels=["nohash"])])
+
+        self.assertEqual(status, 400)
+        self.assertIn("must start with # or &", result["error"])
+
+    def test_no_primary_is_refused_on_save(self):
+        """Not fatal on LOAD - load_lists() promotes the first - but on a save
+        the operator is looking at the screen and can be told."""
+        status, result = self.save([self.entry("Music"), self.entry("Films")])
+
+        self.assertEqual(status, 400)
+        self.assertIn("primary", result["error"])
+
+    def test_every_fault_is_reported_at_once(self):
+        """An operator fixing three things should be told about three
+        things."""
+        status, result = self.save([
+            self.entry("", channels=["nope"]),
+            self.entry("Films", channels=["#f"]),
+            self.entry("films", channels=["#f"])])
+
+        self.assertEqual(status, 400)
+        self.assertGreaterEqual(len(result["error"].split(chr(10))), 2)
+
+    def test_a_bad_folder_inside_a_list_is_reported_against_that_list(self):
+        """The folder rules are not repeated in list_problems() - problems()
+        already owns them - so a bad label has to come back named."""
+        status, result = self.save([
+            self.entry("Music", primary=True,
+                       folders=[{"name": "a/b", "path": self.tree.music}])])
+
+        self.assertEqual(status, 400)
+        self.assertIn("Music", result["error"])
+
+    def test_an_empty_set_goes_back_to_one_list(self):
+        """The file is REMOVED rather than written as [], because load_lists()
+        already falls back on an empty file - so [] would leave something on
+        disk that does nothing."""
+        self.save([self.entry("Music", primary=True, channels=["#music"])])
+        self.assertTrue(os.path.exists(self.store))
+
+        status, _result = self.save([])
+
+        self.assertEqual(status, 200)
+        self.assertFalse(os.path.exists(self.store))
+        self.assertEqual(len(library.lists()), 1)
+
+    def test_the_payload_says_whether_a_list_was_configured_or_implied(self):
+        """With no file there is still exactly one list in the payload - the
+        implicit one - and an operator needs to know editing it is what makes
+        it real."""
+        self.assertEqual(webserver.build_lists_payload()["source"], "implied")
+
+        self.save([self.entry("Music", primary=True)])
+
+        self.assertEqual(webserver.build_lists_payload()["source"], "file")
+
+    def test_more_lists_than_the_cap_are_refused(self):
+        status, _result = self.save(
+            [self.entry("L%d" % i, primary=(i == 0)) for i in range(40)])
+
+        self.assertEqual(status, 400)
+
+    def test_a_body_that_is_not_the_right_shape_is_refused(self):
+        for body in ("nope", {"lists": "nope"}, {"lists": ["nope"]},
+                     {"lists": [{"name": "A", "channels": "nope"}]},
+                     {"lists": [{"name": "A", "folders": "nope"}]}):
+            with self.subTest(body=body):
+                status, _result = webserver.apply_list_changes(body)
+                self.assertEqual(status, 400)
 
 
 if __name__ == "__main__":

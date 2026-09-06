@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **More than one list, each over its own folders and its own channels.** You can now serve, say, a music list in one channel and a film list in another — each built from its own folders, each advertising its own count and size, and each answering `@yourbot`, `@find` and file requests only where you have said it belongs. A channel you have not given a list to is one the bot stays quiet in. Set them up under **Settings → Paths**; if you serve one list, nothing changes and the folder editor is exactly where it was.
+
 - **Setup now offers to bring your OmenServe totals across.** If you are migrating, `configure.py` asks for your mIRC `scripts/vars.ini`, shows exactly what it found, and writes it only after you say yes — instead of you having to know the Stats page can do it. Getting the path wrong, or pointing it at a file with nothing in it, just says so and carries on with the rest of setup.
 
 - **A list rebuild now tells you when two files share a name.** If the same filename sits in two folders, only the first copy can ever be sent — a request names a file, not a path, so anyone asking for the second one silently receives the first instead. The dashboard's **Tools ▸ Verify list** has always been able to show you these; now the rebuild says how many it found, so you hear about it without going to look.
