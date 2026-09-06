@@ -450,6 +450,23 @@ FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever the
 # other command, so this must stay well below MAX_REQUESTS (per REQUEST_WINDOW)
 # or a bot answering your own fetch requests can trip the flood gate and be muted.
 MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
+
+# The largest folder !rar will pack, in bytes. 0 means no limit.
+#
+# NOTHING BOUNDED THIS BEFORE. A request packs whatever the folder holds, and
+# the only thing that ever stopped it was RAR_TIMEOUT - by which point the
+# archive is already on disk in TMP_ZIP_DIR, the pack slot has been held for
+# half an hour, and the requester has had no answer. The film list made it
+# reachable rather than theoretical: it publishes folder headings inside the
+# archive every user downloads, and a heading can be pasted straight back as a
+# request, so a folder deliberately kept out of the album list is nameable by
+# anyone in the channel.
+#
+# 10 GB is chosen to refuse the pathological case without refusing anything
+# real: a FLAC album is a few hundred megabytes and a large box set is a few
+# gigabytes, while the folders this exists for are tens or hundreds. An
+# operator who genuinely serves larger albums can raise it or set 0.
+MAX_RAR_FOLDER_SIZE: int = 10 * 1024 * 1024 * 1024   # 10 GB - refuse to pack more than this
 # A "list" request_type row (a fetched master-list zip, see list_fetch.py) is a
 # text index, never a real download - a whole 1.21TB/47,420-file library
 # compresses to a few MB. MAX_FETCH_FILE_SIZE's 200MB let a hostile "list" offer
