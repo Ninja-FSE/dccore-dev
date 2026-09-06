@@ -1970,6 +1970,20 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 if oserve: oserve.total_sent_bytes += len(chunk)
                 
         transfer_completed = True
+        # THE CLOCK STOPS WHEN THE BYTES DO. Everything below this line is
+        # settling: 1.5 seconds for the receiver to close its file calmly,
+        # another half-second further down, and the statistics write. None of
+        # it is transfer time, and all of it used to be counted as transfer
+        # time because the duration was measured from start_time at the very
+        # end of the function.
+        #
+        # Two seconds of it, against files that mostly take less than that.
+        # A 10 MB file at 46 MB/s takes 0.22s and was reported at 4.5 MB/s -
+        # a tenth of the real rate - which is what "it feels slower than
+        # mIRC" turned out to mean. The transfer was never slow; the number
+        # was. It also fed the speed RECORD and the advert, so the figure the
+        # channel saw was wrong in the same direction.
+        transfer_finished_at = time.time()
         print(f"[DCC-SUCCESS] Sent the whole file to {user} with no errors.")
         # The original pause: gives mIRC 1.5 seconds to close the file calmly
         try: time.sleep(1.5)
@@ -2035,7 +2049,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             pass
 
         # The real-time speed counter
-        acute_duration = time.time() - (start_time if 'start_time' in locals() else time.time())
+        # transfer_finished_at is set the instant the last byte went out; it
+        # only exists on the path that actually completed a transfer, so the
+        # fallbacks below cover the abort paths that reach here without one.
+        _ended = (transfer_finished_at if 'transfer_finished_at' in locals()
+                  else time.time())
+        acute_duration = _ended - (start_time if 'start_time' in locals() else _ended)
         if acute_duration <= 0:
             acute_duration = 0.1
             
