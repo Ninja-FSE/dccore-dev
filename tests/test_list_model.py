@@ -761,5 +761,66 @@ class DefiningListsFromTheDashboard(ListCase):
                 self.assertEqual(status, 400)
 
 
+class FileDirectoryIsOnlyTheFallback(ListCase):
+    """Neo: "under Paths & Storage, this is not needed anymore".
+
+    Not quite - it is still what an install with no folder list serves from,
+    which is most of them. But three places treated it as the ONLY truth, and
+    two of those were bugs an operator with folders configured would meet.
+    """
+
+    def test_startup_asks_the_library_not_the_setting(self):
+        """A stale FILE_DIRECTORY pointing at a drive that is no longer there
+        made the daemon REFUSE TO BOOT, while the folders it actually serves
+        from sat there perfectly readable. A setting nothing reads any more
+        was able to stop the bot starting."""
+        with io.open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
+            code = chr(10).join(line.split("#", 1)[0]
+                                for line in handle.read().splitlines())
+        body = code.split("def startup(", 1)[1].split(chr(10) + "def ", 1)[0]
+
+        self.assertIn("library.folders()", body)
+        self.assertNotIn("if not config.FILE_DIRECTORY:", body)
+        self.assertNotIn("os.path.exists(config.FILE_DIRECTORY)", body)
+
+    def test_startup_refuses_only_when_nothing_at_all_is_readable(self):
+        """EVERY one missing, not any one. A single unavailable folder is a
+        scan-time condition the build already skips with a warning; only a
+        library with nothing readable at all is a real misconfiguration."""
+        with io.open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        body = code.split("def startup(", 1)[1].split(chr(10) + "def ", 1)[0]
+
+        self.assertIn("not any(os.path.exists(folder.path)", body)
+
+    def test_the_build_no_longer_reads_it_at_all(self):
+        """A single-folder leftover: `scan_root` built from FILE_DIRECTORY and
+        then immediately overwritten inside the per-folder loop. Dead since
+        #164 - and it is exactly the kind of leftover that makes a superseded
+        setting look load-bearing."""
+        with io.open(os.path.join(REPO_ROOT, "update_list.py"), encoding="utf-8") as handle:
+            code = chr(10).join(line.split("#", 1)[0]
+                                for line in handle.read().splitlines())
+
+        self.assertNotIn("config.FILE_DIRECTORY", code)
+
+    def test_the_settings_label_says_it_is_a_fallback(self):
+        """Presenting it as a plain "Music directory" beside a folder editor
+        that overrides it is what made it read as the setting that matters."""
+        import webserver
+
+        label = webserver.SETTINGS_LABELS["FILE_DIRECTORY"]
+
+        self.assertIn("only when no folders", label)
+
+    def test_it_is_still_what_an_install_with_no_folder_list_serves(self):
+        """The half of Neo's point that is not true: removing it would take
+        the fallback with it, and that is what every install without a folder
+        file is using."""
+        self.set_config(FILE_DIRECTORY=self.tree.music)
+
+        self.assertEqual([f.path for f in library.folders()], [self.tree.music])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1730,7 +1730,12 @@ SETTINGS_LABELS = {
 
     "LIST_BASE_NAME": "List base name",
     "PAUSE_ON_UPDATE": "Pause sharing during !update",
-    "FILE_DIRECTORY": "Music directory",
+    # Named for what it now IS. Neo: "under Paths & Storage, this is not
+    # needed anymore" - not quite, it is still the fallback for an install
+    # with no folder list, which is most of them. But presenting it as a
+    # plain "Music directory" beside a folder editor that overrides it is
+    # what made it read as the setting that matters.
+    "FILE_DIRECTORY": "Music directory (used only when no folders are set)",
     "LIST_FORMAT": "List delivery format",
     "LIST_IGNORED_EXTENSIONS": "File types to leave out of the list",
     "SEPARATE_VIDEO_LIST": "Publish film and series as a separate list",
