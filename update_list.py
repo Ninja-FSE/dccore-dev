@@ -1102,7 +1102,8 @@ def generate_master_list(list_name=None):
 
             if serve_albums:
                 f_rar.write(f"List of Entire Album Folders (!rar) for !{config.NICKNAME} generated on {date_header_str}\n")
-                f_rar.write(f"To request an entire album, copy/paste the line... eg. !{config.NICKNAME} !rar D:\\MUSIC\\Album\\\n")
+                f_rar.write(f"To request an entire album, copy/paste the line... eg. "
+                            f"!{config.NICKNAME} !rar {list_mod.LIST_FOLDER_PREFIX}Album\\\n")
                 # Same order as the .txt above, and for the same reason. The
                 # !rar list is a separate download that travels on its own, so
                 # it carries its own copy rather than inheriting one.
@@ -1119,7 +1120,8 @@ def generate_master_list(list_name=None):
                     current_folder = folder
                     
                     # The text list gets the complete subfolder (e.g. \Digital Media 1\)
-                    raw_folder_str = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
+                    raw_folder_str = (f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\"
+                                      if folder else list_mod.LIST_FOLDER_PREFIX)
                     display_folder = raw_folder_str.replace("/", "\\")
                     
                     # The rule is drawn to the width of the folder line it wraps, not
@@ -1191,7 +1193,7 @@ def generate_master_list(list_name=None):
                             # refused artist root is not.
                             rar_folder_clean = folder
 
-                        raw_rar_str = f"D:\\MUSIC\\{rar_folder_clean}\\"
+                        raw_rar_str = f"{list_mod.LIST_FOLDER_PREFIX}{rar_folder_clean}\\"
                         display_rar_folder = raw_rar_str.replace("/", "\\")
                         
                         # Write the row exactly once per album to the .rar text file.
@@ -1286,7 +1288,8 @@ def generate_master_list(list_name=None):
                 for folder, filename, bytes_size in video_files_data:
                     if folder != video_folder:
                         video_folder = folder
-                        raw = f"D:\\MUSIC\\{folder}\\" if folder else "D:\\MUSIC\\"
+                        raw = (f"{list_mod.LIST_FOLDER_PREFIX}{folder}\\"
+                               if folder else list_mod.LIST_FOLDER_PREFIX)
                         line = _one_line(raw.replace("/", "\\"))
                         rule = "=" * len(line)
                         f_video.write(f"\n{rule}\n{line}\n{rule}\n")

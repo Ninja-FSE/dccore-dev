@@ -1459,7 +1459,17 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                     # trailing-backslash/separator handling),
                                     # which could silently drift from the
                                     # original if the list format ever changed.
-                                    if back_line.upper().startswith(list_mod.LIST_FOLDER_PREFIX):
+                                    # ANY known prefix, not just the one
+                                    # we write. This is what RECOGNISES
+                                    # a heading, so checking only the
+                                    # current prefix stops seeing the
+                                    # headings in every list already in
+                                    # somebody's hands - a bare request
+                                    # against one then resolves nothing
+                                    # at all. Found by the test that
+                                    # counts resolutions.
+                                    if any(back_line.upper().startswith(p)
+                                           for p in list_mod.LIST_FOLDER_PREFIXES):
                                         # No explicit base: the heading itself
                                         # says which folder it belongs to once
                                         # there is more than one (#164), and

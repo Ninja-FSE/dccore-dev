@@ -98,8 +98,8 @@ class EveryFolderContributes(ScanCase):
         text and nothing could tell them apart on the way back."""
         body = self.build()
 
-        self.assertIn("D:\\MUSIC\\Flac\\Pink Floyd\\Animals\\", body)
-        self.assertIn("D:\\MUSIC\\Mp3\\Pink Floyd\\Animals\\", body)
+        self.assertIn("D:\\MEDIA\\Flac\\Pink Floyd\\Animals\\", body)
+        self.assertIn("D:\\MEDIA\\Mp3\\Pink Floyd\\Animals\\", body)
 
     def test_the_count_covers_every_folder(self):
         self.build()
@@ -110,8 +110,8 @@ class EveryFolderContributes(ScanCase):
         self.build()
         rows = [l for l in self.rar_body().split("\n") if l.startswith("!")]
 
-        self.assertIn("!Bot !rar D:\\MUSIC\\Flac\\Pink Floyd\\Animals\\", rows)
-        self.assertIn("!Bot !rar D:\\MUSIC\\Mp3\\Pink Floyd\\Animals\\", rows)
+        self.assertIn("!Bot !rar D:\\MEDIA\\Flac\\Pink Floyd\\Animals\\", rows)
+        self.assertIn("!Bot !rar D:\\MEDIA\\Mp3\\Pink Floyd\\Animals\\", rows)
 
     def test_every_written_row_resolves_back_to_a_real_folder(self):
         """The round trip, which is the property that actually matters: a row
@@ -142,7 +142,7 @@ class OneFolderIsLabelledToo(ScanCase):
     def test_the_single_folders_label_leads_the_path(self):
         body = self.build()
 
-        self.assertIn("D:\\MUSIC\\Library\\Artist\\Album\\", body)
+        self.assertIn("D:\\MEDIA\\Library\\Artist\\Album\\", body)
 
     def test_it_still_resolves(self):
         self.build()
@@ -173,7 +173,7 @@ class AMissingFolderCostsOnlyItself(ScanCase):
         body = self.build()
 
         self.assertIn("here.flac", body)
-        self.assertIn("D:\\MUSIC\\Present\\Artist\\Album\\", body)
+        self.assertIn("D:\\MEDIA\\Present\\Artist\\Album\\", body)
 
     def test_the_missing_folder_is_named_in_the_log(self):
         """Silently shrinking is the failure mode to avoid: an operator whose
@@ -192,7 +192,7 @@ class AMissingFolderCostsOnlyItself(ScanCase):
     def test_nothing_from_the_missing_folder_is_listed(self):
         body = self.build()
 
-        self.assertNotIn("D:\\MUSIC\\Gone\\", body)
+        self.assertNotIn("D:\\MEDIA\\Gone\\", body)
 
 
 class TheOrderIsTheOperators(ScanCase):

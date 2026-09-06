@@ -176,7 +176,7 @@ class TheFolderResolver(DCCoreTestCase):
             os.path.join(config.FILE_DIRECTORY, "3 Greek", "Yovel", "2020 - X"))
 
     def test_a_heading_with_no_folder_is_the_library_root(self):
-        self.assertEqual(list_mod.resolve_list_folder("D:\\MUSIC\\"),
+        self.assertEqual(list_mod.resolve_list_folder("D:\\MEDIA\\"),
                          config.FILE_DIRECTORY)
 
     def test_an_entry_that_carried_no_heading_is_the_library_root(self):

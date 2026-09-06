@@ -1568,7 +1568,7 @@ class TheAlbumList(MasterListCase):
         # The old bug's own row - the refused artist root alone - must not
         # appear as a substitute for the real one.
         rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
-        self.assertNotIn("!DCCore !rar D:\\MUSIC\\Pink Floyd\\", rar_lines)
+        self.assertNotIn("!DCCore !rar D:\\MEDIA\\Pink Floyd\\", rar_lines)
 
     def test_a_media_markt_style_folder_is_not_mistaken_for_media(self):
         """The same substring bug, the "\\media" box word this time."""
@@ -1590,7 +1590,7 @@ class TheAlbumList(MasterListCase):
             rar_text = handle.read()
         self.assertIn("The Wall", rar_text)
         rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
-        self.assertNotIn("!DCCore !rar D:\\MUSIC\\Rock\\Pink Floyd\\", rar_lines,
+        self.assertNotIn("!DCCore !rar D:\\MEDIA\\Rock\\Pink Floyd\\", rar_lines,
                          "must not collapse to the whole-discography folder")
 
     def test_truncation_never_collapses_to_the_artist_root(self):
@@ -1602,7 +1602,7 @@ class TheAlbumList(MasterListCase):
         with open(self.rar_path(), encoding="utf-8") as handle:
             rar_text = handle.read()
         rar_lines = [l for l in rar_text.split("\n") if l.startswith("!")]
-        self.assertNotIn("!DCCore !rar D:\\MUSIC\\SomeArtist\\", rar_lines,
+        self.assertNotIn("!DCCore !rar D:\\MEDIA\\SomeArtist\\", rar_lines,
                          "must never offer the bare artist root")
 
     def test_earliest_matching_segment_wins_not_list_order(self):
@@ -1626,8 +1626,8 @@ class TheAlbumList(MasterListCase):
 
         # "Disc 1" is the earliest matching segment - truncating there leaves
         # the label plus Artist/Album, the real album.
-        self.assertIn(f"!DCCore !rar D:\\MUSIC\\{label}\\Artist\\Album\\", rar_lines)
-        self.assertNotIn(f"!DCCore !rar D:\\MUSIC\\{label}\\Artist\\Album\\Disc 1\\",
+        self.assertIn(f"!DCCore !rar D:\\MEDIA\\{label}\\Artist\\Album\\", rar_lines)
+        self.assertNotIn(f"!DCCore !rar D:\\MEDIA\\{label}\\Artist\\Album\\Disc 1\\",
                          rar_lines,
                          "must not stop at the later 'CD' match instead of "
                          "the earlier 'Disc' one")
@@ -1649,9 +1649,9 @@ class TheAlbumList(MasterListCase):
 
         label = library.folders()[0].name
 
-        self.assertNotIn(f"!DCCore !rar D:\\MUSIC\\{label}\\SoloArtist\\", rar_lines,
+        self.assertNotIn(f"!DCCore !rar D:\\MEDIA\\{label}\\SoloArtist\\", rar_lines,
                          "truncated to the artist root, which cannot be requested")
-        self.assertIn(f"!DCCore !rar D:\\MUSIC\\{label}\\SoloArtist\\Disc 1\\",
+        self.assertIn(f"!DCCore !rar D:\\MEDIA\\{label}\\SoloArtist\\Disc 1\\",
                       rar_lines,
                       "the untruncated path is still a request dcc.py serves")
 
