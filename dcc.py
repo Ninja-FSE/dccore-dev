@@ -1071,6 +1071,72 @@ def check_queue_and_send(irc_sock, completed_user):
                     break
 
 
+def transfers_are_paused():
+    """Is the bot holding new sends while something finishes?
+
+    Set around a rehash (#310, Neo's): a reload swaps the modules a running
+    transfer is inside, so the safe order is stop starting new ones, let the
+    ones in flight finish, reload, then start again.
+
+    Deliberately NOT update_inprogress. That flag means "the list is being
+    rebuilt" and the notice a user gets says so - telling somebody the list is
+    rebuilding when it is not is the kind of small untruth that makes every
+    other message less believable.
+    """
+    return bool(getattr(config, "transfers_paused", False))
+
+
+def wait_for_transfers_to_finish(timeout=None, poll=0.5, sleep=None,
+                                 log=print):
+    """Stop starting new sends, then wait for the ones in flight to end.
+
+    Returns True if the bot went quiet, False if the timeout ran out first.
+
+    A TIMEOUT IS NOT OPTIONAL. A transfer can sit at "receiving" for as long
+    as the far end keeps the socket open and does nothing, and a rehash that
+    waits for it waits for ever - an admin typing !rehash and getting silence
+    is worse than one whose transfers were interrupted, because at least the
+    second one knows what happened.
+
+    Returning False is not a failure to report and stop on: the caller carries
+    on and reloads anyway, having done what it could. That is the honest
+    trade - the alternative is a bot that cannot be reconfigured while one
+    stuck peer holds a socket.
+    """
+    import time as time_mod
+
+    naptime = sleep or time_mod.sleep
+    if timeout is None:
+        timeout = float(getattr(config, "REHASH_TRANSFER_WAIT", 120))
+
+    config.transfers_paused = True
+    deadline = time_mod.time() + max(0.0, float(timeout))
+    announced = False
+
+    while True:
+        active = list(getattr(config, "active_transfers", []) or [])
+        if not active:
+            if announced:
+                log("[REHASH WAIT] Every transfer finished; reloading now.")
+            return True
+        if time_mod.time() >= deadline:
+            log(f"[REHASH WAIT] {len(active)} transfer(s) still running after "
+                f"{timeout:.0f}s - reloading anyway. They may be interrupted.")
+            return False
+        if not announced:
+            announced = True
+            log(f"[REHASH WAIT] Waiting for {len(active)} transfer(s) to "
+                f"finish before reloading. No new sends will start.")
+        naptime(poll)
+
+
+def resume_transfers():
+    """Let sends start again. Always called, even when the wait timed out -
+    a rehash that failed to quiesce must not leave the bot permanently
+    refusing to send."""
+    config.transfers_paused = False
+
+
 def handle_download_request(irc_sock, user, requested_file, target_chan):
     """Runs when somebody requests a file, or a whole folder via !rar."""
     # ---------------------------------------------------------------------
@@ -1122,6 +1188,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
     # unconditionally and search_inprogress only when PAUSE_ON_UPDATE is on,
     # so gating on update_inprogress behind the same switch refuses exactly
     # what it refused before.
+    # A rehash is quiescing: new sends wait, in-flight ones finish. Its own
+    # message, because "the list is rebuilding" would not be true.
+    if transfers_are_paused():
+        oserve = sys.modules.get('oserve')
+        if oserve:
+            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: The bot is reloading its configuration. Your request is not lost - try again in a moment.\r\n")
+        print(f"[MAINTENANCE BLOCK] Held a file request from {user}: a rehash "
+              f"is waiting for transfers to finish.")
+        return
+
     if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'update_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
         if oserve:
