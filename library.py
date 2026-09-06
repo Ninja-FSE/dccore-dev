@@ -55,6 +55,164 @@ Folder = collections.namedtuple("Folder", ("name", "path"))
 _DRIVE_PREFIX_RE = re.compile(r"^[A-Za-z]:")
 
 
+# One served list: a name, the folders it is built from, and the channels it
+# answers in. #26's design, and the first piece of it.
+#
+# A named tuple for the same reason Folder is one, and `folders` inside it for
+# the reason FUTURE.md gives: the folder set MOVES INSIDE A LIST at this point,
+# and every caller reaches it through library.folders() rather than reading a
+# setting - so the move rebinds one accessor instead of touching every call
+# site a second time.
+#
+# `channels` is empty on the implicit list, and empty means "every channel"
+# only for the primary. Once a channel can be bound to a list, an unbound
+# channel gets nothing - that is #26's rule, not this stage's, and nothing
+# here enforces it yet.
+ServedList = collections.namedtuple(
+    "ServedList", ("name", "primary", "channels", "folders"))
+
+# What a single-list install is called. It is an operator-facing name that no
+# user ever types - #26 is explicit that list names are never typed in a
+# channel - so it only has to be recognisable in the dashboard and the log.
+DEFAULT_LIST_NAME = "Main"
+
+
+def lists_file():
+    """Where the list definitions live.
+
+    Resolved per call for the same reason folders_file() is: !rehash reloads
+    config, and a path baked in at import would keep pointing at the old
+    location for the life of the process.
+    """
+    return getattr(config, "LISTS_FILE", os.path.join("data", "lists.json"))
+
+
+def load_lists(path=None):
+    """The lists as stored, or None if there is no usable file.
+
+    None rather than [] on any problem, exactly as load_folders() does and for
+    exactly the same reason: [] would read as "the operator configured no
+    lists" and serve nothing, when the truth is "we could not read the file".
+    lists() then falls back to the single implicit list, which is what every
+    install has today.
+    """
+    target = lists_file() if path is None else path
+    try:
+        with io.open(platform_compat.long_path(target), encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+    if not isinstance(raw, list):
+        print(f"[LIBRARY] {target} does not contain a list of lists; "
+              f"falling back to the single list.")
+        return None
+
+    entries = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "") or "").strip()
+        if not name:
+            continue
+        folders_in = []
+        for folder in item.get("folders") or []:
+            if not isinstance(folder, dict):
+                continue
+            folder_path = str(folder.get("path", "") or "").strip()
+            if not folder_path:
+                continue
+            label = (str(folder.get("name", "") or "").strip()
+                     or default_label(folder_path))
+            folders_in.append(Folder(label, folder_path))
+        channels = [str(c).strip().lower()
+                    for c in (item.get("channels") or []) if str(c).strip()]
+        entries.append(ServedList(name, bool(item.get("primary")),
+                                  channels, folders_in))
+
+    if not entries:
+        return None
+
+    # EXACTLY ONE PRIMARY, decided here rather than left to callers. A private
+    # message carries no channel, so the primary is the only answer to "which
+    # list does this request mean" - and "none of them" or "two of them" are
+    # both answers that would have to be handled at every call site instead of
+    # once. A file with no primary makes the first list primary; a file with
+    # several keeps the first and demotes the rest.
+    primary_seen = False
+    resolved = []
+    for entry in entries:
+        if entry.primary and not primary_seen:
+            primary_seen = True
+            resolved.append(entry)
+        else:
+            resolved.append(entry._replace(primary=False))
+    if not primary_seen:
+        resolved[0] = resolved[0]._replace(primary=True)
+    return resolved
+
+
+def lists():
+    """Every list this bot serves, in the operator's order, primary included.
+
+    WITH NO lists.json - every install today - this is ONE list built from
+    whatever folders() already resolved: the folder file if there is one, and
+    FILE_DIRECTORY if there is not. So a caller reading this sees exactly what
+    it saw before lists existed, and an install that has chosen no folder at
+    all gets one list with no folders rather than no lists, which keeps "which
+    list is this request for" answerable on a fresh install.
+    """
+    stored = load_lists()
+    if stored:
+        return stored
+    return [ServedList(DEFAULT_LIST_NAME, True, [], _configured_folders())]
+
+
+def primary_list():
+    """The list a request with no channel belongs to.
+
+    A private message carries no channel, which is the whole reason a primary
+    exists. load_lists() guarantees exactly one, so this cannot come back
+    empty-handed while any list is configured at all.
+    """
+    every = lists()
+    for entry in every:
+        if entry.primary:
+            return entry
+    return every[0]
+
+
+def list_for_channel(channel):
+    """The list bound to `channel`, or None if nothing is bound to it.
+
+    None is a real answer and not a fallback to the primary: #26's rule is
+    that a channel with no list bound gets nothing - no advert, no requests
+    answered - and quietly serving the primary instead would be the opposite
+    of that. The caller decides what to do about it; nothing calls this yet.
+
+    Matched case-insensitively, because IRC channel names are.
+    """
+    wanted = str(channel or "").strip().lower()
+    if not wanted:
+        return None
+    for entry in lists():
+        if wanted in entry.channels:
+            return entry
+    return None
+
+
+def list_by_name(name):
+    """The list an operator named, or None. Case-insensitive: the name is
+    typed into a dashboard field, not compared against anything on the wire."""
+    wanted = str(name or "").strip().lower()
+    if not wanted:
+        return None
+    for entry in lists():
+        if entry.name.strip().lower() == wanted:
+            return entry
+    return None
+
+
 def folders_file():
     """Where the folder list lives.
 
@@ -271,18 +429,18 @@ def save_folders(entries, path=None):
     return entries
 
 
-def folders():
-    """Every folder this bot serves, in the order they are served.
+def _configured_folders():
+    """The folder set as configured, before lists existed.
 
-    The order is the operator's: it decides the order the list is built in,
-    and which folder wins when the same relative path exists in two of them.
+    The folder file if there is one, FILE_DIRECTORY if there is not, and []
+    if neither - which is the honest answer to "which folders are configured"
+    on an install that has not chosen one yet. Callers already handle that,
+    because FILE_DIRECTORY is deliberately allowed to be blank until the
+    dashboard sets it.
 
-    With no folder file - every install today - this is one entry built from
-    FILE_DIRECTORY, so callers see exactly what they saw before this module
-    existed. An unset FILE_DIRECTORY gives [], which is the honest answer to
-    "which folders are configured" on an install that has not chosen one yet;
-    callers already handle that case, because FILE_DIRECTORY is deliberately
-    allowed to be blank until the dashboard sets it.
+    Split out from folders() so lists() can build the implicit list from the
+    same resolution rather than a copy of it. That is the whole point of this
+    stage: one answer to "which folders", reached one way.
     """
     stored = load_folders()
     if stored:
@@ -292,6 +450,29 @@ def folders():
     if not single:
         return []
     return [Folder(default_label(single), single)]
+
+
+def folders(name=None):
+    """Every folder a list is built from, in the order they are served.
+
+    The order is the operator's: it decides the order the list is built in,
+    and which folder wins when the same relative path exists in two of them.
+
+    `name` picks a list; without one this is the PRIMARY list's folders, which
+    on every install today is the only list there is. That default is what
+    lets the thirteen existing callers stay exactly as they are - FUTURE.md's
+    own argument for putting the accessor in first: the folder set moving
+    inside a list rebinds this function rather than touching every call site a
+    second time.
+
+    An unknown name returns [] rather than falling back to the primary. A
+    caller asking for a list that is not configured has a bug, and serving it
+    somebody else's folders would hide that behind plausible-looking output.
+    """
+    if name is None:
+        return primary_list().folders
+    chosen = list_by_name(name)
+    return chosen.folders if chosen else []
 
 
 def folder_paths():

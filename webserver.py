@@ -1664,7 +1664,7 @@ SETTINGS_CATEGORIES = (
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES",
-                                                "LIBRARY_FOLDERS_FILE"]),
+                                                "LIBRARY_FOLDERS_FILE", "LISTS_FILE"]),
     ("advertising",   "Advertising & search",  ["THEME", "CUSTOM_THEME_BORDER", "CUSTOM_THEME_SEPARATOR",
                                                 "CUSTOM_THEME_TEXTBOX", "CUSTOM_THEME_VALUE",
                                                 "CUSTOM_THEME_ALERT", "CUSTOM_THEME_ACCENT",
@@ -1744,6 +1744,7 @@ SETTINGS_LABELS = {
     "LIST_HEADER_FILE": "List banner file",
     "LIST_HEADER_MAX_BYTES": "List banner size limit (bytes)",
     "LIBRARY_FOLDERS_FILE": "Served folders file",
+    "LISTS_FILE": "Served lists file",
 
     "THEME": "Colour theme",
     "CUSTOM_THEME_BORDER": "Custom theme: border colour",
