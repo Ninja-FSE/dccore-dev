@@ -407,5 +407,50 @@ class TheConsoleGate(DashboardRouteCase):
         self.assertEqual(self.client.get("/api/queue").status_code, 200)
 
 
+class WhatNeedsARestartToTakeEffect(DashboardRouteCase):
+    """#302: "when a user changes ports or other core configurations that
+    affect irc.py and dcc.py, the changes do not take effect immediately."
+
+    The notice already existed - the save returns `restart_required` and the
+    page shows it. SERVER and PORT were simply not in the set, so the two
+    settings the issue actually names were saved in silence.
+    """
+
+    def test_the_server_and_port_are_named(self):
+        self.assertIn("SERVER", webserver.SETTINGS_RESTART_ONLY)
+        self.assertIn("PORT", webserver.SETTINGS_RESTART_ONLY)
+
+    def test_settings_a_rehash_really_does_apply_are_not(self):
+        """Listing those would train an operator to ignore the notice. The DCC
+        port range is read per send, so a rehash applies it to the very next
+        transfer; the channel list is JOIN/PARTed by the rehash itself."""
+        for name in ("DCC_PORT_START", "DCC_PORT_END", "CHANNEL",
+                     "FILE_DIRECTORY", "MAX_DCC_SLOTS"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, webserver.SETTINGS_RESTART_ONLY)
+
+    def test_there_is_one_answer_to_the_question(self):
+        """A second set was written and deleted during this change. Two
+        answers to "does this need a restart" is how they drift."""
+        self.assertFalse(hasattr(webserver, "SETTINGS_NEEDING_RESTART"))
+
+    def test_a_save_that_changes_the_server_says_so(self):
+        self.log_in()
+
+        resp = self.client.post("/api/settings", json={"SERVER": "irc.example.org"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("SERVER", resp.get_json().get("restart_required", []))
+
+    def test_a_save_that_changes_something_live_does_not(self):
+        """The notice is only worth anything if it stays rare."""
+        self.log_in()
+
+        resp = self.client.post("/api/settings", json={"MAX_DCC_SLOTS": "4"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json().get("restart_required", []), [])
+
+
 if __name__ == "__main__":
     unittest.main()

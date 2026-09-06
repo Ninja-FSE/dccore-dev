@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changing the IRC server or port now tells you a restart is needed.** The dashboard already warned you about settings a running bot cannot pick up — but the server and port were missing from that list, so those two saved silently and left you wondering why the bot was still connected to the old one. Settings a rehash genuinely does apply live, like the DCC port range and your channel list, are still not listed: a warning that appears too often is one you stop reading.
+
 - **Fixed: `!rehash` could delete a user's queue.** Every rehash wakes the queue to let waiting users into free slots — and if that attempt could not go ahead because the bot has no usable public address set, the failure was counted against the *user*. Three rehashes and their queue was silently gone. A missing address is the bot's configuration, not the user's problem, so it no longer costs them anything; a genuinely missing file still does, which is what stops a dead entry being retried for ever.
 
 - **Your held lists can keep themselves up to date.** Turn on **`AUTO_REFETCH_LISTS`** and the bot re-fetches a list when the bot that published it starts advertising a different one — using the same "has this moved on?" check the List Browser already shows you, so it never re-asks for a list that has not changed, and never acts when it cannot tell. Off by default, since it spends other people's bandwidth; `AUTO_REFETCH_INTERVAL_HOURS` sets how stale a list may get and `AUTO_REFETCH_MAX_PER_RUN` how many are asked for at once.
