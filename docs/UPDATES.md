@@ -4,6 +4,54 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📥 Two reasons a real list was thrown away at the last step
+
+Both from one screenshot of the Downloads view: five fetches, four refused.
+
+**A list that arrives as plain text was refused for not being a zip.**
+*"extraction aborted: File is not a zip file"* - on a fetch that completed at
+100%. `update_list.py` has published `.txt` as a `LIST_FORMAT` since #201, so
+a bot sending one is doing an ordinary thing; there was never a reason to
+expect only archives back.
+
+Detected by CONTENT, not by the offered filename. That name comes from the
+sending bot, and a peer calling an archive `list.txt` must not skip the member
+and traversal guards by renaming it - `zipfile.is_zipfile()` reads the file's
+own end-of-archive record.
+
+**It still has to look like a list.** The zip route gets its plausibility from
+the archive guards and `_pick_list_file()`; this route has neither, so without
+a check any file at all that is not a zip would be stored as a bot's list -
+parsing to zero rows, reported as a successful fetch, and answering every
+filter with nothing. The property checked is the one the parser needs, a
+request line, read from a bounded prefix because the file may be 128MB and the
+answer is in the first few lines.
+
+**And the size ceiling was set from a sample of one.** Three lists in that
+same channel - 25.7MB, 26.8MB, 31.5MB - were all refused by a 20MB cap. The
+comment justifying that number said it plainly: *"5x headroom over the largest
+real list anyone here has actually seen"*, that list being this operator's own
+4MB one from a 1.21TB/47,420-file library.
+
+A FLAC library with long filenames produces a far bigger text list than a
+similar MP3 one, and this ceiling has to hold for libraries this operator will
+never see. The default is 128MB - four times the largest actually observed,
+and at roughly 80 bytes a row about 1.6M rows, inside the four million the
+cross-list index is measured against.
+
+**It is a setting now, which reverses the earlier reasoning deliberately.**
+"An internal safety bound, not an operator-facing knob" holds when the right
+value is knowable here. It is not: it depends on the libraries of bots in
+somebody else's channel. The refusal message names the setting too, because
+the operator who hit this had three real lists refused with no indication it
+was adjustable.
+
+The test that pinned the old default has been rewritten to pin the new one
+against the largest list actually offered to this bot, rather than against the
+one that happened to be nearest to hand.
+
+Nine tests, five mutations, all caught.
+
 ### 🗄️ The list says MEDIA, not MUSIC
 
 Neo, reading a real film list:
