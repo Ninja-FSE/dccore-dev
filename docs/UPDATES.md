@@ -4,6 +4,47 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗜️ FILE_DIRECTORY is the fallback, and three places thought it was the truth
+
+Neo:
+
+> under Paths & Storage, this is not needed anymore
+
+Half right, and the half that is not was hiding two real bugs.
+
+**It IS still needed.** It is what an install with no folder list serves from,
+which is most of them, and `library.folders()` falls back to it deliberately.
+Removing it would take that fallback with it.
+
+**But nothing should consult it directly**, and three things did:
+
+**The daemon refused to boot on a stale one.** `oserve.startup()` checked
+`config.FILE_DIRECTORY` alone - so an operator who had configured folders and
+left it pointing at a drive that is no longer there got
+`[CRITICAL] Missing directory` and an exit, while the folders it actually
+serves from sat there perfectly readable. A setting nothing reads any more was
+able to stop the bot starting.
+
+The same check told an operator with folders configured and the setting blank
+that the daemon "cannot search or serve anything" at every single start, which
+was simply untrue. It asks `library.folders()` now, and refuses only when
+EVERY configured folder is missing - a single unavailable one is a scan-time
+condition the build already skips with a warning, which is the rule
+`update_list`'s own entry point already applies.
+
+**The build read it for nothing.** A single-folder leftover: `scan_root` built
+from `config.FILE_DIRECTORY` and then immediately overwritten inside the
+per-folder loop. Dead since #164 - and exactly the kind of leftover that makes
+a superseded setting look load-bearing. `update_list.py` now contains no
+reference to it at all, which a test pins.
+
+**And the Settings page called it "Music directory."** Beside a folder editor
+that overrides it, that reads as the setting that matters. It says "used only
+when no folders are set" now - which is true in both states and needs no
+conditional UI.
+
+Six tests, three mutations, all caught.
+
 ### 🔄 Downloads reads newest first, and a failed fetch can be asked for again
 
 Both Neo's, both about the view you open when something has gone wrong.

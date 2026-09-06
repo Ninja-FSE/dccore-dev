@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: a stale "Music directory" could stop the bot starting.** If you had served folders configured and that older setting still pointed at a drive you had unplugged, the daemon refused to boot — even though everything it actually serves was right there. It now judges by the folders you configured, and only refuses to start when *none* of them exist. It also stops claiming it "cannot serve anything" when you have folders set and that field left blank, and the field itself now says it is only used when no folders are set.
+
 - **Downloads shows the newest first, and a failed fetch has a Redownload button.** The row you want is almost always the most recent one, so it is now at the top instead of below every completed transfer. And when a fetch fails or is rejected there is a **Redownload** button beside Delete — no more going back to the List Browser to retype the nick. The failed row stays where it is, so you can still see why it failed.
 
 - **Fixed: lists from other bots were being refused for two wrong reasons.** A bot that publishes its list as a plain `.txt` had every fetch thrown away at the last step with "File is not a zip file" — those are read now. And the size limit on an incoming list was 20 MB, set from one 4 MB example; real lists in a busy channel run to 25–31 MB and were all rejected after downloading in full. The limit is now 128 MB and adjustable as **`MAX_LIST_TEXT_SIZE`**, and if a list ever does exceed it the message says so by name.

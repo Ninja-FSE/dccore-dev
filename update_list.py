@@ -906,17 +906,13 @@ def generate_master_list(list_name=None):
     packable_folders = set()
     total_bytes = 0
 
-    # long_path()-wrapped so a deeply-nested path (a real hazard in a music
-    # library: "Artist\Album Name (Year)\CD2\12 - A Long Classical Track
-    # Title.flac" nests past Windows' 260-char MAX_PATH without trying)
-    # does not just vanish from the scan the way the per-file getsize() a
-    # few lines down was already protected against. The SAME wrapped value
-    # is used as os.path.relpath()'s base below - wrapping only the walk
-    # root and comparing it against the unwrapped config.FILE_DIRECTORY
-    # would be worse than not wrapping at all: mixing a "\\?\"-prefixed
-    # root with an unprefixed base raises ValueError on Windows, turning a
-    # silent omission into a hard crash of the entire !update.
-    scan_root = platform_compat.long_path(config.FILE_DIRECTORY)
+    # A single-folder leftover used to sit here: `scan_root` built from
+    # config.FILE_DIRECTORY and then immediately overwritten inside the
+    # per-folder loop below. Dead since #164, and reading a setting that is
+    # only the FALLBACK for an install with no folder list - the same
+    # confusion Neo raised about it still sitting on the Settings page.
+    # The real scan root, and why it is long_path()-wrapped, are in the
+    # loop.
 
     # Every subtree os.walk() could not read (a stale NFS handle, EIO, a
     # revoked ACL) used to be skipped in total silence under the default

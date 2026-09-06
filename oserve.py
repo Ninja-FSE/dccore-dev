@@ -123,13 +123,32 @@ def startup():
     # exist) still refuses to start - that is a real misconfiguration, not an
     # unmade choice, and is worth catching before anything tries to serve
     # from it.
-    if not config.FILE_DIRECTORY:
+    # ASKED OF THE LIBRARY, not of FILE_DIRECTORY. That setting is the
+    # fallback for an install with no folder list, and this check treated it as
+    # the only truth - so an operator who had configured folders (or, since
+    # #26, lists) and left it blank was told at every start that the daemon
+    # "cannot search or serve anything", which was simply untrue.
+    #
+    # Worse the other way round: a STALE FILE_DIRECTORY pointing at a drive
+    # that is no longer there made the daemon refuse to boot, while the folders
+    # it actually serves from sat there perfectly readable. A setting nothing
+    # reads any more was able to stop the bot starting.
+    import library
+
+    configured = library.folders()
+    if not configured:
         print("[WARNING] No music directory configured yet - the daemon will "
-              "connect, but cannot search or serve anything. Set FILE_DIRECTORY "
-              "from the web dashboard's Settings page, settings.conf, or "
+              "connect, but cannot search or serve anything. Set it from the "
+              "web dashboard's Settings page, settings.conf, or "
               "admin_config.py.")
-    elif not os.path.exists(config.FILE_DIRECTORY):
-        print(f"[CRITICAL] Missing directory: {config.FILE_DIRECTORY}")
+    elif not any(os.path.exists(folder.path) for folder in configured):
+        # EVERY one missing, not any one. A single unavailable folder is a
+        # scan-time condition the build already skips with a warning; only a
+        # library with nothing readable at all is a real misconfiguration, and
+        # that is what is worth refusing to start for. Same rule update_list's
+        # own entry point applies.
+        print("[CRITICAL] None of the configured music folders exist: "
+              + ", ".join(folder.path for folder in configured))
         sys.exit(1)
 
     # Before anything reads the side files: carry them across from the old
