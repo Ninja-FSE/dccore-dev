@@ -76,7 +76,9 @@ Multi-list then follows: allow more than one list object, with per-channel adver
 
 **Stage 1 is in.** `library.ServedList` is the list object — a name, the folders it is built from, the channels it answers in, and which one is primary — stored in `data/lists.json` and read through `lists()`, `primary_list()`, `list_for_channel()` and `list_by_name()`. `folders()` now takes an optional list name and defaults to the primary's, so all thirteen existing callers are untouched and, with no `lists.json` on disk, every install resolves to one implicit list over exactly the folders it served before. Nothing the daemon does has changed yet.
 
-What is left, in order: per-list naming for the files a build writes; routing a request to the list bound to the channel it arrived in; per-channel adverts; and the Settings page for defining them.
+**Stage 2 is in.** A list's files live in its own directory: the primary keeps `LOCAL_LIST_DIR` itself — so nothing moves and no upgrade migrates anything — and every other list gets a subdirectory named after it. The list is in the *path*, not the filename, so the `-RAR-`/`-VIDEO-`/`-FULL-` markers and everything that parses them are untouched. `generate_master_list()` takes a list name and `generate_all_lists()` builds every one, each independently: one failing does not stop the rest, and the failures are named.
+
+What is left, in order: routing a request to the list bound to the channel it arrived in; per-channel adverts; and the Settings page for defining them.
 
 Two pieces were worth doing carefully rather than quickly, and one of them turned out the opposite way to what this section used to predict:
 

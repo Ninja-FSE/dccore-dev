@@ -263,17 +263,21 @@ def _publish_artifacts(swaps):
     return True
 
 
-def _prune_superseded_lists(keep):
+def _prune_superseded_lists(keep, directory=None):
     """Delete older generated lists once the new ones are safely in place.
 
     Runs AFTER the swap, never before: the previous index has to stay usable for the whole
     scan, which can take minutes on a large NFS mount.
     """
+    # The list's OWN directory. Every list prunes only what it wrote: with
+    # more than one, a prune reaching across them would delete another list's
+    # current index the moment their base names matched, which they always do.
+    directory = directory or config.LOCAL_LIST_DIR
     removed = 0
     try:
-        entries = os.listdir(config.LOCAL_LIST_DIR)
+        entries = os.listdir(directory)
     except OSError as err:
-        print(f"[LIST-CLEAN ERROR] Could not read {config.LOCAL_LIST_DIR}: {err}")
+        print(f"[LIST-CLEAN ERROR] Could not read {directory}: {err}")
         return
 
     for item in entries:
@@ -306,7 +310,7 @@ def _prune_superseded_lists(keep):
         if not item.endswith((".txt", ".zip", ".rar")):
             continue
         try:
-            os.remove(os.path.join(config.LOCAL_LIST_DIR, item))
+            os.remove(os.path.join(directory, item))
             removed += 1
         except OSError as err:
             print(f"[LIST-CLEAN ERROR] Could not remove {item}: {err}")
@@ -479,10 +483,11 @@ def migrate_list_base_name(log=print):
     return moved
 
 
-def _artifact_paths(fmt, date_str):
+def _artifact_paths(fmt, date_str, directory=None):
     """Where the download artifact for `fmt` is published, and staged."""
     import list as list_mod
-    final = os.path.join(config.LOCAL_LIST_DIR, list_mod.list_artifact_name(fmt, date_str))
+    final = os.path.join(directory or config.LOCAL_LIST_DIR,
+                         list_mod.list_artifact_name(fmt, date_str))
     return final, final + ".new"
 
 
@@ -539,7 +544,7 @@ def _write_zip_artifact(tmp_path, members):
 _STAGING_PREFIX = ".listpack-"
 
 
-def _discard_stale_temps():
+def _discard_stale_temps(directory=None):
     """Remove ".new" staging files a previous run was killed in the middle of.
 
     Only names the builder itself stages: "<LIST_BASE_NAME>-...new", in the
@@ -552,11 +557,12 @@ def _discard_stale_temps():
     builds running at once already write the SAME temp paths as each other, so
     this adds no hazard that concurrency does not already have.)
     """
+    directory = directory or config.LOCAL_LIST_DIR
     base = str(getattr(config, "LIST_BASE_NAME", "") or "")
     if not base:
         return
     try:
-        entries = os.listdir(config.LOCAL_LIST_DIR)
+        entries = os.listdir(directory)
     except OSError:
         return
     removed = 0
@@ -564,7 +570,7 @@ def _discard_stale_temps():
         if not (name.startswith(base + "-") and name.endswith(".new")):
             continue
         try:
-            os.remove(os.path.join(config.LOCAL_LIST_DIR, name))
+            os.remove(os.path.join(directory, name))
             removed += 1
         except OSError as err:
             print(f"[LIST-CLEAN ERROR] Could not remove {name}: {err}")
@@ -573,21 +579,22 @@ def _discard_stale_temps():
               f"from an interrupted run.")
 
 
-def _discard_stale_staging():
+def _discard_stale_staging(directory=None):
     """Remove staging directories a previous run was killed in the middle of."""
+    directory = directory or config.LOCAL_LIST_DIR
     try:
-        entries = os.listdir(config.LOCAL_LIST_DIR)
+        entries = os.listdir(directory)
     except OSError:
         return
     for name in entries:
         if not name.startswith(_STAGING_PREFIX):
             continue
-        path = os.path.join(config.LOCAL_LIST_DIR, name)
+        path = os.path.join(directory, name)
         if os.path.isdir(path):
             shutil.rmtree(path, ignore_errors=True)
 
 
-def _write_rar_artifact(tmp_path, members):
+def _write_rar_artifact(tmp_path, members, directory=None):
     """Pack with the rar binary. False if it could not be done, with the reason.
 
     rar has no equivalent of zipfile's arcname, so the members are copied to
@@ -607,8 +614,9 @@ def _write_rar_artifact(tmp_path, members):
     # The finally below removes this run's directory. A daemon killed between
     # mkdtemp and that finally leaves one behind, and nothing else in lists/
     # ever looks at directories, so it would sit there until somebody noticed.
-    _discard_stale_staging()
-    staging = tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=config.LOCAL_LIST_DIR)
+    _discard_stale_staging(directory)
+    directory = directory or config.LOCAL_LIST_DIR
+    staging = tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=directory)
     try:
         staged = []
         for source, name in members:
@@ -624,7 +632,7 @@ def _write_rar_artifact(tmp_path, members):
         # behaviour above. A list of arguments and never a shell, and a
         # timeout, both for the same reasons dcc.py packs albums that way: a
         # hung rar here would wedge every list rebuild after it.
-        cmd = [rar_bin, "a", "-ep", "-w" + os.path.abspath(config.LOCAL_LIST_DIR),
+        cmd = [rar_bin, "a", "-ep", "-w" + os.path.abspath(directory),
                os.path.abspath(built)] + staged
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=getattr(config, "RAR_TIMEOUT", 1800))
@@ -643,7 +651,7 @@ def _write_rar_artifact(tmp_path, members):
         shutil.rmtree(staging, ignore_errors=True)
 
 
-def build_list_artifact(fmt, members, date_str):
+def build_list_artifact(fmt, members, date_str, directory=None):
     """Build what a user downloads. Returns (fmt_used, tmp_path, final_path).
 
     `fmt_used` is not always `fmt`: "rar" falls back to "zip" when the binary
@@ -652,12 +660,12 @@ def build_list_artifact(fmt, members, date_str):
     would take it off the air; the fallback is loud, and the operator still
     has something to serve while they sort the binary out.
     """
-    final, tmp = _artifact_paths(fmt, date_str)
+    final, tmp = _artifact_paths(fmt, date_str, directory)
     if fmt == "rar":
-        if _write_rar_artifact(tmp, members):
+        if _write_rar_artifact(tmp, members, directory):
             return fmt, tmp, final
         fmt = "zip"
-        final, tmp = _artifact_paths(fmt, date_str)
+        final, tmp = _artifact_paths(fmt, date_str, directory)
 
     if fmt == "txt":
         _write_text_artifact(tmp, members)
@@ -802,8 +810,19 @@ def _neutralise_banner(text, log=print):
     return "\n".join(safe).rstrip("\n")
 
 
-def generate_master_list():
-    """Scan the music directory, clear the old files first, and build both lists."""
+def generate_master_list(list_name=None):
+    """Scan one list's folders, clear its old files first, and build its lists.
+
+    `list_name` picks which list to build; without one this is the primary,
+    which on a single-list install is the only one there is - so every existing
+    caller, and the whole of this function's previous behaviour, is unchanged.
+
+    EVERY PATH BELOW COMES FROM `directory`, not from config.LOCAL_LIST_DIR.
+    That is the single change that makes more than one list possible: for the
+    primary the two are the same string, and for any other list it is a
+    subdirectory. See list.list_dir() for why the list is in the path and not
+    in the filename.
+    """
     import os
     import sys
     import time
@@ -812,10 +831,12 @@ def generate_master_list():
     import re
     import defaults as config
     import db
+    import library
     import list as list_mod
 
-    if not os.path.exists(config.LOCAL_LIST_DIR):
-        os.makedirs(config.LOCAL_LIST_DIR)
+    directory = list_mod.list_dir(list_name)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     txt_filename = f"{config.LIST_BASE_NAME}-{today}.txt"
@@ -827,9 +848,9 @@ def generate_master_list():
     # function knows to leave it alone - the same guard "-RAR-" already needs.
     video_filename = f"{config.LIST_BASE_NAME}-{list_mod.VIDEO_LIST_MARKER}-{today}.txt"
 
-    txt_path = os.path.join(config.LOCAL_LIST_DIR, txt_filename)
-    rar_path = os.path.join(config.LOCAL_LIST_DIR, rar_filename)
-    video_path = os.path.join(config.LOCAL_LIST_DIR, video_filename)
+    txt_path = os.path.join(directory, txt_filename)
+    rar_path = os.path.join(directory, rar_filename)
+    video_path = os.path.join(directory, video_filename)
     
     # config.RAR_ENABLED (#140) refuses every !rar request. Building an album
     # list anyway, and shipping it inside the zip every user downloads, hands
@@ -841,8 +862,8 @@ def generate_master_list():
     if not serve_albums:
         print("[LIST-GEN] RAR_ENABLED is off - skipping the album list entirely.")
 
-    SIZE_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, config.LIST_SIZE_FILE)
-    RAWBYTES_FILE_PATH = os.path.join(config.LOCAL_LIST_DIR, config.LIST_RAWBYTES_FILE)
+    SIZE_FILE_PATH = os.path.join(directory, config.LIST_SIZE_FILE)
+    RAWBYTES_FILE_PATH = os.path.join(directory, config.LIST_RAWBYTES_FILE)
 
     scan_start = time.time()
 
@@ -861,7 +882,8 @@ def generate_master_list():
     # for .rar and fell back to .zip has staged two, and the guards below have
     # no way of knowing which without repeating the decision.
     tmp_index_paths = (tmp_txt_path, tmp_rar_path, tmp_video_path)
-    tmp_artifact_paths = tuple(_artifact_paths(f, today)[1] for f in list_mod.LIST_FORMATS)
+    tmp_artifact_paths = tuple(_artifact_paths(f, today, directory)[1]
+                               for f in list_mod.LIST_FORMATS)
     tmp_all_paths = tmp_index_paths + tmp_artifact_paths
     # Before anything of THIS run exists. A run that fails discards its own
     # temporaries; a run that is KILLED - the machine goes down mid-scan,
@@ -870,9 +892,9 @@ def generate_master_list():
     # different names and never touches them again. They accumulate one set
     # per killed run, for ever, in the directory the operator looks at to see
     # whether their lists are being built.
-    _discard_stale_temps()
+    _discard_stale_temps(directory)
 
-    scan_folders = library.folders()
+    scan_folders = library.folders(list_name)
     print("[LIST-GEN] Scanning the library in "
           + ", ".join(f"{f.path} ({f.name})" for f in scan_folders) + "...")
 
@@ -1290,7 +1312,7 @@ def generate_master_list():
         # first run on an empty library still succeeds.
         if total_files_count == 0 and not video_files_data:
             try:
-                existing = [f for f in os.listdir(config.LOCAL_LIST_DIR)
+                existing = [f for f in os.listdir(directory)
                             if f.startswith(config.LIST_BASE_NAME)
                             and f.endswith(".txt") and "-RAR-" not in f]
             except OSError:
@@ -1331,7 +1353,7 @@ def generate_master_list():
         wanted_format = list_mod.list_format()
         print(f"[LIST-GEN] Packing the list for download as .{wanted_format}...")
         artifact_format, tmp_artifact_path, artifact_path = build_list_artifact(
-            wanted_format, members, today)
+            wanted_format, members, today, directory)
 
         # Everything generated cleanly. Swap the new files in, THEN remove the superseded
         # ones. os.replace overwrites atomically on both POSIX and Windows, where os.rename
@@ -1373,7 +1395,8 @@ def generate_master_list():
         # LIST_BASE_NAME, so this is the moment that fact becomes true. Written
         # here rather than only in the migration, so a rename between two
         # rebuilds is still migrated from the right name.
-        write_list_base_marker(config.LIST_BASE_NAME, log=print)
+        write_list_base_marker(config.LIST_BASE_NAME, directory=directory,
+                               log=print)
 
         # DUPLICATE FILENAMES, SAID OUT LOUD AT BUILD TIME.
         #
@@ -1436,7 +1459,7 @@ def generate_master_list():
         # built when the configured format has not been yet, so a stale .zip
         # left beside a fresh .rar would go on being handed out to somebody the
         # day the operator switched formats and the build failed.
-        _prune_superseded_lists(keep=keep)
+        _prune_superseded_lists(keep=keep, directory=directory)
         return True
             
     except Exception as e:
@@ -1445,6 +1468,52 @@ def generate_master_list():
         _discard_temp_lists(*tmp_all_paths)
         return False
 
+def generate_all_lists(log=print):
+    """Build every configured list. True only if every one of them succeeded.
+
+    On a single-list install this is one call to generate_master_list() with no
+    name - byte for byte what running this script has always done. The loop is
+    what a second list turns on.
+
+    EACH LIST IS BUILT INDEPENDENTLY, and one failing does not stop the rest. A
+    list whose folder is on an unavailable mount must not take down the list
+    whose folder is on a local disk: generate_master_list() already refuses to
+    publish an empty scan over a working index, so a failed list goes on serving
+    what it last built while its neighbours move on. Returning False is what
+    tells the operator - and !update - that something needs looking at.
+
+    The failures are NAMED, not counted. "1 of 3 lists failed" sends somebody to
+    read a log they already have open; naming it tells them which folder to go
+    and look at.
+    """
+    import library
+
+    every = library.lists()
+    if len(every) == 1:
+        return generate_master_list()
+
+    failed = []
+    for entry in every:
+        log(f"[LIST-GEN] Building {entry.name!r} ({len(entry.folders)} folder(s))...")
+        try:
+            if not generate_master_list(entry.name):
+                failed.append(entry.name)
+        except Exception as err:
+            # One list's unexpected failure is not every list's. The scan
+            # handles the failures it can predict; this is the backstop for the
+            # ones it cannot, and catching it here is the difference between
+            # "two of your three lists rebuilt" and "the update crashed".
+            log(f"[LIST-GEN ERROR] {entry.name!r} failed: {err}")
+            failed.append(entry.name)
+
+    if failed:
+        log("[LIST-GEN ERROR] These lists were not rebuilt and are still serving "
+            "what they last built: " + ", ".join(repr(n) for n in failed))
+        return False
+    log(f"[LIST-GEN] All {len(every)} lists rebuilt.")
+    return True
+
+
 if __name__ == "__main__":
     print("--- Starting the scheduled weekly file-list update ---")
     # FILE_DIRECTORY is not in settings_file.REQUIRED (see its own comment) -
@@ -1452,7 +1521,12 @@ if __name__ == "__main__":
     # boots fine with, so os.path.exists(None) here (a TypeError, not a
     # clean failure) must be guarded against explicitly rather than assuming
     # a real string ever reaches this point.
-    configured = library.folders()
+    # Across EVERY list, not just the primary. The two guards below ask
+    # "is there anything to build at all", and with several lists the
+    # answer is yes if any one of them has somewhere to look - a single
+    # list pointed at an unplugged drive is generate_all_lists()'s
+    # problem to report, not a reason to refuse the whole run.
+    configured = [folder for entry in library.lists() for folder in entry.folders]
     if not configured:
         print("[CRITICAL] No music directory configured yet - set FILE_DIRECTORY "
               "from the web dashboard's Settings page, settings.conf, or "
@@ -1466,7 +1540,7 @@ if __name__ == "__main__":
               + ", ".join(f.path for f in configured))
         sys.exit(1)
         
-    success = generate_master_list()
+    success = generate_all_lists()
     if success:
         print("--- The list was updated successfully. ---")
         sys.exit(0)

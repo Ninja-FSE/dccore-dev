@@ -1047,6 +1047,201 @@ class TheBuildSaysWhenNamesCollide(MasterListCase):
         self.assertIn("find_duplicate_filenames(", code)
 
 
+class TwoListsOverTwoFolderSets(MasterListCase):
+    """#26 stage 2. The build takes a list name; the driver runs every list."""
+
+    def setUp(self):
+        super().setUp()
+        self.store = os.path.join(self.tree.root, "lists.json")
+        self.set_config(LISTS_FILE=self.store)
+        self.use_empty_library()
+
+    def define(self, *entries):
+        import json
+        with io.open(self.store, "w", encoding="utf-8") as handle:
+            json.dump(list(entries), handle)
+
+    def library_at(self, name, *relative):
+        root = os.path.join(self.tree.root, name)
+        for rel in relative:
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as handle:
+                handle.write(b"\0" * 2048)
+        return root
+
+    def indexes_in(self, directory):
+        return sorted(n for n in os.listdir(directory)
+                      if n.startswith(config.LIST_BASE_NAME)
+                      and n.endswith(".txt")
+                      and "-RAR-" not in n
+                      and f"-{list_mod.VIDEO_LIST_MARKER}-" not in n)
+
+    def test_each_list_is_built_from_its_own_folders(self):
+        music = self.library_at("music-lib", os.path.join("Artist", "Album", "Track.flac"))
+        films = self.library_at("film-lib", os.path.join("Other", "Elsewhere.flac"))
+        self.define(
+            {"name": "Music", "primary": True,
+             "folders": [{"name": "M", "path": music}]},
+            {"name": "Films", "folders": [{"name": "F", "path": films}]})
+
+        self.assertTrue(update_list.generate_all_lists(log=lambda *_a: None))
+
+        with io.open(os.path.join(self.tree.lists,
+                                  self.indexes_in(self.tree.lists)[0]),
+                     encoding="utf-8") as handle:
+            primary = handle.read()
+        films_dir = os.path.join(self.tree.lists, "Films")
+        with io.open(os.path.join(films_dir, self.indexes_in(films_dir)[0]),
+                     encoding="utf-8") as handle:
+            secondary = handle.read()
+
+        self.assertIn("Track.flac", primary)
+        self.assertNotIn("Elsewhere.flac", primary)
+        self.assertIn("Elsewhere.flac", secondary)
+        self.assertNotIn("Track.flac", secondary)
+
+    def test_the_primary_writes_where_it_always_did(self):
+        """Nothing moves for an existing install: no upgrade migrates
+        anything, and a single-list operator cannot tell this landed."""
+        music = self.library_at("music-lib", os.path.join("Artist", "Album", "Track.flac"))
+        self.define({"name": "Music", "primary": True,
+                     "folders": [{"name": "M", "path": music}]},
+                    {"name": "Films", "folders": []})
+
+        self.assertTrue(update_list.generate_all_lists(log=lambda *_a: None))
+
+        self.assertTrue(self.indexes_in(self.tree.lists),
+                        "the primary list did not land in LOCAL_LIST_DIR")
+
+    def test_each_list_keeps_its_own_side_files(self):
+        """The size and byte count describe ONE list. Sharing them would have
+        each build overwrite the other's advertised size."""
+        music = self.library_at("music-lib", os.path.join("A", "B", "One.flac"))
+        films = self.library_at("film-lib", os.path.join("F", "Film.mkv"),
+                                os.path.join("F", "Second.mkv"))
+        self.define({"name": "Music", "primary": True,
+                     "folders": [{"name": "M", "path": music}]},
+                    {"name": "Films", "folders": [{"name": "F", "path": films}]})
+
+        self.assertTrue(update_list.generate_all_lists(log=lambda *_a: None))
+
+        self.assertTrue(os.path.exists(list_mod.size_file_path()))
+        self.assertTrue(os.path.exists(list_mod.size_file_path("Films")))
+        self.assertNotEqual(list_mod.size_file_path(),
+                            list_mod.size_file_path("Films"))
+
+    def test_a_list_with_no_folders_is_not_a_failure(self):
+        """It publishes an empty list, which is exactly what was configured.
+        Reporting that as a failed rebuild would send the operator looking for
+        a fault they do not have."""
+        music = self.library_at("music-lib", os.path.join("A", "B", "One.flac"))
+        self.define({"name": "Music", "primary": True,
+                     "folders": [{"name": "M", "path": music}]},
+                    {"name": "Empty", "folders": []})
+
+        self.assertTrue(update_list.generate_all_lists(log=lambda *_a: None))
+
+    def test_one_list_failing_does_not_stop_the_others(self):
+        """A list whose folder is on an unavailable mount must not take down
+        the list whose folder is on a local disk. Driven at the driver's own
+        seam: the failures worth isolating are the ones the scan cannot
+        predict, and a contrived filesystem would test the scan instead."""
+        music = self.library_at("music-lib", os.path.join("A", "B", "One.flac"))
+        self.define({"name": "Music", "primary": True,
+                     "folders": [{"name": "M", "path": music}]},
+                    {"name": "Broken", "folders": [{"name": "B", "path": music}]})
+        real = update_list.generate_master_list
+        built = []
+
+        def one_fails(name=None):
+            if name == "Broken":
+                return False
+            built.append(name)
+            return real(name)
+
+        update_list.generate_master_list = one_fails
+        self.addCleanup(setattr, update_list, "generate_master_list", real)
+
+        said = []
+        ok = update_list.generate_all_lists(log=said.append)
+
+        self.assertFalse(ok, "a failed list must be reported")
+        self.assertEqual(built, ["Music"], "the healthy list was not built")
+        self.assertIn("Broken", chr(10).join(said))
+
+    def test_a_list_that_raises_is_caught_and_named(self):
+        """The backstop. One list's unexpected failure is the difference
+        between "two of your three rebuilt" and "the update crashed"."""
+        music = self.library_at("music-lib", os.path.join("A", "B", "One.flac"))
+        self.define({"name": "Music", "primary": True,
+                     "folders": [{"name": "M", "path": music}]},
+                    {"name": "Boom", "folders": [{"name": "B", "path": music}]})
+        real = update_list.generate_master_list
+
+        def one_raises(name=None):
+            if name == "Boom":
+                raise RuntimeError("the mount went away")
+            return real(name)
+
+        update_list.generate_master_list = one_raises
+        self.addCleanup(setattr, update_list, "generate_master_list", real)
+
+        said = []
+        ok = update_list.generate_all_lists(log=said.append)
+
+        self.assertFalse(ok)
+        self.assertIn("the mount went away", chr(10).join(said))
+        self.assertTrue(self.indexes_in(self.tree.lists))
+
+    def test_a_single_list_install_takes_the_same_path_as_before(self):
+        """One call with no name - byte for byte what running this script has
+        always done. The loop is what a second list turns on."""
+        self.library_at("music-lib")
+        self.set_config(FILE_DIRECTORY=self.library_at(
+            "solo-lib", os.path.join("A", "B", "One.flac")))
+        calls = []
+        real = update_list.generate_master_list
+
+        def watched(name=None):
+            calls.append(name)
+            return real(name)
+
+        update_list.generate_master_list = watched
+        self.addCleanup(setattr, update_list, "generate_master_list", real)
+
+        self.assertTrue(update_list.generate_all_lists(log=lambda *_a: None))
+
+        self.assertEqual(calls, [None])
+
+    def test_a_prune_never_reaches_another_lists_directory(self):
+        """Every list writes the SAME filenames - same base name, same date -
+        just in different directories. That makes a cross-list prune almost
+        invisible: list B's prune scanning the root would find list A's index
+        under a name B's own keep set also holds, and delete nothing.
+
+        So this watches the scope directly rather than the outcome. A stale
+        file in each place, one build, and only the built list's own stale
+        file may go.
+        """
+        music = self.library_at("music-lib", os.path.join("A", "B", "One.flac"))
+        self.define({"name": "Music", "primary": True,
+                     "folders": [{"name": "M", "path": music}]},
+                    {"name": "Films", "folders": [{"name": "F", "path": music}]})
+        films_dir = os.path.join(self.tree.lists, "Films")
+        os.makedirs(films_dir, exist_ok=True)
+        stale = f"{config.LIST_BASE_NAME}-2020-01-01.txt"
+        for where in (self.tree.lists, films_dir):
+            with io.open(os.path.join(where, stale), "w", encoding="utf-8") as handle:
+                handle.write("superseded")
+
+        self.assertTrue(update_list.generate_master_list("Films"))
+
+        self.assertFalse(os.path.exists(os.path.join(films_dir, stale)),
+                         "the built list did not prune its own superseded index")
+        self.assertTrue(os.path.exists(os.path.join(self.tree.lists, stale)),
+                        "the prune reached into another list's directory")
+
 class PackingHasACeiling(MasterListCase):
     """MAX_RAR_FOLDER_SIZE. Nothing bounded a pack before it.
 

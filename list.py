@@ -7,20 +7,85 @@ import library
 import oserve
 import dcc
 import announce
+import hashlib
 import platform_compat
 import theme
 
 
 
+def list_slug(name):
+    """A directory-safe form of a list name, unique to that exact name.
+
+    List names are operator-facing and never typed in a channel (#26), so they
+    can hold anything an operator likes - including the characters Windows
+    refuses in a path and the separators that would turn one list into a
+    nested tree. Everything outside a small safe set becomes "_", and no "."
+    survives as itself, so no name can produce a traversal.
+
+    THE SUFFIX IS THE POINT. Replacing characters is not injective: "A/B" and
+    "A B" both flatten to "A_B", and two lists landing in one directory would
+    have them overwriting each other's index, archive and side files with no
+    error anywhere. So a name that had to be changed carries a short digest of
+    the ORIGINAL, which makes the mapping one-to-one again.
+
+    A name that needed no changing keeps exactly itself, which is the common
+    case and the readable one: "Films" is the "Films" directory. Two such
+    names cannot collide, because they are equal.
+
+    Stable across restarts and across reordering the lists: it depends on that
+    one name and nothing else. hashlib rather than hash(), which is randomised
+    per process and would rename every directory on each start.
+    """
+    raw = str(name or "").strip()
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_ ") else "_" for ch in raw)
+    cleaned = cleaned.strip(" ")
+    if cleaned == raw and cleaned:
+        return cleaned
+    digest = hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:6]
+    return f"{cleaned or 'list'}-{digest}"
+
+
+def list_dir(name=None):
+    """Where one list's files live.
+
+    THE PRIMARY LIST USES LOCAL_LIST_DIR ITSELF, which is exactly where every
+    install's files are today - so nothing moves, no upgrade migrates anything,
+    and a single-list install cannot tell this function exists. Every other
+    list gets a subdirectory named after it.
+
+    A subdirectory rather than a longer filename, deliberately. The names a
+    build writes already carry three markers - "-RAR-", "-VIDEO-", "-FULL-" -
+    and the code that reads them has been wrong about a base name containing
+    one of those before. Putting the list in the PATH instead of the NAME
+    means every one of those names stays exactly as it is, and none of that
+    parsing grows a dimension.
+    """
+    import library
+
+    root = config.LOCAL_LIST_DIR
+    # No separate branch for `name is None`: list_by_name(None) is None, and
+    # the test below already answers `root` for that. A mutation run showed
+    # the early return changed nothing, so it went rather than being propped
+    # up with a test that could only ever pass.
+    chosen = library.list_by_name(name)
+    if chosen is None or chosen.primary:
+        # An unknown name resolves to the root rather than inventing a
+        # directory for a list nobody configured: callers that look there find
+        # nothing, which is the truthful outcome, and a build never writes to
+        # a name it did not get from lists() in the first place.
+        return root
+    return os.path.join(root, list_slug(chosen.name))
+
+
 # Resolved per call rather than once at import. LOCAL_LIST_DIR is a config value,
 # and !rehash reloads config - a path baked in at import time would keep pointing
 # at the old directory for the life of the process after the operator moved it.
-def size_file_path():
-    return os.path.join(config.LOCAL_LIST_DIR, config.LIST_SIZE_FILE)
+def size_file_path(name=None):
+    return os.path.join(list_dir(name), config.LIST_SIZE_FILE)
 
 
-def rawbytes_file_path():
-    return os.path.join(config.LOCAL_LIST_DIR, config.LIST_RAWBYTES_FILE)
+def rawbytes_file_path(name=None):
+    return os.path.join(list_dir(name), config.LIST_RAWBYTES_FILE)
 
 # NOTE: a second, shadowing definition of find_latest_list() used to sit here. Python keeps
 # the LAST definition, so this one never ran - and the two had drifted: this one did not
@@ -110,7 +175,7 @@ def is_list_artifact_name(filename):
     return any(is_list_artifact(filename, fmt) for fmt in LIST_FORMATS)
 
 
-def find_latest_list_file():
+def find_latest_list_file(name=None):
     """The artifact to send when somebody types the bot's nickname.
 
     The configured format first. If it has not been built yet - the operator
@@ -120,12 +185,13 @@ def find_latest_list_file():
     having no list at all until the weekly update comes round, which is the
     failure the atomic-publish rewrite exists to prevent.
     """
-    if not os.path.exists(config.LOCAL_LIST_DIR):
+    directory = list_dir(name)
+    if not os.path.exists(directory):
         return None
     try:
-        entries = os.listdir(config.LOCAL_LIST_DIR)
+        entries = os.listdir(directory)
     except OSError as err:
-        print(f"[LIST ERROR] Could not read {config.LOCAL_LIST_DIR}: {err}")
+        print(f"[LIST ERROR] Could not read {directory}: {err}")
         return None
 
     wanted = list_format()
@@ -138,7 +204,7 @@ def find_latest_list_file():
         if fmt != wanted:
             print(f"[LIST] No .{wanted} list has been built yet - sending {files[0]}. "
                   f"The next list update will build the .{wanted}.")
-        return os.path.join(config.LOCAL_LIST_DIR, files[0])
+        return os.path.join(directory, files[0])
     return None
 
 def get_file_count_date_size_and_raw_bytes():
@@ -245,7 +311,7 @@ def _has_marker(path, marker):
     return marker in tail
 
 
-def find_latest_list():
+def find_latest_list(name=None):
     """Find the newest master text list in the lists directory.
 
     Globs on config.LIST_BASE_NAME, which is what update_list.py actually names the files
@@ -263,7 +329,7 @@ def find_latest_list():
         # music share under D:\Lists[FLAC]\ is the same bug from the other side.
         # Unescaped, the pattern matched nothing and never errored: @find answered
         # "No MasterList found" and the advert published "0 Files" forever.
-        pattern = os.path.join(glob.escape(config.LOCAL_LIST_DIR),
+        pattern = os.path.join(glob.escape(list_dir(name)),
                                f"{glob.escape(config.LIST_BASE_NAME)}-*.txt")
         all_txt_files = sorted(glob.glob(pattern))
         # Keep the RAR list out of the search, so only the master list is scanned.
@@ -290,7 +356,7 @@ def find_latest_list():
 VIDEO_LIST_MARKER = "VIDEO"
 
 
-def find_latest_video_list():
+def find_latest_video_list(name=None):
     """The newest film-and-series list, or None if the library has no video.
 
     None is the ordinary case, not a fault: the file is only published when
@@ -299,7 +365,7 @@ def find_latest_video_list():
     """
     try:
         pattern = os.path.join(
-            glob.escape(config.LOCAL_LIST_DIR),
+            glob.escape(list_dir(name)),
             f"{glob.escape(config.LIST_BASE_NAME)}-{VIDEO_LIST_MARKER}-*.txt")
         found = sorted(glob.glob(pattern))
         if found:
@@ -309,7 +375,7 @@ def find_latest_video_list():
     return None
 
 
-def all_list_paths():
+def all_list_paths(name=None):
     """Every list a REQUEST may be answered from, newest master first.
 
     This is the seam the split turns on. A file request and an @find both used
@@ -322,7 +388,7 @@ def all_list_paths():
     library and a switched-off SEPARATE_VIDEO_LIST both look like.
     """
     paths = []
-    for path in (find_latest_list(), find_latest_video_list()):
+    for path in (find_latest_list(name), find_latest_video_list(name)):
         if path and os.path.exists(path):
             paths.append(path)
     return paths
