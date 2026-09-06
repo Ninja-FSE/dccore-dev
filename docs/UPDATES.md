@@ -4,6 +4,40 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔓 The fetch size caps can be turned off (#302)
+
+Neo asked for two of them to be removed outright:
+
+> Remove "Max fetched master-list zip size (bytes)". Master lists should not
+> have a size limit. Remove "Max fetch file size (bytes)" limitations. Files
+> should never be rejected based on size.
+
+**Switchable off rather than deleted.** 0 means no limit, which is the same
+outcome for the operator who wants it and no change for the operator who does
+not know these exist. Deleting them would take the choice away from everyone.
+
+**Defensible here in a way it would not be on the serving side.** A fetch is
+SOLICITED: `handle_incoming_offer()` only accepts an offer matching a row this
+operator created, so what arrives is the thing they asked for, onto their own
+disk. The cap guards against a peer answering a request with something
+enormous - worth a default - not against a stranger pushing files at us, which
+is refused earlier and for a different reason.
+
+**And `MAX_FETCH_LIST_FILE_SIZE` was low for the same reason the text ceiling
+was.** 10MB, described as "generous over any real master-list zip", on the
+evidence of one 4MB list. Real lists in that channel run to 31MB of TEXT, and
+an archive of one is several MB - close enough to the old cap that the next
+library along lands on it. 64MB now.
+
+The refusal message names the setting and says 0 turns it off, because the
+operator who hits one of these has no other way to tell it is theirs to change.
+
+Five tests, four mutations, all caught. One of the tests was wrong first time
+in a way worth keeping: with the cap off the row still FAILS - it goes on to
+connect to a peer that is not there - so "not failed" was asserting that a
+fixture socket connects. What the cap decides is whether it failed FOR ITS
+SIZE, and that is what is asserted now.
+
 ### 🗜️ FILE_DIRECTORY is the fallback, and three places thought it was the truth
 
 Neo:

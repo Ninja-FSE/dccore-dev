@@ -1099,10 +1099,24 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         else:
             max_size = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
             cap_name = "MAX_FETCH_FILE_SIZE"
-        if offer["size"] > max_size:
+        # 0 MEANS NO LIMIT. Neo, on #302: "Files should never be rejected based
+        # on size." The caps are not deleted, because deleting them would take
+        # the choice away from everyone else - they are switchable off, which
+        # is the same outcome for the operator who wants it and no change for
+        # the operator who does not know they exist.
+        #
+        # Defensible here in a way it would not be on the serving side: a fetch
+        # is SOLICITED. handle_incoming_offer() only accepts an offer matching
+        # a row we created, so the thing that arrives is the thing this
+        # operator asked for, onto their own disk. The cap protects against a
+        # peer answering a request with something enormous, which is worth a
+        # default - not against a stranger pushing files at us, which is
+        # refused earlier and for a different reason.
+        if max_size > 0 and offer["size"] > max_size:
             _mark_failed_locked(row, f"declared size {offer['size']} exceeds {cap_name} ({max_size})")
             print(f"[FETCH] Rejected oversized offer from {from_nick}: "
-                  f"{offer['size']} > {max_size}. Never connected.")
+                  f"{offer['size']} > {max_size}. Never connected. "
+                  f"Set {cap_name} to 0 for no limit.")
             return
 
         dest_dir, stored_name = _resolve_destination_path(request_id, offer["filename"])

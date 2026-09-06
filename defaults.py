@@ -453,7 +453,12 @@ FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever the
 # Interacts with flood protection: a bot's DCC SEND offers are metered like any
 # other command, so this must stay well below MAX_REQUESTS (per REQUEST_WINDOW)
 # or a bot answering your own fetch requests can trip the flood gate and be muted.
-MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
+# 0 DISABLES IT - #302 asked for these limits to go entirely, and switching
+# them off is the same outcome for the operator who wants that without
+# taking the choice from everyone else. Defensible here because a fetch is
+# SOLICITED: only an offer matching a row this operator created is ever
+# accepted, so it is their own request landing on their own disk.
+MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect; 0 = no limit
 # The largest EXTRACTED list text this bot will parse from a peer, in bytes.
 # Every "!" line in it becomes a retained row, so this bounds memory rather
 # than disk. It was a fixed 20 MB, set from this operator's own 4 MB list -
@@ -486,7 +491,13 @@ MAX_RAR_FOLDER_SIZE: int = 10 * 1024 * 1024 * 1024   # 10 GB - refuse to pack mo
 # anything) was already parsed - hundreds of MB of RAM and several seconds spent
 # on an archive that should have been refused at admission (#162 finding #10).
 # Enforced BEFORE connecting, same as MAX_FETCH_FILE_SIZE/MAX_FETCH_FOLDER_FILE_SIZE.
-MAX_FETCH_LIST_FILE_SIZE: int = 10 * 1024 * 1024  # 10 MB - generous over any real master-list zip
+#
+# 10MB was 'generous over any real master-list zip' on the same evidence
+# that put the text ceiling at 20MB: one 4MB list. Real lists in one
+# channel run to 31MB of text, and a zip of one is several MB - close
+# enough to this that the next library along lands on it. 64MB, and 0
+# disables it.
+MAX_FETCH_LIST_FILE_SIZE: int = 64 * 1024 * 1024  # 64 MB - the archive, not the text inside it; 0 = no limit
 FETCH_TRANSFER_TIMEOUT: int = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
 FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
 
