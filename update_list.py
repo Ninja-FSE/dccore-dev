@@ -1375,6 +1375,40 @@ def generate_master_list():
         # rebuilds is still migrated from the right name.
         write_list_base_marker(config.LIST_BASE_NAME, log=print)
 
+        # DUPLICATE FILENAMES, SAID OUT LOUD AT BUILD TIME.
+        #
+        # The dashboard has answered this since #164 - Tools > Verify list,
+        # build_verify_list_payload() - but only when somebody goes and looks,
+        # and the operators most likely to have collisions are the ones running
+        # several folders without watching a web page. The scan is holding the
+        # data already, so saying it here costs nothing and no second walk.
+        #
+        # Why it matters: a request names a FILE, not a path, because a bare
+        # filename is all the list gives a requester to copy.
+        # dcc.handle_download_request() resolves that name against the list and
+        # serves the FIRST folder it finds it under - so every later copy is
+        # listed, looks requestable, and can never be sent. The requester does
+        # not get an error either; they get the other file.
+        #
+        # Both lists, in the order all_list_paths() hands them to the resolver:
+        # a name in the music list and the film list resolves to the music one.
+        # Counting them separately would miss exactly the collisions the split
+        # introduced.
+        #
+        # The COUNT only. The detail belongs to the view that already presents
+        # it properly, resolved to paths this machine has; printing folder
+        # headings here would be a second presentation to keep in step.
+        duplicate_names = list_mod.find_duplicate_filenames(
+            [{"filename": name, "folder": folder}
+             for folder, name, _size in all_files_data]
+            + [{"filename": name, "folder": folder}
+               for folder, name, _size in video_files_data])
+        if duplicate_names:
+            print(f"[LIST-GEN] WARNING: {len(duplicate_names)} filename(s) appear "
+                  f"under more than one folder. A request names a file, not a "
+                  f"path, so only the first copy of each can ever be sent. "
+                  f"Dashboard: Tools > Verify list.")
+
         print(f"[LIST-GEN] New lists activated: {os.path.basename(txt_path)} "
               f"(download: {os.path.basename(artifact_path)})")
 

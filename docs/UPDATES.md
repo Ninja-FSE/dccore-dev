@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔎 The build says when two files share a name
+
+A request names a FILE, not a path - a bare filename is all the list gives a
+requester to copy. `dcc.handle_download_request()` resolves that name against
+the list and serves the FIRST folder it finds it under, so every later copy is
+listed, looks requestable, and can never be sent. The requester does not even
+get an error: they get the other file, at the other size, silently.
+
+The dashboard has answered this since #164 - Tools > Verify list, computed on
+demand from the list on disk. What was missing is that it only answers when
+somebody goes and looks, and the operators most likely to have collisions are
+the ones running several folders without watching a web page. So the build
+says it too.
+
+**It costs nothing.** The scan is already holding every (folder, filename,
+size) it wrote; the count is a pass over data in memory, with no second walk
+and no side file to keep in step.
+
+**Both lists, in the order the resolver reads them.** `all_list_paths()` hands
+it the music list and then the film list, so a name in both resolves to the
+music copy and the film row can never be sent. Counting the two separately
+would miss exactly the collisions the split introduced - which a test pins,
+because it is the easy thing to get wrong.
+
+**The count only.** The detail belongs to the view that already presents it
+properly, with headings resolved to paths this machine has. Printing them here
+would be a second presentation to keep in step with the first, and one answer
+to this question is the point - `find_duplicate_filenames()` is asked by both,
+which a test also pins.
+
+Nothing is said on a clean library. A warning on every build is a warning
+nobody reads.
+
+**The roadmap asked for this as "a list validator run at build time" and was
+stale by half:** the validator has existed since #164, and its own Implemented
+section three lines up said so while the wanted-list asked for it again. The
+bullet is gone. That section also still called the tab "File Lists", which
+#285 renamed to List Browser.
+
 ### 📦 A ceiling on what `!rar` will pack
 
 Nothing bounded a pack. A request packed whatever the folder held, and the only
