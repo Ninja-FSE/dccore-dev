@@ -160,4 +160,5 @@ should say about one that has never replied.
 
 - **Multi-network before multi-list.** It touches more and is wanted less.
 - **Rewriting the mIRC theme engine.** The colour blocks are what makes a DCCore bot recognisable in a channel.
+- **Adapting the DCC packet size during a transfer.** The block size is not what limits a transfer. `scripts/send_benchmark.py` reaches roughly 950 MB/s at 64 KB on loopback - far above any real link - so there is no headroom for a larger write to win back. What actually bounds a fast link to a distant peer is the socket send buffer against the round-trip time, which is what `DCC_SEND_BUFFER` exists for. And a slow receiver is already handled: TCP flow control blocks the send when the far end stops reading, so adapting the write size downward would be reimplementing, badly, something the kernel does correctly. The setting stays a menu the operator picks once.
 - **TLS for the dashboard.** It is a loopback tool by design; anyone needing it across a network should put a reverse proxy in front rather than have the daemon grow a certificate story.

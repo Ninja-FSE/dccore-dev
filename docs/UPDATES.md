@@ -4,6 +4,47 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚫 Adapting the packet size mid-transfer is not planned
+
+Asked for after the 64 KB work: could the bot raise the packet size when it
+sees a transfer going well, and keep it low for slow receivers?
+
+**Measured rather than argued.** `scripts/send_benchmark.py` reaches roughly
+950 MB/s at 64 KB on loopback, which is far above any real link - so there is
+no headroom for a larger write to win back. What bounds a fast link to a
+distant peer is the socket send buffer against the round-trip time, and
+`DCC_SEND_BUFFER` already exists for exactly that.
+
+The slow-receiver half is already handled too, and better than this would
+handle it: TCP flow control blocks the send when the far end stops reading.
+Adapting the write size downward would be reimplementing that badly.
+
+Recorded in the roadmap's "Not planned" section with the reasoning, rather
+than dropped silently - it is a reasonable thing to ask twice.
+
+### 📋 Three backlog items that were already built
+
+Reported to the operator as outstanding, and none of them were. Corrected
+here because the wrong list was acted on before it was checked.
+
+- **Most-requested files and folders.** Complete end to end: `db.record_download()`
+  writes them, `db.top_downloads()` reads them split by kind, `commands.py`
+  answers on IRC, the stats payload carries them and the dashboard renders
+  them. 31 tests.
+- **Download history persistence.** `_persist_fetch_history_locked()` writes
+  terminal rows every tick with retention, and `oserve.py` loads them at
+  startup. In-flight rows are excluded deliberately - the socket that would
+  have finished them is gone with the old process.
+- **Files counted separately from RAR albums.** That is the `kind` argument
+  above, and the dashboard hides the album table when `RAR_ENABLED` is off.
+
+**The cause is worth keeping.** The backlog was read out of issue #133, which
+was written before any of it was built, instead of out of the code. The
+greps that were supposed to catch that searched for `most_requested` and
+`top_files` - names this project never used - so an absent match read as an
+absent feature. `docs/FUTURE.md` had it right all along: per-file download
+counts are listed under Implemented.
+
 ### 🗑️ The "what's new" list is off the roadmap
 
 Dropped at the operator's call - not wanted at the moment.
