@@ -451,7 +451,22 @@ LIST_RAWBYTES_FILE: str = "dccore.rawbytes.txt"
 # Clamped to 4 KB - 1 MB when read (see dcc.dcc_block_size), because a value
 # of 0 would busy-loop and a value of 500 MB would hold half a gigabyte per
 # transfer for no gain.
-DCC_BLOCK_SIZE: int = 65536      # 64 KB - 16x mIRC's default; 4096..1048576
+DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/131072
+
+# The socket send buffer for a DCC transfer, in bytes. 0 leaves it to the OS.
+#
+# THIS IS THE ONE THAT MATTERS ON A FAST, DISTANT LINK, and it is not the
+# packet size above. What bounds throughput on TCP is the bandwidth-delay
+# product: bytes in flight = bandwidth x round-trip time. At 100 Mbps and
+# 100 ms RTT that is about 1.25 MB, and a 64 KB send buffer caps the transfer
+# at roughly 5 Mbps no matter how big each write is - the writer simply waits
+# for the far end to acknowledge before it can put more on the wire.
+#
+# LEFT AT 0 BY DEFAULT, deliberately. Both Windows and Linux auto-tune this
+# buffer, and setting it explicitly TURNS THAT OFF - so a value chosen for one
+# link can be worse than the default on every other. It is here to be
+# experimented with on a link the operator knows, not to be set hopefully.
+DCC_SEND_BUFFER: int = 0         # 0 = let the OS auto-tune; try 262144 or 1048576
 DCC_PORT_START: int = 55000
 DCC_PORT_END: int   = 55010
 
