@@ -411,9 +411,26 @@ def announce_worker():
                     chan = chan.strip()
                     if not chan:
                         continue
-                        
+
+                    # THIS CHANNEL'S OWN LIST (#26). The loop already read the
+                    # figures once per channel; it just read the same ones every
+                    # time. Now each channel advertises the list it actually
+                    # serves - a count and a size from another channel's library
+                    # is a claim nobody there can act on.
+                    #
+                    # None means no list is bound here and the primary is not
+                    # the catch-all, which is #26's "a channel with no list
+                    # bound gets no advert". The advert is where that rule is
+                    # most visible: a bot silently present in a channel it does
+                    # not serve, rather than one announcing a library it will
+                    # refuse to send from.
+                    import library
+                    wanted = library.list_name_for_request(chan)
+                    if wanted is None:
+                        continue
+
                     # Read the live figures at this exact moment
-                    file_count, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes()
+                    file_count, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes(wanted)
 
                     # #229: get_file_count_date_size_and_raw_bytes() answers the
                     # sentinel "No List" as the DATE when no master list exists

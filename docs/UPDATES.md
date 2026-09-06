@@ -4,6 +4,34 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📢 Each channel advertises its own list (#26, stage 4)
+
+The advert loop already read the figures once per channel. It just read the
+same ones every time - so this stage is the loop asking which list the channel
+has before reading them.
+
+A count and a size from another channel's library is a claim nobody there can
+act on: they would see a number, ask for something in it, and be told no.
+
+**A channel with no list bound gets no advert at all**, which is where #26's
+rule is most visible. The alternative is a bot announcing a library it will
+then refuse to send from - worse than a bot that is simply quiet there.
+
+The lookup goes BEFORE the figures rather than after: reading them first and
+discarding them would be equally correct and would make every unserved channel
+pay for a list read it was never going to use.
+
+One mutation was not caught first time, and the reason was worth the extra
+test. `find_latest_list(name)` inside the counter feeds only the DATE and the
+"is there a list at all" check - the count itself comes through
+`all_list_paths(name)` - so a test asserting counts alone passed while that
+call read the primary's. The sharper property: a list that has never been
+built must report "No List" even when another list has one. It is the sentinel
+the advert skips on, so with it wrong the channel would advertise a library
+that does not exist.
+
+Nine tests, five mutations, all caught.
+
 ### 🔀 A request is answered from the channel's own list (#26, stage 3)
 
 The first stage that changes behaviour. `library.list_for_request()` is the
