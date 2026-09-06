@@ -609,7 +609,25 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
 #
 # That is what makes the per-root labels in the multi-folder design (#164)
 # possible without breaking anything downstream.
-LIST_FOLDER_PREFIX = "D:\\MUSIC\\"
+# "MEDIA", not "MUSIC", since the lists stopped being music-only. A heading
+# reading "D:\MUSIC\TV\Spider-Noir (2026)\Season 01\" says the wrong
+# thing about itself: the second component is the operator's FOLDER LABEL,
+# so the fixed part in front of it should not contradict it. Neo's
+# observation, on a real list.
+#
+# Safe to change for the reasons above: there is no canonical prefix, and
+# AutoQ does not read this one - its dequeue match takes $nopath() of the
+# folder, the last component only.
+#
+# What is NOT safe is stopping understanding the old one. Every list already
+# in somebody's hands says "D:\MUSIC\", and a row pasted back out of one
+# has to keep working - so the tuple below is what the read side uses.
+LIST_FOLDER_PREFIX = "D:\\MEDIA\\"
+
+# Every prefix a heading may ARRIVE with, current first. One is written; all
+# are understood. A list downloaded a year ago is still a list somebody is
+# pasting rows out of today.
+LIST_FOLDER_PREFIXES = (LIST_FOLDER_PREFIX, "D:\\MUSIC\\")
 
 # A leading drive specifier on one path component: "C:", "C:Windows".
 _DRIVE_PREFIX_RE = re.compile(r"^[A-Za-z]:")
@@ -634,8 +652,10 @@ def list_heading_parts(header):
     on a downstream guard for.
     """
     text = (header or "").strip()
-    if text.upper().startswith(LIST_FOLDER_PREFIX):
-        text = text[len(LIST_FOLDER_PREFIX):]
+    for prefix in LIST_FOLDER_PREFIXES:
+        if text.upper().startswith(prefix):
+            text = text[len(prefix):]
+            break
     # Headings are written with backslashes regardless of the host, so split on
     # both and let os.path.join put the platform's own separator back.
     parts = [part for part in text.replace("\\", "/").split("/") if part]

@@ -300,5 +300,63 @@ class _Inline:
         return None
 
 
+class TheVirtualPrefix(unittest.TestCase):
+    """The fixed part in front of every folder heading.
+
+    It is not a real path on anybody's machine - QuickList made the written
+    path an option, so lists in the wild carry full drive paths, stripped
+    relative ones and bare folder names, and OmenServe consumed all of them.
+    There is no canonical prefix, which is what makes this ours to choose.
+
+    It became worth choosing again once the lists stopped being music-only: a
+    heading reading "D:\\MUSIC\\TV\\Spider-Noir (2026)\\Season 01\\"
+    contradicts itself, because the second component is the operator's own
+    folder label.
+    """
+
+    def test_what_is_written_says_media(self):
+        self.assertEqual(list_mod.LIST_FOLDER_PREFIX, "D:\\MEDIA\\")
+
+    def test_the_old_prefix_is_still_understood(self):
+        """EVERY LIST ALREADY IN SOMEBODY'S HANDS says the old one, and a row
+        pasted back out of one has to keep working. One prefix is written; all
+        of them are read."""
+        self.assertIn("D:\\MUSIC\\", list_mod.LIST_FOLDER_PREFIXES)
+        self.assertEqual(
+            list_mod.list_heading_parts("D:\\MUSIC\\TV\\Show\\"),
+            ["TV", "Show"])
+        self.assertEqual(
+            list_mod.list_heading_parts("D:\\MEDIA\\TV\\Show\\"),
+            ["TV", "Show"])
+
+    def test_the_current_prefix_is_the_first_one_tried(self):
+        """Order matters only for cost, not correctness - but the one written
+        today is the one nearly every heading will carry."""
+        self.assertEqual(list_mod.LIST_FOLDER_PREFIXES[0],
+                         list_mod.LIST_FOLDER_PREFIX)
+
+    def test_a_heading_is_RECOGNISED_by_any_known_prefix(self):
+        """Read out of dcc.py, and the reason this test exists: that file uses
+        the prefix to decide whether a line IS a folder heading. Checking only
+        the current one stopped it seeing the headings in every list already
+        downloaded, so a bare request against one resolved nothing at all -
+        which is what the resolution-counting test caught."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+
+        self.assertIn("for p in list_mod.LIST_FOLDER_PREFIXES", code)
+        self.assertNotIn("startswith(list_mod.LIST_FOLDER_PREFIX)", code)
+
+    def test_the_builder_has_no_prefix_of_its_own(self):
+        """Four writers each carried their own copy of the literal, so
+        changing the constant alone would have changed nothing about what gets
+        written. They go through it now."""
+        with io.open(os.path.join(REPO_ROOT, "update_list.py"), encoding="utf-8") as handle:
+            code = handle.read()
+
+        self.assertNotIn("D:" + chr(92) + chr(92) + "MUSIC", code)
+        self.assertGreaterEqual(code.count("list_mod.LIST_FOLDER_PREFIX"), 4)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,51 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗄️ The list says MEDIA, not MUSIC
+
+Neo, reading a real film list:
+
+> we have a virtual name in the list, so it works with both linux paths and
+> windows paths. i opened up the VIDEO list -
+> `D:\MUSIC\TV\Spider-Noir (2026) {imdb-tt30460310}\Season 01\` -
+> maybe we should change this `D:\MUSIC\` to `D:\MEDIA\`
+
+He is right, and the heading contradicts itself: the second component is the
+operator's own FOLDER LABEL, so a fixed "MUSIC" in front of "TV" says
+something about the path that is not true. Since the lists stopped being
+music-only, the prefix stopped being accurate.
+
+**Safe to change**, and `list.py` had already established why: QuickList made
+the written path an OPTION, so lists in the wild carry full drive paths,
+stripped relative ones and bare folder names, and OmenServe consumed all of
+them. There is no canonical prefix. AutoQ does not read it either - its
+dequeue match takes `$nopath()` of the folder, the last component only.
+
+**What is NOT safe is ceasing to understand the old one.** Every list already
+in somebody's hands says `D:\MUSIC\`, and a row pasted back out of one has to
+keep working. So `LIST_FOLDER_PREFIXES` is what the read side uses: one prefix
+is written, all of them are understood.
+
+That distinction was not academic. `dcc.py` uses the prefix to decide whether
+a line IS a folder heading, and with only the new one it stopped seeing the
+headings in every list already downloaded - a bare request against one then
+resolved nothing at all. The test that counts resolutions caught it
+immediately.
+
+**And the builder had four copies of the literal**, none of them the
+constant - so changing `LIST_FOLDER_PREFIX` alone would have changed nothing
+about what gets written. All four go through it now, and a test asserts the
+builder holds no prefix of its own.
+
+The test sweep needed care in both directions. Assertions about what the
+builder WRITES moved to the new prefix; fixture INPUT deliberately kept the
+old one, because that is exactly what a list in somebody's hands says and
+changing it too would have quietly removed the coverage that the legacy prefix
+still resolves. Four assertions were changed and then changed back for that
+reason: they echo their fixture rather than the builder.
+
+Five tests, four mutations, all caught.
+
 ### 🧰 Lists are defined from the Settings page (#26, stage 5 - complete)
 
 The last stage. A list is a name, the channels it serves, its folders, and
