@@ -45,6 +45,38 @@ greps that were supposed to catch that searched for `most_requested` and
 absent feature. `docs/FUTURE.md` had it right all along: per-file download
 counts are listed under Implemented.
 
+### 🌐 The test suite was opening the operator's browser
+
+Reported from the desktop: `http://127.0.0.1:8420/` popping up every few
+minutes, on a machine where the bot was not running.
+
+It was the test suite. `webserver.start()` opens the dashboard in the default
+browser, and two tests in `test_webserver.py` drive `start()` directly to check
+the `WEBUI_ENABLED` and `WEBUI_HOST` gates. So every full-suite run - every
+`scripts/preflight.py` - launched a browser tab.
+
+**The same class of side effect was already guarded one line lower.** That test
+class replaces `create_app()` so a regressed gate cannot bind a real socket,
+and says why: "a test must not be able to start a live listener because the
+code it is testing broke". The browser call sits immediately above the bind and
+was missed.
+
+**The guard is in `tests/__init__.py`.** `tests/support.py` was the obvious
+place and is the wrong one - only 90 of the 121 test files import it, and the
+class that tripped this is a plain `unittest.TestCase` that does not. Patching
+each test that calls `start()` fixes today's two and nothing about the next.
+Importing the package is the one thing every run does.
+
+Calls are RECORDED, not dropped, so opening the dashboard is still assertable -
+which matters, because it is a feature somebody asked for. The new tests check
+that `start()` still would open it, that `WEBUI_OPEN_BROWSER = False` still
+stops it, and that a LAN-bound dashboard still opens nothing.
+
+Verified by re-running the whole of preflight with a `sitecustomize` trap
+installed at interpreter start, below the guard: zero calls reached the real
+opener across both passes. Six mutations, including removing the guard and
+guarding only `open()` while leaving `open_new()` exposed, all fail.
+
 ### 🗑️ The "what's new" list is off the roadmap
 
 Dropped at the operator's call - not wanted at the moment.
