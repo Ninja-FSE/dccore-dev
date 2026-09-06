@@ -4,6 +4,53 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🕵️ A serving bot's nick, out of the test suite
+
+Found while writing the queue tests below. `tests/` SHIPS - `.gitattributes`
+export-ignores exactly two docs, and neither is a test file - and six
+occurrences of another network's real serving bot nick were sitting in two
+test files, copied in from the log excerpts the tests were written against.
+
+Renamed to an invented one. The nick was never what either test was about.
+
+The standing rule is to invent the identifier BEFORE writing the test, and
+this is the second time it has been caught afterwards instead. A log excerpt
+pasted in as a docstring is the specific way it gets in.
+
+### 📥 The fetch queue's pacing, pinned end to end
+
+> i download a bot's list, added 10+ into the queue on the webdashboard. it
+> didnt queue them, it spit out every line at 1 go. should be queued and sent
+> 3 at the time to the channel.
+
+**This could not be reproduced on `main`.** Driven the way it really runs, ten
+queued rows put three lines in the channel, hold the other seven across
+repeated ticks, and release the next three only as the first three complete.
+That is the reported-correct behaviour, and it is what the code does.
+
+What was missing was the test. The SLOT CAP had one - two promoted, two left
+pending - but nothing covered the thing an operator actually watches: that a
+long selection reaches the channel a few lines at a time, and that each
+COMPLETION is what releases the next. Both halves could have regressed in
+silence. Nine tests now hold them, including the hundred-row shape driven
+dispatch-complete-dispatch rather than by setting states and hoping.
+
+**A real hazard turned up next to it.** `MAX_FETCH_SLOTS` is editable on the
+settings page, which is the one way the active count can come out HIGHER than
+the limit - lower it while transfers are running and `free_slots` goes
+negative. It reaches `pending_ids[:free_slots]` as a slice FROM THE END, and
+dispatches every pending row but the last few. A hundred-row queue would empty
+into the channel the moment somebody saved a setting, which is a fair
+description of the symptom reported above.
+
+The `free_slots <= 0` guard has always stopped this, so it has never been
+reachable in a shipped build - but nothing tested the guard, and deleting it
+as redundant would have looked safe. It is pinned now. Holding still until the
+extra transfers finish is the right response: the ones in flight are already
+paid for, and the new limit governs from the next promotion on.
+
+No behaviour changed. The investigation and the guard are the deliverable.
+
 ### 🔌 Commands sent on connect, before the join
 
 > On connect commands to the server like undernet authentication and user
