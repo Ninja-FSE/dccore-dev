@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Downloads shows the newest first, and a failed fetch has a Redownload button.** The row you want is almost always the most recent one, so it is now at the top instead of below every completed transfer. And when a fetch fails or is rejected there is a **Redownload** button beside Delete — no more going back to the List Browser to retype the nick. The failed row stays where it is, so you can still see why it failed.
+
 - **Fixed: lists from other bots were being refused for two wrong reasons.** A bot that publishes its list as a plain `.txt` had every fetch thrown away at the last step with "File is not a zip file" — those are read now. And the size limit on an incoming list was 20 MB, set from one 4 MB example; real lists in a busy channel run to 25–31 MB and were all rejected after downloading in full. The limit is now 128 MB and adjustable as **`MAX_LIST_TEXT_SIZE`**, and if a list ever does exceed it the message says so by name.
 
 - **Folder headings in the list now read `D:\MEDIA\` instead of `D:\MUSIC\`.** That prefix is not a real path on your machine — it is a fixed label so the list looks the same whatever your server actually runs — and with film and series in there too, `D:\MUSIC\TV\...` said the wrong thing. **Lists your users already downloaded keep working**: rows pasted back with the old prefix are still understood.

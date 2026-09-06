@@ -555,5 +555,59 @@ class EveryElementReferenceIsDeclared(unittest.TestCase):
                          "the el map declares element(s) nothing reads")
 
 
+class AskingAgainForAFetchThatFailed(unittest.TestCase):
+    """Neo's: a failed or rejected fetch is the one an operator most wants to
+    retry, and the only way to do it was to go back to the List Browser and
+    retype the nick."""
+
+    def setUp(self):
+        self.js = read("app.js")
+
+    def test_the_button_is_offered_on_the_rows_that_need_it(self):
+        self.assertIn("fetch-retry-btn", self.js)
+        self.assertIn("Redownload", self.js)
+
+    def test_it_is_not_offered_on_a_row_that_succeeded(self):
+        """There is a Download button there, and re-fetching a list already
+        held is what the List Browser's own refresh is for."""
+        line = [l for l in self.js.splitlines() if "fetch-retry-btn" in l
+                and "closest" not in l]
+        self.assertTrue(line)
+        guard = self.js.split("var retryBtn", 1)[1][:200]
+
+        self.assertIn('rejected || state === "failed"', guard)
+
+    def test_neither_the_bot_nor_the_filename_goes_into_an_attribute(self):
+        """escapeHtml() is textContent -> innerHTML: it encodes & < > and
+        leaves a double quote alone, and both of those values come off the
+        wire. The row is looked up by its id instead - that one is ours, and
+        it is hex."""
+        block = self.js.split("var retryBtn", 1)[1].split("var action", 1)[0]
+
+        self.assertNotIn("data-bot=", block)
+        self.assertNotIn("data-filename=", block)
+        self.assertIn("data-request-id=", block)
+
+    def test_a_list_and_a_file_are_asked_for_the_way_they_were_asked_for(self):
+        """They always were different: a list is "@<bot>" and we cannot know
+        what the bot will call its archive, while a file is named outright.
+        Retrying through the wrong one would create a row of a different kind
+        from the one being retried."""
+        body = self.js.split("function redownloadFetchRow", 1)[1].split(
+            chr(10) + "  // Delegated", 1)[0]
+
+        self.assertIn('request_type === "list"', body)
+        self.assertIn("/api/filelists/fetch", body)
+        self.assertIn("/api/fetch/enqueue", body)
+
+    def test_the_row_being_retried_is_not_deleted(self):
+        """It is the record of what happened, and throwing it away as a side
+        effect of retrying would remove the reason the retry was needed."""
+        body = self.js.split("function redownloadFetchRow", 1)[1].split(
+            chr(10) + "  // Delegated", 1)[0]
+
+        self.assertNotIn("/delete", body)
+
+
 if __name__ == "__main__":
     unittest.main()

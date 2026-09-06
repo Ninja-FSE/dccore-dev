@@ -797,7 +797,11 @@ class FetchRoutesTests(DCCoreTestCase):
         self.assertEqual(len(result["errors"]), 2)
         self.assertEqual(len(config.fetch_queue), 1)
 
-    def test_status_payload_is_ordered_oldest_first_and_carries_the_id(self):
+    def test_status_payload_is_ordered_newest_first_and_carries_the_id(self):
+        """It was oldest first. The reason to open this view is almost always
+        the most recent thing that happened, and that meant scrolling past
+        every completed fetch to reach it. Still ordered by time, so it is no
+        less stable between polls - just counted from the other end."""
         rid1 = None
         import dcc_fetch
         rid1 = dcc_fetch.enqueue_fetch("bot1", "First.flac")
@@ -806,8 +810,8 @@ class FetchRoutesTests(DCCoreTestCase):
         config.fetch_queue[rid2]["requested_at"] = 2.0
 
         rows = webserver.build_fetch_status_payload()
-        self.assertEqual([r["id"] for r in rows], [rid1, rid2])
-        self.assertEqual(rows[0]["bot"], "bot1")
+        self.assertEqual([r["id"] for r in rows], [rid2, rid1])
+        self.assertEqual(rows[0]["bot"], "bot2")
 
     def test_status_payload_is_empty_list_when_queue_is_empty(self):
         self.assertEqual(webserver.build_fetch_status_payload(), [])
