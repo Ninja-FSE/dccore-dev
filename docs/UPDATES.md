@@ -4,6 +4,59 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 Held lists can keep themselves up to date (#302)
+
+> Implement auto-downloading of lists from bots to keep them automatically up
+> to date.
+
+**The advert decides, not a timer.** #286 already worked out what "moved on"
+means and why - their advert THEN against their advert NOW, date first and
+count second, because bots count differently and an off-by-a-few would mark a
+list permanently stale. A timer alone would re-ask every bot for a list we
+already have, every interval, for ever: that is other people's bandwidth and
+other people's transfer slots.
+
+**"Unknown" is not "changed."** A bot that publishes no date, or one whose
+advert we have not seen since starting, gives no evidence either way - and
+acting on no evidence is exactly what makes an automatic feature untrustworthy.
+
+**Off by default.** It spends somebody else's resources, which is a decision to
+make rather than one to inherit.
+
+Three bounds, each with a case behind it:
+
+`AUTO_REFETCH_INTERVAL_HOURS` is the floor on how often ONE bot is asked, not
+how often the sweep runs. A bot rebuilding its list hourly would otherwise be
+re-fetched hourly, however loudly its advert changed.
+
+`AUTO_REFETCH_MAX_PER_RUN` caps a sweep. A bot back after a month offline comes
+back to a lot of stale lists, and asking for all of them at once is a burst of
+outbound requests nobody asked for. The rest go next time, **oldest first**.
+
+And every request goes through `build_list_fetch_enqueue_result()` - the same
+enqueue the dashboard's own Refresh uses - so the slot limits, the duplicate
+guard and the queue ceiling apply exactly as they do to a fetch an operator
+started by hand.
+
+Two tests were wrong first time and the fix is the interesting part. They
+asserted the sweep REPORTED a bot as started, but `started` is what the
+enqueue accepted, and in a fixture with no live connection it refuses. That is
+the right answer - a sweep reports what was actually queued, not what it
+decided to try - so the tests now assert what the sweep controls: which bots
+it asks for, and how many.
+
+The coverage gate refused this before it could be pushed: `auto_refetch_worker`
+is an endless loop and no test entered it. It takes its sleep as an argument
+precisely so one can - watch a pass, then leave - and allow-listing a loop that
+was built to be drivable would have been the wrong answer. It also now has a
+test for surviving a sweep that raises, because a background thread that dies
+on one bad pass stops refreshing anything, silently, until a restart.
+
+Eleven tests, nine mutations, all caught. The last needed a source-reading guard
+for the worker's own start, asserted as a sequence: a thread started
+unconditionally and a guard with nothing behind it are both wrong, and either
+alone passes a check for the other.
+
 ### 🪟 The Windows install is seven numbered steps (#302)
 
 Neo's format, with the two things that actually go wrong written in rather
