@@ -874,6 +874,27 @@ html, body {
    element in here that carries `hidden` needs this pair. */
 /* #26's list blocks reuse the served-folder controls, so only what is new
    to them is styled here. */
+.on-connect-commands {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  margin-bottom: 8px;
+  resize: vertical;
+}
+
+/* The stepper the number input gives us natively - up/down arrows, keyboard
+   arrows, and a typed value all in one control. */
+.on-connect-delay {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.on-connect-delay-input {
+  width: 6em;
+}
+
 .served-list-block {
   border: 1px solid var(--border);
   border-radius: 6px;

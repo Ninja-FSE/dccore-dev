@@ -1593,6 +1593,49 @@ def irc_loop():
                         
                         def delayed_join(socket_conn, channels):
                             time.sleep(5)
+                            # ON-CONNECT COMMANDS, BEFORE THE JOIN. The order is
+                            # the point, not a preference: on Undernet, logging
+                            # in to X takes +x, and +x replaces the host every
+                            # person in the channel sees. Joining first puts the
+                            # real host in front of everybody already sitting
+                            # there, and no later mode change takes it back.
+                            #
+                            # So: auth, mode, THEN join. Anything that fails
+                            # here is logged and the join happens anyway - a bot
+                            # that will not join because one optional line was
+                            # refused is worse off than one that joined without
+                            # its usermode.
+                            try:
+                                import on_connect
+
+                                commands, gap = on_connect.load()
+                                if commands:
+                                    # COMMAND WORDS ONLY, never the arguments.
+                                    # These lines hold an X password, and
+                                    # send_debug() writes to a CHANNEL -
+                                    # printing one there hands it to everybody
+                                    # watching.
+                                    shown = ", ".join(on_connect.redacted(commands))
+                                    print(f"[CONNECT] Sending {len(commands)} "
+                                          f"on-connect command(s): {shown}")
+                                for index, command in enumerate(commands):
+                                    if index:
+                                        time.sleep(gap)
+                                    line = on_connect.expand(command,
+                                                             config.NICKNAME)
+                                    socket_conn.send(
+                                        (line + "\r\n").encode(
+                                            "utf-8", errors="ignore"))
+                                if commands:
+                                    # One more gap before the JOIN, so the last
+                                    # command gets the same chance to be acted
+                                    # on as the ones before it. A login sent
+                                    # immediately before a JOIN can still be in
+                                    # flight when the channel sees us.
+                                    time.sleep(gap)
+                            except Exception as on_connect_err:
+                                print(f"[CONNECT] On-connect commands failed "
+                                      f"({on_connect_err}); joining anyway.")
                             try:
                                 socket_conn.send(f"JOIN {channels}\r\n".encode())
                                 # An empty fallback rather than a channel name, and then an

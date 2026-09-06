@@ -62,6 +62,7 @@
     folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
     downloads: [],
     lists: null, listsSource: "", listsDraft: null, listsNote: null,
+    onConnect: null, onConnectNote: null,
     // The folder picker (#164 step 5). `browse` is null when the panel is
     // closed; open, it carries the row it will write back into.
     foldersBrowserEnabled: false, browse: null,
@@ -2148,6 +2149,102 @@
   // than sitting beside it: two places to edit folders, one of which quietly
   // does nothing, is worse than either on its own. With one list the familiar
   // editor stays exactly where it was; the button below is what moves it.
+  // Commands sent once the server has registered us and BEFORE we join.
+  // The ordering is the whole point - see on_connect.py.
+  function onConnectSectionHtml() {
+    var data = state.onConnect || { commands: [], delay_seconds: 2 };
+
+    var note = "";
+    if (state.onConnectNote) {
+      note = '<p class="served-folder-note ' +
+        (state.onConnectNote.ok ? "is-ok" : "is-error") + '">' +
+        escapeHtml(state.onConnectNote.text) +
+        (state.onConnectNote.problems || []).map(function (line) {
+          return "<br>\u2022 " + escapeHtml(line);
+        }).join("") + "</p>";
+    }
+
+    // NO VALUE IN AN ATTRIBUTE. These lines hold an X password and
+    // escapeHtml() leaves a double quote alone - the textarea's contents are
+    // assigned as a property in attachOnConnectRows(), like every other value
+    // on this page.
+    return '<div class="served-folders">' +
+      "<h3>On connect</h3>" +
+      '<p class="served-folder-summary">' +
+        "Sent once the server has registered you and <strong>before</strong> " +
+        "joining - one command per line, exactly as you would type it into a " +
+        "client. On Undernet that ordering matters: logging in to X takes " +
+        "<code>+x</code>, and joining first shows your real host to everyone " +
+        "already in the channel. Use <code>%nick%</code> for the nickname the " +
+        "server actually gave you." +
+      "</p>" +
+      '<textarea class="on-connect-commands" rows="5" spellcheck="false" ' +
+        'placeholder="PRIVMSG X@channels.undernet.org :LOGIN yourname yourpass' +
+        '&#10;MODE %nick% +x" aria-label="Commands to send on connect"></textarea>' +
+      '<div class="on-connect-delay">' +
+        '<label for="on-connect-delay-input">Seconds between commands</label>' +
+        '<input type="number" id="on-connect-delay-input" ' +
+          'class="on-connect-delay-input" min="0" max="' +
+          escapeHtml(String(data.max_delay_seconds || 60)) + '" step="1">' +
+      "</div>" +
+      '<div class="served-folder-actions">' +
+        '<button type="button" class="btn btn-accent on-connect-save">' +
+        "Save on-connect commands</button>" +
+      "</div>" + note + "</div>";
+  }
+
+  function attachOnConnectRows() {
+    var data = state.onConnect || { commands: [], delay_seconds: 2 };
+    var box = el.settingsFields.querySelector(".on-connect-commands");
+    var delay = el.settingsFields.querySelector(".on-connect-delay-input");
+    if (!box || !delay) { return; }
+
+    box.value = (data.commands || []).join("\n");
+    delay.value = data.delay_seconds === undefined ? 2 : data.delay_seconds;
+  }
+
+  function loadOnConnect() {
+    return fetchJson("/api/on-connect")
+      .then(function (payload) {
+        state.onConnect = payload;
+        if (state.active === "settings" && state.settingsActiveCategory === "paths") {
+          renderSettingsFields();
+        }
+      })
+      .catch(function () { /* the settings page still works without it */ });
+  }
+
+  function saveOnConnect() {
+    var box = el.settingsFields.querySelector(".on-connect-commands");
+    var delay = el.settingsFields.querySelector(".on-connect-delay-input");
+    if (!box || !delay) { return; }
+
+    return postJson("/api/on-connect", {
+      commands: box.value,
+      delay_seconds: Number(delay.value)
+    }).then(function (res) {
+      if (res.ok) {
+        state.onConnect = {
+          commands: res.data.commands || [],
+          delay_seconds: res.data.delay_seconds,
+          max_delay_seconds: (state.onConnect || {}).max_delay_seconds
+        };
+        state.onConnectNote = { ok: true, text: res.data.message || "Saved." };
+      } else {
+        // Every fault at once, newline separated, the same way the folder and
+        // list endpoints answer.
+        var message = (res.data && res.data.error) || "Could not save.";
+        var parts = message.split("\n");
+        state.onConnectNote = {
+          ok: false,
+          text: parts.length > 1 ? "Could not save:" : message,
+          problems: parts.length > 1 ? parts : []
+        };
+      }
+      renderSettingsFields();
+    });
+  }
+
   function listsSectionHtml() {
     var draft = state.listsDraft || [];
 
@@ -2603,9 +2700,13 @@
           "</div>" + html;
       }
     }
+    if (category.id === "paths") {
+      html += onConnectSectionHtml();
+    }
     el.settingsFields.innerHTML = html;
     if (category.id === "paths") {
       if (state.listsSource === "file") { attachListRows(); } else { attachFolderRows(); }
+      attachOnConnectRows();
     }
 
     // Values are assigned as PROPERTIES here, not concatenated into value="…"
@@ -2679,6 +2780,7 @@
         state.settingsAdminPasswordSet = !!payload.admin_password_set;
         loadFolders();
         loadLists();
+        loadOnConnect();
 
         var baseline = {};
         state.settingsCategories.forEach(function (category) {
@@ -2754,6 +2856,11 @@
 
     // #26's own buttons first: they share the settings pane with the folder
     // ones and a shared handler would have to tell them apart anyway.
+    if (evt.target.closest(".on-connect-save")) {
+      saveOnConnect();
+      return;
+    }
+
     var listButton = evt.target.closest(
       ".served-list-add, .served-list-save, .served-list-remove, " +
       ".list-folder-add, .list-folder-remove, .served-list-start");

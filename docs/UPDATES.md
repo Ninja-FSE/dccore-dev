@@ -4,6 +4,65 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔌 Commands sent on connect, before the join
+
+> On connect commands to the server like undernet authentication and user
+> modes etc. Maybe a text box in settings where you add all the commands you
+> want to be sent to server on connect and a delay box with up and down arrows
+> to change seconds between commands.
+
+**The moment matters more than the commands.** These run after registration
+and BEFORE the JOIN, and on Undernet that ordering is not cosmetic: logging in
+to X takes `+x`, and `+x` replaces the host every person in the channel sees.
+Join first and your real host is in front of everybody already sitting there -
+and no later mode change takes it back. Auth, mode, then join.
+
+A failure there does not stop the join. A bot that will not join because one
+optional line was refused is worse off than one that joined without its
+usermode.
+
+**Its own file, not a setting.** `settings.conf` is one `NAME = value` per line
+and deliberately refuses a value spanning lines - an indented continuation used
+to join itself onto the setting above, silently. A list of commands is exactly
+the shape that breaks on, so `data/on_connect.json` follows
+`library_folders.json` and `lists.json`.
+
+**The file holds a password**, and that shapes three decisions:
+
+- **The command text is never logged.** `send_debug()` writes to a CHANNEL, and
+  printing an X login there hands the password to everybody watching. The log
+  line is built from `redacted()`, which keeps the command word and drops
+  everything after it: `PRIVMSG ...`.
+- **A validation message names the position, not the text.** "command 1" is
+  enough to find the line; quoting it would put the password in the error.
+- **The dashboard shows them in full anyway.** A box an operator can overwrite
+  but never read means never fixing a typo without retyping the lot - and
+  anyone with the dashboard login can read the file off the disk. The rule is
+  about logs and channels, which is where it is enforced.
+
+`%nick%` expands to the nick the SERVER settled on, not the configured one: a
+433 collision rebinds it, and `MODE %nick% +x` written with the configured nick
+would send a mode for somebody else.
+
+A newline inside one entry becomes a space rather than a second command. That
+is how one line would turn into two on the wire, and an operator pasting a
+block with a stray newline means one command.
+
+The gap between commands is a number input - arrows, keyboard, or typed - and
+it is taken BETWEEN them, not before the first: sending an X login, a usermode
+and whatever else back to back is how a bot meets Excess Flood on its own first
+line, and a gap before the first one would delay the join for nothing.
+
+Twenty-two tests, nine mutations, all caught. One of them - that the gap sits
+inside the loop rather than before it - needed asserting as a sequence, because
+a sleep in either place looks identical to a check for "is there a sleep".
+
+**And a test wrote the real `data/on_connect.json`**, which would have left an
+X password in the working directory. The harness now redirects
+`ON_CONNECT_FILE` per test, the same way it redirects `DCCORE_SETTINGS_FILE` -
+the second time today that a gitignored file was the thing that hid a test
+writing somewhere real.
+
 ### ⏱️ The transfer was never slow. The number was.
 
 > with mirc 65536 packet size i got 46 mb/sec max transfer speed and i get over
