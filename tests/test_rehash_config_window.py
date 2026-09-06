@@ -34,6 +34,7 @@ JOIN that was never sent.
 """
 
 import io
+import contextlib
 import os
 import sys
 import threading
@@ -46,6 +47,8 @@ if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
 import commands  # noqa: E402
+import dcc  # noqa: E402
+import defaults as config  # noqa: E402
 import runtime  # noqa: E402
 import settings_file  # noqa: E402
 
@@ -334,6 +337,98 @@ class TheDashboardReadsUnderTheLock(unittest.TestCase):
                       "build_settings_payload() no longer reads under "
                       "runtime.config_reload_lock - the Settings page can show "
                       "a half-reloaded configuration again")
+
+
+class ARehashDoesNotSpendTheQueuesRetries(DCCoreTestCase):
+    """Neo: "if the bot had some queues from a user, and admin made a rehash,
+    it cancels the queue."
+
+    Traced to the wake. Every rehash ends by calling check_queue_and_send() to
+    let queued users into the free slots - and if that attempt fails, the
+    failure is charged to the user's retry budget. MAX_SEND_FAILS is 3, so
+    three rehashes deleted the row.
+
+    The cause of the failure is what makes it wrong. "No usable public
+    address" is the BOT's configuration: it affects every queued user
+    identically and is fixed by the operator setting MY_IP_OR_DOCK, not by the
+    user waiting. A file that is missing or empty is a different thing - that
+    row really is dead, and charging it is what stops it being re-selected
+    every three seconds for ever.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(dcc_queue={}, frozen_queues={}, channel_users={},
+                        MY_IP_OR_DOCK="", MAX_SEND_FAILS=3)
+        config.dcc_queue["someuser"] = [{"file": "T.flac", "path": "/m/T.flac"}]
+
+    def row(self):
+        return config.dcc_queue.get("someuser", [None])[0]
+
+    def attempt(self):
+        """One dispatch attempt for the queued user, as the wake makes."""
+        row = config.dcc_queue["someuser"][0]
+        with contextlib.redirect_stdout(io.StringIO()):
+            dcc.start_dcc_send(None, "someuser", row["path"], row["file"],
+                               "#chan", row)
+
+    def test_no_public_address_does_not_charge_the_user(self):
+        for _ in range(5):
+            self.attempt()
+
+        self.assertIn("someuser", config.dcc_queue)
+        self.assertNotIn("send_fails", self.row() or {},
+                         "an unset MY_IP_OR_DOCK is being charged to the user")
+
+    def test_the_queue_survives_repeated_rehash_wakes(self):
+        """The shape of the report: it took three, and the third one was
+        silent about what it had just thrown away."""
+        for _ in range(4):
+            self.attempt()
+
+        self.assertEqual(len(config.dcc_queue.get("someuser", [])), 1)
+
+    def test_the_log_says_the_address_is_what_is_missing(self):
+        """It said "file missing, empty, or public IP unknown" - three
+        different problems in one sentence, which is how an operator ends up
+        looking for a file that is perfectly present."""
+        row = config.dcc_queue["someuser"][0]
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            dcc.start_dcc_send(None, "someuser", row["path"], row["file"],
+                               "#chan", row)
+
+        self.assertIn("the address, not the file", buffer.getvalue())
+
+    def test_a_genuinely_missing_file_is_still_charged(self):
+        """The hot loop this budget exists to bound: without it the same
+        unreadable entry was re-selected every three seconds for ever, with no
+        counter and no way out."""
+        # A PUBLIC-LOOKING address, because is_offerable_to_strangers()
+        # correctly refuses the documentation ranges - 203.0.113.x is reserved
+        # and unreachable from a real network, which is the other half of this
+        # same branch. Never dialled: the send aborts on the missing file
+        # first. The precondition is asserted rather than assumed, so this
+        # cannot quietly start testing the address branch again.
+        self.set_config(MY_IP_OR_DOCK="8.8.8.8")
+        self.assertTrue(dcc.is_offerable_to_strangers("8.8.8.8"),
+                        "fixture invariant: this test needs an address the "
+                        "send path accepts, or it tests the wrong branch")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            row0 = config.dcc_queue["someuser"][0]
+            dcc.start_dcc_send(None, "someuser", row0["path"], row0["file"],
+                               "#chan", row0)
+
+        row = self.row()
+        self.assertTrue(row is None or row.get("send_fails"),
+                        "a dead row is no longer charged, so nothing bounds "
+                        "its re-selection")
+        # And it says WHICH of the two things went wrong. The old message
+        # named three at once - "file missing, empty, or public IP unknown" -
+        # which is how an operator ends up hunting for a file that is present.
+        self.assertIn("file missing or empty", buffer.getvalue())
 
 
 if __name__ == "__main__":
