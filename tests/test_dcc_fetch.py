@@ -2488,5 +2488,76 @@ class TurningTheSizeCapsOff(DCCoreTestCase):
         self.assertGreaterEqual(config.MAX_FETCH_LIST_FILE_SIZE, 32 * 1024 * 1024)
 
 
+class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
+    """From Neo's own log, requesting from the dashboard:
+
+        [FETCH] Requested 'BBCRadio - Under Milk Wood - Richard Burton.mp3
+                ::INFO:: 79.53MB' from FlacMeDCC (request f96ba6b77dff).
+        [FETCH] Rejected unsolicited DCC SEND from FlacMeDCC
+                ('BBCRadio_-_Under_Milk_Wood_-_Richard_Burton.mp3'):
+                no matching pending request.
+
+    The bot asked for a file and then refused the answer to its own question.
+    """
+
+    LINE = "BBCRadio - Under Milk Wood - Richard Burton.mp3  ::INFO:: 79.53MB"
+    SENT_BACK = "BBCRadio_-_Under_Milk_Wood_-_Richard_Burton.mp3"
+
+    def test_the_size_suffix_is_not_part_of_the_filename(self):
+        """The dashboard sends what the operator clicked, which is the whole
+        list row. The serving side has stripped this since #234; the fetching
+        side never learned to."""
+        row = dcc_fetch.new_fetch_row("FlacMeDCC", self.LINE)
+
+        self.assertEqual(row["filename"],
+                         "BBCRadio - Under Milk Wood - Richard Burton.mp3")
+        self.assertNotIn("::INFO::", row["requested_filename"])
+
+    def test_the_answer_to_our_own_request_is_now_claimed(self):
+        """The end-to-end shape of the bug: ask with the suffix, be answered
+        without it and with underscores for spaces, and match."""
+        self.set_config(fetch_queue={})
+        request_id = dcc_fetch.enqueue_fetch("FlacMeDCC", self.LINE)
+        config.fetch_queue[request_id]["state"] = "offered"
+
+        claimed_id, row = dcc_fetch._claim_matching_offer_locked(
+            config.fetch_queue, "FlacMeDCC", self.SENT_BACK)
+
+        self.assertEqual(claimed_id, request_id)
+        self.assertEqual(row["state"], "receiving")
+
+    def test_the_normaliser_alone_could_never_have_bridged_it(self):
+        """Worth pinning, because the docstring says the match is
+        "underscore/space-normalised" and it is - that was never the gap. A
+        size only one side carries is not whitespace."""
+        with_suffix = dcc_fetch._normalize_filename_for_match(self.LINE)
+        without = dcc_fetch._normalize_filename_for_match(self.SENT_BACK)
+
+        self.assertNotEqual(with_suffix, without)
+
+    def test_a_folder_rows_request_text_survives_untouched(self):
+        """Only "file" rows are stripped. A folder row's requested_filename is
+        the literal "!rar <path>" request text, which new_fetch_row()'s own
+        docstring depends on being preserved.
+
+        The path is built from a heading in ANOTHER bot's list, so it is not
+        ours to predict - a folder actually named "::INFO::" is odd but it is
+        theirs to name, and stripping it would turn a request they could have
+        answered into one they cannot. That is what makes this restriction
+        load-bearing rather than decorative: without the case, "file" and
+        "everything" are the same code."""
+        for text in ("!rar D:/MEDIA/Artist/Album/",
+                     "!rar D:/MEDIA/Artist/::INFO:: Sessions/"):
+            with self.subTest(text=text):
+                row = dcc_fetch.new_fetch_row("B", text, request_type="folder")
+
+                self.assertEqual(row["requested_filename"], text)
+
+    def test_an_ordinary_filename_is_unchanged(self):
+        row = dcc_fetch.new_fetch_row("B", "Just A Track.flac")
+
+        self.assertEqual(row["filename"], "Just A Track.flac")
+
+
 if __name__ == "__main__":
     unittest.main()

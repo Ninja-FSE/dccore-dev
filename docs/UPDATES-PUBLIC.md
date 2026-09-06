@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: files requested from the dashboard were refused when they arrived.** Clicking a file in another bot's list sent the whole row — including the `::INFO:: 79.53MB` part — as the filename, so when the bot answered with the real name the request no longer matched and the transfer was dropped as unsolicited. The size is stripped off now, the way it already was for requests coming *in*.
+
 - **The size limits on fetching from other bots can be switched off.** Set **`MAX_FETCH_FILE_SIZE`** or **`MAX_FETCH_LIST_FILE_SIZE`** to `0` and nothing you ask another bot for is refused for being too big. The limit on a fetched list archive has also gone from 10 MB to 64 MB, which was set on the same one-list sample that made lists get rejected in the first place. If a fetch is ever refused for size, the message now names the setting and says how to turn it off.
 
 - **Fixed: a stale "Music directory" could stop the bot starting.** If you had served folders configured and that older setting still pointed at a drive you had unplugged, the daemon refused to boot — even though everything it actually serves was right there. It now judges by the folders you configured, and only refuses to start when *none* of them exist. It also stops claiming it "cannot serve anything" when you have folders set and that field left blank, and the field itself now says it is only used when no folders are set.
