@@ -342,6 +342,29 @@ class DCCoreTestCase(unittest.TestCase):
     def setUp(self):
         restore_daemon_functions()
         self.config = reset_config()
+        # NO TEST MAY WRITE THE OPERATOR'S OWN settings.conf. Anything that
+        # reaches settings_file.save() - the /api/settings route most
+        # obviously - writes DEFAULT_PATH unless this variable says otherwise,
+        # and that file is gitignored, so the damage does not show up in
+        # `git status`: it shows up as unrelated tests failing later, on a
+        # different branch, for reasons that have nothing to do with them.
+        #
+        # That is not hypothetical. Two route tests posting to /api/settings
+        # left MAX_DCC_SLOTS and SERVER in the real file, and the next
+        # preflight failed on main with a JSON decode error in the import
+        # graph - because the subprocess it reads stdout from had started
+        # printing "[CONFIG] Wrote 1 setting(s)".
+        settings_home = tempfile.mkdtemp(prefix="dccore-settings-")
+        self.addCleanup(shutil.rmtree, settings_home, ignore_errors=True)
+        previous_settings_file = os.environ.get("DCCORE_SETTINGS_FILE")
+        os.environ["DCCORE_SETTINGS_FILE"] = os.path.join(
+            settings_home, "settings.conf")
+        self.addCleanup(
+            lambda: os.environ.__setitem__("DCCORE_SETTINGS_FILE",
+                                           previous_settings_file)
+            if previous_settings_file is not None
+            else os.environ.pop("DCCORE_SETTINGS_FILE", None))
+
         self.oserve = install_fake_oserve()
         self._trees = []
         # dcc_fetch.check_fetch_queue() persists finished fetches to disk on
