@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 The Windows install is seven numbered steps (#302)
+
+Neo's format, with the two things that actually go wrong written in rather
+than left to be discovered:
+
+**A new Command Prompt.** An already-open one still has the old PATH, so
+`python --version` fails immediately after an install that worked perfectly.
+
+**What `where python` printing only a `WindowsApps` path means.** That is the
+App Execution Alias, not Python - the installer's *Add Python to PATH* box was
+not ticked, and the fix is Modify rather than a reinstall. The guide already
+explained why `python3` opens the Microsoft Store; this is the same trap one
+step earlier.
+
+`pip install -r requirements-web.txt` is marked as the dashboard-only step it
+is: the daemon starts and serves files without Flask, and an operator who does
+not want a web page should not be running a pip command at all.
+
 ### 📍 The bot refused the answer to its own question
 
 From Neo's log, requesting from the dashboard:
