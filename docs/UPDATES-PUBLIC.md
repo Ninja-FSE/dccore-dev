@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The DCC packet size is now a setting — and it was already 16× mIRC's.** mIRC defaults to 4 KB per packet, which is why raising it there is so noticeable; DCCore has always sent 64 KB blocks and never waits for the receiver to acknowledge each one. **`DCC_BLOCK_SIZE`** exposes that number if you want to tune it, but raising it further usually changes nothing: past a few tens of kilobytes your speed is set by TCP and the link, not by this. It is clamped to 4 KB–1 MB, because the value is held once per running transfer.
+
 - **`!rehash` no longer interrupts a transfer in progress.** It now stops starting new sends, waits for the ones already running to finish, reloads, and then lets the queue go again — so reconfiguring the bot no longer lands in the middle of somebody's download. If a transfer is stuck it gives up waiting after **`REHASH_TRANSFER_WAIT`** seconds (120 by default) and reloads anyway, saying so in the log, because a bot that cannot be reconfigured while one peer holds a socket open is worse.
 - **Changing the IRC server or port now tells you a restart is needed.** The dashboard already warned you about settings a running bot cannot pick up — but the server and port were missing from that list, so those two saved silently and left you wondering why the bot was still connected to the old one. Settings a rehash genuinely does apply live, like the DCC port range and your channel list, are still not listed: a warning that appears too often is one you stop reading.
 

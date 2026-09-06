@@ -1071,6 +1071,31 @@ def check_queue_and_send(irc_sock, completed_user):
                     break
 
 
+MIN_DCC_BLOCK_SIZE = 4096
+MAX_DCC_BLOCK_SIZE = 1024 * 1024
+
+
+def dcc_block_size():
+    """Bytes per read/write pass of a transfer, clamped to something sane.
+
+    Read through config on every transfer rather than captured once, like
+    every other tunable here: !rehash reloads config, and a value baked in at
+    import would keep the old one for the life of the process.
+
+    CLAMPED, not trusted. This number is multiplied by the number of
+    concurrent transfers to give the memory this bot holds in send buffers, so
+    a mistyped 500000000 is half a gigabyte per slot. And a value below a few
+    kilobytes turns the send loop into a syscall storm for no benefit - 0 or a
+    negative would spin it. Neither is worth a startup error when the honest
+    thing is to use the nearest usable number and get on with the transfer.
+    """
+    try:
+        wanted = int(getattr(config, "DCC_BLOCK_SIZE", 65536))
+    except (TypeError, ValueError):
+        return 65536
+    return max(MIN_DCC_BLOCK_SIZE, min(MAX_DCC_BLOCK_SIZE, wanted))
+
+
 def transfers_are_paused():
     """Is the bot holding new sends while something finishes?
 
@@ -1899,9 +1924,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         start_time = time.time()       
 
         with open(platform_compat.long_path(file_path), 'rb') as f:
+            # mIRC's "packet size", and the reason raising it there is
+            # noticeable: mIRC defaults to 4 KB and this has always been 64.
+            # Resolved once per transfer, not once per pass - the value cannot
+            # change mid-file, and a getattr in the inner loop of a 4 GB send
+            # is a million lookups for one answer.
+            block = dcc_block_size()
             while True:
-                # A 64 KB packet size, tuned for throughput
-                chunk = f.read(65536)
+                chunk = f.read(block)
                 if not chunk: break
                 try:
                     conn.sendall(chunk)
