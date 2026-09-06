@@ -91,9 +91,11 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 
 ### Test coverage where it is thinnest
 
-The pre-publication audit found **21 daemon functions with no behavioural coverage at all** — `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop, `configure.py`'s entry point. That gap is closed: `scripts/function_coverage.py` reports **2 of 257 uncovered, both on the allowlist with a written reason**, and it fails the build on a third.
+The pre-publication audit found **21 daemon functions with no behavioural coverage at all** — `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop, `configure.py`'s entry point. That gap is closed: `scripts/function_coverage.py` reports **2 of 310 uncovered, both on the allowlist with a written reason**, and it fails the build on a third.
 
-What remains is narrower and does not show up in that number. Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would still not be noticed — this file's own history has three such guards that passed against deliberately broken code. Nine dashboard routes were never requested by any test; that count has not been re-measured since.
+What remains is narrower and does not show up in that number. Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would still not be noticed — this file's own history has three such guards that passed against deliberately broken code. Re-measured: it was **four**, not nine, and they now have HTTP-level tests (`tests/test_every_route_is_behind_the_login.py`). Their builders had always been well covered — six to twelve tests each — so what was missing was the wiring in front of them: that the path resolves, that the method restriction is real, and that the JSON envelope comes back.
+
+The same file closes a larger gap found alongside it. All 37 dashboard rules sit behind one `before_request` hook and not a single per-route decorator, which is the right design — a decorator is a thing somebody can forget — but it put the whole authentication story on one function that nothing tested as a whole. An audit probed every rule unauthenticated and found none reachable, so it held; now a test walks `url_map` itself, so a route added tomorrow is covered without anyone remembering the test exists.
 
 ### From the audits, not yet done
 
