@@ -4,6 +4,61 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📁 A list gets its own directory, and the build takes a name (#26, stage 2)
+
+**The list is in the PATH, not the filename.** That is the whole design
+decision here and it was made against the alternative. The names a build
+writes already carry three markers - `-RAR-`, `-VIDEO-`, `-FULL-` - and the
+code reading them has been wrong about a base name containing one of those
+before, twice. Putting the list in the name would have made every one of those
+parsers grow a dimension; putting it in the directory means every filename
+stays exactly as it is.
+
+**The primary keeps `LOCAL_LIST_DIR` itself.** Nothing moves, no upgrade
+migrates anything, and a single-list operator cannot tell this landed. Only a
+second list creates a subdirectory.
+
+`list_slug()` is one-to-one, which took a second attempt. Replacing unsafe
+characters is not injective - "A/B" and "A B" both flatten to "A_B" - and two
+lists landing in one directory would overwrite each other's index, archive and
+side files with no error anywhere. A name that had to be changed now carries a
+short digest of the original; a name that needed no changing keeps exactly
+itself, so "Films" is still the Films directory. `hashlib`, not `hash()`, which
+is randomised per process and would rename every directory on each start.
+
+`generate_master_list()` takes a list name and resolves ONE directory from it;
+every path in it comes from that. `generate_all_lists()` builds every list, and
+on a single-list install is one call with no name - byte for byte what running
+the script has always done.
+
+**Each list is built independently.** A list whose folder is on an unavailable
+mount must not take down the list whose folder is on a local disk, so a failure
+is recorded and the loop continues. The failures are NAMED rather than counted:
+"1 of 3 failed" sends somebody to read a log they already have open.
+
+Three things the mutation run corrected:
+
+**A guard that could not fail.** `list_dir()` had an early return for
+`name is None`, and `list_by_name(None)` is None, so the branch below already
+answered `root`. Deleting it changed nothing. It went, rather than being
+propped up with a test that could only ever pass.
+
+**A test that could not see what it was checking.** The prune test built two
+lists and asserted both survived - but every list writes the SAME filenames,
+same base name and same date, differing only in directory. So a prune scanning
+the root would find another list's index under a name its own keep set also
+held, and delete nothing. The test now watches the SCOPE: a stale file in each
+place, one build, and only the built list's own may go.
+
+**And two of my own assumptions were wrong,** which the suite said before I
+did. A `.mkv` in a second list's folder is not in that list's master index -
+it is in its film list, because the split is on by default - so the test was
+asking the wrong file. And a list with no folders is not a failed build: it
+publishes an empty list, which is exactly what was configured, and reporting
+that as a failure would send an operator looking for a fault they do not have.
+
+Twelve tests, thirteen mutations, all caught.
+
 ### 🗂️ A list is now a thing, not a folder set (#26, stage 1)
 
 The first piece of multiple lists, and deliberately the piece that changes
