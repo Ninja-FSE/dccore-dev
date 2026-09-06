@@ -60,6 +60,7 @@
     // source is selected without asking again.
     filelistsBots: {},
     folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
+    downloads: [],
     lists: null, listsSource: "", listsDraft: null, listsNote: null,
     // The folder picker (#164 step 5). `browse` is null when the panel is
     // closed; open, it carries the row it will write back into.
@@ -666,13 +667,68 @@
   function loadDownloads() {
     fetchJson("/api/fetch/status").then(function (rows) {
       markConnection(true);
+      // Held so a row's own details can be looked up by id. The Redownload
+      // button needs the bot and the filename, and neither may go into a data
+      // attribute - escapeHtml() is textContent -> innerHTML and leaves a
+      // double quote alone, and both of those come off the wire. The id does
+      // go in one: it is ours, and it is hex.
+      state.downloads = rows || [];
       renderDownloads(rows);
     }).catch(function () { markConnection(false); });
+  }
+
+  function redownloadFetchRow(button) {
+    var requestId = decodeURIComponent(button.dataset.requestId);
+    var row = (state.downloads || []).filter(function (candidate) {
+      return String(candidate.id) === requestId;
+    })[0];
+    if (!row) { return; }
+
+    button.disabled = true;
+
+    // A LIST row and a FILE row are asked for in different ways, because they
+    // always were: a list is "@<bot>" and we cannot know what the bot will
+    // call its archive, while a file is named outright. Re-asking has to use
+    // the same route the original request came through, or the retry would
+    // create a row of a different kind from the one it is retrying.
+    var again;
+    if (row.request_type === "list") {
+      again = postJson("/api/filelists/fetch", { bot: row.bot });
+    } else {
+      // requested_filename, not filename: for a folder row the second is the
+      // name the OTHER bot eventually advertised, and for a failed one it may
+      // never have been set at all. The first is what we asked for.
+      var wanted = row.requested_filename || row.filename;
+      if (!wanted) { button.disabled = false; return; }
+      again = postJson("/api/fetch/enqueue", [{ bot: row.bot, filename: wanted }]);
+    }
+
+    again.then(function (res) {
+      if (!res.ok) {
+        window.alert("Could not ask again: " +
+          ((res.data && res.data.error) || ("HTTP " + res.status)));
+        button.disabled = false;
+        return;
+      }
+      // The old row is left alone deliberately. It is the record of what
+      // happened, and deleting it as a side effect of retrying would throw
+      // away the reason the retry was needed.
+      loadDownloads();
+    }).catch(function (err) {
+      window.alert("Could not ask again: " + err.message);
+      button.disabled = false;
+    });
   }
 
   // Delegated: renderDownloads() rebuilds the table's innerHTML on every
   // poll, which would silently drop a listener attached to any one row.
   el.downloadsBody.addEventListener("click", function (evt) {
+    var retry = evt.target.closest ? evt.target.closest(".fetch-retry-btn") : null;
+    if (retry) {
+      redownloadFetchRow(retry);
+      return;
+    }
+
     var btn = evt.target.closest ? evt.target.closest(".fetch-delete-btn") : null;
     if (!btn) { return; }
     var requestId = decodeURIComponent(btn.dataset.requestId);
@@ -732,13 +788,29 @@
           encodeURIComponent(row.id) + "\" data-pending=\"" + (state === "pending" ? "1" : "") + "\">" +
           (state === "pending" ? "Cancel" : "Delete") + "</button>"
         : "";
+      // ASK AGAIN, for a row that did not arrive. Neo's: a failed or rejected
+      // fetch is the one an operator most wants to retry, and the only way to
+      // do it was to go back to the List Browser and retype the nick.
+      //
+      // Not offered on a row that succeeded: there is a Download button there,
+      // and re-fetching a list already held is what the Refresh in the List
+      // Browser is for.
+      //
+      // NOTHING IN AN ATTRIBUTE that a nick or a filename could break out of.
+      // escapeHtml() is textContent -> innerHTML and leaves a double quote
+      // alone, and both of these come off the wire - so the row's id goes in
+      // (it is ours, and hex) and the handler looks the rest up from state.
+      var retryBtn = (rejected || state === "failed")
+        ? "<button type=\"button\" class=\"btn btn-small fetch-retry-btn\" data-request-id=\"" +
+          encodeURIComponent(row.id) + "\">Redownload</button> "
+        : "";
       var action;
       if (rejected) {
-        action = "<span class=\"col-dim\">" + escapeHtml(row.list_processing_error) + "</span> " + deleteBtn;
+        action = "<span class=\"col-dim\">" + escapeHtml(row.list_processing_error) + "</span> " + retryBtn + deleteBtn;
       } else if (state === "complete") {
         action = "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a> " + deleteBtn;
       } else if (state === "failed") {
-        action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + deleteBtn;
+        action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + retryBtn + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
       } else {

@@ -1435,8 +1435,16 @@ def build_fetch_enqueue_result(payload):
 
 
 def build_fetch_status_payload():
-    """GET /api/fetch/status payload: every fetch_queue row, oldest first, so
-    the dashboard's Downloads panel has a stable order to render.
+    """GET /api/fetch/status payload: every fetch_queue row, NEWEST FIRST, so
+    the dashboard's Downloads panel has a stable order to render and the row
+    an operator just created is the one they are already looking at.
+
+    Neo's, and the right way round for a log: the reason to open this view is
+    almost always the most recent thing that happened. Oldest-first meant
+    scrolling past every completed fetch to find it.
+
+    Still ordered by time, so it is no less stable than before - rows do not
+    reshuffle between polls, they are simply counted from the other end.
 
     Reads config.fetch_queue under the same lock dcc_fetch.py's writers use
     (enqueue_fetch() inserting a new row, check_fetch_queue() promoting or
@@ -1450,7 +1458,9 @@ def build_fetch_status_payload():
         queue = {request_id: dict(row)
                  for request_id, row in getattr(config, "fetch_queue", {}).items()}
     rows = []
-    for request_id, row in sorted(queue.items(), key=lambda kv: kv[1].get("requested_at", 0)):
+    for request_id, row in sorted(queue.items(),
+                                  key=lambda kv: kv[1].get("requested_at", 0),
+                                  reverse=True):
         row["id"] = request_id
         rows.append(row)
     return rows

@@ -4,6 +4,41 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔄 Downloads reads newest first, and a failed fetch can be asked for again
+
+Both Neo's, both about the view you open when something has gone wrong.
+
+**Newest on top.** The reason to open Downloads is almost always the most
+recent thing that happened, and oldest-first meant scrolling past every
+completed fetch to reach it. Still ordered by time, so it is no less stable
+between polls - the rows are counted from the other end.
+
+**Redownload, next to Delete, on a row that failed or was rejected.** That is
+the row an operator most wants to retry, and the only way to do it was to go
+back to the List Browser and retype the nick.
+
+Three things it is careful about:
+
+**A list and a file are asked for the way they were asked for.** They always
+differed - a list is `@<bot>`, because we cannot know what the bot will call
+its archive, while a file is named outright. Retrying through the wrong route
+would create a row of a different KIND from the one being retried.
+
+**Neither the bot nor the filename goes into an attribute.** `escapeHtml()` is
+textContent -> innerHTML: it encodes `&` `<` `>` and leaves a double quote
+alone, and both of those values come off the wire. The rows are kept in state
+and looked up by the row's own id, which is ours and is hex. Same rule the
+file lists and the folder rows already follow.
+
+**The row being retried is not deleted.** It is the record of what happened,
+and throwing it away as a side effect of retrying would remove the reason the
+retry was needed.
+
+Not offered on a row that succeeded: there is a Download button there, and
+re-fetching a list already held is what the List Browser's own refresh is for.
+
+Six tests, four mutations, all caught.
+
 ### 📥 Two reasons a real list was thrown away at the last step
 
 Both from one screenshot of the Downloads view: five fetches, four refused.
