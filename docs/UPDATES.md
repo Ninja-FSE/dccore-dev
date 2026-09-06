@@ -4,6 +4,38 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 Every dashboard route, proven to be behind the login
+
+From the pre-release audit. Two findings, one file.
+
+**Nothing tested the authentication gate as a whole.** The dashboard has 37
+registered rules and not one `@login_required` decorator - everything rests on
+a single `before_request` hook that denies by default and exempts exactly one
+endpoint. That design is right, because a per-route decorator is a thing
+somebody can forget to add and a global hook is not. But it puts the whole
+story on one function, and no test walked the routes to check it.
+
+Probed all 37 rules unauthenticated: **none reachable**. The gate holds. What
+was missing was anything that would notice if it stopped holding - the
+exemption widening, the check going back to matching a path prefix, or a
+future blueprint whose routes this hook never sees. The new test walks
+`url_map` itself, so a route added tomorrow is covered without anybody
+remembering the test exists.
+
+Four mutations fail, including making the exemption path-based again and
+quietly adding a second exempt endpoint.
+
+**The "nine untested routes" figure was stale.** `docs/FUTURE.md` carried it
+with "that count has not been re-measured since". Re-measured: four, and their
+BUILDERS were well covered all along - six to twelve tests each. What had no
+test was the wiring: that the path resolves, that a POST-only route really
+refuses a GET, that the JSON envelope comes back. They have it now.
+
+One of those tests documents a real quirk rather than papering over it: this
+app answers a wrong-method request with **404, not 405**, so "is it POST-only"
+is asserted as a refusal plus a separate `url_map` check. The status alone is
+ambiguous - 404 is also what a deleted route returns.
+
 ### 🚫 Adapting the packet size mid-transfer is not planned
 
 Asked for after the 64 KB work: could the bot raise the packet size when it
