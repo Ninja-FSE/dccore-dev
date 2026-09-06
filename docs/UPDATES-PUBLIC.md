@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed: reported transfer speeds were far too low.** The timer kept running through the two seconds of settling after a transfer finished — the pause that lets the receiver close its file — so a 10 MB file that really moved at 46 MB/s was reported at about 4.5 MB/s. Small files were hit hardest, and the wrong figure also fed your speed record and your channel advert. The clock now stops when the last byte goes out. **Your transfers were always this fast; only the number was wrong.**
+
+- **`scripts/send_benchmark.py`** measures the send loop over loopback, so "does this feel slow?" can be answered with a number. On a typical machine it reaches ~950 MB/s at 64 KB — well above any real link — which is how the above was tracked down.
+
 - **The Console is on by default when your dashboard is only reachable from your own machine**, which is how it ships. It stays off when the dashboard is bound to your LAN — there it would put ban, rehash and update behind one password over plain HTTP, which is a choice to make rather than one to inherit. If you have already set `WEBUI_CONSOLE_ENABLED` either way, your setting is untouched.
 
 - **The dashboard opens in your browser when the bot starts.** Only when it is bound to your own machine — a LAN-bound dashboard is as likely to be on a headless box, where opening a browser helps nobody. Turn it off with **`WEBUI_OPEN_BROWSER`**.

@@ -4,6 +4,55 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏱️ The transfer was never slow. The number was.
+
+> with mirc 65536 packet size i got 46 mb/sec max transfer speed and i get over
+> 30 constantly with high speed line people [...] i feel it slower than mirc
+> omenserve even with 64kb
+
+**The send loop was never the limit**, and the first thing to do was stop
+guessing about it. `scripts/send_benchmark.py` runs the exact shape of that
+loop - same read size, same per-chunk bookkeeping, same socket options - over
+loopback, where there is no link to blame. On this machine:
+
+```
+     block       MB/s   MB/s (no bookkeeping)
+      4096       57.1                    65.0
+     16384      234.8                   250.8
+     65536      952.7                  1020.7
+    131072      765.6                  1101.4
+```
+
+At 64 KB the loop reaches about **950 MB/s**, twenty times the fastest real
+transfer being compared against. Worth keeping: at 4 KB it manages 57 MB/s, so
+a small packet size genuinely would cap somebody at these speeds - the menu
+added alongside this is not decoration.
+
+**So the loop was exonerated, and the reported figure was not.**
+`acute_duration` was measured at the very END of `start_dcc_send()` - after
+`time.sleep(1.5)` ("gives mIRC 1.5 seconds to close the file calmly") and
+another `time.sleep(0.5)` before the statistics write. Two seconds of settling,
+counted as transfer time, against files that mostly take less than that:
+
+| file | real at 46 MB/s | reported |
+|---|---|---|
+| 10 MB | 0.22s | **4.5 MB/s** |
+| 50 MB | 1.09s | 16.2 MB/s |
+| 100 MB | 2.17s | 24.0 MB/s |
+| 700 MB | 15.2s | 40.7 MB/s |
+
+A tenth of the real rate on an ordinary music file. And it fed the speed
+RECORD and the channel advert, so the figure everyone else saw was wrong in the
+same direction.
+
+The clock now stops the instant the last byte goes out. The pauses still
+happen - the receiver still gets its 1.5 seconds - they are simply not counted
+as time spent transferring.
+
+Three tests, two mutations, all caught. One of them is not a test of the code
+but of the claim: it pins the size of the old error, so the arithmetic in this
+entry cannot quietly stop being true.
+
 ### 🖥️ The Console is on where nobody else can reach it, and the dashboard opens itself
 
 > i think the website console should be on by default on windows machines and
