@@ -611,7 +611,7 @@ class ExtractedTextSizeCeiling(DCCoreTestCase):
         far bigger text list than a similar MP3 one, and this ceiling has to
         hold for libraries this operator will never see.
         """
-        largest_seen = 31493819          # FlacMe, refused at the 20MB ceiling
+        largest_seen = 31493819          # a real FLAC list, refused at the 20MB ceiling
         self.assertGreater(self._original_limit, largest_seen,
                            "the shipped ceiling still refuses a list that was "
                            "actually offered to this bot")

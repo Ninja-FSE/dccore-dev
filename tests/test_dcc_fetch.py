@@ -2492,8 +2492,8 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
     """From Neo's own log, requesting from the dashboard:
 
         [FETCH] Requested 'BBCRadio - Under Milk Wood - Richard Burton.mp3
-                ::INFO:: 79.53MB' from FlacMeDCC (request f96ba6b77dff).
-        [FETCH] Rejected unsolicited DCC SEND from FlacMeDCC
+                ::INFO:: 79.53MB' from RemoteServeDCC (request f96ba6b77dff).
+        [FETCH] Rejected unsolicited DCC SEND from RemoteServeDCC
                 ('BBCRadio_-_Under_Milk_Wood_-_Richard_Burton.mp3'):
                 no matching pending request.
 
@@ -2507,7 +2507,7 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
         """The dashboard sends what the operator clicked, which is the whole
         list row. The serving side has stripped this since #234; the fetching
         side never learned to."""
-        row = dcc_fetch.new_fetch_row("FlacMeDCC", self.LINE)
+        row = dcc_fetch.new_fetch_row("RemoteServeDCC", self.LINE)
 
         self.assertEqual(row["filename"],
                          "BBCRadio - Under Milk Wood - Richard Burton.mp3")
@@ -2517,11 +2517,11 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
         """The end-to-end shape of the bug: ask with the suffix, be answered
         without it and with underscores for spaces, and match."""
         self.set_config(fetch_queue={})
-        request_id = dcc_fetch.enqueue_fetch("FlacMeDCC", self.LINE)
+        request_id = dcc_fetch.enqueue_fetch("RemoteServeDCC", self.LINE)
         config.fetch_queue[request_id]["state"] = "offered"
 
         claimed_id, row = dcc_fetch._claim_matching_offer_locked(
-            config.fetch_queue, "FlacMeDCC", self.SENT_BACK)
+            config.fetch_queue, "RemoteServeDCC", self.SENT_BACK)
 
         self.assertEqual(claimed_id, request_id)
         self.assertEqual(row["state"], "receiving")
