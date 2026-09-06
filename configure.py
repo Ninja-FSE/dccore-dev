@@ -74,6 +74,7 @@ settings.conf, and nothing here can silently revert an already-correct
 answer to a blank one.
 """
 
+import io
 import os
 import re
 import subprocess
@@ -282,6 +283,98 @@ def write_admin_config_password(password_hash, path=None, sample_path=None):
     print(f"[SETUP] Wrote ADMIN_PASSWORD_HASH to {os.path.basename(path)}.")
 
 
+def read_vars_ini(path):
+    """The text of a vars.ini, or (None, reason). No parsing here.
+
+    mIRC writes that file in whatever the machine's ANSI code page is, and a
+    nickname with an accent in it is enough to make it invalid UTF-8 - so this
+    reads with errors="replace" rather than failing. A mangled character in a
+    variable NAME simply stops that line matching a field, which is the same
+    outcome as the variable being absent; the numbers this reads are ASCII
+    digits either way.
+    """
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read(), None
+    except OSError as err:
+        return None, str(err)
+
+
+def offer_to_import_omenserve_stats(ask=input, log=print):
+    """Bring an OmenServe operator's totals across, during setup.
+
+    THE POINT IS WHEN, not what. The Stats page has imported these since #69,
+    and somebody migrating is looking at THIS script - not at a dashboard they
+    have not enabled yet, on a feature they have no reason to know exists. The
+    roadmap called it "an OmenServe migration path offered on first run", and
+    this is that: the same parse, the same validation, the same write.
+
+    Nothing here re-implements the import. `omenserve_import` reads the file
+    and webserver's preview/apply do the rest - a second copy of "which
+    variables, what is a sane number, what actually landed" is precisely how
+    two answers to one question drift apart.
+
+    Returns True if figures were written, False otherwise. Never raises: a
+    setup script that dies on a mistyped path has cost the operator the whole
+    run.
+    """
+    # Imported here, not at module scope. This is one optional branch of a
+    # setup script, and webserver pulls in its own dependencies - the same
+    # reason webserver itself imports `list` inside its handlers.
+    import webserver
+
+    log("")
+    log("Coming from OmenServe? Your files-sent and bytes-sent totals and your")
+    log("speed record are in mIRC's scripts/vars.ini, written by whichever")
+    log("add-ons you ran. They can be brought across now, or later from the")
+    log("dashboard's Stats page - this is the same import either way.")
+    if str(ask("Import them now? [y/N]: ")).strip().lower() not in ("y", "yes"):
+        return False
+
+    # Quotes stripped because dragging a file onto a terminal on both Windows
+    # and Linux hands you a quoted path, and an operator who does that is
+    # doing the sensible thing.
+    path = str(ask("  Full path to vars.ini: ")).strip().strip('"').strip("'")
+    if not path:
+        log("  Nothing entered - skipped.")
+        return False
+
+    text, problem = read_vars_ini(path)
+    if text is None:
+        log(f"  Could not read it: {problem}")
+        log("  Skipped. The Stats page can do this later.")
+        return False
+
+    try:
+        preview = webserver.build_stats_import_preview(text)
+    except Exception as err:                      # pragma: no cover - defensive
+        log(f"  Could not read the figures out of it: {err}")
+        return False
+
+    for row in preview.get("rows", []):
+        mark = "will import" if row.get("imported") else "not imported"
+        log(f"    {row.get('label', row.get('variable'))}: "
+            f"{row.get('value')}  ({mark})")
+    for note in preview.get("notes", []):
+        log(f"  {note}")
+
+    values = preview.get("values") or {}
+    if not values:
+        log("  Nothing in that file could be imported. Skipped.")
+        return False
+
+    if str(ask("  Write these figures? [y/N]: ")).strip().lower() not in ("y", "yes"):
+        log("  Left alone.")
+        return False
+
+    status, result = webserver.apply_stats_import(values)
+    if status != 200:
+        log(f"  {result.get('error', 'The import failed.')}")
+        return False
+    log(f"  Imported: {', '.join(result.get('imported', []))}.")
+    return True
+
+
 def offer_to_generate_master_list(file_directory_set):
     """update_list.py, run as its own subprocess - exactly the way !update
     already does it (commands.py's handle_list_update_request). A fresh
@@ -328,6 +421,7 @@ def main():
     write_settings_conf(changes)
     write_admin_config_password(password_hash)
     offer_to_generate_master_list("FILE_DIRECTORY" in changes)
+    offer_to_import_omenserve_stats()
 
     print()
     print("=" * 68)

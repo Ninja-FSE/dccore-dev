@@ -433,7 +433,7 @@ class TheFirstRunWizardsEntryPoint(unittest.TestCase):
 
     tests/test_configure.py covers the pure functions the wizard pulls out for
     exactly that purpose, and stops there - so the function that decides the
-    ORDER those four run in, and the one that decides whether a freshly
+    ORDER the steps run in, and the one that decides whether a freshly
     configured install ends up with a list at all, were never entered.
 
     Order matters here: write_settings_conf has to land before the subprocess
@@ -444,6 +444,12 @@ class TheFirstRunWizardsEntryPoint(unittest.TestCase):
     def setUp(self):
         import configure
         self.setup = configure
+        # The stats-import offer reads from the terminal, so every test that
+        # drives main() has to insulate itself from it or block on stdin.
+        # Stubbed here rather than in each test: what it does is
+        # test_configure.py's subject, and what main() does with it is only
+        # that it is reached, which the first test below asserts off this.
+        self.import_offer = self.stub("offer_to_import_omenserve_stats")
 
     def stub(self, name, result=None):
         calls = []
@@ -457,7 +463,7 @@ class TheFirstRunWizardsEntryPoint(unittest.TestCase):
         self.addCleanup(setattr, self.setup, name, real)
         return calls
 
-    def test_main_runs_the_four_steps(self):
+    def test_main_runs_every_step(self):
         answers = self.stub("collect_answers", ({"NICKNAME": "Bot"}, "hash"))
         settings = self.stub("write_settings_conf")
         password = self.stub("write_admin_config_password")
@@ -469,9 +475,13 @@ class TheFirstRunWizardsEntryPoint(unittest.TestCase):
         self.assertEqual(len(settings), 1)
         self.assertEqual(len(password), 1)
         self.assertEqual(len(listing), 1)
+        # The OmenServe import, added after this test was written and the
+        # reason it is no longer "the four steps": an offer nothing reaches
+        # is not an offer.
+        self.assertEqual(len(self.import_offer), 1)
 
     def test_the_answers_reach_the_writers(self):
-        """A main() that called all four with nothing would satisfy the counts
+        """A main() that called them all with nothing would satisfy the counts
         above."""
         self.stub("collect_answers", ({"NICKNAME": "Bot"}, "the-hash"))
         settings = self.stub("write_settings_conf")

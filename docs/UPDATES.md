@@ -4,6 +4,38 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚪 The OmenServe import is offered during setup
+
+The Stats page has imported these totals since #69. The gap was never what it
+imports - it was WHEN it asks. Somebody migrating from OmenServe is looking at
+`configure.py`, not at a dashboard they have not enabled yet, on a feature they
+have no reason to know exists. The roadmap called this "an OmenServe migration
+path offered on first run"; this is that.
+
+**Nothing here re-implements the import.** `omenserve_import` reads the file,
+and webserver's preview and apply do the rest. A second copy of "which
+variables, what counts as a sane number, what actually landed" is precisely how
+two answers to one question drift apart - so a test asserts `configure.py`
+calls both, and that it does not name a single `%mx.` variable of its own.
+
+**It shows the figures before it writes them.** A number read out of somebody's
+file is not a number they have agreed to, so the rows and the notes are printed
+and a second yes is asked for. Saying no leaves everything alone.
+
+**It never ends the run.** A setup script that dies on a mistyped path has cost
+the operator every answer they already gave. An unreadable file, a path that
+does not exist, a file with nothing in it: each says so and carries on.
+
+**And it reads a file mIRC actually wrote.** mIRC writes `vars.ini` in the
+machine's ANSI code page, so a nickname with an accent in it is enough to make
+the file invalid UTF-8 - `errors="replace"` rather than a crash. The numbers
+are ASCII either way, and a mangled character in a variable NAME simply stops
+that line matching a field, which is the same outcome as the variable being
+absent.
+
+A quoted path works too, because dragging a file onto a terminal hands you one
+on both platforms and an operator who does that is doing the sensible thing.
+
 ### 🔎 The build says when two files share a name
 
 A request names a FILE, not a path - a bare filename is all the list gives a

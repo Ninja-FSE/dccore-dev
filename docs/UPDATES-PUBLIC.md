@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Setup now offers to bring your OmenServe totals across.** If you are migrating, `configure.py` asks for your mIRC `scripts/vars.ini`, shows exactly what it found, and writes it only after you say yes — instead of you having to know the Stats page can do it. Getting the path wrong, or pointing it at a file with nothing in it, just says so and carries on with the rest of setup.
+
 - **A list rebuild now tells you when two files share a name.** If the same filename sits in two folders, only the first copy can ever be sent — a request names a file, not a path, so anyone asking for the second one silently receives the first instead. The dashboard's **Tools ▸ Verify list** has always been able to show you these; now the rebuild says how many it found, so you hear about it without going to look.
 
 - **`!rar` will no longer pack a folder of any size.** There was no limit: a request packed whatever the folder held, and the only thing that stopped it was the half-hour timeout — by which point a part-built archive was on disk and the one pack slot had been busy the whole time, with the person who asked told nothing. **`MAX_RAR_FOLDER_SIZE`** now bounds it, 10 GB by default, and an over-size request is refused straight away with a note that the files can still be requested by name. Set it to 0 if you want the old behaviour.
