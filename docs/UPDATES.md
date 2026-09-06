@@ -4,6 +4,57 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔀 A request is answered from the channel's own list (#26, stage 3)
+
+The first stage that changes behaviour. `library.list_for_request()` is the
+whole rule, and each of its three parts stops a different thing going wrong:
+
+1. **A channel bound to a list gets that list.**
+2. **Otherwise the PRIMARY answers - but only if it binds no channels of its
+   own.** That is every install today: one list, no bindings, answering
+   everywhere. Without this part, adding routing would be an upgrade that
+   silenced every bot in existence.
+3. **Otherwise nothing.** Once the primary names its own channels the operator
+   has said where each list belongs, so a channel they did not name is one this
+   bot does not serve. Without this part, binding a channel would mean nothing.
+
+A private message is always the primary, and that is not the same as part 2: a
+PM is not "a channel with nothing bound", it is not a channel at all.
+
+**A channel serving nothing is answered with silence, not an error.** An error
+implies something went wrong; nothing did. The bot does not serve there.
+
+Three entry points route: `send_file_list()`, `execute_search()` and
+`dcc.handle_download_request()`. The last resolves the list ONCE at the top,
+because two things below need the same answer - the folders a bare filename is
+looked for in, and the list the name is resolved against - and they must not
+disagree. A heading is resolved against its own list's folders too: a label
+names a folder OF a list, and reading one list's heading against another's
+folders would send a request into the wrong library.
+
+**A real defect fell out of writing the tests.** `dcc.py` looked for a list
+ARCHIVE in `config.LOCAL_LIST_DIR` directly. Every list writes its archive
+under the same name in its own directory, so any list but the primary would
+have been offered its archive by `send_file_list()` and then told "file not
+found" by the very next step. A source-reading test could not have found it;
+driving the real path did, immediately.
+
+**And three of my own tests were too weak to fail.** A mutation run broke the
+routing in `send_file_list()` three separate ways and all three assertions
+passed: one checked that a `return` appeared somewhere in the next 400
+characters, one never named the call it cared about, and one asserted
+`library.folders(wanted_list)` was *present* while two such calls exist and
+only one was mutated. The first two are behavioural now - `send_file_list()` is
+driven for real - and the third COUNTS: every `library.folders(` in that
+function must be the scoped form.
+
+Getting that behavioural test running took three attempts, and the reason is
+worth recording: `list.py` binds `oserve` at import time, so the fake the test
+harness installs into `sys.modules` is not the object it calls. Every notice
+was going to the real module while the test asserted on an empty list.
+
+Fifteen tests, eleven mutations, all caught.
+
 ### 📁 A list gets its own directory, and the build takes a name (#26, stage 2)
 
 **The list is in the PATH, not the filename.** That is the whole design

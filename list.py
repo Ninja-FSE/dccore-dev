@@ -207,9 +207,13 @@ def find_latest_list_file(name=None):
         return os.path.join(directory, files[0])
     return None
 
-def get_file_count_date_size_and_raw_bytes():
-    """The EXACT number of music files, counting only lines that start with the trigger."""
-    latest_list = find_latest_list()
+def get_file_count_date_size_and_raw_bytes(name=None):
+    """The EXACT number of music files, counting only lines that start with the trigger.
+
+    `name` picks a list; without one this is the primary, which on a
+    single-list install is the only one there is.
+    """
+    latest_list = find_latest_list(name)
     if not latest_list or not os.path.exists(latest_list):
         return 0, "No List", "0B", 0
         
@@ -229,7 +233,7 @@ def get_file_count_date_size_and_raw_bytes():
         # even though the list was fine. Every request line in the generated file
         # starts with "!" (update_list.py:156) and no header or separator does, so
         # this is the same filter execute_search already applies to the same file.
-        for one_list in all_list_paths():
+        for one_list in all_list_paths(name):
             with open(one_list, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     if line.strip().startswith("!"):
@@ -448,7 +452,7 @@ def _split_entry_line(line_strip):
     return strip_info_suffix(rest)
 
 
-def find_matching_entries(search_words, limit=None, list_path=None):
+def find_matching_entries(search_words, limit=None, list_path=None, name=None):
     """IRC-agnostic core of the master-list search, extracted from execute_search().
 
     Scans the current master list exactly the way execute_search() always has -
@@ -492,11 +496,11 @@ def find_matching_entries(search_words, limit=None, list_path=None):
         # through the same seam in dcc.py, unrequestable.
         entries = []
         total_matches = 0
-        for path in all_list_paths():
+        for path in all_list_paths(name):
             found, matched = find_matching_entries(
                 search_words,
                 limit=None if limit is None else max(0, limit - len(entries)),
-                list_path=path)
+                list_path=path, name=name)
             entries.extend(found)
             # Counted across every list, not per file: the search header
             # reports the true total even when the cap hides most of it.
@@ -639,7 +643,7 @@ def list_heading_parts(header):
     return [part for part in parts if part]
 
 
-def resolve_list_folder_with_root(header):
+def resolve_list_folder_with_root(header, name=None):
     """(path, Folder) for a heading: where it points, and which folder it is in.
 
     The root matters to callers that guard on it. dcc.py's `!rar` path runs
@@ -668,7 +672,10 @@ def resolve_list_folder_with_root(header):
     exactly as it did before, rather than this inventing a path that is real
     but wrong.
     """
-    folders = library.folders()
+    # This list's folders. A heading is a heading IN a list, and a label
+    # that names a folder of one list means nothing in another - resolving
+    # against the primary's would send a request into the wrong library.
+    folders = library.folders(name)
     parts = list_heading_parts(header)
 
     if not folders:
@@ -677,7 +684,7 @@ def resolve_list_folder_with_root(header):
         return (folders[0].path, folders[0])
 
     labelled = None
-    label = library.folder_for_label(parts[0])
+    label = library.folder_for_label(parts[0], name)
     if label is not None:
         labelled = (os.path.join(label.path, *parts[1:]) if parts[1:] else label.path,
                     label)
@@ -694,7 +701,7 @@ def resolve_list_folder_with_root(header):
     return (os.path.join(folders[0].path, *parts), folders[0])
 
 
-def resolve_list_folder(header, base=None):
+def resolve_list_folder(header, base=None, name=None):
     """Turn a master-list folder heading into a real path on this machine.
 
     Mirrors what dcc.handle_download_request() does when it resolves a
@@ -712,7 +719,7 @@ def resolve_list_folder(header, base=None):
     resolve_list_folder_with_root() for how a heading is read.
     """
     if base is None:
-        return resolve_list_folder_with_root(header)[0]
+        return resolve_list_folder_with_root(header, name)[0]
 
     parts = list_heading_parts(header)
     return os.path.join(base, *parts) if parts else base
@@ -953,10 +960,21 @@ def execute_search(irc_sock, user, search_term, channel):
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}Error{config.C_RESET}: Search term must be at least 3 characters long.\r\n")
         return
 
+    # WHICH LIST THIS CHANNEL SEARCHES (#26). None means no list is bound
+    # here and the primary is not the catch-all - #26's "a channel with no list
+    # bound gets nothing", answered with silence rather than an error, because
+    # an error implies something went wrong and nothing did.
+    import library
+    wanted = library.list_name_for_request(channel)
+    if wanted is None:
+        print(f"[SEARCH] No list is bound to {channel!r}; ignoring the search "
+              f"from {user}.")
+        return
+
     config.search_inprogress = True
     
     try:
-        current_list_path = find_latest_list()
+        current_list_path = find_latest_list(wanted)
         if not current_list_path or not os.path.exists(current_list_path):
             oserve = sys.modules.get('oserve')
             if oserve:
@@ -982,7 +1000,8 @@ def execute_search(irc_sock, user, search_term, channel):
         # preserved explicitly here rather than inside the shared function.
         max_results = getattr(config, 'MAX_SEARCH_RESULTS', 5)
         if search_words:
-            found_entries, total_matches = find_matching_entries(search_words, limit=max_results)
+            found_entries, total_matches = find_matching_entries(
+                search_words, limit=max_results, name=wanted)
         else:
             found_entries, total_matches = [], 0
         # The row is kept exactly as it is on disk - matches go to IRC raw.
@@ -1032,7 +1051,19 @@ def send_file_list(irc_sock, user, channel):
         oserve.queue_message(user, msg)
         return
 
-    current_zip_path = find_latest_list_file()
+    # WHICH LIST THIS CHANNEL GETS (#26). None means no list is bound here and
+    # the primary is not the catch-all, which is #26's "a channel with no list
+    # bound gets nothing" - answered with silence rather than an error, because
+    # an error implies something went wrong and nothing did: this bot simply
+    # does not serve here.
+    import library
+    wanted = library.list_name_for_request(channel)
+    if wanted is None:
+        print(f"[LIST] No list is bound to {channel!r}; ignoring the request "
+              f"from {user}.")
+        return
+
+    current_zip_path = find_latest_list_file(wanted)
     
     if not current_zip_path or not os.path.exists(current_zip_path):
         oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}Error{config.C_RESET}: List file missing. {config.C_BOLD}{config.SCRIPT_VERSION}{config.C_RESET} \r\n")
