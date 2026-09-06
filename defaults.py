@@ -448,6 +448,22 @@ MAX_FETCH_SLOTS: int        = 3        # Max simultaneous in-flight/offered fetc
 # happened, not an archive; the row cap below is only a backstop for a burst of
 # activity inside the window. Pruning forgets the ROW, never the downloaded
 # file - that stays under FETCHED_FILES_DIR. 0 disables either rule.
+# Ask again, by itself, for a held list whose owner's advert says it has moved
+# on (#302). OFF by default: it spends other people's bandwidth and other
+# people's transfer slots, which is an operator's decision to make rather than
+# one to inherit.
+#
+# The ADVERT decides, not a timer - #286 already worked out what "moved on"
+# means. A timer alone would re-ask every bot for a list we already have.
+AUTO_REFETCH_LISTS: bool = False
+# How stale a held list may get before it is re-asked for, in hours. Not how
+# often the check runs (that is hourly); this is the floor on how often any one
+# bot is asked, so a bot rebuilding hourly is not re-fetched hourly.
+AUTO_REFETCH_INTERVAL_HOURS: int = 24
+# Most lists to ask for in one sweep. A bot back after a month offline has a
+# lot of stale lists, and asking for all of them at once is a burst of
+# outbound requests nobody asked for. The rest go next sweep, oldest first.
+AUTO_REFETCH_MAX_PER_RUN: int = 3
 FETCH_HISTORY_DAYS: int     = 30       # Days a finished fetch stays in the history
 FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever their age
 # Interacts with flood protection: a bot's DCC SEND offers are metered like any

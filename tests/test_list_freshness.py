@@ -35,6 +35,7 @@ if REPO_ROOT not in sys.path:
 if os.path.join(REPO_ROOT, "tests") not in sys.path:
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests"))
 
+import defaults as config  # noqa: E402
 import list_fetch  # noqa: E402
 import runtime  # noqa: E402
 import webserver  # noqa: E402
@@ -238,6 +239,212 @@ class ThePageRendersItHonestly(unittest.TestCase):
         block = self.js().split("function describeAdvert(", 1)[1][:400]
 
         self.assertIn("nothing we could read", block)
+
+
+class AskingAgainWithoutBeingAsked(DCCoreTestCase):
+    """#302: "Implement auto-downloading of lists from bots to keep them
+    automatically up to date."
+
+    The advert decides, not a timer. #286 already worked out what "moved on"
+    means and why; a timer alone would ask every bot for a list we already
+    have, every interval, for ever - other people's bandwidth and other
+    people's transfer slots.
+    """
+
+    def setUp(self):
+        super().setUp()
+        original = dict(runtime.known_bots)
+        runtime.known_bots.clear()
+        self.addCleanup(lambda: (runtime.known_bots.clear(),
+                                 runtime.known_bots.update(original)))
+        self.set_config(AUTO_REFETCH_LISTS=True,
+                        AUTO_REFETCH_INTERVAL_HOURS=0,
+                        AUTO_REFETCH_MAX_PER_RUN=3)
+
+    def hold(self, bot, then, fetched_at=1.0):
+        store = dict(getattr(config, "fetched_bot_lists", {}) or {})
+        store[bot.lower()] = {"bot": bot, "fetched_at": fetched_at,
+                              "entry_count": 10, "advert_when_fetched": then}
+        self.set_config(fetched_bot_lists=store)
+
+    def advertise(self, bot, now):
+        runtime.known_bots[bot.lower()] = dict(now, nick=bot)
+
+    def test_the_worker_is_started_when_it_is_switched_on(self):
+        """Read out of oserve.py: driving startup() needs a live socket, and
+        the one thing that matters is that the loop is reached at all.
+
+        Asserted as a SEQUENCE - the guard and the thread together - because a
+        thread started unconditionally and a guard with nothing behind it are
+        both wrong, and either alone passes a check for the other."""
+        with io.open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        block = code.split('if getattr(config, "AUTO_REFETCH_LISTS", False):', 1)
+
+        self.assertEqual(len(block), 2,
+                         "oserve.py does not gate the refresh worker on the setting")
+        self.assertIn("list_fetch.auto_refetch_worker", block[1][:400],
+                      "the setting is checked but no worker follows it")
+
+    def test_the_loop_itself_runs_a_sweep_and_then_waits(self):
+        """The worker is an endless loop, so it takes its sleep as an argument
+        - which is what lets a test enter it, watch one pass, and leave. The
+        coverage gate caught it having none, and allow-listing a loop that was
+        built to be drivable would have been the wrong answer."""
+        swept = []
+        real = list_fetch.refetch_due_lists
+        list_fetch.refetch_due_lists = lambda *a, **k: swept.append(1) or []
+        self.addCleanup(setattr, list_fetch, "refetch_due_lists", real)
+
+        class Enough(Exception):
+            pass
+
+        def stop(seconds):
+            self.slept = seconds
+            raise Enough()
+
+        with self.assertRaises(Enough):
+            list_fetch.auto_refetch_worker(sleep=stop)
+
+        self.assertEqual(len(swept), 1)
+        self.assertEqual(self.slept, 3600.0,
+                         "the sweep interval is not the configured staleness "
+                         "window - it is how often the check runs")
+
+    def test_the_loop_survives_a_sweep_that_raises(self):
+        """A background thread that dies on one bad sweep stops refreshing
+        anything, silently, until the daemon is restarted."""
+        real = list_fetch.refetch_due_lists
+
+        def explode(*_a, **_k):
+            raise RuntimeError("the registry went away")
+
+        list_fetch.refetch_due_lists = explode
+        self.addCleanup(setattr, list_fetch, "refetch_due_lists", real)
+
+        class Enough(Exception):
+            pass
+
+        def stop(_seconds):
+            raise Enough()
+
+        with self.assertRaises(Enough):
+            list_fetch.auto_refetch_worker(sleep=stop)
+
+    def test_a_list_its_bot_says_has_changed_is_due(self):
+        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+
+        self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9),
+                         ["TapeDeck"])
+
+    def test_a_list_that_has_not_changed_is_left_alone(self):
+        """Otherwise this is a timer, and a timer re-asks every bot for a list
+        we already have."""
+        same = {"files": 100, "list_date": "Aug 1st"}
+        self.hold("TapeDeck", same)
+        self.advertise("TapeDeck", same)
+
+        self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9), [])
+
+    def test_unknown_is_not_changed(self):
+        """A bot that publishes no date gives no evidence either way, and
+        acting on no evidence is what makes an automatic feature
+        untrustworthy."""
+        self.hold("TapeDeck", {})
+        self.advertise("TapeDeck", {"files": 250})
+
+        self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9), [])
+
+    def test_it_is_off_unless_switched_on(self):
+        """It spends other people's bandwidth and other people's slots, which
+        is a decision to make rather than one to inherit."""
+        self.set_config(AUTO_REFETCH_LISTS=False)
+        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+
+        self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9), [])
+
+    def test_one_bot_is_not_re_asked_more_often_than_the_interval(self):
+        """A bot rebuilding its list hourly would otherwise be re-fetched
+        hourly, however loudly its advert changed."""
+        self.set_config(AUTO_REFETCH_INTERVAL_HOURS=24)
+        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"},
+                  fetched_at=1000.0)
+        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+
+        # An hour after the fetch: changed, but not yet stale enough.
+        self.assertEqual(list_fetch.lists_worth_refetching(now=1000.0 + 3600), [])
+        # Two days after: due.
+        self.assertEqual(
+            list_fetch.lists_worth_refetching(now=1000.0 + 48 * 3600),
+            ["TapeDeck"])
+
+    def test_the_stalest_go_first_and_a_sweep_is_capped(self):
+        """A bot back after a month offline has a lot of stale lists, and
+        asking for all of them at once is a burst of outbound requests nobody
+        asked for."""
+        for index, bot in enumerate(("Oldest", "Middle", "Newest")):
+            self.hold(bot, {"files": 1, "list_date": "Aug 1st"},
+                      fetched_at=float(index))
+            self.advertise(bot, {"files": 99, "list_date": "Sep 6th"})
+        store = dict(getattr(config, "fetched_bot_lists", {}))
+        self.set_config(fetched_bot_lists=store)
+
+        due = list_fetch.lists_worth_refetching(now=10 ** 9)
+
+        self.assertEqual(due, ["Oldest", "Middle", "Newest"])
+
+    def test_a_sweep_asks_through_the_same_enqueue_the_dashboard_uses(self):
+        """So the slot limits, the duplicate guard and the queue ceiling all
+        apply exactly as they do to a fetch started by hand."""
+        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+        calls = []
+        import webserver
+        real = webserver.build_list_fetch_enqueue_result
+
+        def watched(payload):
+            calls.append(payload)
+            return real(payload)
+
+        webserver.build_list_fetch_enqueue_result = watched
+        self.addCleanup(setattr, webserver, "build_list_fetch_enqueue_result", real)
+
+        started = list_fetch.refetch_due_lists(log=lambda *_a: None, now=10 ** 9)
+
+        self.assertEqual(calls, [{"bot": "TapeDeck"}])
+        # `started` is what the enqueue ACCEPTED, and in this fixture it
+        # refuses - there is no live connection to ask over. That is the right
+        # answer and worth pinning: a sweep reports what was actually queued,
+        # not what it decided to try.
+        self.assertEqual(started, [])
+
+    def test_a_run_is_capped_even_when_more_are_due(self):
+        self.set_config(AUTO_REFETCH_MAX_PER_RUN=1)
+        for index, bot in enumerate(("Oldest", "Middle")):
+            self.hold(bot, {"files": 1, "list_date": "Aug 1st"},
+                      fetched_at=float(index))
+            self.advertise(bot, {"files": 99, "list_date": "Sep 6th"})
+        store = dict(getattr(config, "fetched_bot_lists", {}))
+        self.set_config(fetched_bot_lists=store)
+
+        calls = []
+        import webserver
+        real = webserver.build_list_fetch_enqueue_result
+
+        def watched(payload):
+            calls.append(payload)
+            return real(payload)
+
+        webserver.build_list_fetch_enqueue_result = watched
+        self.addCleanup(setattr, webserver, "build_list_fetch_enqueue_result", real)
+
+        list_fetch.refetch_due_lists(log=lambda *_a: None, now=10 ** 9)
+
+        # The cap bounds how many are ASKED FOR - which is the burst it exists
+        # to prevent, whether or not the enqueue then accepts them.
+        self.assertEqual(calls, [{"bot": "Oldest"}])
 
 
 if __name__ == "__main__":

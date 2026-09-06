@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Your held lists can keep themselves up to date.** Turn on **`AUTO_REFETCH_LISTS`** and the bot re-fetches a list when the bot that published it starts advertising a different one — using the same "has this moved on?" check the List Browser already shows you, so it never re-asks for a list that has not changed, and never acts when it cannot tell. Off by default, since it spends other people's bandwidth; `AUTO_REFETCH_INTERVAL_HOURS` sets how stale a list may get and `AUTO_REFETCH_MAX_PER_RUN` how many are asked for at once.
+
 - **The Windows install guide is now seven numbered steps**, including how to check the install actually took — and what it means when `where python` prints only a `WindowsApps` path (that is Windows' placeholder, not Python).
 
 - **Fixed: files requested from the dashboard were refused when they arrived.** Clicking a file in another bot's list sent the whole row — including the `::INFO:: 79.53MB` part — as the filename, so when the bot answered with the real name the request no longer matched and the transfer was dropped as unsolicited. The size is stripped off now, the way it already was for requests coming *in*.

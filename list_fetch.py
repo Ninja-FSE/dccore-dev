@@ -581,6 +581,134 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
     return _pick_list_file(extract_dir), None
 
 
+# ==========================================================================
+# Keeping held lists current (#302).
+# ==========================================================================
+
+def _hours_to_seconds(hours):
+    try:
+        return max(0.0, float(hours) * 3600.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def lists_worth_refetching(now=None):
+    """The bots whose held list their own advert says has moved on.
+
+    Returns a list of nicks, oldest fetch first, so a run that is capped takes
+    the most stale ones. Empty when the feature is off, when nothing is held,
+    or when nothing has changed.
+
+    THE ADVERT DECIDES, not a timer. #286 already worked out what "moved on"
+    means and why: their advert THEN against their advert NOW, date first and
+    count second, because bots count differently and an off-by-a-few would
+    mark a list permanently stale. Re-fetching on a timer alone would ask
+    every bot for a list we already have, every interval, for ever - which is
+    other people's bandwidth and other people's transfer slots.
+
+    "unknown" is not "changed". A bot that publishes no date, or one whose
+    advert we have not seen since starting, gives no evidence either way, and
+    acting on no evidence is what makes an automatic feature untrustworthy.
+    """
+    import webserver
+
+    if not getattr(config, "AUTO_REFETCH_LISTS", False):
+        return []
+
+    now = time.time() if now is None else now
+    interval = _hours_to_seconds(getattr(config, "AUTO_REFETCH_INTERVAL_HOURS", 24))
+
+    held = dict(getattr(config, "fetched_bot_lists", {}) or {})
+    due = []
+    for entry in held.values():
+        if not isinstance(entry, dict):
+            continue
+        bot = str(entry.get("bot") or "").strip()
+        if not bot:
+            continue
+
+        # NOT MORE OFTEN THAN THE INTERVAL, whatever the advert says. A bot
+        # rebuilding its list hourly would otherwise be re-fetched hourly.
+        fetched_at = entry.get("fetched_at") or 0
+        if interval and (now - float(fetched_at or 0)) < interval:
+            continue
+
+        rows = [row for row in webserver.build_fetched_bot_list_summaries()
+                if str(row.get("bot", "")).strip().lower() == bot.lower()]
+        if not rows or rows[0].get("freshness") != "changed":
+            continue
+        due.append((float(fetched_at or 0), bot))
+
+    due.sort()
+    return [bot for _when, bot in due]
+
+
+def refetch_due_lists(log=print, now=None):
+    """Ask again for the held lists their own adverts say have changed.
+
+    Returns the nicks actually enqueued. Bounded per run by
+    AUTO_REFETCH_MAX_PER_RUN: a bot that has been offline for a month comes
+    back to thirty stale lists, and asking all thirty at once is a burst of
+    outbound requests nobody asked for - the rest are picked up next time
+    round, oldest first.
+
+    Goes through the SAME enqueue the dashboard's own Refresh uses, so the
+    slot limits, the duplicate guard and the queue ceiling all apply exactly
+    as they do to a fetch an operator started by hand.
+    """
+    import webserver
+
+    due = lists_worth_refetching(now=now)
+    if not due:
+        return []
+
+    try:
+        cap = int(getattr(config, "AUTO_REFETCH_MAX_PER_RUN", 3))
+    except (TypeError, ValueError):
+        cap = 3
+    if cap > 0:
+        due = due[:cap]
+
+    started = []
+    for bot in due:
+        status, result = webserver.build_list_fetch_enqueue_result({"bot": bot})
+        if status == 200:
+            started.append(bot)
+            log(f"[LIST-FETCH] {bot}'s list has changed since we took our copy "
+                f"- asking again automatically.")
+        else:
+            # Not an error worth stopping for: the usual reason is that a
+            # fetch for that bot is already outstanding, which is the right
+            # outcome and needs no announcement.
+            log(f"[LIST-FETCH] Did not re-ask {bot}: "
+                f"{result.get('error', 'refused')}")
+    return started
+
+
+def auto_refetch_worker(sleep=None):
+    """The loop. Started from oserve.startup() when AUTO_REFETCH_LISTS is on.
+
+    Deliberately its own thread and not a branch of the fetch dispatcher: that
+    one runs every two seconds and only touches the queue, while this reads
+    every held list and talks to webserver. Sharing it would make a slow
+    read here delay every fetch promotion.
+    """
+    import time as time_mod
+
+    naptime = sleep or (lambda seconds: time_mod.sleep(seconds))
+    print("[LIST-FETCH] Automatic list refresh is on.")
+    while True:
+        try:
+            refetch_due_lists()
+        except Exception as err:
+            print(f"[LIST-FETCH] Automatic refresh error: {err}")
+        # A fixed hour between sweeps, not the configured interval: the
+        # interval is how STALE a list may be before it is re-asked for, and
+        # checking more often than that costs one pass over a dict.
+        naptime(3600.0)
+
+
+
 def process_fetched_list_zip(bot, zip_path):
     """Entry point, called by dcc_fetch.py once a request_type="list" fetch
     reaches 'complete'. Safely extracts `zip_path`, locates the master-list
