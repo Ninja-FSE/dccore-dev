@@ -454,6 +454,13 @@ FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever the
 # other command, so this must stay well below MAX_REQUESTS (per REQUEST_WINDOW)
 # or a bot answering your own fetch requests can trip the flood gate and be muted.
 MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect
+# The largest EXTRACTED list text this bot will parse from a peer, in bytes.
+# Every "!" line in it becomes a retained row, so this bounds memory rather
+# than disk. It was a fixed 20 MB, set from this operator's own 4 MB list -
+# and three real lists in one channel arrived at 25-31 MB and were refused.
+# The right value depends on OTHER people's libraries, which is why it is a
+# setting now. 0 restores the default.
+MAX_LIST_TEXT_SIZE: int     = 128 * 1024 * 1024   # 128 MB - 4x the largest list actually seen
 
 # The largest folder !rar will pack, in bytes. 0 means no limit.
 #

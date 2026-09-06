@@ -554,9 +554,13 @@ class ExtractedTextSizeCeiling(DCCoreTestCase):
         config.FETCHED_FILES_DIR = self.tmp
         self.zip_path = os.path.join(self.tmp, "incoming.zip")
 
-        self._original_limit = list_fetch.MAX_LIST_TEXT_SIZE
-        self.addCleanup(setattr, list_fetch, "MAX_LIST_TEXT_SIZE", self._original_limit)
-        list_fetch.MAX_LIST_TEXT_SIZE = 1000
+        # The ceiling is a SETTING now, not a module constant - it depends on
+        # the libraries of bots in somebody else's channel, and the last time
+        # it was fixed at a number it refused three real lists.
+        self._original_limit = getattr(config, "MAX_LIST_TEXT_SIZE", None)
+        self.addCleanup(setattr, config, "MAX_LIST_TEXT_SIZE",
+                        self._original_limit)
+        config.MAX_LIST_TEXT_SIZE = 1000
 
     def test_an_extracted_list_over_the_ceiling_is_rejected(self):
         # Highly repetitive text compresses to a fraction of its real size -
@@ -596,15 +600,24 @@ class ExtractedTextSizeCeiling(DCCoreTestCase):
         self.assertTrue(ok, reason)
         self.assertIn("smallbot", config.fetched_bot_lists)
 
-    def test_the_shipped_default_has_real_headroom_over_a_genuine_library(self):
-        """Not a regression test for the patched value above - this pins the
-        actual shipped default (20MB) against the number that motivated it:
-        this operator's real 1.21TB/47,420-file library produces a 4MB list."""
-        self.assertEqual(self._original_limit, 20 * 1024 * 1024)
-        four_mb_real_library = 4 * 1024 * 1024
-        self.assertGreater(self._original_limit, four_mb_real_library,
-                           "the shipped ceiling no longer has headroom over a "
-                           "real library-sized list")
+    def test_the_shipped_default_clears_the_lists_that_were_actually_refused(self):
+        """This pinned 20MB against the number that motivated it - a 4MB list,
+        from this operator's own 1.21TB/47,420-file library. That was a sample
+        of ONE, and it was wrong about everyone else: three lists in a single
+        channel arrived at 25.7MB, 26.8MB and 31.5MB and were all refused.
+
+        So the figure to pin against is the largest one actually observed, not
+        the one nearest to hand. A FLAC library with long filenames produces a
+        far bigger text list than a similar MP3 one, and this ceiling has to
+        hold for libraries this operator will never see.
+        """
+        largest_seen = 31493819          # FlacMe, refused at the 20MB ceiling
+        self.assertGreater(self._original_limit, largest_seen,
+                           "the shipped ceiling still refuses a list that was "
+                           "actually offered to this bot")
+        # And it is not merely nudged past that one: the next FLAC library
+        # along would land straight back on it.
+        self.assertGreaterEqual(self._original_limit, 4 * largest_seen)
 
 
 class ListExtractDirTests(DCCoreTestCase):
@@ -1322,6 +1335,90 @@ class APeerRunningDCCoreSendsTwoLists(unittest.TestCase):
         picked = list_fetch._pick_list_file(self.dir)
 
         self.assertEqual(os.path.basename(picked), "TheirBot-VIDEO-2026-08-30.txt")
+
+
+class AListThatArrivedAsPlainText(DCCoreTestCase):
+    """A bot that publishes its list as a .txt sends exactly that.
+
+    This was refused with "extraction aborted: File is not a zip file" - a
+    real fetch, completed at 100%, thrown away at the last step. update_list
+    has published .txt as a LIST_FORMAT since #201; there was never a reason
+    to expect only archives back.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-txtlist-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp,
+                                                            ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.path = os.path.join(self.tmp, "Heywood-default(2026-07-31)-OS.txt")
+
+    def write(self, text):
+        with io.open(self.path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def test_it_is_accepted_and_its_rows_are_read(self):
+        self.write(_list_txt(files=(("Real Track.flac", "5.0MB"),)))
+
+        ok, reason = list_fetch.process_fetched_list_zip("heywood", self.path)
+
+        self.assertTrue(ok, reason)
+        held = dict(getattr(config, "fetched_bot_lists", {}) or {})
+        self.assertIn("heywood", held)
+        self.assertGreater(held["heywood"].get("entry_count", 0), 0)
+
+    def test_a_file_that_is_not_a_list_is_still_refused(self):
+        """The zip route gets its plausibility from the archive guards and
+        _pick_list_file(); this route has neither. Without a check, any
+        non-zip file at all would be stored as a bot's list - parsing to zero
+        rows, reported as a successful fetch, and answering every filter with
+        nothing."""
+        self.write("this is definitely not a file list\n")
+
+        ok, reason = list_fetch.process_fetched_list_zip("garbagebot", self.path)
+
+        self.assertFalse(ok)
+        self.assertIn("not a file list", reason)
+
+    def test_a_zip_named_txt_still_goes_through_the_archive_guards(self):
+        """Detected by CONTENT, not by the offered filename - which comes from
+        the sending bot. A peer calling an archive "list.txt" must not skip
+        the member and traversal checks by renaming it."""
+        _write_zip(self.path, [("OtherBot-2026-08-27.txt",
+                                _list_txt(files=(("A Track.flac", "1.0MB"),)))])
+
+        ok, reason = list_fetch.process_fetched_list_zip("ziptxtbot", self.path)
+
+        self.assertTrue(ok, reason)
+        held = dict(getattr(config, "fetched_bot_lists", {}) or {})
+        self.assertIn("ziptxtbot", held)
+
+    def test_the_text_ceiling_still_applies_to_it(self):
+        """The one guard that DOES apply to a single file already on disk runs
+        where it always did."""
+        original = getattr(config, "MAX_LIST_TEXT_SIZE", None)
+        self.addCleanup(setattr, config, "MAX_LIST_TEXT_SIZE", original)
+        config.MAX_LIST_TEXT_SIZE = 1000
+        self.write(_list_txt() + ("!OtherBot Filler.flac  ::INFO:: 1.0MB" + chr(10)) * 200)
+
+        ok, reason = list_fetch.process_fetched_list_zip("bigtxtbot", self.path)
+
+        self.assertFalse(ok)
+        self.assertIn("ceiling", reason)
+
+    def test_the_refusal_says_how_to_raise_the_ceiling(self):
+        """The operator who hit this had three real lists refused and no way
+        to tell from the message that it was adjustable."""
+        original = getattr(config, "MAX_LIST_TEXT_SIZE", None)
+        self.addCleanup(setattr, config, "MAX_LIST_TEXT_SIZE", original)
+        config.MAX_LIST_TEXT_SIZE = 1000
+        self.write(_list_txt() + ("!OtherBot Filler.flac  ::INFO:: 1.0MB" + chr(10)) * 200)
+
+        _ok, reason = list_fetch.process_fetched_list_zip("bigtxtbot2", self.path)
+
+        self.assertIn("MAX_LIST_TEXT_SIZE", reason)
 
 
 if __name__ == "__main__":

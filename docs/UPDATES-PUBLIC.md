@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: lists from other bots were being refused for two wrong reasons.** A bot that publishes its list as a plain `.txt` had every fetch thrown away at the last step with "File is not a zip file" — those are read now. And the size limit on an incoming list was 20 MB, set from one 4 MB example; real lists in a busy channel run to 25–31 MB and were all rejected after downloading in full. The limit is now 128 MB and adjustable as **`MAX_LIST_TEXT_SIZE`**, and if a list ever does exceed it the message says so by name.
+
 - **Folder headings in the list now read `D:\MEDIA\` instead of `D:\MUSIC\`.** That prefix is not a real path on your machine — it is a fixed label so the list looks the same whatever your server actually runs — and with film and series in there too, `D:\MUSIC\TV\...` said the wrong thing. **Lists your users already downloaded keep working**: rows pasted back with the old prefix are still understood.
 
 - **More than one list, each over its own folders and its own channels.** You can now serve, say, a music list in one channel and a film list in another — each built from its own folders, each advertising its own count and size, and each answering `@yourbot`, `@find` and file requests only where you have said it belongs. A channel you have not given a list to is one the bot stays quiet in. Set them up under **Settings → Paths**; if you serve one list, nothing changes and the folder editor is exactly where it was.

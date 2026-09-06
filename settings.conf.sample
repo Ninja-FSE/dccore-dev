@@ -481,6 +481,15 @@
 # 200 MB - reject the offer before we even connect
 #MAX_FETCH_FILE_SIZE = 209715200
 
+# The largest EXTRACTED list text this bot will parse from a peer, in bytes.
+# Every "!" line in it becomes a retained row, so this bounds memory rather
+# than disk. It was a fixed 20 MB, set from this operator's own 4 MB list -
+# and three real lists in one channel arrived at 25-31 MB and were refused.
+# The right value depends on OTHER people's libraries, which is why it is a
+# setting now. 0 restores the default.
+# 128 MB - 4x the largest list actually seen
+#MAX_LIST_TEXT_SIZE = 134217728
+
 # The largest folder !rar will pack, in bytes. 0 means no limit.
 # 
 # NOTHING BOUNDED THIS BEFORE. A request packs whatever the folder holds, and

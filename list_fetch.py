@@ -46,6 +46,7 @@
 # the same "::INFO::" tolerance this project already added for OTHER bots'
 # formatting variance (see strip_info_suffix()'s own docstring) applies here
 # automatically, for free.
+import io
 import os
 import re
 import shutil
@@ -72,16 +73,53 @@ MAX_LIST_ZIP_ENTRIES = 300
 
 # Issue #76: every guard up to this point counts bytes or zip members - none
 # of them counts LINES, and every "!" line in the extracted text becomes a
-# permanently-retained dict once parsed. A real master list is small: this
-# operator's own 1.21TB/47,420-file library produces a 4MB text list, so 20MB
-# is 5x headroom over the largest real list anyone here has actually seen, and
-# only ever rejects something that isn't a genuine master list. Checked on the
-# EXTRACTED file's real size on disk, before it is parsed - not the zip's
-# declared/compressed size, which is exactly what let a small download expand
-# into hundreds of megabytes of retained rows in the first place.
-MAX_LIST_TEXT_SIZE = 20 * 1024 * 1024
+# permanently-retained dict once parsed. Checked on the EXTRACTED file's real
+# size on disk, before it is parsed - not the zip's declared/compressed size,
+# which is exactly what let a small download expand into hundreds of megabytes
+# of retained rows in the first place.
+#
+# THE FIRST NUMBER WAS WRONG, and wrong in the way a guess about other
+# people's data usually is. It was 20MB, reasoned as "5x headroom over the
+# largest real list anyone here has actually seen" - that list being this
+# operator's own 4MB one, from a 1.21TB/47,420-file library. Three lists in
+# one channel then arrived at 25.7MB, 26.8MB and 31.5MB and were all refused,
+# which is not a guard doing its job; it is a guard set from a sample of one.
+#
+# A FLAC library with long filenames produces a far bigger text list than a
+# similarly sized MP3 one, and the ceiling has to hold for libraries this
+# operator will never see. 128MB is four times the largest observed, and at
+# roughly 80 bytes a row that is ~1.6M rows - inside the four million the
+# cross-list index is measured against, so it is a size this project already
+# knows it can hold.
+#
+# A SETTING rather than a constant now, which reverses the earlier reasoning
+# deliberately. "An internal safety bound, not an operator-facing knob" holds
+# when the right value is knowable here. It is not: it depends on the
+# libraries of bots in somebody else's channel, and the last time this was
+# fixed at a number it cost three real lists silently.
+DEFAULT_MAX_LIST_TEXT_SIZE = 128 * 1024 * 1024
+
+
+def max_list_text_size():
+    """The ceiling, read through config so an operator can raise it.
+
+    Resolved per call rather than captured at import, for the same reason
+    every other path in this project is: !rehash reloads config.
+    """
+    try:
+        value = int(getattr(config, "MAX_LIST_TEXT_SIZE",
+                            DEFAULT_MAX_LIST_TEXT_SIZE))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_LIST_TEXT_SIZE
+    return value if value > 0 else DEFAULT_MAX_LIST_TEXT_SIZE
 
 _COPY_CHUNK = 65536
+
+# How much of a plain-text list is read to decide it IS one. A real list
+# reaches its first request line within a header plus a banner, and the
+# banner is capped at 8KB, so this is comfortable headroom over the point
+# the answer is knowable.
+_PLAUSIBLE_LIST_PREFIX = 64 * 1024
 
 
 _FALLBACK_LOCK = threading.Lock()
@@ -388,6 +426,52 @@ def _pick_list_file(extract_dir):
     return candidates[0]
 
 
+def _accept_plain_text_list(source_path, extract_dir):
+    """Take a list that arrived as plain text, returning (path, reason).
+
+    The archive guards it skips are all guards about ARCHIVES - member counts,
+    traversal in member names, a compressed size that expands - and none of
+    them has anything to say about a single file that is already on disk at a
+    size we have measured. The one guard that does apply, the text-size
+    ceiling, runs where it always did: on the file this returns, in the caller.
+
+    Copied into the extraction directory rather than parsed where it landed,
+    so everything downstream sees the same shape from both routes and the
+    caller's cleanup covers both.
+    """
+    # IT STILL HAS TO LOOK LIKE A LIST. The zip route gets its plausibility
+    # from the archive guards and _pick_list_file(); this route has neither, so
+    # without a check here any file at all that is not a zip would be stored as
+    # a bot's list - parsing to zero rows, reported as a successful fetch, and
+    # answering every filter with nothing.
+    #
+    # The property is the one the parser needs: a request line. Read from a
+    # BOUNDED prefix rather than the whole file, because the file may be
+    # 128MB and the answer is in the first few lines - after a header and a
+    # banner, which is itself capped at 8KB.
+    try:
+        with io.open(platform_compat.long_path(source_path), "r",
+                     encoding="utf-8", errors="replace") as handle:
+            head = handle.read(_PLAUSIBLE_LIST_PREFIX)
+    except OSError as err:
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        return None, f"could not read the fetched list: {err}"
+
+    if not any(line.lstrip().startswith("!") for line in head.splitlines()):
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        return None, ("the file is not a zip and holds no request lines, so it "
+                      "is not a file list")
+
+    try:
+        destination = os.path.join(extract_dir, os.path.basename(source_path))
+        shutil.copyfile(platform_compat.long_path(source_path),
+                        platform_compat.long_path(destination))
+    except OSError as err:
+        shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        return None, f"could not read the fetched list: {err}"
+    return destination, None
+
+
 def _extract_and_locate_list_file(zip_path, extract_dir):
     """Validate, then safely extract, `zip_path` into `extract_dir` (wiped
     and recreated first, so a previous fetch's leftovers can never be
@@ -431,6 +515,19 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
         return None, (f"fetched zip is {on_disk_size} bytes, more than "
                        f"MAX_FETCH_LIST_FILE_SIZE ({list_zip_cap}) - refusing "
                        f"to open it")
+
+    # NOT EVERY LIST IS A ZIP. A bot that publishes its list as a plain .txt
+    # sends exactly that, and this refused it with "extraction aborted: File
+    # is not a zip file" - a real fetch, completed at 100%, thrown away at the
+    # last step. update_list.py has published .txt as a LIST_FORMAT since #201;
+    # there was never a reason to expect only archives back.
+    #
+    # Detected by CONTENT, not by the offered filename: the name comes from
+    # the sending bot and a peer calling a zip "list.txt" must not skip the
+    # archive guards. zipfile.is_zipfile() reads the file's own end-of-archive
+    # record.
+    if not zipfile.is_zipfile(platform_compat.long_path(zip_path)):
+        return _accept_plain_text_list(zip_path, extract_dir)
 
     try:
         with zipfile.ZipFile(platform_compat.long_path(zip_path), "r") as zf:
@@ -563,9 +660,11 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
         print(f"[LIST-FETCH] Rejected list zip from {bot}: {reason}")
         shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return False, reason
-    if text_size > MAX_LIST_TEXT_SIZE:
+    if text_size > max_list_text_size():
         reason = (f"the extracted list is {text_size} bytes, over the "
-                  f"{MAX_LIST_TEXT_SIZE}-byte ceiling for a real master list")
+                  f"{max_list_text_size()}-byte ceiling for a real master "
+                  f"list (raise MAX_LIST_TEXT_SIZE if your peers publish "
+                  f"bigger ones)")
         print(f"[LIST-FETCH] Rejected list zip from {bot}: {reason}")
         shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return False, reason
