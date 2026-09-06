@@ -677,6 +677,19 @@ def _handle_rehash_request(user, target_chan):
         live_debug_sinks = list(announce._debug_sinks)
 
     try:
+        # 1b. QUIESCE FIRST (#310, Neo's). A reload swaps the modules a
+        # running transfer is executing inside, so the safe order is: stop
+        # starting new sends, let the ones in flight finish, reload, then
+        # start again. Without it a rehash lands in the middle of somebody's
+        # download.
+        #
+        # Bounded, and it carries on if the bound is reached - see
+        # wait_for_transfers_to_finish(). A bot that cannot be reconfigured
+        # while one stuck peer holds a socket is worse than one that
+        # occasionally interrupts a transfer, and the log says which happened.
+        import dcc as _dcc_quiesce
+        _dcc_quiesce.wait_for_transfers_to_finish()
+
         # 2. REHASH: reload every core module live, in memory. The ORDER matters
         # and is documented on reload_modules_in_order() itself.
         reload_modules_in_order()
@@ -871,6 +884,13 @@ def _handle_rehash_request(user, target_chan):
         oserve_mod = sys.modules.get('oserve')
         live_socket = getattr(oserve_mod, 'irc_connection', None) if oserve_mod else None
         
+        # Sends are allowed again BEFORE the queue is woken - waking it while
+        # still paused would have every dispatch refused by the gate the wait
+        # put up, and the wake is the thing that restarts the queue Neo asked
+        # for.
+        import dcc as _dcc_resume
+        _dcc_resume.resume_transfers()
+
         if live_socket:
             import dcc
             import threading
@@ -886,6 +906,14 @@ def _handle_rehash_request(user, target_chan):
     except Exception as e:
         import announce
         announce.is_ready = True
+        # THE PAUSE MUST NOT OUTLIVE THE REHASH. If the reload raised anywhere
+        # after the quiesce, the bot would sit refusing every send for ever,
+        # with the only clue a notice telling users to try again in a moment.
+        try:
+            import dcc as _dcc_unpause
+            _dcc_unpause.resume_transfers()
+        except Exception:
+            pass
         print(f"[REHASH CRITICAL ERROR] The files could not be reloaded live: {e}")
         announce.send_debug(f"Rehash FAILED (Notices Resumed for safety): {e}", category="INFO")
 

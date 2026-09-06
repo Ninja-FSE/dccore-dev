@@ -464,6 +464,12 @@ AUTO_REFETCH_INTERVAL_HOURS: int = 24
 # lot of stale lists, and asking for all of them at once is a burst of
 # outbound requests nobody asked for. The rest go next sweep, oldest first.
 AUTO_REFETCH_MAX_PER_RUN: int = 3
+# How long a rehash waits for transfers in flight to finish before reloading
+# anyway, in seconds (#310). A transfer can sit idle for as long as the far
+# end keeps its socket open, so this cannot be unbounded: a bot that cannot
+# be reconfigured while one stuck peer holds a socket is worse than one that
+# occasionally interrupts a transfer. 0 reloads immediately, as before.
+REHASH_TRANSFER_WAIT: int   = 120
 FETCH_HISTORY_DAYS: int     = 30       # Days a finished fetch stays in the history
 FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever their age
 # Interacts with flood protection: a bot's DCC SEND offers are metered like any

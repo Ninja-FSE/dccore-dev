@@ -431,5 +431,157 @@ class ARehashDoesNotSpendTheQueuesRetries(DCCoreTestCase):
         self.assertIn("file missing or empty", buffer.getvalue())
 
 
+class ARehashWaitsForTransfersToFinish(DCCoreTestCase):
+    """Neo, on #310:
+
+        When rehash is requested check if dcc send is currently sending,
+        pause dcc after a complete send. Do the rehash and when it's finished
+        restart queue.
+
+    A reload swaps the modules a running transfer is executing inside, so the
+    safe order is: stop starting new ones, let the ones in flight finish,
+    reload, start again.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(active_transfers=[], transfers_paused=False,
+                        REHASH_TRANSFER_WAIT=120)
+
+    def test_a_quiet_bot_does_not_wait_at_all(self):
+        slept = []
+
+        went_quiet = dcc.wait_for_transfers_to_finish(sleep=slept.append)
+
+        self.assertTrue(went_quiet)
+        self.assertEqual(slept, [], "an idle bot was made to wait")
+
+    def test_new_sends_are_held_while_it_waits(self):
+        """"Pause dcc after a complete send" - the pause has to be up before
+        the wait begins, or a send started during the wait is one the reload
+        lands in the middle of."""
+        config.active_transfers.append({"user": "someone", "file": "T.flac"})
+        ticks = []
+
+        def stop_after_one(_seconds):
+            ticks.append(1)
+            self.assertTrue(dcc.transfers_are_paused(),
+                            "sends were not held while waiting")
+            config.active_transfers.clear()
+
+        self.assertTrue(dcc.wait_for_transfers_to_finish(sleep=stop_after_one))
+        self.assertEqual(len(ticks), 1)
+
+    def test_it_waits_until_the_transfer_ends_and_then_stops(self):
+        config.active_transfers.append({"user": "someone", "file": "T.flac"})
+        ticks = []
+
+        def finish_on_the_third(_seconds):
+            ticks.append(1)
+            if len(ticks) == 3:
+                config.active_transfers.clear()
+
+        self.assertTrue(dcc.wait_for_transfers_to_finish(sleep=finish_on_the_third))
+        self.assertEqual(len(ticks), 3)
+
+    def test_a_stuck_transfer_does_not_block_the_rehash_for_ever(self):
+        """A transfer can sit idle for as long as the far end keeps its socket
+        open. An admin typing !rehash and getting silence is worse than one
+        whose transfer was interrupted - at least the second knows what
+        happened."""
+        config.active_transfers.append({"user": "stuck", "file": "T.flac"})
+        ticks = []
+
+        def counted(_seconds):
+            # The loop is bounded HERE as well as by the timeout, so a broken
+            # timeout fails this test instead of hanging the whole suite - a
+            # mutation run found out the hard way that "caught" and "never
+            # returns" look identical from outside.
+            ticks.append(1)
+            if len(ticks) > 20:
+                raise AssertionError("the wait is not bounded by its timeout")
+
+        went_quiet = dcc.wait_for_transfers_to_finish(timeout=0, sleep=counted)
+
+        self.assertFalse(went_quiet)
+
+    def test_the_timeout_says_what_it_did(self):
+        config.active_transfers.append({"user": "stuck", "file": "T.flac"})
+        said = []
+
+        ticks = []
+
+        def counted(_seconds):
+            ticks.append(1)
+            if len(ticks) > 20:
+                raise AssertionError("the wait is not bounded by its timeout")
+
+        dcc.wait_for_transfers_to_finish(timeout=0, sleep=counted,
+                                         log=said.append)
+
+        self.assertIn("reloading anyway", chr(10).join(said))
+
+    def test_the_message_does_not_claim_the_list_is_rebuilding(self):
+        """update_inprogress means "the list is being rebuilt" and its notice
+        says so. Telling somebody that when it is not true is the kind of small
+        untruth that makes every other message less believable."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        block = code.split("if transfers_are_paused():", 1)[1][:600]
+
+        self.assertIn("reloading its configuration", block)
+        self.assertNotIn("MasterList is currently rebuilding", block)
+
+    def test_the_rehash_waits_before_it_reloads(self):
+        """Order is the whole point: waiting AFTER the reload would mean the
+        reload already happened inside somebody's transfer. Read out of the
+        source, because driving a real rehash means driving a real socket -
+        and asserted as a sequence, since the call alone in the wrong place
+        would pass a check for the call alone."""
+        with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
+            # COMMENTS STRIPPED, and the search scoped to the rehash body.
+            # Whole-file index() found a COMMENT mentioning
+            # reload_modules_in_order() five hundred lines above the call, so
+            # the assertion compared the wait against a sentence about the
+            # reload rather than the reload itself - and failed while the
+            # order was perfectly correct.
+            code = chr(10).join(line.split("#", 1)[0]
+                                for line in handle.read().splitlines())
+        body = code.split("def handle_rehash_request(", 1)[1]
+
+        self.assertIn("wait_for_transfers_to_finish()", body,
+                      "the rehash does not wait for transfers at all")
+        self.assertLess(body.index("wait_for_transfers_to_finish()"),
+                        body.index("reload_modules_in_order()"),
+                        "the reload happens before the wait, which is the "
+                        "thing the wait exists to prevent")
+
+    def test_the_pause_is_lifted_before_the_queue_is_woken(self):
+        """Waking the queue while still paused would have every dispatch
+        refused by the gate the wait put up - and the wake is the thing that
+        restarts the queue Neo asked for."""
+        with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
+            code = handle.read()
+
+        self.assertLess(code.index("_dcc_resume.resume_transfers()"),
+                        code.index("[REHASH-WAKE]"))
+
+    def test_the_pause_does_not_outlive_a_rehash_that_raised(self):
+        """Otherwise the bot sits refusing every send for ever, with the only
+        clue a notice telling users to try again in a moment."""
+        with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        failure_path = code.split("[REHASH CRITICAL ERROR]", 1)[0][-800:]
+
+        self.assertIn("resume_transfers()", failure_path)
+
+    def test_resume_lets_sends_start_again(self):
+        config.transfers_paused = True
+
+        dcc.resume_transfers()
+
+        self.assertFalse(dcc.transfers_are_paused())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`!rehash` no longer interrupts a transfer in progress.** It now stops starting new sends, waits for the ones already running to finish, reloads, and then lets the queue go again — so reconfiguring the bot no longer lands in the middle of somebody's download. If a transfer is stuck it gives up waiting after **`REHASH_TRANSFER_WAIT`** seconds (120 by default) and reloads anyway, saying so in the log, because a bot that cannot be reconfigured while one peer holds a socket open is worse.
+
 - **Fixed: `!rehash` could delete a user's queue.** Every rehash wakes the queue to let waiting users into free slots — and if that attempt could not go ahead because the bot has no usable public address set, the failure was counted against the *user*. Three rehashes and their queue was silently gone. A missing address is the bot's configuration, not the user's problem, so it no longer costs them anything; a genuinely missing file still does, which is what stops a dead entry being retried for ever.
 
 - **Your held lists can keep themselves up to date.** Turn on **`AUTO_REFETCH_LISTS`** and the bot re-fetches a list when the bot that published it starts advertising a different one — using the same "has this moved on?" check the List Browser already shows you, so it never re-asks for a list that has not changed, and never acts when it cannot tell. Off by default, since it spends other people's bandwidth; `AUTO_REFETCH_INTERVAL_HOURS` sets how stale a list may get and `AUTO_REFETCH_MAX_PER_RUN` how many are asked for at once.

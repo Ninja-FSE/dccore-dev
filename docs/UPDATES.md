@@ -4,6 +4,52 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏸️ A rehash waits for transfers to finish (#310)
+
+Neo, reviewing the last rehash fix:
+
+> When rehash is requested check if dcc send is currently sending, pause dcc
+> after a complete send. Do the rehash and when it's finished restart queue.
+
+Right, and a level above what the last change did: that one stopped a rehash
+COSTING a queued user their place. This one stops the reload landing inside
+somebody's download at all. A reload swaps the modules a running transfer is
+executing inside.
+
+The order is the whole feature: **stop starting new sends -> let the ones in
+flight finish -> reload -> start again.** A test asserts the wait precedes
+`reload_modules_in_order()`, because waiting afterwards would mean the reload
+already happened inside the transfer it was waiting for.
+
+**Its own pause flag, not `update_inprogress`.** That one means "the list is
+being rebuilt" and its notice says so. Telling somebody the list is rebuilding
+when it is not is the kind of small untruth that makes every other message less
+believable, so a held request gets its own: *"The bot is reloading its
+configuration. Your request is not lost - try again in a moment."*
+
+**Bounded, and it goes ahead anyway when the bound is reached.** A transfer can
+sit idle for as long as the far end keeps its socket open. An admin who types
+`!rehash` and gets silence is worse off than one whose transfer was
+interrupted, because at least the second one knows what happened -
+`REHASH_TRANSFER_WAIT` is 120 seconds, and the log says which of the two
+occurred.
+
+**The pause is lifted on the failure path too.** If the reload raised anywhere
+after the quiesce, the bot would sit refusing every send for ever, with the
+only clue a notice telling users to try again in a moment.
+
+Ten tests, six mutations, all caught - and two of them taught something.
+
+The order guard failed while the order was perfectly correct: a whole-file
+`index()` found a COMMENT mentioning `reload_modules_in_order()` five hundred
+lines above the call, so it was comparing the wait against a sentence about the
+reload. Comments stripped, and the search scoped to the rehash body.
+
+And the timeout mutation did not fail the suite, it HUNG it: Disabling the timeout did not fail the suite, it HUNG
+it: from outside, "caught" and "never returns" look identical. The two wait
+tests now bound their own loop by counting sleeps, so a broken timeout fails
+them instead of stopping the run.
+
 ### 🧊 A rehash was spending the queue's retries
 
 Neo:
