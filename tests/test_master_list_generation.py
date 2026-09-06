@@ -986,6 +986,67 @@ class RarExtensionsIsAGateNotADisplayRule(MasterListCase):
         self.assertIn("still be requested by name", source)
 
 
+class TheBuildSaysWhenNamesCollide(MasterListCase):
+    """A request names a FILE, not a path - a bare filename is all the list
+    gives a requester to copy - so the resolver serves the first folder it
+    finds that name under, and every later copy is listed, looks requestable,
+    and can never be sent. The requester does not even get an error; they get
+    the other file.
+
+    The dashboard has answered this since #164. This is the half for operators
+    who never open it.
+    """
+
+    def build_output(self):
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.assertTrue(self.generate())
+        return buffer.getvalue()
+
+    def test_a_collision_is_reported(self):
+        self.use_empty_library()
+        self.add(os.path.join("Artist", "Album One", "01 - Intro.flac"))
+        self.add(os.path.join("Artist", "Album Two", "01 - Intro.flac"))
+
+        output = self.build_output()
+
+        self.assertIn("appear under more than one folder", output)
+        self.assertIn("1 filename(s)", output)
+
+    def test_a_clean_library_says_nothing(self):
+        """A warning on every build is a warning nobody reads."""
+        self.use_empty_library()
+        self.add(os.path.join("Artist", "Album One", "01 - Intro.flac"))
+        self.add(os.path.join("Artist", "Album Two", "02 - Reprise.flac"))
+
+        self.assertNotIn("more than one folder", self.build_output())
+
+    def test_a_name_in_both_lists_counts(self):
+        """The film list is read by the SAME resolver, second - so a name in
+        the music list and the film list resolves to the music copy, and the
+        film row can never be sent. Counting the two lists separately would
+        miss exactly the collisions the split introduced."""
+        self.use_empty_library()
+        self.add(os.path.join("Artist", "Album", "Bonus.mkv"))
+        self.add(os.path.join("Artist", "Album", "Bonus.flac"))
+        # Same NAME under two folders, one of each kind.
+        self.add(os.path.join("Films", "Feature", "Bonus.mkv"))
+
+        output = self.build_output()
+
+        self.assertIn("appear under more than one folder", output)
+
+    def test_the_count_comes_from_the_same_predicate_the_view_uses(self):
+        """Two answers to one question is how they drift. The dashboard
+        resolves headings to real paths on top of this; the question of WHICH
+        names collide is asked in one place."""
+        with io.open(os.path.join(REPO_ROOT, "update_list.py"), encoding="utf-8") as fh:
+            code = chr(10).join(line.split("#", 1)[0]
+                                for line in fh.read().splitlines())
+
+        self.assertIn("find_duplicate_filenames(", code)
+
+
 class PackingHasACeiling(MasterListCase):
     """MAX_RAR_FOLDER_SIZE. Nothing bounded a pack before it.
 

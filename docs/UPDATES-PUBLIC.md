@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A list rebuild now tells you when two files share a name.** If the same filename sits in two folders, only the first copy can ever be sent — a request names a file, not a path, so anyone asking for the second one silently receives the first instead. The dashboard's **Tools ▸ Verify list** has always been able to show you these; now the rebuild says how many it found, so you hear about it without going to look.
+
 - **`!rar` will no longer pack a folder of any size.** There was no limit: a request packed whatever the folder held, and the only thing that stopped it was the half-hour timeout — by which point a part-built archive was on disk and the one pack slot had been busy the whole time, with the person who asked told nothing. **`MAX_RAR_FOLDER_SIZE`** now bounds it, 10 GB by default, and an over-size request is refused straight away with a note that the files can still be requested by name. Set it to 0 if you want the old behaviour.
 
 - **The dashboard now refuses an oversized request instead of reading it into memory.** Anything over 8MB — far more than any page here sends — is turned away before it is read, and the limit applies to the login page too. On a machine that is also sending files, memory the bot does not need to hold is memory transfers can use.

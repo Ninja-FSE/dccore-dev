@@ -34,7 +34,7 @@ What DCCore does today, and what it does not do yet.
 ### Operating it
 
 - **Authenticated admin console over DCC CHAT**, gated on the operator's services host *and* a PBKDF2-hashed password. Read-only commands (`status`, `queue`, `slots`, `bans`, `uptime`, `version`) and action commands (`ban`, `unban`, `clearqueue`, `rehash`, `update`) — see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md).
-- **Optional web dashboard** — Search, Queue, File Lists grouped by folder, Downloads, a duplicate-filename verifier, a list rebuilder, a Settings page, and a Console (the DCC CHAT admin console's commands and live log, in the browser — for an operator who wants neither a second IRC client nor a debug channel). Off by default, loopback by default, behind the same password as the DCC CHAT console.
+- **Optional web dashboard** — Search, Queue, List Browser grouped by folder, Downloads, a duplicate-filename verifier (which the build now warns about too, for operators who never open the dashboard), a list rebuilder, a Settings page, and a Console (the DCC CHAT admin console's commands and live log, in the browser — for an operator who wants neither a second IRC client nor a debug channel). Off by default, loopback by default, behind the same password as the DCC CHAT console.
 - **Guided first-run setup** — `python3 configure.py` asks a short series of questions and writes a working configuration.
 - **Pre-flight check** — `start-dccore.sh check` verifies the setup without opening a socket.
 - **Two configuration mechanisms** — `admin_config.py` for Python, `settings.conf` for plain text; the dashboard and console both write to the latter.
@@ -142,7 +142,6 @@ should say about one that has never replied.
 - **PER-LIST file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them per list. `LIST_IGNORED_EXTENSIONS` does this globally; scoping it to one folder is the part still missing.
 - **A fetched list keeps only the peer's master.** Since the film-and-series split, a DCCore bot's archive carries two `.txt` files, and `list_fetch` picks one - now the master rather than whichever is larger. The films in the other are dropped from the fetched copy. Reading both into one fetched list changes what `_pick_list_file()` returns and the size ceiling that guards it, so it is a change of its own rather than part of the fix.
 - **A "what's new" list** — files added in the last N days, generated alongside the main one.
-- **A list validator** run at build time, reporting anything a requester will not actually be able to get — duplicate filenames across folders being the common case.
 - **An OmenServe migration path offered on FIRST RUN.** The Stats page can import an operator's totals from `vars.ini` today; what is missing is `configure.py` offering it during setup, when somebody migrating is actually looking.
 - **Stealth channels** — serve a channel while advertising nothing in it.
 - **Multi-network** — real in OmenServe, and it would touch every socket path here.
