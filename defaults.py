@@ -266,6 +266,10 @@ LIBRARY_FOLDERS_FILE: str = "./data/library_folders.json"
 # which resolves to one implicit list over LIBRARY_FOLDERS_FILE/FILE_DIRECTORY
 # - so nothing changes until an operator defines more than one.
 LISTS_FILE: str = "./data/lists.json"
+# Commands sent to the server once registered and BEFORE joining - X
+# login, usermodes, whatever the network wants. See on_connect.py for why
+# the ordering matters and why the file is never logged.
+ON_CONNECT_FILE: str = "./data/on_connect.json"
 
 # The operator's own banner, printed at the top of every generated list above
 # the bot's identity line. Free-form: several lines, ASCII art, a channel name,

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Commands sent to the server when you connect** — X login, usermodes, whatever your network wants. Settings gives you a box to paste them into, one per line, and a seconds-between-commands stepper so you do not trip Excess Flood. Use `%nick%` for the nickname the server actually gave you.
+
+  **They run before the bot joins**, which on Undernet is the whole point: logging in to X takes `+x`, and joining first shows your real host to everybody already in the channel. Your commands are never written to the log or the debug channel — only the command word, so an X password cannot end up in a channel.
+
 - **Fixed: reported transfer speeds were far too low.** The timer kept running through the two seconds of settling after a transfer finished — the pause that lets the receiver close its file — so a 10 MB file that really moved at 46 MB/s was reported at about 4.5 MB/s. Small files were hit hardest, and the wrong figure also fed your speed record and your channel advert. The clock now stops when the last byte goes out. **Your transfers were always this fast; only the number was wrong.**
 
 - **`scripts/send_benchmark.py`** measures the send loop over loopback, so "does this feel slow?" can be answered with a number. On a typical machine it reaches ~950 MB/s at 64 KB — well above any real link — which is how the above was tracked down.

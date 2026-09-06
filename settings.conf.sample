@@ -282,6 +282,11 @@
 # - so nothing changes until an operator defines more than one.
 #LISTS_FILE = ./data/lists.json
 
+# Commands sent to the server once registered and BEFORE joining - X
+# login, usermodes, whatever the network wants. See on_connect.py for why
+# the ordering matters and why the file is never logged.
+#ON_CONNECT_FILE = ./data/on_connect.json
+
 # The operator's own banner, printed at the top of every generated list above
 # the bot's identity line. Free-form: several lines, ASCII art, a channel name,
 # whatever should greet whoever opens the file. Missing or empty means no

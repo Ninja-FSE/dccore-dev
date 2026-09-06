@@ -387,6 +387,14 @@ class DCCoreTestCase(unittest.TestCase):
         # on live local data, passing on CI where the file does not exist and
         # failing here. The registry is gitignored, so nobody saw it until a
         # test asserted on the contents of that dict.
+        # Same rule as DCCORE_SETTINGS_FILE above: no test may write a real
+        # file under data/. This one holds an X login in plain text, so a test
+        # that wrote it would put a password in the developer's working
+        # directory - and data/ is gitignored, so it would not show up in
+        # `git status` any more than settings.conf did.
+        self.set_config(ON_CONNECT_FILE=os.path.join(self._fetch_history_dir,
+                                                     "on_connect.json"))
+
         self._real_known_bots_file = db.KNOWN_BOTS_FILE
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
                                           "known_bots.json")

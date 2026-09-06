@@ -1675,7 +1675,7 @@ SETTINGS_CATEGORIES = (
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES",
-                                                "LIBRARY_FOLDERS_FILE", "LISTS_FILE"]),
+                                                "LIBRARY_FOLDERS_FILE", "LISTS_FILE", "ON_CONNECT_FILE"]),
     ("advertising",   "Advertising & search",  ["THEME", "CUSTOM_THEME_BORDER", "CUSTOM_THEME_SEPARATOR",
                                                 "CUSTOM_THEME_TEXTBOX", "CUSTOM_THEME_VALUE",
                                                 "CUSTOM_THEME_ALERT", "CUSTOM_THEME_ACCENT",
@@ -1768,6 +1768,7 @@ SETTINGS_LABELS = {
     "LIST_HEADER_MAX_BYTES": "List banner size limit (bytes)",
     "LIBRARY_FOLDERS_FILE": "Served folders file",
     "LISTS_FILE": "Served lists file",
+    "ON_CONNECT_FILE": "On-connect commands file",
 
     "THEME": "Colour theme",
     "CUSTOM_THEME_BORDER": "Custom theme: border colour",
@@ -2069,6 +2070,74 @@ def build_folder_browse_payload(raw_path):
 
 
 MAX_SERVED_LISTS = 16
+
+
+def build_on_connect_payload():
+    """GET /api/on-connect: the commands sent once registered, and the gap.
+
+    THE COMMANDS COME BACK IN FULL, and that is a decision rather than an
+    oversight. One of them is very likely an X login with a password in it, so
+    the alternative is a box an operator can overwrite but never read - which
+    means never correcting a typo without retyping the lot.
+
+    They are already behind the dashboard login, and anybody who has that can
+    read data/on_connect.json off the disk anyway. What must NOT happen is the
+    text reaching a log or a debug channel, and that is enforced where it would
+    happen - see on_connect.redacted().
+    """
+    import on_connect
+
+    commands, delay = on_connect.load()
+    return {
+        "commands": commands,
+        "delay_seconds": delay,
+        "max_commands": on_connect.MAX_COMMANDS,
+        "max_delay_seconds": on_connect.MAX_DELAY_SECONDS,
+    }
+
+
+def apply_on_connect_changes(payload):
+    """POST /api/on-connect: validate the whole set, then write it.
+
+    Returns (http_status, payload_dict).
+
+    NO REHASH. These are read fresh at every connect, so the next one picks
+    them up - and rehashing to apply them would be misleading, because what
+    they need is a reconnect, not a reload. The response says so.
+    """
+    import on_connect
+
+    if not isinstance(payload, dict):
+        return 400, {"error": "Expected an object with 'commands'."}
+
+    raw = payload.get("commands")
+    if isinstance(raw, str):
+        # The page sends a textarea, one command per line, because that is what
+        # an operator pastes. Splitting here rather than in the browser keeps
+        # the API usable by hand.
+        raw = raw.splitlines()
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        return 400, {"error": "'commands' must be a list or a block of text."}
+
+    delay = payload.get("delay_seconds", on_connect.DEFAULT_DELAY_SECONDS)
+
+    try:
+        written = on_connect.save(raw, delay)
+    except ValueError as err:
+        return 400, {"error": str(err)}
+    except OSError as err:
+        return 500, {"error": f"Could not write the commands: {err}"}
+
+    return 200, {
+        "commands": written,
+        "delay_seconds": float(delay),
+        "reconnect_required": bool(written),
+        "message": ("Saved. They run at the next connection - use them now "
+                    "by reconnecting." if written
+                    else "Cleared. Nothing is sent on connect."),
+    }
 
 
 def build_lists_payload():
@@ -2939,6 +3008,16 @@ if HAVE_FLASK:
         def api_lists_save():
             body = json_object(request.get_json(silent=True))
             status, result = apply_list_changes(body)
+            return jsonify(result), status
+
+        @app.route("/api/on-connect")
+        def api_on_connect():
+            return jsonify(build_on_connect_payload())
+
+        @app.route("/api/on-connect", methods=["POST"])
+        def api_on_connect_save():
+            body = json_object(request.get_json(silent=True))
+            status, result = apply_on_connect_changes(body)
             return jsonify(result), status
 
         @app.route("/api/settings/password", methods=["POST"])
