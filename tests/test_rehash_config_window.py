@@ -583,5 +583,68 @@ class ARehashWaitsForTransfersToFinish(DCCoreTestCase):
         self.assertFalse(dcc.transfers_are_paused())
 
 
+class HowMuchGoesOutPerPass(DCCoreTestCase):
+    """mIRC calls it the packet size, defaults it to 4 KB, and raising it there
+    is noticeable - which is why operators come looking for it here.
+
+    DCCore has always used 64 KB, sixteen times that, and does not wait for the
+    receiver to acknowledge each block before sending the next. So the thing
+    they are looking for was already on; this only exposes the number.
+    """
+
+    def test_the_default_is_what_it_has_always_been(self):
+        """Sixteen times mIRC's, so nobody's transfers change speed because
+        this became a setting."""
+        self.assertEqual(dcc.dcc_block_size(), 65536)
+
+    def test_a_bigger_value_is_honoured(self):
+        self.set_config(DCC_BLOCK_SIZE=262144)
+
+        self.assertEqual(dcc.dcc_block_size(), 262144)
+
+    def test_a_value_that_would_spin_the_loop_is_raised(self):
+        """0 or a negative makes read() return nothing and the loop turn into
+        a syscall storm - and neither is worth a startup error when the honest
+        thing is to use the nearest usable number and get on with it."""
+        for value in (0, -5, 100):
+            with self.subTest(value=value):
+                self.set_config(DCC_BLOCK_SIZE=value)
+                self.assertEqual(dcc.dcc_block_size(), dcc.MIN_DCC_BLOCK_SIZE)
+
+    def test_a_value_that_would_eat_the_machine_is_capped(self):
+        """This is multiplied by the number of concurrent transfers to give the
+        memory held in send buffers, so a mistyped 500000000 is half a gigabyte
+        per slot."""
+        self.set_config(DCC_BLOCK_SIZE=500000000)
+
+        self.assertEqual(dcc.dcc_block_size(), dcc.MAX_DCC_BLOCK_SIZE)
+
+    def test_something_that_is_not_a_number_falls_back(self):
+        self.set_config(DCC_BLOCK_SIZE="fast please")
+
+        self.assertEqual(dcc.dcc_block_size(), 65536)
+
+    def test_the_send_loop_uses_it(self):
+        """Read out of the source: driving a real transfer needs a peer on a
+        socket, and what matters is that the loop reads the setting rather
+        than the literal it replaced."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+
+        self.assertIn("block = dcc_block_size()", code)
+        self.assertIn("f.read(block)", code)
+        self.assertNotIn("f.read(65536)", code,
+                         "the send loop still has the number hardcoded")
+
+    def test_it_is_resolved_once_per_transfer_not_once_per_pass(self):
+        """A getattr in the inner loop of a 4 GB send is a million lookups for
+        one answer that cannot change mid-file."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        loop = code.split("block = dcc_block_size()", 1)[1].split("break", 1)[0]
+
+        self.assertNotIn("dcc_block_size()", loop)
+
+
 if __name__ == "__main__":
     unittest.main()

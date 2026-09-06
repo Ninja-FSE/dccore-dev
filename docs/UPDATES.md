@@ -4,6 +4,39 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The DCC packet size is a setting, and it was already large
+
+> mirc has packet size option that makes sends much faster if you raise the
+> packet size and you have a good connection speed. is there something like
+> this in dccore?
+
+There is, and it has been on the whole time. mIRC defaults its packet size to
+4 KB, which is why raising it there is so noticeable. **DCCore has always used
+64 KB** - sixteen times that - and it does not wait for the receiver to
+acknowledge each block before sending the next, which is the other half of what
+mIRC's fast send does. So the thing an operator comes looking for is already
+there; what was missing is the number being visible.
+
+`DCC_BLOCK_SIZE` now exposes it, and the honest part is the documentation
+around it: **raising it further usually changes nothing.** Past a few tens of
+kilobytes the limit is TCP's own window and the link, not how much this loop
+hands the kernel at a time - the bytes are already in flight while the next
+read happens. Where it can help is a very fast, very high-latency link. Where
+it can hurt is memory, because this number is multiplied by the number of
+concurrent transfers.
+
+**Clamped rather than trusted**, 4 KB to 1 MB. A mistyped 500000000 would hold
+half a gigabyte per slot, and 0 would turn the send loop into a syscall storm -
+neither worth a startup error when the honest thing is to use the nearest
+usable number and get on with the transfer.
+
+Resolved once per transfer rather than once per pass: a `getattr` in the inner
+loop of a 4 GB send is a million lookups for one answer that cannot change
+mid-file. A test pins that too, since the obvious way to write it is the wrong
+one.
+
+Seven tests, four mutations, all caught.
+
 ### ⏸️ A rehash waits for transfers to finish (#310)
 
 Neo, reviewing the last rehash fix:

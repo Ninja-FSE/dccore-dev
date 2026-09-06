@@ -432,6 +432,26 @@ DEBUG_TO_CONSOLE: bool = True
 LIST_SIZE_FILE: str     = "dccore.size.txt"
 LIST_RAWBYTES_FILE: str = "dccore.rawbytes.txt"
 
+# How many bytes are read and written per pass of a DCC send, in bytes.
+#
+# mIRC calls this the packet size and defaults it to 4 KB, which is why raising
+# it there is so noticeable. DCCore has always used 64 KB - sixteen times that
+# - and does not wait for the receiver to acknowledge each block before sending
+# the next, which is the other half of what mIRC's "fast send" does. So the
+# thing operators come here looking for is already on; this only exposes the
+# number.
+#
+# RAISING IT FURTHER USUALLY CHANGES NOTHING, and it is worth saying so rather
+# than implying a free win. Past a few tens of kilobytes the limit is TCP's own
+# window and the link, not how much this loop hands the kernel at a time - the
+# bytes are already in flight while the next read happens. Where it can help is
+# a very fast, very high-latency link; where it can hurt is memory, since each
+# concurrent transfer holds one buffer of this size.
+#
+# Clamped to 4 KB - 1 MB when read (see dcc.dcc_block_size), because a value
+# of 0 would busy-loop and a value of 500 MB would hold half a gigabyte per
+# transfer for no gain.
+DCC_BLOCK_SIZE: int = 65536      # 64 KB - 16x mIRC's default; 4096..1048576
 DCC_PORT_START: int = 55000
 DCC_PORT_END: int   = 55010
 
