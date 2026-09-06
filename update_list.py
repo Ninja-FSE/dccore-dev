@@ -79,6 +79,42 @@ def rar_extensions():
     return _extension_set("RAR_EXTENSIONS")
 
 
+def pack_size_over(path, cap):
+    """Is packing `path` going to exceed `cap` bytes? Returns (over, measured).
+
+    RECURSIVE, because the pack is: `rar a <dir>` takes the directory and
+    everything under it, so a check that only looked at the top level would
+    measure something other than what gets packed.
+
+    STOPS AS SOON AS THE CAP IS PASSED. The answer wanted here is a yes or no,
+    not a total, and the folder this is most useful on is the one that is
+    enormous - so walking all of it to produce a number nobody reads is the
+    one cost worth avoiding. A folder a hundred times over the cap is refused
+    after a few thousand entries instead of after all of them.
+
+    `cap` of 0 or less means no limit, and returns (False, 0) without touching
+    the disk at all: an operator who has not set one pays nothing for this.
+
+    An unreadable entry is skipped rather than counted or raised on. This runs
+    on the REQUEST path, where the alternative to an answer is a user who gets
+    no reply - and the pack that follows would meet the same unreadable file
+    and report it properly.
+    """
+    if not cap or cap <= 0:
+        return False, 0
+    measured = 0
+    for root, _dirs, files in os.walk(platform_compat.long_path(path)):
+        for name in files:
+            try:
+                measured += os.path.getsize(
+                    platform_compat.long_path(os.path.join(root, name)))
+            except OSError:
+                continue
+            if measured > cap:
+                return True, measured
+    return False, measured
+
+
 def _has_extension(name, extensions):
     return bool(extensions) and str(name).lower().endswith(tuple(extensions))
 

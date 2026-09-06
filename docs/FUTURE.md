@@ -11,7 +11,7 @@ What DCCore does today, and what it does not do yet.
 ### Serving files
 
 - **DCC SEND over IRC**, with a per-user and global queue, configurable slot limits, and a DCC port range you control.
-- **Album packing** — `!rar <folder>` builds an archive on demand and cleans it up afterwards.
+- **Album packing** — `!rar <folder>` builds an archive on demand and cleans it up afterwards, bounded by `MAX_RAR_FOLDER_SIZE` so a request cannot ask for an unbounded pack.
 - **Freeze box** — a user who parts or quits keeps their queue for five minutes; rejoining thaws it instantly rather than losing their place.
 - **Anti-flood** — a rolling request window, temporary mutes, and escalation to a day-ban for anyone who keeps going while muted.
 - **Ban list** — hard bans by hostmask pattern, timed bans, and a guard that refuses a pattern matching everyone.
@@ -140,7 +140,6 @@ should say about one that has never replied.
 ### Smaller things worth having
 
 - **PER-LIST file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them per list. `LIST_IGNORED_EXTENSIONS` does this globally; scoping it to one folder is the part still missing.
-- **A size cap on `!rar` packing.** There is none: a request packs whatever the folder holds, however large. `RAR_EXTENSIONS` now keeps film folders out of the album list entirely, which removes the worst case, but a genuinely enormous album is still a request nobody sized before accepting.
 - **A fetched list keeps only the peer's master.** Since the film-and-series split, a DCCore bot's archive carries two `.txt` files, and `list_fetch` picks one - now the master rather than whichever is larger. The films in the other are dropped from the fetched copy. Reading both into one fetched list changes what `_pick_list_file()` returns and the size ceiling that guards it, so it is a change of its own rather than part of the fix.
 - **A "what's new" list** — files added in the last N days, generated alongside the main one.
 - **A list validator** run at build time, reporting anything a requester will not actually be able to get — duplicate filenames across folders being the common case.

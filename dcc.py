@@ -1219,8 +1219,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # list_heading_parts() strips the prefix, so a heading can be
             # pasted straight back as a request - which is how a folder that
             # was deliberately kept OUT of the album list became reachable.
-            # There is no size cap anywhere, so that is an unbounded pack
-            # behind a line anybody in the channel can send.
+            # That was an unbounded pack behind a line anybody in the channel
+            # could send; MAX_RAR_FOLDER_SIZE below is the other half of it.
             #
             # Checked with scandir and stopped at the first match: the pack
             # about to run walks this whole folder anyway.
@@ -1247,6 +1247,28 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                         f"still be requested by name.",
                         category="PART")
                     return
+
+            # MAX_RAR_FOLDER_SIZE, enforced in the same place and for the same
+            # reason as RAR_EXTENSIONS above: this is where a request becomes a
+            # pack, and a rule not applied here is not applied.
+            #
+            # Refused BEFORE the queue, deliberately. Accepting it and finding
+            # out at pack time costs a pack slot, half an hour of RAR_TIMEOUT,
+            # a part-written archive in TMP_ZIP_DIR, and still ends with the
+            # requester told nothing useful. The size is knowable now.
+            size_cap = int(getattr(config, "MAX_RAR_FOLDER_SIZE", 0) or 0)
+            over, measured = update_list.pack_size_over(true_source_dir, size_cap)
+            if over:
+                print(f"[PACK] Refused {relative_to_root!r} for {user}: over "
+                      f"{size_cap:,} bytes (measured at least {measured:,}).")
+                announce_mod.send_pack_error_notice(irc_sock, user)
+                announce_mod.send_debug(
+                    f"Pack denied for {user}: "
+                    f"{config.C_BOLD}{relative_to_root}{config.C_RESET} is "
+                    f"larger than MAX_RAR_FOLDER_SIZE. The files in it can "
+                    f"still be requested by name.",
+                    category="PART")
+                return
 
             with queue_lock:
                 total_global_queued = get_total_queued_count()

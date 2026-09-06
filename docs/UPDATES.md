@@ -4,6 +4,53 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A ceiling on what `!rar` will pack
+
+Nothing bounded a pack. A request packed whatever the folder held, and the only
+thing that ever stopped one was `RAR_TIMEOUT` - by which point the archive is
+already on disk in `TMP_ZIP_DIR`, the single pack slot has been held for half an
+hour, and the requester has had no answer at all.
+
+The film-and-series split is what made it reachable rather than theoretical.
+The film list publishes folder headings inside the archive every user
+downloads, and `list_heading_parts()` strips the prefix, so a heading pastes
+straight back as a request - which means a folder deliberately kept out of the
+album list is nameable by anyone in the channel. `dcc.py` already said so in a
+comment: *"There is no size cap anywhere, so that is an unbounded pack behind a
+line anybody in the channel can send."*
+
+`MAX_RAR_FOLDER_SIZE`, 10 GB by default, 0 for no limit.
+
+**Checked BEFORE the request is queued.** Accepting it and discovering the size
+at pack time costs a pack slot, half an hour of timeout, a part-written archive,
+and still ends with the requester told nothing useful. The size is knowable at
+request time, so it is known then.
+
+**Measured the way the pack measures.** `rar a <dir>` takes the directory and
+everything under it, so the walk is recursive - a top-level-only check would
+measure something other than what gets packed, and the difference is exactly
+where a huge folder hides.
+
+**And it stops as soon as the cap is passed.** The answer wanted is a yes or a
+no, not a total, and the folder this is most useful on is the enormous one - so
+walking all of it to produce a number nobody reads is the one cost worth
+avoiding. A folder a hundred times over is refused after a few thousand entries
+rather than after all of them. With no cap set it does not touch the disk at
+all, which a test asserts by watching `os.walk`.
+
+**Not done here: filtering the album list by size.** The scan has per-file
+sizes and could skip writing a row for an over-cap folder, so the bot would not
+advertise what it will refuse. But those sizes are the MUSIC files, and the
+pack takes everything in the folder - so a list-side check would under-measure
+exactly where it matters. The gate is the enforcement; doing both properly
+needs the scan to carry a second total, which is its own change.
+
+The default is chosen to refuse the pathological case without refusing anything
+real: a FLAC album is a few hundred megabytes and a large box set a few
+gigabytes, while the folders this exists for are tens or hundreds. A test pins
+both ends of that, because a default that refused ordinary albums would break a
+working feature on upgrade and one that passed everything would not be a cap.
+
 ### 🧹 A real bot's nick out of the fixtures, and a line nobody could act on
 
 **`Vibessono` is a real bot**, one of the 32 observed advertising in the

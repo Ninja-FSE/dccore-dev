@@ -951,8 +951,9 @@ class RarExtensionsIsAGateNotADisplayRule(MasterListCase):
     headings inside the archive every user downloads, and list_heading_parts()
     strips the prefix, so a heading pastes straight back as a request - which
     is exactly how a folder excluded from the album list became reachable.
-    There is no size cap anywhere, so that is an unbounded pack behind a line
-    anybody in the channel can send.
+    That was an unbounded pack behind a line anybody in the channel could
+    send; MAX_RAR_FOLDER_SIZE is the other half of it, and PackingHasACeiling
+    below covers that half.
 
     Found by audit. defaults.py, INSTALL.md, the public changelog and
     test_a_film_folder_is_not_packable_with_the_split_turned_off all asserted
@@ -983,6 +984,129 @@ class RarExtensionsIsAGateNotADisplayRule(MasterListCase):
             source = fh.read()
 
         self.assertIn("still be requested by name", source)
+
+
+class PackingHasACeiling(MasterListCase):
+    """MAX_RAR_FOLDER_SIZE. Nothing bounded a pack before it.
+
+    RAR_TIMEOUT was the only thing that ever stopped one, and by the time it
+    fires the archive is already on disk in TMP_ZIP_DIR, the single pack slot
+    has been held for half an hour, and the requester has had no answer.
+    """
+
+    def folder(self, name, count, size):
+        import os as os_mod
+        path = os_mod.path.join(self.tree.music, name)
+        os_mod.makedirs(path, exist_ok=True)
+        for i in range(count):
+            with open(os_mod.path.join(path, f"track{i}.flac"), "wb") as fh:
+                fh.write(b"\0" * size)
+        return path
+
+    def test_a_folder_under_the_cap_packs(self):
+        path = self.folder("Small", 4, 1024)
+
+        over, measured = update_list.pack_size_over(path, 1024 * 1024)
+
+        self.assertFalse(over)
+        self.assertEqual(measured, 4096)
+
+    def test_a_folder_over_it_does_not(self):
+        path = self.folder("Big", 8, 1024)
+
+        over, measured = update_list.pack_size_over(path, 2048)
+
+        self.assertTrue(over)
+        self.assertGreater(measured, 2048)
+
+    def test_it_counts_what_the_pack_will_actually_take(self):
+        """`rar a <dir>` takes the directory AND everything under it, so a
+        check that only read the top level would measure something other than
+        what gets packed - and the difference is exactly where a huge folder
+        hides."""
+        import os as os_mod
+        path = self.folder("Nested", 1, 1024)
+        deep = os_mod.path.join(path, "CD2", "Bonus")
+        os_mod.makedirs(deep, exist_ok=True)
+        with open(os_mod.path.join(deep, "hidden.flac"), "wb") as fh:
+            fh.write(b"\0" * 8192)
+
+        over, measured = update_list.pack_size_over(path, 4096)
+
+        self.assertTrue(over, "a subfolder's contents were not counted")
+
+    def test_it_stops_as_soon_as_the_cap_is_passed(self):
+        """The answer wanted is a yes or no, not a total, and the folder this
+        is most useful on is the enormous one - so walking all of it to
+        produce a number nobody reads is the one cost worth avoiding."""
+        path = self.folder("Enormous", 60, 1024)
+
+        over, measured = update_list.pack_size_over(path, 2048)
+
+        self.assertTrue(over)
+        self.assertLess(measured, 60 * 1024 // 2,
+                        "the whole folder was measured after the answer was known")
+
+    def test_no_cap_configured_costs_nothing(self):
+        """An operator who has not set one must not pay a recursive walk on
+        every request."""
+        import os as os_mod
+        walked = []
+        real = os_mod.walk
+        os_mod.walk = lambda *a, **k: (walked.append(a), real(*a, **k))[1]
+        self.addCleanup(setattr, os_mod, "walk", real)
+
+        for cap in (0, None, -1):
+            with self.subTest(cap=cap):
+                self.assertEqual(update_list.pack_size_over(self.tree.music, cap),
+                                 (False, 0))
+        self.assertEqual(walked, [], "the disk was walked with no cap set")
+
+    def test_a_file_it_cannot_size_is_skipped_not_raised_on(self):
+        """This runs on the REQUEST path, where the alternative to an answer
+        is a user who gets no reply at all."""
+        import os as os_mod
+        path = self.folder("Unreadable", 3, 1024)
+        real = os_mod.path.getsize
+
+        def one_fails(p):
+            if "track1" in str(p):
+                raise OSError("locked by another process")
+            return real(p)
+
+        os_mod.path.getsize = one_fails
+        self.addCleanup(setattr, os_mod.path, "getsize", real)
+
+        over, measured = update_list.pack_size_over(path, 1024 * 1024)
+
+        self.assertFalse(over)
+        self.assertEqual(measured, 2048)
+
+    def test_the_request_path_asks_before_it_queues(self):
+        """Read out of dcc.py. Accepting the request and finding out at pack
+        time costs a pack slot, half an hour of RAR_TIMEOUT, a part-written
+        archive in TMP_ZIP_DIR, and still ends with the requester told nothing
+        useful. The size is knowable at request time."""
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as fh:
+            code = "\n".join(line.split("#", 1)[0]
+                              for line in fh.read().splitlines())
+
+        rar_block = code.split('if requested_file.lower().startswith("!rar ")', 1)[1]
+        rar_block = rar_block.split("def ", 1)[0]
+
+        self.assertIn("pack_size_over(", rar_block,
+                      "the !rar request path never consults MAX_RAR_FOLDER_SIZE")
+        self.assertLess(rar_block.index("pack_size_over("),
+                        rar_block.index("with queue_lock"),
+                        "the size is checked after the request is already queued")
+
+    def test_the_shipped_default_passes_a_real_album_and_refuses_a_library(self):
+        """A default that refused ordinary albums would break a working
+        feature on upgrade; one that passed everything would not be a cap."""
+        cap = config.MAX_RAR_FOLDER_SIZE
+
+        self.assertGreater(cap, 5 * 1024 ** 3, "a large box set would be refused")
+        self.assertLess(cap, 100 * 1024 ** 3, "not a cap on anything real")
 
 
 class TheHelperIsTheOnlyPredicate(unittest.TestCase):
