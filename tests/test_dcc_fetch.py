@@ -2492,8 +2492,8 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
     """From Neo's own log, requesting from the dashboard:
 
         [FETCH] Requested 'BBCRadio - Under Milk Wood - Richard Burton.mp3
-                ::INFO:: 79.53MB' from FlacMeDCC (request f96ba6b77dff).
-        [FETCH] Rejected unsolicited DCC SEND from FlacMeDCC
+                ::INFO:: 79.53MB' from RemoteServeDCC (request f96ba6b77dff).
+        [FETCH] Rejected unsolicited DCC SEND from RemoteServeDCC
                 ('BBCRadio_-_Under_Milk_Wood_-_Richard_Burton.mp3'):
                 no matching pending request.
 
@@ -2507,7 +2507,7 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
         """The dashboard sends what the operator clicked, which is the whole
         list row. The serving side has stripped this since #234; the fetching
         side never learned to."""
-        row = dcc_fetch.new_fetch_row("FlacMeDCC", self.LINE)
+        row = dcc_fetch.new_fetch_row("RemoteServeDCC", self.LINE)
 
         self.assertEqual(row["filename"],
                          "BBCRadio - Under Milk Wood - Richard Burton.mp3")
@@ -2517,11 +2517,11 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
         """The end-to-end shape of the bug: ask with the suffix, be answered
         without it and with underscores for spaces, and match."""
         self.set_config(fetch_queue={})
-        request_id = dcc_fetch.enqueue_fetch("FlacMeDCC", self.LINE)
+        request_id = dcc_fetch.enqueue_fetch("RemoteServeDCC", self.LINE)
         config.fetch_queue[request_id]["state"] = "offered"
 
         claimed_id, row = dcc_fetch._claim_matching_offer_locked(
-            config.fetch_queue, "FlacMeDCC", self.SENT_BACK)
+            config.fetch_queue, "RemoteServeDCC", self.SENT_BACK)
 
         self.assertEqual(claimed_id, request_id)
         self.assertEqual(row["state"], "receiving")
@@ -2557,6 +2557,157 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
         row = dcc_fetch.new_fetch_row("B", "Just A Track.flac")
 
         self.assertEqual(row["filename"], "Just A Track.flac")
+
+
+class AWholeAlbumSelectedAtOnce(DCCoreTestCase):
+    """From an operator report: "i download a bot's list, added 10+ into the
+    queue on the webdashboard. it didnt queue them, it spit out every line
+    at 1 go. should be queued and sent 3 at the time to the channel."
+
+    That is the contract, and it was only half covered. The SLOT CAP had a
+    test - two promoted, two left pending. What did not was the thing an
+    operator actually sees: that a hundred-row selection reaches the channel a
+    few lines at a time, and that each COMPLETION is what releases the next.
+    A regression in either would have been silent.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(fetch_queue={}, MAX_FETCH_SLOTS=3,
+                        fetch_feature_disabled=False, CHANNEL="#chan")
+
+    def lines_sent(self):
+        return [msg for _user, msg, _vip in self.oserve.queued]
+
+    def queue_up(self, count, bot="ListBot"):
+        return [dcc_fetch.enqueue_fetch(bot, f"Track {i:02d}.flac")
+                for i in range(count)]
+
+    def complete_everything_in_flight(self):
+        done = 0
+        for row in config.fetch_queue.values():
+            if row.get("state") == "offered":
+                row["state"] = "complete"
+                done += 1
+        return done
+
+    def test_selecting_ten_does_not_put_ten_lines_in_the_channel(self):
+        """The whole point of a queue. Every line at once is both a wall of
+        text in a public channel and a good way to meet Excess Flood."""
+        self.queue_up(10)
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(len(self.lines_sent()), 3)
+
+    def test_the_rest_are_waiting_not_lost(self):
+        ids = self.queue_up(10)
+
+        dcc_fetch.check_fetch_queue()
+
+        states = [config.fetch_queue[rid]["state"] for rid in ids]
+        self.assertEqual(states.count("offered"), 3)
+        self.assertEqual(states.count("pending"), 7)
+
+    def test_nothing_more_goes_out_while_the_first_three_are_in_flight(self):
+        """The tick runs every two seconds. If a dispatched row did not count
+        against the slots, a ten-row queue would empty into the channel in
+        under ten seconds - which is what "spit out every line at 1 go" looks
+        like from the outside."""
+        self.queue_up(10)
+
+        for _tick in range(5):
+            dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(len(self.lines_sent()), 3)
+
+    def test_each_completion_releases_exactly_one_more(self):
+        """"as each file download gets completed program requests the next
+        from queue"."""
+        self.queue_up(10)
+        dcc_fetch.check_fetch_queue()
+
+        for row in config.fetch_queue.values():
+            if row.get("state") == "offered":
+                row["state"] = "complete"
+                break
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(len(self.lines_sent()), 4)
+
+    def test_a_long_queue_drains_a_batch_at_a_time(self):
+        """"Queue could be hundreds of lines." Driven the way it really runs -
+        dispatch, complete, dispatch - rather than by setting states and
+        hoping."""
+        self.queue_up(9)
+
+        rounds = 0
+        while rounds < 10:
+            dcc_fetch.check_fetch_queue()
+            self.assertLessEqual(
+                len(self.lines_sent()), (rounds + 1) * 3,
+                "more lines reached the channel than slots allow")
+            if not self.complete_everything_in_flight():
+                break
+            rounds += 1
+
+        self.assertEqual(len(self.lines_sent()), 9)
+        self.assertEqual(rounds, 3, "nine files should take three batches")
+
+    def test_lowering_the_slot_limit_mid_flight_does_not_flush_the_queue(self):
+        """An operator can edit Max fetch slots on the settings page while
+        transfers are running, which is the one way `active` can come out
+        HIGHER than the limit. Without the free_slots <= 0 guard, the negative
+        count reaches pending_ids[:free_slots] as a from-the-end slice and
+        dispatches every pending row but the last few - a hundred-row queue
+        emptying into the channel the moment somebody saved a setting.
+
+        A rehash disturbing a live queue has been reported once already, so
+        this path is not hypothetical. Holding still until the extra
+        transfers finish is the correct response: the ones in flight are
+        already paid for, and the new limit governs from the next promotion
+        on.
+        """
+        self.queue_up(10)
+        dcc_fetch.check_fetch_queue()
+        self.assertEqual(len(self.lines_sent()), 3)
+
+        self.set_config(MAX_FETCH_SLOTS=1)
+        for _tick in range(3):
+            dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(len(self.lines_sent()), 3,
+                         "lowering the limit released the rest of the queue")
+
+    def test_the_lowered_limit_governs_once_the_backlog_clears(self):
+        """The guard holds, it does not wedge."""
+        self.queue_up(10)
+        dcc_fetch.check_fetch_queue()
+        self.set_config(MAX_FETCH_SLOTS=1)
+        self.complete_everything_in_flight()
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(len(self.lines_sent()), 4)
+
+    def test_the_slot_count_is_what_paces_it(self):
+        """Raising the limit raises the batch - so an operator who wants more
+        in flight has a setting, and one who does not is not surprised."""
+        self.set_config(MAX_FETCH_SLOTS=5)
+        self.queue_up(10)
+
+        dcc_fetch.check_fetch_queue()
+
+        self.assertEqual(len(self.lines_sent()), 5)
+
+    def test_enqueueing_sends_nothing_by_itself(self):
+        """The dashboard creates rows; the dispatcher owns pacing. If enqueue
+        ever dispatched, selecting a hundred files would send a hundred lines
+        before the dispatcher got a say - which is exactly the reported
+        symptom."""
+        self.queue_up(10)
+
+        self.assertEqual(self.lines_sent(), [])
 
 
 if __name__ == "__main__":
