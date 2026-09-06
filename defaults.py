@@ -262,6 +262,10 @@ HARD_BANS_FILE: str = "./data/hard_bans.txt"
 # upgrade migrates nothing, and this file appears the first time an operator
 # saves a folder set from the dashboard.
 LIBRARY_FOLDERS_FILE: str = "./data/library_folders.json"
+# Where the served LISTS are defined (#26). Absent on every install today,
+# which resolves to one implicit list over LIBRARY_FOLDERS_FILE/FILE_DIRECTORY
+# - so nothing changes until an operator defines more than one.
+LISTS_FILE: str = "./data/lists.json"
 
 # The operator's own banner, printed at the top of every generated list above
 # the bot's identity line. Free-form: several lines, ASCII art, a channel name,

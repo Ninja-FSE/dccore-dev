@@ -4,6 +4,55 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ A list is now a thing, not a folder set (#26, stage 1)
+
+The first piece of multiple lists, and deliberately the piece that changes
+nothing. `library.ServedList` is a name, the folders it is built from, the
+channels it answers in, and whether it is primary; `data/lists.json` holds
+them; `lists()`, `primary_list()`, `list_for_channel()` and `list_by_name()`
+answer for them.
+
+**With no `lists.json` - every install - there is ONE list, over exactly the
+folders that install already served.** Not a copy of that resolution, the same
+one: `_configured_folders()` is what both `folders()` and the implicit list
+read, because two answers to "which folders" is how they drift. A test asserts
+the implicit list's folders and `folders()` are equal, which is the property
+this whole stage rests on.
+
+**`folders()` gained an optional list name and kept its meaning without one.**
+That is FUTURE.md's own argument for building the accessor before the feature:
+the folder set moving inside a list rebinds one function instead of touching
+thirteen call sites a second time. All thirteen are untouched here.
+
+Three decisions worth naming, because each has a wrong answer that looks
+reasonable:
+
+**Exactly one primary, settled on load.** A private message carries no channel,
+so the primary is the only answer to "which list does this mean" - and "none of
+them" and "two of them" are both answers somebody would otherwise handle at
+every call site. A file with no primary promotes the first; a file with several
+keeps the first and demotes the rest.
+
+**A channel bound to nothing gets `None`, not the primary.** #26's rule is that
+such a channel gets no advert and no requests answered. Quietly serving the
+primary instead would be the opposite of that, and it would look like it was
+working.
+
+**An unknown list name gets `[]`, not the primary.** A caller asking for a list
+that is not configured has a bug, and serving it somebody else's folders hides
+that behind output nobody would question.
+
+An install that has chosen no folder at all still gets one list with no
+folders, rather than no lists: "which list is this request for" has to stay
+answerable on a fresh install, where `FILE_DIRECTORY` is deliberately blank
+until the dashboard sets it.
+
+Twenty-one tests, ten mutations, all caught.
+
+**Still to come:** per-list naming for the files a build writes, routing a
+request to the list bound to the channel it arrived in, per-channel adverts,
+and the Settings page. Each its own change.
+
 ### 🚪 The OmenServe import is offered during setup
 
 The Stats page has imported these totals since #69. The gap was never what it
