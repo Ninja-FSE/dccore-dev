@@ -87,7 +87,7 @@ What remains is narrower and does not show up in that number. Several "the wirin
 
 ### From the audits, not yet done
 
-- Roughly forty further verified findings, from a false "MasterList missing" during a concurrent search to a queued `!rar` pack that is never re-dispatched.
+- **The earlier audits' remaining findings were never written down.** This said "roughly forty", and named two: a false "MasterList missing" during a concurrent search, and a queued `!rar` pack that is never re-dispatched. The second is fixed and wired at three call sites. Nothing anywhere records the rest, so the number can be neither confirmed nor worked from, and a great deal has been fixed since it was written. Treated as unknown rather than as a backlog: the next audit should leave a list that outlives it.
 
 ### Knowing which bots are out there — open questions
 

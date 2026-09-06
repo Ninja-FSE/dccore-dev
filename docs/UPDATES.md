@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧹 A real bot's nick out of the fixtures, and a line nobody could act on
+
+**`Vibessono` is a real bot**, one of the 32 observed advertising in the
+channel #133 was written from - the issue discusses it by name, as the only one
+of the 32 publishing no list date. It was being used as an ordinary fixture
+nick in three test files, 33 times, and `tests/` ships. Renamed to `TapeDeck`.
+
+The distinction that matters, since this project deliberately does the
+opposite elsewhere: `tests/test_advert_listener.py` says **"THE FIXTURES ARE
+REAL"** and reproduces captured adverts untidied, because no two bots format
+alike and a parser written against a cleaned-up sample is a parser written
+against a bot nobody runs. That is a reasoned choice and it stands. The
+difference is that there the nick is inseparable from the sample being parsed,
+while here it was a name for "a bot we hold a list from" - where an invented
+one does the identical job. Real data where it is the point; invented data
+where it is not.
+
+**And a roadmap line nobody could act on.** "Roughly forty further verified
+findings" was written on 2 Sep when the README was split, with no list behind
+it anywhere in the repository - `git log -S` finds it arriving already
+summarised. One of its two named examples, the queued `!rar` pack never
+re-dispatched, is fixed and wired at three call sites; the other cannot be
+checked without knowing what the other thirty-eight were. It now says that
+plainly instead of implying a backlog that can be picked up, and asks the next
+audit to leave a list that outlives it.
+
 ### 🔍 Thirteen audit findings, and the worst made the filter match nothing
 
 From the multi-agent audit of the same day's work, plus the refutation pass
