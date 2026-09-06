@@ -4,6 +4,49 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧊 A rehash was spending the queue's retries
+
+Neo:
+
+> Also noticed that if the bit had some queues from a user. And admin made a
+> rehash. It cancels the queue.
+
+Reproduced, and it is not Windows-only.
+
+**Every rehash ends by waking the queue** - `[REHASH-WAKE] Letting queued
+users into the free slots...` - which calls `check_queue_and_send()` and
+attempts a send for each queued user. If that attempt fails, the failure is
+charged to the user's retry budget. `MAX_SEND_FAILS` is 3. **Three rehashes
+deleted the row.**
+
+**The cause of the failure is what makes it wrong.** That branch covered two
+unrelated things under one message - *"file missing, empty, or public IP
+unknown"*:
+
+- A file that is missing or empty is a DEAD ROW. No amount of retrying brings
+  it back, and charging the budget is exactly what stops it being re-selected
+  every three seconds for ever - the reason the charge was added.
+- **"No usable public address" is not that.** It is the bot's own
+  configuration, it affects every queued user identically, and it is fixed by
+  the operator setting `MY_IP_OR_DOCK` - not by the user waiting. Charging it
+  meant three attempts silently discarded a perfectly good queue, and the
+  fastest way to make three attempts happen is three `!rehash` runs.
+
+So the address case returns without charging anyone, and says which of the two
+it was: *"the address, not the file, is what is missing"*. The hot loop the
+budget exists to bound is still bounded - with no public address there is
+nothing to select, and the retry that would re-enter the loop is not scheduled.
+
+**What it is NOT:** the module reload is innocent. `dcc_queue` is bound from
+`runtime.py` and a reload rebinds the name to the same object, which a direct
+test confirms; `channel_users` is backed up and restored in place around the
+reload. Both were checked before the wake was suspected.
+
+Four tests, three mutations, all caught. One needed its precondition asserted
+rather than assumed: `is_offerable_to_strangers()` correctly refuses the
+documentation ranges, so a fixture using `203.0.113.9` was testing the address
+branch while claiming to test the file branch.
+
 ### 🔁 Held lists can keep themselves up to date (#302)
 
 > Implement auto-downloading of lists from bots to keep them automatically up

@@ -1674,8 +1674,37 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # this call the same unreadable entry was re-selected every ~3 seconds forever,
         # with no counter and no way out - a permanent hot loop injecting a NOTICE and a
         # VIP notice on every pass. Charging it to the retry budget bounds it.
+        # WHOSE FAULT IT IS DECIDES WHETHER IT COSTS THE USER A RETRY.
+        #
+        # This branch covers two unrelated things. A file that is missing or
+        # empty is a dead row: the library moved on, no amount of retrying
+        # brings it back, and charging the budget is what stops it being
+        # re-selected every three seconds forever - the reason this call was
+        # added.
+        #
+        # "No usable public address" is not that. It is the BOT's own
+        # configuration, it affects every queued user identically, and it is
+        # fixed by the operator setting MY_IP_OR_DOCK - not by the user
+        # waiting. Charging it meant three attempts silently discarded a
+        # perfectly good queue, and the fastest way to make three attempts
+        # happen is three !rehash runs: each one wakes the queue, each wake
+        # fails the same way, and the third deletes the row. Neo saw exactly
+        # that - "if the bot had some queues from a user, and admin made a
+        # rehash, it cancels the queue".
+        #
+        # The hot loop this call exists to bound is still bounded: with no
+        # public address there is nothing to select and check_queue_and_send()
+        # below is not called again, so the row simply waits.
+        if ip_long == 0 or not is_offerable_to_strangers():
+            print(f"[DCC QUEUE] {user}'s queue is untouched - the address, not "
+                  f"the file, is what is missing. Nothing is retried until "
+                  f"MY_IP_OR_DOCK is set.")
+            if hasattr(config, 'user_processing_lock'):
+                config.user_processing_lock.discard(user.lower())
+            return
+
         release_queue_entry(user, next_file, delivered=False,
-                            reason="file missing, empty, or public IP unknown")
+                            reason="file missing or empty")
 
         time.sleep(3.0)
         check_queue_and_send(irc_sock, user)
