@@ -12,6 +12,8 @@ tests/test_adminchat.py's real-socket pattern rather than mocking everything.
 Deliberately stdlib-only, like the rest of the suite.
 """
 
+import contextlib
+import io
 import ipaddress
 import os
 import socket
@@ -2419,6 +2421,71 @@ class LongOfferedFilenames(LoopbackTransferTests):
 
         self.assertEqual(row["state"], "complete")
         self.assertEqual(row["bytes_received"], len(payload))
+
+
+class TurningTheSizeCapsOff(DCCoreTestCase):
+    """#302: "Files should never be rejected based on size."
+
+    The caps are not deleted - deleting them takes the choice from every
+    operator who does not know they exist. They are switchable off, which is
+    the same outcome for the one who wants it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.bot = "SizeBot"
+        self.set_config(fetch_queue={})
+
+    def offer(self, size, request_type="file"):
+        """The payload is the raw CTCP text, and the row must already be
+        'offered' - admission control only accepts an offer answering a
+        request we made a moment ago."""
+        import dcc_fetch
+        request_id = dcc_fetch.enqueue_fetch(self.bot, "Huge.rar")
+        row = config.fetch_queue[request_id]
+        row["request_type"] = request_type
+        row["state"] = "offered"
+        row["offered_at"] = time.time()
+        dcc_fetch.handle_incoming_offer(
+            None, self.bot, f"DCC SEND Huge.rar 2130706433 55000 {size}")
+        return config.fetch_queue[request_id]
+
+    def test_an_offer_over_the_cap_is_still_refused_by_default(self):
+        self.set_config(MAX_FETCH_FILE_SIZE=1000)
+
+        row = self.offer(5000)
+
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("exceeds", row.get("reason", ""))
+
+    def test_zero_means_no_limit(self):
+        """The row still fails - it goes on to connect to a peer that is not
+        there - but not FOR ITS SIZE, which is the whole of what the cap
+        decides. Asserting "not failed" would be asserting that a fixture
+        socket connects."""
+        self.set_config(MAX_FETCH_FILE_SIZE=0)
+
+        row = self.offer(5 * 1024 * 1024 * 1024)
+
+        self.assertNotIn("exceeds", row.get("reason", ""))
+        self.assertNotIn("MAX_FETCH_FILE_SIZE", row.get("reason", ""))
+
+    def test_the_refusal_says_how_to_switch_it_off(self):
+        """The operator who hit this had no way to tell from the message that
+        it was theirs to change."""
+        self.set_config(MAX_FETCH_FILE_SIZE=1000)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.offer(5000)
+
+        self.assertIn("0 for no limit", buffer.getvalue())
+
+    def test_the_list_cap_clears_a_real_list_archive(self):
+        """10MB was 'generous over any real master-list zip' on the same
+        evidence that put the text ceiling at 20MB: one 4MB list. Real lists
+        run to 31MB of text, and a zip of one is several MB - close enough to
+        the old cap that the next library along lands on it."""
+        self.assertGreaterEqual(config.MAX_FETCH_LIST_FILE_SIZE, 32 * 1024 * 1024)
 
 
 if __name__ == "__main__":
