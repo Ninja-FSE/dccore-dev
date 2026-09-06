@@ -4,6 +4,52 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🖥️ The Console is on where nobody else can reach it, and the dashboard opens itself
+
+> i think the website console should be on by default on windows machines and
+> when it is enabled i think the website should auto open on the default
+> browser when you start up the program
+
+**Keyed on exposure, not on the platform**, and that is the one place this
+departs from the request. `WEBUI_CONSOLE_ENABLED`'s own comment explains why it
+shipped off:
+
+> an operator who enabled it months ago would have gained a remote admin
+> console on upgrade with no setting changed and nothing recording that their
+> exposure had widened
+
+Defaulting it on for Windows would do exactly that. But look at what the gate
+is protecting against: the Console reaches ban, unban, clearqueue, rehash and
+update behind the dashboard password ALONE - one factor, over plain HTTP. That
+is a real widening when the dashboard is on the LAN, and no widening at all
+when it is on loopback, where whoever can reach it already has the served files
+and `admin_config.py` sitting on the same disk.
+
+So the default is now "on when the dashboard is loopback-only". On a Windows
+desktop, which binds `127.0.0.1`, that is on - the outcome asked for - without
+handing a remote admin console to anyone whose dashboard faces the LAN. **An
+explicit True or False always wins**, so nobody who has already made this
+choice has it made again for them.
+
+A host that cannot be parsed counts as exposed. A host this cannot read is one
+it cannot vouch for, and the safe answer to "is this reachable from outside" is
+yes.
+
+**The browser opens itself**, loopback only - and that half is not about
+security but about what the machine probably is. A dashboard bound to the LAN
+is as likely to be a headless box as a desktop, and a daemon that spawns a
+browser there is doing something nobody asked for and nobody will see. A
+missing browser or display is not a reason to stop the bot: the address was
+printed a line above either way.
+
+One thing worth noting for whoever reads this next: the routes gate on
+`console_is_enabled()` now rather than reading the setting. Two of them check
+independently on purpose - they are the whole attack surface - and leaving them
+reading the raw setting would have kept the old flat default alive on the only
+paths that actually gate the feature.
+
+Twelve tests, seven mutations, all caught.
+
 ### 🎛️ Packet size is a menu, and the thing that is probably slowing you down is not it
 
 > can we make dcc packet size choosable like mirc? 4 kb -> 8 -> 16 -> 32 -> 64

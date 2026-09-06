@@ -452,5 +452,118 @@ class WhatNeedsARestartToTakeEffect(DashboardRouteCase):
         self.assertEqual(resp.get_json().get("restart_required", []), [])
 
 
+class WhenTheConsoleIsOnByDefault(DCCoreTestCase):
+    """Asked for as "on by default on windows machines". Keyed on EXPOSURE
+    instead, which gives the same answer on a normal Windows desktop and does
+    not create the case the setting exists to prevent.
+
+    The Console puts ban, unban, clearqueue, rehash and update behind the
+    dashboard password alone - one factor, over plain HTTP. That is a real
+    widening when the dashboard is on the LAN, and no widening at all when it
+    is on loopback, where whoever can reach it already has the served files
+    and admin_config.py.
+    """
+
+    def test_loopback_means_on(self):
+        self.set_config(WEBUI_HOST="127.0.0.1", WEBUI_CONSOLE_ENABLED=None)
+
+        self.assertTrue(webserver.console_is_enabled())
+
+    def test_localhost_counts_as_loopback(self):
+        self.set_config(WEBUI_HOST="localhost", WEBUI_CONSOLE_ENABLED=None)
+
+        self.assertTrue(webserver.console_is_enabled())
+
+    def test_a_lan_address_means_off(self):
+        """The paragraph in defaults.py applies in full here: turning the
+        dashboard on for Search and Queue must not grant remote admin as a
+        side effect."""
+        for host in ("0.0.0.0", "192.168.1.20", "10.0.0.5"):
+            with self.subTest(host=host):
+                self.set_config(WEBUI_HOST=host, WEBUI_CONSOLE_ENABLED=None)
+                self.assertFalse(webserver.console_is_enabled())
+
+    def test_a_host_it_cannot_read_is_treated_as_exposed(self):
+        """A host this cannot parse is a host it cannot vouch for, and the
+        safe answer to "is this exposed" is yes."""
+        self.set_config(WEBUI_HOST="some-hostname.local",
+                        WEBUI_CONSOLE_ENABLED=None)
+
+        self.assertFalse(webserver.console_is_enabled())
+
+    def test_an_explicit_choice_always_wins(self):
+        """Nobody who has already made this choice has it made again for them
+        on upgrade - which is the whole objection to changing a default."""
+        self.set_config(WEBUI_HOST="127.0.0.1", WEBUI_CONSOLE_ENABLED=False)
+        self.assertFalse(webserver.console_is_enabled())
+
+        self.set_config(WEBUI_HOST="0.0.0.0", WEBUI_CONSOLE_ENABLED=True)
+        self.assertTrue(webserver.console_is_enabled())
+
+    def test_the_routes_ask_the_same_question(self):
+        """Reading the setting directly in the route would keep the old flat
+        default alive on the only paths that actually gate the feature."""
+        with io.open(os.path.join(REPO_ROOT, "webserver.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        gate = code.split("def _console_is_available():", 1)[1][:400]
+
+        self.assertIn("console_is_enabled()", gate)
+        self.assertNotIn('getattr(config, "WEBUI_CONSOLE_ENABLED"', gate)
+
+
+class OpeningTheDashboardOnStartup(DCCoreTestCase):
+    """"when it is enabled i think the website should auto open on the default
+    browser when you start up the program"."""
+
+    def test_it_opens_for_a_loopback_dashboard(self):
+        self.set_config(WEBUI_HOST="127.0.0.1", WEBUI_OPEN_BROWSER=True)
+        opened = []
+
+        self.assertTrue(webserver._open_in_browser("127.0.0.1", 8420,
+                                                   opener=opened.append))
+        self.assertEqual(opened, ["http://127.0.0.1:8420/"])
+
+    def test_it_does_not_open_on_a_lan_bound_dashboard(self):
+        """Not about security - about what the machine probably is. A
+        dashboard on the LAN is as likely to be a headless box as a desktop,
+        and a daemon spawning a browser there is doing something nobody asked
+        for and nobody will see."""
+        self.set_config(WEBUI_HOST="0.0.0.0", WEBUI_OPEN_BROWSER=True)
+        opened = []
+
+        self.assertFalse(webserver._open_in_browser("0.0.0.0", 8420,
+                                                    opener=opened.append))
+        self.assertEqual(opened, [])
+
+    def test_it_can_be_turned_off(self):
+        self.set_config(WEBUI_HOST="127.0.0.1", WEBUI_OPEN_BROWSER=False)
+        opened = []
+
+        self.assertFalse(webserver._open_in_browser("127.0.0.1", 8420,
+                                                    opener=opened.append))
+        self.assertEqual(opened, [])
+
+    def test_a_machine_with_no_browser_still_starts_the_bot(self):
+        """A missing browser, no display, or a wayward BROWSER variable is not
+        a reason to stop the daemon - the address was printed a line above."""
+        self.set_config(WEBUI_HOST="127.0.0.1", WEBUI_OPEN_BROWSER=True)
+        said = []
+
+        def explode(_url):
+            raise RuntimeError("no display")
+
+        result = webserver._open_in_browser("127.0.0.1", 8420, opener=explode,
+                                            log=said.append)
+
+        self.assertFalse(result)
+        self.assertIn("still running at", chr(10).join(said))
+
+    def test_startup_calls_it(self):
+        with io.open(os.path.join(REPO_ROOT, "webserver.py"), encoding="utf-8") as handle:
+            code = handle.read()
+
+        self.assertIn("_open_in_browser(host, port)", code)
+
+
 if __name__ == "__main__":
     unittest.main()

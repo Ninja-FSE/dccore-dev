@@ -1687,7 +1687,7 @@ SETTINGS_CATEGORIES = (
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
-                                                "WEBUI_CONSOLE_ENABLED",
+                                                "WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
                                                 "WEBUI_FOLDER_BROWSER_ENABLED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE",
                                                 "PROJECT_URL"]),
@@ -1798,6 +1798,7 @@ SETTINGS_LABELS = {
     "WEBUI_PORT": "Port",
     "WEBUI_FOLDER_BROWSER_ENABLED": "Folder picker on the Settings page",
     "WEBUI_CONSOLE_ENABLED": "Enable the Console page (remote admin)",
+    "WEBUI_OPEN_BROWSER": "Open the dashboard in a browser at startup",
 
     "DEBUG_MODE": "Debug mode",
     "DEBUG_TO_CHANNEL": "Send debug lines to channel",
@@ -2489,6 +2490,77 @@ def _console_debug_sink(msg_text, category="INFO"):
         _console_next_id += 1
 
 
+def _open_in_browser(host, port, opener=None, log=print):
+    """Open the dashboard in the default browser, if that was asked for.
+
+    LOOPBACK ONLY, and not because of security - because of what the machine
+    probably is. A dashboard bound to the LAN is as likely to be running on a
+    headless box as on somebody's desktop, and a daemon that tries to spawn a
+    browser there is doing something nobody asked for and nobody will see.
+
+    Never fatal. A machine with no browser, no display, or a wayward
+    BROWSER variable is not a reason to stop the bot starting - the address
+    was printed a line above either way.
+    """
+    if not getattr(config, "WEBUI_OPEN_BROWSER", True):
+        return False
+    if not dashboard_is_loopback_only(host):
+        return False
+    try:
+        import webbrowser
+
+        (opener or webbrowser.open)(f"http://{host}:{port}/")
+        return True
+    except Exception as err:
+        log(f"[WEBUI] Could not open a browser ({err}); the dashboard is "
+            f"still running at http://{host}:{port}/")
+        return False
+
+
+def dashboard_is_loopback_only(host=None):
+    """Is the dashboard reachable only from the machine it runs on?
+
+    The whole question the Console's default turns on. Anything that is not a
+    loopback address means somebody else can reach the login page, and from
+    there the Console is admin behind one factor.
+
+    Unparseable is treated as NOT loopback. A host this cannot read is a host
+    this cannot vouch for, and the safe answer to "is this exposed" is yes.
+    """
+    import ipaddress
+
+    text = str(host if host is not None
+               else getattr(config, "WEBUI_HOST", "127.0.0.1")).strip()
+    if not text:
+        return False
+    if text.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def console_is_enabled():
+    """Whether the dashboard's Console is available.
+
+    An explicit True or False in the operator's own configuration always wins:
+    somebody who has already made this choice does not get it made again for
+    them on upgrade.
+
+    With no explicit value the answer is "yes if nobody else can reach it".
+    The Console puts ban/unban/clearqueue/rehash/update behind the dashboard
+    password alone - one factor, over plain HTTP - which is a real widening
+    when the dashboard is on the LAN and no widening at all when it is on
+    loopback, where the only person who can reach it already has the files and
+    admin_config.py.
+    """
+    configured = getattr(config, "WEBUI_CONSOLE_ENABLED", None)
+    if configured is not None:
+        return bool(configured)
+    return dashboard_is_loopback_only()
+
+
 def _ensure_console_sink():
     """Register the console's debug sink, at most once.
 
@@ -2888,7 +2960,12 @@ if HAVE_FLASK:
         # to one and forgotten on the other is a silent hole. Two lines each is
         # cheap enough to not be clever about.
         def _console_is_available():
-            return bool(getattr(config, "WEBUI_CONSOLE_ENABLED", False))
+            # ONE answer to "is the Console on", shared with the startup
+            # notice and with anything else that asks. Reading the setting
+            # directly here would have kept the old flat default alive on the
+            # only paths that actually gate the feature - the routes - while
+            # everything else moved.
+            return console_is_enabled()
 
         @app.route("/api/console/log")
         def api_console_log():
@@ -2937,6 +3014,10 @@ def start():
     _ensure_console_sink()
     app = create_app()
     print(f"[WEBUI] Dashboard starting on http://{host}:{port}/ (login required).")
+    if console_is_enabled():
+        print("[WEBUI] The Console is on. It reaches ban, rehash and update "
+              "behind this one password - see WEBUI_CONSOLE_ENABLED.")
+    _open_in_browser(host, port)
     try:
         # use_reloader=False is NOT optional: Flask's reloader re-execs the whole
         # process, and this runs on an already-live daemon thread - a re-exec

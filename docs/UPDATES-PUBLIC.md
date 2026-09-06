@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The Console is on by default when your dashboard is only reachable from your own machine**, which is how it ships. It stays off when the dashboard is bound to your LAN — there it would put ban, rehash and update behind one password over plain HTTP, which is a choice to make rather than one to inherit. If you have already set `WEBUI_CONSOLE_ENABLED` either way, your setting is untouched.
+
+- **The dashboard opens in your browser when the bot starts.** Only when it is bound to your own machine — a LAN-bound dashboard is as likely to be on a headless box, where opening a browser helps nobody. Turn it off with **`WEBUI_OPEN_BROWSER`**.
+
 - **Packet size is now a menu, like mIRC's: 4, 8, 16, 32, 64 or 128 KB.** DCCore has always used 64 KB and never waits for the receiver to acknowledge each block, so both halves of mIRC's "fast send" were already on — but you can now try the others from Settings.
 
 - **And if transfers feel slow at 64 KB, the packet size is probably not why.** On a fast link to a distant peer, what limits you is the socket send buffer, not the write size: at 100 Mbps with 100 ms round-trip, 64 KB of buffer caps you near 5 Mbps whatever the packet size. **`DCC_SEND_BUFFER`** lets you raise it. It is `0` (leave it to the operating system) by default on purpose — Windows and Linux both tune this automatically, and setting it by hand switches that off, so it is worth measuring rather than guessing.
