@@ -4,6 +4,56 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧰 Lists are defined from the Settings page (#26, stage 5 - complete)
+
+The last stage. A list is a name, the channels it serves, its folders, and
+whether it is primary, edited in the Paths category and written through
+`POST /api/lists`.
+
+**One editor, never two.** With more than one list the folders live INSIDE the
+lists, so leaving the single-folder editor on screen would be a second place
+to edit folders that quietly does nothing. With one list the familiar editor
+stays exactly where it was, and a button moves an operator to the other -
+seeded from the folders already configured, so "serve more than one list" does
+not begin by throwing away what is already there. Nothing is written until
+they save.
+
+**The whole set is validated, not each row**, for the reason the folder
+endpoint already gives and one of its own: two lists can each be perfectly
+good and still be an invalid pair. The same channel bound to both, or the same
+name twice, is only visible in the set. Every fault comes back at once, each
+naming the specific other entry it conflicts with - "invalid list
+configuration" tells an operator with four lists nothing about which two to
+look at.
+
+The rules: a name is required, because a list is bound to channels and picked
+by name; names are unique case-insensitively, because `list_by_name()` matches
+that way and on Windows two directories differing only in case are one
+directory; a channel belongs to one list; a channel name starts with `#` or
+`&`; and one list must be primary, since a private message carries no channel.
+Folder rules are NOT repeated - `problems()` already owns them, and each
+list's folders go through it so a bad label reads the same whichever screen it
+was typed on, prefixed with the list it belongs to.
+
+**An empty set removes the file rather than writing `[]`**, because
+`load_lists()` already falls back on an empty file - so `[]` would leave
+something on disk that does nothing and the next operator to read it would
+have to work that out.
+
+One thing a guard caught: `saveLists()` read `res.body`, and `postJson()`
+returns `res.data`. `tests/test_web_assets.py` has asserted that exact
+convention since the last time somebody got it wrong.
+
+And one branch was written and then deleted. `list_problems()` checked whether
+two names would land in the same directory - but `list_slug()` is one-to-one
+by construction, so it can never fire, and a rule no test can reach is the
+same dead guard removed twice already today. The invariant is asserted where
+it lives, in `list_slug()`'s own tests.
+
+Twelve tests, ten mutations, all caught. **#26 is complete**: a list is a
+thing, it has its own directory, requests route to it by channel, each channel
+advertises its own, and they can be defined without hand-editing JSON.
+
 ### 📢 Each channel advertises its own list (#26, stage 4)
 
 The advert loop already read the figures once per channel. It just read the

@@ -60,6 +60,7 @@
     // source is selected without asking again.
     filelistsBots: {},
     folders: null, foldersSource: "", foldersDraft: null, foldersNote: null,
+    lists: null, listsSource: "", listsDraft: null, listsNote: null,
     // The folder picker (#164 step 5). `browse` is null when the panel is
     // closed; open, it carries the row it will write back into.
     foldersBrowserEnabled: false, browse: null,
@@ -2071,6 +2072,232 @@
   // which leaves a double quote alone, so a path containing one would close
   // value="…" and everything after it would be parsed as markup. Every value
   // here is assigned as a .value PROPERTY by attachFolderRows() below.
+  // MORE THAN ONE LIST (#26). This replaces the single folders editor rather
+  // than sitting beside it: two places to edit folders, one of which quietly
+  // does nothing, is worse than either on its own. With one list the familiar
+  // editor stays exactly where it was; the button below is what moves it.
+  function listsSectionHtml() {
+    var draft = state.listsDraft || [];
+
+    var blocks = draft.map(function (entry, index) {
+      var folderRows = (entry.folders || []).map(function (_f, fIndex) {
+        return '<div class="list-folder-row" data-list-index="' + index +
+          '" data-folder-index="' + fIndex + '">' +
+          '<input type="text" class="list-folder-name" placeholder="Label" aria-label="Folder label">' +
+          '<input type="text" class="list-folder-path" placeholder="Full path to the folder" aria-label="Folder path">' +
+          '<button type="button" class="served-folder-btn list-folder-remove" title="Remove folder" aria-label="Remove folder">\u00d7</button>' +
+          "</div>";
+      }).join("");
+
+      return '<div class="served-list-block" data-list-index="' + index + '">' +
+        '<div class="served-list-head">' +
+          '<input type="text" class="served-list-name" placeholder="List name" aria-label="List name">' +
+          '<label class="served-list-primary-label">' +
+            '<input type="radio" name="served-list-primary" class="served-list-primary">' +
+            " Primary</label>" +
+          '<button type="button" class="served-folder-btn served-list-remove" title="Remove list" aria-label="Remove list">\u00d7</button>' +
+        "</div>" +
+        '<input type="text" class="served-list-channels" placeholder="#channel, #other (blank = everywhere)" aria-label="Channels this list serves">' +
+        '<div class="served-list-folders">' + folderRows + "</div>" +
+        '<button type="button" class="btn btn-small list-folder-add">Add folder</button>' +
+        "</div>";
+    }).join("");
+
+    var note = "";
+    if (state.listsNote) {
+      note = '<p class="served-folder-note ' + (state.listsNote.ok ? "is-ok" : "is-error") + '">' +
+        escapeHtml(state.listsNote.text) +
+        (state.listsNote.problems || []).map(function (line) {
+          return "<br>\u2022 " + escapeHtml(line);
+        }).join("") + "</p>";
+    }
+
+    return '<div class="served-folders">' +
+      "<h3>Served lists</h3>" +
+      '<p class="served-folder-summary">' +
+        "Each list is built from its own folders and answered in its own " +
+        "channels. A channel named by no list is not served at all; a list " +
+        "naming no channels answers everywhere, which only makes sense for " +
+        "one of them. The primary is what a private message means." +
+      "</p>" +
+      blocks +
+      '<div class="served-folder-actions">' +
+        '<button type="button" class="btn served-list-add">Add list</button>' +
+        '<button type="button" class="btn btn-accent served-list-save">Save lists</button>' +
+      "</div>" + note + "</div>";
+  }
+
+  // Values as PROPERTIES, never concatenated into value="…": escapeHtml() is
+  // textContent -> innerHTML and leaves a double quote alone, so a path
+  // containing one would close the attribute. Same rule the folder rows
+  // follow. Typing does not re-render, so the caret stays where it is.
+  function attachListRows() {
+    var draft = state.listsDraft || [];
+
+    el.settingsFields.querySelectorAll(".served-list-block").forEach(function (block) {
+      var index = parseInt(block.dataset.listIndex, 10);
+      var entry = draft[index];
+      if (!entry) { return; }
+
+      var nameInput = block.querySelector(".served-list-name");
+      var channelsInput = block.querySelector(".served-list-channels");
+      var primaryInput = block.querySelector(".served-list-primary");
+
+      nameInput.value = entry.name || "";
+      channelsInput.value = (entry.channels || []).join(", ");
+      primaryInput.checked = !!entry.primary;
+
+      nameInput.addEventListener("input", function () {
+        draft[index].name = nameInput.value;
+      });
+      channelsInput.addEventListener("input", function () {
+        draft[index].channels = channelsInput.value.split(",")
+          .map(function (part) { return part.trim(); })
+          .filter(function (part) { return part.length > 0; });
+      });
+      primaryInput.addEventListener("change", function () {
+        // Exactly one, enforced here as well as on the server: a radio group
+        // already allows only one, but the draft is what gets sent.
+        draft.forEach(function (other, otherIndex) {
+          other.primary = otherIndex === index;
+        });
+      });
+    });
+
+    el.settingsFields.querySelectorAll(".list-folder-row").forEach(function (row) {
+      var listIndex = parseInt(row.dataset.listIndex, 10);
+      var folderIndex = parseInt(row.dataset.folderIndex, 10);
+      var entry = draft[listIndex];
+      if (!entry || !entry.folders || !entry.folders[folderIndex]) { return; }
+      var folder = entry.folders[folderIndex];
+
+      var nameInput = row.querySelector(".list-folder-name");
+      var pathInput = row.querySelector(".list-folder-path");
+      nameInput.value = folder.name || "";
+      pathInput.value = folder.path || "";
+      nameInput.addEventListener("input", function () {
+        folder.name = nameInput.value;
+      });
+      pathInput.addEventListener("input", function () {
+        folder.path = pathInput.value;
+      });
+    });
+  }
+
+  function handleListButton(button) {
+    var draft = state.listsDraft || (state.listsDraft = []);
+
+    if (button.classList.contains("served-list-start")) {
+      // Seeded from what is already served, so "serve more than one list"
+      // does not begin by throwing away the folders already configured. It
+      // is not saved until the operator saves it.
+      state.listsDraft = [{
+        name: "Main",
+        primary: true,
+        channels: [],
+        folders: (state.foldersDraft || state.folders || []).map(function (f) {
+          return { name: f.name, path: f.path };
+        })
+      }];
+      state.listsSource = "file";
+      state.listsNote = {
+        ok: true,
+        text: "Add a second list, name the channels each one serves, then " +
+              "save. Nothing changes until you do."
+      };
+      renderSettingsCategory();
+      return;
+    }
+
+    if (button.classList.contains("served-list-save")) {
+      saveLists();
+      return;
+    }
+
+    if (button.classList.contains("served-list-add")) {
+      draft.push({ name: "", primary: draft.length === 0, channels: [], folders: [] });
+    } else if (button.classList.contains("served-list-remove")) {
+      var block = button.closest(".served-list-block");
+      var removeIndex = parseInt(block.dataset.listIndex, 10);
+      var wasPrimary = draft[removeIndex] && draft[removeIndex].primary;
+      draft.splice(removeIndex, 1);
+      // Removing the primary must leave one behind, or the save is refused
+      // for a reason the operator did not choose.
+      if (wasPrimary && draft.length) { draft[0].primary = true; }
+    } else if (button.classList.contains("list-folder-add")) {
+      var addBlock = button.closest(".served-list-block");
+      var addIndex = parseInt(addBlock.dataset.listIndex, 10);
+      if (draft[addIndex]) {
+        draft[addIndex].folders = draft[addIndex].folders || [];
+        draft[addIndex].folders.push({ name: "", path: "" });
+      }
+    } else if (button.classList.contains("list-folder-remove")) {
+      var row = button.closest(".list-folder-row");
+      var listIndex = parseInt(row.dataset.listIndex, 10);
+      var folderIndex = parseInt(row.dataset.folderIndex, 10);
+      if (draft[listIndex] && draft[listIndex].folders) {
+        draft[listIndex].folders.splice(folderIndex, 1);
+      }
+    }
+    state.listsNote = null;
+    renderSettingsCategory();
+  }
+
+  function loadLists() {
+    return fetchJson("/api/lists")
+      .then(function (payload) {
+        state.lists = payload.lists || [];
+        state.listsSource = payload.source || "";
+        // Only seeded from the server when there is no edit in progress -
+        // a poll landing mid-edit must not throw away what was typed.
+        if (state.listsDraft === null) {
+          state.listsDraft = state.lists.map(function (entry) {
+            return {
+              name: entry.name,
+              primary: !!entry.primary,
+              channels: (entry.channels || []).slice(),
+              folders: (entry.folders || []).map(function (f) {
+                return { name: f.name, path: f.path };
+              })
+            };
+          });
+        }
+        if (state.active === "settings" && state.settingsActiveCategory === "paths") {
+          renderSettingsFields();
+        }
+      })
+      .catch(function () { /* the settings page still works without it */ });
+  }
+
+  function saveLists() {
+    var draft = state.listsDraft || [];
+    return postJson("/api/lists", { lists: draft })
+      .then(function (res) {
+        if (res.ok) {
+          state.listsNote = {
+            ok: true,
+            text: res.data.message || "Saved."
+          };
+          // Dropped so the reload seeds it from what the server actually
+          // wrote, rather than from what was typed - a name the server
+          // trimmed would otherwise stay untrimmed on screen.
+          state.listsDraft = null;
+          state.lists = res.data.lists || [];
+          return loadLists();
+        }
+        // The server returns every fault at once, newline separated, so an
+        // operator fixing three things is told about three things.
+        var message = (res.data && res.data.error) || "Could not save.";
+        var parts = message.split("\n");
+        state.listsNote = {
+          ok: false,
+          text: parts.length > 1 ? "Could not save:" : message,
+          problems: parts.length > 1 ? parts : []
+        };
+        renderSettingsFields();
+      });
+  }
+
   function foldersSectionHtml() {
     var draft = state.foldersDraft || [];
     var rows = draft.map(function (_row, index) {
@@ -2286,13 +2513,28 @@
       html += settingsPasswordSectionHtml();
     }
     if (category.id === "paths") {
-      // ABOVE the fields, because "Served folders" is what an operator comes
+      // ABOVE the fields, because the served library is what an operator comes
       // to this category for and Music directory is now only the fallback
-      // used when the list is empty.
-      html = foldersSectionHtml() + html;
+      // used when nothing else is configured.
+      //
+      // ONE editor, not two. With more than one list configured the folders
+      // live inside the lists, so showing the single-list folder editor as
+      // well would be a second place to edit folders that quietly does
+      // nothing. The button below is what moves an operator between them.
+      if (state.listsSource === "file") {
+        html = listsSectionHtml() + html;
+      } else {
+        html = foldersSectionHtml() +
+          '<div class="served-folder-actions">' +
+            '<button type="button" class="btn served-list-start">' +
+            "Serve more than one list\u2026</button>" +
+          "</div>" + html;
+      }
     }
     el.settingsFields.innerHTML = html;
-    if (category.id === "paths") { attachFolderRows(); }
+    if (category.id === "paths") {
+      if (state.listsSource === "file") { attachListRows(); } else { attachFolderRows(); }
+    }
 
     // Values are assigned as PROPERTIES here, not concatenated into value="…"
     // in the markup above. escapeHtml() is textContent -> innerHTML, which
@@ -2364,6 +2606,7 @@
         state.settingsCategories = payload.categories || [];
         state.settingsAdminPasswordSet = !!payload.admin_password_set;
         loadFolders();
+        loadLists();
 
         var baseline = {};
         state.settingsCategories.forEach(function (category) {
@@ -2434,6 +2677,16 @@
         state.foldersNote = null;
         renderSettingsCategory();
       }
+      return;
+    }
+
+    // #26's own buttons first: they share the settings pane with the folder
+    // ones and a shared handler would have to tell them apart anyway.
+    var listButton = evt.target.closest(
+      ".served-list-add, .served-list-save, .served-list-remove, " +
+      ".list-folder-add, .list-folder-remove, .served-list-start");
+    if (listButton) {
+      handleListButton(listButton);
       return;
     }
 

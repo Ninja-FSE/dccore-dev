@@ -82,7 +82,7 @@ Multi-list then follows: allow more than one list object, with per-channel adver
 
 **Stage 4 is in.** Each channel advertises the list it actually serves. The advert loop already read the figures once per channel — it just read the same ones every time — so this is the loop asking which list first, and skipping a channel with none bound. The advert is where #26's rule is most visible: a bot silently present in a channel it does not serve, rather than one announcing a library it will refuse to send from.
 
-What is left: the Settings page for defining lists.
+**Stage 5 is in, and #26 is complete.** The Settings page's Paths category defines them: a name, which channels it serves, its folders, and which one is primary. With one list the familiar folder editor stays exactly where it was and a button moves you to the list editor — one editor, never two, because a second place to edit folders that quietly does nothing is worse than either alone. `GET`/`POST /api/lists` validate the whole set and report every fault at once.
 
 Two pieces were worth doing carefully rather than quickly, and one of them turned out the opposite way to what this section used to predict:
 
