@@ -1075,6 +1075,26 @@ MIN_DCC_BLOCK_SIZE = 4096
 MAX_DCC_BLOCK_SIZE = 1024 * 1024
 
 
+def _apply_send_buffer(conn, log=print):
+    """Set SO_SNDBUF if the operator asked for one. Never raises.
+
+    A socket option that cannot be set is not a reason to fail a transfer that
+    would otherwise work - the kernel is entitled to refuse or to round the
+    value, and the transfer proceeds either way.
+    """
+    try:
+        wanted = int(getattr(config, "DCC_SEND_BUFFER", 0) or 0)
+    except (TypeError, ValueError):
+        return
+    if wanted <= 0:
+        return
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, wanted)
+    except (OSError, socket.error) as err:
+        log(f"[DCC] Could not set the send buffer to {wanted}: {err}. "
+            f"Continuing with the OS default.")
+
+
 def dcc_block_size():
     """Bytes per read/write pass of a transfer, clamped to something sane.
 
@@ -1918,6 +1938,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         
        # Push the packets out immediately rather than letting them coalesce
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        # Only when asked for. Setting SO_SNDBUF disables the OS's own
+        # auto-tuning on both platforms, so an unrequested value would be a
+        # silent downgrade on every link the operator did not measure. See
+        # config.DCC_SEND_BUFFER for what it is for.
+        _apply_send_buffer(conn)
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         print(f"[DCC-CONNECT] {user} connected from {addr}!")
 

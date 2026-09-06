@@ -202,6 +202,11 @@ CHOICES = {
     # the default. The operator who wrote "lisen" got automatic mode and no
     # indication their setting had not taken. Found by audit.
     "ADMIN_CHAT_MODE": ("auto", "listen", "connect"),
+    # mIRC's own packet-size menu, in bytes: 4, 8, 16, 32, 64, 128 KB. A list
+    # rather than a free number because that is what an operator is comparing
+    # against - "the same setting mIRC has" - and because the six of them are
+    # the only values anyone actually wants to try.
+    "DCC_BLOCK_SIZE": ("4096", "8192", "16384", "32768", "65536", "131072"),
 }
 
 
@@ -346,6 +351,20 @@ def coerce(name, raw, default, declared=None):
         if lowered not in CHOICES[name]:
             raise ValueError(
                 f"expected one of {list(CHOICES[name])}, got {raw!r}")
+        # A NUMERIC choice still comes back as a number. Every choice was a
+        # string until DCC_BLOCK_SIZE, and returning "65536" for a setting
+        # declared `int` would hand the send loop a str to read() with - the
+        # kind of type drift that only shows up on the one code path nobody
+        # exercised. The declared default decides, exactly as it does for
+        # every non-choice setting below.
+        #
+        # `is not True/False` rather than `not isinstance(default, bool)`
+        # would be the same thing here, but bool IS an int in Python and a
+        # future True/False choice must not be turned into 1/0.
+        if isinstance(default, bool):
+            return lowered
+        if isinstance(default, int):
+            return int(lowered)
         return lowered
 
     if default is None and not text:

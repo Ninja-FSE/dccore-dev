@@ -4,6 +4,42 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎛️ Packet size is a menu, and the thing that is probably slowing you down is not it
+
+> can we make dcc packet size choosable like mirc? 4 kb -> 8 -> 16 -> 32 -> 64
+> and 128 [...] i feel it slower than mirc omenserve even with 64kb
+
+**The menu:** `DCC_BLOCK_SIZE` is now a dropdown of exactly those six values.
+That needed the choice mechanism to learn about numbers - every `CHOICES`
+entry had been a string, and returning `"65536"` for a setting declared `int`
+would hand the send loop a `str` to `read()` with. `bool` had to be told apart
+from `int` first, because in Python a bool IS an int and a future `("yes",
+"no")` choice would otherwise come back as 1 and 0.
+
+**Now the part that matters more.** At 64 KB the packet size is very unlikely
+to be what an operator is feeling. TCP_NODELAY is already set on every
+transfer, and DCCore has never waited for per-block acknowledgements - so the
+two things mIRC's "fast send" does are both already on.
+
+What bounds a transfer on a fast, distant link is the **bandwidth-delay
+product**: bytes in flight = bandwidth x round-trip time. At 100 Mbps and
+100 ms RTT that is about 1.25 MB, and a 64 KB socket send buffer caps the
+transfer at roughly 5 Mbps no matter how large each write is - the writer waits
+for the far end to acknowledge before it can put more on the wire. Raising the
+packet size does not change that; raising the send buffer does.
+
+So `DCC_SEND_BUFFER` is here too, and **it defaults to 0, meaning "leave it
+alone"**. That is not timidity: both Windows and Linux auto-tune this buffer,
+and setting it explicitly TURNS THAT OFF - a value chosen for one link can be
+worse than the default on every other. It is a knob to experiment with on a
+link you know, not one to set hopefully. A kernel that refuses or rounds the
+value does not fail the transfer.
+
+Twelve tests, seven mutations, all caught. One of them was unfalsifiable at
+first - nothing has a boolean choice today - so rather than delete a guard
+against a real language footgun, the test adds a temporary one. A guard nothing
+can falsify is a guard nobody can trust.
+
 ### 📦 The DCC packet size is a setting, and it was already large
 
 > mirc has packet size option that makes sends much faster if you raise the

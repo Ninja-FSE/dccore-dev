@@ -598,9 +598,141 @@ class HowMuchGoesOutPerPass(DCCoreTestCase):
         self.assertEqual(dcc.dcc_block_size(), 65536)
 
     def test_a_bigger_value_is_honoured(self):
-        self.set_config(DCC_BLOCK_SIZE=262144)
+        self.set_config(DCC_BLOCK_SIZE=131072)
 
-        self.assertEqual(dcc.dcc_block_size(), 262144)
+        self.assertEqual(dcc.dcc_block_size(), 131072)
+
+    def test_the_menu_is_the_one_mirc_offers(self):
+        """4, 8, 16, 32, 64, 128 KB - what an operator is comparing against
+        when they say "the same setting mIRC has"."""
+        import settings_file
+
+        self.assertEqual(
+            settings_file.CHOICES["DCC_BLOCK_SIZE"],
+            ("4096", "8192", "16384", "32768", "65536", "131072"))
+
+    def test_a_chosen_number_comes_back_as_a_number(self):
+        """Every choice was a string until this one. Returning "65536" for a
+        setting declared int would hand the send loop a str to read() with -
+        type drift that only shows up on the one path nobody exercised."""
+        import settings_file
+
+        value = settings_file.coerce("DCC_BLOCK_SIZE", "131072", 65536)
+
+        self.assertEqual(value, 131072)
+        self.assertIsInstance(value, int)
+
+    def test_a_boolean_choice_would_not_become_one_and_zero(self):
+        """bool IS an int in Python, so `isinstance(default, int)` is True for
+        True and False - and a choice of ("yes", "no") declared against a bool
+        default would come back as 1 and 0 without the guard above it.
+
+        No such choice exists today, which is exactly why this test adds one:
+        a guard nothing can falsify is a guard nobody can trust, and this
+        hazard is a language subtlety the next person to add a choice will
+        walk straight into."""
+        import settings_file
+
+        original = dict(settings_file.CHOICES)
+        settings_file.CHOICES["A_MADE_UP_FLAG"] = ("yes", "no")
+        self.addCleanup(lambda: (settings_file.CHOICES.clear(),
+                                 settings_file.CHOICES.update(original)))
+
+        value = settings_file.coerce("A_MADE_UP_FLAG", "yes", False)
+
+        self.assertEqual(value, "yes")
+        self.assertNotIsInstance(value, int)
+
+    def test_a_string_choice_is_still_a_string(self):
+        """bool is an int in Python, so the conversion has to be told apart
+        from a future True/False choice as well as from these."""
+        import settings_file
+
+        self.assertEqual(settings_file.coerce("LIST_FORMAT", "ZIP", "zip"), "zip")
+        self.assertEqual(settings_file.coerce("THEME", "forest", "classic"), "forest")
+
+    def test_something_off_the_menu_is_refused(self):
+        import settings_file
+
+        with self.assertRaises(ValueError):
+            settings_file.coerce("DCC_BLOCK_SIZE", "99999", 65536)
+
+    def test_the_dashboard_offers_it_as_a_list(self):
+        import webserver
+
+        field = webserver._settings_field("DCC_BLOCK_SIZE", int, 65536)
+
+        self.assertEqual(field["choices"],
+                         ["4096", "8192", "16384", "32768", "65536", "131072"])
+
+
+class TheSocketSendBuffer(DCCoreTestCase):
+    """What actually bounds a transfer on a fast, distant link - and it is not
+    the packet size.
+
+    Throughput on TCP is the bandwidth-delay product: bytes in flight =
+    bandwidth x round-trip time. At 100 Mbps and 100 ms RTT that is about
+    1.25 MB, and a 64 KB send buffer caps the transfer at roughly 5 Mbps
+    however big each write is.
+    """
+
+    class FakeSocket(object):
+        def __init__(self, fail=False):
+            self.options = []
+            self.fail = fail
+
+        def setsockopt(self, level, option, value):
+            if self.fail:
+                raise OSError("refused")
+            self.options.append((level, option, value))
+
+    def test_zero_leaves_the_os_alone(self):
+        """Setting SO_SNDBUF disables the OS's own auto-tuning on both
+        platforms, so an unrequested value would be a silent downgrade on
+        every link the operator did not measure."""
+        self.set_config(DCC_SEND_BUFFER=0)
+        sock = self.FakeSocket()
+
+        dcc._apply_send_buffer(sock)
+
+        self.assertEqual(sock.options, [])
+
+    def test_a_requested_size_is_set(self):
+        import socket as socket_mod
+
+        self.set_config(DCC_SEND_BUFFER=262144)
+        sock = self.FakeSocket()
+
+        dcc._apply_send_buffer(sock)
+
+        self.assertEqual(
+            sock.options,
+            [(socket_mod.SOL_SOCKET, socket_mod.SO_SNDBUF, 262144)])
+
+    def test_a_kernel_that_refuses_does_not_fail_the_transfer(self):
+        """The kernel is entitled to refuse or to round the value, and a
+        socket option that cannot be set is not a reason to fail a transfer
+        that would otherwise work."""
+        self.set_config(DCC_SEND_BUFFER=262144)
+        said = []
+
+        dcc._apply_send_buffer(self.FakeSocket(fail=True), log=said.append)
+
+        self.assertIn("Continuing with the OS default", chr(10).join(said))
+
+    def test_nonsense_is_ignored_rather_than_raised(self):
+        self.set_config(DCC_SEND_BUFFER="lots")
+        sock = self.FakeSocket()
+
+        dcc._apply_send_buffer(sock)
+
+        self.assertEqual(sock.options, [])
+
+    def test_the_transfer_path_applies_it(self):
+        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+
+        self.assertIn("_apply_send_buffer(conn)", code)
 
     def test_a_value_that_would_spin_the_loop_is_raised(self):
         """0 or a negative makes read() return nothing and the loop turn into

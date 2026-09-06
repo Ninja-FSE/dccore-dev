@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Packet size is now a menu, like mIRC's: 4, 8, 16, 32, 64 or 128 KB.** DCCore has always used 64 KB and never waits for the receiver to acknowledge each block, so both halves of mIRC's "fast send" were already on — but you can now try the others from Settings.
+
+- **And if transfers feel slow at 64 KB, the packet size is probably not why.** On a fast link to a distant peer, what limits you is the socket send buffer, not the write size: at 100 Mbps with 100 ms round-trip, 64 KB of buffer caps you near 5 Mbps whatever the packet size. **`DCC_SEND_BUFFER`** lets you raise it. It is `0` (leave it to the operating system) by default on purpose — Windows and Linux both tune this automatically, and setting it by hand switches that off, so it is worth measuring rather than guessing.
+
 - **The DCC packet size is now a setting — and it was already 16× mIRC's.** mIRC defaults to 4 KB per packet, which is why raising it there is so noticeable; DCCore has always sent 64 KB blocks and never waits for the receiver to acknowledge each one. **`DCC_BLOCK_SIZE`** exposes that number if you want to tune it, but raising it further usually changes nothing: past a few tens of kilobytes your speed is set by TCP and the link, not by this. It is clamped to 4 KB–1 MB, because the value is held once per running transfer.
 
 - **`!rehash` no longer interrupts a transfer in progress.** It now stops starting new sends, waits for the ones already running to finish, reloads, and then lets the queue go again — so reconfiguring the bot no longer lands in the middle of somebody's download. If a transfer is stuck it gives up waiting after **`REHASH_TRANSFER_WAIT`** seconds (120 by default) and reloads anyway, saying so in the log, because a bot that cannot be reconfigured while one peer holds a socket open is worse.
