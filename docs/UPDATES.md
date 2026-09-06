@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗑️ The "what's new" list is off the roadmap
+
+Dropped at the operator's call - not wanted at the moment.
+
+**Nothing was built, so nothing was removed but the line.** The design got as
+far as a marker excluded from `find_latest_list()` and a `SEPARATE_NEW_LIST`
+default that was off, and it was never applied: no branch, no stash, and
+`git log --all -S` finds neither identifier in any commit. Verified before
+deleting the roadmap entry rather than assumed.
+
+Recorded here so it is not proposed again as though it were new. The design
+question that stalled it is the part worth keeping if it ever comes back:
+what counts as "new" is the difference against the PREVIOUS PUBLISHED LIST,
+not a file timestamp - mtime is rewritten by copying a library, restoring a
+backup or moving between drives, and any of those would report the whole
+library as new.
+
 ### 🔌 Commands sent on connect, before the join
 
 > On connect commands to the server like undernet authentication and user
