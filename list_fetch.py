@@ -765,9 +765,76 @@ def process_fetched_list_zip(bot, zip_path):
         return _process_fetched_list_zip_unlocked(bot, zip_path)
 
 
+def _hold_existing_list(extract_dir):
+    """Move the list we already hold aside, and say where it went.
+
+    _extract_and_locate_list_file() wipes extract_dir as its FIRST action, and
+    that directory is not scratch space - it is where the list we are already
+    serving lives. Every validation comes after: the size cap, is_zipfile(),
+    the member checks, the plausible-list sniff, the line-count ceiling.
+
+    So a re-fetch that turned out to be a RAR, an oversized archive, or a
+    peer's error page destroyed a perfectly good list on its way to rejecting
+    the replacement - and refetch_due_lists() runs unattended, so the operator
+    would find the list simply gone.
+
+    Same shape as update_list.py publishing through `final + ".new"`: build
+    the new one somewhere else, and only replace the live one once it is known
+    to be good.
+    """
+    held = extract_dir + ".previous"
+    try:
+        if os.path.exists(platform_compat.long_path(held)):
+            shutil.rmtree(platform_compat.long_path(held), ignore_errors=True)
+        if os.path.exists(platform_compat.long_path(extract_dir)):
+            os.rename(platform_compat.long_path(extract_dir),
+                      platform_compat.long_path(held))
+            return held
+    except OSError as err:
+        # Not fatal, and deliberately not a refusal to fetch: the worst case
+        # is the behaviour this function was added to improve on.
+        print(f"[LIST-FETCH] Could not set the held list aside before "
+              f"re-fetching ({err}); continuing without a rollback copy.")
+    return None
+
+
+def _release_held_list(held, extract_dir, succeeded):
+    """Drop the held copy, or put it back."""
+    if not held:
+        return
+    if succeeded:
+        shutil.rmtree(platform_compat.long_path(held), ignore_errors=True)
+        return
+    try:
+        if os.path.exists(platform_compat.long_path(extract_dir)):
+            shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
+        os.rename(platform_compat.long_path(held),
+                  platform_compat.long_path(extract_dir))
+        print("[LIST-FETCH] The re-fetch was rejected; the list already held "
+              "has been put back.")
+    except OSError as err:
+        print(f"[LIST-FETCH] Could not restore the previously held list "
+              f"({err}); it is still on disk at {held!r}.")
+
+
 def _process_fetched_list_zip_unlocked(bot, zip_path):
-    """The body of process_fetched_list_zip. Caller must hold _lock()."""
+    """The body of process_fetched_list_zip. Caller must hold _lock().
+
+    Wraps the real work so that a rejected re-fetch leaves the list we were
+    already serving exactly where it was - see _hold_existing_list().
+    """
     extract_dir = list_extract_dir(bot)
+    held = _hold_existing_list(extract_dir)
+    succeeded = False
+    try:
+        succeeded, reason = _install_fetched_list(bot, zip_path, extract_dir)
+        return succeeded, reason
+    finally:
+        _release_held_list(held, extract_dir, succeeded)
+
+
+def _install_fetched_list(bot, zip_path, extract_dir):
+    """Extract, validate and publish one fetched list. (bool, reason)."""
     list_path, reason = _extract_and_locate_list_file(zip_path, extract_dir)
     if reason:
         print(f"[LIST-FETCH] Rejected list zip from {bot}: {reason}")

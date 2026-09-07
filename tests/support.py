@@ -428,6 +428,29 @@ class DCCoreTestCase(unittest.TestCase):
         # db.DCC_QUEUE_FILE and db.FETCHED_BOT_LISTS_FILE are module-level
         # constants read at import, so they are rebound directly and restored
         # in tearDown; the rest are config values and go through set_config().
+        # AND the config values behind them, not only the module constants.
+        # db.py derives each of these once at import - FETCH_HISTORY_FILE =
+        # getattr(config, "FETCH_HISTORY_FILE", "data/fetch_history.json") -
+        # and a !rehash reloads db, which re-runs that line. Any test that
+        # exercises a reload therefore threw the redirect away mid-run and
+        # every later write in that process went to the developer's real
+        # data/ directory. defaults.py does not define these names, so the
+        # fallback is the real path; setting them on config means the reload
+        # re-derives the temp one instead.
+        #
+        # Found by the preflight state guard, on a run where nothing else had
+        # changed - which is exactly the kind of intermittent leak it exists
+        # to make loud.
+        self.set_config(
+            FETCH_HISTORY_FILE=os.path.join(self._fetch_history_dir,
+                                            "fetch_history.json"),
+            KNOWN_BOTS_FILE=os.path.join(self._fetch_history_dir,
+                                         "known_bots.json"),
+            DCC_QUEUE_FILE=os.path.join(self._fetch_history_dir,
+                                        "dcc_queue.txt"),
+            FETCHED_BOT_LISTS_FILE=os.path.join(self._fetch_history_dir,
+                                                "fetched_bot_lists.json"))
+
         self._real_dcc_queue_file = db.DCC_QUEUE_FILE
         db.DCC_QUEUE_FILE = os.path.join(self._fetch_history_dir, "dcc_queue.txt")
         self._real_fetched_bot_lists_file = db.FETCHED_BOT_LISTS_FILE
