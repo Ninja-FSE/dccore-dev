@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪞 The guard against shipping names was shipping them
+
+Caught by running the guard's own question against the export it had just
+been added to. It held a denylist of the forbidden strings written out in
+full - and it ships, like everything else in `tests/`, so the one file
+guaranteed to contain every identifier was published along with them. It even
+had to skip itself to pass, which meant the file most certain to contain them
+was the one file never checked.
+
+`docs/PUBLIC-REPO-WORKFLOW.md` already records the principle, learnt from the
+licence check: **"Assert what should be true, not a list of what shouldn't."**
+No positive property distinguishes a person's handle from any other word, so
+the next best thing is a denylist nobody can read: the entries are SHA-256
+hashes of the lowercased word, and the scanner hashes each word it finds.
+
+That removed the leak and the self-exemption in one change - the guard now
+checks itself like every other file, and passes.
+
 ### 🕵️ Every identifying name out of the shipped tree, and a guard that keeps it that way
 
 `.gitattributes` export-ignores exactly two files. Everything else reaches the
