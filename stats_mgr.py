@@ -129,7 +129,20 @@ MIN_SAMPLE_SECONDS = 1.0
 
 
 def live_speed(now=None):
-    """Aggregate bytes/sec across the transfers currently sending.
+    """The MEAN bytes/sec of the transfers currently sending - not the total.
+
+    Said plainly because this function used to contradict itself: the line
+    below computed a mean and explained why ("one skipped for lack of a window
+    must not drag the mean down"), while this docstring and runtime.py both
+    called it an aggregate "across every sending transfer". Somebody changed
+    one and not the others.
+
+    WHICH IT SHOULD BE IS AN OPEN QUESTION, deliberately left alone here. The
+    figure is what the channel advert publishes as "Speed:" and what the
+    dashboard shows as "Speed now", so with three slots each moving 2 MB/s the
+    bot currently advertises 2.0MB/s against 6 MB/s of real outbound traffic.
+    Changing it changes what every advert says, which is the operator's call
+    and not a thing to slip into a docstring fix.
 
     Cached for MIN_SAMPLE_SECONDS: a call inside that window returns the last
     figure rather than taking a second sample that would measure a fraction of
