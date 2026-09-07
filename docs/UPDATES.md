@@ -4,6 +4,50 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 A real `!rehash`, executed end to end for the first time
+
+The audit's completeness critic named this as the single highest-value check
+still not done, and it was right: `_handle_rehash_request()` is about seven
+hundred lines - quiesce transfers, reload eight modules, merge runtime state
+back, re-baseline the nick, restore the advert token, reattach debug sinks,
+sync channels - and across 120-odd test files **nothing ran it**. Every test
+stubbed it, reloaded one harmless module instead, or read its source as text.
+`test_commands.py` says why: running the real reload "would risk the identical
+thing happening to test state".
+
+Correct for a unit suite, and the wrong place to leave it for a release. This
+is not a rare admin command - the dashboard fires one on EVERY settings save,
+and the console and IRC are two more entry points. The daemon's least-tested
+path is the one an operator triggers with a checkbox, and three of the audit's
+confirmed findings lived inside it.
+
+**It runs in a subprocess.** The objection was only ever about reloading
+modules the test runner itself holds; a separate interpreter has no such
+problem. The child seeds the live state a rehash exists to carry across,
+changes `settings.conf` underneath itself the way a dashboard save does, runs
+the real thing, and reports what survived. Eleven assertions: the changed
+setting takes effect, a user's queue survives, the channel lists survive, a
+timed ban is not released, a freeze timer survives, the advert token survives,
+the bot is not left paused, adverts resume, the queue is woken, and it says
+`[REHASH SUCCESS]` rather than failing quietly.
+
+**Two things it taught immediately.**
+
+The first fixture assigned `config.dcc_queue = {...}` and the queue came back
+empty - which reads exactly like the rehash losing it. It is not: `dcc_queue`
+is a `runtime.py`-bound container and runtime is not reloaded, which is
+precisely why it survives. Rebinding on `config` detaches that alias.
+`defaults.py` says so in as many words - "Mutate them in place. Never rebind
+them" - so the fixture was breaking the documented invariant, not finding a
+defect.
+
+And the preserved runtime state has **two independent mechanisms** keeping it
+alive: the `runtime.py` binding, and the rehash's own PRESERVE_RUNTIME
+snapshot. Breaking either alone leaves the test passing; only breaking both
+fails it. That is what belt-and-braces should look like, and it is worth
+knowing before anybody decides one of them is redundant - which, from reading
+either one alone, it looks like.
+
 ### 🔚 The last four audit findings: two fixed, two deliberately not
 
 **A busy neighbour could hide a real match.** `bot:"Dude"` is an FTS5 PHRASE
