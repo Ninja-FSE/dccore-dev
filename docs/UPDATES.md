@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A running RAR pack is no longer invisible
+
+`config.active_transfers` is the SEND side, and a folder pack has no row there
+while it runs: `check_queue_and_send()` claims `rar_inprogress`, runs `rar` for
+up to `RAR_TIMEOUT` - half an hour by default - and only appends once the
+archive exists. Two things read that list and drew the wrong conclusion.
+
+**The quiesce saw an idle bot.** `wait_for_transfers_to_finish()` returned True
+immediately with a pack mid-flight. The reload then re-executed `defaults.py`,
+whose body sets `rar_inprogress = False`, and the rehash rebound
+`user_processing_lock` to a fresh empty set - both while the packer was still
+running. The next `!rar` read both interlocks as free and started a SECOND
+`rar` process. Two packs of the same album target the same archive path, and
+the second one removes the file the first is still writing.
+
+**The capacity check was minutes stale.** The RAR branch tests `MAX_DCC_SLOTS`
+before starting `rar` and takes its slot after. For a large album those are
+minutes apart - long enough for every slot to fill with plain file sends, each
+of which re-checked correctly on its own way through. This was the one append
+that did not, so a finished pack could push the count past the ceiling.
+
+Re-checked under the lock now, and a pack that finds no slot leaves its
+archive queued for the next trigger, releases `rar_inprogress` and lets a
+waiting pack start - the same outcome, and the same message, the two sibling
+dispatch paths already use.
+
 ### 🧯 Three quiet failures from the audit's low findings
 
 None is dramatic alone. What they share is silence: memory that grows with
