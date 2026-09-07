@@ -4,6 +4,87 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🚀 Send speed was capped at 3 MB/s, and it was arithmetic
+
+From the beta. Same friend, same machine, same link:
+
+    OmenServe : 30.4 MB/s
+    DCCore    : 2.95 / 2.98 / 3.00 / 3.01 MB/s   (four files, different sizes)
+
+Identical every time - congestion varies, a ceiling does not.
+
+TCP cannot have more bytes in flight than the send buffer holds, so throughput
+is bounded by `SO_SNDBUF / round-trip-time`. The measured default buffer on
+that machine was exactly 65,536 bytes. Setting the packet size to 4 KB made it
+WORSE - 1.6 MB/s - and fitting both measurements gives the whole picture:
+
+    effective ceiling  : 3.19 MB/s
+    fixed cost / block : 1.27 ms
+    implied RTT        : 20.6 ms      64 KB / 20.6 ms = 3.19 MB/s
+
+An ordinary internet round trip, derived from the two speeds rather than
+assumed. Raising `DCC_SEND_BUFFER` to 1 MB took the same transfer to **23.9 and
+24.7 MB/s**, confirmed by the same friend.
+
+**Per-platform, not simply a new default.** The old behaviour was "never set it
+unless asked", justified by `SO_SNDBUF` disabling the OS's own auto-tuning.
+That is sound on Linux, where `tcp_wmem` grows the buffer to fit the connection
+and pinning it would be a downgrade on exactly the long-haul links that need it
+most. It does not hold on Windows, where "leave it alone" means a fixed 64 KB.
+Neither platform's answer is the other's mistake, so `0` now means "the default
+for your platform" - and an explicit value still wins on both, including a
+deliberately small one.
+
+### 🔇 The dashboard's own heartbeat no longer buries the console
+
+From the beta, pasting a screen of this:
+
+    127.0.0.1 - - [...] "GET /api/fetch/status HTTP/1.1" 200 -
+    127.0.0.1 - - [...] "GET /api/filelists/bots HTTP/1.1" 200 -
+    127.0.0.1 - - [...] "GET /api/console/log?since=33 HTTP/1.1" 200 -
+
+*"maybe those lines shouldnt be visible on cmd.exe except you run dccore on
+something like debug mode. you miss the important lines like search results
+etc"*.
+
+Exactly that. The dashboard polls five endpoints every couple of seconds, so an
+idle bot with one page open writes on the order of a hundred lines a minute.
+Every one says the same thing - the dashboard is still open - and together they
+push a search result, a transfer or a disconnect off the screen faster than
+anyone can read them. The console is the operator's only view on a daemon with
+no window, and this was spending it on the daemon talking to itself.
+
+**Silenced, not redirected.** Every request werkzeug reports is one this
+process just served, so nothing is lost that was ever news. ERROR is left
+through, so a genuine failure inside the dashboard still reaches the console -
+and `DEBUG_MODE` turns the whole thing back on for anyone who wants it.
+
+### 🔎 A dropped link reports what the server last said
+
+From the same beta, after several channels were added:
+
+    [DISCONNECT FIX] TCP keepalive detected a dead network ([WinError 10054]
+    ...). Dropping the link to reconnect.
+
+By the time it was asked about the surrounding lines were gone and it would not
+reproduce - so there was nothing to diagnose from, and no way to ask for more.
+
+An ircd states its reason before it hangs up: `ERROR :Closing Link: <nick> (Max
+SendQ exceeded)` and the like. **That line was being read, matched by nothing,
+and dropped** - the only mention of `ERROR` in the read loop was a condition
+inside a `DEBUG_MODE` filter, which is off on every install that has not
+already gone looking for trouble. It is logged on arrival now, and the last
+fifteen inbound lines are printed on every one of the four ways out of the read
+loop.
+
+**WinError 10054 is not a dead network.** It is `ECONNRESET` - the server
+hanging up on US. Reporting every socket error as "TCP keepalive detected a
+dead network" sent an operator to look at their connection when the answer had
+been on the wire a moment earlier.
+
+The ring is bounded and each line truncated: the point is the handful of lines
+around a drop, not a transcript, on a bot that may run for months without one.
+
 ### 🔽 A dropdown on the Settings page shows what is actually stored
 
 From the beta: *"i set packet size to 64kb and when i press save and rehash i

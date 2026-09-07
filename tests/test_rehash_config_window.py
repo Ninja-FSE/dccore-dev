@@ -831,16 +831,33 @@ class TheSocketSendBuffer(DCCoreTestCase):
                 raise OSError("refused")
             self.options.append((level, option, value))
 
-    def test_zero_leaves_the_os_alone(self):
-        """Setting SO_SNDBUF disables the OS's own auto-tuning on both
-        platforms, so an unrequested value would be a silent downgrade on
-        every link the operator did not measure."""
+    def test_zero_means_the_default_for_the_platform(self):
+        """This used to assert that zero touched nothing at all, on the
+        reasoning that setting SO_SNDBUF disables the OS's own auto-tuning
+        "on both platforms". Half right, and the class docstring above had
+        already worked out what the other half would cost.
+
+        It holds on Linux, where tcp_wmem grows the buffer to fit the
+        connection. On Windows, "leave it alone" is a fixed 64 KB - which a
+        beta measured at 3.19 MB/s over a 20.6 ms link, against 30.4 MB/s
+        from an OmenServe bot on the same machine to the same person. So
+        zero now means the default for the platform, and only one platform
+        has one.
+
+        See tests/test_send_buffer_is_not_a_64kb_ceiling.py for the
+        measurements and for the rest of this behaviour."""
+        import platform_compat
+
         self.set_config(DCC_SEND_BUFFER=0)
         sock = self.FakeSocket()
 
         dcc._apply_send_buffer(sock)
 
-        self.assertEqual(sock.options, [])
+        if platform_compat.IS_WINDOWS:
+            self.assertEqual([value for _l, _o, value in sock.options],
+                             [1024 * 1024])
+        else:
+            self.assertEqual(sock.options, [])
 
     def test_a_requested_size_is_set(self):
         import socket as socket_mod
