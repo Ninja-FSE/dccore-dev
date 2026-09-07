@@ -8,7 +8,7 @@ It sits in a channel, advertises a catalogue, and serves files over DCC to whoev
 
 ## What it does
 
-- **Serves files over DCC** — per-user and global queues, configurable slots, `!rar` album packing on demand
+- **Serves files over DCC** — per-user and global queues, configurable slots, `!rar` album packing on demand, and DCC RESUME so an interrupted download continues instead of starting over
 - **Keeps a searchable master list** in `.txt`, `.zip` and `.rar`, rebuilt atomically so a failed scan never overwrites a good one
 - **Fetches from other bots** — request a file or a whole list, or broadcast one `@find` and collect every reply
 - **Remembers people** — a user who disconnects keeps their queue for five minutes and resumes on rejoin

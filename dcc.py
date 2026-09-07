@@ -1191,6 +1191,158 @@ def _apply_send_buffer(conn, log=print):
             f"Continuing with the OS default.")
 
 
+# ------------------------------------------------------------- DCC RESUME
+#
+# REPORTED FROM A BETA, from mIRC: a transfer sat at "Requesting resume"
+# and never moved. It was waiting for a reply this bot had never been able
+# to give - DCC RESUME was not implemented at all, in either direction.
+#
+# The exchange is three lines. We offer:
+#
+#     DCC SEND <name> <ip> <port> <size>
+#
+# a receiver holding a partial file answers with what it already has:
+#
+#     DCC RESUME <name> <port> <position>
+#
+# and the sender MUST answer before anything else happens:
+#
+#     DCC ACCEPT <name> <port> <position>
+#
+# Only then does the receiver connect. Without the ACCEPT it waits, which is
+# exactly what was seen: not a failure, not an error, just a client keeping
+# its side of a bargain the other side never answered.
+#
+# MATCHED BY PORT, NEVER BY FILENAME. The port is ours, unique per offer and
+# unambiguous. The offered name has already been through a space-to-underscore
+# pass, and announce.fit_irc_filename() may have SHORTENED it to fit the IRC
+# line - so the name we sent is not always the name we hold, and matching on
+# it would fail on exactly the long-titled files most likely to need resuming.
+#
+# The name in our ACCEPT is the one WE offered, read back from the handshake
+# that actually went out, rather than the one echoed at us. It is what the
+# receiver is matching against, and it means no text from the wire is ever
+# interpolated back into an outbound line.
+
+
+def register_send_offer(user, port, offered_name, file_size):
+    """Record a DCC SEND that has gone out and not yet been picked up.
+
+    Registered BEFORE the handshake is sent, not after: the receiver may
+    answer with a RESUME the instant the offer lands, and an entry that
+    appears a moment later would miss it.
+    """
+    with runtime.dcc_send_offers_lock:
+        runtime.dcc_send_offers[(str(user).strip().lower(), int(port))] = {
+            "filename": str(offered_name),
+            "size": int(file_size),
+            "position": 0,
+        }
+
+
+def clear_send_offer(user, port):
+    """Drop the offer and return it, or None. Safe to call twice - every exit
+    from a send runs through the finally that calls it, including the ones
+    that never got as far as registering."""
+    try:
+        key = (str(user).strip().lower(), int(port))
+    except (TypeError, ValueError):
+        return None
+    with runtime.dcc_send_offers_lock:
+        return runtime.dcc_send_offers.pop(key, None)
+
+
+def parse_resume_request(body):
+    """(filename, port, position) from a "DCC RESUME ..." body, or None.
+
+    Split from the RIGHT. The last two fields are numbers and everything
+    between the verb and them is the name, so a name containing spaces - which
+    mIRC sends in double quotes - needs no special case and no quote parsing
+    that a peer could get creative with.
+    """
+    text = str(body or "").strip().strip("\x01").strip()
+    if not text.upper().startswith("DCC RESUME"):
+        return None
+    parts = text[len("DCC RESUME"):].strip().rsplit(None, 2)
+    if len(parts) != 3:
+        return None
+    filename, port_text, position_text = parts
+    try:
+        port, position = int(port_text), int(position_text)
+    except ValueError:
+        return None
+    # A port outside the range cannot be one we are listening on, and a
+    # negative position is not a position. Both are refused here rather than
+    # left for the lookup to miss, so the log says which it was.
+    if not (0 < port <= 65535) or position < 0:
+        return None
+    return filename.strip('"'), port, position
+
+
+def handle_resume_request(irc_sock, user, body):
+    """Answer a receiver's DCC RESUME with the DCC ACCEPT it is waiting for.
+
+    True if an ACCEPT was sent. False means no offer of ours matched, which
+    is the ordinary outcome for a stray or forged line and is not logged as
+    an error: anyone on the network can send this, and the only thing that
+    makes it ours is a port we are listening on for that exact nick.
+    """
+    parsed = parse_resume_request(body)
+    if not parsed:
+        return False
+    _echoed_name, port, position = parsed
+    key = (str(user).strip().lower(), int(port))
+
+    with runtime.dcc_send_offers_lock:
+        offer = runtime.dcc_send_offers.get(key)
+        if not offer:
+            return False
+        size = int(offer.get("size") or 0)
+        # CLAMPED, NOT TRUSTED. The position decides where we seek in a file
+        # of ours, and it arrives from the network. Past the end is not an
+        # error worth refusing over - a receiver whose partial copy is longer
+        # than our file has a different file, and answering "you already have
+        # all of it" completes their transfer honestly instead of leaving them
+        # hanging, which is the failure this whole feature exists to end.
+        position = max(0, min(position, size))
+        offer["position"] = position
+        offered_name = offer["filename"]
+
+    # The position is stored BEFORE the ACCEPT goes out, and that ordering is
+    # the whole race. A receiver connects only once it has seen the ACCEPT, so
+    # by the time accept() returns in the sending thread the offset is already
+    # there to be read. Sending first and storing afterwards would leave a
+    # window in which a prompt client connects and gets sent the file from
+    # byte zero, appended onto what it already had.
+    reply = (f"PRIVMSG {user} :\x01DCC ACCEPT {offered_name} "
+             f"{port} {position}\x01\r\n")
+    try:
+        irc_sock.send(reply.encode())
+    except Exception as err:
+        print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
+        return False
+    print(f"[DCC-RESUME] {user} already has {position} of {size} bytes of "
+          f"{offered_name}; accepted and will send from there.")
+    return True
+
+
+def offered_name_from_handshake(handshake):
+    """The filename as it actually went out in a DCC SEND line.
+
+    Read back from the handshake rather than assumed, because
+    announce.fit_irc_filename() may have shortened it. The line ends with
+    "<ip> <port> <size>", so everything between the verb and the last three
+    fields is the name - the same right-hand split parse_resume_request()
+    uses, and for the same reason.
+    """
+    text = str(handshake or "")
+    if "DCC SEND " not in text:
+        return ""
+    tail = text.split("DCC SEND ", 1)[1]
+    parts = tail.rsplit(" ", 3)
+    return parts[0] if len(parts) == 4 else ""
+
+
 def dcc_block_size():
     """Bytes per read/write pass of a transfer, clamped to something sane.
 
@@ -2056,6 +2208,16 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # name the operator never chose and cannot find in their own library.
             print(f"[DCC] Offered filename shortened to fit the IRC line: {file_name!r}")
     
+        # Registered BEFORE the send, not after: a receiver holding a partial
+        # file answers with a DCC RESUME the moment the offer lands, and that
+        # answer arrives on the IRC read loop - a different thread from this
+        # one, which is about to block in accept(). An entry that appeared a
+        # moment later would miss it, and the receiver would sit waiting for
+        # an ACCEPT that never came.
+        register_send_offer(user, assigned_port,
+                            offered_name_from_handshake(ctcp_handshake),
+                            file_size)
+
         try:
             irc_sock.send(ctcp_handshake.encode())
             print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
@@ -2076,9 +2238,33 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         print(f"[DCC-CONNECT] {user} connected from {addr}!")
 
-        start_time = time.time()       
+        start_time = time.time()
+
+        # WHERE TO START, agreed before the connection was made. The offer is
+        # dropped here rather than in the finally: a RESUME arriving after the
+        # receiver has already connected is answering a question nobody is
+        # waiting on, and leaving the entry up would let a second one move an
+        # offset this transfer has already read. The finally still calls it,
+        # for every path that never got this far.
+        resume_offset = int((clear_send_offer(user, assigned_port)
+                             or {}).get("position") or 0)
+        if resume_offset:
+            # bytes_sent counts what the RECEIVER ends up holding, so the
+            # completeness check below still compares against the whole file.
+            # What this transfer actually put on the wire is tracked
+            # separately, because a resumed send that skipped 4 GB did not
+            # move 4 GB and must not be allowed to claim it in the speed
+            # record the channel advert publishes.
+            bytes_sent = resume_offset
+            for tx in config.active_transfers:
+                if tx['user'].lower() == user.lower():
+                    tx['bytes_sent'] = resume_offset
+            print(f"[DCC-RESUME] Resuming {file_name} for {user} at byte "
+                  f"{resume_offset} of {file_size}.")
 
         with open(platform_compat.long_path(file_path), 'rb') as f:
+            if resume_offset:
+                f.seek(resume_offset)
             # mIRC's "packet size", and the reason raising it there is
             # noticeable: mIRC defaults to 4 KB and this has always been 64.
             # Resolved once per transfer, not once per pass - the value cannot
@@ -2147,7 +2333,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # thread saved second discard the other's increment - permanently,
             # since nothing ever recomputes these counters. It also rotates the
             # day, so a transfer completing after midnight is counted correctly.
-            stats = db.update_stats_on_complete(file_size)
+            # What went out on the wire, not what the receiver now holds. A
+            # resumed send completes a whole file while transferring only the
+            # tail of it, and the totals are a record of bytes SENT.
+            stats = db.update_stats_on_complete(file_size - resume_offset)
             print(f"[DB COUNTER] Statistics updated on disk. (Files sent: {stats[0]})")
 
             # And count the item itself, for the Stats page's "Most
@@ -2188,6 +2377,18 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     finally:
+        # Never leave an offer standing. The success path already dropped it
+        # the moment the receiver connected; this covers every other exit -
+        # the port-refusal return above, a listen() that raised, an accept()
+        # that timed out because nobody ever came. A stale entry is not
+        # harmless: the ports it is keyed by are reused, so the next offer on
+        # the same port to the same nick could read an offset agreed for a
+        # different file and send it from the middle.
+        try:
+            clear_send_offer(user, assigned_port)
+        except Exception:
+            pass
+
         # Give the network buffer 0.5s to flush the final acknowledgement
         try:
             import time
@@ -2205,7 +2406,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         if acute_duration <= 0:
             acute_duration = 0.1
             
-        acute_bytes = bytes_sent if 'bytes_sent' in locals() else 0
+        # Minus whatever the receiver already had. Counting a resumed send's
+        # skipped bytes as though this transfer moved them would post a speed
+        # record that never happened - and that number feeds the channel
+        # advert, which is the same mistake the timing comment above describes.
+        _skipped = resume_offset if 'resume_offset' in locals() else 0
+        acute_bytes = max(0, (bytes_sent if 'bytes_sent' in locals() else 0) - _skipped)
         final_calc_speed = int(acute_bytes / acute_duration)
 
         # The record the channel advert publishes. db has had

@@ -4,6 +4,104 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### ⏭️ DCC RESUME: a partial download can be resumed
+
+From the beta, in mIRC: a transfer sat at **"Requesting resume"** and never
+moved. Not a failure and not an error - a client keeping its side of a bargain
+this bot had never been able to answer. DCC RESUME was not implemented at all;
+there was not one mention of the verb anywhere in the tree.
+
+The exchange is three lines. We offer `DCC SEND <name> <ip> <port> <size>`; a
+receiver holding a partial file answers `DCC RESUME <name> <port> <position>`;
+and the sender MUST answer `DCC ACCEPT <name> <port> <position>` before
+anything else happens. Only then does the receiver connect. Without the ACCEPT
+it waits, which is exactly what was seen.
+
+**Matched by port, never by filename.** The port is ours, unique per offer and
+unambiguous. The offered name has already been through a space-to-underscore
+pass and `announce.fit_irc_filename()` may have SHORTENED it to fit the IRC
+line - so the name we sent is not always the name we hold, and matching on it
+would fail on exactly the long-titled files most likely to need resuming. The
+name in our ACCEPT is read back out of the handshake that actually went out,
+so it is what the receiver is matching against, and no text off the wire is
+ever interpolated into an outbound line.
+
+**The ordering is the race.** The offset is stored before the ACCEPT is sent,
+because a receiver connects only once it has seen the ACCEPT. Sending first
+and storing afterwards would leave a window in which a prompt client connects
+and is sent the file from byte zero, appended onto what it already had.
+
+**Clamped, not trusted.** The position decides where we seek in a file of ours
+and it arrives from the network. Past the end is answered as "you already have
+all of it", which completes the receiver's transfer honestly rather than
+leaving it hanging - the failure this whole feature exists to end.
+
+**Honest numbers.** `bytes_sent` still counts what the receiver ends up
+holding, so the completeness check compares against the whole file. What this
+transfer actually put on the wire is tracked separately: a resumed send that
+skipped 4 GB did not move 4 GB, and must not claim it in the totals or in the
+speed record the channel advert publishes.
+
+The registry lives in `runtime.py`, is bound onto config, is reset by the test
+harness, and is in `commands.PRESERVE_RUNTIME` - all four demanded by existing
+guards. The last matters most: losing it to a rehash does not merely forget an
+offer, it hands the waiting sender an offset of zero, so it sends from the
+start to a receiver that has been told to append from the middle. A silently
+corrupted download rather than a failed one.
+
+DCC RESUME is in the flood-checked set too, for the reason #219 gives for DCC
+SEND: it answers with an outbound PRIVMSG, and an unthrottled responder is a
+standard way to make a bot flood itself off the network.
+
+`tests/test_dcc_resume_end_to_end.py` runs the whole thing over a real
+loopback socket and checks the arriving bytes against the file - the test that
+catches an off-by-one in the seek, or an ACCEPT whose position and whose seek
+disagree. It probes bind-and-connect first and skips if the runner cannot host
+it.
+
+Two existing guards earned their keep: the runtime-container contract, four
+failures until the registry was bound and reset; and the preflight state
+guard, which caught the end-to-end test writing the developer's real
+`data/download_counts.json` - `db.record_download()` is only reached on the
+success path, and no test had ever taken one.
+
+### 📡 A channel name is not restricted to word characters
+
+Also from the beta. An operator added a channel with an **"&"** in its name.
+The bot joined it, sat in it, advertised into it on schedule - and answered
+nothing at all. `@<nick>`, `@find`, `-help`, `-que`: every one silently
+dropped, in that channel only.
+
+Joining and advertising are OUTBOUND. Neither parses a line, which is why both
+looked perfectly healthy.
+
+`parse_privmsg()` matched its target as `[#\w\-]+` - "#", letters, digits,
+underscore, hyphen. RFC 2812 says a channel is a "#", "&", "+" or "!" prefix
+followed by any octet except NUL, BEL, CR, LF, space and comma. "&" is not
+exotic, and neither is "^", which is just as common in music-channel names. A
+message from such a channel failed to match at all, and a PRIVMSG that does
+not parse is a PRIVMSG that never happened.
+
+The same character class sat in five more parsers, every failure silent:
+
+- **NOTICE**, which is how another bot's advert reaches us
+- **353 (NAMES)**, which populates `config.channel_users` - `dcc.py` treats
+  that as proof a user is present before it dispatches, so sends into such a
+  channel were refused too. This one also stopped skipping to the first "#"
+  and takes the RFC's own `:<server> 353 <nick> <symbol> <channel> :<names>`.
+- **366 (End of NAMES)**, so the channel never counted as confirmed at startup
+- **JOIN** and **PART** tracking, which freeze and thaw a user's queue
+
+**Widening alone would have been wrong.** `\S+` on its own lets a hostile
+server hand us a "channel" containing `\x01` or a bare `\r`, and the target is
+interpolated straight back into our own outbound lines. So the regexes take
+`\S+` - which is what the protocol means, since a space is the field separator
+- and `is_valid_irc_target()` refuses NUL, BEL, CR, LF, `\x01` and the comma
+that separates a target list. Validating at parse time means every caller
+inherits it rather than each one remembering, the same reasoning
+`dcc_fetch.contains_unsafe_ctcp_bytes()` is applied where an offer is parsed
+and not where it is echoed.
+
 ### 🏷️ A row we asked for says "Requested", not "Offered"
 
 From a maintainer, on two list rows sitting at OFFERED in the Downloads

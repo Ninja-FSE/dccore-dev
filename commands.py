@@ -330,6 +330,14 @@ PRESERVE_RUNTIME = (
                           # at the pace those bots advertise - five minutes or more per
                           # entry, in advert order - so a rehash would empty the
                           # dashboard's bot list and refill it a stranger at a time.
+    'dcc_send_offers',    # DCC SEND offers waiting for a receiver to connect, and the
+                          # byte each one has agreed to resume from. Losing this does
+                          # not merely forget an offer: the sending thread reads the
+                          # agreed offset AFTER accept() returns, so an emptied dict
+                          # gives it zero, and it sends the file from the start to a
+                          # receiver that has already been told to append from the
+                          # middle. That is a silently corrupted download rather than
+                          # a failed one - the transfer "succeeds" at both ends.
 )
 
 

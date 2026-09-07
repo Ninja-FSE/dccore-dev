@@ -83,6 +83,10 @@ RUNTIME_CONTAINERS = {
     # full run. test_runtime_state.py now derives the comparison rather than
     # leaving the next one to be found the same way.
     "known_bots": dict,
+    # Offers in flight. A leftover here is not inert: it is keyed by (nick,
+    # port), the DCC port range is small and reused, and a stale entry would
+    # hand the next test's send an offset agreed for a different file.
+    "dcc_send_offers": dict,
 }
 
 RUNTIME_FLAGS = {
@@ -423,6 +427,15 @@ class DCCoreTestCase(unittest.TestCase):
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
                                           "known_bots.json")
 
+        # Same shape, found the same way: the state guard caught it the first
+        # time a test drove a transfer all the way to completion, because
+        # db.record_download() is only reached on the success path and
+        # nothing had ever taken one. A module-level constant like the two
+        # above, so it is rebound here and restored in tearDown.
+        self._real_download_counts_file = db.DOWNLOAD_COUNTS_FILE
+        db.DOWNLOAD_COUNTS_FILE = os.path.join(self._fetch_history_dir,
+                                               "download_counts.json")
+
         # And five more the new preflight state guard found the moment it
         # existed: bans.txt, dcc_queue.txt, fetched_bot_lists.json,
         # list_index.db and stats.txt were all being written for real by the
@@ -500,6 +513,7 @@ class DCCoreTestCase(unittest.TestCase):
         import db
         db.FETCH_HISTORY_FILE = self._real_fetch_history_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
+        db.DOWNLOAD_COUNTS_FILE = self._real_download_counts_file
         db.DCC_QUEUE_FILE = self._real_dcc_queue_file
         db.SPEED_RECORD_FILE = self._real_speed_record_file
         db.FETCHED_BOT_LISTS_FILE = self._real_fetched_bot_lists_file

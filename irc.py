@@ -206,6 +206,46 @@ def event_source_host(line):
     return match.group(1).lower() if match else None
 
 
+# WHAT MAY BE A TARGET, which is very nearly everything.
+#
+# FOUND IN A BETA CHANNEL. The parsers below used to match a target as
+# `[#\w\-]+` - "#", letters, digits, underscore, hyphen. RFC 2812 says a
+# channel is a "#", "&", "+" or "!" prefix followed by any octet except NUL,
+# BEL, CR, LF, space and comma, and real channels use that room: an "&" or a
+# "^" in the name is ordinary. An operator joined a channel with an "&" in it
+# and the bot sat there mute - it JOINED, and it ADVERTISED, because both of
+# those are OUTBOUND and never parse a line. Every message arriving from that
+# channel simply failed to match, so @<nick>, @find, -help and the queue
+# commands were all silently dropped, in that channel only.
+#
+# The same class also cost the 366 confirmation (the channel never counted as
+# joined at startup) and the JOIN/PART tracking that dcc.py reads as proof of
+# presence before it dispatches a send.
+#
+# So the regexes take `\S+` - which is what the protocol means, since a space
+# is the field separator - and the target is validated here instead. This is
+# NOT merely widening: `\S+` alone would let a hostile server hand us a
+# "channel" containing \x01 or a bare \r, and target_chan is interpolated into
+# our own outbound lines (see the RAM-CHECK NOTICE in irc_loop, and every
+# handler that answers back into the channel it was asked in). Rejecting them
+# here means every caller of these parsers inherits the check, rather than
+# each one remembering - the same reasoning dcc_fetch.py's
+# contains_unsafe_ctcp_bytes() is applied at parse time and not at each echo.
+_UNSAFE_IRC_TARGET_RE = re.compile(r'[\x00\x07\r\n\x01,]')
+
+
+def is_valid_irc_target(value):
+    """True if `value` is safe to treat as a PRIVMSG/NOTICE target.
+
+    A target is a channel or a nick. Neither may contain NUL, BEL, CR, LF or
+    a comma (which separates a target LIST), and this codebase additionally
+    refuses \\x01 anywhere that reaches a raw outbound line, because a body
+    containing it is read as an inline CTCP by the receiving client.
+    """
+    text = str(value or "")
+    return bool(text) and not _UNSAFE_IRC_TARGET_RE.search(text)
+
+
 def parse_privmsg(line):
     """(nick, ident_host, target, message) for a well-formed PRIVMSG line,
     or None.
@@ -230,8 +270,8 @@ def parse_privmsg(line):
     for security.check_user_status()'s hostmask-pattern matching - not the
     same as event_source_host(), which strips the ident and lowercases.
     """
-    match = re.match(r"^:([^!\s]+)!(\S*)\s+PRIVMSG\s+([#\w\-]+)\s+:(.+)$", line)
-    if not match:
+    match = re.match(r"^:([^!\s]+)!(\S*)\s+PRIVMSG\s+(\S+)\s+:(.+)$", line)
+    if not match or not is_valid_irc_target(match.group(3)):
         return None
     return match.group(1), match.group(2), match.group(3), match.group(4)
 
@@ -240,8 +280,8 @@ def parse_notice(line):
     """(nick, target, message) for a well-formed NOTICE line, or None. See
     parse_privmsg()'s docstring for why the anchoring matters - the same
     greedy-`.* ` and unanchored-nick problems applied here identically."""
-    match = re.match(r"^:([^!\s]+)!\S*\s+NOTICE\s+([#\w\-]+)\s+:(.+)$", line)
-    if not match:
+    match = re.match(r"^:([^!\s]+)!\S*\s+NOTICE\s+(\S+)\s+:(.+)$", line)
+    if not match or not is_valid_irc_target(match.group(2)):
         return None
     return match.group(1), match.group(2), match.group(3)
 
@@ -1746,8 +1786,12 @@ def irc_loop():
                         # Anchored to the server prefix: the old unanchored search matched
                         # anywhere in the line, so a user could PRIVMSG " 366 x #chan" and
                         # forge a channel confirmation, activating the bot early.
-                        m366 = re.match(r"^:\S+ 366 \S+ ([#\w\-]+)", line)
-                        if m366:
+                        # \S+ for the channel, not [#\w\-]+ - see
+                        # is_valid_irc_target(). A channel with an "&" or a
+                        # "^" in its name never had its 366 recognised, so it
+                        # never counted as confirmed at startup.
+                        m366 = re.match(r"^:\S+ 366 \S+ (\S+)", line)
+                        if m366 and is_valid_irc_target(m366.group(1)):
                             confirmed_chan = m366.group(1).lower()
                             channels_confirmed.add(confirmed_chan)
                             print(f"[INFO] Received End of NAMES for {confirmed_chan} ({len(channels_confirmed & target_channels)}/{len(target_channels)} target channels confirmed)")
@@ -1782,8 +1826,20 @@ def irc_loop():
                     # proof a user is present when deciding whether to thaw a frozen queue
                     # and dispatch to them. A forged line injected fake presence.
                     if is_server_numeric(line, "353"):
-                        name_match = re.search(r" 353 [^#]+([#\w\-]+) :(.+)$", line)
-                        if name_match:
+                        # The RFC form, rather than "skip to the first #".
+                        # A 353 is ":<server> 353 <nick> <symbol> <channel>
+                        # :<names>", where <symbol> is one of = * @. Matching
+                        # the channel as [#\w\-]+ meant a name containing "&"
+                        # or "^" never parsed, so config.channel_users never
+                        # learned who was in it - and the presence check above
+                        # then refused to dispatch to anyone there. The symbol
+                        # is optional here only because not every server sends
+                        # one; restricting it to those three keeps it from
+                        # swallowing a real channel name.
+                        name_match = re.search(
+                            r"^:\S+\s+353\s+\S+\s+(?:[=*@]\s+)?(\S+)\s+:(.+)$",
+                            line)
+                        if name_match and is_valid_irc_target(name_match.group(1)):
                             chan = name_match.group(1).lower()
                             names = [n.strip("@+~&%").lower() for n in name_match.group(2).split()]
                             with runtime.channel_users_lock():
@@ -1824,8 +1880,8 @@ def irc_loop():
                     # themselves into config.channel_users for a channel they are not in -
                     # which dcc.py reads as proof of presence before it dispatches.
                     elif is_user_event(line, "JOIN") and event_source_nick(line) != config.NICKNAME.lower():
-                        join_match = re.search(r"^:([^!]+)!.* JOIN :?([#\w\-]+)", line)
-                        if join_match:
+                        join_match = re.search(r"^:([^!]+)!.* JOIN :?(\S+)", line)
+                        if join_match and is_valid_irc_target(join_match.group(2)):
                             joined_user = join_match.group(1)
                             joined_chan = join_match.group(2)
                             j_key = joined_user.lower()
@@ -1852,8 +1908,8 @@ def irc_loop():
                     # Anchored: as JOIN. This one removes people from channel_users, which
                     # freezes their queue and starts the five-minute delete timer.
                     elif is_user_event(line, "PART"):
-                        part_match = re.search(r"^:([^!]+)!.* PART ([#\w\-]+)", line)
-                        if part_match:
+                        part_match = re.search(r"^:([^!]+)!.* PART (\S+)", line)
+                        if part_match and is_valid_irc_target(part_match.group(2)):
                             p_user = part_match.group(1).lower()
                             p_chan = part_match.group(2).lower()
                             with runtime.channel_users_lock():
@@ -1968,6 +2024,16 @@ def irc_loop():
                             or (msg.startswith("\x01")
                                 and msg.strip("\x01").strip().upper().startswith("DCC SEND ")
                                 and target_chan.lower() == config.NICKNAME.lower())
+                            # DCC RESUME, for the same reason #219 gives just
+                            # above. It is cheaper than an offer - a dict
+                            # lookup, no thread, no disk - but it answers with
+                            # an outbound PRIVMSG, and an unthrottled
+                            # responder is a standard way to make a bot flood
+                            # ITSELF off the network. Being unmatched costs
+                            # nothing, so being unthrottled costs everything.
+                            or (msg.startswith("\x01")
+                                and msg.strip("\x01").strip().upper().startswith("DCC RESUME ")
+                                and target_chan.lower() == config.NICKNAME.lower())
                         )
                         if is_bot_command and security.is_flooding(user):
                             continue 
@@ -2006,6 +2072,29 @@ def irc_loop():
                                         target=dcc_fetch.handle_incoming_offer,
                                         args=(s, user, msg.strip("\x01").strip()),
                                         daemon=True).start()
+                                    continue
+                                # A receiver telling us it already holds part
+                                # of the file we just offered, and asking us
+                                # to send from there. It will not connect
+                                # until we answer with a DCC ACCEPT - which
+                                # is what "Requesting resume" sitting still
+                                # in mIRC forever meant: the client keeping
+                                # its side of a bargain we had never been
+                                # able to answer.
+                                #
+                                # Private only, like the two branches above.
+                                # Answered INLINE rather than on a thread: the
+                                # receiver is blocked waiting for this, it is
+                                # one dict lookup and one send, and it touches
+                                # no disk. Admission control is entirely
+                                # inside handle_resume_request() - it matches
+                                # on a port WE are listening on for this exact
+                                # nick, so a stray or forged line finds
+                                # nothing and is dropped there.
+                                if (ctcp_cmd.startswith("DCC RESUME ")
+                                        and target_chan.lower() == config.NICKNAME.lower()):
+                                    dcc.handle_resume_request(
+                                        s, user, msg.strip("\x01").strip())
                                     continue
                                 if ctcp_cmd == "VERSION":
                                     # Answered inline rather than on a thread:
