@@ -19,6 +19,7 @@ the same weight and dates better. The attributions were rewritten rather than
 deleted, so the reasoning survives without the name.
 """
 
+import hashlib
 import io
 import os
 import re
@@ -29,17 +30,37 @@ import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Every pattern here has actually shipped, or was one edit away from it.
+# HASHED, not written out. This file SHIPS - it is in tests/, like everything
+# else here - so a denylist spelling the names would publish the very strings
+# it exists to remove. The first version did exactly that, and had to skip
+# itself to pass: the one file guaranteed to contain every forbidden string
+# was the one file never checked.
+#
+# docs/PUBLIC-REPO-WORKFLOW.md already records the principle, learnt from the
+# licence check: "Assert what should be true, not a list of what shouldn't."
+# No positive property distinguishes a person's handle from any other word,
+# so the next best thing is a denylist nobody can read.
+#
+# SHA-256 of the lowercased word, first 16 hex characters. Add one with:
+#     python -c "import hashlib;print(hashlib.sha256(b'thename').hexdigest()[:16])"
 FORBIDDEN = {
-    r"\bNeo\b": "the co-maintainer's handle - the same one on IRC and the "
-                "issue tracker. Attribute to 'an operator' instead",
-    r"\bFlacMe": "a real serving bot on a real network; it shipped in two "
-                 "test files before an audit found it",
-    r"\bchchatzop\b": "the maintainer's account name",
-    r"\bdccore-dev\b": "the private development repository. Naming it in the "
-                       "public tree points strangers at a repo they cannot "
-                       "read and whose issue numbers resolve to nothing",
+    "73ef176d9f12809e": "a co-maintainer's handle, the same one used on IRC "
+                        "and the issue tracker. Attribute an observation to "
+                        "'an operator' instead",
+    "5dade860d3d5eadd": "a real serving bot on a real network; it shipped in "
+                        "two test files before an audit found it",
+    "f0756a8e416936e7": "the maintainer's own account name",
+    "13ea59307fc3f4ec": "the private development repository. Naming it in the "
+                        "public tree points strangers at a repo they cannot "
+                        "read, whose issue numbers resolve to nothing",
 }
+
+# Compared lowercased, so one hash covers every capitalisation.
+WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+
+
+def word_hash(word):
+    return hashlib.sha256(word.lower().encode("utf-8")).hexdigest()[:16]
 
 # Documentation and private ranges are the ONLY literal addresses that may
 # ship. Everything else is somebody's real machine.
@@ -100,14 +121,12 @@ class NothingIdentifyingShips(unittest.TestCase):
             self.skipTest(self.reason)
 
     def files(self):
-        # This file is skipped: it necessarily CONTAINS every pattern it
-        # searches for, so a guard that scanned itself could never pass. The
-        # patterns live nowhere else, which is what keeps the exemption from
-        # being a hole somebody could hide behind.
-        mine = os.path.basename(__file__)
+        # NO SELF-EXEMPTION any more. The first version spelled the names out
+        # and had to skip itself to pass, which meant the one file guaranteed
+        # to contain every forbidden string was the one file never checked -
+        # and it shipped them. Hashing removed the exemption and the leak in
+        # the same change.
         for name in self.shipped:
-            if os.path.basename(name) == mine:
-                continue
             if name.endswith(TEXT_SUFFIXES):
                 yield name
 
@@ -120,10 +139,12 @@ class NothingIdentifyingShips(unittest.TestCase):
         found = {}
         for path in self.files():
             text = self.read(path)
-            for pattern, why in FORBIDDEN.items():
-                for match in re.finditer(pattern, text):
-                    line = text.count("\n", 0, match.start()) + 1
-                    found.setdefault(why, []).append(f"{path}:{line}")
+            for match in WORD.finditer(text):
+                why = FORBIDDEN.get(word_hash(match.group(0)))
+                if why is None:
+                    continue
+                line = text.count("\n", 0, match.start()) + 1
+                found.setdefault(why, []).append(f"{path}:{line}")
 
         self.assertEqual(
             found, {},
