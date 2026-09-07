@@ -26,6 +26,33 @@ An ordinary internet round trip, derived from the two speeds rather than
 assumed. Raising `DCC_SEND_BUFFER` to 1 MB took the same transfer to **23.9 and
 24.7 MB/s**, confirmed by the same friend.
 
+**Why 4 MB and not the 1 MB that fixed the report.** The measured link was
+20.6 ms away, where 1 MB is already far more than enough - but the ceiling is a
+function of DISTANCE, and this bot serves a channel rather than one friend:
+
+    RTT  20 ms   1MB ->  52.4 MB/s     4MB -> 209.7 MB/s
+    RTT 120 ms   1MB ->   8.7 MB/s     4MB ->  35.0 MB/s
+    RTT 200 ms   1MB ->   5.2 MB/s     4MB ->  21.0 MB/s
+    RTT 300 ms   1MB ->   3.5 MB/s     4MB ->  14.0 MB/s
+
+At 200 ms - an ordinary Australia-to-Europe hop - 1 MB lands back at the same
+few megabytes a second this change exists to escape. Fixing the nearby case and
+leaving the distant one is not a fix, it is a shorter list of people who are
+still capped. The cost is bounded: `SO_SNDBUF` is a ceiling the kernel MAY
+buffer, not an allocation, and it only fills when the network is slow enough to
+make it worth having.
+
+**And the guard this makes load-bearing.** `sendall()` returns once the bytes
+are in the kernel, not once the peer has them, so a file that fits entirely
+inside the send buffer "sends" in almost no time and its computed speed means
+nothing. The window of affected files is exactly the buffer size - it grew from
+under 1 MB to under 4 MB, which is most single tracks.
+`stats_mgr.MIN_RECORD_SECONDS` already refuses a sample measured over less than
+a second and predates all of this; it now has tests tied to THIS reason, so the
+buffer can be changed again without anyone re-deriving why the floor matters.
+The record is what the channel advert publishes, so a bogus one is not a
+private mistake.
+
 **Per-platform, not simply a new default.** The old behaviour was "never set it
 unless asked", justified by `SO_SNDBUF` disabling the OS's own auto-tuning.
 That is sound on Linux, where `tcp_wmem` grows the buffer to fit the connection
