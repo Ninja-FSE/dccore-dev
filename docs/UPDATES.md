@@ -4,6 +4,38 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔑 Rotating the admin password could silently do nothing
+
+`defaults.py` applies `admin_config.py` first and `settings.conf` second, and
+says so in as many words: settings.conf wins. The dashboard's own change-
+password control writes to settings.conf.
+
+So on any install whose password had ever been changed from the dashboard,
+running `configure.py` to rotate the credential wrote a new hash into
+`admin_config.py` where nothing would read it - and the operator went on
+believing they had replaced a password that still worked. That is the recovery
+path for a lost or shared credential, so it is the worst possible place for a
+silent no-op.
+
+`settings_file.shadowed_by_admin_config()` already warns about this exact
+collision from the other direction. The reverse direction now has its half:
+configure.py parses settings.conf with the daemon's own parser and says
+plainly that the change will not take effect, and where to make it instead.
+
+### 🧱 A half-written `admin_config.py` bricked the install
+
+`open(path, "w")` truncates before it writes, so a full disk, a killed process
+or a power cut during a routine password change left a partial Python file.
+
+A partial Python file is a `SyntaxError`, and `defaults.py`'s
+`except ImportError` around `from admin_config import *` does not catch that -
+verified: `import defaults` fails outright. `configure.py` imports `defaults`
+itself, so the one tool that could repair the file will not start either. The
+install is unbootable AND un-reconfigurable.
+
+`settings_file._atomic_write()` already does this correctly for the other
+config file; this one is no longer the exception.
+
 ### 🪟 `start-dccore.bat check` said FAIL and exited 0
 
 `cmd.exe` expands `%errorlevel%` when it PARSES a parenthesised block, before
