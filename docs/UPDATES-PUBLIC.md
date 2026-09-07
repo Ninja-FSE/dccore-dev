@@ -2,6 +2,10 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **A download you asked for now says "Requested" instead of "Offered".** A row turns to that state at the moment DCCore sends your request out to the other bot, so "Offered" read as though they had offered you something when in fact you were still waiting for their reply. The two fetch timeout settings are named the same way now - they are how long to wait for a reply after asking, not a limit on an offer somebody made you. Your `settings.conf` is untouched.
+
+- **The coloured dot beside each bot's list now tells you what it is comparing.** Hovering a yellow one used to say only "Their list has changed since you downloaded it", which cannot tell you whether your re-download failed, arrived and was refused, or arrived fine while the bot published a newer list again straight after. It now shows both sides - what they advertised when you downloaded, and what they advertise now - so you can see at a glance whether a re-download took. Green and "not downloaded" say what they matched too.
+
 - **Size settings are in MB now, not bytes.** `10737418240` for the `!rar` size cap is a number you had to count the zeros in. The five large limits are in MB, the socket send buffer and the list banner limit are in KB (MB would show `0.0078` for the latter), and the packet-size menu reads `64 KB` instead of `65536`. Your `settings.conf` is untouched and still holds bytes - only the page you read and type into changed, so nothing needs migrating and a hand-edited file looks exactly as it did.
 
 - **The list rebuild now shows what it is doing.** Tools -> Update list used to say "Rebuilding the master list..." and nothing else until it finished, which on a large library is minutes of silence that looks exactly like a hung process. It now shows a progress bar, which folder it is scanning and how far through the folders it is, and a running count of files indexed - the count keeps moving even while the bar does not, so you can see it is alive. Once the scan is done and it is writing the list, the bar goes indeterminate rather than sitting frozen at a number.

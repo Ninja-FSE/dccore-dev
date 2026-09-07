@@ -656,13 +656,32 @@
 
   // -------------------------------------------------------------- Downloads
 
+  // The pill an operator reads, which is NOT the internal state name.
+  //
+  // From a maintainer, on seeing two list rows sitting at "OFFERED": "should
+  // be REQUESTED, not offered". Exactly right, and the word was backwards on
+  // the screen rather than in the queue. dcc_fetch.py flips a row to
+  // `offered` in check_fetch_queue() at the moment it DISPATCHES OUR OWN
+  // request line - `@bot` for a list, `!bot <file>` otherwise - and stamps
+  // `offered_at` with the time we sent it. So the state means "we have asked
+  // and are waiting for their DCC SEND". Nothing has been offered to us; the
+  // name reads from inside the module, where the row IS the offer we are
+  // waiting on.
+  //
+  // The internal name stays as it is. It is written into the fetch queue
+  // file, so renaming it would strand every row in flight across a restart,
+  // and it is matched by name in a dozen places in dcc_fetch.py. Only the
+  // word on the pill is wrong, so only the word on the pill changes. The CSS
+  // class is still built from the state name, so .status-offered keeps
+  // styling it.
+  //
   // "rejected" is not a state dcc_fetch.py ever writes. A list archive whose
   // bytes arrived intact but which the extraction guard refused keeps
   // state === "complete", because the transfer really did succeed - the
   // reason it was refused is carried separately, in list_processing_error.
   // This is the display-side name for that combination.
   var DOWNLOAD_STATE_LABELS = {
-    pending: "Pending", offered: "Offered", listening: "Listening",
+    pending: "Pending", offered: "Requested", listening: "Listening",
     receiving: "Receiving", complete: "Complete", failed: "Failed",
     rejected: "Rejected"
   };
@@ -1097,7 +1116,7 @@
 
     var led = document.createElement("span");
     led.className = "led " + ledClass(row.freshness);
-    led.title = ledTitle(row.freshness);
+    led.title = ledTitle(row);
     button.appendChild(led);
 
     var name = document.createElement("span");
@@ -1127,16 +1146,45 @@
     return "is-unknown";
   }
 
-  function ledTitle(freshness) {
+  // WHAT THE LED IS COMPARING, not just its verdict.
+  //
+  // From a maintainer: "redownloaded [a bot's] list, its yellow, but it does
+  // not update to green." The tooltip said only "Their list has changed since
+  // you downloaded it", which cannot tell you whether the re-download never
+  // landed, landed and was refused, or landed fine while the bot advertised
+  // something newer again in between. All three look identical from outside,
+  // and telling them apart meant reading the daemon log.
+  //
+  // The payload has carried `advert_then` and `advert_now` since the LED was
+  // built - the exact two values webserver._freshness() decides on - and this
+  // was dropping them. renderFilelistsFreshness() below already spells them
+  // out, but only for the bot currently SELECTED in the List Browser; the LED
+  // is what you look at when scanning the bot list itself, which is where the
+  // question gets asked. Same describeAdvert() for both, so the two can never
+  // drift into telling different stories about one row.
+  //
+  // Set as a PROPERTY, never concatenated into an attribute: these strings
+  // come off another bot's advert, and escapeHtml() encodes & < > and leaves
+  // a double quote alone. Same rule as the nick beside it.
+  function ledTitle(row) {
+    var freshness = row.freshness;
     if (freshness === "changed") {
-      return "Their list has changed since you downloaded it";
+      return "Their list has changed since you downloaded it. " +
+             "They advertised " + describeAdvert(row.advert_then || {}) +
+             " when you downloaded it, and now advertise " +
+             describeAdvert(row.advert_now || {}) + ".";
     }
-    if (freshness === "not_held") { return "Not downloaded"; }
+    if (freshness === "not_held") {
+      return "Not downloaded. They advertise " +
+             describeAdvert(row.advert_now || {}) + ".";
+    }
     if (freshness === "unknown") {
       return "Cannot tell - we have not seen what they advertise, " +
              "or they publish no date or count";
     }
-    return "Current";
+    if (freshness === "own") { return "Your own list"; }
+    return "Current - they still advertise " +
+           describeAdvert(row.advert_now || {}) + ".";
   }
 
   function markFilelistsActiveBot() {
