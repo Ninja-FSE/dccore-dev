@@ -678,8 +678,12 @@ def build_search_payload(query):
     ]
 
 
-def build_filelists_payload(offset=0, limit=None):
-    """The File Lists view's data: a page of THIS bot's own master list.
+def build_filelists_payload(offset=0, limit=None, name=None):
+    """The File Lists view's data: a page of one of THIS bot's own lists.
+
+    `name` picks which. None means the primary, which is what every list
+    function already resolves it to and what this route meant before lists
+    had names - so an unqualified request is unchanged.
 
     v1 scope is deliberately THIS BOT ONLY - it serves DCCore's own master
     list, decomposed into rows, with "source" hardcoded to config.NICKNAME.
@@ -705,7 +709,7 @@ def build_filelists_payload(offset=0, limit=None):
     if limit is None:
         limit = FILELISTS_DEFAULT_PAGE_SIZE
 
-    entries, _total = list_mod.find_matching_entries([], limit=None)
+    entries, _total = list_mod.find_matching_entries([], limit=None, name=name)
     rows = list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
     groups = list_mod.group_rows_by_folder(rows)
     page, total_folders, total_rows = list_mod.page_folder_groups(
@@ -1054,6 +1058,126 @@ def build_crosslist_search_payload(term, limit=None):
         "empty": sorted(empty),
     })
     return payload
+
+
+# The source key for our own lists. "__own__" alone still means the PRIMARY,
+# which is what GET /api/filelists with no ?list= has always returned - so
+# every existing caller, and every install that serves one list, is unchanged.
+OWN_SOURCE = "__own__"
+
+
+def own_list_source(served_list):
+    """The List Browser source key for one of OUR served lists.
+
+    The primary keeps the bare "__own__" it has always had. Naming it as well
+    would have been tidier and would have changed the meaning of a URL that
+    predates lists having names at all.
+    """
+    if served_list.primary:
+        return OWN_SOURCE
+    return f"{OWN_SOURCE}:{served_list.name}"
+
+
+def own_list_name(source):
+    """The served-list name a source key refers to, or None if it is not ours.
+
+    None for the bare "__own__" too: that means the primary, and the primary
+    is what every list function already resolves `name=None` to. Returning its
+    name instead would be the same answer by a longer route, and would break
+    the moment an operator renamed it.
+    """
+    text = str(source or "")
+    if text == OWN_SOURCE:
+        return None
+    if text.startswith(OWN_SOURCE + ":"):
+        return text[len(OWN_SOURCE) + 1:] or None
+    return None
+
+
+def source_is_ours(source):
+    text = str(source or "")
+    return text == OWN_SOURCE or text.startswith(OWN_SOURCE + ":")
+
+
+def requested_own_list(name):
+    """Validate a ?list= against the lists we actually serve.
+
+    Returns the served list's own name, or None for "the primary" - which
+    covers an absent parameter and a name we do not serve alike. Deliberately
+    not an error: this route is polled continuously, and a list renamed or
+    removed between one poll and the next would otherwise turn the table into
+    an error message without anybody having touched it.
+
+    It also keeps an arbitrary string away from list.find_latest_list(), which
+    joins the name into a directory path.
+    """
+    wanted = str(name or "").strip()
+    if not wanted:
+        return None
+    try:
+        import library
+        for entry in library.lists():
+            if entry.name == wanted:
+                return None if entry.primary else entry.name
+    except Exception as err:
+        print(f"[WEBUI] Could not resolve the requested list: {err}")
+    return None
+
+
+def build_own_list_summaries():
+    """One row per list THIS bot serves, in the operator's own order.
+
+    FOUND IN A BETA. An operator built a second list through the dashboard,
+    put every film in it, and then could not find it: "in list browser i dont
+    see all my lists ... video list isnt there". The list was being served
+    correctly and advertised correctly in its own channel - only the page that
+    browses lists stopped at the primary, because build_filelists_payload()
+    resolved `name=None` and the sidebar hard-coded a single row.
+
+    Multi-list is this release's headline feature, and the dashboard is where
+    the operator created the list. A page that offers to make a thing and then
+    will not show it is a round trip that does not close.
+
+    LABELLED "Our own list" WHEN THERE IS ONLY ONE. Every install today has
+    exactly one, called "Main" by default - a name the operator never chose
+    and has no reason to recognise. Showing it would be a change with no
+    information in it. With several, each carries its own name, which is
+    exactly what the operator typed.
+
+    No count: it would mean parsing every list on every poll of this route,
+    which the File Lists tab makes every few seconds, on libraries measured in
+    hundreds of thousands of files. The row existing at all is the fix.
+    """
+    import library
+
+    try:
+        served = library.lists()
+    except Exception as err:
+        # This route is polled continuously; a malformed lists.json must cost
+        # the extra rows, not the whole sidebar.
+        print(f"[WEBUI] Could not read the served lists: {err}")
+        served = []
+
+    if not served:
+        return [{"bot": OWN_SOURCE, "label": "Our own list", "held": True,
+                 "freshness": "own", "own": True, "fetched_at": 0,
+                 "count": None, "advert_then": {}, "advert_now": {}}]
+
+    single = len(served) == 1
+    rows = []
+    for entry in served:
+        rows.append({
+            "bot": own_list_source(entry),
+            "label": "Our own list" if single else entry.name,
+            "held": True,
+            "freshness": "own",
+            "own": True,
+            "fetched_at": 0,
+            "count": None,
+            "advert_then": {},
+            "advert_now": {},
+        })
+    return rows
 
 
 def build_fetched_bot_list_summaries():
@@ -2979,7 +3103,9 @@ if HAVE_FLASK:
         def api_filelists():
             offset, limit = parse_pagination_params(
                 request.args.get("offset"), request.args.get("limit"))
-            return jsonify(build_filelists_payload(offset, limit))
+            # ?list= names one of OUR served lists; absent means the primary.
+            return jsonify(build_filelists_payload(
+                offset, limit, name=requested_own_list(request.args.get("list"))))
 
         # ------------------------------------------------------------------
         # These routes below DO mutate state (queuing an outbound IRC line,
@@ -3036,7 +3162,16 @@ if HAVE_FLASK:
 
         @app.route("/api/filelists/bots")
         def api_filelists_bots():
-            return jsonify(build_fetched_bot_list_summaries())
+            # EVERY source the List Browser can show: ours, then theirs.
+            #
+            # Ours first and in the operator's own order rather than
+            # alphabetically - they arranged that order themselves, and the
+            # primary being first is the one piece of it the page should not
+            # reshuffle. Composed HERE rather than inside either builder,
+            # because each of those answers a question its own name states and
+            # neither should start answering the other's.
+            return jsonify(build_own_list_summaries()
+                           + build_fetched_bot_list_summaries())
 
         @app.route("/api/filelists/search")
         def api_filelists_search():

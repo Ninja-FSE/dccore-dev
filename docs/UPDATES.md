@@ -4,6 +4,49 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🗂️ Every list this bot serves is browsable
+
+From the beta. An operator built a second list **through the dashboard**, put
+every film in it, and then could not find it: *"in list browser i dont see all
+my lists / only music list / video list isnt there"*.
+
+The list was served correctly and advertised correctly in its own channel -
+Stage 4 made adverts per-channel, so that channel reported its 9 films
+accurately. Only the page that BROWSES lists stopped at the primary, for two
+independent reasons:
+
+- `build_filelists_payload()` called `find_matching_entries()` with
+  `name=None`, which resolves to the PRIMARY served list, so everything under
+  another list's own directory was never opened;
+- the sidebar hard-coded one row - `{bot: "__own__", label: "Our own list"}` -
+  so there was nowhere to click even once the backend could answer.
+
+Multi-list is this release's headline feature and the dashboard is where the
+operator created the list. A page that offers to make a thing and then will not
+show it is a round trip that does not close.
+
+**What did not change.** `__own__` alone still means the primary, and
+`GET /api/filelists` with no `?list=` still returns it - the meaning that route
+had before lists had names. Every install serving one list sees exactly what it
+saw before, down to the row still reading "Our own list" rather than "Main", a
+name the operator never chose and has no reason to recognise.
+
+`?list=` is validated against the lists we actually serve, and an unknown name
+resolves to the primary rather than erroring: the sidebar is polled every few
+seconds, and a list renamed between two polls would otherwise turn the table
+into an error message on its own. It also keeps an arbitrary string away from
+`list.find_latest_list()`, which joins the name into a directory path.
+
+**Composed in the route**, not inside either builder.
+`build_fetched_bot_list_summaries()` answers the question its own name states
+and should not start answering ours - the first attempt put the composition
+inside it, and eleven existing tests said so.
+
+`isOwnSource()` replaces every bare `=== "__own__"`. Missing one would leave a
+second list looking like a foreign bot: fetchable, refetchable, and offered a
+Download button for a list we wrote ourselves. A test refuses any bare
+comparison outside the helper itself.
+
 ### 🚀 Send speed was capped at 3 MB/s, and it was arithmetic
 
 From the beta. Same friend, same machine, same link:

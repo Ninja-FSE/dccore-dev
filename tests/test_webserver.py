@@ -1465,10 +1465,23 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
         self.assertEqual(len(body["created"]), 1)
         self.assertEqual(config.fetch_queue[body["created"][0]]["request_type"], "list")
 
-    def test_filelists_bots_route_returns_an_empty_list_with_nothing_fetched(self):
+    def test_filelists_bots_route_offers_only_our_own_with_nothing_fetched(self):
+        """This asserted an empty list until our own served lists joined the
+        route. They are never absent - a bot always serves at least one - so
+        "empty" is now the wrong shape for "nothing has been fetched". What
+        the route must still contain is no FOREIGN row."""
         resp = self.client.get("/api/filelists/bots")
+
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json(), [])
+        rows = resp.get_json()
+
+        # OUR OWN LIST IS THERE. Asserted before the filter below, because
+        # "no foreign rows" and "every row is ours" are both vacuously true
+        # of an empty list - which is exactly what this route used to return,
+        # and what a mutation dropping our lists from it produces.
+        self.assertTrue([row for row in rows if row.get("own")],
+                        "the route offers none of our own lists to browse")
+        self.assertEqual([row for row in rows if not row.get("own")], [])
 
     def test_filelists_bot_route_returns_404_for_an_unknown_nick(self):
         resp = self.client.get("/api/filelists/bot/nosuchbot")
@@ -1856,7 +1869,7 @@ class FolderRarButtonTests(unittest.TestCase):
         checkbox column - packing a folder as .rar only makes sense against
         another bot's list, never our own."""
         body = self._extract_function("folderHeadingHtml")
-        self.assertIn('(state.filelistsSource || "__own__") !== "__own__"', body)
+        self.assertIn('!isOwnSource(state.filelistsSource || "__own__")', body)
 
 
 class FetchDeleteButtonRegressionTests(unittest.TestCase):
@@ -1936,7 +1949,7 @@ class DownloadTabAndFilelistsSwitcherRegressionTests(unittest.TestCase):
                      if "row.bot" in line and "//" not in line]:
             self.assertTrue(
                 ".textContent" in sink or ".dataset." in sink
-                or 'row.bot !== "__own__"' in sink,
+                or "isOwnSource(row.bot)" in sink,
                 f"a nick reaches the DOM by some other route: {sink.strip()}")
 
     def test_no_new_attribute_built_via_string_concatenated_innerhtml(self):
@@ -2032,8 +2045,18 @@ class FilelistsPaginationJsRegressionTests(unittest.TestCase):
         self.assertIn("state.filelistsHistory = []", body)
 
     def test_load_filelists_requests_offset_and_limit_query_params(self):
+        """The "?" moved into the base when ?list= arrived - one of our own
+        lists needs a parameter ahead of the paging, and a foreign bot's does
+        not - so this asserts the paging pair rather than the whole string."""
         body = self._extract_function("loadFilelists")
-        self.assertIn('"?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE', body)
+
+        self.assertIn('"offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE', body)
+
+    def test_one_of_our_own_lists_is_named_in_the_query(self):
+        """A second served list is browsable only if the request says which."""
+        body = self._extract_function("loadFilelists")
+
+        self.assertIn('"?list=" + encodeURIComponent(listParam)', body)
 
 
 class FilelistsFetchableRegressionTests(unittest.TestCase):
