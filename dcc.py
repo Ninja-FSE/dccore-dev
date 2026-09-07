@@ -587,7 +587,37 @@ def check_queue_and_send(irc_sock, completed_user):
     
     user_key = completed_user.lower()
     oserve = sys.modules.get('oserve')
-    
+
+    # 0. THE QUIESCE GATE.
+    #
+    # wait_for_transfers_to_finish() sets config.transfers_paused and then
+    # waits for config.active_transfers to empty, and its own log line
+    # promises "No new sends will start". Until this check existed that was
+    # not true: the flag had exactly ONE reader, in handle_download_request(),
+    # which turns away a NEW request from a user. Nothing stopped THIS
+    # function - the dispatcher that actually claims a slot and starts a send
+    # - from promoting the rows already queued.
+    #
+    # So the wait could not converge on a busy bot. Every completing transfer
+    # re-arms delayed_queue_trigger_fallback (see start_dcc_send's finally),
+    # that fallback calls straight back into here, and the freed slot is
+    # refilled inside the very wait that was supposed to be draining it.
+    # active_transfers never empties, the wait burns REHASH_TRANSFER_WAIT
+    # (120s by default) refusing every user request with "the bot is
+    # reloading", and then reloads under live transfers anyway - which is the
+    # exact outcome #310 added the quiesce to prevent.
+    #
+    # The rehash's own wake path already assumes this gate is here: it calls
+    # resume_transfers() BEFORE waking the queue, commented "waking it while
+    # still paused would have every dispatch refused by the gate the wait put
+    # up". That gate is this one.
+    #
+    # Checked before the freeze sweep runs, not after: the sweep deletes queue
+    # rows for users gone over five minutes, and a rehash is not a reason to
+    # start throwing away queues.
+    if transfers_are_paused():
+        return
+
     # 1. Sweep away frozen queues older than five minutes
     # The sweep may ONLY run once the bot itself is fully channel-synced.
     # During a reconnect channel_users is empty, and the old sweep then deleted queues
