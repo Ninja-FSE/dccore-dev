@@ -855,7 +855,7 @@ class TheSocketSendBuffer(DCCoreTestCase):
 
         if platform_compat.IS_WINDOWS:
             self.assertEqual([value for _l, _o, value in sock.options],
-                             [1024 * 1024])
+                             [4 * 1024 * 1024])
         else:
             self.assertEqual(sock.options, [])
 
