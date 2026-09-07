@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏸️ The rehash quiesce now actually pauses anything
+
+`wait_for_transfers_to_finish()` sets `config.transfers_paused`, waits for the
+in-flight transfers to end, and logs **"No new sends will start."** That was
+not true. The flag had exactly one reader, in `handle_download_request()`,
+which turns away a NEW request from a user. Nothing stopped the DISPATCHER -
+the function that claims a slot and starts the send - from promoting rows that
+were already queued.
+
+**So the wait could not converge on a busy bot.** Every completing transfer
+re-arms a fallback that calls straight back into the dispatcher, so the freed
+slot was refilled inside the very wait that was draining it. `active_transfers`
+never emptied; the wait burned its full 120 seconds refusing every user
+request with "the bot is reloading", and then reloaded under live transfers
+anyway - the exact outcome the quiesce was added to prevent. Every dashboard
+Settings save triggers this path.
+
+The rehash wake already assumed the gate existed: it resumes BEFORE waking the
+queue, commented "waking it while still paused would have every dispatch
+refused by the gate the wait put up". That gate is now real.
+
+**The fetch dispatcher is gated too.** A cross-bot fetch never appears in
+`active_transfers` - it has its own queue - so the wait saw a quiet bot while
+that dispatcher was still putting fresh `@bot` requests into the channel, each
+bringing an inbound DCC SEND into the reload window.
+
+**One existing test had to be rescoped, and that is worth recording.** It read
+`dcc.py` as text and split on the first `if transfers_are_paused():` - so the
+second gate silently moved its anchor onto the wrong branch. It now scopes to
+`handle_download_request` via `inspect.getsource` and then to the branch,
+because that function legitimately carries the list-rebuilding message for a
+different condition.
+
+**And the first version of the new test passed with the gate removed.** It
+queued a row the dispatcher rejected for unrelated reasons, so it proved
+nothing. The fixture now queues a row that really dispatches, and a control
+test asserts exactly that - if the fixture ever stops dispatching, the control
+fails rather than the pause test passing for free.
+
 ### 🧪 The suite was overwriting the developer's - and the server's - real state
 
 Found by a guard written for a smaller problem, which is the useful part of
