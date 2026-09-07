@@ -1777,7 +1777,7 @@ SETTINGS_LABELS = {
     "MAX_FETCH_FILE_SIZE": "Max fetch file size",
     "MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
     "DCC_BLOCK_SIZE": "Packet size",
-    "DCC_SEND_BUFFER": "Socket send buffer (0 = let the OS tune it)",
+    "DCC_SEND_BUFFER": "Socket send buffer (0 = the default for your platform)",
     "REHASH_TRANSFER_WAIT": "Seconds a rehash waits for transfers to finish",
     "AUTO_REFETCH_LISTS": "Re-fetch a held list when its bot advertises a new one",
     "AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",

@@ -2,6 +2,7 @@
 # IRC.PY - THE IRC NETWORK MODULE FOR UNDERNET (PART 1 OF 3)
 # =====================================================================
 import socket
+import collections
 import functools
 import threading
 import time
@@ -244,6 +245,41 @@ def is_valid_irc_target(value):
     """
     text = str(value or "")
     return bool(text) and not _UNSAFE_IRC_TARGET_RE.search(text)
+
+
+# How many inbound lines to keep for a disconnect report. Fifteen covers the
+# exchange around a drop - the JOINs, the NAMES burst, and the server's own
+# ERROR line - without turning a log into a transcript.
+RECENT_LINE_MEMORY = 15
+
+
+def _report_recent_lines(recent_lines):
+    """Print what the server last sent, on the way out of a dropped link.
+
+    A disconnect used to be reported with no context at all. From a beta:
+    "[WinError 10054] ... Dropping the link to reconnect" after several
+    channels were added, and by the time it was asked about, the lines were
+    gone and it would not reproduce - so there was nothing to diagnose from
+    and no way to ask for more.
+
+    An ircd states its reason before it hangs up ("ERROR :Closing Link:
+    <nick> (Max SendQ exceeded)"), and that line was being read and dropped.
+    Printing the tail means the NEXT occurrence explains itself, whether or
+    not anyone is watching when it happens.
+
+    Never raises: this runs on the way out of a link that has already failed,
+    and a logging helper must not be what turns a reconnect into a crash.
+    """
+    try:
+        if not recent_lines:
+            print("[DISCONNECT] Nothing had been received on this link yet.")
+            return
+        print(f"[DISCONNECT] The last {len(recent_lines)} line(s) from the "
+              f"server before the drop:")
+        for line in recent_lines:
+            print(f"[DISCONNECT]   {line}")
+    except Exception:
+        pass
 
 
 def parse_privmsg(line):
@@ -1458,6 +1494,12 @@ def irc_loop():
         KEEPALIVE_AFTER = 45.0   # this much silence is allowed before we PING
         last_ping_sent = 0.0
 
+        # The last few lines the server sent, for the disconnect handlers to
+        # print. Small on purpose: the point is the handful of lines around a
+        # drop, not a transcript, and this is held for the life of a
+        # connection on a bot that may never disconnect at all.
+        recent_lines = collections.deque(maxlen=RECENT_LINE_MEMORY)
+
         # HOISTED (issue #9): delayed_activate lives here now, once, instead of being
         # nested inside the 366 handler - so both the ordinary NAMES path AND
         # the timeout watchdog below can trigger the same activation logic.
@@ -1569,6 +1611,7 @@ def irc_loop():
 
                     if quiet_for > SILENCE_LIMIT:
                         print(f"[TIMEOUT] The server has been silent for {int(quiet_for)}s. Dropping the link to reconnect.")
+                        _report_recent_lines(recent_lines)
                         try: s.close()
                         except: pass
                         _release_socket()
@@ -1586,13 +1629,22 @@ def irc_loop():
                             break
                     continue
                 except socket.error as net_err:
-                    print(f"[DISCONNECT FIX] TCP keepalive detected a dead network ({net_err}). Dropping the link to reconnect.")
+                    # NOT NECESSARILY A DEAD NETWORK, which is what this said
+                    # for every socket error alike. ECONNRESET is the server
+                    # hanging up on US - a different thing with a different
+                    # cause, and a beta report of exactly that sent its
+                    # operator looking at their connection when the answer
+                    # was on the wire a moment earlier.
+                    print(f"[DISCONNECT] The link dropped while reading "
+                          f"({net_err}). Reconnecting.")
+                    _report_recent_lines(recent_lines)
                     try: s.close()
                     except: pass
                     _release_socket()
                     break
                 except Exception as e:
                     print(f"[IRC READ ERROR] Unexpected error while reading from the network: {e}")
+                    _report_recent_lines(recent_lines)
                     try: s.close()
                     except: pass
                     _release_socket()
@@ -1600,6 +1652,7 @@ def irc_loop():
 
                 if not data:
                     print("[DISCONNECT] Server closed connection. Breaking to reconnect motor...")
+                    _report_recent_lines(recent_lines)
                     try: s.close()
                     except: pass
                     _release_socket()
@@ -1611,6 +1664,26 @@ def irc_loop():
                 for line in lines:
                     if not line.strip():
                         continue
+                    # WHAT THE SERVER LAST SAID, kept for the disconnect
+                    # handlers above. A dropped link is reported without a
+                    # word about what preceded it, so a beta report of
+                    # "[WinError 10054] ... Dropping the link to reconnect"
+                    # after joining several channels had nothing to diagnose
+                    # from - and by the time it was asked about, the lines
+                    # were gone and it would not reproduce.
+                    #
+                    # An ircd states its reason before it hangs up: "ERROR
+                    # :Closing Link: <nick> (Max SendQ exceeded)" and the
+                    # like. That line is the answer, and it was being read,
+                    # matched by nothing, and dropped.
+                    recent_lines.append(line.strip()[:200])
+                    # Not only in DEBUG_MODE. An ERROR from the server is the
+                    # server explaining itself, and it is never chatter - the
+                    # debug filter below would have hidden this behind a
+                    # setting nobody has on when the thing they need it for
+                    # happens.
+                    if line.startswith("ERROR ") or line.startswith("ERROR:"):
+                        print(f"[SERVER ERROR] {line.strip()}")
                     if getattr(config, 'DEBUG_MODE', False):
                         is_channel_traffic = " PRIVMSG #" in line
                         is_for_me = f"PRIVMSG {config.NICKNAME}" in line or f" {config.NICKNAME} " in line or f"@{config.NICKNAME.lower()}" in line.lower()
