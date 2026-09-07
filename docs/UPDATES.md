@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 Three fixes that had only ever been applied to one site each
+
+The audit's completeness critic named the pattern underneath a third of the
+findings, and it is not a knowledge gap. In each case somebody found a real
+problem, wrote the right fix, wrote a comment explaining it - and applied it
+only where the bug had been reported from.
+
+**`db` loaders.** `load_known_bots()` filters malformed rows out per ENTRY,
+with a comment explaining that every reader treats a row as a mapping. Its two
+siblings check only that the whole file is a dict, though both docstrings say
+"same posture as `load_known_bots()`". For the fetch history that was not a
+degraded view: `oserve` loads it straight into `config.fetch_queue`, and the
+dispatcher walks that dict every two seconds - so one string value raised
+`AttributeError` on every tick and killed cross-bot fetching for the life of
+the process.
+
+**The latency PONG.** `is_server_numeric()` exists because unanchored
+substring tests let a user forge server messages by typing them in a channel;
+its docstring cites this very PONG line as the bug it was written for. It was
+applied to the 513 handler and not to the PONG handler three lines above, so
+typing `oops PONG OSERVE_LATENCY_CHECK` forged the operator's latency reading -
+and the `continue` after it meant the speaker's own line was never processed.
+
+**The address in an inbound offer.** The only check was that the integer fits
+in 32 bits, so whoever held the offering nick chose an address this daemon
+would connect to - `DCC SEND x 0 22 1` decodes to 0.0.0.0, which `connect()`
+reads as localhost.
+
+**That third one is where the pattern stops being a rule.** The obvious fix -
+call `dcc.is_offerable_to_strangers()` at the missing site - is wrong, and
+proved it by breaking 32 existing tests. That predicate asks whether an
+address is reachable from the public internet, which is the right question
+about OUR OWN advertised address and the wrong one about a peer's: two bots on
+one LAN, or a machine talking to itself, are ordinary. The dial side gets the
+narrower question instead - can this name a peer at all - so 0.0.0.0,
+multicast and reserved are refused while loopback and private ranges stay
+allowed. Mutation-checked in both directions: too loose fails, and so does too
+tight.
+
 ### 🧪 The suite was overwriting the developer's - and the server's - real state
 
 Found by a guard written for a smaller problem, which is the useful part of
