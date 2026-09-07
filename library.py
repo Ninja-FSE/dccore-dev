@@ -639,6 +639,36 @@ def folders(name=None):
     return chosen.folders if chosen else []
 
 
+def every_folder():
+    """Every folder of every configured list, in list order, deduplicated.
+
+    NOT the same question as folders(). folders() answers "what is this list
+    built from", and every caller on the REQUEST path knows which list it is
+    serving, so that is the right accessor there - and the stronger one, since
+    it will not resolve a request against some other list's library.
+
+    This answers the question the two callers below actually have, which is
+    the reverse: "is this path one of OURS at all". Both run AFTER a request
+    has already been routed and validated against its own list - the pack-time
+    poison check and the download counter - and by then the list name is gone.
+    Asking folders() there silently means "the PRIMARY list's folders", so on
+    a multi-list install every path from any other list reads as foreign.
+
+    Deduplicated by path because two lists may legitimately share a folder,
+    and a caller iterating this wants each root once.
+    """
+    seen = set()
+    out = []
+    for served in lists():
+        for entry in served.folders:
+            key = os.path.normcase(os.path.normpath(entry.path))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(entry)
+    return out
+
+
 def folder_paths():
     """Just the paths, in order. For callers that have no use for labels."""
     return [entry.path for entry in folders()]

@@ -180,8 +180,16 @@ def library_count_key(file_path):
     A file under none of the configured folders keeps its absolute path as the
     key. That is a temp archive or a folder removed from the list mid-session;
     it is not a reason to lose the row.
+
+    EVERY list's folders, not the primary's. This runs after the transfer, by
+    which point the list that served the file is no longer in hand - and
+    folders() with no name means the PRIMARY list, so on a multi-list install
+    every file served from any other list fell through to the absolute-path
+    branch. That is a counter key holding a drive letter, which does not match
+    the same file counted from anywhere else and would ship a real path into a
+    stats table.
     """
-    for folder in library.folders():
+    for folder in library.every_folder():
         if library.is_inside(folder.path, file_path):
             try:
                 relative = os.path.relpath(file_path, folder.path)
@@ -189,6 +197,28 @@ def library_count_key(file_path):
                 break
             return os.path.join(folder.name, relative)
     return file_path
+
+
+def path_is_in_our_library(path):
+    """Is this path inside a folder some configured list is built from?
+
+    The pack-time question, and deliberately not the same one the request
+    path asks. A request knows which list it is being served from and is
+    resolved against THAT list's folders, which is the stronger check. By the
+    time a packed row comes back here the list name is gone, and a queued row
+    can legitimately have come from any list.
+
+    A named function rather than the inline `any(...)` it replaces, because
+    the inline form could only be tested by a test that rewrote it - and a
+    test that reimplements the check it is guarding passes just as happily
+    against the broken version. This one is callable.
+
+    Still is_safe_path() per folder, so each comparison resolves symlinks and
+    compares per separator: widening this from one list to all lists must not
+    widen it to the filesystem.
+    """
+    return any(is_safe_path(folder.path, path)
+               for folder in library.every_folder())
 
 
 def _sanitize_rar_leaf_name(folder_leaf):
@@ -581,7 +611,8 @@ def check_queue_and_send(irc_sock, completed_user):
                         db.save_dcc_queue()
                     if f_user in config.frozen_queues:
                         del config.frozen_queues[f_user]
-                    print(f"[DCC QUEUE_CLEAN] {f_user} rensad permanent pga timeout.")
+                    print(f"[DCC QUEUE_CLEAN] {f_user} was frozen for over "
+                          f"five minutes and never came back. Queue dropped.")
 
     if user_key == "system_next_trigger_fallback":
         user_key = ""
@@ -707,8 +738,18 @@ def check_queue_and_send(irc_sock, completed_user):
                     # symlinks and compares per separator exactly as before;
                     # what changed is how many roots are legitimate, not how
                     # any one of them is tested.
-                    if not any(is_safe_path(folder.path, true_source_dir)
-                               for folder in library.folders()):
+                    #
+                    # EVERY list's folders (#26). The request path resolved
+                    # this row against the folders of the list bound to the
+                    # channel it arrived in - see resolve_list_folder_with_root
+                    # (wanted_list) below - so a row from any list but the
+                    # primary is legitimate here. folders() with no name means
+                    # the PRIMARY's, which made this check disagree with the
+                    # one that admitted the row: a !rar accepted in a channel
+                    # bound to a second list was destroyed here minutes later,
+                    # logged as a poisoned queue entry, and the user's queue
+                    # row deleted with it.
+                    if not path_is_in_our_library(true_source_dir):
                         print(f"[SECURITY] Blocked a poisoned queue entry for {completed_user}: {true_source_dir}")
                         with queue_lock:
                             if completed_user.lower() in config.dcc_queue:

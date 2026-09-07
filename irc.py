@@ -1077,6 +1077,44 @@ def is_list_request(msg, msg_lower):
     return not (msg.startswith("@find ") or msg.startswith("@locator "))
 
 
+def thaw_one_user(key):
+    """Release one user's freeze. True if THIS call is the one that released
+    it.
+
+    One pop, never `in` then `del`. Between those two statements the freeze
+    sweep in dcc.check_queue_and_send() - which runs on every dispatch thread
+    and deletes every frozen user it finds present in channel_users - can
+    remove the key, and the `del` then raises KeyError on the IRC READ
+    THREAD, where the message loop's `except Exception` answers it by closing
+    the socket.
+
+    Returning whether this caller did the removing is what keeps the log line
+    and the dispatch thread attached to a real thaw rather than to a race
+    that another thread already won.
+    """
+    frozen = getattr(config, "frozen_queues", None)
+    if not isinstance(frozen, dict):
+        return False
+    return frozen.pop(key, None) is not None
+
+
+def thaw_frozen_users(names):
+    """The users among `names` that THIS call thawed, in order.
+
+    The 353 (NAMES) handler thaws everyone still in the channel and starts a
+    dispatch thread per user. That thread's freeze sweep deletes every user
+    it finds present in channel_users - which the same handler populated with
+    all of these names moments earlier - so the first iteration's thread
+    routinely removes keys the later iterations are about to remove.
+
+    Every removal therefore has to tolerate losing the race, and the returned
+    list has to be what was actually removed: a NAMES sync after a reconnect,
+    with two or more frozen users, was dropping the very link it was sent to
+    recover.
+    """
+    return [name for name in names if thaw_one_user(name)]
+
+
 def take_complete_lines(buffer, chunk):
     """Add `chunk` to `buffer` and return (leftover_bytes, [decoded lines]).
 
@@ -1719,9 +1757,21 @@ def irc_loop():
                             # NAMES (353) and NOT via JOIN. Without this, their queues stayed
                             # frozen and were deleted by the 5-minute timer despite never leaving.
                             # -------------------------------------------------
-                            thawed_users = [n for n in names if n in getattr(config, 'frozen_queues', {})]
+                            # pop(), not del, and the list is rebuilt from what
+                            # was actually removed. The thread started for each
+                            # thawed user runs check_queue_and_send(), whose own
+                            # freeze sweep deletes EVERY user it finds present in
+                            # channel_users - which the 353 handler above has just
+                            # populated with all of these names. So the first
+                            # iteration's thread routinely deletes the keys later
+                            # iterations are about to delete, and `del` raised
+                            # KeyError on the IRC READ THREAD. That is caught far
+                            # below by the message loop's `except Exception`, which
+                            # closes the socket - a NAMES sync after a reconnect,
+                            # with two or more frozen users, dropping the link it
+                            # was sent to recover.
+                            thawed_users = thaw_frozen_users(names)
                             for frozen_user in thawed_users:
-                                del config.frozen_queues[frozen_user]
                                 files_in_q = len(config.dcc_queue.get(frozen_user, []))
                                 print(f"[DCC RECONNECT THAW] {frozen_user} was still in {chan} at the NAMES sync. Thawing {files_in_q} file(s).")
                                 threading.Thread(target=dcc.check_queue_and_send, args=(s, frozen_user), daemon=True).start()
@@ -1745,8 +1795,15 @@ def irc_loop():
                                     config.channel_users[joined_chan.lower()] = set()
                                 config.channel_users[joined_chan.lower()].add(j_key)
                             
-                            if hasattr(config, 'frozen_queues') and j_key in config.frozen_queues:
-                                del config.frozen_queues[j_key]
+                            # One pop, not `in` then `del`. Between the two, the
+                            # freeze sweep in check_queue_and_send() - which runs
+                            # on every dispatch thread and deletes every user it
+                            # finds present in channel_users, set three lines
+                            # above - can remove this key, and the `del` then
+                            # raised KeyError on the IRC READ THREAD. Same class
+                            # as the 353 thaw above, same consequence: the message
+                            # loop's `except Exception` closes the socket.
+                            if thaw_one_user(j_key):
                                 print(f"[DCC REALTIME THAW] {joined_user} rejoined {joined_chan}. Thawing their queue.")
                                 files_in_q = len(config.dcc_queue.get(j_key, [])) if hasattr(config, 'dcc_queue') else 0
                                 announce.send_debug(f"User {config.C_BOLD}{joined_user}{config.C_RESET} returned to {joined_chan}, continuing queue of {config.C_BOLD}{files_in_q}{config.C_RESET} file(s)", category="JOIN")

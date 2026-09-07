@@ -59,6 +59,57 @@ def hostile_env():
     return env
 
 
+# Files a test must never write for real. All three of these have actually
+# been written by the suite: settings.conf (twice), data/on_connect.json with
+# a plaintext X password in it, and data/lists.json - the last one pointing at
+# a temp directory that had already been deleted, which cost 147 failures in
+# tests that never mentioned lists.
+#
+# Every one was invisible in `git status`: settings.conf and data/ are both
+# gitignored. Three times is enough to stop relying on noticing.
+WRITABLE_STATE = ("settings.conf", "data")
+
+
+def state_snapshot():
+    """Every real state file, with its modification time.
+
+    Compared before and after the suite. A test that redirects its writes
+    correctly leaves this identical; one that does not shows up as an added
+    or touched path, named.
+    """
+    seen = {}
+    for target in WRITABLE_STATE:
+        path = os.path.join(REPO_ROOT, target)
+        if os.path.isfile(path):
+            seen[target] = os.path.getmtime(path)
+        elif os.path.isdir(path):
+            for root, _dirs, names in os.walk(path):
+                for name in names:
+                    full = os.path.join(root, name)
+                    try:
+                        seen[os.path.relpath(full, REPO_ROOT)] = os.path.getmtime(full)
+                    except OSError:
+                        pass
+    return seen
+
+
+def report_state_writes(before, after):
+    """True if the suite left the developer's own state alone."""
+    added = sorted(set(after) - set(before))
+    touched = sorted(p for p in set(after) & set(before) if after[p] != before[p])
+    if not added and not touched:
+        return True
+    print()
+    print("  THE SUITE WROTE REAL STATE FILES:")
+    for path in added:
+        print(f"    created  {path}")
+    for path in touched:
+        print(f"    modified {path}")
+    print("  A test wrote outside its temp directory. Redirect it in "
+          "tests/support.py setUp() - see LISTS_FILE there for the pattern.")
+    return False
+
+
 def main():
     py = sys.executable
     checks = [
@@ -81,7 +132,9 @@ def main():
                            "function_coverage.py")]),
     ]
 
+    state_before = state_snapshot()
     results = [run(label, argv) for label, argv in checks]
+    results.append(report_state_writes(state_before, state_snapshot()))
 
     # A test file that silently becomes empty - a bad edit, a broken import - lets
     # the suite report success while testing less. Pin a floor so shrinkage is loud.
