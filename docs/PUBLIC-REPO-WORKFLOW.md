@@ -41,6 +41,44 @@ meant to persist across releases has to originate here and flow through
 extraction like every other file; `dccore` gets content only as a release,
 never as its own line of development.
 
+## Release candidates
+
+The project has cut four of these — `v1.10.0-RC1` through `RC4` — and never
+wrote down how, which is why this section exists.
+
+**What an RC is for:** running a finished release yourself before anyone else
+gets it. Nothing about the code changes; what changes is that the build stops
+claiming to be the final version while it is still being proven.
+
+**Cut one by versioning it, in the same three places a release uses:**
+
+- `SCRIPT_VERSION` in `defaults.py` → `DCCore vX.Y.Z-RCn`
+- the version line in `README.md`
+- the heading in **both** changelogs, `docs/UPDATES.md` marked 🟦 rather than
+  🟩, `docs/UPDATES-PUBLIC.md` in its own plain form
+
+All three, and matching. `SCRIPT_VERSION` is reported over CTCP VERSION,
+printed in the advert and stamped on every generated list, so an RC that says
+`v1.12.0` puts a version that does not exist yet into three places at once —
+and a bug reported against it cannot be placed. That is the same mismatch this
+file already warns about for tags.
+
+**An RC stays here.** It is not extracted to `dccore`: the point is to run it
+before it is published, and publishing it defeats that. The v1.10.0 RCs each
+got a public changelog entry because they *were* released; an RC used only as
+a beta does not need one until it is promoted.
+
+**Promoting it** is one edit in each of those three places — `-RCn` comes off,
+the internal marker goes 🟦 → 🟩, and the date is updated if it has moved.
+The RC heading is not kept as a separate section unless the RC actually
+shipped to `dccore`: two headings for one set of changes reads as two releases.
+Then run the checklist below.
+
+**If the beta finds something**, fix it on a branch as usual and cut `-RC2`.
+Do not fix it silently under the same RC number: the whole value of the
+version is that the person running it can say which build they saw the
+problem on.
+
 ## Releasing to `dccore`
 
 ### Before you extract anything
