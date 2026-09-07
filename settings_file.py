@@ -43,6 +43,7 @@ clearly which line it ignored.
 import configparser
 import io
 import os
+import sys
 import re
 import platform_compat
 import tempfile
@@ -324,9 +325,31 @@ def declared_types(namespace):
 
     Anything whose annotation is not a plain type is ignored rather than
     guessed at, and the caller falls back to the default's own type.
+
+    PYTHON 3.14 DOES NOT PUT THEM IN `__dict__`. PEP 649 made annotations
+    lazy: a module grows an `__annotate__` function, and `__annotations__` is
+    computed the first time the ATTRIBUTE is read. `vars(module)` hands back
+    the raw `__dict__`, which does not contain it until then - so this
+    returned {} on 3.14 while `config.__annotations__` held all 94.
+
+    Nothing raised. Every caller simply saw a config with no declared
+    settings: the dashboard's Settings page rendered zero fields in every
+    category, and both the reader and the writer fell back to the default's
+    runtime type - which for `WEBUI_CONSOLE_ENABLED: bool = None` is
+    NoneType, so the value came through as raw text rather than a bool.
+
+    Found by running the daemon on 3.14 during the RC1 beta. CI covers 3.10
+    and 3.12, and the README promises "3.10+", which now includes this.
     """
-    annotations = namespace.get("__annotations__") or {}
-    return {name: kind for name, kind in annotations.items() if isinstance(kind, type)}
+    annotations = namespace.get("__annotations__")
+    if annotations is None:
+        # Read it as an ATTRIBUTE, which is what triggers the lazy build. The
+        # module is found by its own __name__ rather than being passed in, so
+        # every existing caller keeps handing us vars(config) unchanged.
+        module = sys.modules.get(str(namespace.get("__name__", "")))
+        annotations = getattr(module, "__annotations__", None)
+    return {name: kind for name, kind in (annotations or {}).items()
+            if isinstance(kind, type)}
 
 
 _IRC_ESCAPE_RE = re.compile(r"\\x([0-9A-Fa-f]{2})")

@@ -4,6 +4,46 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🐍 Python 3.14 emptied the entire Settings page
+
+**Second RC1 beta finding, and the more serious of the two.** The dashboard
+came up and every Settings category rendered its heading with no fields under
+it. No JavaScript error, no failed request, no log line - the API returned all
+8 categories and 92 fields when asked from a shell.
+
+The difference was the interpreter. `start-dccore.bat` runs the daemon with
+`py -3`, which on that machine is 3.14; the shell probe used `python`, which
+is 3.13.
+
+**PEP 649, new in 3.14, made annotations lazy.** A module now carries an
+`__annotate__` function and builds `__annotations__` the first time the
+ATTRIBUTE is read. `vars(module)` hands back the raw `__dict__`, which does
+not contain it until then:
+
+    Python 3.13:  vars(config)["__annotations__"]      -> 94 entries
+    Python 3.14:  vars(config).get("__annotations__")  -> None
+
+`declared_types()` reads exactly that, so on 3.14 it reported a configuration
+with **no declared settings at all**. Nothing raised, which is why this
+reached a beta rather than a stack trace. Every caller simply saw nothing:
+the Settings page rendered zero fields, and both the settings reader and the
+writer fell back to the default value's runtime type - so
+`WEBUI_CONSOLE_ENABLED: bool = None` typed as `NoneType` and came through as
+raw text rather than a bool.
+
+It reads the attribute now when the dict has nothing, resolving the module by
+its own `__name__` so every existing caller keeps passing `vars(config)`
+unchanged. 94 settings on both interpreters.
+
+**CI covered 3.10 and 3.12, and the README promises "3.10+".** Nothing in the
+matrix was wrong; the matrix was behind. It has 3.14 in it now, and the whole
+suite passes there - 3290 tests, no failures - so this was the only 3.14
+incompatibility, not the first of many.
+
+The unit-level guard does not depend on which interpreter runs it: it builds a
+module whose annotations are reachable only as an attribute, which is the
+shape 3.14 gives every module.
+
 ### 🧩 The dashboard was silently absent, and the check said "Ready to start"
 
 **First finding from the RC1 beta.** The daemon was started from a real
