@@ -2079,8 +2079,21 @@
         escapeHtml(field.name) + '">';
     }
 
+    // A setting whose unset value is not the same as false says so. Only
+    // WEBUI_CONSOLE_ENABLED carries one today: it is declared `bool = None`
+    // and None means "on while the dashboard is loopback-only", so the
+    // checkbox alone was telling a stock install that the remote admin
+    // console was off while it was on.
+    //
+    // escapeHtml() into TEXT content, which is what it encodes correctly. It
+    // does not encode quotes, so this must never become an attribute.
+    var note = field.note
+      ? '<span class="settings-field-note">' + escapeHtml(field.note) + "</span>"
+      : "";
+
     return '<div class="settings-field-row">' +
-      '<span class="' + nameClass + '">' + escapeHtml(field.label || field.name) + '</span>' +
+      '<span class="' + nameClass + '">' + escapeHtml(field.label || field.name) +
+      note + '</span>' +
       '<span class="settings-field-control">' + control + '</span>' +
       "</div>";
   }

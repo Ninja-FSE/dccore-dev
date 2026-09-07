@@ -1821,6 +1821,24 @@ def _settings_field(name, declared, value):
              "type": declared.__name__, "value": value}
     if name in settings_file.CHOICES:
         field["choices"] = list(settings_file.CHOICES[name])
+
+    # A TRI-STATE NEEDS A THIRD ANSWER. WEBUI_CONSOLE_ENABLED is declared
+    # `bool = None`, and None does not mean False: console_is_enabled() reads
+    # it as "yes if nobody else can reach it", so a stock loopback install has
+    # the Console ON. The page renders a bool as a checkbox from `!!value`,
+    # which drew None as unchecked - telling the operator that ban, unban,
+    # clearqueue, rehash and update were NOT reachable behind the dashboard
+    # password when they were.
+    #
+    # A note rather than sending the effective value as `value`: that would
+    # make the checkbox truthful, but the next save would then write an
+    # explicit True, and an operator who later moved the dashboard onto the
+    # LAN would keep a Console that should have switched itself off. The
+    # value stays unset; what changes is that the page says what unset means
+    # here and now.
+    if name == "WEBUI_CONSOLE_ENABLED" and value is None:
+        field["note"] = ("Not set: on while the dashboard is loopback-only. "
+                         "Currently " + ("ON" if console_is_enabled() else "OFF") + ".")
     return field
 def build_settings_payload():
     """GET /api/settings payload: every editable setting, grouped for the

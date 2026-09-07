@@ -1503,6 +1503,19 @@ html, body {
   color: var(--accent-strong);
 }
 
+/* What an unset tri-state actually resolves to right now. Its own line under
+   the label, because it is a sentence rather than a word and the label column
+   is already narrow. Quieter than the label: it is context, not the name of
+   the thing being set. */
+.settings-field-note {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-sans, inherit);
+  font-size: 11.5px;
+  color: var(--text-dim, var(--text));
+  opacity: 0.85;
+}
+
 .settings-field-control {
   flex: 0 0 auto;
   width: 260px;
