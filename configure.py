@@ -278,9 +278,62 @@ def write_admin_config_password(password_hash, path=None, sample_path=None):
 
     text = build_admin_config_text(existing_text, password_hash)
 
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(text)
+    # ATOMIC, because open(path, "w") truncates BEFORE it writes. A full disk,
+    # a killed process or a power cut at that moment left a half-written
+    # admin_config.py - and a half-written Python file is a SyntaxError, which
+    # defaults.py's `except ImportError` around `from admin_config import *`
+    # does not catch. That makes the daemon unbootable, and configure.py
+    # cannot repair it either, because configure.py imports defaults itself.
+    # settings_file._atomic_write() already does this correctly for the other
+    # config file; there is no reason for this one to be the exception.
+    settings_file._atomic_write(path, text)
     print(f"[SETUP] Wrote ADMIN_PASSWORD_HASH to {os.path.basename(path)}.")
+
+    shadow = settings_conf_shadows_password()
+    if shadow:
+        # WHICH FILE WINS IS NOT THE ONE THIS FUNCTION WRITES. defaults.py
+        # applies admin_config.py first and settings.conf second, so a hash in
+        # settings.conf overrides the one just written - and the dashboard's
+        # own "change password" control writes to settings.conf. So on any
+        # install whose password was ever changed from the dashboard, running
+        # configure.py to rotate the credential silently did nothing, and the
+        # operator kept using a password they believed they had replaced.
+        #
+        # settings_file.shadowed_by_admin_config() warns about exactly this
+        # collision from the other direction. This is the missing half.
+        print(f"[SETUP] WARNING: {os.path.basename(shadow)} also sets "
+              f"ADMIN_PASSWORD_HASH, and it is applied AFTER "
+              f"{os.path.basename(path)} - so the password you just set will "
+              f"NOT take effect.")
+        print(f"[SETUP] Remove the ADMIN_PASSWORD_HASH line from "
+              f"{os.path.basename(shadow)}, or change the password from the "
+              f"dashboard instead, which writes to that file.")
+    return shadow
+
+
+def settings_conf_shadows_password():
+    """The settings.conf path if it sets ADMIN_PASSWORD_HASH, else None.
+
+    Parsed rather than pattern-matched: settings_file.parse() is what the
+    daemon itself uses to decide what that file sets, so this cannot disagree
+    with the thing it is predicting.
+    """
+    try:
+        path = settings_file.settings_path()
+        if not os.path.exists(path):
+            return None
+        with io.open(path, encoding="utf-8") as handle:
+            parsed = settings_file.parse(handle.read())
+    except Exception:
+        # A settings.conf that cannot be read is not a reason to refuse to set
+        # a password; the daemon reports that fault on its own at startup.
+        return None
+    values = parsed[0] if isinstance(parsed, tuple) else parsed
+    try:
+        names = set(values)
+    except TypeError:
+        return None
+    return path if "ADMIN_PASSWORD_HASH" in names else None
 
 
 def read_vars_ini(path):
