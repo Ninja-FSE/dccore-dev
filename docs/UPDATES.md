@@ -4,6 +4,40 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔽 A dropdown on the Settings page shows what is actually stored
+
+From the beta: *"i set packet size to 64kb and when i press save and rehash i
+see it back to 4kb"*.
+
+The save had worked. `4096` is simply the FIRST `DCC_BLOCK_SIZE` choice, and no
+`<option>` was ever marked `selected` - nor did anything assign `select.value`
+after the markup was inserted - so every dropdown on the page rendered showing
+its first choice, whatever the daemon was actually using.
+
+All four were affected, and the packet size was the least of them:
+
+| setting | always displayed |
+|---|---|
+| `LIST_FORMAT` | `txt` |
+| `THEME` | `classic` |
+| `ADMIN_CHAT_MODE` | `auto` |
+| `DCC_BLOCK_SIZE` | `4096` - "4 KB" |
+
+**The worse half is not the one that was noticed.** A page stating a value the
+daemon is not using invites an operator to read it as correct and leave it
+alone - agreeing to something they were never shown. It cuts the other way
+too: someone who wants the first choice sees the first choice, changes
+nothing, and keeps whatever was really there.
+
+**Why it survived.** `field.value` arrives as JSON, so it is an int for
+`DCC_BLOCK_SIZE` and a string for `LIST_FORMAT`, while an `<option>` value is
+always text. Any strict comparison between the two is false for every numeric
+choice. The fix compares as strings, and the tests carry a case of each kind.
+
+A pending edit wins over the stored value, like the checkbox beside it: a
+re-render while the save bar is dirty must not silently discard what the
+operator picked.
+
 ### ⏭️ DCC RESUME: a partial download can be resumed
 
 From the beta, in mIRC: a transfer sat at **"Requesting resume"** and never
