@@ -4,6 +4,60 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔌 A failed listener no longer costs a DCC slot for ever
+
+The caller appends a transfer to `config.active_transfers` BEFORE calling
+`start_dcc_send()`, and only the `finally:` of one try inside that function
+removes it again. `settimeout()` and `listen()` sat ABOVE that try, so an
+`OSError` from either - EMFILE when the host is out of file descriptors, or
+the kernel refusing the backlog - killed the dispatch thread with the row
+still in the list and the listener still open.
+
+Nothing ever revisits such a row. It names a transfer that is not happening
+and no completion will fire to remove it, so it is one permanent slot out of
+`MAX_DCC_SLOTS`, cumulative, until the daemon restarts - and the conditions
+that make `listen()` fail are exactly the ones where losing serving capacity
+hurts most.
+
+`listen()` could not simply move down past the handshake: the handshake is
+what tells the peer to connect, and a peer dialling before we listen gets a
+refusal. The whole block moved inside the try instead, and a test pins that
+ordering as well as the release.
+
+### 🧷 A rejected re-fetch no longer destroys the list you already had
+
+`_extract_and_locate_list_file()` wipes the extraction directory as its FIRST
+action - and that directory is not scratch space. It is
+`<FETCHED_FILES_DIR>/lists/<bot>/`, where the list being served from lives.
+Every validation runs after the wipe: the byte cap, `is_zipfile()`, the member
+checks, the plausible-list sniff, the line ceiling.
+
+So a re-fetch that turned out to be a RAR, an oversized archive or a peer's
+error page destroyed a good list on the way to rejecting the replacement. And
+`refetch_due_lists()` runs unattended on a timer, so nobody is watching: the
+operator finds a list they had yesterday gone today, with a rejection line in
+the log as the only trace.
+
+The held copy is now set aside first and put back on any rejection - the same
+shape `update_list.py` already uses to publish our own list through
+`final + ".new"`, applied to the receiving side.
+
+### 🧪 A reload was throwing the test harness's redirects away
+
+The state guard added earlier today caught this on a run where nothing else
+had changed, which is exactly the intermittent shape it exists to make loud.
+
+`db.py` derives its paths once at import - `FETCH_HISTORY_FILE =
+getattr(config, "FETCH_HISTORY_FILE", "data/fetch_history.json")` - and a
+`!rehash` reloads `db`, re-running that line. The harness patched only the
+module constant, so any test exercising a reload threw the redirect away
+mid-run, and every later write in that process landed in the developer's real
+`data/` directory. `defaults.py` does not define these names, so the fallback
+is the real path.
+
+The harness now sets the CONFIG values too, so a reload re-derives the temp
+path rather than the real one.
+
 ### 🔁 Three fixes that had only ever been applied to one site each
 
 The audit's completeness critic named the pattern underneath a third of the

@@ -1974,35 +1974,54 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             pass
         return
 
-    dcc_sock.settimeout(30.0)
-    dcc_sock.listen(1)
-    
-    safe_file_name = file_name.replace(" ", "_")
-    # The handshake is a PRIVMSG like any other: the server prepends our
-    # ":nick!ident@host " when relaying it, and the whole thing has to fit
-    # inside 512 bytes. A non-ASCII filename costs 2-3 bytes per character,
-    # so a ~150-character Chinese or Japanese title overruns that on its own -
-    # and the fields the transfer actually needs (address, port, size) sit
-    # AFTER the name, so the server's cut takes THOSE and the receiver is
-    # handed a handshake it cannot act on. Trimming the name ourselves costs a
-    # shortened save-name; not trimming it costs the transfer.
-    ctcp_handshake = announce.fit_irc_filename(
-        lambda offered: (f"PRIVMSG {user} :\x01DCC SEND {offered} "
-                         f"{ip_long} {assigned_port} {file_size}\x01\r\n"),
-        safe_file_name)
-    if safe_file_name not in ctcp_handshake:
-        # Say so rather than letting the receiver silently save it under a
-        # name the operator never chose and cannot find in their own library.
-        print(f"[DCC] Offered filename shortened to fit the IRC line: {file_name!r}")
-    
-    try:
-        irc_sock.send(ctcp_handshake.encode())
-        print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
-    except Exception as e:
-        print(f"[DCC ERROR] Failed to send the handshake: {e}")
-
     conn = None
     try:
+        # settimeout() and listen() USED TO SIT ABOVE this try - the one whose
+        # finally is the only thing that releases the slot and closes this
+        # socket. The CALLER appends the transfer to config.active_transfers
+        # before calling us (all three dispatch sites in check_queue_and_send,
+        # plus the direct path), so an OSError out of listen() - EMFILE when
+        # the process is out of file descriptors, or the kernel refusing the
+        # backlog - killed this thread with the row still in the list and the
+        # listener still open.
+        #
+        # Nothing ever revisits that row. It names a transfer that is not
+        # happening, and no completion will fire to remove it: one permanent
+        # slot gone out of MAX_DCC_SLOTS, cumulative, until the daemon is
+        # restarted. The conditions that make listen() fail are exactly the
+        # ones where losing serving capacity hurts most.
+        #
+        # listen() has to stay AHEAD of the handshake - the handshake is what
+        # tells the peer to connect, and a peer dialling before we listen gets
+        # a refusal - so the whole block moved inside the try rather than the
+        # two calls moving down past it.
+        dcc_sock.settimeout(30.0)
+        dcc_sock.listen(1)
+    
+        safe_file_name = file_name.replace(" ", "_")
+        # The handshake is a PRIVMSG like any other: the server prepends our
+        # ":nick!ident@host " when relaying it, and the whole thing has to fit
+        # inside 512 bytes. A non-ASCII filename costs 2-3 bytes per character,
+        # so a ~150-character Chinese or Japanese title overruns that on its own -
+        # and the fields the transfer actually needs (address, port, size) sit
+        # AFTER the name, so the server's cut takes THOSE and the receiver is
+        # handed a handshake it cannot act on. Trimming the name ourselves costs a
+        # shortened save-name; not trimming it costs the transfer.
+        ctcp_handshake = announce.fit_irc_filename(
+            lambda offered: (f"PRIVMSG {user} :\x01DCC SEND {offered} "
+                             f"{ip_long} {assigned_port} {file_size}\x01\r\n"),
+            safe_file_name)
+        if safe_file_name not in ctcp_handshake:
+            # Say so rather than letting the receiver silently save it under a
+            # name the operator never chose and cannot find in their own library.
+            print(f"[DCC] Offered filename shortened to fit the IRC line: {file_name!r}")
+    
+        try:
+            irc_sock.send(ctcp_handshake.encode())
+            print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
+        except Exception as e:
+            print(f"[DCC ERROR] Failed to send the handshake: {e}")
+
         conn, addr = dcc_sock.accept()
         conn.settimeout(60.0)
         dcc_sock.settimeout(None)
