@@ -102,7 +102,7 @@ def load(path=None):
     return commands[:MAX_COMMANDS], delay
 
 
-def problems(commands, delay_seconds):
+def problems(commands, delay_seconds, ignore_blanks=False):
     """Every reason this set could not be sent, as operator-readable lines.
 
     Returns [] when it is usable. Same shape and same reasoning as
@@ -117,7 +117,12 @@ def problems(commands, delay_seconds):
     for index, command in enumerate(commands, start=1):
         text = _clean_command(command)
         if not text:
-            found.append(f"command {index}: blank.")
+            # save() strips blanks before storing them, so when it validates
+            # they are not a fault - they are how somebody formats a pasted
+            # block. The index still advances, which is the point: the number
+            # has to match the line the operator is looking at.
+            if not ignore_blanks:
+                found.append(f"command {index}: blank.")
             continue
         size = len(text.encode("utf-8", "replace"))
         if size > MAX_COMMAND_BYTES:
@@ -146,10 +151,22 @@ def save(commands, delay_seconds, path=None):
     """
     import tempfile
 
-    cleaned = [_clean_command(c) for c in commands or []]
+    # VALIDATE THE ORIGINAL, STORE THE FILTERED. problems() reports a fault
+    # by POSITION - deliberately, because the text may be a password and must
+    # not be echoed back - so the number it gives is the only handle the
+    # operator has for finding the line. Numbering the already-filtered list
+    # made that number wrong by the count of preceding blank lines, and the
+    # dashboard sends a textarea split with splitlines() and no filtering at
+    # all: paste an X login, a blank separator, a MODE line and an over-long
+    # one, and you are told "command 3" for what you typed on line 4.
+    #
+    # ignore_blanks because save() strips them on purpose - a blank line in a
+    # pasted block is formatting, not a command.
+    original = list(commands or [])
+    cleaned = [_clean_command(c) for c in original]
     cleaned = [c for c in cleaned if c]
 
-    found = problems(cleaned, delay_seconds)
+    found = problems(original, delay_seconds, ignore_blanks=True)
     if found:
         raise ValueError("\n".join(found))
 

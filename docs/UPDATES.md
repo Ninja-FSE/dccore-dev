@@ -4,6 +4,59 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 `start-dccore.bat check` said FAIL and exited 0
+
+`cmd.exe` expands `%errorlevel%` when it PARSES a parenthesised block, before
+anything inside it has run - so `if ... ( ... exit /b %errorlevel% )` returned
+whatever the value was beforehand, which is 0. Verified on Windows 11: the
+block form exits 0 where the goto form exits the real code.
+
+It matters because `start-dccore.bat check` is the documented Windows
+pre-flight in `README.md`, `docs/INSTALL.md` and `docs/WINDOWS.md`. It printed
+"FAIL ..." and "1 problem(s) - fix these before starting", then reported
+success, so any wrapper, scheduled task or CI step gating on the exit code
+treated a broken config as verified.
+
+The Linux twin was always right (`"$PY" ... ; exit $?`, outside any block), so
+the two launchers had drifted on the one thing this shim layer exists to keep
+identical.
+
+### 🔢 An on-connect error named the wrong line
+
+`problems()` reports a fault by POSITION, deliberately: the text may be a
+password and must never be echoed back, so the number is the only handle the
+operator has. `save()` stripped blank lines and then numbered the FILTERED
+list, while the dashboard sends a textarea split with `splitlines()` and no
+filtering at all.
+
+Paste an X login, a blank separator, a `MODE %nick% +x` and an over-long
+line - the ordinary shape of the block this feature exists for - and you were
+told "command 3" for what you typed on line 4, then edited the wrong command.
+
+Validation now runs against what the operator typed; blanks are still stripped
+before storing, and are no longer reported as faults when it is `save()` doing
+the asking.
+
+### ⚖️ live_speed() contradicted itself, and the number is a question for the operator
+
+Not changed - documented, because changing it changes what every advert says.
+
+`stats_mgr.live_speed()` sums the per-transfer rates and then DIVIDES by the
+number of contributors. Its inline comment explains that as a mean; its own
+docstring, and `runtime.live_speed_bps`, both called it an aggregate "across
+every sending transfer". Somebody changed one and not the others.
+
+With three slots each moving 2 MB/s, the channel advert publishes
+`Speed: 2.0MB/s` and the dashboard shows the same, against 6 MB/s of real
+outbound traffic. That figure is the bot's shop window, so which of the two
+readings is wanted is the operator's call. Both docstrings now say what the
+code actually does, and name the open question.
+
+**These four files had no audit lens pointed at them at all** - `theme.py`,
+`stats_mgr.py`, `on_connect.py` and `omenserve_import.py`, along with the
+whole of `scripts/` and `web/index.html`. The launchers in particular are
+exactly what a Python-shaped audit walks past.
+
 ### 🔌 A failed listener no longer costs a DCC slot for ever
 
 The caller appends a transfer to `config.active_transfers` BEFORE calling
