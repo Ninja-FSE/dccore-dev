@@ -42,8 +42,20 @@ suite are stdlib-only, which is why they run on a bare machine with no
 4. **Only if you want the web dashboard:**
 
    ```cmd
-   pip install -r requirements-web.txt
+   py -3 -m pip install -r requirements-web.txt
    ```
+
+   `py -3 -m pip`, not a bare `pip`. `start-dccore.bat` runs the daemon with
+   `py -3` and only falls back to `python`, while a bare `pip` follows
+   whatever `python` resolves to. On a machine with two Pythons installed -
+   which step 3 above is precisely how you find out you have - those are
+   different interpreters, so `pip install` succeeds, the daemon starts, and
+   the dashboard silently never appears. The only clue is
+   `[WEBUI] Flask not installed; dashboard disabled.` in the log, after the
+   bot has already connected.
+
+   `start-dccore.bat check` now says so before you get that far, and names
+   the interpreter it looked in.
 
    Skip it otherwise. The daemon starts and serves files without Flask; the
    dashboard is the only thing that needs it.

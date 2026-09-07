@@ -2,6 +2,8 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **Fixed: the web dashboard could be silently missing, with the setup check saying everything was fine.** If your machine has more than one Python - the `py` launcher's and one on your `PATH` - then `pip install -r requirements-web.txt` installed Flask into one while `start-dccore` ran the daemon with the other. The bot started, the dashboard did not, and the only clue was a line in the log after it had already connected. The check now reports whether the dashboard will actually come up and names the interpreter it looked in, and both install guides tell you to use `py -3 -m pip` (Windows) or `python3 -m pip` (Linux) so the package lands where the daemon will look for it.
+
 - **Fixed: changing your admin password with `configure.py` could silently do nothing.** If you had ever changed it from the dashboard, that password lives in `settings.conf` — which is applied *after* `admin_config.py` and therefore wins. Running `configure.py` wrote a new hash into a file nothing would read, told you it had been set, and left the old password working. It now checks, and says plainly that the change will not take effect and where to make it instead. **If you have rotated a shared password this way, check it actually changed.**
 
 - **Fixed: a failed write could leave your install unbootable.** `configure.py` truncated `admin_config.py` before writing it, so a full disk or an interrupted run left half a Python file — which the daemon cannot parse and `configure.py` cannot repair either, because it loads the same file. The write is atomic now: either the new file or the old one, never half of one.
