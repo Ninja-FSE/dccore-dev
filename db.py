@@ -826,7 +826,15 @@ def load_fetched_bot_lists():
     try:
         with io.open(FETCHED_BOT_LISTS_FILE, "r", encoding="utf-8") as handle:
             loaded = json.load(handle)
-        return loaded if isinstance(loaded, dict) else {}
+        if not isinstance(loaded, dict):
+            return {}
+        # Per ENTRY, not just the whole file - the same filter, and the same
+        # reasoning, as load_known_bots() forty lines above. Every reader
+        # treats a row as a mapping, so one malformed value in a hand-edited
+        # or half-restored file raises in all of them instead of costing the
+        # empty registry this docstring promises.
+        return {key: value for key, value in loaded.items()
+                if isinstance(value, dict)}
     except Exception as err:
         print(f"[DB ERROR] Could not read the fetched-lists registry, starting empty: {err}")
         return {}
@@ -859,7 +867,21 @@ def load_fetch_history():
     try:
         with io.open(FETCH_HISTORY_FILE, "r", encoding="utf-8") as handle:
             loaded = json.load(handle)
-        return loaded if isinstance(loaded, dict) else {}
+        if not isinstance(loaded, dict):
+            return {}
+        # Per ENTRY, not just the whole file - the same filter, and the same
+        # reasoning, as load_known_bots() forty lines above. Every reader
+        # treats a row as a mapping, so one malformed value in a hand-edited
+        # or half-restored file raises in all of them instead of costing the
+        # empty history this docstring promises.
+        #
+        # Worse here than in the registry: oserve.py loads this straight into
+        # config.fetch_queue, and check_fetch_queue() walks that dict with
+        # row.get("state") every two seconds. One string value therefore did
+        # not degrade the view - it raised AttributeError on every tick and
+        # killed the cross-bot fetch dispatcher for the life of the process.
+        return {key: value for key, value in loaded.items()
+                if isinstance(value, dict)}
     except Exception as err:
         print(f"[DB ERROR] Could not read the fetch history, starting empty: {err}")
         return {}

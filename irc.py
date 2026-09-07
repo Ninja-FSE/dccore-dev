@@ -1555,7 +1555,20 @@ def irc_loop():
                             pong_code = parts[1].lstrip(':')
                             s.send(f"PONG {pong_code}\r\n".encode())
                     
-                    if " PONG " in line and "OSERVE_LATENCY_CHECK" in line:
+                    # Anchored with is_server_numeric(), for the same reason
+                    # the 513 handler three lines below is: an unanchored
+                    # substring test matches the TEXT of a channel message.
+                    # A user typing "oops PONG OSERVE_LATENCY_CHECK" satisfied
+                    # both halves, so anybody could forge the operator's
+                    # latency reading - and the `continue` below meant their
+                    # own line was then never processed as a command either.
+                    #
+                    # A real PONG is a server message carrying PONG in the
+                    # command position, which is the shape is_server_numeric()
+                    # matches - its regex anchors on any command token, not
+                    # only digits, and its own docstring already cites this
+                    # very PONG line as the bug it was written for.
+                    if is_server_numeric(line, "PONG") and "OSERVE_LATENCY_CHECK" in line:
                         import commands
                         commands.handle_pong_response(category="INFO")
                         continue

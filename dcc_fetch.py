@@ -887,7 +887,57 @@ def parse_dcc_send_offer(ctcp_text):
     except (ipaddress.AddressValueError, ValueError):
         return None
 
+    # ADDRESSES THAT CANNOT BE A PEER AT ALL.
+    #
+    # Until now the only test on this field was that the integer fits in 32
+    # bits, so whoever held the offering nick chose an address this daemon
+    # would connect to. The concrete shape is `DCC SEND x 0 22 1` - ip_long 0
+    # decodes to 0.0.0.0, which connect() treats as localhost, pointing the
+    # fetcher at a port on its own host.
+    #
+    # DELIBERATELY NARROWER THAN dcc.is_offerable_to_strangers(), which is the
+    # same field judged from the other side. That one also refuses loopback
+    # and private ranges, and it is right to: an offer WE advertise carrying
+    # one is an offer no stranger can dial. Refusing them on the way IN would
+    # be wrong, because there the address is the peer's, not ours - two
+    # DCCore bots on the same LAN exchanging lists over 192.168.x.y is an
+    # ordinary setup, and the operator running both is not a stranger to
+    # either. It would also refuse every local transfer this project's own
+    # tests perform over 127.0.0.1.
+    #
+    # So this refuses only what can never name a real peer: the unspecified
+    # address, multicast, and the reserved ranges. Refused at the parse rather
+    # than at the connect, because this return value is what every later stage
+    # acts on.
+    if not _is_a_possible_peer(ip):
+        print(f"[FETCH] Refusing an offer that names {ip}: the unspecified, "
+              f"multicast and reserved ranges cannot be a bot offering a "
+              f"file.")
+        return None
+
     return {"filename": filename, "ip": ip, "port": port, "size": size}
+
+
+def _is_a_possible_peer(ip_text):
+    """Could a bot actually be offering a file from this address?
+
+    Not "is it routable on the public internet" - see the comment at the call
+    site for why that stricter question, which dcc.is_offerable_to_strangers()
+    asks of our OWN address, gives the wrong answer for an address arriving
+    from a peer. Loopback and private ranges are legitimate here: two bots on
+    one LAN, or one machine talking to itself.
+
+    What is left is what can never be a peer at all - 0.0.0.0, which connect()
+    reads as localhost, plus multicast and the reserved ranges.
+    """
+    import ipaddress
+
+    try:
+        address = ipaddress.IPv4Address(str(ip_text).strip())
+    except Exception:
+        return False
+    return not (address.is_unspecified or address.is_multicast
+                or address.is_reserved)
 
 
 def _normalize_filename_for_match(name):
