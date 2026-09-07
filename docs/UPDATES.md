@@ -2,7 +2,19 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟩 v1.12.0 (2026-09-07) - "The Several Lists Release"
+## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
+
+### 🧪 Cut as a release candidate, to be run before it is published
+
+Versioned `-RC1` rather than `v1.12.0` because it is going to be run as a beta
+first. `SCRIPT_VERSION` is reported over CTCP VERSION, printed in the advert
+and stamped on every generated list, so a build under test that calls itself
+`v1.12.0` puts a version that does not exist yet into three places at once -
+and a problem found during the beta cannot be pinned to a build.
+
+`docs/PUBLIC-REPO-WORKFLOW.md` now documents the process. The project had cut
+four release candidates already - `v1.10.0-RC1` through `RC4` - and never
+written down how, so each one was reconstructed from the last.
 
 ### ⏱️ A concurrency test's backstop was set above its own timeout
 
