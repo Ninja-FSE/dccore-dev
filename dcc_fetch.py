@@ -1189,7 +1189,7 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         else:
             max_size = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
             cap_name = "MAX_FETCH_FILE_SIZE"
-        # 0 MEANS NO LIMIT. Neo, on #302: "Files should never be rejected based
+        # 0 MEANS NO LIMIT. From #302: "Files should never be rejected based
         # on size." The caps are not deleted, because deleting them would take
         # the choice away from everyone else - they are switchable off, which
         # is the same outcome for the operator who wants it and no change for

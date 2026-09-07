@@ -619,8 +619,8 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
 # "MEDIA", not "MUSIC", since the lists stopped being music-only. A heading
 # reading "D:\MUSIC\TV\Spider-Noir (2026)\Season 01\" says the wrong
 # thing about itself: the second component is the operator's FOLDER LABEL,
-# so the fixed part in front of it should not contradict it. Neo's
-# observation, on a real list.
+# so the fixed part in front of it should not contradict it. An
+# operator's observation, on a real list.
 #
 # Safe to change for the reasons above: there is no canonical prefix, and
 # AutoQ does not read this one - its dequeue match takes $nopath() of the

@@ -2489,7 +2489,7 @@ class TurningTheSizeCapsOff(DCCoreTestCase):
 
 
 class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
-    """From Neo's own log, requesting from the dashboard:
+    """From an operator's own log, requesting from the dashboard:
 
         [FETCH] Requested 'BBCRadio - Under Milk Wood - Richard Burton.mp3
                 ::INFO:: 79.53MB' from RemoteServeDCC (request f96ba6b77dff).

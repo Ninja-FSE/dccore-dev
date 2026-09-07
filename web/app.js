@@ -789,7 +789,7 @@
           encodeURIComponent(row.id) + "\" data-pending=\"" + (state === "pending" ? "1" : "") + "\">" +
           (state === "pending" ? "Cancel" : "Delete") + "</button>"
         : "";
-      // ASK AGAIN, for a row that did not arrive. Neo's: a failed or rejected
+      // ASK AGAIN, for a row that did not arrive. Requested: a failed or rejected
       // fetch is the one an operator most wants to retry, and the only way to
       // do it was to go back to the List Browser and retype the nick.
       //

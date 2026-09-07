@@ -4,6 +4,53 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🕵️ Every identifying name out of the shipped tree, and a guard that keeps it that way
+
+`.gitattributes` export-ignores exactly two files. Everything else reaches the
+public repository, `tests/` included - and the co-maintainer's handle was on
+18 lines across 12 shipping files, in comments attributing an observation to
+the person who made it.
+
+That was ordinary practice and done in good faith, but the handle is the same
+one on the issue tracker and on IRC, and none of the comments need it: "an
+operator reported" carries the same weight and dates better. The attributions
+were rewritten rather than deleted, so every piece of reasoning survives
+without the name.
+
+**The README named the private repository and linked to files that do not
+ship.** Its document table listed `docs/UPDATES.md` (export-ignored),
+`docs/UPDATES-PUBLIC.md` (renamed at release step 3) and
+`docs/PUBLIC-REPO-WORKFLOW.md` - so in the public tree two of those rows were
+dead links, and the third described the `dccore-dev` / `dccore` split to
+strangers who cannot read one of them. The table now lists what the public
+tree actually ends up with. PUBLIC-REPO-WORKFLOW.md records why, so the rows
+do not come back.
+
+**And a guard, because hand-written sweeps keep missing things.** They are
+written to find what is already known about. `tests/test_no_personal_
+identifiers_ship.py` asks the shipped file list instead: no forbidden
+identifier, no address outside the loopback, private and documentation
+ranges, the two internal documents genuinely export-ignored, and `tests/`
+genuinely shipping - which is the premise the whole rule rests on.
+
+It reads the WORKING TREE via `git ls-files` and `git check-attr`, not
+`git archive HEAD`. An archive-based version reads the last commit, so it
+would have passed the very change that introduced an identifier and failed on
+everything before it - backwards for something meant to stop one being
+committed.
+
+### 📣 The public changelog carries the whole release
+
+`docs/UPDATES-PUBLIC.md` had stopped at the on-connect commands work and was
+missing everything the audit produced. Twenty operator-facing entries added,
+in the file's own voice - what changed, what it means for the person running
+the bot, and which of them changes a number they will notice.
+
+Two are worth reading before upgrading: **rotating the admin password with
+`configure.py` could silently do nothing**, and **live speed is now the total
+across slots rather than their average**, which changes the figure in the
+channel advert.
+
 ### 🔁 A real `!rehash`, executed end to end for the first time
 
 The audit's completeness critic named this as the single highest-value check

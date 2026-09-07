@@ -1215,7 +1215,7 @@ def dcc_block_size():
 def transfers_are_paused():
     """Is the bot holding new sends while something finishes?
 
-    Set around a rehash (#310, Neo's): a reload swaps the modules a running
+    Set around a rehash (#310): a reload swaps the modules a running
     transfer is inside, so the safe order is stop starting new ones, let the
     ones in flight finish, reload, then start again.
 
@@ -1920,8 +1920,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # waiting. Charging it meant three attempts silently discarded a
         # perfectly good queue, and the fastest way to make three attempts
         # happen is three !rehash runs: each one wakes the queue, each wake
-        # fails the same way, and the third deletes the row. Neo saw exactly
-        # that - "if the bot had some queues from a user, and admin made a
+        # fails the same way, and the third deletes the row. Reported from a
+        # live install - "if the bot had some queues from a user, and admin made a
         # rehash, it cancels the queue".
         #
         # The hot loop this call exists to bound is still bounded: with no

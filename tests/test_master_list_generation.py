@@ -511,7 +511,7 @@ class FilmAndSeriesGetTheirOwnList(MasterListCase):
         self.assertNotIn("Track.flac", self.read_video_list())
 
     def test_one_folder_holding_both_is_split_between_them(self):
-        """The case Neo's review names. A folder does not have to pick."""
+        """The case the review names. A folder does not have to pick."""
         self.add("Mixed/Concert/Live Set.flac")
         self.add("Mixed/Concert/Live Set.mkv")
 
