@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import zipfile
 import time
+import json
 import defaults as config
 import library
 import platform_compat
@@ -580,6 +581,65 @@ def _write_zip_artifact(tmp_path, members):
 _STAGING_PREFIX = ".listpack-"
 
 
+# How often a running scan may write its progress file. A 719k-file library
+# would otherwise spend a meaningful part of the run serialising JSON nobody
+# read - the dashboard polls every couple of seconds, so anything finer is
+# work done for no reader.
+PROGRESS_WRITE_SECONDS = 0.5
+
+_progress_last_write = [0.0]
+
+
+def progress_path():
+    """Where a rebuild reports what it is doing. Resolved per call, like every
+    other configurable path here - !rehash reloads config."""
+    return getattr(config, "LIST_PROGRESS_FILE", os.path.join("data", "list_progress.json"))
+
+
+def write_progress(phase, folder="", folder_index=0, folder_count=0,
+                   files=0, force=False):
+    """Report the current step, for the dashboard to poll.
+
+    NEVER RAISES AND NEVER BLOCKS THE SCAN. This is a progress bar: a full
+    disk, a read-only data/ or a permissions problem must cost the operator
+    the bar, not the list rebuild they actually asked for.
+
+    Throttled to PROGRESS_WRITE_SECONDS, except when `force` marks a step an
+    operator would notice missing - the start, each folder, and the end.
+    """
+    now = time.time()
+    if not force and (now - _progress_last_write[0]) < PROGRESS_WRITE_SECONDS:
+        return
+    _progress_last_write[0] = now
+    payload = {"phase": phase, "folder": folder, "folder_index": folder_index,
+               "folder_count": folder_count, "files": files, "at": now}
+    try:
+        path = progress_path()
+        directory = os.path.dirname(os.path.abspath(path))
+        os.makedirs(platform_compat.long_path(directory), exist_ok=True)
+        # Written whole and renamed into place: the dashboard polls this
+        # while it is being written, and half a JSON object is a parse error
+        # every couple of seconds rather than a progress bar.
+        temp = path + ".new"
+        with io.open(platform_compat.long_path(temp), "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        platform_compat.replace_with_retry(temp, path)
+    except Exception:
+        pass
+
+
+def clear_progress():
+    """Drop the progress file once a run is over.
+
+    A leftover from a killed process would otherwise read as a rebuild that
+    is still going, and the dashboard would show a bar that never moves.
+    """
+    try:
+        os.remove(platform_compat.long_path(progress_path()))
+    except OSError:
+        pass
+
+
 def _discard_stale_temps(directory=None):
     """Remove ".new" staging files a previous run was killed in the middle of.
 
@@ -981,7 +1041,19 @@ def generate_master_list(list_name=None):
     else:
         print("[LIST-GEN] One combined list - SEPARATE_VIDEO_LIST is off.")
 
-    for scan_folder in scan_folders:
+    write_progress("scanning", folder_count=len(scan_folders), force=True)
+
+    for folder_number, scan_folder in enumerate(scan_folders, start=1):
+        # Reported per folder because the folder COUNT is the one total known
+        # before the walk starts - a file total would need a full pass to
+        # find, which is the work being measured. So the bar advances a
+        # folder at a time and the file counter shows life in between.
+        write_progress("scanning", folder=scan_folder.name,
+                       folder_index=folder_number,
+                       folder_count=len(scan_folders),
+                       files=len(all_files_data) + len(video_files_data),
+                       force=True)
+
         # A folder that is not there RIGHT NOW is skipped, not fatal: an
         # unplugged drive or an unmounted share should cost its own contents,
         # not take the whole list - and the bot - off the air. Deliberately
@@ -1003,6 +1075,13 @@ def generate_master_list(list_name=None):
         scan_root = platform_compat.long_path(scan_folder.path)
 
         for root, dirs, files in os.walk(scan_root, onerror=_on_walk_error):
+            # Throttled inside write_progress(), so this costs a clock read
+            # per directory rather than a file write.
+            write_progress("scanning", folder=scan_folder.name,
+                           folder_index=folder_number,
+                           folder_count=len(scan_folders),
+                           files=len(all_files_data) + len(video_files_data))
+
             # Keep every track under its exact, complete path on disk
             for file in files:
                 if is_listed_file(file, ignored):
@@ -1331,6 +1410,11 @@ def generate_master_list(list_name=None):
             print(f"[LIST-GEN] Film & series list created: {tmp_video_path}")
 
         print(f"[LIST-GEN] Text list created: {tmp_txt_path}")
+        # The walk is over by here, so the folder bar has nothing left to say.
+        # The phase does: writing and packing a 719k-row list is not instant,
+        # and a bar that sat at 100% through it would look stalled.
+        write_progress("writing", files=len(all_files_data) + len(video_files_data),
+                       force=True)
         if serve_albums:
             print(f"[LIST-GEN] RAR album list created: {tmp_rar_path}")
         
@@ -1523,6 +1607,19 @@ def generate_all_lists(log=print):
     """
     import library
 
+    # The progress file is dropped HERE, not only in __main__, so every entry
+    # point clears it and the behaviour is reachable from a test. A leftover
+    # from a finished run reads as a rebuild still in progress, and the
+    # dashboard would show a bar that never moves.
+    try:
+        return _generate_all_lists(log)
+    finally:
+        clear_progress()
+
+
+def _generate_all_lists(log):
+    import library
+
     every = library.lists()
     if len(every) == 1:
         return generate_master_list()
@@ -1575,6 +1672,11 @@ if __name__ == "__main__":
               + ", ".join(f.path for f in configured))
         sys.exit(1)
         
+    # The file is removed whichever way the run ends, including the failure
+    # branch: a leftover from a crashed or killed process reads as a rebuild
+    # still in progress, and the dashboard would show a bar that never moves.
+    # generate_all_lists() clears the progress file in its own finally, so a
+    # crash inside it still leaves nothing behind for the dashboard to read.
     success = generate_all_lists()
     if success:
         print("--- The list was updated successfully. ---")

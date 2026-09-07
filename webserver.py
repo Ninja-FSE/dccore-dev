@@ -1607,10 +1607,62 @@ def build_update_list_status_payload():
     or False for whether that one succeeded; `error` names why when it did
     not.
     """
-    return {
+    payload = {
         "running": bool(getattr(config, "update_inprogress", False)),
         "ok": getattr(config, "last_list_update_ok", None),
         "error": getattr(config, "last_list_update_error", None),
+    }
+    progress = read_list_progress()
+    if progress:
+        payload["progress"] = progress
+    return payload
+
+
+def read_list_progress():
+    """What a running rebuild last reported, or None.
+
+    update_list.py runs as a SUBPROCESS, so it has no shared memory with this
+    process to report into - it writes LIST_PROGRESS_FILE and this reads it.
+    Written whole and renamed into place at the other end, so a read landing
+    mid-write gets the previous complete object rather than half of one.
+
+    Returns None on anything unexpected. This feeds a progress bar: a missing,
+    unreadable or malformed file should cost the bar, not the page.
+    """
+    import json
+
+    path = getattr(config, "LIST_PROGRESS_FILE", None)
+    if not path:
+        return None
+    try:
+        with open(platform_compat.long_path(path), encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+
+    def whole(name):
+        try:
+            return max(0, int(loaded.get(name) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    folder_count = whole("folder_count")
+    folder_index = min(whole("folder_index"), folder_count) if folder_count else 0
+    percent = None
+    if folder_count:
+        # Folders COMPLETED, not the one in hand: a bar that jumps to 100% as
+        # the last folder starts is telling the operator it has finished
+        # while it is still walking.
+        percent = int(max(0, folder_index - 1) * 100 / folder_count)
+    return {
+        "phase": str(loaded.get("phase") or "")[:40],
+        "folder": str(loaded.get("folder") or "")[:120],
+        "folder_index": folder_index,
+        "folder_count": folder_count,
+        "files": whole("files"),
+        "percent": percent,
     }
 
 
@@ -1675,6 +1727,7 @@ SETTINGS_CATEGORIES = (
                                                 "LIST_INDEX_FILE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
+                                                "LIST_PROGRESS_FILE",
                                                 "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES",
                                                 "LIBRARY_FOLDERS_FILE", "LISTS_FILE", "ON_CONNECT_FILE"]),
     ("advertising",   "Advertising & search",  ["THEME", "CUSTOM_THEME_BORDER", "CUSTOM_THEME_SEPARATOR",
@@ -1764,6 +1817,7 @@ SETTINGS_LABELS = {
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "FETCH_HISTORY_FILE": "Fetch history file",
     "LIST_SIZE_FILE": "List size file",
+    "LIST_PROGRESS_FILE": "List rebuild progress file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
     "LIST_HEADER_FILE": "List banner file",
     "LIST_HEADER_MAX_BYTES": "List banner size limit",

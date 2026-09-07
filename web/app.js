@@ -168,6 +168,8 @@
     themeLight:   document.getElementById("theme-light"),
     updateListRunBtn:     document.getElementById("update-list-run-btn"),
     updateListStatus:     document.getElementById("update-list-status"),
+    updateListBar:        document.getElementById("update-list-bar"),
+    updateListBarFill:    document.getElementById("update-list-bar-fill"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
     verifyStatus:         document.getElementById("verify-status"),
     verifyResults:        document.getElementById("verify-results"),
@@ -1929,6 +1931,46 @@
   function showUpdateListStatus(text, isError) {
     el.updateListStatus.textContent = text;
     el.updateListStatus.classList.toggle("is-error", !!isError);
+    if (el.updateListBar) { el.updateListBar.style.display = "none"; }
+  }
+
+  // "Rebuilding the master list…" for however long a 719k-file library takes,
+  // with nothing else on screen, is indistinguishable from a hung process.
+  // This says which folder it is in, how far through the folders it is, and
+  // how many files it has indexed - the file count moves even while the bar
+  // does not, which is what tells an operator it is alive.
+  function showUpdateListProgress(progress) {
+    if (!progress) {
+      showUpdateListStatus("Rebuilding the master list…", false);
+      return;
+    }
+
+    var parts = [];
+    if (progress.phase === "writing") {
+      parts.push("Writing the list…");
+    } else if (progress.folder_count) {
+      parts.push("Scanning folder " + progress.folder_index +
+                 " of " + progress.folder_count);
+      if (progress.folder) { parts.push(progress.folder); }
+    } else {
+      parts.push("Scanning the library…");
+    }
+    if (progress.files) {
+      parts.push(progress.files.toLocaleString() + " files so far");
+    }
+
+    el.updateListStatus.textContent = parts.join(" · ");
+    el.updateListStatus.classList.remove("is-error");
+
+    if (!el.updateListBar) { return; }
+    // Indeterminate while writing: the folder count has nothing left to say
+    // once the walk is done, and a bar frozen at its last value would read as
+    // a stall during the phase that is genuinely slowest.
+    var known = progress.percent !== null && progress.percent !== undefined
+                && progress.phase !== "writing";
+    el.updateListBar.style.display = "block";
+    el.updateListBar.classList.toggle("is-indeterminate", !known);
+    el.updateListBarFill.style.width = known ? (progress.percent + "%") : "";
   }
 
   function startUpdateListPolling() {
@@ -1941,7 +1983,7 @@
     fetchJson("/api/tools/update-list/status").then(function (payload) {
       markConnection(true);
       if (payload.running) {
-        showUpdateListStatus("Rebuilding the master list…", false);
+        showUpdateListProgress(payload.progress);
         return;
       }
       clearInterval(updateList.pollTimer);

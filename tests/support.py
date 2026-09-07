@@ -454,6 +454,8 @@ class DCCoreTestCase(unittest.TestCase):
                                             "fetch_history.json"),
             SPEED_RECORD_FILE=os.path.join(self._fetch_history_dir,
                                            "speed_record.txt"),
+            LIST_PROGRESS_FILE=os.path.join(self._fetch_history_dir,
+                                            "list_progress.json"),
             KNOWN_BOTS_FILE=os.path.join(self._fetch_history_dir,
                                          "known_bots.json"),
             DCC_QUEUE_FILE=os.path.join(self._fetch_history_dir,
