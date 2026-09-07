@@ -483,7 +483,7 @@ DCC_BLOCK_SIZE: int = 65536      # 64 KB - one of 4096/8192/16384/32768/65536/13
 # buffer, and setting it explicitly TURNS THAT OFF - so a value chosen for one
 # link can be worse than the default on every other. It is here to be
 # experimented with on a link the operator knows, not to be set hopefully.
-DCC_SEND_BUFFER: int = 0         # 0 = per-platform default (1MB on Windows, OS auto-tuning on Linux)
+DCC_SEND_BUFFER: int = 0         # 0 = per-platform default (4MB on Windows, OS auto-tuning on Linux)
 DCC_PORT_START: int = 55000
 DCC_PORT_END: int   = 55010
 

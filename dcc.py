@@ -1198,9 +1198,28 @@ MAX_DCC_BLOCK_SIZE = 1024 * 1024
 # what "leave it alone" gets you is a fixed 64 KB - so the honest default
 # differs by platform, and neither one is the other's mistake.
 #
+# WHY 4 MB AND NOT THE 1 MB THAT FIXED THE REPORT. The measured link was
+# 20.6 ms away, where 1 MB is already far more than enough - but the ceiling
+# is a function of DISTANCE, and this bot serves a channel, not one friend:
+#
+#     RTT  20 ms   1MB ->  52.4 MB/s     4MB -> 209.7 MB/s
+#     RTT 120 ms   1MB ->   8.7 MB/s     4MB ->  35.0 MB/s
+#     RTT 200 ms   1MB ->   5.2 MB/s     4MB ->  21.0 MB/s
+#     RTT 300 ms   1MB ->   3.5 MB/s     4MB ->  14.0 MB/s
+#
+# At 200 ms - an ordinary Australia-to-Europe hop - 1 MB lands back at the
+# same few megabytes a second this whole change exists to escape. Fixing the
+# nearby case and leaving the distant one is not a fix, it is a shorter list
+# of people who are still capped.
+#
+# The cost is bounded and small: SO_SNDBUF is a CEILING the kernel may buffer,
+# not an allocation, and it only fills when the network is slow enough to make
+# it useful. MAX_DCC_SLOTS is 3 by default, so the worst case is a few tens of
+# megabytes on a machine already moving files.
+#
 # An explicit DCC_SEND_BUFFER still wins everywhere, including a deliberate
 # small value.
-_DEFAULT_SEND_BUFFER = 1024 * 1024 if platform_compat.IS_WINDOWS else 0
+_DEFAULT_SEND_BUFFER = 4 * 1024 * 1024 if platform_compat.IS_WINDOWS else 0
 
 
 def _apply_send_buffer(conn, log=print):

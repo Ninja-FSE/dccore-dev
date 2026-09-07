@@ -95,7 +95,7 @@ class TheDefaultDependsOnThePlatform(DCCoreTestCase):
         self.assertEqual(self.applied(8192), 8192)
 
     def test_zero_means_the_platform_default(self):
-        expected = 1024 * 1024 if platform_compat.IS_WINDOWS else None
+        expected = 4 * 1024 * 1024 if platform_compat.IS_WINDOWS else None
 
         self.assertEqual(self.applied(0), expected)
 
@@ -119,7 +119,7 @@ class TheDefaultDependsOnThePlatform(DCCoreTestCase):
         """Guard on the guard: both branches above are skipped on one
         platform each, so this pins the value itself."""
         if platform_compat.IS_WINDOWS:
-            self.assertEqual(dcc._DEFAULT_SEND_BUFFER, 1024 * 1024)
+            self.assertEqual(dcc._DEFAULT_SEND_BUFFER, 4 * 1024 * 1024)
         else:
             self.assertEqual(dcc._DEFAULT_SEND_BUFFER, 0)
 
@@ -139,8 +139,56 @@ class TheDefaultDependsOnThePlatform(DCCoreTestCase):
                      encoding="utf-8") as handle:
             source = handle.read()
 
-        self.assertIn("_DEFAULT_SEND_BUFFER = 1024 * 1024 "
+        self.assertIn("_DEFAULT_SEND_BUFFER = 4 * 1024 * 1024 "
                       "if platform_compat.IS_WINDOWS else 0", source)
+
+
+class ABiggerBufferCannotInflateTheSpeedRecord(DCCoreTestCase):
+    """The one thing raising this default makes load-bearing.
+
+    sendall() returns once the bytes are in the KERNEL, not once the peer has
+    them. A file that fits entirely inside the send buffer therefore "sends"
+    in almost no time, and dividing its size by that gives a number with no
+    relationship to the link. The window of files this applies to is exactly
+    the buffer size - so it grew from under 1 MB to under 4 MB, which is most
+    single tracks.
+
+    stats_mgr.MIN_RECORD_SECONDS already refuses a sample measured over less
+    than a second, and it predates all of this. These tests tie that guard to
+    THIS reason, so the buffer can be changed again later without anyone
+    having to re-derive why the floor matters - which is the only way a
+    guard like it survives.
+
+    The record is what the channel advert publishes, so a bogus one is not a
+    private mistake."""
+
+    def test_a_transfer_that_vanished_into_the_buffer_sets_no_record(self):
+        import stats_mgr
+
+        before = stats_mgr.update_speed_record(5_000_000, duration=10.0)
+        absurd = 4 * 1024 * 1024 * 100     # a 4 MB file "sent" in 10 ms
+
+        after = stats_mgr.update_speed_record(absurd, duration=0.01)
+
+        self.assertEqual(after, before)
+
+    def test_a_real_transfer_still_sets_one(self):
+        """Guard on the guard: a floor that refused everything would pass the
+        test above and quietly stop the record ever moving."""
+        import stats_mgr
+
+        before = stats_mgr.update_speed_record(1_000_000, duration=10.0)
+
+        after = stats_mgr.update_speed_record(9_000_000, duration=10.0)
+
+        self.assertGreater(after, before)
+
+    def test_the_floor_is_longer_than_a_buffer_takes_to_fill(self):
+        """A local memcpy of a few megabytes is microseconds. The floor only
+        has to be long enough that no buffer-sized write can clear it."""
+        import stats_mgr
+
+        self.assertGreaterEqual(stats_mgr.MIN_RECORD_SECONDS, 1.0)
 
 
 class ItNeverCostsATransfer(DCCoreTestCase):
