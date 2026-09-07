@@ -1159,15 +1159,18 @@ def build_own_list_summaries():
         served = []
 
     if not served:
-        return [{"bot": OWN_SOURCE, "label": "Our own list", "held": True,
-                 "freshness": "own", "own": True, "fetched_at": 0,
-                 "count": None, "advert_then": {}, "advert_now": {}}]
+        return [{"bot": OWN_SOURCE, "nick": OWN_SOURCE, "list": "",
+                 "label": "Our own list", "held": True, "freshness": "own",
+                 "own": True, "fetched_at": 0, "count": None,
+                 "advert_then": {}, "advert_now": {}}]
 
     single = len(served) == 1
     rows = []
     for entry in served:
         rows.append({
             "bot": own_list_source(entry),
+            "nick": own_list_source(entry),
+            "list": "",
             "label": "Our own list" if single else entry.name,
             "held": True,
             "freshness": "own",
@@ -1204,19 +1207,47 @@ def build_fetched_bot_list_summaries():
     known = dict(getattr(runtime, "known_bots", {}) or {})
 
     rows = []
+    import list_fetch
+
     for key, entry in store.items():
         bot = entry.get("bot", key)
         then = dict(entry.get("advert_when_fetched") or {})
         now = _advert_now(known, bot)
-        rows.append({
-            "bot": bot,
-            "held": True,
-            "fetched_at": entry.get("fetched_at", 0),
-            "count": entry.get("entry_count", 0),
-            "freshness": _freshness(then, now),
-            "advert_then": then,
-            "advert_now": now,
-        })
+        freshness = _freshness(then, now)
+
+        # ONE ROW PER LIST IN THE ARCHIVE. A peer routinely publishes more
+        # than one - loose files and packed albums, or music and films - and
+        # until the fetch kept them all, everything but the largest was
+        # discarded on the way in. `lists` is absent on an entry stored before
+        # that, and a one-list archive is still the ordinary case, so the
+        # fallback here is the single row this always produced.
+        held = entry.get("lists")
+        if not isinstance(held, dict) or not held:
+            held = {"": {"entry_count": entry.get("entry_count", 0)}}
+
+        # The main list first, then the rest by name - a stable order, and one
+        # that keeps a bot's principal list where the eye already looks.
+        for marker in sorted(held, key=lambda m: (m != "", str(m).lower())):
+            info = held[marker] if isinstance(held[marker], dict) else {}
+            rows.append({
+                # The IDENTITY, which is no longer just a nick: a bot's other
+                # lists are "<nick>/<marker>". Everything that acts on the BOT
+                # rather than the list - re-fetching, packing a folder, the
+                # freshness verdict - reads "nick" below instead.
+                "bot": list_fetch.index_key(bot, marker),
+                "nick": bot,
+                "list": marker,
+                "label": f"{bot} - {marker}" if marker else bot,
+                "held": True,
+                "fetched_at": entry.get("fetched_at", 0),
+                "count": info.get("entry_count", 0),
+                # PER BOT, not per list. One advert covers the archive and one
+                # "@<nick>" fetches all of it, so every list a bot published
+                # is exactly as fresh as the fetch that brought them.
+                "freshness": freshness,
+                "advert_then": then,
+                "advert_now": now,
+            })
 
     # AND THE BOTS WE HAVE ONLY SEEN ADVERTISING. #133's colour rule makes
     # "never downloaded" one of the three states, so the list has to contain
@@ -1234,6 +1265,9 @@ def build_fetched_bot_list_summaries():
         now = _advert_now(known, bot)
         rows.append({
             "bot": bot,
+            "nick": bot,
+            "list": "",
+            "label": bot,
             "held": False,
             "fetched_at": 0,
             "count": now.get("files"),
@@ -1310,7 +1344,28 @@ def _freshness(then, now):
     return "unknown"
 
 
-def build_fetched_bot_list_payload(nick, offset=0, limit=None):
+def _fetched_list_entry(entry, marker):
+    """`entry` re-pointed at one of the bot's lists.
+
+    A shallow copy with list_path and entry_count swapped for the chosen
+    list's, so get_fetched_bot_page() needs to know nothing about markers - it
+    reads the two fields it always read. Returns the entry unchanged for the
+    main list, which is what those two fields already describe.
+    """
+    wanted = str(marker or "")
+    if not wanted:
+        return entry
+    held = entry.get("lists")
+    info = held.get(wanted) if isinstance(held, dict) else None
+    if not isinstance(info, dict) or not info.get("list_path"):
+        return entry
+    picked = dict(entry)
+    picked["list_path"] = info["list_path"]
+    picked["entry_count"] = info.get("entry_count", 0)
+    return picked
+
+
+def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker=""):
     """GET /api/filelists/bot/<nick> payload: (http_status, payload_dict).
 
     Issue #76, options 2 and 3 together: the fetched bot's rows are no longer
@@ -1338,6 +1393,14 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None):
 
     if limit is None:
         limit = FILELISTS_DEFAULT_PAGE_SIZE
+
+    # WHICH OF THAT BOT'S LISTS. An archive holds more than one often enough
+    # that a peer's albums or films used to be dropped on the way in; they are
+    # all kept now, and this picks the one being browsed. An absent or unknown
+    # marker resolves to the main list rather than erroring, for the same
+    # reason ?list= does on our own: the sidebar is polled continuously and a
+    # peer's next archive need not carry the same lists as the last.
+    entry = _fetched_list_entry(entry, list_marker)
 
     page, total_folders, total_rows, error = list_fetch.get_fetched_bot_page(
         entry, offset, limit)
@@ -3188,7 +3251,8 @@ if HAVE_FLASK:
         def api_filelists_bot(nick):
             offset, limit = parse_pagination_params(
                 request.args.get("offset"), request.args.get("limit"))
-            status, result = build_fetched_bot_list_payload(nick, offset, limit)
+            status, result = build_fetched_bot_list_payload(
+                nick, offset, limit, list_marker=request.args.get("list", ""))
             return jsonify(result), status
 
         @app.route("/api/fetch/<request_id>/download")
