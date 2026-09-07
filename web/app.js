@@ -2054,6 +2054,35 @@
     return String(value);
   }
 
+  // The two ends of the unit display. Everything between them - the baseline,
+  // the dirty set, the save body, settings.conf itself - is bytes.
+  function bytesToUnit(stored, factor) {
+    var n = parseFloat(stored);
+    if (!factor || !isFinite(n)) { return stored; }
+    // Trailing zeros trimmed: 200 rather than 200.0000, but 0.5 kept. A whole
+    // number is the ordinary case and the one worth reading cleanly.
+    return String(parseFloat((n / factor).toFixed(4)));
+  }
+
+  function unitToBytes(typed, factor) {
+    var n = parseFloat(typed);
+    // An empty or half-typed box is left alone rather than becoming 0 - the
+    // save would otherwise write "no limit" for a field the operator was
+    // still in the middle of, and 0 means exactly that for several of these.
+    if (!factor || !isFinite(n)) { return typed; }
+    return String(Math.round(n * factor));
+  }
+
+  function settingsFieldByName(name) {
+    var found = null;
+    (state.settingsCategories || []).forEach(function (category) {
+      (category.fields || []).forEach(function (field) {
+        if (field.name === name) { found = field; }
+      });
+    });
+    return found;
+  }
+
   function settingsFieldHtml(field) {
     var isDirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
     var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
@@ -2063,8 +2092,11 @@
       // A fixed few, not free text. The three list formats are the first: a
       // typed "ZIP" or "tar" would be refused by the save with a reason, but
       // being refused is a worse way to find out than never being offered it.
-      var options = field.choices.map(function (choice) {
-        return '<option value="' + escapeHtml(choice) + '">' + escapeHtml(choice) + "</option>";
+      var options = field.choices.map(function (choice, i) {
+        // The stored value stays the value; only what the operator reads
+        // changes. DCC_BLOCK_SIZE is the first: "64 KB" rather than "65536".
+        var text = (field.choice_labels && field.choice_labels[i]) || choice;
+        return '<option value="' + escapeHtml(choice) + '">' + escapeHtml(text) + "</option>";
       }).join("");
       control = '<select data-setting="' + escapeHtml(field.name) + '">' + options + "</select>";
     } else if (field.type === "bool") {
@@ -2072,8 +2104,18 @@
       control = '<input type="checkbox" data-setting="' + escapeHtml(field.name) + '"' +
         (checked ? " checked" : "") + ">";
     } else if (field.type === "int" || field.type === "float") {
-      control = '<input type="number" step="' + (field.type === "float" ? "any" : "1") +
-        '" data-setting="' + escapeHtml(field.name) + '">';
+      // A size gets a unit chip and is typed in that unit. The FILE still
+      // holds bytes - see SETTINGS_UNITS in webserver.py - so nothing
+      // migrates and a hand-edited settings.conf is unchanged. `step="any"`
+      // because a byte count need not land on a whole unit, and refusing to
+      // display a value the daemon is already using would be worse than
+      // showing a fraction of one.
+      var unitChip = field.unit
+        ? '<span class="settings-field-unit">' + escapeHtml(field.unit) + "</span>"
+        : "";
+      control = '<input type="number" step="' +
+        (field.unit || field.type === "float" ? "any" : "1") +
+        '" data-setting="' + escapeHtml(field.name) + '">' + unitChip;
     } else {
       control = '<input type="text" autocomplete="off" data-setting="' +
         escapeHtml(field.name) + '">';
@@ -2128,6 +2170,16 @@
     if (!name) { return; }
 
     var newValue = (input.type === "checkbox") ? (input.checked ? "true" : "false") : input.value;
+
+    // Typed in MB or KB, stored in bytes. Converting HERE rather than at save
+    // time keeps state.settingsDirty in the same unit as the baseline it is
+    // compared against and the payload it is posted as - so the dirty marker,
+    // the save bar and the request body all keep working unchanged.
+    var field = settingsFieldByName(name);
+    if (field && field.unit && input.type !== "checkbox") {
+        newValue = unitToBytes(newValue, field.unit_factor);
+    }
+
     var baselineStr = settingsValueToString(state.settingsBaseline[name]);
 
     if (newValue === baselineStr) {
@@ -2740,8 +2792,14 @@
       var field = byName[input.dataset.setting];
       if (field && input.type !== "checkbox") {
         var dirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
-        input.value = dirty ? state.settingsDirty[field.name]
-                            : settingsValueToString(field.value);
+        var stored = dirty ? state.settingsDirty[field.name]
+                           : settingsValueToString(field.value);
+        // settingsDirty holds BYTES, like the baseline and the payload, so
+        // the dirty comparison and the save body need no unit knowledge at
+        // all. The division happens here and the multiplication happens in
+        // onSettingsFieldChange - the two ends of the display, and nowhere
+        // else.
+        input.value = field.unit ? bytesToUnit(stored, field.unit_factor) : stored;
       }
       // "input" for anything typed into, so the save bar tracks a keystroke at
       // a time; "change" for the controls that have no intermediate state.

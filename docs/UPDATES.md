@@ -4,6 +4,38 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 📏 Sizes are read and typed in MB, not in bytes
+
+From the beta, looking at the Settings page:
+
+    Largest folder !rar will pack (bytes, 0 = no limit)   10737418240
+
+Counting the zeros to check that says ten gigabytes is not work anybody should
+be doing. Seven settings now carry a unit: the five large ones in **MB**, and
+`DCC_SEND_BUFFER` and `LIST_HEADER_MAX_BYTES` in **KB**, because MB would print
+`0.0078` for an 8 KB banner limit and that is less readable than the bytes it
+replaced. `DCC_BLOCK_SIZE` is a menu rather than a number to type, so its
+options read `64 KB` while still storing `65536`.
+
+**Stored in bytes, unchanged.** settings.conf, admin_config.py and every
+reader in the daemon keep the number they have always had - nothing migrates,
+and a hand-edited file looks exactly as it did. The division happens when the
+field is displayed and the multiplication when it is typed into; the baseline,
+the dirty set and the save body are all still bytes, so the dirty marker, the
+save bar and the request body needed no unit knowledge at all.
+
+The unit is fixed per setting rather than chosen from the magnitude. A field
+that switched unit as its value grew would move under an operator mid-edit,
+and `0` - which several of these use for "no limit" - has no magnitude to read.
+An empty or half-typed box is left alone rather than converting to 0, since 0
+means exactly that here.
+
+**One existing guard had to be re-anchored.** It sliced forward from
+`input.value =` to prove the assignment reads the dirty map - and the value is
+now chosen first and converted second, so the slice stopped covering the
+choice. It anchors on the choice instead and still fails when the dirty branch
+is deleted.
+
 ### 🐍 Python 3.14 emptied the entire Settings page
 
 **Second RC1 beta finding, and the more serious of the two.** The dashboard

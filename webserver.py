@@ -1721,10 +1721,10 @@ SETTINGS_LABELS = {
     "MAX_FETCH_SLOTS": "Max fetch slots",
     "FETCH_HISTORY_DAYS": "Keep finished downloads for (days)",
     "FETCH_HISTORY_MAX_ROWS": "Maximum finished downloads kept",
-    "MAX_FETCH_FILE_SIZE": "Max fetch file size (bytes)",
-    "MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer (bytes)",
-    "DCC_BLOCK_SIZE": "Packet size in bytes (4096 = 4 KB, up to 131072 = 128 KB)",
-    "DCC_SEND_BUFFER": "Socket send buffer, bytes (0 = let the OS tune it)",
+    "MAX_FETCH_FILE_SIZE": "Max fetch file size",
+    "MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
+    "DCC_BLOCK_SIZE": "Packet size",
+    "DCC_SEND_BUFFER": "Socket send buffer (0 = let the OS tune it)",
     "REHASH_TRANSFER_WAIT": "Seconds a rehash waits for transfers to finish",
     "AUTO_REFETCH_LISTS": "Re-fetch a held list when its bot advertises a new one",
     "AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",
@@ -1732,8 +1732,8 @@ SETTINGS_LABELS = {
     "FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",
     "FETCH_OFFER_TIMEOUT": "Fetch offer timeout (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT": "Folder (.rar) fetch offer timeout (seconds)",
-    "MAX_FETCH_FOLDER_FILE_SIZE": "Max folder (.rar) fetch size (bytes)",
-    "MAX_FETCH_LIST_FILE_SIZE": "Max fetched master-list zip size (bytes)",
+    "MAX_FETCH_FOLDER_FILE_SIZE": "Max folder (.rar) fetch size",
+    "MAX_FETCH_LIST_FILE_SIZE": "Max fetched master-list zip size",
     "FETCH_FOLDER_TRANSFER_TIMEOUT": "Folder (.rar) fetch transfer timeout (seconds)",
 
     "LIST_BASE_NAME": "List base name",
@@ -1752,7 +1752,7 @@ SETTINGS_LABELS = {
     "RAR_ENABLED": "Enable !rar folder packing",
     "RAR_BINARY": "RAR binary path",
     "TMP_ZIP_DIR": "Temp archive directory",
-    "MAX_RAR_FOLDER_SIZE": "Largest folder !rar will pack (bytes, 0 = no limit)",
+    "MAX_RAR_FOLDER_SIZE": "Largest folder !rar will pack (0 = no limit)",
     "LOCAL_LIST_DIR": "Master list directory",
     "FETCHED_FILES_DIR": "Fetched files directory",
     "BANS_FILE": "Bans file",
@@ -1766,7 +1766,7 @@ SETTINGS_LABELS = {
     "LIST_SIZE_FILE": "List size file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
     "LIST_HEADER_FILE": "List banner file",
-    "LIST_HEADER_MAX_BYTES": "List banner size limit (bytes)",
+    "LIST_HEADER_MAX_BYTES": "List banner size limit",
     "LIBRARY_FOLDERS_FILE": "Served folders file",
     "LISTS_FILE": "Served lists file",
     "ON_CONNECT_FILE": "On-connect commands file",
@@ -1809,6 +1809,37 @@ SETTINGS_LABELS = {
 }
 
 
+# A size an operator reads in the unit they think in, while the file keeps
+# bytes. Counting the zeros in 10737418240 to check it says ten gigabytes is
+# not work anybody should be doing, and the sizes here span 8 KB to 10 GB.
+#
+# STORED IN BYTES, UNCHANGED. settings.conf, admin_config.py and every reader
+# in the daemon keep the number they have always had, so nothing migrates and
+# an operator who edits the file by hand sees exactly what they saw before.
+# Only the dashboard divides, and only for display.
+#
+# The unit is per setting rather than picked from the magnitude: a value that
+# changed unit as it grew would move under the operator mid-edit, and 0 -
+# which several of these use for "no limit" - has no magnitude to read.
+# KB where MB would print 0.0078.
+SETTINGS_UNITS = {
+    "MAX_RAR_FOLDER_SIZE": ("MB", 1024 * 1024),
+    "MAX_FETCH_FILE_SIZE": ("MB", 1024 * 1024),
+    "MAX_LIST_TEXT_SIZE": ("MB", 1024 * 1024),
+    "MAX_FETCH_FOLDER_FILE_SIZE": ("MB", 1024 * 1024),
+    "MAX_FETCH_LIST_FILE_SIZE": ("MB", 1024 * 1024),
+    "DCC_SEND_BUFFER": ("KB", 1024),
+    "LIST_HEADER_MAX_BYTES": ("KB", 1024),
+}
+
+# DCC_BLOCK_SIZE is a menu, not a number to type, so it keeps its byte values
+# as the stored choice and gains readable text beside each one.
+CHOICE_LABELS = {
+    "DCC_BLOCK_SIZE": {str(1024 * n): f"{n} KB"
+                       for n in (4, 8, 16, 32, 64, 128)},
+}
+
+
 def _settings_field(name, declared, value):
     """One field for the settings form.
 
@@ -1822,6 +1853,14 @@ def _settings_field(name, declared, value):
              "type": declared.__name__, "value": value}
     if name in settings_file.CHOICES:
         field["choices"] = list(settings_file.CHOICES[name])
+        labels = CHOICE_LABELS.get(name)
+        if labels:
+            field["choice_labels"] = [labels.get(str(c), str(c))
+                                      for c in field["choices"]]
+
+    unit = SETTINGS_UNITS.get(name)
+    if unit:
+        field["unit"], field["unit_factor"] = unit
 
     # A TRI-STATE NEEDS A THIRD ANSWER. WEBUI_CONSOLE_ENABLED is declared
     # `bool = None`, and None does not mean False: console_is_enabled() reads
