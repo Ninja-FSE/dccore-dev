@@ -620,6 +620,20 @@ def check_fetch_queue():
         # promoting them; there is nowhere safe to write a completed file.
         return
 
+    # The rehash quiesce applies here too. wait_for_transfers_to_finish()
+    # polls config.active_transfers, which is the SEND side only - a fetch has
+    # its own queue and never appears there. So without this check the wait
+    # would report a quiet bot while this dispatcher was still putting fresh
+    # `@bot` and `!bot file` requests into the channel, each of which brings
+    # back an inbound DCC SEND landing squarely in the reload window.
+    #
+    # Read through dcc rather than duplicating the flag name: dcc owns the
+    # pause, and a second reader spelling `config.transfers_paused` by hand is
+    # how a rename turns one of them into a no-op silently.
+    import dcc as _dcc_pause
+    if _dcc_pause.transfers_are_paused():
+        return
+
     queue = _ensure_fetch_queue()
     max_slots = int(getattr(config, "MAX_FETCH_SLOTS", 3))
     offer_timeout = float(getattr(config, "FETCH_OFFER_TIMEOUT", 60))

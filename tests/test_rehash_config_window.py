@@ -525,12 +525,156 @@ class ARehashWaitsForTransfersToFinish(DCCoreTestCase):
         """update_inprogress means "the list is being rebuilt" and its notice
         says so. Telling somebody that when it is not true is the kind of small
         untruth that makes every other message less believable."""
-        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
-            code = handle.read()
-        block = code.split("if transfers_are_paused():", 1)[1][:600]
+        # Scoped to the function that actually answers a USER, not to the
+        # first `if transfers_are_paused():` in the file. The gate now exists
+        # in two places - here, where a new request is refused with a notice,
+        # and in check_queue_and_send(), which simply returns because there is
+        # nobody to tell - and a whole-file split() read the wrong one the
+        # moment the second was added.
+        import inspect
 
-        self.assertIn("reloading its configuration", block)
-        self.assertNotIn("MasterList is currently rebuilding", block)
+        # Two levels of scoping, and both are load-bearing. The FUNCTION,
+        # because the gate now exists in two places - here, where a user is
+        # refused with a notice, and in check_queue_and_send(), which just
+        # returns since there is nobody to tell - and a whole-file split()
+        # read the wrong one as soon as the second appeared. Then the BRANCH,
+        # because this same function legitimately carries the rebuilding
+        # message for update_inprogress, which is a different condition with
+        # a different, true notice.
+        function = inspect.getsource(dcc.handle_download_request)
+        self.assertIn("if transfers_are_paused():", function)
+        branch = function.split("if transfers_are_paused():", 1)[1][:600]
+
+        self.assertIn("reloading its configuration", branch)
+        self.assertNotIn("MasterList is currently rebuilding", branch)
+
+    def _queue_one_dispatchable_file(self):
+        """A queue row this dispatcher will really act on.
+
+        Every field here is load-bearing, and the first version of this test
+        had none of them: it queued a row the dispatcher rejected for
+        unrelated reasons, so it passed with the gate REMOVED. Mutation
+        testing is what exposed that. The control below is the guard against
+        it happening again."""
+        import io as io_mod
+
+        served = os.path.join(self.make_tree().music, "a.flac")
+        os.makedirs(os.path.dirname(served), exist_ok=True)
+        with io_mod.open(served, "wb") as handle:
+            handle.write(b"x" * 1024)
+        self.set_config(active_transfers=[], frozen_queues={},
+                        channel_users={"#chan": {"alice"}},
+                        bot_joined_channel=True, MAX_DCC_SLOTS=3,
+                        dcc_queue={"alice": [{"path": served, "file": "a.flac",
+                                              "size": 1024}]})
+        self.sent = []
+        real_send = dcc.start_dcc_send
+        dcc.start_dcc_send = lambda *a, **k: self.sent.append(a)
+        self.addCleanup(lambda: setattr(dcc, "start_dcc_send", real_send))
+
+    def test_the_dispatcher_really_does_dispatch_this_row(self):
+        """THE CONTROL, and it is the important one. If the fixture stops
+        dispatching for some unrelated reason, the pause test below passes
+        against a daemon with no gate at all."""
+        self._queue_one_dispatchable_file()
+        config.transfers_paused = False
+
+        dcc.check_queue_and_send(None, "alice")
+
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(len(config.active_transfers), 1)
+
+    def test_a_paused_bot_dispatches_nothing_from_the_queue(self):
+        """The gate the wait's own log line promises: "No new sends will
+        start."
+
+        It had exactly one reader - handle_download_request(), which turns
+        away a NEW request from a user. Nothing stopped the DISPATCHER from
+        promoting rows already queued, which is what actually claims a slot
+        and starts a send."""
+        self._queue_one_dispatchable_file()
+        config.transfers_paused = True
+        self.addCleanup(lambda: setattr(config, "transfers_paused", False))
+
+        dcc.check_queue_and_send(None, "alice")
+
+        self.assertEqual(self.sent, [],
+                         "the dispatcher started a send while the bot was "
+                         "quiesced for a rehash")
+        self.assertEqual(len(config.active_transfers), 0,
+                         "the dispatcher claimed a slot while quiesced")
+
+    def test_the_wait_converges_once_the_dispatcher_honours_it(self):
+        """Why it matters. Every completing transfer re-arms a fallback that
+        calls back into the dispatcher, so without the gate a freed slot is
+        refilled inside the very wait that is trying to drain it - and the
+        wait can only ever time out on a busy bot."""
+        config.dcc_queue["bob"] = [{"path": "/tmp/b.flac", "filename": "b.flac"}]
+        self.addCleanup(config.dcc_queue.pop, "bob", None)
+        config.active_transfers.append({"user": "bob", "file": "inflight.flac"})
+
+        ticks = []
+
+        def finish_after_one_tick(_seconds):
+            ticks.append(1)
+            # The in-flight transfer ends, and the queue trigger fires - which
+            # is exactly the moment the slot used to be refilled.
+            if len(ticks) == 1:
+                config.active_transfers.clear()
+                dcc.check_queue_and_send(None, "bob")
+            if len(ticks) > 20:
+                raise AssertionError("the wait never converged")
+
+        went_quiet = dcc.wait_for_transfers_to_finish(
+            timeout=60, sleep=finish_after_one_tick, log=lambda _m: None)
+
+        self.assertTrue(went_quiet,
+                        "the queue refilled the slot inside the wait")
+
+    def test_a_paused_bot_does_not_start_new_cross_bot_fetches(self):
+        """The SEND side is not the whole of "busy". A fetch never appears in
+        config.active_transfers - it has its own queue - so the wait would
+        report a quiet bot while this dispatcher was still putting fresh
+        requests into the channel, each bringing back an inbound DCC SEND
+        landing in the reload window."""
+        import dcc_fetch
+
+        config.transfers_paused = True
+        self.addCleanup(lambda: setattr(config, "transfers_paused", False))
+        self.set_config(fetch_queue={}, MAX_FETCH_SLOTS=3,
+                        fetch_feature_disabled=False, CHANNEL="#chan")
+        dcc_fetch.enqueue_fetch("SomeBot", "Track.flac")
+
+        dcc_fetch.check_fetch_queue()
+
+        states = [row.get("state") for row in config.fetch_queue.values()]
+        self.assertEqual(states, ["pending"],
+                         "a fetch was dispatched while the bot was quiesced")
+
+    def test_fetches_move_again_once_resumed(self):
+        """Control: the gate must not wedge the fetch queue shut."""
+        import dcc_fetch
+
+        self.set_config(fetch_queue={}, MAX_FETCH_SLOTS=3,
+                        fetch_feature_disabled=False, CHANNEL="#chan")
+        dcc_fetch.enqueue_fetch("SomeBot", "Track.flac")
+        config.transfers_paused = True
+        dcc_fetch.check_fetch_queue()
+
+        dcc.resume_transfers()
+        dcc_fetch.check_fetch_queue()
+
+        states = [row.get("state") for row in config.fetch_queue.values()]
+        self.assertEqual(states, ["offered"])
+
+    def test_resuming_lets_the_queue_move_again(self):
+        """The gate must not outlive the rehash. resume_transfers() is called
+        even when the wait timed out, and the wake that follows it has to
+        find a dispatcher that will actually dispatch."""
+        config.transfers_paused = True
+        dcc.resume_transfers()
+
+        self.assertFalse(dcc.transfers_are_paused())
 
     def test_the_rehash_waits_before_it_reloads(self):
         """Order is the whole point: waiting AFTER the reload would mean the
