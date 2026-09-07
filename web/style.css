@@ -1516,10 +1516,25 @@ html, body {
   opacity: 0.85;
 }
 
+/* The unit a size is typed in. Beside the box rather than in the label,
+   because it belongs to the number being entered - an operator reading
+   "Max fetch file size ... 200 MB" should not have to look in two places to
+   know what the 200 means. */
+.settings-field-unit {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim, var(--text));
+  opacity: 0.8;
+}
+
 .settings-field-control {
   flex: 0 0 auto;
   width: 260px;
   max-width: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .settings-field-control select,
