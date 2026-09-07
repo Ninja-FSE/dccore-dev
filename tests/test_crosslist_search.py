@@ -263,14 +263,22 @@ class WhichBotsHaveNothing(IndexCase):
         # once per bot with LIMIT 1" - so a bare search for "LIMIT 1" matched
         # the explanation of the code rather than the code, and passed with
         # the clause deleted.
-        # BOUNDED, and small. It was LIMIT 1 until the bot column turned out
-        # to be matched as an FTS5 phrase rather than compared for equality -
-        # "Bot" matches "Bot-2" - so a near-miss neighbour can occupy the
-        # first row and the equality check needs a few to look at. The
-        # property is unchanged: this must not enumerate every match.
-        self.assertIn("MATCH ? LIMIT 25", block,
+        # BOUNDED, and back to one row. It went LIMIT 1 -> LIMIT 25 when the
+        # bot column turned out to be matched as an FTS5 phrase rather than
+        # compared for equality ("Bot" matches "Bot-2"), so a near-miss
+        # neighbour could occupy the first row and the equality check needed
+        # a few rows to look at.
+        #
+        # Twenty-five was not enough either: a neighbour holding fifty
+        # matching files fills the whole window, and the real bot beneath it
+        # was reported as having NO match. Whatever number is picked, a busy
+        # neighbour can exceed it - so the equality moved INTO the query as a
+        # plain `bot = ?` column filter, which is exact, and one row is proof
+        # again. That is also what this function's docstring has said all
+        # along.
+        self.assertIn("MATCH ? AND bot = ? LIMIT 1", block,
                       "the existence query enumerates every match instead of "
-                      "stopping after a bounded look")
+                      "stopping at the first proof")
 
     def test_no_term_greys_nobody(self):
         self.index("BigTruck", "Enter Sandman.flac")

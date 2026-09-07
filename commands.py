@@ -457,6 +457,35 @@ def _channels_to_sync(config):
     return chans
 
 
+def _restore_advert_worker_token(live_worker_id):
+    """Put the advert worker's generation token back after a reload.
+
+    Returns True if this call restored it.
+
+    announce.current_worker_id is how a running advert worker knows it is
+    still the current one: it compares its own id against the module's and
+    retires if something newer has taken over. importlib.reload() re-executes
+    announce's body, which resets that to 0 - so between the reload and this
+    call, a worker waking on its five-second cycle reads 0, concludes it has
+    been replaced, and stops. Nothing starts another, and the channels go
+    quiet until the next reconnect.
+
+    ONLY IF NOTHING NEWER CLAIMED IT. A reconnect completing inside the reload
+    window starts a fresh worker and stamps a higher id; restoring blindly
+    would retire that one instead and cause the very silence this is
+    preventing.
+    """
+    import announce as _ann
+
+    if not live_worker_id or getattr(_ann, "current_worker_id", 0):
+        return False
+    _ann.current_worker_id = live_worker_id
+    print("[REHASH RAM] Advert worker kept alive across the reload.")
+    print("[REHASH NOTE] announce_worker's own code is NOT re-entered by a rehash; "
+          "restart the daemon to pick up changes to the advert loop itself.")
+    return True
+
+
 def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
     """Reload the daemon's modules in place and return the names reloaded.
 
@@ -694,6 +723,21 @@ def _handle_rehash_request(user, target_chan):
         # and is documented on reload_modules_in_order() itself.
         reload_modules_in_order()
 
+        # THE ADVERT TOKEN GOES BACK FIRST, not seventy lines further down
+        # where it used to. importlib.reload(announce) re-executes that
+        # module's body, which resets current_worker_id to 0, and the live
+        # advert worker wakes every five seconds to compare its own id against
+        # it. A wake landing anywhere in the window between the reload and the
+        # restore saw 0, concluded that something newer had replaced it, and
+        # retired - leaving no advert worker at all and the channels silent
+        # until the next reconnect.
+        #
+        # The "only if nothing newer claimed it" rule below is unchanged and
+        # still needed: a reconnect completing inside this window starts a
+        # fresh worker and stamps a higher id, and restoring blindly would
+        # retire that one instead.
+        _restore_advert_worker_token(live_worker_id)
+
         print(f"[REHASH SUCCESS] Every Python module was reloaded in memory by {user}.")
 
         # Put the live state back before anything else runs against the fresh modules. The
@@ -766,14 +810,10 @@ def _handle_rehash_request(user, target_chan):
                           "will take effect on the next reconnect instead.")
 
         import announce as _ann
-        # Only reinstate the token if nothing newer claimed it. A reconnect completing inside
-        # the reload window starts a fresh advert worker and stamps a higher id; restoring
-        # blindly would retire that new worker and leave the channels silent.
-        if live_worker_id and not getattr(_ann, 'current_worker_id', 0):
-            _ann.current_worker_id = live_worker_id
-            print("[REHASH RAM] Advert worker kept alive across the reload.")
-            print("[REHASH NOTE] announce_worker's own code is NOT re-entered by a rehash; "
-                  "restart the daemon to pick up changes to the advert loop itself.")
+        # The token itself went back immediately after the reload - see
+        # _restore_advert_worker_token() and the comment at that call - because
+        # the worker wakes every five seconds and a wake inside this stretch
+        # used to find it zeroed and retire.
 
         # Reinstate every console session's debug sink - see reattach_debug_sinks()'s
         # docstring for why this is not optional.

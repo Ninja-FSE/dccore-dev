@@ -4,6 +4,47 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔚 The last four audit findings: two fixed, two deliberately not
+
+**A busy neighbour could hide a real match.** `bot:"Dude"` is an FTS5 PHRASE
+over a tokenised column, not equality - unicode61 splits on punctuation, so it
+also matches `Dude|away`. The equality that compensated for that ran in Python
+over a `LIMIT 25` window, and a neighbour holding fifty matching files fills
+the whole window: the bot underneath was reported as having NO match, so the
+sidebar dimmed a list that the filter would then happily list rows from.
+
+Whatever number is picked there, a busy neighbour can exceed it. The equality
+is a plain `bot = ?` column filter inside the query now, which is exact, and
+one row is proof again - which is what that function's docstring had claimed
+all along.
+
+**The advert worker could retire during a rehash.**
+`announce.current_worker_id` is how a running worker knows it is still the
+current one, and `importlib.reload()` resets it to 0. The restore sat seventy
+lines below the reload, and the worker wakes every five seconds: a wake in
+that window read 0, concluded it had been replaced, and stopped - leaving no
+advert worker and the channels silent until the next reconnect. The restore
+now happens immediately after the reload, still refusing to overwrite a newer
+worker's token.
+
+**Two findings were real but are not being changed**, and the reasoning is
+pinned as tests rather than left in a changelog:
+
+- A bot-alone `list` row can claim an offer that was a near-miss for a `file`
+  row from the same bot. The exact-match branch runs first, so reaching the
+  bot-alone one means the name genuinely is not the file we asked for - which,
+  for a bare `@bot` request whose answer cannot be predicted, is exactly what
+  a real list reply looks like. Refusing the fall-through would reject
+  legitimate list answers whenever a file request to that bot was outstanding.
+- The passive DCC reply goes through the 5s-per-message pacer while the 60s
+  accept clock runs. Sending it unpaced is what `queue_mgr` exists to prevent,
+  and `irc.py`'s 513/PONG line is on record as what a raw unpaced write cost.
+  Raising `PASSIVE_LISTEN_TIMEOUT` is the change with no such risk, and that
+  is a setting rather than a code decision.
+
+**That closes all 26 confirmed findings from the six-lens audit** - 24 fixed,
+2 recorded as considered.
+
 ### 🖥️ The Settings page said the Console was off while it was on
 
 `WEBUI_CONSOLE_ENABLED` is declared `bool = None`, and None does not mean
