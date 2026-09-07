@@ -253,7 +253,14 @@ def get_file_count_date_size_and_raw_bytes(name=None):
         # announce an error.
         size_str = "0B"
         try:
-            size_path = size_file_path()
+            # size_file_path(NAME), not size_file_path(). This function is
+            # already list-aware everywhere else - find_latest_list(name) and
+            # all_list_paths(name) both take it, a few lines up - and these
+            # two were the ones the multi-list work missed. Without the name
+            # they resolve to the PRIMARY list's side files, so a channel
+            # bound to a second list advertised its own file count and list
+            # date beside the primary library's size and byte total.
+            size_path = size_file_path(name)
             if os.path.exists(size_path):
                 with open(size_path, "r", encoding="utf-8") as sf:
                     size_str = sf.read().strip() or "0B"
@@ -262,7 +269,7 @@ def get_file_count_date_size_and_raw_bytes(name=None):
 
         raw_bytes = 0
         try:
-            raw_path = rawbytes_file_path()
+            raw_path = rawbytes_file_path(name)
             if os.path.exists(raw_path):
                 with open(raw_path, "r", encoding="utf-8") as rbf:
                     raw_bytes = int(rbf.read().strip())
