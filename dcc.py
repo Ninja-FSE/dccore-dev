@@ -874,9 +874,34 @@ def check_queue_and_send(irc_sock, completed_user):
                         next_file['file'] = rar_filename
                         next_file['is_unpacked_rar_folder'] = False
                         
-                        config.active_transfers.append({"user": completed_user, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename})
+                        # CAPACITY RE-CHECKED HERE, UNDER THE LOCK. The check
+                        # this branch already passed happened before rar even
+                        # started, which for a large album is minutes ago -
+                        # long enough for every slot to have filled with plain
+                        # file sends, each of which re-checked correctly on its
+                        # own way through. This was the one append that did
+                        # not, so a finished pack could push active_transfers
+                        # past MAX_DCC_SLOTS with nothing to stop it.
+                        #
+                        # The archive is already built and the queue row still
+                        # points at it, so leaving it queued costs nothing but
+                        # a wait - the same outcome, and the same message, the
+                        # two sibling dispatch paths use when they find no
+                        # slot.
+                        with queue_lock:
+                            room = len(config.active_transfers) < config.MAX_DCC_SLOTS
+                            if room:
+                                config.active_transfers.append({"user": completed_user, "file": rar_filename, "bytes_sent": 0, "next_file_obj": rar_filename})
+                        if not room:
+                            print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
+                                  f"the packed archive stays queued for the next trigger.")
+                            config.rar_inprogress = False
+                            redispatch_waiting_pack(irc_sock, just_finished=completed_user)
+                            if hasattr(config, 'user_processing_lock'):
+                                config.user_processing_lock.discard(completed_user.lower())
+                            return
                         if oserve: oserve.active_downloads = len(config.active_transfers)
-                        
+
                         announce_mod.send_dcc_sending_notice(completed_user, rar_filename)
                         
                         threading.Thread(
@@ -1230,7 +1255,22 @@ def wait_for_transfers_to_finish(timeout=None, poll=0.5, sleep=None,
     announced = False
 
     while True:
+        # A RUNNING PACK COUNTS AS BUSY. config.active_transfers is the SEND
+        # side, and a folder pack has no row there while it runs:
+        # check_queue_and_send() claims rar_inprogress, runs `rar` for up to
+        # RAR_TIMEOUT (half an hour by default), and only appends once the
+        # archive exists.
+        #
+        # So the wait saw an idle bot and returned at once. The reload then
+        # re-executed defaults.py - whose body sets `rar_inprogress = False` -
+        # and commands.py rebound user_processing_lock to a fresh empty set,
+        # both while the packer was still running. The next !rar read both
+        # interlocks as free and started a SECOND rar process; two packs of
+        # the same album target the same archive path, and the second one
+        # removes the file the first is still writing.
         active = list(getattr(config, "active_transfers", []) or [])
+        if getattr(config, "rar_inprogress", False):
+            active = active + [{"user": "(packing)", "file": "!rar archive"}]
         if not active:
             if announced:
                 log("[REHASH WAIT] Every transfer finished; reloading now.")
