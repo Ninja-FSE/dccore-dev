@@ -356,14 +356,27 @@ def bots_with_a_match(terms, bots):
             # line said "1 match in 2 lists". Every fixture in the tests was
             # token-disjoint, which is why they passed.
             #
-            # So the row's own bot column is compared for equality before the
-            # bot counts as matched. LIMIT stays small rather than 1: a
-            # near-miss neighbour can occupy the first row.
+            # So the equality goes into the QUERY, as a plain column filter
+            # alongside the MATCH, rather than being applied to whatever rows
+            # a LIMIT happened to return.
+            #
+            # It used to fetch 25 rows and compare them in Python, with a
+            # comment explaining that a near-miss neighbour "can occupy the
+            # first row". It can occupy all twenty-five: a bot holding fifty
+            # matching files as Dude|away, beside a Dude holding one, filled
+            # the window entirely and Dude was reported as having no match at
+            # all - the sidebar dimmed a list that did contain the file, and
+            # search() for the same term listed it. Whatever number is chosen
+            # there, a busy neighbour can exceed it.
+            #
+            # `bot = ?` is an ordinary comparison on the stored text, so it is
+            # exact where `bot:"name"` is a tokenised phrase, and LIMIT 1 is
+            # then enough: one row proves the match.
             wanted = bot.strip().lower()
             try:
                 rows = conn.execute(
-                    "SELECT bot FROM entries WHERE entries MATCH ? LIMIT 25",
-                    (f"bot:{_quote(wanted)} AND {query}",)).fetchall()
+                    "SELECT bot FROM entries WHERE entries MATCH ? AND bot = ? LIMIT 1",
+                    (f"bot:{_quote(wanted)} AND {query}", wanted)).fetchall()
             except Exception as err:
                 print(f"[LIST-INDEX] Could not check {bot!r} against the "
                       f"filter ({err}); its list is left unmarked rather "
