@@ -1783,8 +1783,11 @@ SETTINGS_LABELS = {
     "AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",
     "AUTO_REFETCH_MAX_PER_RUN": "Most lists to re-fetch in one sweep",
     "FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",
-    "FETCH_OFFER_TIMEOUT": "Fetch offer timeout (seconds)",
-    "FETCH_FOLDER_OFFER_TIMEOUT": "Folder (.rar) fetch offer timeout (seconds)",
+    # Named from the operator's side, like the pill in the Downloads table:
+    # this is the wait AFTER we send a request, not a timeout on an offer
+    # anybody made us.
+    "FETCH_OFFER_TIMEOUT": "Wait for a reply to a fetch request (seconds)",
+    "FETCH_FOLDER_OFFER_TIMEOUT": "Wait for a reply to a folder (.rar) request (seconds)",
     "MAX_FETCH_FOLDER_FILE_SIZE": "Max folder (.rar) fetch size",
     "MAX_FETCH_LIST_FILE_SIZE": "Max fetched master-list zip size",
     "FETCH_FOLDER_TRANSFER_TIMEOUT": "Folder (.rar) fetch transfer timeout (seconds)",

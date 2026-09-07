@@ -656,13 +656,32 @@
 
   // -------------------------------------------------------------- Downloads
 
+  // The pill an operator reads, which is NOT the internal state name.
+  //
+  // From a maintainer, on seeing two list rows sitting at "OFFERED": "should
+  // be REQUESTED, not offered". Exactly right, and the word was backwards on
+  // the screen rather than in the queue. dcc_fetch.py flips a row to
+  // `offered` in check_fetch_queue() at the moment it DISPATCHES OUR OWN
+  // request line - `@bot` for a list, `!bot <file>` otherwise - and stamps
+  // `offered_at` with the time we sent it. So the state means "we have asked
+  // and are waiting for their DCC SEND". Nothing has been offered to us; the
+  // name reads from inside the module, where the row IS the offer we are
+  // waiting on.
+  //
+  // The internal name stays as it is. It is written into the fetch queue
+  // file, so renaming it would strand every row in flight across a restart,
+  // and it is matched by name in a dozen places in dcc_fetch.py. Only the
+  // word on the pill is wrong, so only the word on the pill changes. The CSS
+  // class is still built from the state name, so .status-offered keeps
+  // styling it.
+  //
   // "rejected" is not a state dcc_fetch.py ever writes. A list archive whose
   // bytes arrived intact but which the extraction guard refused keeps
   // state === "complete", because the transfer really did succeed - the
   // reason it was refused is carried separately, in list_processing_error.
   // This is the display-side name for that combination.
   var DOWNLOAD_STATE_LABELS = {
-    pending: "Pending", offered: "Offered", listening: "Listening",
+    pending: "Pending", offered: "Requested", listening: "Listening",
     receiving: "Receiving", complete: "Complete", failed: "Failed",
     rejected: "Rejected"
   };
