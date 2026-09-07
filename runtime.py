@@ -198,7 +198,7 @@ known_bots_flushed_at = 0.0
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can
 # still see it. webserver.py reads these two directly for the dashboard.
-live_speed_bps = 0        # the MEAN bytes/sec of the sending transfers - see stats_mgr.live_speed(), which owns the open question about whether it should be the total instead
+live_speed_bps = 0        # bytes/sec across every sending transfer, summed
 live_speed_sampled_at = 0.0
 
 
