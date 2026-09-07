@@ -1777,7 +1777,7 @@ SETTINGS_LABELS = {
     "MAX_FETCH_FILE_SIZE": "Max fetch file size",
     "MAX_LIST_TEXT_SIZE": "Largest list text accepted from a peer",
     "DCC_BLOCK_SIZE": "Packet size",
-    "DCC_SEND_BUFFER": "Socket send buffer (0 = let the OS tune it)",
+    "DCC_SEND_BUFFER": "Socket send buffer (0 = the default for your platform)",
     "REHASH_TRANSFER_WAIT": "Seconds a rehash waits for transfers to finish",
     "AUTO_REFETCH_LISTS": "Re-fetch a held list when its bot advertises a new one",
     "AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",
@@ -2745,6 +2745,43 @@ def console_is_enabled():
     return dashboard_is_loopback_only()
 
 
+def _quiet_the_request_log():
+    """Stop werkzeug printing a line per HTTP request onto the operator's
+    console, unless DEBUG_MODE asks for it.
+
+    From the beta: "maybe those lines shouldnt be visible on cmd.exe except
+    you run dccore on something like debug mode. you miss the important lines
+    like search results etc".
+
+    Exactly that. The dashboard polls five endpoints every two seconds, so an
+    idle bot with one page open writes on the order of a hundred lines a
+    minute:
+
+        127.0.0.1 - - [...] "GET /api/console/log?since=33 HTTP/1.1" 200 -
+
+    Every one of them says the same thing - the dashboard is still open - and
+    together they push the lines that matter (a search, a transfer, a
+    disconnect) off the screen faster than anyone can read them. The console
+    is the operator's only view on a daemon with no window; filling it with
+    the dashboard's own heartbeat costs them that view.
+
+    SILENCED, NOT REDIRECTED. Werkzeug's log is a development convenience,
+    and every request it reports is one this process just served itself - the
+    information is not lost, it was never news. ERROR is left through so a
+    genuine failure inside the server still reaches the console.
+
+    Never raises: a logging tweak is not a reason for the dashboard not to
+    start.
+    """
+    if getattr(config, "DEBUG_MODE", False):
+        return
+    try:
+        import logging
+        logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    except Exception as err:
+        print(f"[WEBUI] Could not quieten the request log: {err}")
+
+
 def _ensure_console_sink():
     """Register the console's debug sink, at most once.
 
@@ -3211,6 +3248,7 @@ def start():
     if console_is_enabled():
         print("[WEBUI] The Console is on. It reaches ban, rehash and update "
               "behind this one password - see WEBUI_CONSOLE_ENABLED.")
+    _quiet_the_request_log()
     _open_in_browser(host, port)
     try:
         # use_reloader=False is NOT optional: Flask's reloader re-execs the whole

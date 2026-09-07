@@ -1171,8 +1171,40 @@ MIN_DCC_BLOCK_SIZE = 4096
 MAX_DCC_BLOCK_SIZE = 1024 * 1024
 
 
+# What "let the OS decide" is worth, per platform.
+#
+# MEASURED IN A BETA, and it cost a factor of eight. The same friend, the same
+# machine, the same link: OmenServe 30.4 MB/s, DCCore 2.95 / 2.98 / 3.00 /
+# 3.01 MB/s on four files of different sizes. Identical every time, because it
+# was arithmetic rather than congestion.
+#
+# TCP cannot have more bytes in flight than the send buffer holds, so
+# throughput is capped at SO_SNDBUF / round-trip-time. The default buffer on
+# that machine was exactly 65,536 bytes. Setting the packet size to 4 KB made
+# it WORSE (1.6 MB/s), and fitting both measurements gives the whole picture:
+#
+#     effective ceiling  : 3.19 MB/s
+#     fixed cost / block : 1.27 ms
+#     implied RTT        : 20.6 ms   <- 64 KB / 20.6 ms = 3.19 MB/s
+#
+# An ordinary internet round trip. Raising DCC_SEND_BUFFER to 1 MB took the
+# same transfer to 23.9 and 24.7 MB/s.
+#
+# WHY THIS IS PER-PLATFORM AND NOT SIMPLY A NEW DEFAULT. The old behaviour was
+# "never set it unless asked", justified by SO_SNDBUF disabling the OS's own
+# auto-tuning. That reasoning is sound on Linux, where tcp_wmem grows the
+# buffer to fit the connection and pinning it would be a downgrade on exactly
+# the long-haul links that need it most. It does not hold on Windows, where
+# what "leave it alone" gets you is a fixed 64 KB - so the honest default
+# differs by platform, and neither one is the other's mistake.
+#
+# An explicit DCC_SEND_BUFFER still wins everywhere, including a deliberate
+# small value.
+_DEFAULT_SEND_BUFFER = 1024 * 1024 if platform_compat.IS_WINDOWS else 0
+
+
 def _apply_send_buffer(conn, log=print):
-    """Set SO_SNDBUF if the operator asked for one. Never raises.
+    """Set SO_SNDBUF, from config or from the platform default. Never raises.
 
     A socket option that cannot be set is not a reason to fail a transfer that
     would otherwise work - the kernel is entitled to refuse or to round the
@@ -1182,6 +1214,10 @@ def _apply_send_buffer(conn, log=print):
         wanted = int(getattr(config, "DCC_SEND_BUFFER", 0) or 0)
     except (TypeError, ValueError):
         return
+    if wanted <= 0:
+        # "Let the OS tune it" is the right answer on one platform and a
+        # 64 KB ceiling on the other - see _DEFAULT_SEND_BUFFER.
+        wanted = _DEFAULT_SEND_BUFFER
     if wanted <= 0:
         return
     try:

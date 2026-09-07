@@ -506,7 +506,7 @@
 # buffer, and setting it explicitly TURNS THAT OFF - so a value chosen for one
 # link can be worse than the default on every other. It is here to be
 # experimented with on a link the operator knows, not to be set hopefully.
-# 0 = let the OS auto-tune; try 262144 or 1048576
+# 0 = per-platform default (1MB on Windows, OS auto-tuning on Linux)
 #DCC_SEND_BUFFER = 0
 
 #DCC_PORT_START = 55000
