@@ -4,6 +4,42 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗺️ Two more places the list name was dropped
+
+The audit's critic grouped these under one cause: the `name` argument reaches
+most helpers and is dropped at a few, and each drop silently means "the
+primary list" rather than failing.
+
+**A second list's advert published the primary's size.**
+`get_file_count_date_size_and_raw_bytes(name)` passes `name` to
+`find_latest_list()` and `all_list_paths()` a few lines up, then calls
+`size_file_path()` and `rawbytes_file_path()` bare. So a channel bound to a
+second list advertised its own file count and list date beside the PRIMARY
+library's size and byte total - a plausible-looking number, which is why it
+would have survived a glance.
+
+**Renaming the bot orphaned every list but the primary.**
+`migrate_list_base_name()` only ever looked in `LOCAL_LIST_DIR`. A list's
+files live in its own directory and the marker recording what they are called
+is already per-directory, so the design supported this - the function simply
+never looked. After a rename, every other list's artifacts kept the old base
+name, nothing on the next startup knew to look for it, and those channels
+advertised a library they no longer had a list for.
+
+**One thing deliberately NOT changed**, and one guard deleted:
+
+- `db.migrate_legacy_side_files()` has the same primary-only shape and was
+  flagged with them, but the consequence does not follow. The legacy names it
+  migrates existed only in installs from before that rename, which predates
+  multi-list entirely - so those installs had one list, and a second list's
+  directory is created afterwards and can only ever hold the new names.
+- The new migration briefly had a de-duplication guard for two lists sharing
+  a directory. `list_dir()` does answer `LOCAL_LIST_DIR` for any list marked
+  primary, so two primaries would collide - but `load_lists()` normalises a
+  hand-edited file down to exactly one primary first. Unreachable, so it was
+  deleted rather than kept with a test that could only ever pass. A test now
+  pins the invariant it depended on.
+
 ### 📊 Live speed is the sum of the slots, not their average
 
 The operator's call on the question the audit raised: **"Isn't live speed the

@@ -425,7 +425,43 @@ def migrate_list_base_name(log=print):
     Returns the list of (old, new) basenames actually moved, for the tests
     and for the startup log.
     """
-    directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
+    # EVERY list's directory, not only the primary's. A list's files live in
+    # its own directory - list.list_dir(name), with the primary keeping
+    # LOCAL_LIST_DIR itself - and the marker that records what they are called
+    # is already per-directory. This function simply never looked anywhere but
+    # the primary, so renaming the bot orphaned every other list's artifacts:
+    # they kept the old base name, nothing on the next startup knew to look
+    # for it, and each of those channels advertised a library it no longer had
+    # a list for.
+    #
+    # A failure in one directory must not stop the others, for the same reason
+    # a failure on one file does not stop the rest of that directory: a daemon
+    # that will not start over a rename is worse than the rename not
+    # happening.
+    import list as list_mod
+    import library
+
+    # No de-duplication of directories. It was written, and then deleted for
+    # being unreachable: list_dir() answers LOCAL_LIST_DIR for any list marked
+    # primary, so two primaries would share a directory - but load_lists()
+    # normalises a hand-edited file down to exactly one primary before this
+    # ever sees it. A guard that cannot be reached is a guard no test can
+    # falsify, and this file has deleted two of those already.
+    moved = []
+    for served in library.lists():
+        try:
+            directory = list_mod.list_dir(served.name)
+        except Exception as err:  # a malformed lists.json is not fatal here
+            log(f"[MIGRATE] Could not resolve the directory for list "
+                f"{served.name!r}: {err}")
+            continue
+        moved.extend(_migrate_one_list_directory(directory, log=log))
+    return moved
+
+
+def _migrate_one_list_directory(directory, log=print):
+    """migrate_list_base_name() for ONE list's directory. Returns the
+    (old, new) basenames actually moved."""
 
     # What the files on disk are actually called, not what they were called
     # when the bot shipped. Absent means an install from before the marker
