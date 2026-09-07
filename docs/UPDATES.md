@@ -4,6 +4,62 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 📦 Every list in a fetched archive is kept, not just the largest
+
+A peer's archive routinely holds more than one list, and until now exactly one
+survived: `_pick_list_file()` skipped anything matching the "-rar-"/"-video-"
+naming conventions and took the largest of what remained.
+
+    @SomeBot  ->  SomeBot-Default(2026-01-02)-OS.txt   kept
+                  SomeBot-rar(2026-01-02)-OS.txt       thrown away
+
+So a bot offering its albums as a separate RAR list, or its films as a separate
+video list, had that half silently discarded on the way in - and an operator
+whose peer keeps everything in the second file saw an empty catalogue for a bot
+that plainly advertises thousands.
+
+**Keyed on a marker, never the filename.** A peer's list file carries a date, so
+a filename key would make every re-fetch a NEW list: the old one orphaned, the
+sidebar growing forever, the freshness LED with nothing stable to compare. The
+marker is what remains once the shared prefix, the date and a trailing "-OS"
+come off - `rar`, `VIDEO`, `Default`.
+
+The shared prefix is derived from the FILES rather than assumed from the nick.
+A peer names its lists after its own `LIST_BASE_NAME`, which need not be the
+nick we asked, and a nick containing a hyphen would be cut in half by splitting
+on the first separator. It is trimmed back to a separator so it cannot end
+mid-word: with `-RAR-` and `-README-` the raw common prefix ends at `-R`, and
+the markers would come out `AR` and `EADME`.
+
+**The main list is unchanged.** It keeps the empty marker, it is still mirrored
+in `list_path` and `entry_count` at the top of the entry, and it is still what a
+bare `@<nick>` is understood to be offering - so nothing migrates, and an entry
+written before this has no `lists` key at all and still renders and browses.
+
+**Bounded, and not silently.** "Keep exactly one" was what bounded this; without
+a ceiling an archive of hundreds of small `.txt` files is hundreds of parses,
+sidebar rows and index writes, all under the existing byte cap. The cap names
+what it dropped - three of them and a count, because a cap that says nothing
+reads as "we covered everything" and one that names thirty-two files is a wall
+nobody finishes.
+
+A second list's failure is not the fetch's failure: the main list is parsed,
+counted and indexed before the others are touched, so an oversized or unreadable
+sibling costs that list alone. A `.txt` with no request lines is a readme or a
+banner rather than a catalogue and gets no row - the main list exempt, because
+an empty main list is a fact about that bot worth seeing.
+
+Each list is indexed under its own name - the bare nick for the main one, so an
+index written before this still resolves - so re-fetching replaces one list's
+rows rather than the whole bot's.
+
+**Two things the tests corrected.** The main list is now decided ONCE and passed
+down: the first version asked `_pick_list_file()` a second time, which repeated
+its log line and re-entered a function `tests/test_list_fetch.py` deliberately
+hooks to block on its first call. And a mutation run showed the single-file
+special case was redundant - `marker = "" if path == main` already answers it -
+so it went, rather than staying as dead code that looks load-bearing.
+
 ### 🗂️ Every list this bot serves is browsable
 
 From the beta. An operator built a second list **through the dashboard**, put

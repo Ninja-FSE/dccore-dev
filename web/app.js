@@ -961,7 +961,7 @@
     // than switching to a source that would come back empty, put its nick
     // where fetching one starts.
     if (row.dataset.held === "no") {
-      el.filelistsFetchInput.value = row.dataset.bot;
+      el.filelistsFetchInput.value = row.dataset.nick || row.dataset.bot;
       el.filelistsFetchInput.focus();
       showFilelistsFetchStatus("No list held for " + row.dataset.bot
         + " yet. Press Fetch to ask for it.");
@@ -1116,6 +1116,9 @@
     button.type = "button";
     button.className = "bot-row";
     button.dataset.bot = row.bot;
+    // The NICK as well as the identity. They are the same for a bot's main
+    // list and differ for every other one, and the fetch box wants the nick.
+    button.dataset.nick = row.nick || splitFetchedSource(row.bot).nick;
     button.dataset.held = row.held ? "yes" : "no";
 
     var led = document.createElement("span");
@@ -1152,6 +1155,20 @@
   function isOwnSource(source) {
     var text = String(source || "");
     return text === "__own__" || text.indexOf("__own__:") === 0;
+  }
+
+  // A FETCHED SOURCE IS NOT ALWAYS JUST A NICK. A bot's main list keeps the
+  // bare nick it has always had; its other lists are "<nick>/<marker>". Every
+  // action that concerns the BOT rather than the list - re-fetching, packing a
+  // folder, putting a nick in the fetch box - needs the nick out of it, and
+  // sending "<nick>/<marker>" to any of them would address a bot that does
+  // not exist.
+  function splitFetchedSource(source) {
+    var text = String(source || "");
+    var cut = text.indexOf("/");
+    return cut < 0
+      ? { nick: text, list: "" }
+      : { nick: text.slice(0, cut), list: text.slice(cut + 1) };
   }
 
   // The ?list= for a source key, or "" for the primary.
@@ -1504,7 +1521,8 @@
         // whichever list the sidebar has selected - not the one this folder
         // came from. Requesting the right folder from the wrong bot is a
         // request that cannot succeed.
-        button.dataset.bot = group.bot || state.filelistsSource;
+        button.dataset.bot = splitFetchedSource(
+          group.bot || state.filelistsSource).nick;
         button.dataset.folder = group.folder;
       }
     }
@@ -1754,12 +1772,21 @@
         // bots have matches - see applyFilterHighlight().
         url = "/api/filelists/search?q=" + encodeURIComponent(filter);
       } else {
-        var listParam = ownListParam(source);
-        var base = isOwnSource(source)
-          ? "/api/filelists" + (listParam
-              ? "?list=" + encodeURIComponent(listParam) + "&"
-              : "?")
-          : "/api/filelists/bot/" + encodeURIComponent(source) + "?";
+        var base;
+        if (isOwnSource(source)) {
+          var listParam = ownListParam(source);
+          base = "/api/filelists" + (listParam
+            ? "?list=" + encodeURIComponent(listParam) + "&"
+            : "?");
+        } else {
+          // A bot's other lists are "<nick>/<marker>". The nick is a PATH
+          // segment and the marker a query parameter, so a marker containing
+          // anything path-like cannot reshape the URL - and the route reads
+          // exactly the two it is given.
+          var parts = splitFetchedSource(source);
+          base = "/api/filelists/bot/" + encodeURIComponent(parts.nick)
+            + (parts.list ? "?list=" + encodeURIComponent(parts.list) + "&" : "?");
+        }
         url = base + "offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
       }
 

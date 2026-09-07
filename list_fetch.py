@@ -336,6 +336,145 @@ def _extract_member(zf, info, dest_path, budget):
     return written
 
 
+# A DATE IN A LIST FILENAME, in the shapes peers actually publish:
+# "-2026-09-07" (ours), "(2026-01-02)" (OmenServe's), and the separator
+# variants around them. Stripped when deriving a list's marker, because the
+# marker is an IDENTITY and a date changes on every rebuild - key a stored
+# list on the filename and each re-fetch becomes a new list, orphaning the old
+# one, growing the sidebar forever and leaving the freshness LED nothing
+# stable to compare.
+_LIST_DATE_RE = re.compile(r"[\(\[\-_ ]?\d{4}[-_.]\d{2}[-_.]\d{2}[\)\]]?")
+
+# What some bots put after the date. "-OS" is OmenServe's; it says who built
+# the list, not which list it is.
+_LIST_TRAILER_RE = re.compile(r"[-_ ]*(?:OS|OmenServe)\s*$", re.IGNORECASE)
+
+# How many lists to keep out of one archive. A peer's zip is untrusted, and
+# "keep exactly one" was what bounded this before - without a ceiling, an
+# archive of five hundred small .txt files becomes five hundred parses, five
+# hundred sidebar rows and five hundred index writes, all comfortably under
+# the existing byte cap.
+MAX_LISTS_PER_ARCHIVE = 8
+
+
+def _shared_list_prefix(stems):
+    """The part every one of these filenames begins with.
+
+    Derived from the files rather than assumed from the nick. A peer's list is
+    named after its own LIST_BASE_NAME, which need not be the nick we asked -
+    and for a bot whose nick contains a hyphen ("Some-Bot"), splitting on
+    the first separator would cut the name in half.
+
+    Trimmed back to a separator so the prefix cannot end mid-word: with
+    "SomeBot-RAR-..." and "SomeBot-README-..." the raw common prefix is
+    "SomeBot-R", and the markers would come out "AR" and "EADME".
+    """
+    if not stems:
+        return ""
+    prefix = os.path.commonprefix([stem.lower() for stem in stems])
+    cut = max(prefix.rfind(sep) for sep in ("-", "_", " ", "."))
+    return stems[0][:cut + 1] if cut >= 0 else ""
+
+
+def list_marker(file_name, shared_prefix=""):
+    """The short, STABLE name for one list inside an archive.
+
+        SomeBot-2026-09-07.txt          ->  ""        (the master)
+        SomeBot-RAR-2026-09-07.txt      ->  "RAR"
+        SomeBot-VIDEO-2026-09-07.txt    ->  "VIDEO"
+        SomeBot-Default(2026-01-02)-OS  ->  "Default"
+
+    Empty means the archive's main list - what a bare "@<nick>" is understood
+    to be offering, and what every reader of a fetched entry meant before an
+    archive could hold more than one.
+    """
+    stem = os.path.splitext(os.path.basename(str(file_name or "")))[0]
+    if shared_prefix and stem.lower().startswith(shared_prefix.lower()):
+        stem = stem[len(shared_prefix):]
+    stem = _LIST_DATE_RE.sub("", stem)
+    stem = _LIST_TRAILER_RE.sub("", stem)
+    return stem.strip("-_ .")
+
+
+def _list_txt_files(extract_dir):
+    """Every .txt in the extracted archive, long-path wrapped like the rest of
+    this module - see _pick_list_file() for why both halves of that matter on
+    Windows."""
+    long_root = platform_compat.long_path(extract_dir)
+    found = []
+    for root, _dirs, files in os.walk(long_root):
+        for fname in files:
+            if fname.lower().endswith(".txt"):
+                found.append(os.path.join(root, fname))
+    return found
+
+
+def pick_list_files(extract_dir, main):
+    """Every list in the archive, as [(marker, path), ...], the main one first.
+
+    A peer's archive routinely holds more than one list, and until now exactly
+    one of them survived: _pick_list_file() skipped anything matching the
+    "-rar-"/"-video-" conventions and took the largest of what remained. So a
+    bot offering its albums as a separate RAR list, or its films as a separate
+    video list, had that half silently dropped - and an operator whose own
+    content lived in the second file saw an empty catalogue for a bot that
+    plainly advertises thousands.
+
+    THE MAIN ONE KEEPS THE EMPTY MARKER, and is passed IN - decided once, by
+    the rule that has always decided it, at the point that already had to make
+    the choice. Asking _pick_list_file() a second time here would repeat its
+    log line, and would call a function a concurrency test deliberately hooks
+    to block on its first invocation. Everything a stored entry meant before
+    an archive could hold more than one still means it, because the empty
+    marker IS what it meant.
+
+    CAPPED, and the cap is not silent. A peer's zip is untrusted and "keep
+    exactly one" was what bounded this; see MAX_LISTS_PER_ARCHIVE.
+    """
+    txt_files = _list_txt_files(extract_dir)
+    if not txt_files or main is None:
+        return []
+    stems = [os.path.splitext(os.path.basename(p))[0] for p in txt_files]
+    prefix = _shared_list_prefix(stems)
+
+    ordered = [main] + sorted(p for p in txt_files if p != main)
+    if len(ordered) > MAX_LISTS_PER_ARCHIVE:
+        # NAMED, but not all of them. A cap that says nothing reads as "we
+        # covered everything"; a cap that names thirty-two files is a wall of
+        # text nobody finishes. The count is the fact, and a few names make it
+        # recognisable.
+        dropped = [os.path.basename(p) for p in ordered[MAX_LISTS_PER_ARCHIVE:]]
+        shown = ", ".join(dropped[:3])
+        if len(dropped) > 3:
+            shown += f", and {len(dropped) - 3} more"
+        print(f"[LIST-FETCH] Keeping {MAX_LISTS_PER_ARCHIVE} of "
+              f"{len(ordered)} lists in this archive; ignored {shown}. "
+              f"Raise MAX_LISTS_PER_ARCHIVE if a peer publishes more.")
+        ordered = ordered[:MAX_LISTS_PER_ARCHIVE]
+
+    kept = []
+    seen = set()
+    for path in ordered:
+        # THE MAIN LIST HAS NO MARKER, decided here rather than derived. That
+        # also settles the single-file archive: with nothing to contrast a
+        # name against, list_marker() would find the date or the base name
+        # distinguishing and invent a sub-list the archive does not have. The
+        # only file in an archive is the main one, so it never reaches that.
+        marker = "" if path == main else list_marker(path, prefix)
+        # A marker has to be unique within the archive - it is half the key
+        # the list is stored and browsed under. Two files deriving the same
+        # one is not a reason to drop either, so the later gets its filename
+        # instead of a guess at what makes it different.
+        if not marker or marker.lower() in seen:
+            if path != main:
+                marker = os.path.splitext(os.path.basename(path))[0]
+        if marker.lower() in seen:
+            continue
+        seen.add(marker.lower())
+        kept.append((marker, path))
+    return kept
+
+
 def _pick_list_file(extract_dir):
     """Find the extracted master-list .txt file.
 
@@ -419,10 +558,13 @@ def _pick_list_file(extract_dir):
             return -1
 
     candidates.sort(key=_size, reverse=True)
-    print(f"[LIST-FETCH] WARNING: {len(candidates)} candidate .txt files found "
-          f"in {extract_dir!r}; picking the largest "
-          f"({os.path.basename(candidates[0])}) as the master list - a "
-          f"best-effort guess, not a confident match.")
+    # Short, and said once. This used to be a WARNING about a guess with
+    # something to lose - the others were discarded. They are all kept now
+    # (see pick_list_files()), so all this decides is which one a bare
+    # "@<nick>" is understood to mean, and a multi-list archive is the
+    # ordinary case rather than something to warn about.
+    print(f"[LIST-FETCH] {len(candidates)} lists here; "
+          f"{os.path.basename(candidates[0])} is the main one.")
     return candidates[0]
 
 
@@ -833,6 +975,70 @@ def _process_fetched_list_zip_unlocked(bot, zip_path):
         _release_held_list(held, extract_dir, succeeded)
 
 
+def _measure_extra_list(bot, marker, path):
+    """Parse and index one NON-MAIN list, or None if it cannot be used.
+
+    Same ceiling and the same courtesy parse the main list gets - a second
+    list is no more trustworthy for being second - but a failure here returns
+    None instead of failing the fetch. The main list is already stored by the
+    time this runs, and losing a good list because a sibling was bad is the
+    behaviour this whole change exists to end.
+    """
+    try:
+        text_size = os.path.getsize(platform_compat.long_path(path))
+    except OSError as err:
+        print(f"[LIST-FETCH] Skipping {bot}'s '{marker}' list: {err}")
+        return None
+    if text_size > max_list_text_size():
+        print(f"[LIST-FETCH] Skipping {bot}'s '{marker}' list: {text_size} "
+              f"bytes, over the {max_list_text_size()}-byte ceiling.")
+        return None
+
+    try:
+        entries, _total = list_mod.find_matching_entries(
+            [], limit=None, list_path=platform_compat.long_path(path))
+        rows = list_mod.entries_to_filelist_rows(entries, str(bot).strip())
+    except Exception as err:
+        print(f"[LIST-FETCH] Skipping {bot}'s '{marker}' list: could not "
+              f"parse it ({err}).")
+        return None
+
+    # A .txt with no request lines in it is a readme, a banner or a header -
+    # not a catalogue. Keeping it would put a row in the sidebar that opens on
+    # nothing, which is the noise this change is otherwise removing. The MAIN
+    # list is exempt: it is the archive's identity, and an empty one is a fact
+    # about that bot worth seeing rather than a file to ignore.
+    if not rows:
+        print(f"[LIST-FETCH] Skipping {bot}'s '{marker}' list: no entries in "
+              f"it.")
+        return None
+
+    # Indexed under its own name, so the cross-list filter can say WHICH of a
+    # bot's lists a match came from - and so re-fetching replaces that list's
+    # rows rather than the whole bot's.
+    list_index.index_bot_list(index_key(bot, marker), rows)
+    return {"list_path": path, "entry_count": len(rows),
+            "file_name": os.path.basename(path)}
+
+
+def index_key(bot, marker):
+    """How one list is named in the search index and on the wire.
+
+    The bare nick for a bot's MAIN list - the name it has always had, so an
+    index written before archives could hold more than one still resolves -
+    and "<nick>/<marker>" for the rest.
+    """
+    nick = str(bot).strip()
+    return f"{nick}/{marker}" if marker else nick
+
+
+def split_index_key(key):
+    """(nick, marker) from an index key. The inverse of index_key()."""
+    text = str(key or "").strip()
+    nick, sep, marker = text.partition("/")
+    return (nick, marker) if sep else (text, "")
+
+
 def _install_fetched_list(bot, zip_path, extract_dir):
     """Extract, validate and publish one fetched list. (bool, reason)."""
     list_path, reason = _extract_and_locate_list_file(zip_path, extract_dir)
@@ -899,6 +1105,23 @@ def _install_fetched_list(bot, zip_path, extract_dir):
               f"{entry_count} entries reached the search index; the "
               f"cross-list filter may not show it until the next fetch.")
 
+    # THE REST OF THE ARCHIVE. Everything above concerns the MAIN list, which
+    # is the one this function has always handled and the one every existing
+    # reader means. The others are kept beside it now rather than discarded.
+    #
+    # Their failures are not the fetch's failures: the main list is already
+    # parsed, counted and indexed by this point, and a second file that is
+    # oversized or unreadable costs that list alone. Reporting the whole fetch
+    # as failed over it would throw away a list that is sitting there, correct.
+    kept_lists = {"": {"list_path": list_path, "entry_count": entry_count,
+                       "file_name": os.path.basename(list_path)}}
+    for marker, path in pick_list_files(extract_dir, list_path):
+        if not marker:
+            continue
+        info = _measure_extra_list(bot, marker, path)
+        if info:
+            kept_lists[marker] = info
+
     store = _ensure_fetched_bot_lists()
     store[str(bot).strip().lower()] = {
         "bot": str(bot).strip(),
@@ -929,6 +1152,17 @@ def _install_fetched_list(bot, zip_path, extract_dir):
         # absence is the honest answer rather than a zero - see
         # _advert_snapshot().
         "advert_when_fetched": _advert_snapshot(bot),
+        # EVERY LIST THE ARCHIVE HELD, keyed by a short stable marker. The
+        # main one keeps the empty marker and is also mirrored in list_path
+        # and entry_count above - which is what every reader written before an
+        # archive could hold more than one already means, so nothing migrates
+        # and nothing that reads an entry today has to learn about this.
+        #
+        # Keyed on a MARKER, never the filename: a peer's list file carries a
+        # date, so a filename key would make every re-fetch a new list -
+        # orphaning the old one, growing the sidebar forever, and leaving the
+        # freshness LED nothing stable to compare against.
+        "lists": kept_lists,
     }
 
     # Persisted immediately, not on a timer: unlike the bot registry (updated
@@ -939,9 +1173,16 @@ def _install_fetched_list(bot, zip_path, extract_dir):
     # the File Lists switcher went blank until the next fetch.
     db.save_fetched_bot_lists(dict(store))
 
-    print(f"[LIST-FETCH] Stored a reference to {entry_count} entries from "
-          f"{bot}'s fetched list ({os.path.basename(list_path)}) - parsed "
-          f"fresh from disk on each view, not retained in memory.")
+    if len(kept_lists) > 1:
+        detail = ", ".join(f"{marker or 'main'}: {info['entry_count']}"
+                           for marker, info in kept_lists.items())
+        print(f"[LIST-FETCH] Stored {len(kept_lists)} lists from {bot}'s "
+              f"archive ({detail}) - each parsed fresh from disk on view, "
+              f"not retained in memory.")
+    else:
+        print(f"[LIST-FETCH] Stored a reference to {entry_count} entries from "
+              f"{bot}'s fetched list ({os.path.basename(list_path)}) - parsed "
+              f"fresh from disk on each view, not retained in memory.")
     return True, None
 
 

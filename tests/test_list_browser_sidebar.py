@@ -283,7 +283,10 @@ class ClickingARowYouCannotBrowse(unittest.TestCase):
                          "the not-held arm sets the source itself")
 
     def test_it_puts_the_nick_where_fetching_one_starts(self):
-        self.assertIn("el.filelistsFetchInput.value = row.dataset.bot",
+        """The NICK, which is no longer the same as the row's identity. A
+        bot's other lists are keyed "<nick>/<marker>", and pasting that into
+        the fetch box would address a bot that does not exist."""
+        self.assertIn("el.filelistsFetchInput.value = row.dataset.nick",
                       self.not_held_arm())
 
     def test_and_says_why_nothing_else_happened(self):

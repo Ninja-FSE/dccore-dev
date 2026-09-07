@@ -2,6 +2,8 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **Fixed: only one list survived from each bot you fetched.** A lot of bots publish more than one - loose files in one list and packed albums in another, or music and films kept apart - and DCCore kept the biggest and threw the rest away without saying so. If a bot keeps most of its catalogue in the second list, what you held was close to empty for no visible reason. Every list in the archive is kept now, each with its own row in the List Browser, its own file count and its own contents. Re-fetching updates the same lists rather than piling up new ones, and lists you already hold are unaffected until the next fetch.
+
 - **Fixed: the List Browser only ever showed one of your lists.** If you serve more than one list, only the primary appeared - the others were being served and advertised correctly, but there was no way to look at them from the dashboard, which is where you created them. Every list you serve now gets its own row in the List Browser and can be browsed like any other. If you serve a single list, nothing changes: it is still one row reading "Our own list".
 
 - **The console is readable again while the dashboard is open.** Every page refresh wrote a line like `"GET /api/console/log?since=33 HTTP/1.1" 200 -` to the bot's window - five endpoints polled every couple of seconds, around a hundred lines a minute on an idle bot, all of them saying nothing except that the dashboard was still open. Search results, transfers and disconnects scrolled away before you could read them. Those lines are off now unless you run with debug logging on; genuine dashboard errors still show.
