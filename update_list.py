@@ -946,7 +946,7 @@ def generate_master_list(list_name=None):
     # config.FILE_DIRECTORY and then immediately overwritten inside the
     # per-folder loop below. Dead since #164, and reading a setting that is
     # only the FALLBACK for an install with no folder list - the same
-    # confusion Neo raised about it still sitting on the Settings page.
+    # confusion an operator raised about it still sitting on the Settings page.
     # The real scan root, and why it is long_path()-wrapped, are in the
     # loop.
 

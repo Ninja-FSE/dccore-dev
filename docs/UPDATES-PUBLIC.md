@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **Fixed: changing your admin password with `configure.py` could silently do nothing.** If you had ever changed it from the dashboard, that password lives in `settings.conf` — which is applied *after* `admin_config.py` and therefore wins. Running `configure.py` wrote a new hash into a file nothing would read, told you it had been set, and left the old password working. It now checks, and says plainly that the change will not take effect and where to make it instead. **If you have rotated a shared password this way, check it actually changed.**
+
+- **Fixed: a failed write could leave your install unbootable.** `configure.py` truncated `admin_config.py` before writing it, so a full disk or an interrupted run left half a Python file — which the daemon cannot parse and `configure.py` cannot repair either, because it loads the same file. The write is atomic now: either the new file or the old one, never half of one.
+
+- **Fixed: `!rehash` did not actually pause anything.** It said "No new sends will start" and then kept dispatching queued files, so on a busy bot it could never go quiet: every finished transfer immediately refilled the slot it had just freed. The wait ran its full two minutes refusing every request with "the bot is reloading", and then reloaded during live transfers anyway — the exact thing it exists to avoid. **The dashboard triggers this on every settings save.** Cross-bot fetches are held too, and a running `!rar` pack now counts as busy rather than being invisible to it.
+
+- **Fixed: a `!rar` request could be packed and then thrown away.** On an install with more than one list, a folder requested in a channel bound to your second list was accepted, packed — minutes of work for a large album — and then rejected at the last step as a "poisoned queue entry", taking the user's queue row with it. The check at the end was only ever looking at your primary list's folders.
+
+- **Fixed: your second list advertised your primary list's size.** The file count and list date were right; the size and byte total came from the wrong list. Renaming the bot also left every list but the primary with its files under the old name, so those channels advertised a library the bot could no longer find a list for.
+
+- **Fixed: a reconnect could drop the connection it was recovering.** When the bot rejoins and the server sends the channel's user list, everyone whose queue was frozen gets thawed. With two or more of them, that could raise an error on the connection thread, which the bot handles by closing the socket — so the sync sent to recover the link is what dropped it.
+
+- **Fixed: a transfer that ran out of file was recorded as complete.** If the file shrank mid-send — a re-encode, a tidy-up, a network drive going away — the send stopped early and was counted as a finished transfer: added to your totals, credited to the download counter, and the queue row deleted, while the receiver sat waiting for the rest. It is recorded as a failure now, and says how many bytes of how many went out.
+
+- **Fixed: a failed listener cost a serving slot permanently.** If the bot could not open a listening socket for a send — which is what happens when the machine runs out of file descriptors — the slot stayed marked in use for ever. Nothing revisits it, so each occurrence cost one slot out of your maximum until you restarted, exactly when you could least afford it.
+
+- **Fixed: re-fetching a list could destroy the copy you already had.** The bot cleared the old list before checking the new one, so if what arrived was not usable — a `.rar` where a `.zip` was expected, an oversized archive, an error page — you lost a good list on the way to rejecting the replacement. With automatic re-fetching on, that happens unattended. The old copy is now kept aside and put back if the new one is refused.
+
+- **Fixed: your speed record could be replaced by a slower one.** Two transfers finishing at the same moment both read the old record and the slower one wrote last, so a genuine record was quietly overwritten by a worse figure. Nothing recomputes it, so it was gone for good.
+
+- **Live speed is now the total across your slots, not their average.** Three transfers at 2 MB/s each advertised `Speed: 2.0MB/s` against 6 MB/s of real traffic — the bot understating itself in its own channel by however many slots were in use, worst exactly when it was busiest. **This changes the number in your advert.**
+
+- **Fixed: the Settings page said the remote Console was off when it was on.** With the setting left at its default, the Console is on while your dashboard is reachable only from your own machine — but the checkbox showed unchecked, so a stock install was told that ban, rehash and update were not reachable behind the dashboard password when they were. The field now says what the default resolves to on your install.
+
+- **Fixed: custom theme colours could not be entered at all.** The sample tells you to write a code like `\x0306,06`, and that text was sent to the channel literally — nine characters where the colour should be, in every advert and every notice. There was no way round it either: a colour code starts with a control character neither a text editor nor a browser field can produce. Typing the escape now works, which is what the documentation always said.
+
+- **Fixed: `start-dccore.bat check` reported success even when the check failed.** It printed the problems and then exited `0`, so anything that gates on the result — a scheduled task, a wrapper script — treated a broken configuration as verified. The Linux script was always right; the two agree again.
+
+- **Fixed: an on-connect command error pointed at the wrong line.** Errors name the position rather than the text, because the text may hold a password — but blank lines were stripped before counting, so a block with a blank separator in it reported "command 3" for what you typed on line 4. It counts the lines you typed now.
+
+- **Fixed: a filter search could say a list has no match when it does.** If a bot with a similar nick — `Bot` and `Bot|away`, say — had a lot of matching files, the other bot's list was greyed out as empty while the filter would happily list rows from it.
+
+- **Fixed: the advert could stop after a `!rehash`.** A reload briefly cleared the marker the advert loop checks, and a loop waking in that moment concluded it had been replaced and retired — leaving the channels silent until the next reconnect.
+
+- **Fixed: one bad line in a saved file could disable cross-bot fetching for good.** A hand-edited or half-restored `data/fetch_history.json` with a single malformed entry made the fetch dispatcher fail every two seconds for the life of the process. One bad entry is dropped now instead of taking the whole file, which is what the bot registry already did.
+
+- **A few things a hostile or broken peer could do, closed.** The bot no longer connects to whatever address an incoming offer names — `0.0.0.0` in particular, which means "this machine". Anybody in a channel could forge the operator's latency reading by typing a message that looked like a server reply. And a peer that never finished a line could grow the bot's read buffer until the machine ran out of memory.
+
+- **If you run the test suite, run it somewhere else.** It was writing real files under `data/` — your queue, your ban list, your accumulated totals — so running it inside a live install overwrote them with test fixtures. It no longer touches anything outside its own temporary directory, and the build fails if that ever changes again.
+
 - **Commands sent to the server when you connect** — X login, usermodes, whatever your network wants. Settings gives you a box to paste them into, one per line, and a seconds-between-commands stepper so you do not trip Excess Flood. Use `%nick%` for the nickname the server actually gave you.
 
   **They run before the bot joins**, which on Undernet is the whole point: logging in to X takes `+x`, and joining first shows your real host to everybody already in the channel. Your commands are never written to the log or the debug channel — only the command word, so an X password cannot end up in a channel.

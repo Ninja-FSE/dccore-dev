@@ -706,7 +706,7 @@ def _handle_rehash_request(user, target_chan):
         live_debug_sinks = list(announce._debug_sinks)
 
     try:
-        # 1b. QUIESCE FIRST (#310, Neo's). A reload swaps the modules a
+        # 1b. QUIESCE FIRST (#310). A reload swaps the modules a
         # running transfer is executing inside, so the safe order is: stop
         # starting new sends, let the ones in flight finish, reload, then
         # start again. Without it a rehash lands in the middle of somebody's
@@ -926,8 +926,8 @@ def _handle_rehash_request(user, target_chan):
         
         # Sends are allowed again BEFORE the queue is woken - waking it while
         # still paused would have every dispatch refused by the gate the wait
-        # put up, and the wake is the thing that restarts the queue Neo asked
-        # for.
+        # put up, and the wake is the thing that restarts the queue the
+        # operator asked for.
         import dcc as _dcc_resume
         _dcc_resume.resume_transfers()
 

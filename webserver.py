@@ -1439,7 +1439,8 @@ def build_fetch_status_payload():
     the dashboard's Downloads panel has a stable order to render and the row
     an operator just created is the one they are already looking at.
 
-    Neo's, and the right way round for a log: the reason to open this view is
+    An operator's request, and the right way round for a log: the reason to
+    open this view is
     almost always the most recent thing that happened. Oldest-first meant
     scrolling past every completed fetch to find it.
 
@@ -1737,7 +1738,7 @@ SETTINGS_LABELS = {
 
     "LIST_BASE_NAME": "List base name",
     "PAUSE_ON_UPDATE": "Pause sharing during !update",
-    # Named for what it now IS. Neo: "under Paths & Storage, this is not
+    # Named for what it now IS. From an operator: "under Paths & Storage, this is not
     # needed anymore" - not quite, it is still the fallback for an install
     # with no folder list, which is most of them. But presenting it as a
     # plain "Music directory" beside a folder editor that overrides it is

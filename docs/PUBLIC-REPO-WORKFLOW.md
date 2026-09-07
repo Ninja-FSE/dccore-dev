@@ -120,6 +120,14 @@ that later sweeps caught by design, not luck. Specifically:
   trusting the rule is there.
 - Read the scrubbing/test code itself during a sweep, not just the
   production code and docs. The scrubber is shipped too.
+- **`README.md`'s document table deliberately does not list this file or
+  `UPDATES-PUBLIC.md`.** README ships, and both of those are internal: one
+  is export-ignored and the other is renamed to `UPDATES.md` at step 3, so
+  listing either produced a link that resolves to nothing in the public
+  tree — and the row naming the `dccore-dev` / `dccore` split pointed
+  strangers at a repository they cannot read. It lists `UPDATES.md`, which
+  is what the public tree ends up with. Do not add the rows back; the two
+  of us do not need a table to find a file in `docs/`.
 
 ## Access
 

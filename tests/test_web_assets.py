@@ -556,7 +556,7 @@ class EveryElementReferenceIsDeclared(unittest.TestCase):
 
 
 class AskingAgainForAFetchThatFailed(unittest.TestCase):
-    """Neo's: a failed or rejected fetch is the one an operator most wants to
+    """Requested: a failed or rejected fetch is the one an operator most wants to
     retry, and the only way to do it was to go back to the List Browser and
     retype the nick."""
 

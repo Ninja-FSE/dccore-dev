@@ -762,7 +762,7 @@ class DefiningListsFromTheDashboard(ListCase):
 
 
 class FileDirectoryIsOnlyTheFallback(ListCase):
-    """Neo: "under Paths & Storage, this is not needed anymore".
+    """From an operator: "under Paths & Storage, this is not needed anymore".
 
     Not quite - it is still what an install with no folder list serves from,
     which is most of them. But three places treated it as the ONLY truth, and
@@ -814,7 +814,7 @@ class FileDirectoryIsOnlyTheFallback(ListCase):
         self.assertIn("only when no folders", label)
 
     def test_it_is_still_what_an_install_with_no_folder_list_serves(self):
-        """The half of Neo's point that is not true: removing it would take
+        """The half of that point which is not true: removing it would take
         the fallback with it, and that is what every install without a folder
         file is using."""
         self.set_config(FILE_DIRECTORY=self.tree.music)

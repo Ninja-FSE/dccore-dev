@@ -340,7 +340,8 @@ class TheDashboardReadsUnderTheLock(unittest.TestCase):
 
 
 class ARehashDoesNotSpendTheQueuesRetries(DCCoreTestCase):
-    """Neo: "if the bot had some queues from a user, and admin made a rehash,
+    """Reported from a live install: "if the bot had some queues from a user,
+    and admin made a rehash,
     it cancels the queue."
 
     Traced to the wake. Every rehash ends by calling check_queue_and_send() to
@@ -432,7 +433,7 @@ class ARehashDoesNotSpendTheQueuesRetries(DCCoreTestCase):
 
 
 class ARehashWaitsForTransfersToFinish(DCCoreTestCase):
-    """Neo, on #310:
+    """From #310:
 
         When rehash is requested check if dcc send is currently sending,
         pause dcc after a complete send. Do the rehash and when it's finished
@@ -703,7 +704,7 @@ class ARehashWaitsForTransfersToFinish(DCCoreTestCase):
     def test_the_pause_is_lifted_before_the_queue_is_woken(self):
         """Waking the queue while still paused would have every dispatch
         refused by the gate the wait put up - and the wake is the thing that
-        restarts the queue Neo asked for."""
+        restarts the queue the operator asked for."""
         with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
             code = handle.read()
 
