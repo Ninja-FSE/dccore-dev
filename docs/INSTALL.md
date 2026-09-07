@@ -216,6 +216,12 @@ The list build changed what it puts in the list, so three things are worth knowi
 
 If you keep video, it also gets its own list from now on, travelling in the same archive people already receive. `SEPARATE_VIDEO_LIST = No` puts everything back in one list.
 
+**Check your admin password if you ever changed it with `configure.py`.** On any install whose password had also been changed from the dashboard at some point, `configure.py` was writing the new hash to `admin_config.py` — which `settings.conf` overrides, so the change never took effect and the old password kept working. It says so plainly now, but it did not before, so a rotation you believe you did may not have happened. Log in with the password you think you removed; if it still works, set it again from the dashboard.
+
+**If you wrote a `CUSTOM_THEME_*` override, look at your next advert.** The documented form — a code like `\x0306,06` — was previously sent to the channel as those literal characters rather than as a colour. It is decoded now, so a value you had given up on will start working, and one you had worked around by other means may now be applied twice.
+
+**Your advert's `Speed:` figure will read higher.** It was showing the average across your sending slots rather than their total, so three transfers at 2 MB/s each advertised 2.0MB/s. Nothing about your transfers changed — only the number, which was understating the bot by however many slots were in use.
+
 ### Coming from a version before the `config.py` → `defaults.py` rename
 
 Your own overrides file was called `local_config.py` and is gitignored, so `git pull` cannot rename it for you. **Do not copy `admin_config.py.sample` over the top** — that strands your real settings. Just start the daemon once and it renames the file itself, keeping every setting in it. The launchers and the pre-flight check both say so if they meet that state.

@@ -166,29 +166,21 @@ class NothingIdentifyingShips(unittest.TestCase):
                          "only loopback, private and documentation ranges may "
                          "ship; these are somebody's real machine")
 
-    def test_the_two_internal_documents_do_not_ship(self):
-        """The whole rule rests on these being export-ignored. If either ever
-        appears in the archive, the internal changelog - which names real
-        channels, this repository, and its own issue numbers - is public."""
-        for internal in ("docs/UPDATES.md", "docs/PUBLIC-REPO-WORKFLOW.md"):
-            with self.subTest(document=internal):
-                self.assertNotIn(internal, self.shipped,
-                                 f"{internal} is export-ignored and must not "
-                                 f"ship")
+    def test_the_tests_are_covered_by_this_guard(self):
+        """The premise the whole file rests on: nothing export-ignores
+        `tests/`, so a fixture is as public as the daemon and has to be
+        scanned like one.
 
-    def test_the_tests_do_ship(self):
-        """The reason this guard has to cover them. Nothing export-ignores
-        tests/, so a fixture is as public as the daemon."""
-        shipped = [p for p in self.files() if p.startswith("tests/")]
+        What ships, and what must not, is NOT re-asserted here -
+        tests/test_internal_files_do_not_ship.py owns that question and had it
+        first. Two guards for one property drift apart, and the one nobody
+        looks at is the one that quietly stops meaning anything.
+        """
+        scanned = [p for p in self.files() if p.startswith("tests/")]
 
-        self.assertGreater(len(shipped), 100,
-                           "tests/ is missing from the export - if that "
-                           "became deliberate, this file's premise changed")
-
-    def test_the_public_changelog_ships_and_the_internal_one_does_not(self):
-        """They are a pair, and swapping them would publish the internal
-        history rather than the operator-facing one."""
-        self.assertIn("docs/UPDATES-PUBLIC.md", self.shipped)
+        self.assertGreater(len(scanned), 100,
+                           "tests/ is missing from the scan - if it ever "
+                           "stopped shipping, this file's premise changed")
 
 
 if __name__ == "__main__":

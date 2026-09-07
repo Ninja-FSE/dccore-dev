@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.12.0 (2026-09-07) - "The Several Lists Release"
 
 ### 🪞 The guard against shipping names was shipping them
 

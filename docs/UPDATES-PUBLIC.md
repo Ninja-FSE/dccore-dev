@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.12.0 — The Several Lists Release
 
 - **Fixed: changing your admin password with `configure.py` could silently do nothing.** If you had ever changed it from the dashboard, that password lives in `settings.conf` — which is applied *after* `admin_config.py` and therefore wins. Running `configure.py` wrote a new hash into a file nothing would read, told you it had been set, and left the old password working. It now checks, and says plainly that the change will not take effect and where to make it instead. **If you have rotated a shared password this way, check it actually changed.**
 
