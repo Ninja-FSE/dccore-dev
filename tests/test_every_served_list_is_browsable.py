@@ -53,8 +53,8 @@ def app_js():
 
 
 class TwoServedLists(DCCoreTestCase):
-    """Neo's shape: a primary whose own list is EMPTY, and a second list
-    holding everything. That combination is what made the symptom read as
+    """The reported shape: a primary whose own list is EMPTY, and a second
+    list holding everything. That combination is what made the symptom read as
     "the browser shows nothing of mine" rather than "one list is missing"."""
 
     def setUp(self):
@@ -137,8 +137,9 @@ class TwoServedLists(DCCoreTestCase):
         self.assertIn("Some.Film.2020.mkv", [row["title"] for row in rows])
 
     def test_the_primary_is_still_the_primary(self):
-        """Neo's primary really was empty - that is not the bug, and the fix
-        must not paper over it by merging everything together."""
+        """The reporting operator's primary really was empty - that is not
+        the bug, and the fix must not paper over it by merging the lists
+        together."""
         self.assertEqual(self.rows_for(None), [])
         self.assertEqual(self.rows_for("Main"), [])
 

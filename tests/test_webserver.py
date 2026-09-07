@@ -1474,8 +1474,14 @@ class CrlfInjectionHttpRouteTests(DCCoreTestCase):
 
         self.assertEqual(resp.status_code, 200)
         rows = resp.get_json()
+
+        # OUR OWN LIST IS THERE. Asserted before the filter below, because
+        # "no foreign rows" and "every row is ours" are both vacuously true
+        # of an empty list - which is exactly what this route used to return,
+        # and what a mutation dropping our lists from it produces.
+        self.assertTrue([row for row in rows if row.get("own")],
+                        "the route offers none of our own lists to browse")
         self.assertEqual([row for row in rows if not row.get("own")], [])
-        self.assertTrue(all(row["freshness"] == "own" for row in rows))
 
     def test_filelists_bot_route_returns_404_for_an_unknown_nick(self):
         resp = self.client.get("/api/filelists/bot/nosuchbot")
