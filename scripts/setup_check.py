@@ -54,7 +54,7 @@ class Platform:
     """
 
     def __init__(self, display, os_name, wrong_os, rar_hint, python,
-                 start_cmd, stop_where):
+                 start_cmd, stop_where, pip_hint):
         self.display = display          # "Linux" / "Windows"
         self.os_name = os_name          # what os.name reads as
         self.wrong_os = wrong_os        # said when run on the other one
@@ -62,6 +62,11 @@ class Platform:
         self.python = python            # python3 / python
         self.start_cmd = start_cmd      # how to launch the daemon
         self.stop_where = stop_where    # "terminal" / "window"
+        # How to install an optional dependency INTO THE INTERPRETER THE
+        # LAUNCHER USES. A bare `pip` follows whatever `python` resolves to,
+        # which on a machine with more than one is not necessarily the one
+        # that will run the daemon - see the Flask check further down.
+        self.pip_hint = pip_hint
 
 
 LINUX = Platform(
@@ -73,6 +78,7 @@ LINUX = Platform(
     python="python3",
     start_cmd="./scripts/linux/start-dccore.sh",
     stop_where="terminal",
+    pip_hint="python3 -m pip install -r requirements-web.txt",
 )
 
 WINDOWS = Platform(
@@ -84,6 +90,10 @@ WINDOWS = Platform(
     python="python",
     start_cmd="scripts\\windows\\start-dccore.bat",
     stop_where="window",
+    # `py -3 -m pip`, not a bare `pip`. start-dccore.bat prefers `py -3` and
+    # only falls back to `python`, so on a machine with both this is the one
+    # that puts the package where the daemon will actually look for it.
+    pip_hint="py -3 -m pip install -r requirements-web.txt",
 )
 
 
@@ -290,6 +300,30 @@ def main(platform):
     else:
         warn(f"{platform.rar_hint} - whole-album (!rar) packing will fail, "
              f"single files are unaffected")
+
+    # Flask, checked with THIS interpreter on purpose. The launcher runs both
+    # the daemon and this check through the same `%PY%` / `$PY`, so importing
+    # it here answers the only question that matters: will the dashboard come
+    # up when the bot starts.
+    #
+    # Found in beta. A machine with both a `py` launcher and a `python` on
+    # PATH can have two interpreters - and `pip install -r requirements-web
+    # .txt`, which is what the docs say, follows `python` while the launcher
+    # prefers `py -3`. Flask went into one and the daemon started under the
+    # other, so the dashboard was silently absent and the only clue was a log
+    # line AFTER the bot had already connected. The check said "Ready to
+    # start" and meant it - it just was not answering this question.
+    if getattr(config, "WEBUI_ENABLED", False):
+        try:
+            import flask  # noqa: F401
+            ok("Flask available - the web dashboard will start")
+        except ImportError:
+            warn(f"WEBUI_ENABLED is on but Flask is not installed FOR THIS "
+                 f"INTERPRETER ({sys.executable}) - the daemon will start and "
+                 f"the dashboard will not. Install it with the same one: "
+                 f"{platform.pip_hint}")
+    else:
+        ok("web dashboard disabled (WEBUI_ENABLED) - Flask not needed")
 
     # --- DCC ports -----------------------------------------------------------
     print()

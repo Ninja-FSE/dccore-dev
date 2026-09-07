@@ -16,7 +16,7 @@ Two optional extras:
 
 | | |
 |---|---|
-| **Web dashboard** | needs Flask — `pip install -r requirements-web.txt`. The bot starts fine without it and says so. |
+| **Web dashboard** | needs Flask. Install it with **the same interpreter that runs the daemon**: `python3 -m pip install -r requirements-web.txt` on Linux, `py -3 -m pip install -r requirements-web.txt` on Windows. A bare `pip` follows whatever `python` resolves to, which on a machine with more than one Python is not necessarily the one the launcher picks — and the result is a dashboard that silently never starts. The bot itself starts fine without Flask and says so; `start-dccore` `check` now reports this before you get that far. |
 | **`!rar` album packing** | needs a `rar` binary on `PATH`. Without it, `!rar` refuses with a notice; ordinary transfers are unaffected. |
 
 Developed on Linux (Debian/Ubuntu, including Proxmox LXC) and runs on Windows — the platform differences live in `platform_compat.py`, and CI covers both. Windows operators should also read [WINDOWS.md](WINDOWS.md).

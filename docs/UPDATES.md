@@ -4,6 +4,38 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🧩 The dashboard was silently absent, and the check said "Ready to start"
+
+**First finding from the RC1 beta.** The daemon was started from a real
+install and the web dashboard was not there. The only evidence was one line,
+after the bot had already connected and joined its channels:
+
+    [WEBUI] Flask not installed; dashboard disabled.
+
+Flask *was* installed. The machine had two Pythons - one reached by the `py`
+launcher, another first on `PATH` - and the two halves of the instructions
+pointed at different ones:
+
+- `start-dccore.bat` runs the daemon with `py -3`, falling back to `python`
+- the documented `pip install -r requirements-web.txt` follows `python`
+
+So the package went into one interpreter and the daemon started under the
+other. `check-setup` reported "Ready to start" and was not wrong; it had
+simply never been asked this question.
+
+**The check asks it now**, and asks it the only way that can be right: by
+importing Flask itself. The launcher invokes the check through the same
+`%PY%` / `$PY` it uses for the daemon, so the answer is about the interpreter
+that will actually run the bot. Anything that shelled out to `pip list` or
+read a requirements file would have agreed with the documentation and been
+just as wrong. The warning names the interpreter it looked in, which is what
+makes the two-Python case diagnosable rather than baffling.
+
+**Both guides now say `py -3 -m pip` / `python3 -m pip`** rather than a bare
+`pip`, and say why. `docs/WINDOWS.md` is the one that matters most: its step 3
+has the operator run `where python` and `where py` precisely to discover they
+have two, and then step 4 sent them to the wrong one.
+
 ### 🧪 Cut as a release candidate, to be run before it is published
 
 Versioned `-RC1` rather than `v1.12.0` because it is going to be run as a beta
