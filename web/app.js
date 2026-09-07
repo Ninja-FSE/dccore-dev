@@ -2182,11 +2182,37 @@
       // A fixed few, not free text. The three list formats are the first: a
       // typed "ZIP" or "tar" would be refused by the save with a reason, but
       // being refused is a worse way to find out than never being offered it.
+      // THE STORED VALUE HAS TO BE THE SELECTED ONE, and it was not: no
+      // option carried `selected` and nothing assigned select.value after
+      // this markup was inserted, so every dropdown on this page rendered
+      // showing its FIRST choice whatever the daemon was actually using.
+      //
+      // From the beta: "i set packet size to 64kb and when i press save and
+      // rehash i see it back to 4kb". The save had worked - 4096 is simply
+      // the first DCC_BLOCK_SIZE choice, and the page could not show
+      // anything else. All four selects were affected (LIST_FORMAT always
+      // read "txt", THEME "classic", ADMIN_CHAT_MODE "auto"), which is the
+      // worse half: the page states a value the daemon is not using, and an
+      // operator who reads it as correct and leaves it alone is agreeing to
+      // something they were never shown.
+      //
+      // Compared as STRINGS. field.value arrives as JSON, so it is an int
+      // for DCC_BLOCK_SIZE and a string for LIST_FORMAT, while an <option>
+      // value is always text - a strict === between the two is false for
+      // every numeric choice, which is exactly how this survived.
+      //
+      // A pending edit wins over the stored value, like the checkbox branch
+      // below: a re-render while the save bar is dirty must not silently
+      // discard what the operator picked.
+      var current = isDirty ? state.settingsDirty[field.name]
+                            : settingsValueToString(field.value);
       var options = field.choices.map(function (choice, i) {
         // The stored value stays the value; only what the operator reads
         // changes. DCC_BLOCK_SIZE is the first: "64 KB" rather than "65536".
         var text = (field.choice_labels && field.choice_labels[i]) || choice;
-        return '<option value="' + escapeHtml(choice) + '">' + escapeHtml(text) + "</option>";
+        return '<option value="' + escapeHtml(choice) + '"' +
+          (String(choice) === current ? " selected" : "") +
+          ">" + escapeHtml(text) + "</option>";
       }).join("");
       control = '<select data-setting="' + escapeHtml(field.name) + '">' + options + "</select>";
     } else if (field.type === "bool") {
