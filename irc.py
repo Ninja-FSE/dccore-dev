@@ -1115,6 +1115,13 @@ def thaw_frozen_users(names):
     return [name for name in names if thaw_one_user(name)]
 
 
+# Far above anything a real server sends: RFC 1459 caps a line at 512 bytes
+# including CRLF, and IRCv3 message tags add at most 8191 more. This bounds
+# memory against a peer that never terminates a line at all; it does not
+# police line length.
+MAX_PENDING_LINE_BYTES = 64 * 1024
+
+
 def take_complete_lines(buffer, chunk):
     """Add `chunk` to `buffer` and return (leftover_bytes, [decoded lines]).
 
@@ -1146,8 +1153,28 @@ def take_complete_lines(buffer, chunk):
     """
     buffer += chunk
     raw_lines = buffer.split(b"\r\n")
-    return raw_lines.pop(), [raw.decode("utf-8", errors="replace")
-                             for raw in raw_lines]
+    leftover = raw_lines.pop()
+
+    # A LINE THAT NEVER ENDS IS NOT A LINE. Without this the leftover grows by
+    # every chunk for as long as the peer withholds CRLF - an on-path attacker,
+    # or a PORT pointed at something that is not an ircd, streaming bytes until
+    # the daemon is killed by the OOM reaper. The read loop cannot notice on
+    # its own: it sees no complete lines, so no per-line handler ever runs and
+    # nothing else in the process gets a chance to object.
+    #
+    # RFC 1459 caps a line at 512 bytes including CRLF, and IRCv3 message tags
+    # add at most 8191 more, so nothing a real server sends can reach the
+    # ceiling below. That is what makes discarding the right response rather
+    # than a risk: whatever is in the buffer at that point is not an IRC line,
+    # and keeping it can only make the problem worse.
+    if len(leftover) > MAX_PENDING_LINE_BYTES:
+        print(f"[IRC] Discarded {len(leftover)} bytes of unterminated input: "
+              f"no CRLF within {MAX_PENDING_LINE_BYTES} bytes, which is not "
+              f"an IRC line.")
+        leftover = b""
+
+    return leftover, [raw.decode("utf-8", errors="replace")
+                      for raw in raw_lines]
 
 
 def resolve_dcc_address(lookup=None, log=print):

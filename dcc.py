@@ -2059,7 +2059,24 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.total_sent_bytes += len(chunk)
                 
-        transfer_completed = True
+        # COMPLETE MEANS ALL OF IT. The loop above ends on local EOF, which
+        # says the file stopped giving bytes - not that it gave as many as the
+        # handshake promised. file_size was read with os.path.getsize() before
+        # the offer went out, and the receiver uses that same figure to decide
+        # when the transfer is done, so a short send leaves it waiting for
+        # bytes that are never coming.
+        #
+        # A file replaced by a shorter one mid-send is the ordinary way this
+        # happens: a re-encode, a library tidy-up, or an NFS mount going away
+        # under the read - which is why the request path already has its own
+        # NFS guards. Before this, the short send was recorded as a COMPLETED
+        # transfer: counted in the totals, credited to the download counter,
+        # and the queue row deleted, so nothing would ever retry it.
+        transfer_completed = bytes_sent >= file_size
+        if not transfer_completed:
+            print(f"[DCC-FAIL] {file_name} for {user}: sent {bytes_sent} of "
+                  f"{file_size} bytes before the file ended. Recorded as a "
+                  f"failure rather than a completed transfer.")
         # THE CLOCK STOPS WHEN THE BYTES DO. Everything below this line is
         # settling: 1.5 seconds for the receiver to close its file calmly,
         # another half-second further down, and the statistics write. None of
