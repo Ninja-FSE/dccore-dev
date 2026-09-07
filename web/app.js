@@ -1116,7 +1116,7 @@
 
     var led = document.createElement("span");
     led.className = "led " + ledClass(row.freshness);
-    led.title = ledTitle(row.freshness);
+    led.title = ledTitle(row);
     button.appendChild(led);
 
     var name = document.createElement("span");
@@ -1146,16 +1146,45 @@
     return "is-unknown";
   }
 
-  function ledTitle(freshness) {
+  // WHAT THE LED IS COMPARING, not just its verdict.
+  //
+  // From a maintainer: "redownloaded [a bot's] list, its yellow, but it does
+  // not update to green." The tooltip said only "Their list has changed since
+  // you downloaded it", which cannot tell you whether the re-download never
+  // landed, landed and was refused, or landed fine while the bot advertised
+  // something newer again in between. All three look identical from outside,
+  // and telling them apart meant reading the daemon log.
+  //
+  // The payload has carried `advert_then` and `advert_now` since the LED was
+  // built - the exact two values webserver._freshness() decides on - and this
+  // was dropping them. renderFilelistsFreshness() below already spells them
+  // out, but only for the bot currently SELECTED in the List Browser; the LED
+  // is what you look at when scanning the bot list itself, which is where the
+  // question gets asked. Same describeAdvert() for both, so the two can never
+  // drift into telling different stories about one row.
+  //
+  // Set as a PROPERTY, never concatenated into an attribute: these strings
+  // come off another bot's advert, and escapeHtml() encodes & < > and leaves
+  // a double quote alone. Same rule as the nick beside it.
+  function ledTitle(row) {
+    var freshness = row.freshness;
     if (freshness === "changed") {
-      return "Their list has changed since you downloaded it";
+      return "Their list has changed since you downloaded it. " +
+             "They advertised " + describeAdvert(row.advert_then || {}) +
+             " when you downloaded it, and now advertise " +
+             describeAdvert(row.advert_now || {}) + ".";
     }
-    if (freshness === "not_held") { return "Not downloaded"; }
+    if (freshness === "not_held") {
+      return "Not downloaded. They advertise " +
+             describeAdvert(row.advert_now || {}) + ".";
+    }
     if (freshness === "unknown") {
       return "Cannot tell - we have not seen what they advertise, " +
              "or they publish no date or count";
     }
-    return "Current";
+    if (freshness === "own") { return "Your own list"; }
+    return "Current - they still advertise " +
+           describeAdvert(row.advert_now || {}) + ".";
   }
 
   function markFilelistsActiveBot() {

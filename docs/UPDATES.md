@@ -4,6 +4,86 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🏷️ A row we asked for says "Requested", not "Offered"
+
+From a maintainer, on two list rows sitting at OFFERED in the Downloads
+table: *"should be REQUESTED, not offered"*.
+
+Exactly right, and the word was backwards on the SCREEN rather than in the
+queue. `check_fetch_queue()` flips a row to `offered` at the moment it
+dispatches OUR OWN request line - `@bot` for a list, `!bot <file>` otherwise -
+and stamps `offered_at` with the time we sent it. Its own log line for that
+moment already said "Requested". So the state means "we have asked and are
+waiting for their DCC SEND"; nothing has been offered to us. The name reads
+from inside `dcc_fetch.py`, where the row IS the offer being waited on, and
+that reading does not survive being printed on a pill.
+
+**Only the label moved.** The internal name stays: it is written into the
+fetch queue file, so renaming it would strand every row in flight across a
+restart, and it is matched by name in a dozen places. The CSS class is built
+from the state name, so the pill keeps its colour.
+
+The two fetch timeout settings measure this same state and had the same
+backwards word - "Fetch offer timeout" sounds like a limit on an offer
+somebody made us, when it is how long we wait for a reply after asking.
+Fixing the pill and leaving those would have left an operator reading two
+different accounts of one thing. Setting KEYS are untouched, so `settings.conf`
+is unaffected.
+
+### 💡 The freshness LED says what it is comparing
+
+From the same maintainer: *"redownloaded [a bot's] list, its yellow, but it
+does not update to green."*
+
+The tooltip said only "Their list has changed since you downloaded it" - the
+verdict with the evidence removed. Three quite different situations produce
+it: the re-download never landed, it landed and was refused, or it landed fine
+and the bot advertised something newer again afterwards. From outside they are
+identical, and telling them apart meant reading the daemon log.
+
+The payload has carried `advert_then` and `advert_now` since the LED was built
+- the exact two values `webserver._freshness()` decides on - and the LED was
+dropping them. It now reads "They advertised 100 files, built 2026-08-01 when
+you downloaded it, and now advertise 120 files, built 2026-09-05", which
+answers the question by hovering. The green and "not downloaded" states say
+what they matched too: "Current" alone cannot be told from a bot that simply
+stopped advertising.
+
+**Reusing the formatter, not writing a second one.** `describeAdvert()`
+already existed for the freshness BANNER, which spells the same two adverts
+out for whichever bot is SELECTED in the List Browser. The LED is what you
+read while scanning the bot list itself, which is where the question actually
+gets asked. A second function of that name would not have been a duplicate so
+much as a silent override - JavaScript hoists both declarations and the later
+one wins - so the two are now guaranteed to tell one story.
+
+The verdict itself was correct throughout, and a test now says so end to end:
+green, then yellow after the bot advertises a newer list, then green again
+once a re-fetch rewrites the stored snapshot.
+
+### 🧯 A guard that the dashboard's JavaScript still parses
+
+Found by breaking it. While writing the tooltip above, a `\n` written into a
+string through a shell heredoc arrived as a REAL newline, so the string ran
+off the end of its line. `web/app.js` is one script: a single unterminated
+string anywhere in it takes down every tab at once, silently, with a blank
+page and one line in a console nobody has open. The same shape as the empty
+Settings page that reached the beta.
+
+Nothing in the suite noticed, and the diff looked right.
+
+There is no JS engine here, so this is not a parser and does not pretend to
+be one. It walks each script in `web/` once, in the order a lexer would -
+block comment, line comment, string, code - and reports a string left open at
+the end of its line, or brackets that do not balance. A quote inside a
+comment, an apostrophe inside a double-quoted string and an escaped quote are
+all ordinary in this file and all defeat simple counting, which is why it
+scans rather than greps.
+
+Template literals would legitimately span lines. `app.js` has no backtick in
+CODE - all 26 are prose inside comments - so one appearing is itself reported,
+rather than quietly widening what the check will accept.
+
 ### 📏 Sizes are read and typed in MB, not in bytes
 
 From the beta, looking at the Settings page:
