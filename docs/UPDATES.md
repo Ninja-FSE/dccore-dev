@@ -4,6 +4,28 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📊 Live speed is the sum of the slots, not their average
+
+The operator's call on the question the audit raised: **"Isn't live speed the
+sum of all slot speeds?"** Yes - and both contracts already said so. The
+implementation was the odd one out.
+
+`stats_mgr.live_speed()` summed the per-transfer rates and then divided by the
+number of contributors. Its own docstring, and `runtime.live_speed_bps`, both
+described an aggregate "across every sending transfer". So a bot with three
+slots each moving 2 MB/s published `Speed: 2.0MB/s` in its channel advert
+against 6 MB/s of real outbound traffic - understating itself by a factor of
+the slots in use, and worst exactly when it was busiest and had most to show.
+
+The divisor had a defence written next to it: a transfer with no sample window
+yet must not drag the mean toward zero. Under a sum that concern disappears on
+its own - a skipped transfer contributes nothing, which is exactly right.
+`contributors` is kept only to tell "nothing moved" apart from "nothing was
+measured".
+
+This changes what every advert publishes, which is why it waited for a
+decision rather than going in with the docstring fix.
+
 ### 🔑 Rotating the admin password could silently do nothing
 
 `defaults.py` applies `admin_config.py` first and `settings.conf` second, and
