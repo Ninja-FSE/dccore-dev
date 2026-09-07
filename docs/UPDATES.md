@@ -2,7 +2,28 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.12.0 (2026-09-07) - "The Several Lists Release"
+
+### ⏱️ A concurrency test's backstop was set above its own timeout
+
+Found by CI on the release branch, on windows-latest, reporting a possible
+deadlock. There was none.
+
+`ConcurrentReadDuringSameBotRefetch` caps the writer at `MAX_FETCH_ROUNDS`
+re-fetches as a backstop against a stuck reader, and joins each thread with a
+60-second timeout. The cap was 2000, and a re-fetch of that fixture measures
+about 25ms - so reaching the backstop takes roughly fifty seconds on a
+developer machine and more than sixty on the CI runner. The safety net was
+hung below the floor.
+
+**Measured rather than guessed:** a healthy run uses **41** rounds, because
+the readers finishing is what actually stops the writer. The cap was never
+reached at 2000 and is not reached at 300 either; all that changes is the
+worst case, from about fifty seconds to about seven.
+
+The re-fetch rollback added in this release costs ~7% per round (23.1ms ->
+24.8ms) and narrowed an already-thin margin, but it did not create it. The
+test had been one slow runner away from this since it was written.
 
 ### 🪞 The guard against shipping names was shipping them
 

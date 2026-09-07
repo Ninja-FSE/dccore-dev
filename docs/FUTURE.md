@@ -44,7 +44,7 @@ What DCCore does today, and what it does not do yet.
 
 ### Quality
 
-- **2903 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
+- **3276 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
 - **No reloaded module owns a lock** — `!rehash` re-executes a module body, so a module-level `threading.Lock()` is rebound while a thread is still inside it. Every lock in a reloaded module is allocated in `runtime.py` and bound by name, and `tests/test_no_reloaded_module_owns_a_lock.py` fails if a new one appears — the class, not the four instances that prompted it.
 - **A cross-list search index** — SQLite FTS5, built as each bot list is fetched, so the dashboard can filter every held list live rather than re-reading them at 2-11 seconds a keystroke.
@@ -93,13 +93,19 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 
 The pre-publication audit found **21 daemon functions with no behavioural coverage at all** — `!rehash`, `@<nick>-que`, the advert worker, the IRC read loop, `configure.py`'s entry point. That gap is closed: `scripts/function_coverage.py` reports **2 of 310 uncovered, both on the allowlist with a written reason**, and it fails the build on a third.
 
-What remains is narrower and does not show up in that number. Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would still not be noticed — this file's own history has three such guards that passed against deliberately broken code. Re-measured: it was **four**, not nine, and they now have HTTP-level tests (`tests/test_every_route_is_behind_the_login.py`). Their builders had always been well covered — six to twelve tests each — so what was missing was the wiring in front of them: that the path resolves, that the method restriction is real, and that the JSON envelope comes back.
+What remains is narrower and does not show up in that number. Several "the wiring is in place" guards read the source as text rather than executing it, so a call moved behind a disabled branch would still not be noticed — this file's own history has three such guards that passed against deliberately broken code, and the v1.12.0 work found three more the same way, each caught by mutation rather than by review.
+
+**The largest single gap is closed.** `_handle_rehash_request()` — seven hundred lines that nothing in 120-odd test files had ever executed, while the dashboard triggers it on every settings save — now runs for real in `tests/test_rehash_end_to_end.py`, in a subprocess so the reload cannot touch the runner's own imports. It asserts what survives: the changed setting, a user's queue, the channel lists, a timed ban, a freeze timer, the advert token, and that the bot is not left paused. Re-measured: it was **four**, not nine, and they now have HTTP-level tests (`tests/test_every_route_is_behind_the_login.py`). Their builders had always been well covered — six to twelve tests each — so what was missing was the wiring in front of them: that the path resolves, that the method restriction is real, and that the JSON envelope comes back.
 
 The same file closes a larger gap found alongside it. All 37 dashboard rules sit behind one `before_request` hook and not a single per-route decorator, which is the right design — a decorator is a thing somebody can forget — but it put the whole authentication story on one function that nothing tested as a whole. An audit probed every rule unauthenticated and found none reachable, so it held; now a test walks `url_map` itself, so a route added tomorrow is covered without anyone remembering the test exists.
 
-### From the audits, not yet done
+### From the audits
 
-- **The earlier audits' remaining findings were never written down.** This said "roughly forty", and named two: a false "MasterList missing" during a concurrent search, and a queued `!rar` pack that is never re-dispatched. The second is fixed and wired at three call sites. Nothing anywhere records the rest, so the number can be neither confirmed nor worked from, and a great deal has been fixed since it was written. Treated as unknown rather than as a backlog: the next audit should leave a list that outlives it.
+**The v1.12.0 audit left the list this section used to ask for.** Six independent lenses — security, concurrency, the transfer path, lists, the IRC surface, and persistence — each adversarially refuted before anything counted. **26 findings confirmed, and all 26 are closed: 24 fixed, 2 recorded in tests as considered and deliberately not changed.** Every one is written up in `docs/UPDATES.md` with its failure scenario, so the next audit starts from a record rather than from "roughly forty".
+
+Two of the two-not-changed are worth knowing about before somebody "fixes" them: a bot-alone `list` row may claim an offer that was a near-miss for a `file` row from the same bot (refusing the fall-through would reject legitimate list replies), and the passive DCC reply goes through the outbound pacer while the accept clock runs (sending it unpaced is what `queue_mgr` exists to prevent; raising `PASSIVE_LISTEN_TIMEOUT` is the lever with no such risk).
+
+- **The earlier audits' findings still were never written down.** That said "roughly forty" and named two, one of which is fixed. The rest can be neither confirmed nor worked from, and a great deal has been fixed since. Still treated as unknown rather than as a backlog — but it is now the only part of the audit history that is.
 
 ### Knowing which bots are out there — open questions
 

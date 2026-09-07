@@ -886,12 +886,26 @@ class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
 
         READER_THREADS = 2
         READS_PER_THREAD = 40
-        # A generous safety cap on how many times the writer will re-fetch
-        # while waiting for the readers to finish their fixed quota of reads
-        # - not the thing that stops the writer under normal conditions (the
-        # readers finishing is), just a backstop so a stuck reader cannot
-        # wedge this test into looping forever.
-        MAX_FETCH_ROUNDS = 2000
+        # A safety cap on how many times the writer will re-fetch while
+        # waiting for the readers to finish their fixed quota - not the thing
+        # that stops the writer under normal conditions (the readers finishing
+        # is), just a backstop so a stuck reader cannot wedge this test into
+        # looping forever.
+        #
+        # LOWERED FROM 2000, because the backstop has to be reachable in less
+        # time than the 60-second join below allows. A re-fetch of this list
+        # measures ~25ms, so 2000 rounds is ~50 seconds of writer time on a
+        # developer machine and more than that on the Windows CI runner -
+        # which is where it eventually timed out, reporting a possible
+        # deadlock for what was really a cap set above the ceiling.
+        #
+        # 300 keeps every property this test has. Measured: a healthy run
+        # uses 41 rounds, because the readers finishing is what stops the
+        # writer - so the cap is never reached at 2000 and is not reached at
+        # 300 either. What changes is only the worst case, from about fifty
+        # seconds to about seven, which is the difference between a backstop
+        # inside the timeout and one above it.
+        MAX_FETCH_ROUNDS = 300
         stop_writer = threading.Event()
         state_lock = threading.Lock()
         errors = []
