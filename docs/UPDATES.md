@@ -4,6 +4,39 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧯 Three quiet failures from the audit's low findings
+
+None is dramatic alone. What they share is silence: memory that grows with
+nothing logged, a truncated file recorded as a completed send, and a record
+replaced by a worse one.
+
+**The IRC read buffer had no ceiling.** `buffer += chunk` grew for as long as
+the peer withheld CRLF - an on-path attacker, or a `PORT` pointed at something
+that is not an ircd, streaming bytes until the OOM reaper takes the daemon.
+The read loop cannot notice on its own: with no complete lines, no per-line
+handler ever runs. Bounded at 64 KB, far above RFC 1459's 512 bytes plus
+IRCv3's 8191 of tags, so nothing a real server sends can reach it.
+
+**A truncated send was recorded as complete.** The send loop ends on local
+EOF, which says the file stopped giving bytes - not that it gave as many as
+the handshake promised. A file replaced by a shorter one mid-send is the
+ordinary way that happens: a re-encode, a library tidy-up, an NFS mount going
+away under the read. The short send was then counted in the totals, credited
+to the download counter, and its queue row deleted, while the receiver waited
+for bytes that were never coming.
+
+**The speed record could be replaced by a slower one.** The read and the write
+were two separate lock acquisitions with the comparison between them, so two
+transfers finishing together both read the old record, both decided they had
+beaten it, and the slower one saved last. `db.raise_speed_record_to()` now
+does the compare and the write under one lock, the way `record_download()`
+already does. Losing a record is not corruption, but it is the one number in
+the advert an operator cannot get back.
+
+**A ninth state file was leaking**, found the same way as the previous five -
+`data/speed_record.txt`, written for real by the new tests. Redirected in the
+harness. The guard added this morning has now caught nine.
+
 ### 🗺️ Two more places the list name was dropped
 
 The audit's critic grouped these under one cause: the `name` argument reaches

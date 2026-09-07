@@ -106,11 +106,17 @@ def update_speed_record(bytes_per_sec, duration=None):
         return current
     if duration is not None and duration < MIN_RECORD_SECONDS:
         return current
-    if speed <= current:
-        return current
-
-    db.save_speed_record(speed)
-    return speed
+    # The compare and the write happen under ONE lock in db, not here. This
+    # used to read the record, compare, and then save - three steps with two
+    # separate lock acquisitions and the decision in between. MAX_DCC_SLOTS
+    # transfers finish concurrently, so two could both read the old record,
+    # both decide they had beaten it, and the SLOWER one save last: a 5 MB/s
+    # record permanently replaced by a 1.2 MB/s one, with nothing anywhere to
+    # recompute it.
+    #
+    # The cheap rejections above stay here, because they are about whether the
+    # sample is worth offering at all and do not touch the file.
+    return db.raise_speed_record_to(speed)
 
 
 # The shortest window a sample may be measured over, and so also the most often

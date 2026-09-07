@@ -518,6 +518,47 @@ def save_speed_record(new_record):
         print(f"[DB ERROR] Could not save the speed record: {e}")
 
 
+def _read_speed_record_unlocked():
+    """The saved record, or 0. Caller must hold _disk_lock."""
+    if not os.path.exists(SPEED_RECORD_FILE):
+        return 0
+    try:
+        with open(SPEED_RECORD_FILE, "r") as handle:
+            return int(handle.read().strip())
+    except Exception:
+        return 0
+
+
+def raise_speed_record_to(candidate):
+    """Store `candidate` only if it beats the record. Returns the record after.
+
+    ONE lock acquisition around read-compare-write, for the same reason
+    record_download() and update_stats_on_complete() hold one across their
+    whole load-increment-save: MAX_DCC_SLOTS transfers finish concurrently.
+
+    Read and write used to be two separate acquisitions, with the comparison
+    in the caller between them. Two transfers finishing together both read the
+    old record, both decided they had beaten it, and whichever saved second
+    won - so a 5 MB/s record was permanently replaced by a 1.2 MB/s one, and
+    nothing ever recomputes it. Losing a record is not corruption, but it is
+    the one number in the advert an operator cannot get back.
+    """
+    try:
+        speed = int(candidate)
+    except (TypeError, ValueError):
+        return get_speed_record()
+    with _disk_lock:
+        current = _read_speed_record_unlocked()
+        if speed <= current:
+            return current
+        try:
+            _atomic_write(SPEED_RECORD_FILE, str(speed))
+        except Exception as err:
+            print(f"[DB ERROR] Could not save the speed record: {err}")
+            return current
+        return speed
+
+
 DOWNLOAD_COUNTS_FILE = getattr(config, "DOWNLOAD_COUNTS_FILE",
                                os.path.join("data", "download_counts.json"))
 

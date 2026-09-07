@@ -444,12 +444,23 @@ class DCCoreTestCase(unittest.TestCase):
         self.set_config(
             FETCH_HISTORY_FILE=os.path.join(self._fetch_history_dir,
                                             "fetch_history.json"),
+            SPEED_RECORD_FILE=os.path.join(self._fetch_history_dir,
+                                           "speed_record.txt"),
             KNOWN_BOTS_FILE=os.path.join(self._fetch_history_dir,
                                          "known_bots.json"),
             DCC_QUEUE_FILE=os.path.join(self._fetch_history_dir,
                                         "dcc_queue.txt"),
             FETCHED_BOT_LISTS_FILE=os.path.join(self._fetch_history_dir,
                                                 "fetched_bot_lists.json"))
+
+        # Ninth file, found the same way as the previous five: a new test
+        # wrote the real one and the leak showed up as a value bleeding
+        # between tests. db.SPEED_RECORD_FILE is the bot's all-time record -
+        # exactly the kind of accumulated number an operator cannot get back,
+        # and the sort the OmenServe import exists to carry across.
+        self._real_speed_record_file = db.SPEED_RECORD_FILE
+        db.SPEED_RECORD_FILE = os.path.join(self._fetch_history_dir,
+                                            "speed_record.txt")
 
         self._real_dcc_queue_file = db.DCC_QUEUE_FILE
         db.DCC_QUEUE_FILE = os.path.join(self._fetch_history_dir, "dcc_queue.txt")
@@ -480,6 +491,7 @@ class DCCoreTestCase(unittest.TestCase):
         db.FETCH_HISTORY_FILE = self._real_fetch_history_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
         db.DCC_QUEUE_FILE = self._real_dcc_queue_file
+        db.SPEED_RECORD_FILE = self._real_speed_record_file
         db.FETCHED_BOT_LISTS_FILE = self._real_fetched_bot_lists_file
         shutil.rmtree(self._fetch_history_dir, ignore_errors=True)
 
