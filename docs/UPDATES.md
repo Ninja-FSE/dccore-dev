@@ -4,6 +4,46 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🖥️ The Settings page said the Console was off while it was on
+
+`WEBUI_CONSOLE_ENABLED` is declared `bool = None`, and None does not mean
+False: `console_is_enabled()` reads it as "on while the dashboard is
+loopback-only". A stock install therefore has the Console - ban, unban,
+clearqueue, rehash, update, behind the dashboard password alone - switched ON.
+
+The page renders a bool from `!!value`, so None drew an unchecked box. The
+operator was told the remote admin console was disabled while it was live.
+
+The field now carries a note saying what unset resolves to right now. A note
+rather than a corrected value on purpose: sending the effective value would
+make the checkbox truthful and then have the next save write an explicit
+`True`, so an operator who later moved the dashboard onto the LAN would keep a
+Console that should have switched itself off.
+
+### 🎨 A custom theme colour could not be expressed at all
+
+`settings.conf.sample` documents each `CUSTOM_THEME_*` override as "a raw mIRC
+code string like `\x0306,06`", and `defaults.py` says the same. Neither was
+true: `coerce()` returned the text verbatim, so those nine literal characters
+went into every advert, every "Sent:" notice and every search header -
+broadcast on a five-minute cycle, with nothing reporting a problem.
+
+There was no way round it either. A colour code starts with `0x03`, a control
+character: `settings.conf` is edited in a text editor and the dashboard field
+is a browser text input, and neither can produce that byte. Typing the escape
+was the only route there was, and it was the one route that did not work.
+
+`\xHH` now decodes, which covers every code mIRC uses - colour, bold,
+underline, reset. Only `\xHH`, and only for the theme settings: a decoder
+that ate every backslash would quietly mangle a Windows path in some future
+string setting.
+
+**Neither of these files had an audit lens pointed at it.** `theme.py`,
+`stats_mgr.py`, `on_connect.py`, `omenserve_import.py`, `web/index.html`,
+`web/style.css` and the whole of `scripts/` were covered by nobody, and the
+console defect in particular is only visible across two of them - the tri-state
+lives in `webserver.py` and the rendering that misreports it in `app.js`.
+
 ### 📦 A running RAR pack is no longer invisible
 
 `config.active_transfers` is the SEND side, and a folder pack has no row there
