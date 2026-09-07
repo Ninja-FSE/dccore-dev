@@ -179,12 +179,20 @@ class TheDownloadCounterKeepsARelativeKey(DCCoreTestCase):
     def setUp(self):
         super().setUp()
         self.tree = self.make_tree()
+        # BOTH directories are created, and both names are used exactly as
+        # spelled. This setUp originally passed `<root>/Music` for the primary
+        # without creating it, and relied on TempTree's own `<root>/music`
+        # existing - which is a different path on Linux and the same one on
+        # NTFS. It passed on Windows and failed every CI run on ubuntu with
+        # "not a folder on this machine", which is the plainest case of the
+        # portability trap this project is trying to avoid.
+        self.music = os.path.join(self.tree.root, "Music")
         self.films = os.path.join(self.tree.root, "Films")
-        os.makedirs(self.films, exist_ok=True)
+        for path in (self.music, self.films):
+            os.makedirs(path, exist_ok=True)
         library.save_lists([
             library.ServedList(name="Music", primary=True, channels=(),
-                               folders=(library.Folder(
-                                   "Music", os.path.join(self.tree.root, "Music")),)),
+                               folders=(library.Folder("Music", self.music),)),
             library.ServedList(name="Films", primary=False, channels=("#films",),
                                folders=(library.Folder("Films", self.films),)),
         ])

@@ -306,6 +306,14 @@ class CapturedDispatch:
 class TempTree:
     """A throwaway music library and lists directory.
 
+    NOTE THE CASE: `music` and `lists` are lowercase, and a test that wants a
+    directory of its own must CREATE it rather than assume a differently-cased
+    spelling resolves to one of these. On NTFS it does; on the ubuntu runner
+    it does not, so such a test passes on the developer's machine and fails
+    every CI run. That has happened once already - see
+    tests/test_audit_multilist_and_thaw.py's TheDownloadCounterKeepsARelativeKey.
+
+
     Uses real files because several of the behaviours under test are about the
     filesystem itself - path containment, atomic replacement, long names.
     """
