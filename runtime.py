@@ -194,6 +194,22 @@ list_index_lock = threading.Lock()
 known_bots = {}
 known_bots_flushed_at = 0.0
 
+# Offers waiting for the receiver to connect ---------------------------------
+# Keyed by (nick_lower, port) -> {"filename", "size", "position"}, one entry
+# per DCC SEND handshake that has gone out and not yet been picked up.
+#
+# It exists so a DCC RESUME can find the offer it belongs to. The RESUME
+# arrives on the IRC read loop, in a different thread from the one blocked in
+# accept(), so the two need somewhere to meet. Keyed by PORT and not by
+# filename: the port is ours, unique, and unambiguous, while the offered name
+# has already been through a space-to-underscore pass and may have been
+# shortened to fit the IRC line.
+#
+# Here rather than in dcc.py for this module's usual reason: a !rehash
+# re-executes that module's body and would drop every offer in flight.
+dcc_send_offers = {}
+dcc_send_offers_lock = threading.Lock()
+
 # Live transfer rate ---------------------------------------------------------
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can

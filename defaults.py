@@ -775,6 +775,13 @@ fetched_bot_lists = runtime.fetched_bot_lists
 # Bound from runtime.py for the same reason as everything above it.
 known_bots = runtime.known_bots
 
+# DCC SEND offers that have gone out and not yet been picked up, keyed by
+# (nick, port). A receiver's DCC RESUME finds its offer here - see dcc.py's
+# DCC RESUME section. Bound from runtime.py for the same reason as everything
+# above it: a rehash re-executing this file must not strand a transfer that is
+# mid-handshake.
+dcc_send_offers = runtime.dcc_send_offers
+
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
 # ---------------------------------------------------------------------

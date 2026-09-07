@@ -2024,6 +2024,16 @@ def irc_loop():
                             or (msg.startswith("\x01")
                                 and msg.strip("\x01").strip().upper().startswith("DCC SEND ")
                                 and target_chan.lower() == config.NICKNAME.lower())
+                            # DCC RESUME, for the same reason #219 gives just
+                            # above. It is cheaper than an offer - a dict
+                            # lookup, no thread, no disk - but it answers with
+                            # an outbound PRIVMSG, and an unthrottled
+                            # responder is a standard way to make a bot flood
+                            # ITSELF off the network. Being unmatched costs
+                            # nothing, so being unthrottled costs everything.
+                            or (msg.startswith("\x01")
+                                and msg.strip("\x01").strip().upper().startswith("DCC RESUME ")
+                                and target_chan.lower() == config.NICKNAME.lower())
                         )
                         if is_bot_command and security.is_flooding(user):
                             continue 
@@ -2062,6 +2072,29 @@ def irc_loop():
                                         target=dcc_fetch.handle_incoming_offer,
                                         args=(s, user, msg.strip("\x01").strip()),
                                         daemon=True).start()
+                                    continue
+                                # A receiver telling us it already holds part
+                                # of the file we just offered, and asking us
+                                # to send from there. It will not connect
+                                # until we answer with a DCC ACCEPT - which
+                                # is what "Requesting resume" sitting still
+                                # in mIRC forever meant: the client keeping
+                                # its side of a bargain we had never been
+                                # able to answer.
+                                #
+                                # Private only, like the two branches above.
+                                # Answered INLINE rather than on a thread: the
+                                # receiver is blocked waiting for this, it is
+                                # one dict lookup and one send, and it touches
+                                # no disk. Admission control is entirely
+                                # inside handle_resume_request() - it matches
+                                # on a port WE are listening on for this exact
+                                # nick, so a stray or forged line finds
+                                # nothing and is dropped there.
+                                if (ctcp_cmd.startswith("DCC RESUME ")
+                                        and target_chan.lower() == config.NICKNAME.lower()):
+                                    dcc.handle_resume_request(
+                                        s, user, msg.strip("\x01").strip())
                                     continue
                                 if ctcp_cmd == "VERSION":
                                     # Answered inline rather than on a thread:
