@@ -972,7 +972,7 @@
     // does a different thing: the table is showing every list at once, so
     // "switch to this one" has nothing to mean. Clicking toggles whether
     // that bot's matches are on screen instead.
-    if ((state.filelistsFilter || "").trim() && row.dataset.bot !== "__own__") {
+    if ((state.filelistsFilter || "").trim() && !isOwnSource(row.dataset.bot)) {
       var key = String(row.dataset.bot || "").toLowerCase();
       if (state.filelistsExcluded[key]) {
         delete state.filelistsExcluded[key];
@@ -1068,9 +1068,12 @@
 
     state.filelistsBots = {};
     list.innerHTML = "";
-    list.appendChild(botRow({ bot: "__own__", label: "Our own list",
-                              held: true, freshness: "own" }));
 
+    // OUR OWN LISTS COME FROM THE SERVER NOW, one row each, rather than a
+    // single hard-coded row here. An operator who builds a second list
+    // through the dashboard could not find it afterwards: the page offered
+    // to make a thing and then would not show it. Only the server knows how
+    // many lists there are and what they are called.
     rows.forEach(function (row) {
       state.filelistsBots[row.bot] = row;
       list.appendChild(botRow(row));
@@ -1079,8 +1082,9 @@
     // A source that has gone - the bot dropped out of the registry, or its
     // list was removed - falls back to our own rather than leaving the view
     // pointed at nothing.
-    var stillThere = previous === "__own__" ||
-      rows.some(function (row) { return row.bot === previous && row.held; });
+    var stillThere = rows.some(function (row) {
+      return row.bot === previous && row.held;
+    });
     state.filelistsSource = stillThere ? previous : "__own__";
     markFilelistsActiveBot();
 
@@ -1132,11 +1136,28 @@
       ? "\u2014" : Number(row.count).toLocaleString();
     button.appendChild(count);
 
-    if (!row.held && row.bot !== "__own__") {
+    if (!row.held && !isOwnSource(row.bot)) {
       button.title = "You have not downloaded this bot's list. " +
         "Click to put its nick in the fetch box.";
     }
     return button;
+  }
+
+  // OURS, WHICHEVER OF OURS. "__own__" alone still means the primary - the
+  // meaning GET /api/filelists has always had - and each further served list
+  // is "__own__:<name>". Every place that used to compare against the bare
+  // string now asks this instead, because missing one would leave a second
+  // list looking like a foreign bot: fetchable, refetchable, and offered a
+  // Download button for a list we wrote ourselves.
+  function isOwnSource(source) {
+    var text = String(source || "");
+    return text === "__own__" || text.indexOf("__own__:") === 0;
+  }
+
+  // The ?list= for a source key, or "" for the primary.
+  function ownListParam(source) {
+    var text = String(source || "");
+    return text.indexOf("__own__:") === 0 ? text.slice("__own__:".length) : "";
   }
 
   function ledClass(freshness) {
@@ -1259,7 +1280,7 @@
       // suppressed the folder button on all of them.
       var fetchable = ((state.filelistsFilter || "").trim()
         ? true
-        : (state.filelistsSource || "__own__") !== "__own__")
+        : !isOwnSource(state.filelistsSource || "__own__"))
         && !!group.folder;
       // data-folder-index is safe to string-concatenate: it is this group's
       // own position in the internal `groups` array (an internal loop
@@ -1296,7 +1317,7 @@
       // checkbox and no way to queue any of it.
       var fetchable = (state.filelistsFilter || "").trim()
         ? true
-        : (state.filelistsSource || "__own__") !== "__own__";
+        : !isOwnSource(state.filelistsSource || "__own__");
       var rows = entries.map(function (row) {
         // No data-bot/data-filename attribute here, and no bot/filename text
         // anywhere in this markup fragment: `row.source`/`row.title` come
@@ -1573,7 +1594,7 @@
       var bot = String(rows[i].dataset.bot || "").toLowerCase();
       // Our own list is not one of the lists the filter searches - it covers
       // lists FETCHED from other bots - so it is never greyed by it.
-      var dim = filtering && bot !== "__own__" && empty[bot] === true;
+      var dim = filtering && !isOwnSource(bot) && empty[bot] === true;
       rows[i].classList.toggle("is-filtered-out", dim);
       // Switched off BY THE OPERATOR, which is a different thing from having
       // nothing to show and reads differently: one is an answer, the other is
@@ -1733,10 +1754,13 @@
         // bots have matches - see applyFilterHighlight().
         url = "/api/filelists/search?q=" + encodeURIComponent(filter);
       } else {
-        var base = (source === "__own__")
-          ? "/api/filelists"
-          : "/api/filelists/bot/" + encodeURIComponent(source);
-        url = base + "?offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+        var listParam = ownListParam(source);
+        var base = isOwnSource(source)
+          ? "/api/filelists" + (listParam
+              ? "?list=" + encodeURIComponent(listParam) + "&"
+              : "?")
+          : "/api/filelists/bot/" + encodeURIComponent(source) + "?";
+        url = base + "offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
       }
 
       fetchJson(url)
