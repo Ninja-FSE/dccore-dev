@@ -395,9 +395,48 @@ class DCCoreTestCase(unittest.TestCase):
         self.set_config(ON_CONNECT_FILE=os.path.join(self._fetch_history_dir,
                                                      "on_connect.json"))
 
+        # Third file, same rule, and it got in the same way: a test called
+        # library.save_lists() and wrote data/lists.json for real. The paths
+        # in it were that test's temp directory, deleted the moment it ended -
+        # so every LATER test read a lists.json defining folders that no
+        # longer exist. It cost 147 failures and 27 errors in one preflight
+        # run, all of them in tests that never mentioned lists.
+        #
+        # data/ is gitignored, so `git status` was clean throughout. That is
+        # the third time this exact shape has bitten: settings.conf, then
+        # on_connect.json, now lists.json. The rule is the file, not the
+        # feature - anything a test can persist has to be redirected here.
+        self.set_config(LISTS_FILE=os.path.join(self._fetch_history_dir,
+                                                "lists.json"))
+        self.set_config(LIBRARY_FOLDERS_FILE=os.path.join(
+            self._fetch_history_dir, "library_folders.json"))
+
         self._real_known_bots_file = db.KNOWN_BOTS_FILE
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
                                           "known_bots.json")
+
+        # And five more the new preflight state guard found the moment it
+        # existed: bans.txt, dcc_queue.txt, fetched_bot_lists.json,
+        # list_index.db and stats.txt were all being written for real by the
+        # suite. Nobody had noticed, because data/ is gitignored.
+        #
+        # It is worse than untidy. The daemon runs from its own directory on
+        # the production LXC, so running the suite there overwrote the live
+        # bot's queue, its ban list and its accumulated stats with test
+        # fixtures - the exact totals the OmenServe import exists to preserve.
+        #
+        # db.DCC_QUEUE_FILE and db.FETCHED_BOT_LISTS_FILE are module-level
+        # constants read at import, so they are rebound directly and restored
+        # in tearDown; the rest are config values and go through set_config().
+        self._real_dcc_queue_file = db.DCC_QUEUE_FILE
+        db.DCC_QUEUE_FILE = os.path.join(self._fetch_history_dir, "dcc_queue.txt")
+        self._real_fetched_bot_lists_file = db.FETCHED_BOT_LISTS_FILE
+        db.FETCHED_BOT_LISTS_FILE = os.path.join(self._fetch_history_dir,
+                                                 "fetched_bot_lists.json")
+        self.set_config(
+            BANS_FILE=os.path.join(self._fetch_history_dir, "bans.txt"),
+            STATS_FILE=os.path.join(self._fetch_history_dir, "stats.txt"),
+            LIST_INDEX_FILE=os.path.join(self._fetch_history_dir, "list_index.db"))
 
     def tearDown(self):
         restore_daemon_functions()
@@ -417,6 +456,8 @@ class DCCoreTestCase(unittest.TestCase):
         import db
         db.FETCH_HISTORY_FILE = self._real_fetch_history_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
+        db.DCC_QUEUE_FILE = self._real_dcc_queue_file
+        db.FETCHED_BOT_LISTS_FILE = self._real_fetched_bot_lists_file
         shutil.rmtree(self._fetch_history_dir, ignore_errors=True)
 
     def set_config(self, **overrides):

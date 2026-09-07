@@ -4,6 +4,73 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The suite was overwriting the developer's - and the server's - real state
+
+Found by a guard written for a smaller problem, which is the useful part of
+the story.
+
+A new test called `library.save_lists()` and wrote **`data/lists.json` for
+real**. The folders in it were that test's temp directory, deleted the moment
+it finished, so every later test read a list definition pointing at nothing:
+**147 failures and 27 errors**, none of them in tests that mention lists.
+`git status` stayed clean throughout, because `data/` is gitignored.
+
+That was the third time - `settings.conf`, then `data/on_connect.json` with a
+plaintext X password in it, now this. So rather than fix it a third time and
+wait for a fourth, `scripts/preflight.py` now snapshots `settings.conf` and
+everything under `data/` before the suite and compares afterwards, naming any
+file the suite created or touched.
+
+**It fired immediately, on five files nobody knew about**: `bans.txt`,
+`dcc_queue.txt`, `fetched_bot_lists.json`, `list_index.db` and `stats.txt`.
+
+That is not untidiness. The daemon runs from its own directory on the
+production LXC, so running the suite there overwrote **the live bot's queue,
+its ban list and its accumulated totals** - the very numbers the OmenServe
+import exists to carry across - with test fixtures. All eight files are
+redirected now, and the guard fails the build on the ninth.
+
+### 🗂️ Three defects from the six-lens audit
+
+**A `!rar` from any list but the primary was destroyed at pack time.**
+`library.folders()` defaults to the primary list's folders, which is right on
+the request path - a request is routed to a list first, and checking it
+against that list is the stronger test. But two callers ask the opposite
+question, "is this path one of ours at all", and both run after routing, when
+the list name is gone.
+
+So a `!rar` arriving in a channel bound to a second list was validated against
+that list's folders, accepted, queued, packed - and then, at the end, checked
+against the PRIMARY's folders, logged as a poisoned queue entry, and deleted
+along with the user's queue row. The download counter had the same bug more
+quietly: files served from a second list fell through to an absolute-path key,
+putting a real drive path into a stats table the dashboard renders.
+
+`library.every_folder()` is the accessor for that second question. The default
+`folders()` is untouched.
+
+**A NAMES sync could drop the link it was sent to recover.** The 353 handler
+thaws every frozen user still in the channel and starts a dispatch thread for
+each. That thread's freeze sweep deletes every user it finds present in
+`channel_users` - which the same handler populated with all those names two
+lines earlier. So the first iteration's thread routinely deleted keys the
+later iterations were about to `del`, and the `KeyError` landed on the IRC
+READ THREAD, where the message loop answers it by closing the socket. The JOIN
+handler had the same check-then-act shape. Both are one `pop()` now.
+
+**One Swedish log line** (`dcc.py`, the queue-clean message) - the suite ships
+publicly and the rule is English only.
+
+**On the tests.** The first versions of these reimplemented the checks inline
+instead of calling them, and passed against the broken code: three of five
+mutations survived. That is the "guard that reads rather than executes"
+failure this project has already been bitten by three times. The checks are
+now named functions - `dcc.path_is_in_our_library()`,
+`irc.thaw_frozen_users()` - so the tests can call the real thing, and the race
+is driven by a dict whose membership test removes the key, which makes the
+interleaving deterministic rather than hoping threads collide. All six
+mutations fail now.
+
 ### 🔐 Every dashboard route, proven to be behind the login
 
 From the pre-release audit. Two findings, one file.
