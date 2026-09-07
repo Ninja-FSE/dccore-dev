@@ -36,6 +36,48 @@ now chosen first and converted second, so the slice stopped covering the
 choice. It anchors on the choice instead and still fails when the dirty branch
 is deleted.
 
+### 📊 The list rebuild says what it is doing
+
+From the beta: "running update list in tools is too silent." It was. The page
+said "Rebuilding the master list..." and nothing else for as long as the scan
+took, which on a large library is minutes and is indistinguishable from a hung
+process.
+
+It now reports the folder it is in, how far through the folders it is, and how
+many files it has indexed - with a bar. The file counter is the part that
+matters most: it moves even while the bar does not, which is what tells an
+operator the thing is alive.
+
+**Through a file, because the rebuild is a SUBPROCESS.** `update_list.py` is
+started with `subprocess`, so it has no shared memory with the daemon to
+report into. It writes `LIST_PROGRESS_FILE` and the status endpoint reads it -
+written whole and renamed into place, since the dashboard polls it while it is
+being written and half a JSON object is a parse error every two seconds rather
+than a progress bar. The alternative was parsing the child's stdout, which
+turns prose written for an operator into a wire format.
+
+**What is honest to report.** The folder COUNT is known before the walk starts,
+so "folder 2 of 5" is a real fraction; a file total is not knowable without a
+full pass, which is the work being measured. The percentage counts folders
+COMPLETED rather than the one in hand, because a bar that reaches 100% as the
+last folder starts is claiming to have finished while it is still walking. Once
+the walk is done the folder count has nothing left to say, so the writing phase
+renders as indeterminate rather than freezing at its last value during the
+phase that is genuinely slowest.
+
+**It can never cost the rebuild.** Every write is wrapped and throttled to
+twice a second: a full disk, a read-only `data/` or a permissions problem costs
+the operator the bar, not the list they asked for. The file is dropped in
+`generate_all_lists()`'s own `finally`, so a crash mid-scan leaves nothing
+behind - a leftover would read as a rebuild still in progress and show a bar
+that never moves.
+
+Two things the existing guards caught on the way in: the clearing first lived
+only in `__main__`, which no test runs, so a mutation removing it passed until
+it moved somewhere reachable; and the bar's colours were written as literal
+fallbacks, which `tests/test_web_theme.py` refuses - every colour comes from
+the palette.
+
 ### 🐍 Python 3.14 emptied the entire Settings page
 
 **Second RC1 beta finding, and the more serious of the two.** The dashboard

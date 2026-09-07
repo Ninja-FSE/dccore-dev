@@ -458,6 +458,19 @@
 
 #LIST_RAWBYTES_FILE = dccore.rawbytes.txt
 
+# Where a running rebuild reports what it is doing, for the dashboard to read.
+# 
+# A FILE, because update_list.py runs as a SUBPROCESS (see
+# commands.handle_list_update_request) - it has no shared memory with the
+# daemon that started it, so there is nowhere else for it to say "folder 2 of
+# 5, 41,000 files so far". The alternative was parsing the child's stdout,
+# which makes prose meant for an operator into a wire format.
+# 
+# Under data/ rather than beside the lists: it is transient state about a run,
+# not an artifact anybody serves, and a stale one from a killed process must
+# never be mistaken for part of a published list.
+#LIST_PROGRESS_FILE = ./data/list_progress.json
+
 # How many bytes are read and written per pass of a DCC send, in bytes.
 # 
 # mIRC calls this the packet size and defaults it to 4 KB, which is why raising
