@@ -329,6 +329,36 @@ def declared_types(namespace):
     return {name: kind for name, kind in annotations.items() if isinstance(kind, type)}
 
 
+_IRC_ESCAPE_RE = re.compile(r"\\x([0-9A-Fa-f]{2})")
+
+
+def decode_irc_escapes(text):
+    r"""Turn the `\xHH` sequences an operator can TYPE into the bytes mIRC
+    actually reads.
+
+    settings.conf.sample documents each CUSTOM_THEME_* override as "a raw mIRC
+    code string like \x0306,06", and defaults.py says the same. Neither was
+    true: coerce() returned the text verbatim, so the nine literal characters
+    went into every advert, every "Sent:" notice and every search header,
+    broadcast on a five-minute cycle with no error anywhere.
+
+    Nor could the operator work around it. A colour code starts with 0x03,
+    which is a control character: settings.conf is a text file they edit in an
+    editor, and the dashboard field is a browser text input that cannot
+    produce that byte at all. Typing the escape was the only route there was,
+    and it was the one route that did not work.
+
+    ONLY \xHH, deliberately. That covers every code mIRC uses - 0x03 colour,
+    0x02 bold, 0x1F underline, 0x0F reset - and leaves every other backslash
+    alone, so a Windows path in some future string setting is not quietly
+    mangled by a decoder that was only ever meant for control codes. A literal
+    backslash-x-digit-digit is therefore not expressible here, which no theme
+    string wants.
+    """
+    return _IRC_ESCAPE_RE.sub(lambda match: chr(int(match.group(1), 16)),
+                              str(text))
+
+
 def coerce(name, raw, default, declared=None):
     """Convert `raw` to `declared`, or to the type of `default` without one.
 
@@ -405,6 +435,9 @@ def coerce(name, raw, default, declared=None):
         # No annotation and a None default: nothing declares what this should
         # become, so it stays the text the operator wrote.
         return text
+
+    if name.startswith("CUSTOM_THEME_"):
+        return decode_irc_escapes(text)
 
     return raw.strip("\n")
 
