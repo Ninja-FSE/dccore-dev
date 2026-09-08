@@ -4,6 +4,58 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 The theme preview showed the colour code instead of the colour
+
+Issue #367, reported with a screenshot: picking a custom colour from the new
+dropdown put a literal, unstyled `\x0309,07` at the front of the advert
+sample and pushed the box off to the right. Every role still on "Theme default"
+rendered correctly, which is what isolated it to values that had been through
+the picker.
+
+**A colour has two forms and they are one character apart.** It crosses the
+wire as the escape TEXT - nine characters - because a browser text input cannot
+hold the 0x03 control byte and `settings.conf` should not carry one either.
+`theme.palette()` deals in the decoded BYTE, which is what `theme.CLASSIC` and
+every other preset holds.
+
+The save path already bridged the two: `settings_file.coerce()` decodes on the
+way in. **The preview path did not.** It handed nine literal characters to a
+builder expecting a colour code, and `renderIrcLine()` - which looks for a real
+0x03 - found none and drew them as text.
+
+**The report's second claim does not hold**, and checking it was the first
+thing done rather than the last. It said a saved value would carry the same
+text into every outbound line and reach real channels. It would not:
+`_check_writable()` coerces before writing, so `settings.conf` gets the
+readable `\x0309,07` and config gets the real byte. A test now pins that
+difference down, and it is the one test in the new file that passes against
+the unfixed code - which is exactly what makes it worth having.
+
+**The fix is one line, and it is which function does the decoding.** The
+preview whitelist now coerces through `settings_file.coerce()` rather than a
+private copy of the rule: the preview's whole claim is that it shows what
+saving would produce, and two functions that merely happen to agree today are
+two functions that can stop agreeing. That is what happened here.
+
+**Not** by changing the page to emit a raw control byte, which is what the
+report proposed. That would have fixed the preview by undoing the reason the
+picker exists - a text input cannot display 0x03, which is what made the
+settings box read `13` for a value of `\x0313` in the first place. Two tests
+assert the page still speaks the readable form.
+
+**Why the existing tests missed it**, which the report got right: the picker's
+own round trip is `parseIrcColour(formatIrcColour(...))`, and both sides speak
+the escape text. It is perfectly self-consistent and can never surface the
+mismatch. What was missing is an assertion against the REAL byte - against what
+`theme.CLASSIC` actually contains - and against the two paths agreeing with
+each other rather than each with itself.
+
+The bug arrived with the preview, not with the picker. Anyone who had typed a
+code by hand into the box would have seen it; the dropdown simply made custom
+colours something people would actually set.
+
+Five mutants, all caught, including the report's own proposed fix.
+
 ### 🔴 Served folders, multiple lists and On connect had vanished from the page
 
 From the beta, and the only way this could have been found:

@@ -2385,7 +2385,26 @@ def theme_preview_overrides(payload):
     else on the settings page has nothing to say about colour. THEME is
     checked against the presets that exist, because an unknown name would
     otherwise pick the configured one and quietly preview the wrong thing.
+
+    AND IT COERCES THE WAY THE FILE WOULD. A colour crosses the wire as the
+    escape text `\x0313` - see _settings_field() for why it must, and
+    settings_file.encode_irc_escapes() for the other half of that trip - while
+    theme.palette() deals in the decoded BYTE, which is what theme.CLASSIC and
+    every other preset holds.
+
+    Nothing was decoding it here, so the preview rendered the operator's typed
+    text as nine literal characters. The advert sample began with a visible
+    `\x0309,07` and overflowed to the right, which is exactly the failure the
+    preview exists to show them they are about to cause. Reported against the
+    colour picker, but it arrived with the preview itself and would have hit
+    anyone who typed a code by hand.
+
+    Through settings_file.coerce(), not a private copy of the rule: the
+    preview's whole claim is that it shows what saving would produce, and two
+    functions that merely happen to agree today are two functions that can
+    stop agreeing.
     """
+    import settings_file
     import theme
 
     body = json_object(payload)
@@ -2397,7 +2416,8 @@ def theme_preview_overrides(payload):
         key = f"CUSTOM_THEME_{role.upper()}"
         if key in body:
             value = body.get(key)
-            wanted[key] = value if isinstance(value, str) else ""
+            wanted[key] = (settings_file.coerce(key, value, "", str)
+                           if isinstance(value, str) else "")
     return wanted
 
 
