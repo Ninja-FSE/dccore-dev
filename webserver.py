@@ -1903,6 +1903,7 @@ SETTINGS_CATEGORIES = (
                                                 "MAX_FETCH_FILE_SIZE", "MAX_LIST_TEXT_SIZE", "DCC_SEND_BUFFER", "REHASH_TRANSFER_WAIT", "AUTO_REFETCH_LISTS", "AUTO_REFETCH_INTERVAL_HOURS",
                                                 "AUTO_REFETCH_MAX_PER_RUN", "FETCH_TRANSFER_TIMEOUT",
                                                 "FETCH_OFFER_TIMEOUT", "FETCH_FOLDER_OFFER_TIMEOUT",
+                                                "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
                                                 "MAX_FETCH_FOLDER_FILE_SIZE", "MAX_FETCH_LIST_FILE_SIZE",
                                                 "FETCH_FOLDER_TRANSFER_TIMEOUT"]),
     ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
@@ -1975,6 +1976,8 @@ SETTINGS_LABELS = {
     # anybody made us.
     "FETCH_OFFER_TIMEOUT": "Wait for a reply to a fetch request (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT": "Wait for a reply to a folder (.rar) request (seconds)",
+    "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED":
+        "...from a bot that publishes no .rar list (seconds)",
     "MAX_FETCH_FOLDER_FILE_SIZE": "Max folder (.rar) fetch size",
     "MAX_FETCH_LIST_FILE_SIZE": "Max fetched master-list zip size",
     "FETCH_FOLDER_TRANSFER_TIMEOUT": "Folder (.rar) fetch transfer timeout (seconds)",

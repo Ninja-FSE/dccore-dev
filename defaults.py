@@ -587,6 +587,20 @@ FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DC
 # folder row waiting this long is lost on restart same as any other
 # offered/listening row - just for longer.
 FETCH_FOLDER_OFFER_TIMEOUT: int = 1800
+
+# ...AND HOW LONG TO WAIT FROM A BOT WITH NO SIGN OF PACKING ANYTHING.
+#
+# The long timeout above is for a bot that really is packing an album, which
+# takes real time on the other end. A bot that publishes no RAR list and
+# advertises none is not slow - it is not answering, and 1800 seconds of one
+# of MAX_FETCH_SLOTS is a heavy price for finding that out.
+#
+# Measured against one live registry: 2 of 51 known bots publish a RAR folder
+# list. The dashboard now only offers the button where a bot's own list says
+# it will pack that folder, so a request like this should be rare - this is
+# the net under the cases the list cannot cover: a request made through the
+# API, or a bot that has stopped packing since its list was fetched.
+FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED: int = 120
 # MAX_FETCH_FOLDER_FILE_SIZE: 2GB - separate, larger cap than
 # MAX_FETCH_FILE_SIZE for a whole packed album/discography archive.
 MAX_FETCH_FOLDER_FILE_SIZE: int = 2147483648

@@ -638,6 +638,8 @@ def check_fetch_queue():
     max_slots = int(getattr(config, "MAX_FETCH_SLOTS", 3))
     offer_timeout = float(getattr(config, "FETCH_OFFER_TIMEOUT", 60))
     folder_offer_timeout = float(getattr(config, "FETCH_FOLDER_OFFER_TIMEOUT", 1800))
+    unadvertised_folder_timeout = float(
+        getattr(config, "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED", 120))
     now = time.time()
 
     to_dispatch = []
@@ -650,8 +652,9 @@ def check_fetch_queue():
         # plain file/list fetches never have to wait on.
         for row in queue.values():
             if row.get("state") == "offered" and row.get("offered_at") is not None:
-                this_timeout = (folder_offer_timeout
-                                 if row.get("request_type") == "folder" else offer_timeout)
+                this_timeout = _offer_timeout_for(
+                    row, offer_timeout, folder_offer_timeout,
+                    unadvertised_folder_timeout)
                 if (now - row["offered_at"]) > this_timeout:
                     _mark_failed_locked(row, "no response")
 
@@ -1475,6 +1478,36 @@ def _handle_completed_list_fetch(row, zip_path):
         # transfer that itself already completed successfully.
         row["list_processing_error"] = f"unexpected error: {err}"
         print(f"[FETCH] Unexpected error processing {row.get('bot')}'s fetched list zip: {err!r}")
+
+
+def _offer_timeout_for(row, offer_timeout, folder_timeout, unadvertised_timeout):
+    """How long this particular offer is allowed to go unanswered.
+
+    A "folder" row waits far longer than a file, because the other bot has to
+    run its own packing pipeline before it can even start the DCC SEND. That
+    is the right allowance for a bot that IS packing an album - and much too
+    generous for one that never packs anything, where a non-answer is the
+    expected outcome rather than a slow one. The wait is one of
+    MAX_FETCH_SLOTS, so paying it needs a reason.
+
+    See list_fetch.bot_publishes_a_rar_list() for what counts as a sign. Used
+    to decide how long to WAIT, never whether to ask: a bot can pack folders
+    with neither signal, and refusing on this would take away something that
+    works, where waiting less costs nothing when the guess is wrong.
+    """
+    if row.get("request_type") != "folder":
+        return offer_timeout
+    try:
+        import list_fetch
+        if list_fetch.bot_publishes_a_rar_list(row.get("bot", "")):
+            return folder_timeout
+    except Exception:
+        # This runs inside the queue lock on the sweep every tick. A failure
+        # deciding which of two numbers to use is not worth stalling the queue
+        # for; the longer one is the safe way to be wrong, since it only ever
+        # waits, never gives up on something still coming.
+        return folder_timeout
+    return unadvertised_timeout
 
 
 def _fetch_transfer_timeout(request_type):
