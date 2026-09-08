@@ -2,7 +2,8 @@
 
 FROM THE BETA, filtering with two lists held from one bot:
 
-    "why flacme - rar shows like it has a result for amon a but i dont see any"
+    "why [a bot] - rar shows like it has a result for [a term] but i dont
+     see any"
 
 Because it was never asked. A bot's archive can hold several lists - its loose
 files and its packed albums, or music and film - and since they started being
