@@ -172,9 +172,26 @@ class TheLookDidNotChange(ThemedPathCase):
     def test_the_fixture_covers_every_path_that_reads_the_palette(self):
         """Control. A golden file that quietly lost an entry would let a change
         to that path through, and the pass would read the same either way."""
-        source = "".join(io.open(os.path.join(REPO_ROOT, name), encoding="utf-8").read()
-                         for name in ("announce.py", "list.py"))
-        readers = source.count("theme.blocks()") + source.count("theme.palette()")
+        # COUNTED FROM THE SYNTAX TREE, for two reasons found the hard way.
+        # It matched the literal "theme.blocks()" until a caller passed an
+        # argument - theme.blocks(settings), which the dashboard's preview
+        # uses to render colours typed and not yet saved - and then
+        # under-counted. Widening it to "theme.blocks(" then over-counted,
+        # because the same text appears in a DOCSTRING explaining what that
+        # argument is for. A call is a call; prose about one is not.
+        import ast
+
+        readers = 0
+        for name in ("announce.py", "list.py"):
+            tree = ast.parse(io.open(os.path.join(REPO_ROOT, name),
+                                     encoding="utf-8").read())
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in ("blocks", "palette")
+                        and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "theme"):
+                    readers += 1
 
         # announce_worker is the one reader with no fixture: it is a while-loop
         # thread, and the source scan below is what covers it instead.

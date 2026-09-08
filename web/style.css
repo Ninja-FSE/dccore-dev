@@ -831,6 +831,44 @@ html, body {
    yellow that belongs to neither theme, so it takes the palette's own accent -
    as a tint behind the text rather than a block, because a title is read as a
    whole and a solid highlight breaks it into pieces. */
+/* The sample of what the channel sees. Deliberately NOT themed by the
+   dashboard's palette: it is showing IRC colours on an IRC client's own
+   ground, and painting it in the dashboard's colours would misrepresent the
+   one thing it exists to show. A dark plate is what these channels look like
+   in every client that ships a default. */
+.theme-preview {
+  background: #000000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+}
+
+.theme-preview-label {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #d2d2d2;
+}
+
+/* Monospace and unwrapped, like a client's own window: these lines are built
+   to a 512-byte budget and wrapping them would hide that they are long. */
+.theme-preview-line {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre;
+  color: #d2d2d2;
+}
+
+.theme-preview-note {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: #7f7f7f;
+}
+
 mark.filter-hit {
   background: var(--accent-dim);
   color: inherit;

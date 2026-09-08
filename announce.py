@@ -239,6 +239,69 @@ def format_size_human(bytes_size):
 # avoid: a crash mid-write leaves a short row, which the loader discards,
 # resetting every counter to zero. Wiring them back in would undo that fix.
 
+# ==========================================================================
+# THE TWO LINES A THEME IS ACTUALLY JUDGED BY
+#
+# Lifted out of the advert loop and the completion notice so the dashboard can
+# render exactly what the channel will see - see webserver.theme_preview().
+# A preview built from a COPY of these templates would drift the first time one
+# of them changed, and would then tell the operator a lie with a straight face.
+# Being the same function is the only thing that keeps it true.
+#
+# Pure: every value is an argument, nothing is read from config here except
+# the palette, and nothing is sent. The callers below still gather the figures
+# exactly as they did.
+#
+# BETWEEN THEM THEY USE ALL SIX ROLES, which is why there are two samples and
+# not one. The advert never uses `accent` - only the completion notice does, on
+# its "[as of ...]" - so an advert-only preview would leave one of the six
+# settings with no visible effect, which is the problem a preview exists to
+# solve.
+# ==========================================================================
+
+def build_advert_line(channel, nickname, file_count, total_size, list_date,
+                      slots, queued, speed, record, total_sent, version,
+                      settings=None):
+    """The periodic channel advert, as one outbound PRIVMSG line.
+
+    `settings` is passed straight to theme.blocks() - see there. The advert
+    loop never passes it; the dashboard's preview does, so it can show colours
+    that have been typed and not yet saved.
+    """
+    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks(settings)
+    return (
+        f"PRIVMSG {channel} :"
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Type: {B}{V}@{nickname}{R}{BG_TEXT_BOX} For My List Of: {B}{A}{file_count}{R}{BG_TEXT_BOX} Files ({total_size}) created {V}{list_date} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {slots} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {queued} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {speed} / Record: {record} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {total_sent} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {B}{V}ON{R}{BG_TEXT_BOX} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {version} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
+    )
+
+
+def build_transfer_complete_line(channel, user, shown_name, total_sent,
+                                 yesterday, today, at_time, speed,
+                                 settings=None):
+    """The notice posted when a send finishes, as one outbound PRIVMSG line.
+
+    The central block theme, an exact copy of the channel advert's framing.
+    `settings` as in build_advert_line().
+    """
+    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks(settings)
+    return (
+        f"PRIVMSG {channel} :"
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {B}{V}Sent{B}{BG_TEXT_BOX}: {B}{shown_name}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} To: {B}{V}{user}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {B}{V}{total_sent}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Yesterday: {B}{A}{yesterday}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Today: {B}{A}{today}{B} {X}[as of {at_time}] "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {B}{V}{speed}{B} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
+    )
+
+
 def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed):
     """Send the block-styled transfer notice once a file has finished."""
     import sys
@@ -284,23 +347,10 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
         speed_str = "0k/s"
     current_time_str = time.strftime("%I:%M %p").lower().lstrip("0")
     
-    # ---------------------------------------------------------------------
-    # The central block theme, an exact copy of the channel advert's framing.
-    # ---------------------------------------------------------------------
-    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
-    
     def _build(shown_name):
-        return (
-        f"PRIVMSG {channel} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {B}{V}Sent{B}{BG_TEXT_BOX}: {B}{shown_name}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} To: {B}{V}{user}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {B}{V}{total_sent_str}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Yesterday: {B}{A}{yesterday_str}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Today: {B}{A}{today_str}{B} {X}[as of {current_time_str}] "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {B}{V}{speed_str}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
-        )
-    
+        return build_transfer_complete_line(
+            channel, user, shown_name, total_sent_str, yesterday_str,
+            today_str, current_time_str, speed_str)
 
     # The filename is the only unbounded field here and it comes straight off the disk. A
     # long classical track name pushed this line past 512 bytes and the server truncated it
@@ -473,18 +523,10 @@ def announce_worker():
                     raw_record = db.get_speed_record()
                     record_str = stats_mgr.format_speed(raw_record) if raw_record > 0 else "0k/s"
 
-                    BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
-
-                    announce_msg = (
-                        f"PRIVMSG {chan} :"
-                        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Type: {B}{V}@{config.NICKNAME}{R}{BG_TEXT_BOX} For My List Of: {B}{A}{formatted_count}{R}{BG_TEXT_BOX} Files ({total_size}) created {V}{list_date} "
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {slots_str} "
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {queued_str} "
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {speed_str} / Record: {record_str} "
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {total_sent_str} "
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {B}{V}ON{R}{BG_TEXT_BOX} "
-                        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {config.SCRIPT_VERSION} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
-                    )
+                    announce_msg = build_advert_line(
+                        chan, config.NICKNAME, formatted_count, total_size,
+                        list_date, slots_str, queued_str, speed_str,
+                        record_str, total_sent_str, config.SCRIPT_VERSION)
 
                     if oserve:
                         oserve.queue_message("channel_announce", announce_msg)
