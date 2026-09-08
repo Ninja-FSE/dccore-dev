@@ -198,74 +198,86 @@
     </section>
 
     <section class="view" id="view-filelists">
-      <div class="filelists-toolbar">
-        <form id="filelists-fetch-form" class="filelists-fetch-form">
-          <input type="text" id="filelists-fetch-input" class="search-input"
-                 placeholder="Fetch a bot's list&hellip; (nick)" autocomplete="off">
-          <button type="submit" class="btn btn-accent">Fetch</button>
-        </form>
-      </div>
-      <p class="broadcast-status" id="filelists-fetch-status"></p>
+      <!-- TWO COLUMNS: which list, and what is in it.
+           These were stacked, so the sources took the full width to show a
+           column of nicks and pushed the files below the fold - on a wide
+           screen the table began some 600px down and then had to scroll
+           inside what was left. Side by side, the sources are as wide as they
+           need to be and the table gets the height. -->
+      <div class="filelists-layout">
+        <div class="filelists-sources">
+          <div class="filelists-toolbar">
+            <form id="filelists-fetch-form" class="filelists-fetch-form">
+              <input type="text" id="filelists-fetch-input" class="search-input"
+                     placeholder="Fetch a bot's list&hellip; (nick)" autocomplete="off">
+              <button type="submit" class="btn btn-accent">Fetch</button>
+            </form>
+          </div>
+          <p class="broadcast-status" id="filelists-fetch-status"></p>
 
-      <!-- One term against every list held at once (#133). Live as you type:
-           the search index makes both the results and the "which bots have
-           nothing" answer a couple of milliseconds even across four million
-           rows, which is what this bar needs to exist at all. -->
-      <div class="filelists-filter">
-        <input type="search" id="filelists-filter-input" class="search-input"
-               placeholder="Filter every list you hold&hellip;"
-               autocomplete="off" aria-describedby="filelists-filter-status">
-        <button type="button" class="btn btn-small" id="filelists-filter-clear"
-                hidden>Clear</button>
-      </div>
-      <p class="filelists-filter-status" id="filelists-filter-status" hidden></p>
-      <div class="filelists-filter-actions" id="filelists-filter-actions" hidden>
-        <button type="button" class="btn btn-small"
-                id="filelists-filter-all">Show all lists</button>
-        <button type="button" class="btn btn-small"
-                id="filelists-filter-none">Show none</button>
-      </div>
+          <!-- One term against every list held at once (#133). Live as you type:
+               the search index makes both the results and the "which bots have
+               nothing" answer a couple of milliseconds even across four million
+               rows, which is what this bar needs to exist at all. -->
+          <div class="filelists-filter">
+            <input type="search" id="filelists-filter-input" class="search-input"
+                   placeholder="Filter every list you hold&hellip;"
+                   autocomplete="off" aria-describedby="filelists-filter-status">
+            <button type="button" class="btn btn-small" id="filelists-filter-clear"
+                    hidden>Clear</button>
+          </div>
+          <p class="filelists-filter-status" id="filelists-filter-status" hidden></p>
+          <div class="filelists-filter-actions" id="filelists-filter-actions" hidden>
+            <button type="button" class="btn btn-small"
+                    id="filelists-filter-all">Show all lists</button>
+            <button type="button" class="btn btn-small"
+                    id="filelists-filter-none">Show none</button>
+          </div>
 
-      <!-- One row per source, with a dot for whether the copy we hold is
-           still what that bot advertises (#133). Scrolls, because a busy
-           channel has thirty-odd advertisers and every one of them is a row
-           here whether we hold their list or not. -->
-      <div class="bot-list" id="filelists-bot-list"
-           aria-label="Whose list to show"></div>
-      <p class="bot-legend">
-        <span><span class="led is-current"></span> current</span>
-        <span><span class="led is-changed"></span> their list changed</span>
-        <span><span class="led is-not-held"></span> not downloaded</span>
-        <span><span class="led is-unknown"></span> cannot tell</span>
-      </p>
+          <!-- One row per source, with a dot for whether the copy we hold is
+               still what that bot advertises (#133). Scrolls, because a busy
+               channel has thirty-odd advertisers and every one of them is a row
+               here whether we hold their list or not. -->
+          <div class="bot-list" id="filelists-bot-list"
+               aria-label="Whose list to show"></div>
+          <p class="bot-legend">
+            <span><span class="led is-current"></span> current</span>
+            <span><span class="led is-changed"></span> their list changed</span>
+            <span><span class="led is-not-held"></span> not downloaded</span>
+            <span><span class="led is-unknown"></span> cannot tell</span>
+          </p>
+        </div>
 
-      <p class="filelists-freshness" id="filelists-freshness" hidden></p>
-      <div class="folder-controls">
-        <button type="button" class="btn btn-small" id="filelists-expand-all">Expand all</button>
-        <button type="button" class="btn btn-small" id="filelists-collapse-all">Collapse all</button>
-        <button type="button" class="btn btn-accent btn-small" id="filelists-download-selected-btn" disabled title="Tick the files you want. Shift-click a second box to take everything between it and the last one you touched.">Download selected</button>
-      </div>
+        <div class="filelists-files">
+          <p class="filelists-freshness" id="filelists-freshness" hidden></p>
+          <div class="folder-controls">
+            <button type="button" class="btn btn-small" id="filelists-expand-all">Expand all</button>
+            <button type="button" class="btn btn-small" id="filelists-collapse-all">Collapse all</button>
+            <button type="button" class="btn btn-accent btn-small" id="filelists-download-selected-btn" disabled title="Tick the files you want. Shift-click a second box to take everything between it and the last one you touched.">Download selected</button>
+          </div>
 
-      <div class="table-wrap">
-        <table class="data-table" id="filelists-table">
-          <thead>
-            <tr>
-              <th class="col-check"></th>
-              <th>Title</th>
-              <th>Size</th>
-              <th>Format</th>
-              <th>Source</th>
-            </tr>
-          </thead>
-          <tbody id="filelists-body">
-            <tr class="empty-row"><td colspan="5">Loading&hellip;</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="filelists-pager">
-        <button type="button" class="btn btn-small" id="filelists-prev-btn">Prev</button>
-        <span class="filelists-pager-info" id="filelists-page-info"></span>
-        <button type="button" class="btn btn-small" id="filelists-next-btn">Next</button>
+          <div class="table-wrap">
+            <table class="data-table" id="filelists-table">
+              <thead>
+                <tr>
+                  <th class="col-check"></th>
+                  <th>Title</th>
+                  <th>Size</th>
+                  <th>Format</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody id="filelists-body">
+                <tr class="empty-row"><td colspan="5">Loading&hellip;</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="filelists-pager">
+            <button type="button" class="btn btn-small" id="filelists-prev-btn">Prev</button>
+            <span class="filelists-pager-info" id="filelists-page-info"></span>
+            <button type="button" class="btn btn-small" id="filelists-next-btn">Next</button>
+          </div>
+        </div>
       </div>
     </section>
 
