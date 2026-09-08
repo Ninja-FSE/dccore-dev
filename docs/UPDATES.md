@@ -4,6 +4,80 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 Served folders, multiple lists and On connect had vanished from the page
+
+From the beta, and the only way this could have been found:
+*"uhm, what happend with multi folder / channel? cant see it in settings at
+all"*
+
+**Three editors were being drawn on a category that no longer existed.**
+
+They are not settings and cannot be. Served folders and "Serve more than one
+list" are ORDERED lists of `{label, path}` validated as a set - two folders can
+each be fine and still conflict with each other - and a served list carries its
+own `channels` as well as its own `folders`, which is exactly the "multi folder
+/ channel" of the report. On connect is a list of commands whose ORDER is the
+point. All three live in their own JSON files behind their own endpoints, and
+each is then stitched into a settings category so an operator finds it where
+they would look.
+
+That stitching is a string comparison against `category.id`. Regrouping the
+Settings page renamed the categories, `paths` stopped existing, and all nine
+comparisons against it went quietly false.
+
+**Nothing failed.** No error, no empty panel, no console warning. The
+categories all rendered; every one of the 94 settings still appeared, and a
+sweep for settings that had fallen off the page would have come back clean - it
+was run, and it did. The only symptom was three features being reachable from
+nowhere, on a dashboard that is the only place they can be reached from.
+
+They are back where they belong rather than where they were: the folder and
+multi-list editors on **Your list**, beside the Music directory that is
+labelled *"used only when no folders are set"* - the thing that sets them
+should not be on another screen from the label that defers to it. On connect
+goes to **Identity & network**, beside the server and the channels: those
+commands run after registration and BEFORE the JOIN, which on Undernet is the
+difference between `+x` hiding your host and everyone in the channel seeing it.
+
+**The two ids are named constants now**, which is worth doing and does not by
+itself fix anything - a renamed category still leaves a constant holding a
+string nothing matches. The fix is
+`tests/test_every_settings_category_the_page_asks_for_exists.py`, which lifts
+every category id `app.js` compares against and asserts each is one
+`SETTINGS_CATEGORIES` actually defines. It fails on the shipped code, naming
+the id and listing the twelve that exist. Neither side can check this alone:
+`webserver.py` owns the category list, `app.js` owns the attachment, and
+neither imports the other.
+
+It also asserts each editor is drawn AND wired up - rows drawn without their
+listeners is an editor that looks like it works right up until Save - and that
+the settings themselves have not fallen off, which is the half that was already
+fine and is now checked with the half that was not.
+
+Every mutant caught. One survived first time, and it was the failure mode this
+project keeps meeting: `assertIn("onConnectSectionHtml()", source)` is
+satisfied by the function's own DEFINITION, so deleting the call that draws it
+changed nothing. The assertion is now on the call, inside the branch that makes
+it.
+
+**And the same shape was swept for everywhere else it occurs**, which is what
+was asked for once this was found. Every `getElementById` against the ids in
+`index.html`; every `el.*` name used against the ones the map declares; every
+view switched to against the sections that exist; every literal API path
+against the routes `webserver.py` serves; and every settings category against
+what the server sends.
+
+**It found no second instance.** Two things looked like hits and were not: two
+CSS classes with no rule of their own turned out to be selector hooks
+(`querySelectorAll(".broadcast-check:checked")`), and two API routes that
+looked uncalled are built by concatenation
+(`"/api/filelists/bot/" + encodeURIComponent(nick)`) so a literal-only scan
+cannot see them.
+
+Five of those sweeps are now permanent tests, mutation-checked. The CSS-class
+one is not: it cannot tell a missing style from a selector hook, and a guard
+that has to be argued with every time it fires is one that gets deleted.
+
 ### 🟢 A list with nothing matching leaves the sidebar, and says it has
 
 From the beta: *"names get hidden as you type something that you search lists
