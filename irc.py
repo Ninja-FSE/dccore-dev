@@ -252,6 +252,34 @@ def is_valid_irc_target(value):
 # ERROR line - without turning a log into a transcript.
 RECENT_LINE_MEMORY = 15
 
+# HOW MUCH TO TAKE FROM THE SOCKET AT ONCE.
+#
+# 2048 for as long as this file has existed, which is one or two IRC lines: a
+# line is capped at 512 bytes by RFC 1459, and 8703 with IRCv3 tags. That is
+# fine when the server is trickling channel chatter and wrong when it is not.
+#
+# Joining channels is when it is not. Every JOIN is answered with the whole
+# NAMES list - one 353 per few hundred nicks, then a 366 - so adding several
+# channels at once produces tens of kilobytes in a burst, taken 2 KB at a
+# time. An ircd bounds what it will hold for a client that is not keeping up,
+# and closes the link when that fills: to us that arrives as ECONNRESET, with
+# nothing to say why. A beta reported exactly that shape - "[WinError 10054]
+# ... Dropping the link to reconnect" right after several channels were
+# added - and it would not reproduce.
+#
+# This is not proof that was the cause, and the disconnect report that landed
+# with it will say so directly the next time it happens. It is that reading a
+# byte stream two kilobytes at a time has no argument for it: recv() returns
+# whatever is there up to the size asked for and never waits to fill the
+# buffer, so a larger one costs an allocation and saves syscalls exactly when
+# there is a backlog to clear.
+#
+# take_complete_lines() accumulates BYTES and hands back only whole CRLF-
+# terminated lines, so the read size cannot split a line or a UTF-8 character
+# however it lands - and MAX_PENDING_LINE_BYTES still bounds a peer that never
+# sends CRLF at all.
+SOCKET_READ_BYTES = 65536
+
 
 def _report_recent_lines(recent_lines):
     """Print what the server last sent, on the way out of a dropped link.
@@ -1383,7 +1411,7 @@ def irc_loop():
             
             auth_buffer = b""
             while True:
-                auth_data = s.recv(1024)
+                auth_data = s.recv(SOCKET_READ_BYTES)
                 if not auth_data:
                     break
                 auth_buffer, auth_lines = take_complete_lines(auth_buffer, auth_data)
@@ -1604,7 +1632,7 @@ def irc_loop():
         while True:
             try:
                 try:
-                    data = s.recv(2048)
+                    data = s.recv(SOCKET_READ_BYTES)
                 except socket.timeout:
                     now = time.time()
                     quiet_for = now - last_recv_time
