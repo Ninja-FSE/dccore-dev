@@ -4,6 +4,70 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 The settings box could not show the colour it held
+
+The other half of the same beta request - *"select colors/symbols from drop
+down menu"* - and it turned out not to be only about convenience.
+
+config holds the DECODED bytes. A role of `\x0313` is four characters, two of
+them the 0x03 control code, and the settings page was being handed them raw. A
+browser text input cannot display 0x03, so **the field for that accent read
+`13`**. The code was there, invisible, and what the operator could see was not
+what was set. Retyping what they read would have put a literal `13` into every
+advert.
+
+The same value went the other way too. Saving from the dashboard wrote the raw
+control byte into `settings.conf` - a file people edit by hand, where a 0x03 is
+invisible in an editor and is exactly the kind of thing an editor strips on
+save.
+
+`decode_irc_escapes()` had been half a round trip since #170's follow-up: it
+turns typed `\x0313` into the byte mIRC reads, and **nothing turned it back**.
+`encode_irc_escapes()` is the missing half, applied at both ends - the value
+the page is given, and the text that lands on disk. Every control character,
+not just the ones a theme uses today, because picking a shorter set means
+deciding now which codes a future theme may want. Lowercase hex, so a value has
+one spelling: the decoder takes either case, and two spellings of the same
+colour would each read as an edit of the other against a baseline string.
+
+On the way out, the escape happens **before** the line-break check rather than
+after, so that check weighs what will actually be written - an escaped value
+holds no line break at all.
+
+**Then the menus.** Each role gets a foreground list, a background list and a
+swatch of what the two make. The background is disabled while the foreground is
+"theme default", because there is no such code as `\x03,05`: offering it would
+be offering a value that cannot be saved. Codes are written with both digits,
+matching every preset in `theme.py` - mIRC reads `\x034` and `\x0304` alike,
+but one value should have one spelling for the same reason the hex is
+lowercase.
+
+**What the menus will not do** is rewrite a value they cannot say. A code with
+bold in it, a number past fifteen, anything hand-written - the field stays a
+text box and says why. Replacing an operator's own value with the nearest thing
+a dropdown can offer, to make the page tidier, is the one behaviour a picker
+must never have.
+
+**The parse rule is tested by being run, not by being read.** It is one regular
+expression, and it is the whole decision, so the test lifts it out of `app.js`
+and executes it against a table - Python and JavaScript agree on anchors, `\d`
+with a counted repeat, and an optional non-capturing group. That found a trap
+in the test itself: `re.match()` anchors at position 0 whatever the pattern
+says, so a rule that had lost its `^` passed every assertion. JavaScript's
+`.exec()` is an unanchored search and `re.search()` is the honest counterpart.
+
+Twenty mutants, all caught. Three needed the tests tightened first - the
+anchoring one above, `pad2(` present anywhere being satisfied by the background
+while the foreground went out unpadded, and the fallback branch being checked
+for its contents rather than for the guard that reaches it.
+
+One extraction on the way: `recordSettingChange()`, because the picker is two
+controls that mean one setting and cannot go through the ordinary change
+handler. Everything after the value is computed is identical for both,
+including the part that is easy to get subtly wrong - a value put back exactly
+as it was found is not an edit, and must be removed from the dirty set rather
+than stored.
+
 ### 🟢 You can see the theme before the channel does
 
 From the beta, on the settings that colour the advert:

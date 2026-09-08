@@ -382,6 +382,37 @@ def decode_irc_escapes(text):
                               str(text))
 
 
+_IRC_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def encode_irc_escapes(text):
+    r"""The way back out: control bytes as the `\xHH` an operator can read.
+
+    decode_irc_escapes() has been half a round trip. It turns typed `\x0313`
+    into the byte mIRC reads, and nothing turned it back - so a colour that
+    had been through config once was a raw 0x03 from then on, and 0x03 is not
+    a character a text file or a browser input can show. The dashboard field
+    for an accent of `\x0313` read `13`: the code was there, invisible, and
+    what the operator could see was not what was set. Typing back what they
+    read would have put a literal "13" into every advert.
+
+    It also decides what lands in settings.conf, which is a file people edit
+    by hand. A raw control byte in it is invisible in an editor and is exactly
+    the kind of thing an editor strips on save.
+
+    EVERY control character, not just the ones a theme uses. The set that
+    cannot survive a text file is the set below, and picking a shorter one
+    would mean deciding today which codes a future theme may want.
+
+    Lowercase hex, so a value has ONE spelling once it has been through here -
+    the decoder accepts either case, and two spellings of the same colour
+    would each read as an edit of the other. Idempotent on text that is
+    already escaped, since that text holds no control characters at all.
+    """
+    return _IRC_CONTROL_RE.sub(
+        lambda match: "\\x%02x" % ord(match.group()), str(text))
+
+
 def coerce(name, raw, default, declared=None):
     """Convert `raw` to `declared`, or to the type of `default` without one.
 
@@ -665,6 +696,20 @@ def _check_writable(name, value, namespace, types):
             f"instead of clearing it.")
 
     text = render(value)
+
+    # A COLOUR GOES BACK OUT THE WAY IT CAME IN. coerce() above has just
+    # decoded "\\x0313" into the byte mIRC reads, and writing that byte is
+    # what put a raw 0x03 into settings.conf - a file people edit by hand,
+    # where it is invisible in an editor and is exactly what an editor strips
+    # on save. decode_irc_escapes() was half a round trip; this is the half
+    # that was missing.
+    #
+    # BEFORE the checks below, not after, so they weigh what will actually be
+    # written. The line-break check in particular: an escaped value holds no
+    # line break at all, so a control character that would have been refused
+    # is now simply written in the form the file can carry.
+    if name.startswith("CUSTOM_THEME_"):
+        text = encode_irc_escapes(text)
 
     if "\n" in text or "\r" in text:
         raise SettingsWriteError(

@@ -2440,6 +2440,49 @@
     "#0000fc", "#ff00ff", "#7f7f7f", "#d2d2d2"
   ];
 
+  // The same sixteen, named. theme.py's own comments are the vocabulary -
+  // "solid green", "royal blue", "light cyan" - so the menu and the presets
+  // it is competing with call a colour the same thing.
+  var IRC_COLOUR_NAMES = [
+    "white", "black", "blue", "green", "red", "maroon", "purple", "orange",
+    "yellow", "light green", "cyan", "light cyan", "royal blue", "pink",
+    "grey", "light grey"
+  ];
+
+  // A ROLE IS A COLOUR CODE, and only some codes are a colour the menus can
+  // offer: "\x0304", "\x0304,05", or nothing at all. Returns null for
+  // anything else - a code with bold in it, a hand-written oddity, text -
+  // and the field then stays the box it has always been.
+  //
+  // Returning null rather than a best guess is the point. Rewriting a value
+  // the operator wrote by hand into the nearest thing a dropdown can say is
+  // the one behaviour a picker must never have.
+  function parseIrcColour(text) {
+    var raw = String(text == null ? "" : text);
+    if (!raw) { return { fg: "", bg: "" }; }
+    var match = /^\\x03(\d{1,2})(?:,(\d{1,2}))?$/.exec(raw);
+    if (!match) { return null; }
+    var fg = parseInt(match[1], 10);
+    var bg = match[2] === undefined ? null : parseInt(match[2], 10);
+    if (fg > 15 || (bg !== null && bg > 15)) { return null; }
+    return { fg: String(fg), bg: bg === null ? "" : String(bg) };
+  }
+
+  // Two digits, because every preset in theme.py is written that way and one
+  // value should have one spelling. mIRC reads "\x034" and "\x0304" alike,
+  // but "\x034,05" is ambiguous to some clients where the padded form never
+  // is.
+  function formatIrcColour(fg, bg) {
+    if (fg === "") { return ""; }
+    var code = "\\x03" + pad2(fg);
+    return bg === "" ? code : code + "," + pad2(bg);
+  }
+
+  function pad2(value) {
+    var text = String(value);
+    return text.length < 2 ? "0" + text : text;
+  }
+
   // WHAT THE CHANNEL WILL SEE, rendered from the same bytes that go on the
   // wire. Handles the three codes the themes use - \x03 colour, \x02 bold,
   // \x0f reset - and passes anything else through as text.
@@ -2514,12 +2557,102 @@
     return out;
   }
 
+  // TWO MENUS AND A SWATCH, in place of a box that could not display what it
+  // held. See _settings_field() in webserver.py for what the box was showing.
+  //
+  // The background menu is disabled while the foreground is "theme default",
+  // because there is no such code as a background on its own: "\x03,05" is
+  // not a colour, and offering it would be offering a value that cannot be
+  // saved.
+  function ircColourPickerHtml(name, picked) {
+    function options(selected, none) {
+      var out = '<option value=""' + (selected === "" ? " selected" : "") +
+        ">" + escapeHtml(none) + "</option>";
+      for (var i = 0; i < IRC_COLOUR_NAMES.length; i++) {
+        out += '<option value="' + i + '"' +
+          (selected === String(i) ? " selected" : "") + ">" +
+          escapeHtml(pad2(i) + " " + IRC_COLOUR_NAMES[i]) + "</option>";
+      }
+      return out;
+    }
+
+    return '<span class="irc-colour" data-irc-colour="' + escapeHtml(name) + '">' +
+      '<span class="irc-colour-swatch" data-irc-swatch></span>' +
+      '<select data-irc-part="fg" aria-label="Foreground colour">' +
+        options(picked.fg, "Theme default") +
+      "</select>" +
+      '<select data-irc-part="bg" aria-label="Background colour"' +
+        (picked.fg === "" ? " disabled" : "") + ">" +
+        options(picked.bg, "No background") +
+      "</select>" +
+    "</span>";
+  }
+
+  // The swatch is what the code MEANS, shown next to the menus that made it:
+  // a solid block is a foreground on a background, which is exactly how the
+  // border and separator roles are built (see theme.py - fg == bg fills the
+  // cell). Without it, "04 red on 05 maroon" is two words rather than a
+  // colour.
+  function paintIrcSwatch(holder) {
+    var swatch = holder.querySelector("[data-irc-swatch]");
+    var fg = holder.querySelector('[data-irc-part="fg"]').value;
+    var bg = holder.querySelector('[data-irc-part="bg"]').value;
+    if (!swatch) { return; }
+    if (fg === "") {
+      swatch.removeAttribute("style");
+      swatch.classList.add("is-unset");
+      return;
+    }
+    swatch.classList.remove("is-unset");
+    swatch.style.color = IRC_COLOURS[Number(fg)];
+    swatch.style.backgroundColor = bg === ""
+      ? "transparent" : IRC_COLOURS[Number(bg)];
+  }
+
+  function attachIrcColourPickers() {
+    el.settingsFields.querySelectorAll("[data-irc-colour]").forEach(function (holder) {
+      var name = holder.dataset.ircColour;
+      var fg = holder.querySelector('[data-irc-part="fg"]');
+      var bg = holder.querySelector('[data-irc-part="bg"]');
+      paintIrcSwatch(holder);
+
+      function changed() {
+        // A background with no foreground is not a code. Clearing it here
+        // rather than refusing the save means the operator never assembles a
+        // value that cannot exist.
+        bg.disabled = fg.value === "";
+        if (bg.disabled) { bg.value = ""; }
+        paintIrcSwatch(holder);
+        recordSettingChange(name, formatIrcColour(fg.value, bg.value), holder);
+      }
+
+      fg.addEventListener("change", changed);
+      bg.addEventListener("change", changed);
+    });
+  }
+
   function settingsFieldHtml(field) {
     var isDirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
     var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
     var control;
 
-    if (field.choices) {
+    if (field.irc_colour) {
+      var current = isDirty ? state.settingsDirty[field.name]
+                            : settingsValueToString(field.value);
+      var picked = parseIrcColour(current);
+      if (picked) {
+        control = ircColourPickerHtml(field.name, picked);
+      } else {
+        // A value the menus cannot say. It stays a text box, and says why -
+        // silently replacing it with the nearest colour a dropdown can offer
+        // would be losing the operator's work to make the page tidier.
+        control = '<input type="text" autocomplete="off" data-setting="' +
+          escapeHtml(field.name) + '">' +
+          '<span class="settings-field-note">Set by hand to something the ' +
+          "menus cannot offer, so it is left as text.</span>";
+      }
+    } else if (field.choices) {
+
       // A fixed few, not free text. The three list formats are the first: a
       // typed "ZIP" or "tar" would be refused by the save with a reason, but
       // being refused is a worse way to find out than never being offered it.
@@ -2637,6 +2770,17 @@
         newValue = unitToBytes(newValue, field.unit_factor);
     }
 
+    recordSettingChange(name, newValue, input);
+  }
+
+  // WHAT AN EDIT IS, for a control of any shape. The colour picker is two
+  // selects that together mean one setting, so it cannot go through the
+  // handler above - and everything after the value is computed is identical
+  // for both, including the part that is easy to get subtly wrong: a value
+  // equal to the baseline is not an edit, and must be REMOVED from the dirty
+  // set rather than stored, or the save bar counts a field the operator has
+  // put back exactly as they found it.
+  function recordSettingChange(name, newValue, sourceEl) {
     var baselineStr = settingsValueToString(state.settingsBaseline[name]);
 
     if (newValue === baselineStr) {
@@ -2645,7 +2789,7 @@
       state.settingsDirty[name] = newValue;
     }
 
-    var row = input.closest(".settings-field-row");
+    var row = sourceEl.closest(".settings-field-row");
     var label = row && row.querySelector(".settings-field-name");
     if (label) {
       label.classList.toggle("is-dirty", Object.prototype.hasOwnProperty.call(state.settingsDirty, name));
@@ -3333,6 +3477,11 @@
       var discrete = input.type === "checkbox" || input.tagName === "SELECT";
       input.addEventListener(discrete ? "change" : "input", onSettingsFieldChange);
     });
+
+    // The colour pickers carry `data-irc-part`, not `data-setting`, so the
+    // pass above leaves them alone: two selects mean one setting between
+    // them, and neither one's value is the value to record.
+    attachIrcColourPickers();
   }
 
   function renderSettingsRail() {

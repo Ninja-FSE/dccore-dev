@@ -162,10 +162,21 @@ plus six settings that override a single role each. All of them live under
 **Appearance** on the Settings page.
 
 The six roles are `border`, `separator`, `textbox`, `value`, `alert` and
-`accent`, set as `CUSTOM_THEME_BORDER` and so on. Each holds a raw mIRC colour
-code — `\x0300,01` is white on black — and a role left empty keeps whatever the
-chosen preset uses, so changing one colour does not mean restating the other
-five.
+`accent`, set as `CUSTOM_THEME_BORDER` and so on. A role left empty keeps
+whatever the chosen preset uses, so changing one colour does not mean restating
+the other five.
+
+**You pick each one from two menus** — a foreground and an optional background
+— with a swatch beside them showing what the two make together. A background
+cannot be chosen on its own: `\x03,05` is not a colour code, so that menu stays
+disabled until a foreground is set.
+
+Underneath, a role is still an mIRC colour code written as `\x0300,01` (white
+on black), and you can still set one by hand in `settings.conf`. If you write
+something the menus cannot express — a code with bold in it, or anything past
+the sixteen colours — **the dashboard leaves it exactly as you wrote it** and
+shows it as text rather than replacing it with the nearest colour a dropdown
+can offer.
 
 You do not have to guess what a code looks like. The Appearance section draws
 **two sample lines above the fields and redraws them as you type**, before
