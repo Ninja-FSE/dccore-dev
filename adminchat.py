@@ -1235,6 +1235,10 @@ def _read_password(prompt):
 
 
 if __name__ == "__main__":
+    # An entry point of its own - see update_list.py.
+    import platform_compat
+    platform_compat.install_console_encoding_guard()
+
     print("Generate the value for admin_config.ADMIN_PASSWORD_HASH.")
     first = _read_password("Password: ")
     second = _read_password("Again: ")

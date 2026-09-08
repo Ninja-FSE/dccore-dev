@@ -861,7 +861,15 @@ def check_queue_and_send(irc_sock, completed_user):
                     # thread forever while config.rar_inprogress stays True, wedging folder
                     # packing for EVERY user until the daemon is restarted.
                     rar_timeout = getattr(config, 'RAR_TIMEOUT', 1800)
-                    process = subprocess.run(cmd, capture_output=True, text=True, timeout=rar_timeout)
+                    # See commands.py's note on the same call. rar is not
+                    # Python, so nothing can guard what it writes - a
+                    # filename in its error output is decoded here or
+                    # nowhere, and a pack that failed for a nameable
+                    # reason must not become a pack that failed silently.
+                    process = subprocess.run(cmd, capture_output=True,
+                                             text=True, encoding="utf-8",
+                                             errors="replace",
+                                             timeout=rar_timeout)
                     
                     if process.returncode == 0 and os.path.exists(target_rar_path):
                         print(f"[LINEAR RAR] Compression succeeded. Waiting 2.0s for the disk to sync...")

@@ -4,6 +4,60 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 One accented filename stopped the list rebuilding
+
+Reported from a live install on a Greek Windows box:
+
+    External update_list.py failed (Exit Code 1): Unknown script error
+    ...
+    File "C:\\Python314\\Lib\\encodings\\cp1253.py", line 23, in decode
+    UnicodeDecodeError: 'charmap' codec can't decode byte 0x8d in position 563
+
+**Two failures, one cause, and they hid each other.**
+
+**The child.** `update_list.py` runs as its own process - the daemon starts it
+with `subprocess.run()`, `configure.py` runs it directly - so `oserve.py`'s
+console guard, which has protected the daemon since it was written, did nothing
+for it. Every line it prints is a path off somebody's disk. On a console whose
+code page cannot represent a character in one of those paths, `print()` raises
+`UnicodeEncodeError` and the scan dies where it stood. One accented filename is
+enough, which is to say: most music libraries.
+
+**The parent.** `subprocess.run(..., text=True)` with no `encoding` decodes the
+child using the same locale code page. So the bytes that did escape killed
+`subprocess`'s own reader thread, and the run reported *"Unknown script error"*
+- because **the output that would have explained it is exactly what could not
+be read**.
+
+The operator got a failure with no cause, for a library that was fine.
+
+**The fix is the one that already existed, applied where it was missing.**
+`platform_compat.install_console_encoding_guard()` has been the answer since
+`oserve.py` called it. `update_list.py`, `configure.py` and `adminchat.py` are
+entry points too and never did - three of the four. Verified rather than
+reasoned about: the same print, in a child with the code page forced, exits 1
+with `UnicodeEncodeError` without the guard and 0 with it.
+
+The parents now decode `utf-8` with `errors="replace"`, so a child that does
+not guard itself still cannot take the daemon's report away with it. That
+matters most for `rar`, which is not Python and cannot be guarded at all - a
+pack that failed for a nameable reason must not become a pack that failed
+silently.
+
+**The class guard is the part that keeps this fixed.** A test walks every
+module carrying a `__main__` block and fails if it does not install the guard,
+so a new entry point that forgets is a failing test rather than a bug report
+from somebody's channel. A second sweep parses each captured `subprocess.run()`
+and fails on any that does not name both an encoding and an error handler -
+`text=True` alone means "decode with whatever the console uses", which is the
+whole bug.
+
+**This is the code-page hazard for the third time** (after the loopback probe
+and MAX_PATH), and the first time it has been caught by a rule rather than by
+an operator.
+
+Nine mutants, all caught.
+
 ### 🟢 A flaky test asserted a number nothing promised
 
 `test_missing_rar_charges_the_row_rather_than_looping` failed once on
