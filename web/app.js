@@ -1121,13 +1121,21 @@
     button.dataset.nick = row.nick || splitFetchedSource(row.bot).nick;
     button.dataset.held = row.held ? "yes" : "no";
 
+    // TWO SIGNALS, TWO PLACES. The dot used to carry the list's freshness,
+    // which left presence - the thing that decides whether asking is worth
+    // anything at all - shown nowhere. A list can be perfectly current from a
+    // bot that signed off an hour ago.
+    //
+    // The dot is now whether they are HERE, and the name's colour is what we
+    // hold from them. Asked for exactly that way in the beta.
     var led = document.createElement("span");
-    led.className = "led " + ledClass(row.freshness);
-    led.title = ledTitle(row);
+    led.className = "led " + presenceClass(row.online);
+    led.title = presenceTitle(row.online);
     button.appendChild(led);
 
     var name = document.createElement("span");
-    name.className = "bot-row-name";
+    name.className = "bot-row-name " + freshnessClass(row.freshness);
+    name.title = ledTitle(row);
     name.textContent = row.label || row.bot;
     button.appendChild(name);
 
@@ -1177,7 +1185,25 @@
     return text.indexOf("__own__:") === 0 ? text.slice("__own__:".length) : "";
   }
 
-  function ledClass(freshness) {
+  // WHETHER THEY ARE HERE. `null` is not "offline" - it is a bot that has not
+  // finished joining, where the membership mirror is empty and every nick
+  // would read as gone.
+  function presenceClass(online) {
+    if (online === true) { return "is-online"; }
+    if (online === false) { return "is-offline"; }
+    return "is-presence-unknown";
+  }
+
+  function presenceTitle(online) {
+    if (online === true) { return "In a channel with this bot now"; }
+    if (online === false) {
+      return "Not in any channel this bot is in - a request would go nowhere";
+    }
+    return "Cannot tell yet - still joining";
+  }
+
+  // WHAT WE HOLD FROM THEM, on the name rather than the dot.
+  function freshnessClass(freshness) {
     if (freshness === "current" || freshness === "own") { return "is-current"; }
     if (freshness === "changed") { return "is-changed"; }
     if (freshness === "not_held") { return "is-not-held"; }

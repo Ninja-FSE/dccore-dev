@@ -1084,10 +1084,41 @@ mark.filter-hit {
   background: var(--status-empty);
 }
 
+/* THE DOT IS PRESENCE. It carried the list's freshness until the beta asked
+   for the two apart, which left "is this bot even here" shown nowhere - and
+   that is the one that decides whether asking is worth anything. */
+.led.is-online  { background: var(--accent); }
+.led.is-offline { background: var(--danger); }
+/* Not "offline": the membership mirror is empty while the bot is still
+   joining, and every nick would read as gone. */
+.led.is-presence-unknown { background: var(--status-empty); }
+
+/* Kept for the freshness LEGEND swatches and for any older markup: the same
+   four colours the dot used to carry, now on the name. */
 .led.is-current  { background: var(--accent); }
 .led.is-changed  { background: var(--status-frozen); }
 .led.is-not-held { background: var(--danger); }
 .led.is-unknown  { background: var(--status-empty); }
+
+/* THE NAME IS WHAT WE HOLD. Colour rather than a second dot, because the row
+   is already a nick and a count and a dot, and a fourth mark to decode is
+   worse than the two it replaced. */
+.bot-row-name.is-current  { color: var(--accent); }
+.bot-row-name.is-changed  { color: var(--status-frozen); }
+.bot-row-name.is-not-held { color: var(--danger); }
+.bot-row-name.is-unknown  { color: var(--text-dim); }
+
+/* The legend's own sample of each, so the colours are named rather than left
+   to be worked out from the rows. */
+.legend-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.legend-name.is-current  { color: var(--accent); }
+.legend-name.is-changed  { color: var(--status-frozen); }
+.legend-name.is-not-held { color: var(--danger); }
+.legend-name.is-unknown  { color: var(--text-dim); }
 
 .bot-legend {
   display: flex;

@@ -155,7 +155,10 @@ class TheTooltipShowsThem(unittest.TestCase):
         """These strings come off another bot's advert, and escapeHtml()
         encodes & < > but leaves a double quote alone - so this must never
         become part of a concatenated attribute."""
-        self.assertIn("led.title = ledTitle(row);", app_js())
+        # On the NAME now. The dot became presence when the two signals
+        # were split, and the freshness explanation went with the colour it
+        # explains.
+        self.assertIn("name.title = ledTitle(row);", app_js())
 
 
 class ItReusesTheBannerFormatter(unittest.TestCase):

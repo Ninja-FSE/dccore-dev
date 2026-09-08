@@ -768,6 +768,43 @@ BOT_ALONE_FETCH_CONFLICT_ERROR = (
 )
 
 
+def bot_not_here_error(bot):
+    """Why we will not ask this bot, or None if we will.
+
+    FROM THE BETA. A list was requested from a nick that was not on the
+    network - the server answered the operator's own WHOIS with "No such
+    nick" - and the fetch sat in the queue holding a slot until it timed out,
+    then reported "no response". Which was true, and useless: nobody was there
+    to respond, and that was knowable before a line went out.
+
+    The daemon already knows. config.channel_users is synced from 353/JOIN/
+    PART for every channel it is in, and dcc.py has read it as proof of
+    presence before dispatching a send since long before this. A request is a
+    PRIVMSG into a channel: a nick that is not in one of ours cannot see it,
+    so this is not a guess about whether they would answer - it is the
+    observation that they were not asked.
+
+    Returns None when we have no channel membership at all, rather than
+    refusing everything: that is a bot which has not finished joining, and
+    "wait" is a better answer than "nobody exists".
+    """
+    import dcc
+
+    nick = str(bot or "").strip()
+    if not nick:
+        return None
+    with runtime.channel_users_lock():
+        known = any(users for users in
+                    (getattr(config, "channel_users", {}) or {}).values())
+    if not known:
+        return None
+    if dcc.user_is_present_in_ram(nick):
+        return None
+    return (f"{nick} is not in any channel this bot is in, so a request "
+            f"would go nowhere. They may have signed off - the dot beside "
+            f"their name says which.")
+
+
 def build_list_fetch_enqueue_result(bot_raw):
     """POST /api/filelists/fetch's pure logic: validate the bot nick and
     enqueue a request_type="list" row.
@@ -810,6 +847,10 @@ def build_list_fetch_enqueue_result(bot_raw):
     bot = bot_raw.strip()
     if not bot:
         return 400, {"error": "'bot' is required."}
+
+    absent = bot_not_here_error(bot)
+    if absent:
+        return 409, {"error": absent}
 
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
@@ -864,6 +905,10 @@ def build_folder_rar_fetch_enqueue_result(bot_raw, folder_raw):
     folder = folder_raw.strip()
     if not bot or not folder:
         return 400, {"error": "Both 'bot' and 'folder' are required."}
+
+    absent = bot_not_here_error(bot)
+    if absent:
+        return 409, {"error": absent}
 
     if dcc_fetch.has_outstanding_bot_alone_request(bot):
         return 409, {"error": BOT_ALONE_FETCH_CONFLICT_ERROR}
@@ -1153,6 +1198,20 @@ def requested_own_list(name):
     return None
 
 
+def present_nicks():
+    """Every nick the daemon can currently see, lower-cased.
+
+    Synced from 353/JOIN/PART for every channel this bot is in - the same
+    mirror dcc.py has read as proof of presence before dispatching a send
+    since long before this. An empty set means we have not finished joining
+    yet, which callers have to tell apart from "nobody is here".
+    """
+    with runtime.channel_users_lock():
+        return {str(nick).lower()
+                for users in (getattr(config, "channel_users", {}) or {}).values()
+                for nick in users}
+
+
 def build_own_list_summaries():
     """One row per list THIS bot serves, in the operator's own order.
 
@@ -1190,6 +1249,7 @@ def build_own_list_summaries():
     if not served:
         return [{"bot": OWN_SOURCE, "nick": OWN_SOURCE, "list": "",
                  "label": "Our own list", "held": True, "freshness": "own",
+                 "online": True,
                  "own": True, "fetched_at": 0, "count": None,
                  "advert_then": {}, "advert_now": {}}]
 
@@ -1202,6 +1262,7 @@ def build_own_list_summaries():
             "list": "",
             "label": "Our own list" if single else entry.name,
             "held": True,
+            "online": True,
             "freshness": "own",
             "own": True,
             "fetched_at": 0,
@@ -1238,6 +1299,12 @@ def build_fetched_bot_list_summaries():
     rows = []
     import list_fetch
 
+    # WHO IS ACTUALLY THERE, built ONCE for the whole payload. This route is
+    # polled every few seconds and a busy channel has dozens of advertisers;
+    # asking user_is_present_in_ram() per row would rescan every channel's
+    # membership per row, per poll.
+    present = present_nicks()
+
     for key, entry in store.items():
         bot = entry.get("bot", key)
         then = dict(entry.get("advert_when_fetched") or {})
@@ -1268,6 +1335,15 @@ def build_fetched_bot_list_summaries():
                 "list": marker,
                 "label": f"{bot} - {marker}" if marker else bot,
                 "held": True,
+                # PRESENCE, which is a different question from freshness and
+                # was being answered by the same dot. A list can be perfectly
+                # current from a bot that signed off an hour ago, and asking
+                # that bot for anything is a request nobody will see.
+                #
+                # None, not False, when we know nothing yet: an empty
+                # membership mirror is a bot still joining, and "offline" is a
+                # claim we have not earned.
+                "online": (bot.lower() in present) if present else None,
                 "fetched_at": entry.get("fetched_at", 0),
                 "count": info.get("entry_count", 0),
                 # PER BOT, not per list. One advert covers the archive and one
@@ -1298,6 +1374,7 @@ def build_fetched_bot_list_summaries():
             "list": "",
             "label": bot,
             "held": False,
+            "online": (bot.lower() in present) if present else None,
             "fetched_at": 0,
             "count": now.get("files"),
             "freshness": "not_held",
@@ -1632,6 +1709,14 @@ def build_fetch_enqueue_result(payload):
         filename = filename_raw.strip()
         if not bot or not filename:
             errors.append({"error": "Both 'bot' and 'filename' are required.", "item": raw})
+            continue
+        # PER ITEM, not per request: a bulk paste is routinely several bots at
+        # once, and one of them having signed off is no reason to refuse the
+        # rest. It joins `errors`, which this route already reports beside
+        # whatever it did manage to queue.
+        absent = bot_not_here_error(bot)
+        if absent:
+            errors.append({"error": absent, "item": raw})
             continue
         request_id = dcc_fetch.enqueue_fetch(bot, filename)
         if request_id is None:
