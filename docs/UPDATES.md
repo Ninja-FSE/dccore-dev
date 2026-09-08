@@ -4,6 +4,61 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 📥 The server is read in useful-sized bites
+
+The socket was read **2048 bytes at a time** for as long as `irc.py` has
+existed. That is one or two IRC lines - RFC 1459 caps a line at 512 bytes,
+IRCv3 tags raise it to 8703 - which is fine while the server is trickling
+channel chatter, and wrong when it is not.
+
+Joining channels is when it is not. Every JOIN is answered with the whole NAMES
+list, one 353 per few hundred nicks and then a 366, so adding several channels
+at once produces tens of kilobytes in a burst - taken two kilobytes at a time.
+An ircd bounds what it will hold for a client that is not keeping up and closes
+the link when that fills; to us that arrives as `ECONNRESET` with nothing to
+say why. A beta reported exactly that shape - *"[WinError 10054] ... Dropping
+the link to reconnect"* right after several channels were added - and it would
+not reproduce.
+
+**This is not proof that was the cause.** The disconnect report that shipped
+alongside it will say so directly the next time it happens, by printing the
+server's own `ERROR :Closing Link:` line. This change stands on its own: a byte
+stream read two kilobytes at a time has no argument for it. `recv()` returns
+whatever is there up to the size asked for and never waits to fill the buffer,
+so a larger one costs an allocation and saves syscalls exactly when there is a
+backlog to clear.
+
+Both loops, since the registration loop reads the same stream through the same
+helper and the server's 001-005 and MOTD arrive there in a burst of their own.
+
+**What makes it safe was already true** and is now pinned at this scale:
+`take_complete_lines()` accumulates BYTES and returns only whole CRLF-terminated
+lines, so the read size cannot split a line or a UTF-8 character however the
+boundary lands, and `MAX_PENDING_LINE_BYTES` still bounds a peer that never
+sends CRLF at all. A bigger read makes a mid-line boundary MORE likely, not
+less, so there are tests for that case rather than fewer.
+
+### 🔎 Checked, and not a defect: what a bare @nick hands over
+
+Raised during the beta, when an operator whose whole library is film found
+their master list empty and their video list holding everything: does a plain
+`@<nick>` then hand somebody an empty file, while the advert - which sums every
+list - promises hundreds?
+
+**No, in either format**, verified against exactly that shape rather than by
+reading the code:
+
+    LIST_FORMAT=txt  ->  <base>-FULL-<date>.txt      contains the film
+    LIST_FORMAT=zip  ->  <base>-<date>.zip           master + VIDEO + RAR
+
+The `.txt` artifact is not the master index - it is a separate combined file
+(`list.FULL_LIST_MARKER`), written precisely so that choosing `.txt` is a
+choice about packaging rather than a request to hand out less. So the count in
+the advert and the contents of the download agree.
+
+The half of that question which WAS a real defect - a peer FETCHING such an
+archive, and keeping only its empty master - is fixed above.
+
 ### 🗃️ The Settings page is grouped the way an operator looks for things
 
 From the beta: *"Settings pages at webpage are a mess. Need better grouping,
