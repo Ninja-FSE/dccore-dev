@@ -4,6 +4,53 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 A flaky test asserted a number nothing promised
+
+`test_missing_rar_charges_the_row_rather_than_looping` failed once on
+ubuntu/3.12 with `3 != 1` - the first failure in twenty-five CI runs that day,
+green on a re-run of the same commit, and unrelated to the branch it appeared
+on.
+
+**The exact count was never a contract.** A failed send reaches
+`release_queue_entry()` by more than one path, and they do not all charge the
+same amount. `start_dcc_send()`'s missing-file branch deliberately charges,
+sleeps three seconds and calls `check_queue_and_send()` again - its own comment
+says why: *"charging the budget is what stops it being re-selected every three
+seconds forever"*. One request down that path walks a row to the budget on its
+own. Which path a failure takes depends on how far the pack got before it died,
+which is timing, which is why a loaded runner sees a different number from a
+laptop.
+
+The test now asserts what it is named for and what every path guarantees: the
+failure lands on the retry budget, and **the budget is a ceiling**. A second
+test covers the half nothing asserted - that the charges stop and the row
+leaves the queue, because charging is only a bound if something ends. A row
+re-selected forever at the cost of a queue slot is the same failure wearing a
+counter.
+
+**This is a strengthening, not a loosening**, and that was measured rather than
+claimed. The same four mutants run against the old test and the new one:
+
+| mutant | old | new |
+|---|---|---|
+| the failure is never charged at all | caught | caught |
+| the budget is not a ceiling - it climbs forever | **survived** | caught |
+| a row that used up its budget stays in the queue | **survived** | caught |
+| the charge is one higher than the attempt | caught | caught |
+
+Two of the three things this test exists to prevent were unguarded by it.
+
+**What is not claimed:** the exact sequence that produced 3 on that runner.
+Thirty isolated runs and a full local suite would not reproduce it, and two
+theories were built and discarded on the evidence - a stale retry thread left
+by an earlier test (disproved: this path spawns no such thread, which a
+deliberately falsifiable guard reported as `suppressed == 0` rather than
+passing quietly), and cross-test interference through the shared fixture nick
+(not reproducible under a full-suite trace). The over-specified assertion is a
+defect on its own terms whichever path fired, so it is fixed on its own terms -
+and the discarded guesses are not written into the code as though they had been
+findings.
+
 ### 🔴 A list is bound to a channel by picking it, not by retyping it
 
 Issue #368. Identity & network already holds the operator's channel list, and
