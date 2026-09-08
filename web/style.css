@@ -836,6 +836,56 @@ html, body {
    ground, and painting it in the dashboard's colours would misrepresent the
    one thing it exists to show. A dark plate is what these channels look like
    in every client that ships a default. */
+/* The colour picker: two menus and the block they make between them.
+
+   NO LITERAL COLOURS HERE, and that is not an oversight - the swatch takes
+   its two colours from IRC_COLOURS in app.js, set as properties by
+   paintIrcSwatch(). The sixteen belong to IRC and live in one place; a copy
+   of them in this file would be a second place to keep them right. */
+.irc-colour {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.irc-colour select {
+  min-width: 9.5rem;
+}
+
+.irc-colour select:disabled {
+  opacity: 0.45;
+}
+
+/* A solid block, the way a border or separator role is drawn in a channel -
+   see theme.py on why fg == bg fills the cell. The character is a full block
+   so a foreground with no background still reads as its colour. */
+.irc-colour-swatch {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.irc-colour-swatch::before {
+  content: "\2588\2588";
+  display: block;
+  line-height: 1.4rem;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+/* Nothing picked is not a colour, so it does not get drawn as one. */
+.irc-colour-swatch.is-unset {
+  background: repeating-linear-gradient(
+    45deg, transparent, transparent 3px,
+    var(--border) 3px, var(--border) 4px);
+}
+
+.irc-colour-swatch.is-unset::before {
+  content: "";
+}
+
 .theme-preview {
   background: #000000;
   border: 1px solid var(--border);

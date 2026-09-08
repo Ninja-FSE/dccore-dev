@@ -2274,6 +2274,22 @@ def _settings_field(name, declared, value):
             field["choice_labels"] = [labels.get(str(c), str(c))
                                       for c in field["choices"]]
 
+    # A COLOUR THE OPERATOR CAN READ, AND PICK. config holds the decoded
+    # bytes - a role of "\x0313" is four characters, two of them a control
+    # code - and the page was being handed them raw. A text input cannot show
+    # 0x03, so the field for that accent read "13": the code was present,
+    # invisible, and what the operator could see was not what was set. Typing
+    # back what they read would have put a literal "13" in every advert.
+    #
+    # So the value crosses as the escape text settings.conf.sample documents,
+    # which is also what the save writes back - and `irc_colour` tells the
+    # page it may offer the sixteen colours as menus instead of asking for a
+    # control code to be typed into a box that cannot display one.
+    if name.startswith("CUSTOM_THEME_"):
+        import settings_file as _settings_file
+        field["value"] = _settings_file.encode_irc_escapes(value or "")
+        field["irc_colour"] = True
+
     unit = SETTINGS_UNITS.get(name)
     if unit:
         field["unit"], field["unit_factor"] = unit
