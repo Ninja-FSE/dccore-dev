@@ -4,6 +4,49 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🗜 A folder is offered as .rar because that bot's list says so
+
+"Get folder as .rar" sat on every folder heading of every fetched list, gated
+only on "this is not our own list". That could never be right: it is a claim
+about what a FOREIGN bot will do, made from nothing.
+
+Measured against one live registry, **2 of 51** known bots publish a RAR folder
+list at all. The button was wrong for the other 49 - and a click sent
+`!<nick> !rar <folder>` into the channel and then held one of `MAX_DCC_SLOTS`
+worth of fetch slots for `FETCH_FOLDER_OFFER_TIMEOUT`, half an hour, waiting
+for a reply that was never coming. Three clicks and cross-bot fetching was dead
+for the afternoon.
+
+**And per-bot would still have been wrong.** From the operator: *"rar file list
+can be different than normal filelist. i can offer 1 folder as normal file list
+and 1 other folder as rar filelist only."* `update_list.py` does exactly that
+here too - a folder earns its `!rar` row from holding a *packable* file, so the
+two lists are different sets even in our own output.
+
+**What the list already says.** A bot that packs albums publishes a separate
+list whose every row is the line to type:
+
+    !SomeBot !rar D:\MUSIC\Amon Amarth - 1999 - The Avenger
+A per-folder statement of what that bot will pack, published by the bot itself.
+Nothing inferred from an advert, nothing guessed from a filename convention
+only our own lists follow. So the button goes on the ROW carrying the request
+line, and the folder it sends is the one that row asks for - never the heading
+the row sits under, which for a RAR list is not the folder being requested.
+
+That list was being discarded on the way in until the change above kept it,
+which is what makes this answerable at all.
+
+The title is left exactly as the list wrote it: those rows exist to be copied
+verbatim - the header of every such list says so - so this adds a field beside
+the title rather than reformatting it. And the button shares the checkbox's own
+gate, in the same function, since packing a folder makes no sense against our
+own list.
+
+A mutation run earned its keep twice: `\s*` in place of `\s+` let a file whose
+name merely BEGINS "!rar" read as a request - `!rarely used.flac` becoming a
+request to pack `ely used.flac` - and the single-file branch in the archive
+picker turned out to be dead code.
+
 ### 📦 Every list in a fetched archive is kept, not just the largest
 
 A peer's archive routinely holds more than one list, and until now exactly one

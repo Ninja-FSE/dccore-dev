@@ -2,6 +2,8 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **"Get folder as .rar" now appears only where the bot will actually pack it.** It used to sit on every folder of every list you had fetched, whether or not that bot packs anything - and clicking it on a bot that does not sent a request into the channel and then tied up one of your fetch slots for half an hour waiting for an answer that never came. A bot that packs albums publishes a separate list of exactly which folders it will pack, so the button now appears on those rows and nowhere else. Note this is per FOLDER, not per bot: a bot can offer one folder as loose files and another only as a pack, and the list says which is which.
+
 - **Fixed: only one list survived from each bot you fetched.** A lot of bots publish more than one - loose files in one list and packed albums in another, or music and films kept apart - and DCCore kept the biggest and threw the rest away without saying so. If a bot keeps most of its catalogue in the second list, what you held was close to empty for no visible reason. Every list in the archive is kept now, each with its own row in the List Browser, its own file count and its own contents. Re-fetching updates the same lists rather than piling up new ones, and lists you already hold are unaffected until the next fetch.
 
 - **Fixed: the List Browser only ever showed one of your lists.** If you serve more than one list, only the primary appeared - the others were being served and advertised correctly, but there was no way to look at them from the dashboard, which is where you created them. Every list you serve now gets its own row in the List Browser and can be browsed like any other. If you serve a single list, nothing changes: it is still one row reading "Our own list".
