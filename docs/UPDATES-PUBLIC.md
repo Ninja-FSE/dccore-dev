@@ -2,6 +2,8 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **The List Browser's filter searches what you typed, in the order you typed it.** It used to treat each word separately and match them anywhere, so typing an artist plus the start of an album name got you every track by that artist containing a short common word - a two-word search returned *more* than a one-word search. Now `amon amar` looks for those words together, as a phrase, and still completes the last one as you type. If you want the words in any position, separate them with `*`: `amon*amar`. Matched text is highlighted in the results so you can see why a row is there. This affects the dashboard filter only; `@find` in the channel is unchanged.
+
 - **Fixed: the filter ignored all but the first list from each bot.** Now that a bot's whole archive is kept, a bot can appear in the sidebar with two or three lists - and the filter was only ever searching the first of them. Anything in the others could not be found, and worse, those lists were left looking as though they held matches when they had not even been searched. Every list is searched now, and every one is dimmed or not according to what it actually contains.
 
 - **A folder heading in filter results says "matches", not "files".** The same words meant two different things: browsing, the number is how big the folder is; filtering, it is how many rows matched. A nine-track album with two matching tracks read as an album with two tracks in it.

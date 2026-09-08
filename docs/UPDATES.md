@@ -4,6 +4,54 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔤 The filter bar searches what was typed, in the order it was typed
+
+From the beta: *"when i type amon a i want it to search 'amon a' only. if i
+type amon amar i want it to search 'amon amar'. if i want the 2nd word to be in
+any place then i search for amon*amar. also, it it possible to highlight the
+matched characters?"*
+
+**What it replaced.** Every word was ANDed and could appear anywhere, so a
+two-word query was WIDER than a one-word query in every way that mattered - the
+second word is usually short, and a short word is in half the library. Typing an
+artist and the first letters of an album returned every track by that artist
+whose title happened to contain a standalone "a".
+
+    typed          old                        new
+    amon a         amon AND a  (anywhere)     "amon a" as a phrase
+    amon amar      amon AND amar (anywhere)   "amon amar" as a phrase
+    amon*amar      - no meaning -             amon AND amar, anywhere
+
+**The prefix rule is why it works.** The last phrase's last word is still
+matched as a prefix, because it is the word being typed - so "amon a" reaches
+"Amon Amarth". The old length floor refusing a wildcard on a single character is
+right for a bare "a", which is every row in the index, and wrong inside a
+phrase, where "amon" has already anchored it: without that exception "amon a"
+asks for the standalone word "a" straight after "amon", which is not what
+anybody types it for.
+
+The `*` never reaches FTS5 - it is a separator, consumed before the expression
+is built. Reaching it, it would be syntax, which is the same reason every term
+is quoted rather than interpolated.
+
+**The highlight marks what was TYPED**, not what FTS5 matched: the last phrase
+is a prefix, so "amar" matches "Amarth", and marking the four characters the
+operator put in is the honest reading of the request. The segments are parsed
+ONCE, on the server, and returned in the payload - two parses of "amon*amar"
+could disagree about where the boundary is, and the page would then mark
+something the search did not use. Overlapping ranges are merged, because a
+nested `<mark>` renders as a darker patch that reads like a third kind of match.
+
+Every piece is escaped with the same `escapeHtml()` the title always had:
+marking part of a foreign bot's filename must not turn the rest into markup. A
+first version of that test counted escapes and a mutation walked straight
+through it - dropping the escape from one of five pieces still left four - so it
+asserts the property instead: no slice of the title reaches the output raw.
+
+This changes the DASHBOARD FILTER only. `@find` and the own-list search go
+through `list.find_matching_entries()`, which keeps its AND-across-words rule;
+changing what channel users experience was not what was asked for.
+
 ### 🔍 The cross-list filter searches every list, and reports on every list
 
 From the beta, filtering with two lists held from one bot: *"why flacme - rar

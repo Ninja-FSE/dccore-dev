@@ -178,33 +178,78 @@ def _quote(text):
     return '"' + str(text).replace('"', '""') + '"'
 
 
-def build_match_query(terms, prefix_last=True):
+def filter_segments(text):
+    """What a filter-bar query means, as a list of phrases.
+
+    ASKED FOR IN THE BETA, and it is the difference between a filter that
+    finds an album and one that finds every track with a short word in it:
+
+        "well when i type amon a i want it to search 'amon a' only. if i type
+         amon amar i want it to search 'amon amar'. if i want the 2nd word to
+         be in any place then i search for amon*amar"
+
+    So the words somebody types are a PHRASE - adjacent, in that order - and
+    "*" is what separates one phrase from another. Typing "amon a" asks for
+    "amon" followed by a word starting with "a", which is Amon Amarth and not
+    every track whose title happens to contain the word "a".
+
+    That was the old behaviour: every word ANDed, in any position. It made a
+    two-word query WIDER than a one-word query in every way that mattered,
+    because the second word was usually short and matched half the library.
+
+    Returns [] for nothing typed, and drops empty segments - "amon*", "*amon"
+    and "amon**x" all mean the phrase either side of a separator, with
+    nothing on the other.
+    """
+    return [part.strip() for part in str(text or "").lower().split("*")
+            if part.strip()]
+
+
+def build_match_query(segments, prefix_last=True):
     """The FTS5 MATCH expression for a filter-bar query, or None for nothing.
 
-    Every term must be present - the same AND-across-words rule
-    find_matching_entries() applies - and the last one gets a prefix wildcard
-    so that typing shows results before the word is finished. That is what
-    makes it a filter bar rather than a search button.
+    Each segment is a PHRASE - its words must be adjacent and in order - and
+    the segments are ANDed, so they may appear anywhere relative to each
+    other. See filter_segments() for why round that way.
+
+    Only the LAST segment's last word gets a prefix wildcard, and only when it
+    is long enough to narrow anything. That is what makes this a filter bar
+    rather than a search button: the word being typed right now is incomplete,
+    and the ones before it are not.
 
     Terms are quoted, never interpolated: a query is whatever somebody typed
-    into a box, and FTS5's expression syntax has plenty of operators in it.
-    An unquoted `-` or `*` or `NEAR` would be read as syntax, and at best
-    answers the wrong question.
+    into a box, and FTS5's expression syntax has plenty of operators in it. An
+    unquoted "-" or "NEAR" would be read as syntax, and at best answers the
+    wrong question. The "*" the operator types is a separator here and never
+    reaches the expression - it is consumed by filter_segments().
     """
-    cleaned = [str(t).strip().lower() for t in (terms or [])]
-    cleaned = [t for t in cleaned if t]
+    cleaned = [str(part).strip().lower() for part in (segments or [])]
+    cleaned = [part for part in cleaned if part]
     if not cleaned:
         return None
 
     parts = []
-    for i, term in enumerate(cleaned):
+    for i, phrase in enumerate(cleaned):
         last = (i == len(cleaned) - 1)
-        if prefix_last and last and len(term) >= 2:
+        words = phrase.split()
+        if not words:
+            continue
+        # THE PREFIX GOES ON UNLESS IT WOULD MATCH EVERYTHING. A lone "a"
+        # with a wildcard is every row in the index, which is why the length
+        # floor exists. Inside a PHRASE it is nothing of the sort: "amon a"*
+        # is already anchored by "amon", and refusing the wildcard there is
+        # what would make the query useless - "amon a" would ask for a title
+        # with the standalone word "a" straight after "amon", which is not
+        # what anybody types it for. They are typing "Amon Amarth".
+        if prefix_last and last and (len(words) > 1 or len(words[-1]) >= 2):
             # The wildcard sits OUTSIDE the quotes: "meta"* is FTS5's prefix
-            # form. Inside them it would be a literal asterisk to match.
-            parts.append(_quote(term) + "*")
+            # form, and on a multi-word phrase it applies to the phrase's own
+            # last token - which is exactly the word still being typed.
+            parts.append(_quote(" ".join(words)) + "*")
         else:
-            parts.append(_quote(term))
+            parts.append(_quote(" ".join(words)))
+    if not parts:
+        return None
     return "filename:(" + " AND ".join(parts) + ")"
 
 
