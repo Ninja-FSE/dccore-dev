@@ -1295,6 +1295,18 @@
         : !isOwnSource(state.filelistsSource || "__own__");
     }
 
+    // "2 files" means two DIFFERENT things in the two views, and they look
+    // identical. Browsing, it is how big the folder is. Filtering, the group
+    // holds only the rows that matched - so a nine-track album whose title
+    // matched twice read as an album with two tracks in it, which is what it
+    // was reported as.
+    function folderCountNoun(count) {
+      if ((state.filelistsFilter || "").trim()) {
+        return count === 1 ? " match" : " matches";
+      }
+      return count === 1 ? " file" : " files";
+    }
+
     function folderHeadingHtml(group, index) {
       var count = group.count || 0;
       // SELECT THE WHOLE FOLDER. Asked for during the beta: an album is the
@@ -1327,7 +1339,7 @@
             "<span class=\"folder-name\">" +
               escapeHtml(folderLabel(group.folder)) + "</span>" +
             "<span class=\"folder-count\">" + count.toLocaleString() +
-              (count === 1 ? " file" : " files") + "</span>" +
+              folderCountNoun(count) + "</span>" +
           "</button>" +
         "</td></tr>";
     }
