@@ -952,6 +952,54 @@ html, body {
    limit: this holds a row for every bot seen advertising, and one channel in
    the capture #133 was written from had thirty-two of them. Six rows is
    roughly where the table below still starts above the fold. */
+/* THE LIST BROWSER IS TWO COLUMNS: which list, and what is in it.
+   They were stacked, so a column of nicks took the full width and pushed the
+   table below the fold - on a wide screen the files began some 600px down and
+   then scrolled inside whatever height was left. Side by side, the sources
+   are as wide as they need to be and the table gets the height. */
+.filelists-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* minmax(0, ...) above, not a bare 1fr, and it is load-bearing: a grid track
+   sized 1fr takes min-width:auto, so a wide table inside it pushes the TRACK
+   wider rather than scrolling within it - and the whole page gains a
+   horizontal scrollbar. The floor of 0 lets the column be narrower than its
+   content, which is what hands the overflow back to .table-wrap, where it is
+   already handled. The min-width on the items themselves is the other half:
+   a floor on the track is undone by an item that will not shrink. */
+.filelists-sources {
+  min-width: 0;
+}
+
+.filelists-files {
+  min-width: 0;
+}
+
+/* In a column of its own the source list has the height to be useful - it was
+   capped at 216px because it sat above the table and every pixel it took came
+   off the files. Side by side it costs the table nothing. */
+.filelists-layout .bot-list {
+  max-height: 60vh;
+}
+
+@media (max-width: 900px) {
+  /* Below this the two columns are narrower than either wants. Stacked is the
+     arrangement that was there before, which is the right thing to fall back
+     to rather than a squeeze - and the source list gives its height back,
+     because stacked it costs the table again. */
+  .filelists-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filelists-layout .bot-list {
+    max-height: 216px;
+  }
+}
+
 .bot-list {
   display: flex;
   flex-direction: column;
