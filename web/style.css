@@ -1054,9 +1054,21 @@ mark.filter-hit {
   color: var(--accent);
 }
 
-/* A bot with no list held is still worth showing - that is what the red dot
-   is for - but it reads as unavailable rather than as somewhere to go. */
-.bot-row[data-held="no"] .bot-row-name { color: var(--text-dim); }
+/* A bot with no list held is still worth showing - it is somewhere you might
+   GO - but it should not read as somewhere you have already been.
+ *
+ * That used to be `.bot-row[data-held="no"] .bot-row-name { color: dim }`,
+ * written when the dot carried freshness and the name carried nothing. Once
+ * the name took the freshness colour, that rule outranked it: (0,3,0) against
+ * the modifier's (0,2,0), on exactly the rows it applies to - so every
+ * not-downloaded bot stayed dim grey while the legend beside it promised red.
+ * Reported from the beta as "shouldnt names be red of those not downloaded
+ * yet".
+ *
+ * It is gone. .bot-row-name.is-not-held says the same thing in the colour the
+ * legend names, and one rule saying it beats two disagreeing. The WEIGHT is
+ * what is kept: a bot with nothing held is not emphasised. */
+.bot-row[data-held="no"] .bot-row-name { font-weight: 400; }
 
 .bot-row-name {
   flex: 1;
