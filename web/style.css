@@ -824,6 +824,53 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Binding a list to channels, picked from the ones already configured. */
+.served-list-channels {
+  margin: 8px 0 0;
+}
+
+.served-list-channels-label {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.served-list-channel-boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.served-list-channel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* Bound here, but not a channel the bot joins - so nothing ever arrives from
+   it, and under library.py's rule 3 its presence can silence the channels
+   that DO exist. Marked rather than hidden or dropped: an install already in
+   this state has no other place the mistake is visible. */
+.served-list-channel.is-unconfigured {
+  color: var(--danger);
+}
+
+.served-list-channels-warning {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
+.served-list-channels-empty {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
 /* The colour picker: two menus and the block they make between them.
 
    NO LITERAL COLOURS HERE, and that is not an oversight - the swatch takes

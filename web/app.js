@@ -2543,6 +2543,32 @@
     return String(Math.round(n * factor));
   }
 
+  // THE CHANNELS THE BOT IS ACTUALLY CONFIGURED TO JOIN, as the operator has
+  // them RIGHT NOW - the pending edit if there is one, the saved value
+  // otherwise. Same source and same precedence the theme preview reads, for
+  // the same reason: a channel typed into Identity & network and not yet
+  // saved is still a channel the operator means to be in, and offering the
+  // stale list would be offering to bind a list to a channel they have just
+  // renamed.
+  function configuredChannels() {
+    var field = settingsFieldByName("CHANNEL");
+    if (!field) { return []; }
+    var raw = Object.prototype.hasOwnProperty.call(state.settingsDirty, "CHANNEL")
+      ? state.settingsDirty.CHANNEL
+      : settingsValueToString(field.value);
+    var seen = {};
+    var out = [];
+    String(raw || "").split(",").forEach(function (part) {
+      var name = part.trim();
+      if (!name) { return; }
+      var key = name.toLowerCase();
+      if (seen[key]) { return; }
+      seen[key] = true;
+      out.push(name);
+    });
+    return out;
+  }
+
   function settingsFieldByName(name) {
     var found = null;
     (state.settingsCategories || []).forEach(function (category) {
@@ -3080,7 +3106,7 @@
             " Primary</label>" +
           '<button type="button" class="served-folder-btn served-list-remove" title="Remove list" aria-label="Remove list">\u00d7</button>' +
         "</div>" +
-        '<input type="text" class="served-list-channels" placeholder="#channel, #other (blank = everywhere)" aria-label="Channels this list serves">' +
+        servedListChannelsHtml(entry, index) +
         '<div class="served-list-folders">' + folderRows + "</div>" +
         '<button type="button" class="btn btn-small list-folder-add">Add folder</button>' +
         "</div>";
@@ -3110,10 +3136,114 @@
       "</div>" + note + "</div>";
   }
 
+  // PICK FROM THE CHANNELS ALREADY CONFIGURED, rather than typing them a
+  // second time.
+  //
+  // WHY THIS IS NOT TIDYING. library.list_for_request() matches exactly, and
+  // its rule 3 is that once the primary binds any channels at all, a channel
+  // with nothing bound to it gets NOTHING - no advert, no requests answered.
+  // So a single mistyped character in this field does not bind one channel
+  // wrongly; it silences the bot in the real channel, with no error anywhere
+  // and nothing on the page saying why. Verified, not assumed:
+  // tests/test_a_list_binds_the_channels_you_configured.py starts by
+  // reproducing it.
+  //
+  // A CHANNEL BOUND HERE THAT IS NOT IN THE JOIN LIST IS STILL SHOWN, ticked,
+  // and marked. It is the operator's own data and dropping it silently would
+  // be the picker deciding what they meant - and more to the point, an
+  // install already in this state is one where the row IS the diagnosis. It
+  // is the only place the mistake is visible.
+  //
+  // Nothing ticked still means everywhere, which is what an empty field has
+  // always meant and what every install today has.
+  function servedListChannelsHtml(entry, index) {
+    var bound = (entry.channels || []).map(function (name) {
+      return String(name).trim();
+    }).filter(function (name) { return name.length > 0; });
+    var boundKeys = {};
+    bound.forEach(function (name) { boundKeys[name.toLowerCase()] = true; });
+
+    var offered = configuredChannels();
+    var offeredKeys = {};
+    offered.forEach(function (name) { offeredKeys[name.toLowerCase()] = true; });
+
+    var extra = bound.filter(function (name) {
+      return !offeredKeys[name.toLowerCase()];
+    });
+
+    if (!offered.length && !extra.length) {
+      return '<p class="served-list-channels-empty">' +
+        "No channels are configured yet. Add them under Identity &amp; " +
+        "network, then come back to bind this list to one. Until then this " +
+        "list serves every channel." +
+        "</p>";
+    }
+
+    var boxes = offered.map(function (name) {
+      return channelBoxHtml(index, name, !!boundKeys[name.toLowerCase()], false);
+    }).concat(extra.map(function (name) {
+      return channelBoxHtml(index, name, true, true);
+    })).join("");
+
+    var warning = extra.length
+      ? '<p class="served-list-channels-warning">' +
+        (extra.length === 1
+          ? "One channel bound here is not in your join list, so nothing "
+          : extra.length + " channels bound here are not in your join list, so nothing ") +
+        "arrives from it. Untick it, or add it under Identity &amp; network." +
+        "</p>"
+      : "";
+
+    return '<div class="served-list-channels" data-list-index="' + index + '">' +
+      '<p class="served-list-channels-label">Serves' +
+        (bound.length ? "" : " every channel") + "</p>" +
+      '<div class="served-list-channel-boxes">' + boxes + "</div>" +
+      warning +
+      "</div>";
+  }
+
+  // The NAME goes on via .dataset in attachListRows(), never concatenated
+  // into the markup: a channel name is operator input and escapeHtml() does
+  // not encode a double quote, which is the same rule every other row in this
+  // file follows.
+  function channelBoxHtml(index, name, checked, unconfigured) {
+    return '<label class="served-list-channel' +
+      (unconfigured ? " is-unconfigured" : "") + '">' +
+      '<input type="checkbox" class="served-list-channel-box"' +
+      ' data-list-index="' + index + '"' + (checked ? " checked" : "") + ">" +
+      "<span></span></label>";
+  }
+
   // Values as PROPERTIES, never concatenated into value="…": escapeHtml() is
   // textContent -> innerHTML and leaves a double quote alone, so a path
   // containing one would close the attribute. Same rule the folder rows
   // follow. Typing does not re-render, so the caret stays where it is.
+  // The same order servedListChannelsHtml() drew them in - configured first,
+  // then anything bound that is not configured. Derived rather than stored,
+  // so the boxes and their names cannot drift apart.
+  function channelNamesFor(entry, index) {
+    var bound = (entry.channels || []).map(function (name) {
+      return String(name).trim();
+    }).filter(function (name) { return name.length > 0; });
+    var offered = configuredChannels();
+    var offeredKeys = {};
+    offered.forEach(function (name) { offeredKeys[name.toLowerCase()] = true; });
+    return offered.concat(bound.filter(function (name) {
+      return !offeredKeys[name.toLowerCase()];
+    }));
+  }
+
+  // What is ticked, in the order it is drawn. Read off the DOM rather than
+  // accumulated as they are clicked: the draft is what gets sent, and one
+  // read of the boxes cannot disagree with them.
+  function tickedChannels(block) {
+    var out = [];
+    block.querySelectorAll(".served-list-channel-box").forEach(function (box) {
+      if (box.checked && box.dataset.channel) { out.push(box.dataset.channel); }
+    });
+    return out;
+  }
+
   function attachListRows() {
     var draft = state.listsDraft || [];
 
@@ -3123,20 +3253,27 @@
       if (!entry) { return; }
 
       var nameInput = block.querySelector(".served-list-name");
-      var channelsInput = block.querySelector(".served-list-channels");
       var primaryInput = block.querySelector(".served-list-primary");
 
       nameInput.value = entry.name || "";
-      channelsInput.value = (entry.channels || []).join(", ");
       primaryInput.checked = !!entry.primary;
 
       nameInput.addEventListener("input", function () {
         draft[index].name = nameInput.value;
       });
-      channelsInput.addEventListener("input", function () {
-        draft[index].channels = channelsInput.value.split(",")
-          .map(function (part) { return part.trim(); })
-          .filter(function (part) { return part.length > 0; });
+
+      // The channel NAME is assigned as a property, never written into the
+      // markup - see channelBoxHtml(). The label text goes in as textContent
+      // for the same reason.
+      block.querySelectorAll(".served-list-channel").forEach(function (label, position) {
+        var box = label.querySelector(".served-list-channel-box");
+        var name = channelNamesFor(entry, index)[position];
+        if (name === undefined) { return; }
+        box.dataset.channel = name;
+        label.querySelector("span").textContent = name;
+        box.addEventListener("change", function () {
+          draft[index].channels = tickedChannels(block);
+        });
       });
       primaryInput.addEventListener("change", function () {
         // Exactly one, enforced here as well as on the server: a radio group

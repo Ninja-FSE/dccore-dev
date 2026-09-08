@@ -58,6 +58,110 @@ an operator.
 
 Nine mutants, all caught.
 
+### 🟢 A flaky test asserted a number nothing promised
+
+`test_missing_rar_charges_the_row_rather_than_looping` failed once on
+ubuntu/3.12 with `3 != 1` - the first failure in twenty-five CI runs that day,
+green on a re-run of the same commit, and unrelated to the branch it appeared
+on.
+
+**The exact count was never a contract.** A failed send reaches
+`release_queue_entry()` by more than one path, and they do not all charge the
+same amount. `start_dcc_send()`'s missing-file branch deliberately charges,
+sleeps three seconds and calls `check_queue_and_send()` again - its own comment
+says why: *"charging the budget is what stops it being re-selected every three
+seconds forever"*. One request down that path walks a row to the budget on its
+own. Which path a failure takes depends on how far the pack got before it died,
+which is timing, which is why a loaded runner sees a different number from a
+laptop.
+
+The test now asserts what it is named for and what every path guarantees: the
+failure lands on the retry budget, and **the budget is a ceiling**. A second
+test covers the half nothing asserted - that the charges stop and the row
+leaves the queue, because charging is only a bound if something ends. A row
+re-selected forever at the cost of a queue slot is the same failure wearing a
+counter.
+
+**This is a strengthening, not a loosening**, and that was measured rather than
+claimed. The same four mutants run against the old test and the new one:
+
+| mutant | old | new |
+|---|---|---|
+| the failure is never charged at all | caught | caught |
+| the budget is not a ceiling - it climbs forever | **survived** | caught |
+| a row that used up its budget stays in the queue | **survived** | caught |
+| the charge is one higher than the attempt | caught | caught |
+
+Two of the three things this test exists to prevent were unguarded by it.
+
+**What is not claimed:** the exact sequence that produced 3 on that runner.
+Thirty isolated runs and a full local suite would not reproduce it, and two
+theories were built and discarded on the evidence - a stale retry thread left
+by an earlier test (disproved: this path spawns no such thread, which a
+deliberately falsifiable guard reported as `suppressed == 0` rather than
+passing quietly), and cross-test interference through the shared fixture nick
+(not reproducible under a full-suite trace). The over-specified assertion is a
+defect on its own terms whichever path fired, so it is fixed on its own terms -
+and the discarded guesses are not written into the code as though they had been
+findings.
+
+### 🔴 A list is bound to a channel by picking it, not by retyping it
+
+Issue #368. Identity & network already holds the operator's channel list, and
+the Served lists editor asked for each list's channels again as free text -
+so the same names were typed a second time with nothing connecting the two.
+
+**It is not the typing that makes this worth fixing**, and the report was right
+to say so - but it is worse than it says. `library.list_for_request()` matches
+exactly, and its third rule is that once the primary binds ANY channels at all,
+a channel with nothing bound to it gets nothing:
+
+    bound (with a one-character typo) : #somechannnel
+    list_for_request("#somechannel")  : None
+    spelled correctly                 : the list
+    nothing bound at all              : the list
+
+So a single mistyped character does not bind one channel wrongly. **It silences
+the bot in the real channel** - no advert, no requests answered - with no error
+raised anywhere and nothing on the page saying why. That is reproduced against
+the real routing as the first class in the new test file, because the whole
+justification rests on it and a fix argued from a premise nobody checked is a
+fix that outlives its reason.
+
+**The field is now the configured channels, as checkboxes.** They come from
+`CHANNEL`'s own settings field, taking a pending edit over the saved value -
+the same source and the same precedence the theme preview reads, for the same
+reason: a channel typed into Identity & network and not yet saved is still one
+the operator means to be in, and offering the stale list would offer to bind a
+list to a channel they have just renamed.
+
+**A binding the picker cannot offer is kept, ticked, and marked in red**, with
+a line saying nothing arrives from it and what to do about it. That is the part
+that matters most for anyone already caught: their channel is silent, the log
+says nothing, and `lists.json` looks perfectly well-formed. **That row is the
+only place the mistake is visible.** Dropping it silently to make the picker
+tidy would have removed the diagnosis along with the symptom - the same rule
+the colour picker follows for a code its menus cannot say.
+
+With no channels configured at all, the section says where to add them and that
+the list serves everywhere meanwhile - rather than an empty box that reads as
+broken. Nothing ticked still means every channel, which is what an empty field
+has always meant and what every install today has.
+
+The channel name is assigned as a property and its label set as `textContent`,
+never concatenated into the markup: it is operator input and `escapeHtml()`
+does not encode a double quote, which is the rule every other row in that file
+follows.
+
+The server is unchanged, as #368 says it should be. `lists.json` can still be
+hand-edited and is still accepted as written - the picker narrows what can be
+CHOSEN, it does not become the rule.
+
+Fourteen mutants, all caught. One survived first time and it was the same shape
+as the last three: `assertIn("not in your join list", body)` was satisfied with
+the condition replaced by `false`, because the message still sat there in a
+branch nothing could reach. The assertion is on the guard now.
+
 ### 🔴 The theme preview showed the colour code instead of the colour
 
 Issue #367, reported with a screenshot: picking a custom colour from the new
