@@ -806,6 +806,21 @@ def find_duplicate_filenames(entries):
             for name, key in first_seen if len(folders_by_name[key]) > 1]
 
 
+# "!rar <folder>" - what is left of a pack request once the "!<nick> " prefix
+# has been taken off by the same parse every other row goes through.
+_RAR_REQUEST_RE = re.compile(r"^!rar\s+(.+)$", re.IGNORECASE)
+
+
+def rar_folder_of(title):
+    """The folder a "!rar" row asks for, or "" if the row is not one.
+
+    Whitespace-only or bare "!rar" is not a request for anything, and an empty
+    answer is the honest reading rather than a folder named "".
+    """
+    match = _RAR_REQUEST_RE.match(str(title or "").strip())
+    return match.group(1).strip() if match else ""
+
+
 def entries_to_filelist_rows(entries, source):
     """Shape find_matching_entries() output into the File Lists view's row
     format: {"title", "size", "format", "source"}, deduping same
@@ -842,6 +857,24 @@ def entries_to_filelist_rows(entries, source):
             "format": ext,
             "source": source,
             "folder": folder,
+            # THE FOLDER THIS ROW ASKS FOR, when the row is a "!rar" request
+            # rather than a file - and "" when it is not.
+            #
+            # A bot that packs whole albums publishes a SEPARATE list whose
+            # every row is the line to type: "!<nick> !rar <folder>". So the
+            # list itself says which folders that bot will pack, per folder,
+            # and no capability has to be inferred from an advert or guessed
+            # at from a filename convention. That matters because the two
+            # lists need not agree: a bot can offer one folder as loose files
+            # and another only as a pack, and asking it for a folder it never
+            # offered spends a fetch slot for half an hour on a reply that is
+            # never coming.
+            #
+            # The title is left exactly as the list wrote it. These rows are
+            # meant to be copied verbatim - that is what the header of every
+            # such list tells the reader to do - so this adds a field beside
+            # it rather than reformatting it.
+            "rar_folder": rar_folder_of(filename),
             # What we have already asked this bot for: "requested",
             # "received", or "" for neither. Declared HERE, empty, rather
             # than added by whichever payload happens to know - both this

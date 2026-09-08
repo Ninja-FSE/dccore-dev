@@ -1822,7 +1822,11 @@ class FolderRarButtonTests(unittest.TestCase):
         body = self._extract_function("attachFilelistsFolderRarData")
 
         self.assertIn(".dataset.bot =", body)
-        self.assertIn(".dataset.folder = group.folder", body)
+        # The ROW's folder now, not the heading's. The button sits on the row
+        # whose own request line asks for it, and a RAR list's rows are
+        # grouped under whatever heading that list happens to carry - which is
+        # not the folder being requested.
+        self.assertIn(".dataset.folder = (row && row.rar_folder)", body)
         for unsafe in ("innerHTML", "insertAdjacentHTML", "outerHTML",
                        'data-bot="', 'data-folder="'):
             with self.subTest(unsafe=unsafe):
@@ -1867,9 +1871,29 @@ class FolderRarButtonTests(unittest.TestCase):
     def test_folder_rar_button_only_rendered_for_another_bots_list(self):
         """Same gate folderFilesHtml() already applies to the per-file
         checkbox column - packing a folder as .rar only makes sense against
-        another bot's list, never our own."""
-        body = self._extract_function("folderHeadingHtml")
-        self.assertIn('!isOwnSource(state.filelistsSource || "__own__")', body)
+        another bot's list, never our own.
+
+        It used to be asserted against folderHeadingHtml(), which is where the
+        button was. The button moved to the ROW that carries the request line,
+        because whether a bot will pack a folder is a per-folder question its
+        RAR list answers and a heading could only guess at - so the gate is
+        now literally the same expression the checkbox uses, in the same
+        function, which is what this test always said it should be."""
+        # Sliced from the source rather than taken from _extract_function(),
+        # which stops short of the end of this one - the button sits past
+        # where it cuts, so asserting on what it returns would be asserting
+        # against text that does not contain the subject either way.
+        with open(os.path.join(REPO_ROOT, "web", "app.js"),
+                  encoding="utf-8") as handle:
+            source = handle.read()
+        body = source.split("function folderFilesHtml(", 1)[1]
+        body = body.split("\n    function setFolderExpanded(", 1)[0]
+
+        self.assertIn("var rarCell = (row.rar_folder && fetchable)", body)
+        self.assertIn("var fetchable =", body,
+                      "the gate the button shares with the checkbox is not in "
+                      "this function - the slice above is looking at the "
+                      "wrong text")
 
 
 class FetchDeleteButtonRegressionTests(unittest.TestCase):
@@ -2093,8 +2117,13 @@ class FilelistsFetchableRegressionTests(unittest.TestCase):
             clauses.append(self.source[found:self.source.index(";", found)])
             start = found + 1
 
-        self.assertEqual(len(clauses), 2,
-                         "a third fetchable decision appeared; it needs the "
+        # ONE now, not two. The second was the folder heading's .rar button,
+        # which is gone: it could only ever guess whether a bot would pack a
+        # folder, and the rows of that bot's RAR list answer it exactly, one
+        # folder at a time. The rule below still governs every decision of
+        # this kind that remains.
+        self.assertEqual(len(clauses), 1,
+                         "another fetchable decision appeared; it needs the "
                          "same rule or its own reason not to")
         for clause in clauses:
             with self.subTest(clause=clause.splitlines()[0]):

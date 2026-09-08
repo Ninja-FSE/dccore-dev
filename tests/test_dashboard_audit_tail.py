@@ -233,19 +233,34 @@ class ClimbingFromADriveRootReachesTheRootList(unittest.TestCase):
 
 class TheRarButtonIsOnlyOnFoldersThatHaveOne(unittest.TestCase):
 
-    def test_a_group_with_no_folder_name_gets_no_button(self):
-        """requestFolderRar() drops the click on `if (!bot || !folder)`, so
-        rendering it there is a button that does nothing and says nothing.
-        Read out of the source: nothing here executes JavaScript."""
+    def test_the_folder_heading_offers_to_pack_nothing(self):
+        """This required a `&& !!group.folder` gate on the heading's own .rar
+        button, because requestFolderRar() drops the click on
+        `if (!bot || !folder)` and a button that does nothing says nothing.
+
+        The heading has no such button at all now. It could only ever guess:
+        measured against one live registry, 2 of 51 known bots publish a RAR
+        list, so the button was wrong for the other 49 - and a click sent
+        "!nick !rar <folder>" into the channel and held a fetch slot for half
+        an hour waiting for a reply that was never coming.
+
+        The question is per FOLDER, not per bot, and the rows of a bot's RAR
+        list answer exactly that - so the button lives on the row carrying the
+        request line. Read out of the source: nothing here executes
+        JavaScript."""
         with io.open(os.path.join(REPO_ROOT, "web", "app.js"),
                      encoding="utf-8") as handle:
             source = handle.read()
         heading = source.split("function folderHeadingHtml(", 1)[1]
         heading = heading.split("\n    function ", 1)[0]
 
-        self.assertIn("&& !!group.folder", heading.replace("\n", " "),
-                      "the .rar button is rendered for a group with no folder "
-                      "name again - one click, no request, no message")
+        self.assertNotIn("folder-rar-btn", heading,
+                         "the folder heading offers to pack a folder again, "
+                         "which it cannot know that bot will pack")
+        self.assertIn("folder-rar-btn",
+                      source.split("function folderFilesHtml(", 1)[1][:4000],
+                      "and the row that DOES carry the request line has lost "
+                      "its button")
 
 
 if __name__ == "__main__":

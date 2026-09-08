@@ -1295,18 +1295,23 @@
       // one is another bot's list answers the wrong question. Every group in
       // a filter result belongs to another bot by definition, and this
       // suppressed the folder button on all of them.
-      var fetchable = ((state.filelistsFilter || "").trim()
-        ? true
-        : !isOwnSource(state.filelistsSource || "__own__"))
-        && !!group.folder;
+      // THE FOLDER HEADING NO LONGER OFFERS TO PACK ANYTHING. It used to
+      // carry a "Get folder as .rar" button on every folder of every fetched
+      // list, which could only ever be a guess: measured against one live
+      // registry, 2 of 51 known bots publish a RAR list at all, so the button
+      // was wrong for the other 49 - and clicking it sent "!nick !rar
+      // <folder>" into the channel and held a fetch slot for half an hour
+      // waiting for a reply that was never coming.
+      //
+      // The question is per FOLDER, not per bot: a bot can offer one folder
+      // as loose files and another only as a pack. The rows of its RAR list
+      // answer exactly that, one folder at a time, so the button lives there
+      // now - see rar_folder in folderFilesHtml().
       // data-folder-index is safe to string-concatenate: it is this group's
       // own position in the internal `groups` array (an internal loop
       // index), not untrusted content - unlike the bot/folder values
       // attachFilelistsFolderRarData() sets below via .dataset assignment.
-      var rarButton = fetchable
-        ? "<button type=\"button\" class=\"btn btn-small folder-rar-btn\"" +
-          " data-folder-index=\"" + index + "\">Get folder as .rar</button>"
-        : "";
+      var rarButton = "";
       return "<tr class=\"folder-row\">" +
         "<td colspan=\"5\">" +
           "<button type=\"button\" class=\"folder-toggle\" aria-expanded=\"false\"" +
@@ -1335,7 +1340,7 @@
       var fetchable = (state.filelistsFilter || "").trim()
         ? true
         : !isOwnSource(state.filelistsSource || "__own__");
-      var rows = entries.map(function (row) {
+      var rows = entries.map(function (row, position) {
         // No data-bot/data-filename attribute here, and no bot/filename text
         // anywhere in this markup fragment: `row.source`/`row.title` come
         // from another bot's fetched list file - attacker-controlled the
@@ -1362,9 +1367,26 @@
             escapeHtml(row.mark === "received" ? "have it" : "asked") +
             "</span>"
           : "";
+        // A ROW THAT ASKS FOR A FOLDER, not a file. A bot that packs albums
+        // publishes a list whose every row is the line to type - "!<nick>
+        // !rar <folder>" - so the list itself says, per folder, what that bot
+        // will pack. Nothing is inferred from an advert or guessed at from a
+        // filename convention, and the two lists need not agree: a bot can
+        // offer one folder as loose files and another only as a pack.
+        //
+        // data-folder-index is this group's own position in the internal
+        // array and is safe to concatenate; the FOLDER is not - it is a path
+        // out of a foreign bot's list - so it goes on via .dataset in
+        // attachFilelistsFolderRarData(), like the bot nick beside it.
+        var rarCell = (row.rar_folder && fetchable)
+          ? "<button type=\"button\" class=\"btn btn-small folder-rar-btn\"" +
+            " data-folder-index=\"" + index + "\" data-entry-index=\"" + position +
+            "\">Get folder as .rar</button>"
+          : "";
         return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
           checkCell +
-          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + mark + "</td>" +
+          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + mark +
+          (rarCell ? " " + rarCell : "") + "</td>" +
           "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
           "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
           "<td class=\"col-dim col-mono\">" + escapeHtml(row.source) + "</td>" +
@@ -1523,7 +1545,14 @@
         // request that cannot succeed.
         button.dataset.bot = splitFetchedSource(
           group.bot || state.filelistsSource).nick;
-        button.dataset.folder = group.folder;
+        // THE ROW'S OWN FOLDER, taken from the request line that put the
+        // button there - not the folder HEADING the row happens to sit under.
+        // A RAR list's rows are grouped under whatever heading that list
+        // carries, which is not the folder being asked for.
+        var position = parseInt(button.dataset.entryIndex, 10);
+        var entries = group.entries || [];
+        var row = isNaN(position) ? null : entries[position];
+        button.dataset.folder = (row && row.rar_folder) || "";
       }
     }
 
