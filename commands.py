@@ -1194,7 +1194,20 @@ def handle_list_update_request(user, target_chan, authorised=False):
             # config.update_inprogress permanently. subprocess.run() kills the child
             # itself when the timeout fires.
             list_update_timeout = getattr(config, 'LIST_UPDATE_TIMEOUT', 1800)
-            process = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=list_update_timeout)
+            # utf-8 with errors="replace", NOT the locale code page.
+            # text=True alone decodes the child with whatever the console
+            # uses - cp1253 on a Greek install - and one byte outside it
+            # kills subprocess's own reader thread with UnicodeDecodeError.
+            # The run then reports "Unknown script error" because the
+            # output that would have explained it is what could not be
+            # read. The child guards its own writes now (see
+            # update_list.py); this guards our reading of them, so a
+            # future child that does not still cannot take the daemon's
+            # report away with it.
+            process = subprocess.run([sys.executable, script_path],
+                                     capture_output=True, text=True,
+                                     encoding="utf-8", errors="replace",
+                                     timeout=list_update_timeout)
             
             if process.returncode == 0:
                 # ---------------------------------------------------------------------

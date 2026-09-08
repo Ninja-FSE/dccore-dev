@@ -80,6 +80,12 @@ import re
 import subprocess
 import sys
 
+import platform_compat
+
+# See update_list.py's own note: this is an entry point of its own,
+# so it needs the guard oserve.py installs for the daemon.
+platform_compat.install_console_encoding_guard()
+
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)

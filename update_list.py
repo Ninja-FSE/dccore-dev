@@ -14,6 +14,19 @@ import defaults as config
 import library
 import platform_compat
 
+# BEFORE ANYTHING PRINTS A FILENAME. This runs as its own process - the daemon
+# starts it with subprocess.run() and configure.py runs it directly - so
+# oserve.py's guard does nothing for it, and every line it writes is a path off
+# somebody's disk.
+#
+# On a console whose code page cannot represent a character in one of those
+# paths, print() raises UnicodeEncodeError and the scan dies where it stood.
+# Reported from a live Greek-Windows install: "External update_list.py failed
+# (Exit Code 1): Unknown script error", with the parent's own reader thread
+# then dying on the bytes that had made it out - so the operator got a failure
+# with no cause, for a library containing an accented filename.
+platform_compat.install_console_encoding_guard()
+
 # Multi-disc/box-set container names the !rar album list truncates at - see
 # generate_master_list()'s own comment on the box-word block for why this
 # has to match a whole PATH SEGMENT, not a substring anywhere in the path.
@@ -730,7 +743,9 @@ def _write_rar_artifact(tmp_path, members, directory=None):
         # hung rar here would wedge every list rebuild after it.
         cmd = [rar_bin, "a", "-ep", "-w" + os.path.abspath(directory),
                os.path.abspath(built)] + staged
+        # utf-8/replace for the same reason as dcc.py's rar call.
         result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace",
                                 timeout=getattr(config, "RAR_TIMEOUT", 1800))
         if result.returncode == 0 and os.path.exists(built):
             platform_compat.replace_with_retry(built, tmp_path)
