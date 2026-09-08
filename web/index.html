@@ -232,6 +232,11 @@
                     id="filelists-filter-all">Show all lists</button>
             <button type="button" class="btn btn-small"
                     id="filelists-filter-none">Show none</button>
+            <!-- The way back to a row the filter has taken off the screen.
+                 Hiding without saying so would make the sidebar answer a
+                 different question every keystroke with no way to check it. -->
+            <button type="button" class="btn btn-small"
+                    id="filelists-filter-reveal" hidden></button>
           </div>
 
           <!-- One row per source, with a dot for whether the copy we hold is

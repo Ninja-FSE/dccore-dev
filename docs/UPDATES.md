@@ -4,6 +4,63 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 A list with nothing matching leaves the sidebar, and says it has
+
+From the beta: *"names get hidden as you type something that you search lists
+for. only the names with result are shown. and you can still select/deselect
+results from certain bots if you click on their names and then reclick on their
+names (toggle/select)."*
+
+The second half of that **already existed** - clicking a name while filtering
+toggles its results, and "Show all lists" / "Show none" do it wholesale - which
+makes that half a discoverability problem rather than a missing feature. What
+changed is the first half.
+
+**The old behaviour was not simply wrong**, and the argument for it was written
+into the stylesheet: the rows were dimmed rather than hidden because *"the
+sidebar is also the answer to 'who has this', and a row that vanished would
+take that answer with it."* That is right about what matters and wrong about
+what to do. Dimming asks the operator to scan thirty rows and judge opacity; a
+count states the same fact outright - **"Show 12 with no match"** - and the
+button that says it puts them back for anyone who wants to look. The answer is
+kept, in a form nobody has to count.
+
+That note has been rewritten rather than deleted, and a test fails if it goes
+back to claiming the rows stay. A comment describing a decision the file no
+longer makes is worse than no comment: it reads as current.
+
+**Four rows are never hidden**, and none of them is a special case for its own
+sake:
+
+- **our own list**, which this filter does not search - it covers lists fetched
+  from other bots;
+- **the list currently open**, or the table would be showing a list with no row
+  for it;
+- **the row holding keyboard focus**, because hiding the focused element drops
+  focus to the body and loses the operator's place in a list they were moving
+  through;
+- **all of them**, once the operator has asked to see them.
+
+A row that cannot be hidden is still dimmed - it is on screen, and the fact
+that it has nothing is still the thing worth knowing about it. `display: none`
+rather than `visibility` or `opacity`, so a hidden row leaves no gap and is not
+a stop on the way through the list with the keyboard.
+
+The reveal is a **toggle**, resets on every new term like the per-bot
+exclusions already do, and redraws from the answer already in the browser
+rather than re-asking the server for rows it has just returned.
+
+Nineteen mutants, all caught.
+
+**A stylesheet tidy-up on the way, and it was mine.** Three comments had been
+orphaned from their rules across the two previous changes in this release: each
+patch anchored on a RULE and inserted before it, which put the new block
+between an existing rule and its own comment. Three ended up stacked with no
+rules between them, each sitting above somebody else's - the filter-dimming
+note above `mark.filter-hit`, and so on. Cosmetic, but a comment next to the
+wrong rule reads as though it describes that rule. All three are back where
+they belong.
+
 ### 🔴 The settings box could not show the colour it held
 
 The other half of the same beta request - *"select colors/symbols from drop

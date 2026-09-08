@@ -824,18 +824,6 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
-/* A bot with nothing matching the current filter. Dimmed rather than hidden:
-   the sidebar is also the answer to "who has this", and a row that vanished
-   would take that answer with it. */
-/* Where the typed text sits inside a title. The default <mark> is a browser
-   yellow that belongs to neither theme, so it takes the palette's own accent -
-   as a tint behind the text rather than a block, because a title is read as a
-   whole and a solid highlight breaks it into pieces. */
-/* The sample of what the channel sees. Deliberately NOT themed by the
-   dashboard's palette: it is showing IRC colours on an IRC client's own
-   ground, and painting it in the dashboard's colours would misrepresent the
-   one thing it exists to show. A dark plate is what these channels look like
-   in every client that ships a default. */
 /* The colour picker: two menus and the block they make between them.
 
    NO LITERAL COLOURS HERE, and that is not an oversight - the swatch takes
@@ -886,6 +874,11 @@ html, body {
   content: "";
 }
 
+/* The sample of what the channel sees. Deliberately NOT themed by the
+   dashboard's palette: it is showing IRC colours on an IRC client's own
+   ground, and painting it in the dashboard's colours would misrepresent the
+   one thing it exists to show. A dark plate is what these channels look like
+   in every client that ships a default. */
 .theme-preview {
   background: #000000;
   border: 1px solid var(--border);
@@ -919,6 +912,10 @@ html, body {
   color: #7f7f7f;
 }
 
+/* Where the typed text sits inside a title. The default <mark> is a browser
+   yellow that belongs to neither theme, so it takes the palette's own accent -
+   as a tint behind the text rather than a block, because a title is read as a
+   whole and a solid highlight breaks it into pieces. */
 mark.filter-hit {
   background: var(--accent-dim);
   color: inherit;
@@ -927,8 +924,25 @@ mark.filter-hit {
   font-weight: 600;
 }
 
+/* A bot with nothing matching the current filter, still on screen - because
+   it is the list currently open, or holds keyboard focus, or the operator has
+   asked to see the ones that were hidden.
+
+   IT USED TO BE THE ONLY BEHAVIOUR, and the argument for it was that the
+   sidebar is also the answer to "who has this", so a row that vanished would
+   take that answer with it. Right about what matters, wrong about what to do:
+   dimming asks somebody to scan thirty rows and judge opacity, where a count
+   above the list states it outright. The answer is kept and read more easily;
+   see applyFilterHighlight() in app.js. */
 .bot-row.is-filtered-out {
   opacity: 0.4;
+}
+
+/* Taken off the screen by the filter. display:none rather than visibility or
+   opacity, so it leaves no gap and is skipped by tabbing - a row nobody can
+   see should not be a stop on the way to the ones they can. */
+.bot-row.is-filtered-away {
+  display: none;
 }
 
 /* Switched off by the operator, not by the search. Kept visually distinct
