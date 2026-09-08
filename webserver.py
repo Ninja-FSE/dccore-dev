@@ -1894,45 +1894,100 @@ def start_list_update():
 # actual annotations by SettingsPayloadTests' completeness guard, so a
 # setting added to config.py later and never slotted in here fails a test
 # instead of silently never showing up on the page.
+# REGROUPED, and the old grouping is worth recording because it is how any
+# grouping ends up: by accretion. Each feature put its settings wherever there
+# was room, so "Slots & queue" had grown to 25 and "Paths & storage" to 31 -
+# between them two thirds of the page - while the two settings that tune a
+# transfer sat in DIFFERENT categories.
+#
+# From the operator: "Settings pages at webpage are a mess. Need better
+# grouping, hiding some that are never used like folder locations under
+# advanced settings etc. Also why is packet size on different page than buffer
+# size."
+#
+# THREE RULES, applied here and worth keeping:
+#
+#   * Settings that are read together live together. DCC_BLOCK_SIZE and
+#     DCC_SEND_BUFFER are the transfer-tuning pair - the 3 MB/s investigation
+#     needed both - and were a category apart.
+#   * A category is named for what an operator came looking for, not for the
+#     part of the code it configures. The colour theme was under "Advertising
+#     & search" because announce.py draws it.
+#   * The things set once at install and never again go last, in their own
+#     section. Seventeen file paths at the same level as MAX_DCC_SLOTS is
+#     seventeen chances to wonder whether you should be changing one.
+#
+# NOTHING MOVES ON DISK. settings.conf is flat; a category is a grouping for
+# this page and nothing else, so this reorders what an operator reads without
+# touching a single stored value.
+#
+# Every name here is checked against config.py's actual annotations by
+# SettingsPayloadTests' completeness guard, so a setting added later and never
+# slotted in fails a test instead of silently never showing up.
 SETTINGS_CATEGORIES = (
-    ("identity",      "Identity & network",   ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME",
+    ("identity",      "Identity & network",    ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME",
                                                 "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL"]),
-    ("slots-queue",   "Slots & queue",         ["MAX_DCC_SLOTS", "MAX_USER_QUEUE", "MAX_GLOBAL_QUEUE",
-                                                "MAX_SEARCH_RESULTS", "MSG_DELAY", "DEBUG_MSG_DELAY",
-                                                "DCC_PORT_START", "DCC_PORT_END", "MAX_FETCH_SLOTS", "FETCH_HISTORY_DAYS", "FETCH_HISTORY_MAX_ROWS",
-                                                "MAX_FETCH_FILE_SIZE", "MAX_LIST_TEXT_SIZE", "DCC_SEND_BUFFER", "REHASH_TRANSFER_WAIT", "AUTO_REFETCH_LISTS", "AUTO_REFETCH_INTERVAL_HOURS",
-                                                "AUTO_REFETCH_MAX_PER_RUN", "FETCH_TRANSFER_TIMEOUT",
-                                                "FETCH_OFFER_TIMEOUT", "FETCH_FOLDER_OFFER_TIMEOUT",
-                                                "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
-                                                "MAX_FETCH_FOLDER_FILE_SIZE", "MAX_FETCH_LIST_FILE_SIZE",
-                                                "FETCH_FOLDER_TRANSFER_TIMEOUT"]),
-    ("paths",         "Paths & storage",       ["LIST_BASE_NAME", "PAUSE_ON_UPDATE", "FILE_DIRECTORY",
+    ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
+                                                "MAX_GLOBAL_QUEUE", "MAX_SEARCH_RESULTS",
+                                                "PAUSE_ON_UPDATE", "REHASH_TRANSFER_WAIT"]),
+    # The transfer-tuning pair, together. Anyone reaching for one wants the
+    # other in front of them.
+    ("transfers",     "Transfers",             ["DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
+                                                "DCC_PORT_START", "DCC_PORT_END",
+                                                "MAX_SEND_FAILS"]),
+    ("your-list",     "Your list",             ["FILE_DIRECTORY", "LIST_BASE_NAME",
                                                 "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS",
-                                                "SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS", "RAR_EXTENSIONS",
-                                                "RAR_ENABLED", "RAR_BINARY", "MAX_RAR_FOLDER_SIZE", "DCC_BLOCK_SIZE", "TMP_ZIP_DIR", "LOCAL_LIST_DIR",
-                                                "FETCHED_FILES_DIR", "BANS_FILE", "STATS_FILE",
-                                                "HARD_BANS_FILE", "KNOWN_BOTS_FILE", "FETCHED_BOT_LISTS_FILE",
-                                                "LIST_INDEX_FILE",
-                                                "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
-                                                "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
-                                                "LIST_PROGRESS_FILE",
-                                                "LIST_HEADER_FILE", "LIST_HEADER_MAX_BYTES",
-                                                "LIBRARY_FOLDERS_FILE", "LISTS_FILE", "ON_CONNECT_FILE"]),
-    ("advertising",   "Advertising & search",  ["THEME", "CUSTOM_THEME_BORDER", "CUSTOM_THEME_SEPARATOR",
-                                                "CUSTOM_THEME_TEXTBOX", "CUSTOM_THEME_VALUE",
-                                                "CUSTOM_THEME_ALERT", "CUSTOM_THEME_ACCENT",
-                                                "ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
-                                                "BROADCAST_SEARCH_COOLDOWN",
-                                                "CTCP_VERSION_REPLY"]),
-    ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME", "FLOOD_BAN_SECONDS",
-                                                "MAX_SEND_FAILS", "RAR_TIMEOUT", "LIST_UPDATE_TIMEOUT"]),
+                                                "SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS",
+                                                "RAR_ENABLED", "RAR_EXTENSIONS", "RAR_BINARY",
+                                                "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT",
+                                                "LIST_UPDATE_TIMEOUT", "LIST_HEADER_FILE",
+                                                "LIST_HEADER_MAX_BYTES"]),
+    ("fetching",      "Fetching from bots",    ["MAX_FETCH_SLOTS", "AUTO_REFETCH_LISTS",
+                                                "AUTO_REFETCH_INTERVAL_HOURS",
+                                                "AUTO_REFETCH_MAX_PER_RUN",
+                                                "FETCH_OFFER_TIMEOUT",
+                                                "FETCH_TRANSFER_TIMEOUT",
+                                                "FETCH_FOLDER_OFFER_TIMEOUT",
+                                                "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
+                                                "FETCH_FOLDER_TRANSFER_TIMEOUT",
+                                                "MAX_FETCH_FILE_SIZE",
+                                                "MAX_FETCH_FOLDER_FILE_SIZE",
+                                                "MAX_FETCH_LIST_FILE_SIZE",
+                                                "MAX_LIST_TEXT_SIZE",
+                                                "FETCH_HISTORY_DAYS",
+                                                "FETCH_HISTORY_MAX_ROWS"]),
+    ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
+                                                "BROADCAST_SEARCH_COOLDOWN", "CTCP_VERSION_REPLY",
+                                                "MSG_DELAY", "DEBUG_MSG_DELAY"]),
+    # Its own category, not a corner of "Advertising & search". The theme
+    # lived there because announce.py is what draws it - which is a fact about
+    # the code, not about what an operator came looking for.
+    ("appearance",    "Appearance",            ["THEME", "CUSTOM_THEME_BORDER",
+                                                "CUSTOM_THEME_SEPARATOR", "CUSTOM_THEME_TEXTBOX",
+                                                "CUSTOM_THEME_VALUE", "CUSTOM_THEME_ALERT",
+                                                "CUSTOM_THEME_ACCENT"]),
+    ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME",
+                                                "FLOOD_BAN_SECONDS"]),
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
                                                 "WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
                                                 "WEBUI_FOLDER_BROWSER_ENABLED"]),
-    ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE",
-                                                "PROJECT_URL"]),
+    ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL",
+                                                "DEBUG_TO_CONSOLE", "PROJECT_URL"]),
+    # LAST, and named so nobody opens it by accident. Set once at install, and
+    # a wrong value here loses a queue or a statistics file rather than
+    # mis-tuning something. They were interleaved with the settings changed
+    # weekly.
+    ("advanced",      "Advanced: file locations",
+                                               ["TMP_ZIP_DIR", "LOCAL_LIST_DIR",
+                                                "FETCHED_FILES_DIR", "BANS_FILE", "HARD_BANS_FILE",
+                                                "STATS_FILE", "KNOWN_BOTS_FILE",
+                                                "FETCHED_BOT_LISTS_FILE", "LIST_INDEX_FILE",
+                                                "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
+                                                "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
+                                                "LIST_PROGRESS_FILE", "LIBRARY_FOLDERS_FILE",
+                                                "LISTS_FILE", "ON_CONNECT_FILE"]),
 )
 
 # A human-readable label per setting, since the raw config.py name

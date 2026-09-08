@@ -4,6 +4,53 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🗃️ The Settings page is grouped the way an operator looks for things
+
+From the beta: *"Settings pages at webpage are a mess. Need better grouping,
+hiding some that are never used like folder locations under advanced settings
+etc. Also why is packet size on different page than buffer size."*
+
+All three, and a fourth they did not name.
+
+The old grouping is how any grouping ends up - by accretion. Each feature put
+its settings wherever there was room, so of 94 settings:
+
+| category | | |
+|---|---|---|
+| Slots & queue | **25** | DCC slots, queue limits, message delays, DCC ports, fetch slots, fetch history, fetch sizes, the send buffer, the rehash wait, auto-refetch, four fetch timeouts |
+| Paths & storage | **31** | list generation, `.rar` packing, the **packet size**, and seventeen file paths |
+
+Two thirds of the page in two categories - and `DCC_BLOCK_SIZE` and
+`DCC_SEND_BUFFER`, the pair anyone tuning a transfer reads together and which
+the 3 MB/s investigation needed both of, sat a category apart.
+
+**The fourth:** the colour theme was under "Advertising & search", because
+`announce.py` is what draws it. A fact about the code rather than about what an
+operator came looking for. It has its own section now.
+
+**Three rules**, applied and pinned by tests rather than left as an
+arrangement:
+
+- settings read together live together - the transfer pair, the fetch timeouts,
+  a timeout beside the one it qualifies, the `.rar` settings with the list they
+  shape;
+- a category is named for what an operator came looking for;
+- what is set once at install goes last, in **Advanced: file locations**.
+  Seventeen file paths at the same level as `MAX_DCC_SLOTS` is seventeen
+  chances to wonder whether you should be changing one.
+
+The tests assert the other half of that last rule too: **nothing changed weekly
+may be hidden there**, since burying something an operator does reach for would
+be worse than the mess it replaced.
+
+Largest ordinary category is now 15 rather than 31, and a test refuses any above
+16 - so the next dumping ground fails a build instead of forming quietly.
+
+**Nothing moves on disk.** `settings.conf` is flat; a category is a grouping for
+this page and nothing else. Every stored value and every setting NAME is
+untouched - only what an operator reads changed. The existing completeness guard
+proved nothing was lost in the move: it passed unchanged.
+
 ### ⏱ A folder request to a bot with no sign of packing fails fast
 
 `FETCH_FOLDER_OFFER_TIMEOUT` is 1800 seconds, and rightly so: the other bot has
