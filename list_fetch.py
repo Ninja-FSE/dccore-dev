@@ -1021,6 +1021,49 @@ def _measure_extra_list(bot, marker, path):
             "file_name": os.path.basename(path)}
 
 
+# Markers that name a pack list. A bot names its own files, so this is a
+# recognition rather than a rule - "rar" is the convention every packer in this
+# family follows, ours included.
+_RAR_MARKERS = ("rar",)
+
+
+def bot_publishes_a_rar_list(bot):
+    """True if `bot` is known to pack whole folders on request.
+
+    TWO INDEPENDENT SIGNALS, either one enough:
+
+      * a RAR list of theirs is one of the lists we hold - the strongest kind
+        of evidence there is, since it is their own list of the folders they
+        will pack; and
+      * they advertise one. irc.py has parsed the "@<nick>^ ... RAR folders"
+        wording into known_bots since #133, and nothing outside the registry
+        had ever read it.
+
+    Used to decide how long to wait for an answer, NOT whether to ask. A bot
+    can pack folders without either signal - we may simply never have seen the
+    advert, and may hold only its main list - so refusing on this would take
+    away something that works. Waiting a shorter time for a bot with no sign
+    of packing anything costs nothing when we are wrong and half an hour of a
+    fetch slot when we are right.
+    """
+    key = str(bot or "").strip().lower()
+    if not key:
+        return False
+
+    entry = (getattr(config, "fetched_bot_lists", {}) or {}).get(key)
+    held = entry.get("lists") if isinstance(entry, dict) else None
+    if isinstance(held, dict):
+        for marker in held:
+            if str(marker).strip().lower() in _RAR_MARKERS:
+                return True
+
+    advert = runtime.known_bots.get(key)
+    if isinstance(advert, dict):
+        if advert.get("rar_folders") is not None or advert.get("rar_trigger"):
+            return True
+    return False
+
+
 def index_key(bot, marker):
     """How one list is named in the search index and on the wire.
 
