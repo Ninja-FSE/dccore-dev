@@ -2,6 +2,8 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **A transfer too quick to time no longer reports an invented speed.** Small sends - a list archive, a single track - were reported at rates like 138 MB/s, because the timer stopped when the data was handed to the operating system rather than when it reached the other end. For anything bigger than the socket buffer those are the same moment and the figure is real; for anything smaller it is measuring a memory copy. Those transfers now say `n/a (<1s)` instead of a number, in the channel notice and the log alike. The speeds themselves have not changed - only the ones that were never measurable stop claiming to be.
+
 - **Tick a whole folder at once in the List Browser.** Each folder heading now has its own checkbox that selects every file under it - an album is usually what you actually want, and ticking nine boxes one at a time to get one was work the page should have been doing for you. It shows a half-state when only some of the folder is selected, and it works on a collapsed folder too, so you can select several albums without opening any of them.
 
 - **DCCore reads from the server faster when there is a lot to read.** It took data from the connection 2 KB at a time, which is fine for ordinary channel traffic and slow when a server is sending a burst - joining several channels at once produces tens of kilobytes of user lists in one go. A server that decides a client is not keeping up closes the connection, which showed up as an unexplained disconnect right after channels were added. This does not prove that was the cause, and the new disconnect report will say so outright next time - but reading a busy connection in small pieces had nothing to recommend it.

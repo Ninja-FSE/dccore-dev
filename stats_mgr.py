@@ -83,6 +83,32 @@ def format_speed(bytes_per_sec):
 MIN_RECORD_SECONDS = 1.0
 
 
+def speed_is_measurable(duration):
+    """Whether a transfer of this duration has a rate worth reporting.
+
+    sendall() returns once the bytes are in the KERNEL, not once the peer has
+    them. For a file LARGER than the socket send buffer the two converge - the
+    kernel blocks once the buffer is full, so the send paces itself against the
+    network and the clock measures something real. For a file that fits inside
+    the buffer they do not converge at all: the whole thing is handed over in
+    one go and the clock measures a memory copy.
+
+    From the beta, on a list zip: "Sent ... [138.63MB/s] this seems to high to
+    be true". It was. Raising the default send buffer to 4 MB widened the
+    window of files this applies to from under 1 MB to under 4 MB, which is
+    most list archives and many single tracks.
+
+    MIN_RECORD_SECONDS is the floor the speed RECORD has always applied, for
+    exactly this reason. This is that same judgement, made available to
+    everything that reports a rate rather than only to the thing that stores
+    one - because a number too unreliable to keep is too unreliable to say.
+    """
+    try:
+        return duration is not None and float(duration) >= MIN_RECORD_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
 def update_speed_record(bytes_per_sec, duration=None):
     """Store `bytes_per_sec` if it beats the saved record. Returns the record
     in force afterwards, whether or not this call changed it.

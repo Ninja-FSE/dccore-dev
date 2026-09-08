@@ -272,7 +272,16 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     except Exception as e:
         print(f"[ANNOUNCE ERROR] The figures clashed in memory: {e}")
 
-    speed_str = stats_mgr.format_speed(actual_speed) if actual_speed > 0 else "0k/s"
+    # None means the transfer was over before it could be timed - see
+    # stats_mgr.speed_is_measurable(). Saying so is the honest answer, and
+    # this line goes into the channel: a figure nobody should act on is worse
+    # published than absent.
+    if actual_speed is None:
+        speed_str = "n/a (<1s)"
+    elif actual_speed > 0:
+        speed_str = stats_mgr.format_speed(actual_speed)
+    else:
+        speed_str = "0k/s"
     current_time_str = time.strftime("%I:%M %p").lower().lstrip("0")
     
     # ---------------------------------------------------------------------
