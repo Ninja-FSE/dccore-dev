@@ -81,6 +81,9 @@
     // than asking again: the rows are already here, and a round trip per
     // click would be slower than the search that produced them.
     filelistsExcluded: {}, filelistsFilterPayload: null, filelistsMatchTerms: [],
+    // Off for every new term. A row put back on screen while looking for one
+    // thing should not still be there, unasked, while looking for the next.
+    filelistsRevealEmpty: false,
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
     filelistsHistory: [],
     settingsLoaded: false, settingsCategories: [], settingsActiveCategory: null,
@@ -103,6 +106,7 @@
     filelistsFilterActions: document.getElementById("filelists-filter-actions"),
     filelistsFilterAll: document.getElementById("filelists-filter-all"),
     filelistsFilterNone: document.getElementById("filelists-filter-none"),
+    filelistsFilterReveal: document.getElementById("filelists-filter-reveal"),
     statSlots:    document.getElementById("stat-slots"),
     statFiles:    document.getElementById("stat-files"),
     statUsers:    document.getElementById("stat-users"),
@@ -1004,6 +1008,13 @@
     setEveryListShown(false);
   });
 
+  // A toggle, not a one-way door: somebody who looked at what was hidden
+  // wants to put it back without retyping the term.
+  el.filelistsFilterReveal.addEventListener("click", function () {
+    state.filelistsRevealEmpty = !state.filelistsRevealEmpty;
+    rerenderFromFilterPayload();
+  });
+
   el.filelistsFilterClear.addEventListener("click", function () {
     el.filelistsFilterInput.value = "";
     state.filelistsFilter = "";
@@ -1801,10 +1812,32 @@
   // webserver._freshness). "unknown" renders as nothing at all: a bot that
   // publishes no date, or one whose advert we have not seen, should show no
   // freshness claim rather than an invented one.
-  // Greys out the bots with nothing to show for the current term, and
-  // clears every mark again when the term goes. Driven by what the server
-  // said rather than by what came back in the page: the page is capped, so a
-  // bot whose matches all fall past the cap would look empty when it is not.
+  // TAKES THE BOTS WITH NOTHING TO SHOW OFF THE SCREEN, and clears every mark
+  // again when the term goes. Driven by what the server said rather than by
+  // what came back in the page: the page is capped, so a bot whose matches
+  // all fall past the cap would look empty when it is not.
+  //
+  // THEY USED TO BE DIMMED, and the argument for that was written into the
+  // stylesheet: the sidebar is also the answer to "who has this", and a row
+  // that vanished would take that answer with it. That argument was right
+  // about what matters and wrong about what to do. Asked for in the beta:
+  // "names get hidden as you type something that you search lists for. only
+  // the names with result are shown."
+  //
+  // The answer is kept, and made easier to read than it was. Dimming asked
+  // the operator to scan thirty rows and judge opacity; a count states it -
+  // "12 lists with no match hidden" - and the button beside it puts them
+  // back, dimmed, for anyone who wants to look. So the row that vanished
+  // gives its answer as a number instead of as an absence.
+  //
+  // FOUR ROWS ARE NEVER HIDDEN, and none of them is a special case for its
+  // own sake:
+  //   - our own list, which this filter does not search at all;
+  //   - the list currently open, or the table would be showing a list with
+  //     no row;
+  //   - the row holding keyboard focus, because hiding it drops focus to the
+  //     body and loses the operator's place;
+  //   - all of them, once the operator has asked to see them.
   function applyFilterHighlight(payload) {
     var rows = el.filelistsBotList.querySelectorAll(".bot-row");
     var filtering = !!(state.filelistsFilter || "").trim();
@@ -1812,19 +1845,31 @@
     if (payload && Array.isArray(payload.empty)) {
       payload.empty.forEach(function (name) { empty[String(name).toLowerCase()] = true; });
     }
+    var hidden = 0;
     for (var i = 0; i < rows.length; i++) {
-      var bot = String(rows[i].dataset.bot || "").toLowerCase();
+      var row = rows[i];
+      var bot = String(row.dataset.bot || "").toLowerCase();
       // Our own list is not one of the lists the filter searches - it covers
-      // lists FETCHED from other bots - so it is never greyed by it.
-      var dim = filtering && !isOwnSource(bot) && empty[bot] === true;
-      rows[i].classList.toggle("is-filtered-out", dim);
+      // lists FETCHED from other bots - so it is never marked by it.
+      var nothing = filtering && !isOwnSource(bot) && empty[bot] === true;
+      var pinned = bot === String(state.filelistsSource || "").toLowerCase()
+        || row.contains(document.activeElement);
+      var away = nothing && !pinned && !state.filelistsRevealEmpty;
+      if (away) { hidden += 1; }
+      row.classList.toggle("is-filtered-away", away);
+      // Still dimmed when it cannot be hidden, or when the operator has asked
+      // to see them: the row is on screen and the fact that it has nothing is
+      // still the thing worth knowing about it.
+      row.classList.toggle("is-filtered-out", nothing && !away);
       // Switched off BY THE OPERATOR, which is a different thing from having
       // nothing to show and reads differently: one is an answer, the other is
       // a choice, and the choice is reversible by clicking again.
-      rows[i].classList.toggle(
+      row.classList.toggle(
         "is-excluded",
         filtering && !!state.filelistsExcluded[bot]);
     }
+
+    renderRevealButton(filtering, hidden);
 
     if (!filtering) {
       el.filelistsFilterStatus.hidden = true;
@@ -1843,6 +1888,22 @@
     }
     el.filelistsFilterStatus.hidden = false;
     el.filelistsFilterStatus.textContent = text;
+  }
+
+  // WHAT WAS TAKEN AWAY, and the way back to it. A count rather than nothing
+  // at all, because a sidebar that quietly holds a different number of rows
+  // each keystroke is one the operator cannot trust to answer "who has this".
+  function renderRevealButton(filtering, hidden) {
+    var button = el.filelistsFilterReveal;
+    if (!button) { return; }
+    if (!filtering || (!hidden && !state.filelistsRevealEmpty)) {
+      button.hidden = true;
+      return;
+    }
+    button.hidden = false;
+    button.textContent = state.filelistsRevealEmpty
+      ? "Hide lists with no match"
+      : "Show " + hidden + " with no match";
   }
 
   // Every group the current answer holds, minus the bots switched off.
@@ -1911,8 +1972,10 @@
     el.filelistsFilterActions.hidden = !term;
     // A new term is a new question, so nothing carries over: a bot switched
     // off while looking for one thing should not be silently switched off
-    // while looking for the next.
+    // while looking for the next, and rows put back on screen for one term
+    // should not still be there, unasked, for the next.
     state.filelistsExcluded = {};
+    state.filelistsRevealEmpty = false;
     state.filelistsOffset = 0;
     state.filelistsHistory = [];
 
