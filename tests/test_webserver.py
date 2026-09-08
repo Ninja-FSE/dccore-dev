@@ -2129,12 +2129,24 @@ class FilelistsFetchableRegressionTests(unittest.TestCase):
 
         self.assertEqual(decisions, ["var fetchable = rowsAreFetchable();"])
 
-    def test_both_surfaces_still_ask(self):
+    def test_every_surface_that_offers_a_selection_asks(self):
         """Guard on the guard: a single unused helper containing the right
-        rule would satisfy both assertions above."""
-        self.assertEqual(self.source.count("rowsAreFetchable()"), 3,
-                         "expected the definition plus its two callers - the "
-                         "file rows and the folder heading")
+        rule would satisfy both assertions above.
+
+        THREE callers now. The third is the flat-list select-all, which rides
+        on the table header because a list with no folders has no heading to
+        carry it - and a select-all over rows that have no checkboxes would be
+        the same lie the folder heading was fixed for."""
+        self.assertEqual(self.source.count("rowsAreFetchable()"), 4,
+                         "expected the definition plus its three callers - the "
+                         "file rows, the folder heading, and the flat-list "
+                         "select-all in the table header")
+
+    def test_the_flat_list_select_all_is_one_of_them(self):
+        """Named, because a count is satisfied by any third caller."""
+        body = self.source.split("function renderFlatListControls(", 1)[1]
+
+        self.assertIn("rowsAreFetchable()", body.split("\n  }", 1)[0])
 
 
 class OptionalFlaskDependencyTests(unittest.TestCase):

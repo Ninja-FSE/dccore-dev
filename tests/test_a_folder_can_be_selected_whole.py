@@ -107,10 +107,16 @@ class TickingItTicksTheFiles(unittest.TestCase):
     def test_a_collapsed_folder_is_still_reachable(self):
         """Its rows carry is-hidden and remain in the document, so the walk
         above finds them without the folder being opened. Asserted on the
-        renderer, since that is what decides they stay."""
+        renderer, since that is what decides they stay.
+
+        `is-hidden` is CONDITIONAL now - a list with no folders in it draws no
+        heading, and rows with nothing to hide them under must not start
+        hidden. What matters here is unchanged: where there IS a heading, its
+        rows are in the document and reachable by index."""
         rows = function_body("folderFilesHtml")
 
-        self.assertIn("file-row is-hidden", rows)
+        self.assertIn('(flat ? "" : " is-hidden")', rows)
+        self.assertIn('"<tr class=\\"file-row"', rows)
         self.assertIn("data-folder-index=", rows)
 
     def test_the_shift_anchor_is_dropped(self):
