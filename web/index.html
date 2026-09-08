@@ -240,11 +240,20 @@
                here whether we hold their list or not. -->
           <div class="bot-list" id="filelists-bot-list"
                aria-label="Whose list to show"></div>
+          <!-- Two legends, because there are two signals: the dot says
+               whether that bot is HERE, and the name's colour says what we
+               hold from them. One dot carrying both was what hid presence
+               entirely. -->
           <p class="bot-legend">
-            <span><span class="led is-current"></span> current</span>
-            <span><span class="led is-changed"></span> their list changed</span>
-            <span><span class="led is-not-held"></span> not downloaded</span>
-            <span><span class="led is-unknown"></span> cannot tell</span>
+            <span><span class="led is-online"></span> here now</span>
+            <span><span class="led is-offline"></span> not in a channel</span>
+            <span><span class="led is-presence-unknown"></span> still joining</span>
+          </p>
+          <p class="bot-legend">
+            <span><span class="legend-name is-current">name</span> list current</span>
+            <span><span class="legend-name is-changed">name</span> theirs changed</span>
+            <span><span class="legend-name is-not-held">name</span> not downloaded</span>
+            <span><span class="legend-name is-unknown">name</span> cannot tell</span>
           </p>
         </div>
 

@@ -219,29 +219,46 @@ class TheDotNeverClaimsMoreThanWeKnow(unittest.TestCase):
         """The default arm, not a green one. A verdict the page has never
         heard of - added later, or a garbled record - must not be painted as
         current; that is the one colour telling the operator this list needs
-        no more thought."""
-        body = self.block("ledClass")
+        no more thought.
+
+        On the NAME now rather than the dot. The dot was carrying freshness,
+        which left presence shown nowhere, so the two were split."""
+        body = self.block("freshnessClass")
         last_return = body.rstrip().rstrip("}").rstrip().splitlines()[-1]
 
         self.assertIn("is-unknown", last_return)
 
-    def test_every_state_the_server_can_send_has_its_own_dot(self):
+    def test_every_state_the_server_can_send_has_its_own_colour(self):
         """The four the server emits, plus "own" for our own list. A state
         with no arm here would silently render grey."""
-        body = self.block("ledClass")
+        body = self.block("freshnessClass")
 
         for state in ("current", "changed", "not_held", "own"):
             self.assertIn('"' + state + '"', body,
-                          state + " has no arm in ledClass()")
+                          state + " has no arm in freshnessClass()")
 
-    def test_each_dot_also_says_it_in_words(self):
-        """Colour alone is invisible to roughly one man in twelve, so every
-        dot carries a title and the legend names all four."""
-        self.assertIn("led.title = ledTitle(", self.block("botRow"))
+    def test_presence_has_a_third_state_of_its_own(self):
+        """`null` is not "offline". The membership mirror is empty while the
+        bot is still joining, and every nick would read as gone."""
+        body = self.block("presenceClass")
+
+        self.assertIn("is-online", body)
+        self.assertIn("is-offline", body)
+        self.assertIn("is-presence-unknown", body)
+
+    def test_both_signals_also_say_it_in_words(self):
+        """Colour alone is invisible to roughly one man in twelve, so the dot
+        and the name each carry a title of their own."""
+        row = self.block("botRow")
+
+        self.assertIn("led.title = presenceTitle(", row)
+        self.assertIn("name.title = ledTitle(", row)
 
         titles = self.block("ledTitle")
         for state in ("changed", "not_held", "unknown"):
             self.assertIn('"' + state + '"', titles)
+
+        self.assertIn("channel", self.block("presenceTitle"))
 
 
 class ClickingARowYouCannotBrowse(unittest.TestCase):
@@ -322,37 +339,58 @@ class TheLegendTheDotsAndTheStylesheetAgree(unittest.TestCase):
         cls.html = web_file("index.html")
         cls.css = web_file("style.css")
 
-    def js_classes(self):
-        start = self.js.index("function ledClass(")
+    def js_classes(self, function_name):
+        start = self.js.index("function " + function_name + "(")
         body = self.js[start:self.js.index("\n  }", start)]
         return set(re.findall(r'"(is-[a-z-]+)"', body))
 
     def legend(self):
-        block = self.html[self.html.index('class="bot-legend"'):]
-        return block[:block.index("</p>")]
+        """BOTH legends. There are two signals now - the dot for presence and
+        the name colour for what we hold - so a reader that took only the
+        first would report the second as missing."""
+        out = []
+        at = self.html.find('class="bot-legend"')
+        while at != -1:
+            out.append(self.html[at:self.html.index("</p>", at)])
+            at = self.html.find('class="bot-legend"', at + 1)
+        return "\n".join(out)
 
     def test_the_legend_shows_every_dot_the_page_can_render(self):
-        for name in self.js_classes():
+        for name in self.js_classes("presenceClass"):
             self.assertIn("led " + name, self.legend(),
                           name + " can be rendered but is not in the legend")
 
+    def test_the_legend_shows_every_name_colour_too(self):
+        for name in self.js_classes("freshnessClass"):
+            self.assertIn("legend-name " + name, self.legend(),
+                          name + " can be rendered but is not in the legend")
+
     def test_the_legend_shows_nothing_the_page_cannot_render(self):
-        for name in set(re.findall(r"led (is-[a-z-]+)", self.legend())):
-            self.assertIn(name, self.js_classes(),
+        renderable = (self.js_classes("presenceClass")
+                      | self.js_classes("freshnessClass"))
+        shown = set(re.findall(r"(?:led|legend-name) (is-[a-z-]+)",
+                               self.legend()))
+
+        self.assertTrue(shown, "the legend reader found nothing at all")
+        for name in shown:
+            self.assertIn(name, renderable,
                           name + " is in the legend but nothing renders it")
 
-    def test_every_dot_has_a_colour(self):
-        """A class with no rule is an invisible dot, and the row then reads as
-        having no state at all rather than as a state we cannot show."""
-        for name in self.js_classes():
+    def test_every_signal_has_a_colour(self):
+        """A class with no rule is an invisible mark, and the row then reads
+        as having no state at all rather than as one we cannot show."""
+        for name in self.js_classes("presenceClass"):
             self.assertIn(".led." + name, self.css,
-                          name + " has no rule in style.css")
+                          name + " has no dot rule in style.css")
+        for name in self.js_classes("freshnessClass"):
+            self.assertIn(".bot-row-name." + name, self.css,
+                          name + " has no name rule in style.css")
 
     def test_the_colours_are_palette_tokens_not_literals(self):
         """Both themes are defined token-level; a literal hex would be one
         theme's colour showing through on the other's ground."""
         for line in self.css.splitlines():
-            if line.startswith(".led.is-"):
+            if line.startswith(".led.is-") or line.startswith(".bot-row-name.is-"):
                 self.assertIn("var(--", line, line.strip())
 
 
