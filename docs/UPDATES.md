@@ -4,6 +4,37 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### ⏱ A folder request to a bot with no sign of packing fails fast
+
+`FETCH_FOLDER_OFFER_TIMEOUT` is 1800 seconds, and rightly so: the other bot has
+to run its own packing pipeline before it can even begin the DCC SEND, and a
+real album takes real time.
+
+That allowance is wrong for a bot that never packs anything. There a non-answer
+is the EXPECTED outcome rather than a slow one, and the wait costs one of
+`MAX_FETCH_SLOTS` - three by default. Half an hour of a third of the fetch
+capacity, spent discovering what that bot's own list already said.
+
+**Two signals, either one enough.** A RAR list of theirs among the lists we hold
+- their own statement of the folders they will pack, in our hands, and kept only
+since the change above stopped discarding it - or the `@<nick>^ ... RAR folders`
+advert `irc.py` has parsed into `known_bots` since #133 and which nothing
+outside the registry had ever read.
+
+**Used to decide how long to WAIT, never whether to ask.** A bot can pack
+folders with neither signal: we may simply never have caught the advert, and may
+hold only its main list. Refusing on this would take away something that works.
+Waiting less costs nothing when the guess is wrong, and half an hour of a slot
+when it is right.
+
+A failure deciding waits LONGER rather than less. This runs inside the queue
+lock on the sweep every tick, and the long wait is the safe way to be wrong: it
+only ever waits, where the short one could give up on a pack still coming.
+
+`FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED` sits on the Settings page beside the
+timeout it qualifies, because reading one without the other tells half a story -
+and a test says so.
+
 ### 🗜 A folder is offered as .rar because that bot's list says so
 
 "Get folder as .rar" sat on every folder heading of every fetched list, gated
