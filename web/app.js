@@ -80,7 +80,7 @@
     // answer the server gave. Toggling re-renders from that answer rather
     // than asking again: the rows are already here, and a round trip per
     // click would be slower than the search that produced them.
-    filelistsExcluded: {}, filelistsFilterPayload: null,
+    filelistsExcluded: {}, filelistsFilterPayload: null, filelistsMatchTerms: [],
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
     filelistsHistory: [],
     settingsLoaded: false, settingsCategories: [], settingsActiveCategory: null,
@@ -1307,6 +1307,63 @@
       return count === 1 ? " file" : " files";
     }
 
+    // WHERE THE MATCH IS, in a title that is often a hundred characters of
+    // artist, album, year, encoder and track number. Asked for in the beta
+    // alongside the phrase change: finding the row is half the job, and the
+    // other half is seeing why it is a row at all.
+    //
+    // Marks what was TYPED, not what FTS5 matched: the last phrase is a
+    // prefix, so typing "amar" matches "Amarth" - and highlighting the four
+    // characters the operator put in is the honest reading of "highlight the
+    // matched characters".
+    //
+    // EVERY PIECE ESCAPED SEPARATELY. The title comes off another bot's list.
+    // escapeHtml() is the same treatment it already had; the only change is
+    // that it is applied to three pieces instead of one, so the <mark> can go
+    // between them without the title ever being parsed as markup.
+    function highlightedTitle(title) {
+      var text = String(title || "");
+      var segments = state.filelistsMatchTerms || [];
+      if (!segments.length) { return escapeHtml(text); }
+
+      var lower = text.toLowerCase();
+      var ranges = [];
+      for (var s = 0; s < segments.length; s++) {
+        var needle = String(segments[s] || "").toLowerCase();
+        if (!needle) { continue; }
+        var at = lower.indexOf(needle);
+        while (at !== -1) {
+          ranges.push([at, at + needle.length]);
+          at = lower.indexOf(needle, at + needle.length);
+        }
+      }
+      if (!ranges.length) { return escapeHtml(text); }
+
+      // Merged, because two phrases can overlap in one title - and nesting a
+      // <mark> inside another renders as a darker patch that reads like a
+      // third kind of match.
+      ranges.sort(function (a, b) { return a[0] - b[0]; });
+      var merged = [ranges[0]];
+      for (var i = 1; i < ranges.length; i++) {
+        var last = merged[merged.length - 1];
+        if (ranges[i][0] <= last[1]) {
+          last[1] = Math.max(last[1], ranges[i][1]);
+        } else {
+          merged.push(ranges[i]);
+        }
+      }
+
+      var out = "";
+      var cursor = 0;
+      for (var m = 0; m < merged.length; m++) {
+        out += escapeHtml(text.slice(cursor, merged[m][0]));
+        out += "<mark class=\"filter-hit\">" +
+               escapeHtml(text.slice(merged[m][0], merged[m][1])) + "</mark>";
+        cursor = merged[m][1];
+      }
+      return out + escapeHtml(text.slice(cursor));
+    }
+
     function folderHeadingHtml(group, index) {
       var count = group.count || 0;
       // SELECT THE WHOLE FOLDER. Asked for during the beta: an album is the
@@ -1400,7 +1457,7 @@
           : "";
         return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
           checkCell +
-          "<td class=\"col-mono col-indent\">" + escapeHtml(row.title) + mark +
+          "<td class=\"col-mono col-indent\">" + highlightedTitle(row.title) + mark +
           (rarCell ? " " + rarCell : "") + "</td>" +
           "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
           "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
@@ -1924,6 +1981,10 @@
           renderFilelistsPager(Array.isArray(payload)
             ? payload.length : (payload.total_files || 0));
           state.filelistsFilterPayload = filter ? payload : null;
+          // The pieces the server actually matched on, parsed there rather
+          // than here: one parse cannot disagree with itself, and "amon*amar"
+          // is two phrases whichever side you split it on.
+          state.filelistsMatchTerms = filter ? (payload.terms || []) : [];
           renderFilelistGroups(groups, !!filter);
         })
         .catch(function (err) {

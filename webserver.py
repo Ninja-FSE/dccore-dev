@@ -981,7 +981,12 @@ def build_crosslist_search_payload(term, limit=None):
 
     import list_fetch
 
-    terms = [word for word in str(term or "").lower().split() if word]
+    # PHRASES, not loose words - see list_index.filter_segments(). What the
+    # operator typed is one phrase unless they separated it with "*", and the
+    # page needs the same pieces to highlight what matched, so they are
+    # parsed once here and returned in the payload rather than parsed again
+    # in JavaScript.
+    terms = list_index.filter_segments(term)
 
     # EVERY LIST, not every bot. A bot's archive can hold several - its loose
     # files and its packed albums, or music and film - and each is indexed
@@ -1012,6 +1017,7 @@ def build_crosslist_search_payload(term, limit=None):
 
     empty_payload = {
         "term": str(term or ""),
+        "terms": terms,
         "folders": [],
         "total": 0,
         "total_files": 0,

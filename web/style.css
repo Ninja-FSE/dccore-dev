@@ -827,6 +827,18 @@ html, body {
 /* A bot with nothing matching the current filter. Dimmed rather than hidden:
    the sidebar is also the answer to "who has this", and a row that vanished
    would take that answer with it. */
+/* Where the typed text sits inside a title. The default <mark> is a browser
+   yellow that belongs to neither theme, so it takes the palette's own accent -
+   as a tint behind the text rather than a block, because a title is read as a
+   whole and a solid highlight breaks it into pieces. */
+mark.filter-hit {
+  background: var(--accent-dim);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+  font-weight: 600;
+}
+
 .bot-row.is-filtered-out {
   opacity: 0.4;
 }
