@@ -4,6 +4,46 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🖥 The List Browser is two columns
+
+Asked for during the beta with the two regions drawn on a screenshot: the
+sources should be a narrow column on the left, and the table should sit beside
+them rather than under them.
+
+Everything was stacked full-width, so a column of nicks - which needs perhaps
+300px - took the whole width, and the file table began some 600px down the page
+and then scrolled inside whatever height was left. On the screen it was
+reported from, six file rows were visible under a source list showing five.
+
+    BEFORE                              AFTER
+    +--- fetch ---------------+         +--------+------------------+
+    +--- filter --------------+         | fetch  | TITLE  SIZE  FMT |
+    +--- bot list ------------+         | filter |------------------|
+    +--- file table ----------+         | FlacMe |  [ ] 01 Bleed... |
+                                        | ...    |  [ ] 02 The L... |
+
+**The `minmax(0, 1fr)` is load-bearing**, and looks like a redundant zero. A
+grid track sized `1fr` takes `min-width: auto`, so a wide table inside it pushes
+the TRACK wider rather than scrolling within it - and the whole page gains a
+horizontal scrollbar, which is worse than what was there before. A floor of 0
+lets the column be narrower than its content, handing the overflow back to
+`.table-wrap` where it is already handled. `min-width: 0` on the two columns
+themselves is the other half: a floor on the track is undone by an item that
+will not shrink.
+
+The source list gets its height back. It was capped at 216px because it sat
+ABOVE the table and every pixel it took came off the files; side by side it
+costs the table nothing, so it takes 60vh - and the cap returns under the
+narrow-screen fallback, where it costs again. Below 900px the two columns are
+narrower than either wants, so it stacks, which is the arrangement that was
+already there.
+
+A test reads the media query by MATCHING BRACES. The first version split on
+`@media` and took everything after the next `{`, which is the rest of the file -
+so it found a rule inside the first media query in the stylesheet and reported
+on that. It has a guard on itself now: a block reader that returns the whole
+file makes every assertion using it meaningless.
+
 ### 🧮 A rate nobody should act on is not stated as a fact
 
 From the beta, on a list zip:
