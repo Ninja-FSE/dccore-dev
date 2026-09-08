@@ -1279,41 +1279,48 @@
     // before the operator spends a click finding out. `count` is the folder's
     // TRUE size, so a folder that arrived truncated still reports what it
     // holds rather than only what fitted on the page.
+    // A file is only fetchable when it belongs to someone ELSE's list -
+    // browsing our own is direct filesystem access already, and
+    // /api/fetch/enqueue exists to reach another bot over IRC, not this one.
+    //
+    // While FILTERING there is no single source: the rows come from every
+    // list held, and every one of them is another bot's by definition.
+    //
+    // ONE FUNCTION, because the folder heading and the file rows have to
+    // agree. A heading offering a "select everything here" box over rows with
+    // no checkboxes to select is worse than either alone.
+    function rowsAreFetchable() {
+      return (state.filelistsFilter || "").trim()
+        ? true
+        : !isOwnSource(state.filelistsSource || "__own__");
+    }
+
     function folderHeadingHtml(group, index) {
       var count = group.count || 0;
-      // Packing a whole folder as .rar only makes sense against another
-      // bot's list - browsing our own is direct filesystem access already,
-      // same gate folderFilesHtml() already applies to the per-file
-      // checkbox column.
-      // A group with no folder name has nothing to pack: requestFolderRar()
-      // drops the click on `if (!bot || !folder)`, so the button was there,
-      // clickable, and silently did nothing - one click, no request, no
-      // message. Found by audit. A foreign list always has this group when
-      // any of its rows sat above the first folder heading.
-      // Same rule as the file rows below, and for the same reason: while
-      // FILTERING there is no single source, so asking whether the SELECTED
-      // one is another bot's list answers the wrong question. Every group in
-      // a filter result belongs to another bot by definition, and this
-      // suppressed the folder button on all of them.
-      // THE FOLDER HEADING NO LONGER OFFERS TO PACK ANYTHING. It used to
-      // carry a "Get folder as .rar" button on every folder of every fetched
-      // list, which could only ever be a guess: measured against one live
-      // registry, 2 of 51 known bots publish a RAR list at all, so the button
-      // was wrong for the other 49 - and clicking it sent "!nick !rar
-      // <folder>" into the channel and held a fetch slot for half an hour
-      // waiting for a reply that was never coming.
+      // SELECT THE WHOLE FOLDER. Asked for during the beta: an album is the
+      // unit people actually want, and ticking nine boxes one at a time to
+      // get one is the kind of work a page should be doing for them.
       //
-      // The question is per FOLDER, not per bot: a bot can offer one folder
-      // as loose files and another only as a pack. The rows of its RAR list
-      // answer exactly that, one folder at a time, so the button lives there
-      // now - see rar_folder in folderFilesHtml().
+      // In the same column as the file checkboxes it commands, so the
+      // relationship is visible rather than something to work out - which is
+      // why the heading's cell is split rather than left spanning all five.
+      //
+      // It selects the rows that are RENDERED. A folder past the page's row
+      // ceiling arrives cut short and says so in its own row (see
+      // folderFilesHtml), and a box that silently claimed the rest would be
+      // claiming to have queued files nobody has seen.
+      //
       // data-folder-index is safe to string-concatenate: it is this group's
-      // own position in the internal `groups` array (an internal loop
-      // index), not untrusted content - unlike the bot/folder values
-      // attachFilelistsFolderRarData() sets below via .dataset assignment.
-      var rarButton = "";
+      // own position in the internal `groups` array, not untrusted content.
+      var checkCell = rowsAreFetchable()
+        ? "<td class=\"col-check\"><input type=\"checkbox\"" +
+          " class=\"filelists-folder-check\" data-folder-index=\"" + index +
+          "\" title=\"Select every file in this folder\"" +
+          " aria-label=\"Select every file in this folder\"></td>"
+        : "<td class=\"col-check\"></td>";
       return "<tr class=\"folder-row\">" +
-        "<td colspan=\"5\">" +
+        checkCell +
+        "<td colspan=\"4\">" +
           "<button type=\"button\" class=\"folder-toggle\" aria-expanded=\"false\"" +
                  " data-folder-index=\"" + index + "\">" +
             "<span class=\"folder-caret\" aria-hidden=\"true\"></span>" +
@@ -1322,10 +1329,8 @@
             "<span class=\"folder-count\">" + count.toLocaleString() +
               (count === 1 ? " file" : " files") + "</span>" +
           "</button>" +
-          rarButton +
         "</td></tr>";
     }
-
     function folderFilesHtml(group, index) {
       var entries = group.entries || [];
       // A file is only fetchable when it belongs to someone ELSE's list -
@@ -1337,9 +1342,7 @@
       // asked only about the selected source, which defaults to our own list -
       // so filtering before picking a bot rendered every result with no
       // checkbox and no way to queue any of it.
-      var fetchable = (state.filelistsFilter || "").trim()
-        ? true
-        : !isOwnSource(state.filelistsSource || "__own__");
+      var fetchable = rowsAreFetchable();
       var rows = entries.map(function (row, position) {
         // No data-bot/data-filename attribute here, and no bot/filename text
         // anywhere in this markup fragment: `row.source`/`row.title` come
@@ -1447,11 +1450,85 @@
     // checkboxes are rebuilt from scratch on every page/source change, so a
     // listener attached per-checkbox would need re-attaching every time.
     el.filelistsBody.addEventListener("change", function (evt) {
-      if (evt.target.classList && evt.target.classList.contains("filelists-check")) {
-        state.filelistsLastChecked = evt.target;
+      var target = evt.target;
+      if (!target.classList) { return; }
+      if (target.classList.contains("filelists-folder-check")) {
+        setFolderChecked(target.dataset.folderIndex, target.checked);
+        updateFilelistsDownloadSelectedState();
+        return;
+      }
+      if (target.classList.contains("filelists-check")) {
+        state.filelistsLastChecked = target;
+        // The folder box follows its files, so it cannot claim the folder is
+        // selected while one row in it is not.
+        syncFolderCheck(target.closest("tr") &&
+                        target.closest("tr").dataset.folderIndex);
         updateFilelistsDownloadSelectedState();
       }
     });
+
+    // TICK EVERY FILE IN ONE FOLDER, including the rows of a COLLAPSED one.
+    // They are in the document already - collapsing hides them rather than
+    // removing them - so a folder can be selected without being opened, which
+    // is most of the point when a list has hundreds of them.
+    function folderBoxes(index) {
+      if (index === undefined || index === null || index === "") { return []; }
+      // The index is our own loop counter, but it still reaches a selector -
+      // so it is matched by walking rather than concatenated into one, the
+      // same rule the bot rows follow.
+      var rows = el.filelistsBody.querySelectorAll("tr.file-row");
+      var found = [];
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].dataset.folderIndex !== String(index)) { continue; }
+        var box = rows[i].querySelector(".filelists-check");
+        if (box) { found.push(box); }
+      }
+      return found;
+    }
+
+    function setFolderChecked(index, checked) {
+      var boxes = folderBoxes(index);
+      for (var i = 0; i < boxes.length; i++) {
+        boxes[i].checked = checked;
+      }
+      // The shift-range anchor is "the last box the operator actually
+      // touched". A folder box is not one of those, and leaving a stale
+      // anchor would make the next shift-click extend from a row nobody
+      // pointed at.
+      state.filelistsLastChecked = null;
+    }
+
+    // Checked, unchecked, or INDETERMINATE for some-but-not-all. The third
+    // state is the honest one: a box that showed "unchecked" while four of
+    // nine rows were selected would be describing a selection that is not
+    // the one in force.
+    function syncFolderCheck(index) {
+      var box = folderCheckFor(index);
+      if (!box) { return; }
+      var boxes = folderBoxes(index);
+      var checked = 0;
+      for (var i = 0; i < boxes.length; i++) {
+        if (boxes[i].checked) { checked++; }
+      }
+      box.checked = boxes.length > 0 && checked === boxes.length;
+      box.indeterminate = checked > 0 && checked < boxes.length;
+    }
+
+    function folderCheckFor(index) {
+      if (index === undefined || index === null || index === "") { return null; }
+      var boxes = el.filelistsBody.querySelectorAll(".filelists-folder-check");
+      for (var i = 0; i < boxes.length; i++) {
+        if (boxes[i].dataset.folderIndex === String(index)) { return boxes[i]; }
+      }
+      return null;
+    }
+
+    function syncEveryFolderCheck() {
+      var boxes = el.filelistsBody.querySelectorAll(".filelists-folder-check");
+      for (var i = 0; i < boxes.length; i++) {
+        syncFolderCheck(boxes[i].dataset.folderIndex);
+      }
+    }
 
     // SHIFT EXTENDS A RANGE (#133). Handled on click rather than change,
     // because the range has to be computed against the state BEFORE the
@@ -1487,6 +1564,9 @@
       for (var i = from; i <= to; i++) {
         boxes[i].checked = wanted;
       }
+      // A range can span several folders, so every heading is re-read rather
+      // than only the one clicked in.
+      syncEveryFolderCheck();
       updateFilelistsDownloadSelectedState();
     });
 

@@ -4,6 +4,39 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### ☑ A folder can be selected whole
+
+Asked for during the beta, looking at a nine-track album: an album is the unit
+people actually want, and ticking nine boxes one at a time to get one is the
+kind of work a page should be doing for them.
+
+The folder heading carries a checkbox now, **in the same column as the file
+checkboxes it commands** - which is why the heading's cell is split into a
+check column and a colspan of four instead of spanning all five. The
+relationship is visible rather than something to work out.
+
+**Three states, not two.** Checked, unchecked, and INDETERMINATE for
+some-but-not-all. The third is the honest one: a box reading "unchecked" while
+four of nine rows are selected describes a selection that is not the one in
+force. Ticking a file updates its folder's box; a shift-range can span several
+folders, so every heading is re-read rather than only the one clicked in.
+
+**A collapsed folder selects too.** Its rows are in the document already -
+collapsing hides them rather than removing them - so a folder can be selected
+without being opened, which is most of the point when a list has hundreds of
+them.
+
+**What it does not claim.** It selects the rows that are RENDERED. A folder
+past the page's row ceiling arrives cut short and says so in its own row, and a
+box that silently claimed the rest would be claiming to have queued files
+nobody has seen.
+
+The gate deciding whether any of this appears is now written ONCE, in
+`rowsAreFetchable()`. It existed twice before - the file checkbox and the
+folder heading's old button - with the same defect fixed in each at different
+times. Two copies of a rule cannot disagree if there is only one, and a test
+refuses a second.
+
 ### 📥 The server is read in useful-sized bites
 
 The socket was read **2048 bytes at a time** for as long as `irc.py` has

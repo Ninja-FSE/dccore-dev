@@ -1355,6 +1355,22 @@ html, body {
   border-bottom: 1px solid var(--border);
 }
 
+/* The folder row's own checkbox, in the same column as the file checkboxes it
+   commands - which is the whole reason the heading cell is split rather than
+   spanning all five. The rule above sets padding to 0 so the toggle button can
+   fill the rest of the row; this cell needs its own back. */
+.folder-row td.col-check {
+  padding: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.folder-row td.col-check input {
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
 .folder-toggle {
   display: flex;
   align-items: center;
