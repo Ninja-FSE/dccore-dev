@@ -2101,35 +2101,40 @@ class FilelistsFetchableRegressionTests(unittest.TestCase):
                   encoding="utf-8") as handle:
             cls.source = handle.read()
 
-    def test_a_filtered_row_is_fetchable_without_choosing_a_source(self):
+    def test_the_rule_is_written_once(self):
         """EVERY such decision, derived rather than the first one found.
 
-        There are two - the file row's checkbox and the folder's !rar button -
-        and they had the same defect. A test that sliced from the first
-        occurrence checked one and reported on the other, so it failed while
-        pointing at code that was already fixed."""
-        clauses = []
-        start = 0
-        while True:
-            found = self.source.find("var fetchable =", start)
-            if found == -1:
-                break
-            clauses.append(self.source[found:self.source.index(";", found)])
-            start = found + 1
+        There were two - the file row's checkbox and the folder heading's
+        button - and they had the SAME defect, fixed at different times. A
+        test that sliced from the first occurrence checked one and reported on
+        the other, so it failed while pointing at code already fixed.
 
-        # ONE now, not two. The second was the folder heading's .rar button,
-        # which is gone: it could only ever guess whether a bot would pack a
-        # folder, and the rows of that bot's RAR list answer it exactly, one
-        # folder at a time. The rule below still governs every decision of
-        # this kind that remains.
-        self.assertEqual(len(clauses), 1,
-                         "another fetchable decision appeared; it needs the "
-                         "same rule or its own reason not to")
-        for clause in clauses:
-            with self.subTest(clause=clause.splitlines()[0]):
-                self.assertIn("state.filelistsFilter", clause,
-                              "a cross-list result is only fetchable when a "
-                              "bot happens to be selected")
+        There is one now, in rowsAreFetchable(), and both callers ask it. That
+        is the stronger property: two copies of a rule cannot disagree if
+        there is only one."""
+        body = self.source.split("function rowsAreFetchable(", 1)[1]
+        body = body.split("\n    }", 1)[0]
+
+        self.assertIn("state.filelistsFilter", body,
+                      "a cross-list result is only fetchable when a bot "
+                      "happens to be selected")
+        self.assertIn("isOwnSource", body,
+                      "browsing our own list is filesystem access already")
+
+    def test_nothing_decides_it_for_itself(self):
+        """A second copy would be free to drift, which is how the two got out
+        of step before."""
+        decisions = [line.strip() for line in self.source.splitlines()
+                     if "var fetchable =" in line]
+
+        self.assertEqual(decisions, ["var fetchable = rowsAreFetchable();"])
+
+    def test_both_surfaces_still_ask(self):
+        """Guard on the guard: a single unused helper containing the right
+        rule would satisfy both assertions above."""
+        self.assertEqual(self.source.count("rowsAreFetchable()"), 3,
+                         "expected the definition plus its two callers - the "
+                         "file rows and the folder heading")
 
 
 class OptionalFlaskDependencyTests(unittest.TestCase):
