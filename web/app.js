@@ -2694,6 +2694,26 @@
     });
   }
 
+  // WHICH CATEGORY EACH EXTRA EDITOR BELONGS TO, named rather than typed out
+  // at each of its call sites.
+  //
+  // Three editors are not settings and cannot be: Served folders and Serve
+  // more than one list are ordered lists of {label, path} validated as a SET,
+  // and On connect is a list of commands. They live in their own JSON files
+  // behind their own endpoints, and they are stitched into a settings
+  // category so an operator finds them where they would look.
+  //
+  // They were stitched onto a category id that stopped existing when
+  // the Settings page was regrouped, which took all three off the dashboard
+  // with nothing failing anywhere. Reported from the beta: "what happened with
+  // multi folder / channel? cant see it in settings at all."
+  //
+  // A constant does not by itself stop that happening again, so
+  // test_every_settings_category_the_page_asks_for_exists.py checks each of
+  // these against what the server actually sends.
+  var SERVED_FOLDERS_CATEGORY = "your-list";   // where Music directory lives
+  var ON_CONNECT_CATEGORY = "identity";        // registration, before the JOIN
+
   function settingsFieldHtml(field) {
     var isDirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
     var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
@@ -2942,7 +2962,8 @@
     return fetchJson("/api/on-connect")
       .then(function (payload) {
         state.onConnect = payload;
-        if (state.active === "settings" && state.settingsActiveCategory === "paths") {
+        if (state.active === "settings"
+            && state.settingsActiveCategory === ON_CONNECT_CATEGORY) {
           renderSettingsFields();
         }
       })
@@ -3166,7 +3187,8 @@
             };
           });
         }
-        if (state.active === "settings" && state.settingsActiveCategory === "paths") {
+        if (state.active === "settings"
+            && state.settingsActiveCategory === SERVED_FOLDERS_CATEGORY) {
           renderSettingsFields();
         }
       })
@@ -3330,7 +3352,8 @@
             return { name: f.name, path: f.path };
           });
         }
-        if (state.active === "settings" && state.settingsActiveCategory === "paths") {
+        if (state.active === "settings"
+            && state.settingsActiveCategory === SERVED_FOLDERS_CATEGORY) {
           renderSettingsCategory();
         }
       })
@@ -3473,7 +3496,7 @@
       // adjusted to see what it did.
       html = themePreviewHtml() + html;
     }
-    if (category.id === "paths") {
+    if (category.id === SERVED_FOLDERS_CATEGORY) {
       // ABOVE the fields, because the served library is what an operator comes
       // to this category for and Music directory is now only the fallback
       // used when nothing else is configured.
@@ -3492,12 +3515,16 @@
           "</div>" + html;
       }
     }
-    if (category.id === "paths") {
+    if (category.id === ON_CONNECT_CATEGORY) {
+      // BELOW the fields. What to send at registration is read after the
+      // server and the nick it applies to, not before them.
       html += onConnectSectionHtml();
     }
     el.settingsFields.innerHTML = html;
-    if (category.id === "paths") {
+    if (category.id === SERVED_FOLDERS_CATEGORY) {
       if (state.listsSource === "file") { attachListRows(); } else { attachFolderRows(); }
+    }
+    if (category.id === ON_CONNECT_CATEGORY) {
       attachOnConnectRows();
     }
     if (category.id === "appearance") {
