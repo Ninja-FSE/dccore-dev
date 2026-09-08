@@ -51,6 +51,63 @@ defect on its own terms whichever path fired, so it is fixed on its own terms -
 and the discarded guesses are not written into the code as though they had been
 findings.
 
+### 🔴 A list is bound to a channel by picking it, not by retyping it
+
+Issue #368. Identity & network already holds the operator's channel list, and
+the Served lists editor asked for each list's channels again as free text -
+so the same names were typed a second time with nothing connecting the two.
+
+**It is not the typing that makes this worth fixing**, and the report was right
+to say so - but it is worse than it says. `library.list_for_request()` matches
+exactly, and its third rule is that once the primary binds ANY channels at all,
+a channel with nothing bound to it gets nothing:
+
+    bound (with a one-character typo) : #somechannnel
+    list_for_request("#somechannel")  : None
+    spelled correctly                 : the list
+    nothing bound at all              : the list
+
+So a single mistyped character does not bind one channel wrongly. **It silences
+the bot in the real channel** - no advert, no requests answered - with no error
+raised anywhere and nothing on the page saying why. That is reproduced against
+the real routing as the first class in the new test file, because the whole
+justification rests on it and a fix argued from a premise nobody checked is a
+fix that outlives its reason.
+
+**The field is now the configured channels, as checkboxes.** They come from
+`CHANNEL`'s own settings field, taking a pending edit over the saved value -
+the same source and the same precedence the theme preview reads, for the same
+reason: a channel typed into Identity & network and not yet saved is still one
+the operator means to be in, and offering the stale list would offer to bind a
+list to a channel they have just renamed.
+
+**A binding the picker cannot offer is kept, ticked, and marked in red**, with
+a line saying nothing arrives from it and what to do about it. That is the part
+that matters most for anyone already caught: their channel is silent, the log
+says nothing, and `lists.json` looks perfectly well-formed. **That row is the
+only place the mistake is visible.** Dropping it silently to make the picker
+tidy would have removed the diagnosis along with the symptom - the same rule
+the colour picker follows for a code its menus cannot say.
+
+With no channels configured at all, the section says where to add them and that
+the list serves everywhere meanwhile - rather than an empty box that reads as
+broken. Nothing ticked still means every channel, which is what an empty field
+has always meant and what every install today has.
+
+The channel name is assigned as a property and its label set as `textContent`,
+never concatenated into the markup: it is operator input and `escapeHtml()`
+does not encode a double quote, which is the rule every other row in that file
+follows.
+
+The server is unchanged, as #368 says it should be. `lists.json` can still be
+hand-edited and is still accepted as written - the picker narrows what can be
+CHOSEN, it does not become the rule.
+
+Fourteen mutants, all caught. One survived first time and it was the same shape
+as the last three: `assertIn("not in your join list", body)` was satisfied with
+the condition replaced by `false`, because the message still sat there in a
+branch nothing could reach. The assertion is on the guard now.
+
 ### 🔴 The theme preview showed the colour code instead of the colour
 
 Issue #367, reported with a screenshot: picking a custom colour from the new
