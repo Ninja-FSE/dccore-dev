@@ -81,6 +81,8 @@
     // than asking again: the rows are already here, and a round trip per
     // click would be slower than the search that produced them.
     filelistsExcluded: {}, filelistsFilterPayload: null, filelistsMatchTerms: [],
+    // Whether what is on screen has any folders in it - see listIsFlat().
+    filelistsFlat: false,
     // Off for every new term. A row put back on screen while looking for one
     // thing should not still be there, unasked, while looking for the next.
     filelistsRevealEmpty: false,
@@ -133,6 +135,7 @@
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
     filelistsExpandAll:   document.getElementById("filelists-expand-all"),
     filelistsCollapseAll: document.getElementById("filelists-collapse-all"),
+    filelistsHeadCheck:   document.getElementById("filelists-head-check"),
     filelistsDownloadSelectedBtn: document.getElementById("filelists-download-selected-btn"),
     stSpeed:               document.getElementById("st-speed"),
     stRecord:              document.getElementById("st-record"),
@@ -1298,10 +1301,14 @@
       var start = shown === 0 ? 0 : offset + 1;
       var end = offset + shown;
       var files = totalFiles || 0;
-      el.filelistsPageInfo.textContent =
-        "Folders " + start.toLocaleString() + "–" + end.toLocaleString() +
-        " of " + total.toLocaleString() +
-        " (" + files.toLocaleString() + (files === 1 ? " file)" : " files)");
+      // "Folders 1-1 of 1 (11,232 files)" is true and says nothing: a flat
+      // list has one group because everything is in it, not because the page
+      // is showing one folder out of several.
+      el.filelistsPageInfo.textContent = (total === 1 && state.filelistsFlat)
+        ? files.toLocaleString() + (files === 1 ? " file" : " files")
+        : "Folders " + start.toLocaleString() + "–" + end.toLocaleString() +
+          " of " + total.toLocaleString() +
+          " (" + files.toLocaleString() + (files === 1 ? " file)" : " files)");
       el.filelistsPrevBtn.disabled = offset <= 0;
       el.filelistsNextBtn.disabled = (offset + shown) >= total;
     }
@@ -1310,6 +1317,25 @@
     // shown under something.
     function folderLabel(name) {
       return name ? name : "(no folder)";
+    }
+
+    // A LIST WITH NO FOLDERS IN IT AT ALL. A bot that publishes its albums as
+    // packs has one row per pack and no directory structure to speak of, so
+    // the whole list arrives as a single unnamed group - see
+    // folderGroupsFrom(), which is also what a flat .txt list produces.
+    //
+    // Reported from the beta: "If a file list is a rar file list there are no
+    // folders. When I click on a rar file list I see 1 folder that I have to
+    // expand. That's not needed when there are no folders." Quite right: it
+    // was one collapsed row reading "(no folder) - 11,232 files", and a click
+    // to get past a grouping that groups nothing.
+    //
+    // The test is the list's own shape rather than anything about .rar: one
+    // group, and that group unnamed. A list that genuinely has one folder is
+    // NOT flat - it has a name worth showing, and its heading says which
+    // folder the rows below belong to.
+    function listIsFlat(groups) {
+      return groups.length === 1 && !groups[0].folder;
     }
 
     // The count is the point of a collapsed folder: it says how much is inside
@@ -1437,7 +1463,7 @@
           "</button>" +
         "</td></tr>";
     }
-    function folderFilesHtml(group, index) {
+    function folderFilesHtml(group, index, flat) {
       var entries = group.entries || [];
       // A file is only fetchable when it belongs to someone ELSE's list -
       // browsing our own is direct filesystem access already, and
@@ -1492,9 +1518,13 @@
             " data-folder-index=\"" + index + "\" data-entry-index=\"" + position +
             "\">Get folder as .rar</button>"
           : "";
-        return "<tr class=\"file-row is-hidden\" data-folder-index=\"" + index + "\">" +
+        // Hidden and indented only when there is a heading to hide them
+        // under. In a flat list they ARE the table.
+        return "<tr class=\"file-row" + (flat ? "" : " is-hidden") +
+          "\" data-folder-index=\"" + index + "\">" +
           checkCell +
-          "<td class=\"col-mono col-indent\">" + highlightedTitle(row.title) + mark +
+          "<td class=\"col-mono" + (flat ? "" : " col-indent") + "\">" +
+          highlightedTitle(row.title) + mark +
           (rarCell ? " " + rarCell : "") + "</td>" +
           "<td class=\"col-mono\">" + escapeHtml(row.size) + "</td>" +
           "<td class=\"col-dim\">" + escapeHtml(row.format) + "</td>" +
@@ -1506,11 +1536,12 @@
       // in the heading right above them.
       if (group.truncated) {
         rows.push(
-          "<tr class=\"file-row folder-truncated is-hidden\" data-folder-index=\"" +
-          index + "\"><td colspan=\"5\">Showing the first " +
-          entries.length.toLocaleString() + " of " +
+          "<tr class=\"file-row folder-truncated" + (flat ? "" : " is-hidden") +
+          "\" data-folder-index=\"" + index + "\"><td colspan=\"5\">" +
+          "Showing the first " + entries.length.toLocaleString() + " of " +
           (group.count || 0).toLocaleString() +
-          " files in this folder.</td></tr>");
+          (flat ? " files in this list." : " files in this folder.") +
+          "</td></tr>");
       }
       return rows.join("");
     }
@@ -1928,12 +1959,39 @@
       updateFilelistsDownloadSelectedState();
       return;
     }
+    var flat = listIsFlat(groups);
+    state.filelistsFlat = flat;
     el.filelistsBody.innerHTML = groups.map(function (group, index) {
-      return folderHeadingHtml(group, index) + folderFilesHtml(group, index);
+      return (flat ? "" : folderHeadingHtml(group, index)) +
+        folderFilesHtml(group, index, flat);
     }).join("");
+    renderFlatListControls(flat);
     attachFilelistsCheckboxData(groups);
     attachFilelistsFolderRarData(groups);
     updateFilelistsDownloadSelectedState();
+  }
+
+  // WITH NO FOLDERS THERE IS NOTHING TO EXPAND, and two buttons that do
+  // nothing are worse than none: they say the table has a structure it does
+  // not have.
+  //
+  // The select-all box moves rather than going away. It lives on the folder
+  // heading normally - in the same column as the boxes it commands - and a
+  // flat list has no heading to carry it, so it goes to the table header,
+  // which is where a table-wide select belongs anyway. Same class and the
+  // same data-folder-index, so the existing handler needs no changes: every
+  // row in a flat list is in group 0.
+  function renderFlatListControls(flat) {
+    el.filelistsExpandAll.hidden = flat;
+    el.filelistsCollapseAll.hidden = flat;
+
+    var head = el.filelistsHeadCheck;
+    if (!head) { return; }
+    head.innerHTML = (flat && rowsAreFetchable())
+      ? '<input type="checkbox" class="filelists-folder-check"' +
+        ' data-folder-index="0" title="Select every file shown"' +
+        ' aria-label="Select every file shown">'
+      : "";
   }
 
   // Re-renders from the answer already held. Used by the sidebar toggle and

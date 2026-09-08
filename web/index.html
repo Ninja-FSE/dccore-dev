@@ -274,7 +274,10 @@
             <table class="data-table" id="filelists-table">
               <thead>
                 <tr>
-                  <th class="col-check"></th>
+                  <!-- Empty except in a list with no folders, where the
+                       select-all that normally rides on a folder heading has
+                       nowhere else to be. See renderFlatListControls(). -->
+                  <th class="col-check" id="filelists-head-check"></th>
                   <th>Title</th>
                   <th>Size</th>
                   <th>Format</th>
