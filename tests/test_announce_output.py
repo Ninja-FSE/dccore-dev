@@ -590,7 +590,12 @@ class TheAdvertNeverPublishesTheNoListSentinel(unittest.TestCase):
         source = self._source()
 
         guard_at = source.find('list_date == "No List"')
-        message_at = source.find("announce_msg = (")
+        # The ASSIGNMENT, not one way of writing the right-hand side. This
+        # matched "announce_msg = (" - the inline f-string - until the
+        # template moved into announce.build_advert_line() so the dashboard
+        # could render the same line as a preview. What has to come after the
+        # sentinel check is the line being BUILT, however it is built.
+        message_at = source.find("announce_msg = ")
 
         self.assertNotEqual(guard_at, -1,
                             "no check for the \"No List\" sentinel found in announce.py")

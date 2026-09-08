@@ -155,6 +155,29 @@ Three things worth knowing:
 
 mIRC colour codes work if your audience reads the list in mIRC, but they show as stray characters in a plain text editor — worth deciding which of the two matters more for your channel.
 
+### Choosing the advert's colours
+
+The colours DCCore uses in the channel are a **theme** — one of five presets,
+plus six settings that override a single role each. All of them live under
+**Appearance** on the Settings page.
+
+The six roles are `border`, `separator`, `textbox`, `value`, `alert` and
+`accent`, set as `CUSTOM_THEME_BORDER` and so on. Each holds a raw mIRC colour
+code — `\x0300,01` is white on black — and a role left empty keeps whatever the
+chosen preset uses, so changing one colour does not mean restating the other
+five.
+
+You do not have to guess what a code looks like. The Appearance section draws
+**two sample lines above the fields and redraws them as you type**, before
+anything is saved: the periodic advert and the notice posted when a send
+finishes. Both are shown because between them they use all six roles and
+neither uses all six alone — the advert never uses `accent`. They are built by
+the same code that builds the real lines, so the sample is what the channel
+gets.
+
+The preview changes nothing. Until you press **Save**, the daemon is still
+advertising in the colours it started with.
+
 ## Upgrading
 
 Your settings and data are never touched by an upgrade: `settings.conf`, `admin_config.py` and everything under `data/` are gitignored, so updating the code cannot overwrite them. That is also the one thing to watch — see step 4.

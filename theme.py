@@ -153,7 +153,10 @@ def theme_name():
     return DEFAULT_THEME
 
 
-def palette():
+ROLES = ("border", "separator", "textbox", "value", "alert", "accent")
+
+
+def palette(settings=None):
     """The six roles for the configured theme, as a dict.
 
     config.CUSTOM_THEME_<ROLE> overrides one role on top of the chosen
@@ -162,16 +165,32 @@ def palette():
     into six plain strings (see config.py's own comment on that change) - a
     role left at its default of None keeps the preset's own value, exactly
     as an absent key in the old dict did.
+
+    `settings` answers "what WOULD this look like" without changing anything.
+    It is a plain {"THEME": ..., "CUSTOM_THEME_ACCENT": ...} mapping, read in
+    place of config for exactly the keys it holds, so the dashboard can render
+    a preview of values the operator has typed and not yet saved. A live
+    daemon is serving a channel while they are choosing colours; the preview
+    must not reach the config every other thread is reading.
     """
-    roles = dict(THEMES[theme_name()])
+    if settings is None:
+        settings = {}
+
+    def setting(name, fallback=None):
+        if name in settings:
+            return settings[name]
+        return getattr(config, name, fallback)
+
+    wanted = str(setting("THEME", "") or "").strip().lower()
+    roles = dict(THEMES[wanted if wanted in THEMES else theme_name()])
     for role in roles:
-        override = getattr(config, f"CUSTOM_THEME_{role.upper()}", None)
+        override = setting(f"CUSTOM_THEME_{role.upper()}")
         if isinstance(override, str) and override:
             roles[role] = override
     return roles
 
 
-def blocks():
+def blocks(settings=None):
     """The eight message paths' palette, in the order they bind it.
 
     Returns (border, separator, textbox, reset, bold, value, alert, accent).
@@ -181,6 +200,6 @@ def blocks():
     of where the values come from and not a change to a single line of
     outbound text.
     """
-    roles = palette()
+    roles = palette(settings)
     return (roles["border"], roles["separator"], roles["textbox"],
             RESET, BOLD, roles["value"], roles["alert"], roles["accent"])

@@ -4,6 +4,74 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 You can see the theme before the channel does
+
+From the beta, on the settings that colour the advert:
+*"bot font settings shows become easier. select colors/symbols from drop down
+menu and show preview of the messages"*
+
+This is the preview half. The six `CUSTOM_THEME_*` settings hold raw mIRC
+colour codes, typed into text boxes. Finding out what a change did meant
+saving it, rehashing, and waiting for the next advert - up to
+`ANNOUNCE_INTERVAL` away, on a bot other people are using. **The channel was
+the preview.** Now the Appearance category draws two sample lines above the
+fields and redraws them on every keystroke.
+
+**Two samples, and that is not a presentation choice.** Between them the
+advert and the completion notice use all six roles, and neither uses all six
+alone: the advert never touches `accent`. One sample would leave one setting
+looking as though it did nothing, which is exactly the confusion a preview
+exists to end. That was measured rather than assumed, and there is a test that
+fails if a role ever stops appearing in both.
+
+**Built by the real builders, not by a copy of their templates.** Two builders
+were lifted out of `announce.py` for this - `build_advert_line()` and
+`build_transfer_complete_line()` - and the advert loop and the notice now go
+through them. A preview assembled from its own copy of those f-strings would
+drift the first time one changed and would then lie with a straight face. The
+extraction was proved byte-identical against the pre-change file across all
+five themes before anything was built on it, and a test counts the templates
+so a third copy is a failure rather than a surprise.
+
+**And it never touches config.** The point of a preview is the colour you have
+just typed and not saved, so the pending edits travel with the request and
+`theme.palette(settings)` reads them in place of config for exactly the keys
+they hold. A live daemon is serving a channel while somebody is choosing
+colours; the preview must not write to what every other thread is reading.
+What may steer it is a whitelist - `THEME` and the six roles, with an unknown
+theme name dropped rather than silently falling back to the configured one,
+which would preview the wrong thing under a name the operator did not pick.
+
+**Rendering mIRC in a browser** is a small parser: `\x03` with one or two
+digits and an optional `,background`, `\x02` bold, `\x0f` reset, everything
+else through as text. A comma with no digits after it is a literal comma, not
+an empty background - which is how `\x0304,text` is meant to read. Text goes
+in through `escapeHtml()` and colours come from a fixed table of mIRC's
+sixteen, indexed by a number from `parseInt` - so nothing from a settings box
+reaches a style attribute as text.
+
+**The one place a literal colour is correct**, and the stylesheet guard now
+says why rather than carrying a name on an ignore list. The preview shows what
+the CHANNEL looks like: those sixteen colours are a property of IRC, identical
+whether the dashboard is in light mode or dark, because a channel does not
+have a dashboard theme. Painting them from the palette would misrepresent the
+one thing the panel exists to show. So the exemption is narrow - one selector
+prefix and the renderer's own table - and it is a positive statement rather
+than a hole: every literal inside it must BE one of the mIRC sixteen, the
+panel still takes its FRAME from the palette, the renderer must map all
+sixteen, and a guard-on-the-guard fails if the exempt region ever disappears
+and leaves the checks passing on nothing.
+
+Fifteen mutants, all caught. Three needed the tests tightened first, and each
+was the same shape of mistake: counting occurrences instead of asserting a
+property. `refreshThemePreview()` twice was satisfied by the definition plus
+one call, so deleting the call that runs on every edit changed nothing;
+`IRC_COLOURS[` present somewhere was satisfied by the background branch while
+the foreground put a raw number in a style attribute; and a pending change was
+only ever checked on the notice, which the advert builder could ignore
+entirely. They now name the call site, check each colour push, and override a
+role the advert actually uses.
+
 ### 🔴 The colour on a bot's name is the one the legend promises
 
 From the beta, looking at a sidebar where every not-downloaded bot was grey:

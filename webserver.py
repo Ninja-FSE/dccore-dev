@@ -2296,6 +2296,95 @@ def _settings_field(name, declared, value):
         field["note"] = ("Not set: on while the dashboard is loopback-only. "
                          "Currently " + ("ON" if console_is_enabled() else "OFF") + ".")
     return field
+# The roles a theme has, and the one sample line each of them shows up in.
+# Named here so the page can say which setting it is that the operator just
+# changed nothing visible with - and so a role added later without a sample is
+# a failing test rather than a silent gap.
+THEME_PREVIEW_ROLES = {
+    "border": "both", "separator": "both", "textbox": "both",
+    "value": "both", "alert": "both", "accent": "notice",
+}
+
+
+def build_theme_preview(overrides=None):
+    """The two lines a theme is judged by, rendered with `overrides`.
+
+    WHY A PREVIEW EXISTS. The six CUSTOM_THEME_* settings hold raw mIRC colour
+    codes, typed into text boxes. Finding out what a change did meant saving
+    it, rehashing, and watching the channel for the next advert - and the next
+    advert is up to ANNOUNCE_INTERVAL away, on a bot other people are using.
+
+    WHY BOTH LINES. Between them they use all six roles, and neither uses all
+    six alone: the advert never touches `accent`, only the completion notice
+    does. A single sample would leave one setting looking like it does
+    nothing, which is the confusion this is meant to end.
+
+    Built by announce.py's own builders, not by a copy of their templates. A
+    copy drifts the first time one of them changes, and then the preview lies
+    with a straight face.
+
+    `overrides` is what the operator has typed and not saved. It never reaches
+    config: a live daemon is serving a channel while they are choosing
+    colours.
+
+    Returns the RAW lines, colour codes and all. Rendering them is the page's
+    job - it is the one that knows how wide the box is.
+    """
+    import announce
+
+    settings = dict(overrides or {})
+    nick = str(getattr(config, "NICKNAME", "") or "DCCore")
+    channel = (str(getattr(config, "CHANNEL", "") or "#channel")
+               .split(",")[0].strip() or "#channel")
+
+    # Plausible rather than real. Reading the live figures would make the
+    # preview flicker as transfers come and go, and a sample that changes
+    # while you are comparing two colours is a sample you cannot compare.
+    advert = announce.build_advert_line(
+        channel, nick, "719,041", "5.48 TB", "Sep 7th", "3/3", "0",
+        "2.4MB/s", "24.7MB/s", "1,204 Files (8.9 TB)",
+        str(config.SCRIPT_VERSION), settings=settings)
+    notice = announce.build_transfer_complete_line(
+        channel, "someuser", "Some Artist - Some Album - 01 - A Track.flac",
+        "1,204 Files (8.9 TB)", "37", "12", "3:04 pm", "24.7MB/s",
+        settings=settings)
+
+    # The PRIVMSG envelope is protocol, not something anybody sees in a
+    # channel. Showing it would put "PRIVMSG #chan :" at the front of a
+    # preview of what the channel looks like.
+    def body(line):
+        return line.split(" :", 1)[1].rstrip("\r\n") if " :" in line else line
+
+    return {
+        "advert": body(advert),
+        "notice": body(notice),
+        "roles": THEME_PREVIEW_ROLES,
+    }
+
+
+def theme_preview_overrides(payload):
+    """The subset of a posted body that may steer a preview.
+
+    A whitelist, not a filter: this reaches theme.palette(), and everything
+    else on the settings page has nothing to say about colour. THEME is
+    checked against the presets that exist, because an unknown name would
+    otherwise pick the configured one and quietly preview the wrong thing.
+    """
+    import theme
+
+    body = json_object(payload)
+    wanted = {}
+    name = str(body.get("THEME", "") or "").strip().lower()
+    if name in theme.THEMES:
+        wanted["THEME"] = name
+    for role in theme.ROLES:
+        key = f"CUSTOM_THEME_{role.upper()}"
+        if key in body:
+            value = body.get(key)
+            wanted[key] = value if isinstance(value, str) else ""
+    return wanted
+
+
 def build_settings_payload():
     """GET /api/settings payload: every editable setting, grouped for the
     Settings view's category rail, plus whether an admin password is set.
@@ -3394,6 +3483,14 @@ if HAVE_FLASK:
             status, result = build_folder_rar_fetch_enqueue_result(
                 body.get("bot", ""), body.get("folder", ""))
             return jsonify(result), status
+
+        @app.route("/api/settings/theme-preview", methods=["POST"])
+        def api_theme_preview():
+            # POST because it carries what the operator has typed. It changes
+            # nothing - see build_theme_preview() - and sits behind the same
+            # login as every other route here.
+            return jsonify(build_theme_preview(
+                theme_preview_overrides(request.get_json(silent=True))))
 
         @app.route("/api/filelists/bots")
         def api_filelists_bots():

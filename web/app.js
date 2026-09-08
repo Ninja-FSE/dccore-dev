@@ -2432,6 +2432,88 @@
     return found;
   }
 
+  // mIRC's sixteen. Every client agrees on these; the 99-colour extension
+  // does not, which is why the themes only ever use this range.
+  var IRC_COLOURS = [
+    "#ffffff", "#000000", "#00007f", "#009300", "#ff0000", "#7f0000",
+    "#9c009c", "#fc7f00", "#ffff00", "#00fc00", "#009393", "#00ffff",
+    "#0000fc", "#ff00ff", "#7f7f7f", "#d2d2d2"
+  ];
+
+  // WHAT THE CHANNEL WILL SEE, rendered from the same bytes that go on the
+  // wire. Handles the three codes the themes use - \x03 colour, \x02 bold,
+  // \x0f reset - and passes anything else through as text.
+  //
+  // A preview that renders differently from a real client is worse than no
+  // preview, so this deliberately does the same simple thing every client
+  // does: a colour code sets foreground and optional background until the
+  // next one, and a reset clears both.
+  //
+  // Text goes in with escapeHtml() and colours come from the fixed table
+  // above - the codes are digits parsed with parseInt, so nothing off the
+  // wire reaches an attribute.
+  function renderIrcLine(text) {
+    var out = "";
+    var i = 0;
+    var fg = null, bg = null, bold = false;
+    var open = false;
+    var raw = String(text || "");
+
+    function openSpan() {
+      var style = [];
+      if (fg !== null && IRC_COLOURS[fg]) { style.push("color:" + IRC_COLOURS[fg]); }
+      if (bg !== null && IRC_COLOURS[bg]) {
+        style.push("background-color:" + IRC_COLOURS[bg]);
+      }
+      if (bold) { style.push("font-weight:700"); }
+      if (!style.length) { return; }
+      out += '<span style="' + style.join(";") + '">';
+      open = true;
+    }
+
+    function closeSpan() {
+      if (open) { out += "</span>"; open = false; }
+    }
+
+    function restart() { closeSpan(); openSpan(); }
+
+    while (i < raw.length) {
+      var ch = raw.charAt(i);
+      if (ch === "\u0003") {
+        i++;
+        var digits = "";
+        while (digits.length < 2 && /[0-9]/.test(raw.charAt(i))) {
+          digits += raw.charAt(i); i++;
+        }
+        if (!digits) {
+          // A bare \x03 clears colour and keeps whatever bold is in force.
+          fg = null; bg = null; restart(); continue;
+        }
+        fg = parseInt(digits, 10) % 16;
+        if (raw.charAt(i) === ",") {
+          var after = "";
+          var j = i + 1;
+          while (after.length < 2 && /[0-9]/.test(raw.charAt(j))) {
+            after += raw.charAt(j); j++;
+          }
+          // A comma with no digits after it is a literal comma, not an empty
+          // background - which is how "\x0304,text" is meant to read.
+          if (after) { bg = parseInt(after, 10) % 16; i = j; }
+        }
+        restart();
+        continue;
+      }
+      if (ch === "\u0002") { bold = !bold; i++; restart(); continue; }
+      if (ch === "\u000f") {
+        fg = null; bg = null; bold = false; i++; closeSpan(); continue;
+      }
+      out += escapeHtml(ch);
+      i++;
+    }
+    closeSpan();
+    return out;
+  }
+
   function settingsFieldHtml(field) {
     var isDirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
     var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
@@ -2572,6 +2654,12 @@
   }
 
   function updateSettingsSaveBar() {
+    // Colours are the one setting whose effect is not described by its own
+    // value, so the sample follows every keystroke rather than waiting for a
+    // save that would publish it to a channel first.
+    if (state.settingsActiveCategory === "appearance") {
+      refreshThemePreview();
+    }
     var count = Object.keys(state.settingsDirty).length;
     el.settingsSaveBtn.disabled = count === 0;
     el.settingsSavebarText.classList.toggle("is-dirty", count > 0);
@@ -3106,6 +3194,56 @@
     });
   }
 
+  function themePreviewHtml() {
+    return (
+      '<div class="theme-preview">' +
+        '<p class="theme-preview-label">What the channel sees</p>' +
+        // Classes, not ids. This panel lives inside a container that is
+        // rebuilt whenever the category changes, so an id would be a global
+        // name for something that comes and goes - and the page's own guard
+        // refuses a lookup by an id the markup does not contain.
+        '<div class="theme-preview-line theme-preview-advert">' +
+          "Loading&hellip;</div>" +
+        '<div class="theme-preview-line theme-preview-notice"></div>' +
+        '<p class="theme-preview-note">The periodic advert, and the notice ' +
+          "posted when a send finishes. Between them they use all six " +
+          "colours - the advert never uses the accent, so both are shown." +
+        "</p>" +
+      "</div>");
+  }
+
+  // WHAT IS ON SCREEN, not what is saved. The point of a preview is the
+  // colour you have just typed and not committed, so the pending edits go
+  // with the request - the server renders them without touching its own
+  // config, which is being read by a daemon serving a channel.
+  function refreshThemePreview() {
+    var advert = el.settingsFields.querySelector(".theme-preview-advert");
+    var notice = el.settingsFields.querySelector(".theme-preview-notice");
+    if (!advert || !notice) { return; }
+
+    var wanted = {};
+    (state.settingsCategories || []).forEach(function (category) {
+      category.fields.forEach(function (field) {
+        if (field.name !== "THEME" && field.name.indexOf("CUSTOM_THEME_") !== 0) {
+          return;
+        }
+        wanted[field.name] = Object.prototype.hasOwnProperty.call(
+          state.settingsDirty, field.name)
+          ? state.settingsDirty[field.name]
+          : settingsValueToString(field.value);
+      });
+    });
+
+    postJson("/api/settings/theme-preview", wanted).then(function (res) {
+      if (!res.ok) { return; }
+      advert.innerHTML = renderIrcLine(res.data.advert);
+      notice.innerHTML = renderIrcLine(res.data.notice);
+    }).catch(function () {
+      advert.textContent = "The preview could not be loaded.";
+      notice.textContent = "";
+    });
+  }
+
   function renderSettingsCategory() {
     var category = (state.settingsCategories || []).filter(function (c) {
       return c.id === state.settingsActiveCategory;
@@ -3120,6 +3258,13 @@
       category.fields.map(settingsFieldHtml).join("");
     if (category.id === "admin-console") {
       html += settingsPasswordSectionHtml();
+    }
+    if (category.id === "appearance") {
+      // ABOVE the fields. The colours are the subject and the sample is what
+      // the operator is actually looking at while they change them; putting
+      // it under six inputs would mean scrolling away from the thing being
+      // adjusted to see what it did.
+      html = themePreviewHtml() + html;
     }
     if (category.id === "paths") {
       // ABOVE the fields, because the served library is what an operator comes
@@ -3147,6 +3292,13 @@
     if (category.id === "paths") {
       if (state.listsSource === "file") { attachListRows(); } else { attachFolderRows(); }
       attachOnConnectRows();
+    }
+    if (category.id === "appearance") {
+      // The panel is inserted saying "Loading" and nothing else would fill
+      // it: the refresh below otherwise runs only on an edit, so an operator
+      // who opened the category and changed nothing would sit looking at a
+      // sample that never arrived.
+      refreshThemePreview();
     }
 
     // Values are assigned as PROPERTIES here, not concatenated into value="…"
