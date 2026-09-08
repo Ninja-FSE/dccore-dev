@@ -4,6 +4,41 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔍 The cross-list filter searches every list, and reports on every list
+
+From the beta, filtering with two lists held from one bot: *"why flacme - rar
+shows like it has a result for amon a but i dont see any"*.
+
+Because it was never asked. A bot's archive can hold several lists, and since
+they started being kept each is indexed under its own name - `<nick>` for the
+main one and `<nick>/<marker>` for the rest. The filter built its list of
+sources from the NICKS alone.
+
+Two consequences, and the reported one is the second:
+
+- the other lists were **never searched**, so a match inside one could not be
+  found by the filter at all; and
+- they came back in neither `matched` nor `empty` - and the sidebar only dims
+  what it is TOLD is empty, so a list with no matches was left bright, reading
+  as the one list that had them.
+
+The keys now come from the same place the sidebar's rows do, which is what makes
+the two line up. One enumeration used by both; two would drift, and drifting is
+what produced the report. An entry written before archives were kept whole has
+no `lists` key at all and is still enumerated by its bare nick, so nothing needs
+migrating.
+
+**And a second thing from the same screenshot** - *"why on folders i see only
+track 01 and track 06"* - which is the filter working correctly. `amon a` means
+"contains `amon` AND contains `a`", which is `build_match_query()`'s own rule
+with the prefix wildcard reserved for terms of two characters or more, and every
+result had a standalone "A" in its title.
+
+But the folder heading said "2 files", which means the folder's SIZE when
+browsing and the number of MATCHES when filtering - in identical words. So a
+nine-track album whose title matched twice read as an album with two tracks in
+it. It says "matches" when that is what it is.
+
 ### 🖥 The List Browser is two columns
 
 Asked for during the beta with the two regions drawn on a screenshot: the

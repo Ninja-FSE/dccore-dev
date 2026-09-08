@@ -2,6 +2,10 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **Fixed: the filter ignored all but the first list from each bot.** Now that a bot's whole archive is kept, a bot can appear in the sidebar with two or three lists - and the filter was only ever searching the first of them. Anything in the others could not be found, and worse, those lists were left looking as though they held matches when they had not even been searched. Every list is searched now, and every one is dimmed or not according to what it actually contains.
+
+- **A folder heading in filter results says "matches", not "files".** The same words meant two different things: browsing, the number is how big the folder is; filtering, it is how many rows matched. A nine-track album with two matching tracks read as an album with two tracks in it.
+
 - **The List Browser is laid out in two columns.** Choosing which list to read took the full width of the page to show a narrow column of names, which pushed the files themselves halfway down the screen and left them scrolling in whatever space was left. The list of bots is now a column on the left and the files sit beside it, starting at the top - so you see far more of a list at once. On a narrow window it goes back to stacking, as before.
 
 - **A transfer too quick to time no longer reports an invented speed.** Small sends - a list archive, a single track - were reported at rates like 138 MB/s, because the timer stopped when the data was handed to the operating system rather than when it reached the other end. For anything bigger than the socket buffer those are the same moment and the figure is real; for anything smaller it is measuring a memory copy. Those transfers now say `n/a (<1s)` instead of a number, in the channel notice and the log alike. The speeds themselves have not changed - only the ones that were never measurable stop claiming to be.

@@ -979,13 +979,36 @@ def build_crosslist_search_payload(term, limit=None):
     import list as list_mod
     import list_index
 
+    import list_fetch
+
     terms = [word for word in str(term or "").lower().split() if word]
+
+    # EVERY LIST, not every bot. A bot's archive can hold several - its loose
+    # files and its packed albums, or music and film - and each is indexed
+    # under its own name, "<nick>" for the main one and "<nick>/<marker>" for
+    # the rest. Asking about the NICK alone had two consequences, both
+    # reported from a beta looking at a bot with two lists:
+    #
+    #   * the other lists were never searched, so a match inside one could
+    #     not be found by the filter at all; and
+    #   * they came back in neither `matched` nor `empty`, and the sidebar
+    #     only dims what it was TOLD is empty - so a list with no matches was
+    #     left bright, reading as the one list that had them.
+    #
+    # These keys are exactly the ones build_fetched_bot_list_summaries()
+    # gives its rows, which is what makes the dimming line up.
     held = {}
     for key, entry in (dict(getattr(config, "fetched_bot_lists", {}) or {})
                        ).items():
         name = str(entry.get("bot") or key).strip()
-        if name:
-            held[name.lower()] = name
+        if not name:
+            continue
+        stored = entry.get("lists")
+        markers = (list(stored) if isinstance(stored, dict) and stored
+                   else [""])
+        for marker in markers:
+            source = list_fetch.index_key(name, marker)
+            held[source.lower()] = source
 
     empty_payload = {
         "term": str(term or ""),
