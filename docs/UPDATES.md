@@ -4,6 +4,56 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 The dot says who is here; the name says what we hold
+
+Two requests from the beta, and they are the same subject.
+
+**We asked a nick that was not on the network.** The server answered the
+operator's own WHOIS with "No such nick", and the fetch sat in the queue
+holding a slot until it timed out, then reported "no response". True, and
+useless: nobody was there to respond, and that was knowable before a line went
+out.
+
+The daemon already knew. `config.channel_users` is synced from 353/JOIN/PART
+for every channel it is in, and `dcc.py` has read it as proof of presence
+before dispatching a send since long before this. A request is a PRIVMSG into a
+channel - a nick that is not in one of ours cannot see it - so refusing is not a
+guess about whether they would answer, it is the observation that they were
+never asked.
+
+All three entry points check it: list, folder and file. The file route checks
+PER ITEM, because a bulk paste is routinely several bots and one of them having
+signed off is no reason to refuse the rest.
+
+**Nothing known is not the same as nobody there.** While the bot is still
+joining, the membership mirror is empty and every nick would read as gone - so
+that state is its own, and it never refuses a fetch.
+
+**And the sidebar shows both things now.** The dot carried the list's
+freshness, which left presence - the thing that decides whether asking is worth
+anything at all - shown nowhere. A list can be perfectly current from a bot that
+signed off an hour ago.
+
+    dot   green  in a channel with us     name  green   list current
+          red    not in one                     orange  theirs changed
+          grey   still joining                  red     not downloaded
+                                                grey    cannot tell
+
+Colour on the name rather than a second dot: the row is already a nick, a count
+and a dot, and a fourth mark to decode is worse than the two it replaces. Each
+carries its own title, because colour alone is invisible to roughly one man in
+twelve - and the legend names every state of both, which an existing guard
+insisted on when the third presence state had no entry.
+
+Membership is read ONCE per payload. This route is polled every few seconds and
+a busy channel has dozens of advertisers; asking per row would rescan every
+channel's membership per row, per poll.
+
+A mutation run earned its keep on the wiring rather than the pieces: both
+helpers can be perfect and still be plugged in the wrong way round, and
+swapping the dot back to freshness passed every test until the wiring itself
+was asserted.
+
 ### 🔤 The filter bar searches what was typed, in the order it was typed
 
 From the beta: *"when i type amon a i want it to search 'amon a' only. if i
