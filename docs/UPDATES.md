@@ -4,6 +4,35 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 The colour on a bot's name is the one the legend promises
+
+From the beta, looking at a sidebar where every not-downloaded bot was grey:
+*"shouldnt names be red of those not downloaded yet?"*
+
+They should. The name had just taken over carrying the list's freshness, and a
+rule written for the older design was still there:
+
+    .bot-row[data-held="no"] .bot-row-name { color: var(--text-dim); }
+
+That is specificity **(0,3,0)** against the modifier's **(0,2,0)**, on EXACTLY
+the rows the modifier is about. So every not-downloaded bot stayed dim while the
+legend beside it promised red - and nothing failed: the class was applied, the
+rule existed, the colour was simply outranked.
+
+The override is gone. `.bot-row-name.is-not-held` says the same thing in the
+colour the legend names, and one rule saying it beats two disagreeing. What that
+rule was really for is kept: a bot with nothing held is not emphasised, so it
+sets the WEIGHT and leaves the colour alone.
+
+**A test file rather than a one-line fix**, because this is a class of bug
+rather than an incident. A specificity collision is invisible in review - both
+rules are correct on their own, and the losing one is present and spelled right
+- and silent at runtime. Nothing here executes CSS, so the cascade is computed:
+every rule that sets a colour on `.bot-row-name` is weighed, and none may
+outrank the four freshness modifiers. The calculator has its own guard, since
+one that returned the same number for everything would pass every assertion
+using it.
+
 ### 🟢 The dot says who is here; the name says what we hold
 
 Two requests from the beta, and they are the same subject.
