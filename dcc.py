@@ -2469,6 +2469,23 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         acute_bytes = max(0, (bytes_sent if 'bytes_sent' in locals() else 0) - _skipped)
         final_calc_speed = int(acute_bytes / acute_duration)
 
+        # WHAT WE ARE WILLING TO SAY IT WAS. The figure above divides bytes by
+        # the time it took to hand them to the kernel, which is the same thing
+        # as the transfer only for a file bigger than the socket send buffer.
+        # A smaller one is copied into the buffer in one go and the clock
+        # measures memory - a list zip was reported at 138 MB/s that way.
+        #
+        # None rather than a number when it cannot be measured, so the two
+        # places that display it say so instead of stating a figure nobody
+        # should act on. The RECORD has always refused these samples; this is
+        # the same judgement applied to what is shown.
+        stats_mgr_speed = sys.modules.get("stats_mgr")
+        if stats_mgr_speed is None:
+            import stats_mgr as stats_mgr_speed
+        reported_speed = (final_calc_speed
+                          if stats_mgr_speed.speed_is_measurable(acute_duration)
+                          else None)
+
         # The record the channel advert publishes. db has had
         # save_speed_record() from the start and announce.py has read it into
         # every advert since, but nothing ever sat between the two - the only
@@ -2502,7 +2519,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # its queue row for retry, so announcing here would tell the channel "Sent" and
             # re-offer the same file on every attempt.
             if transfer_completed:
-                announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, final_calc_speed)
+                announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, reported_speed)
         except Exception as ann_chan_err:
             print(f"[ANNOUNCE CHANNEL ERROR] Could not send the channel notice: {ann_chan_err}")
 

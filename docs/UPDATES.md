@@ -4,6 +4,37 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🧮 A rate nobody should act on is not stated as a fact
+
+From the beta, on a list zip:
+
+    Sent: "<list>.zip" to <user> [138.63MB/s]
+    "this seems to high to be true"
+
+It was. `sendall()` returns once the bytes are in the KERNEL, not once the peer
+has them. For a file LARGER than the socket send buffer the two converge - the
+kernel blocks once the buffer is full, so the send paces itself against the
+network and the clock measures something real. For a file that fits INSIDE the
+buffer they do not converge at all: the whole thing is handed over in one go
+and the clock measures a memory copy.
+
+**Caused by a change in this release, and predicted by it.** Raising the default
+send buffer to 4 MB - which took a real transfer from 3.0 to 24.7 MB/s - also
+widened the window of files this applies to from under 1 MB to under 4 MB. That
+is most list archives and many single tracks. The change said so at the time and
+pinned the guard on the speed RECORD; it did not pin the guard on what gets
+SAID, and there was not one.
+
+`MIN_RECORD_SECONDS` is the floor the record has always applied, for exactly this
+reason. A number too unreliable to keep is too unreliable to say, so the same
+judgement now decides both - and this line goes into the CHANNEL, where a figure
+nobody should act on is worse published than absent. Such a transfer reports
+`n/a (<1s)` rather than a guess, and rather than `0k/s`, which would be a
+different false claim rather than an absence of one.
+
+Nothing about the transfers themselves changed. They really are fast now; only
+the ones too short to time stop claiming a number.
+
 ### ☑ A folder can be selected whole
 
 Asked for during the beta, looking at a nine-track album: an album is the unit
