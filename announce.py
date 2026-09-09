@@ -480,6 +480,26 @@ def announce_worker():
                 speed_bytes_per_sec = stats_mgr.live_speed()
                 speed_str = stats_mgr.format_speed(speed_bytes_per_sec)
 
+                # ASK TO COME BACK, at the moment we were about to speak
+                # there anyway. An instant rejoin after a kick reads as a
+                # fight with whoever did it, and is how a kick becomes a ban;
+                # the advert interval is slow enough to be polite and is
+                # already the bot's own rhythm, so it needs no clock of its
+                # own. Suggested exactly this way from a live channel.
+                #
+                # irc.py owns the rule and the counting - this only sends what
+                # it is told to, so the advert worker holds no lock and knows
+                # nothing about kicks.
+                try:
+                    import irc as irc_mod
+                    for waiting in irc_mod.channels_to_rejoin():
+                        if oserve:
+                            oserve.queue_message(
+                                "channel_announce", f"JOIN {waiting}\r\n")
+                            print(f"[REJOIN] Asking to rejoin {waiting}.")
+                except Exception as rejoin_err:
+                    print(f"[REJOIN ERROR] Could not attempt a rejoin: {rejoin_err}")
+
                 for chan in channels_to_spam:
                     chan = chan.strip()
                     if not chan:

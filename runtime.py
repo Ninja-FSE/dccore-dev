@@ -207,6 +207,21 @@ known_bots_flushed_at = 0.0
 #
 # Here rather than in dcc.py for this module's usual reason: a !rehash
 # re-executes that module's body and would drop every offer in flight.
+# CHANNELS WE HAVE BEEN THROWN OUT OF, and how many times a rejoin has been
+# refused since. Keyed by lowercase channel name.
+#
+#     {"#chan": {"refusals": 0, "kicked_at": 1788904212.0, "by": "someop"}}
+#
+# Live state, so it belongs here rather than in a module body: a !rehash
+# re-executes those, and forgetting we were kicked would restart the retry
+# count from zero every time the operator saved a setting - which is a rejoin
+# loop with extra steps.
+#
+# A channel is removed from this map the moment a join succeeds, so its
+# presence means "not in it, and still trying" and nothing else.
+kicked_channels = {}
+kicked_channels_lock = threading.Lock()
+
 dcc_send_offers = {}
 dcc_send_offers_lock = threading.Lock()
 
