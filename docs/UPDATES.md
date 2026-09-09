@@ -68,6 +68,131 @@ the warning's guard was replaced with `if (true)` and every assertion about
 the function's contents still passed, because they were all still there as
 dead code. The guard is named now.
 
+### 🟢 No bold anywhere, and the channel need not be told
+
+Two things asked for together:
+
+> Should be able to hide that message if you don't want to send public
+> messages. In settings. Also theme shouldn't have bold in any location of the
+> message. That's for everywhere bot advertisement answers to find requests
+> etc. No bolds
+
+**One public message, and now it is optional.** A send produces four messages
+and only one of them is public:
+
+| message | to | |
+|---|---|---|
+| queue position | the requester | private NOTICE |
+| "Sending" | the requester | private NOTICE |
+| `DCC SEND` | the requester | private CTCP |
+| **"Sent: ... To: ..."** | **the channel** | **public PRIVMSG** |
+
+`ANNOUNCE_TRANSFERS` gates the last one and nothing else. Turning it off does
+not make a request go unanswered: whoever asked is told exactly what they were
+told before. It is the channel that stops being told afterwards.
+
+**And it does not take the operator's own log with it.**
+`send_transfer_complete()` also writes the debug line that records the send,
+and the obvious implementation - an early return - would have silenced both.
+Somebody who does not want the channel told is not somebody who wants to stop
+seeing their own transfers, so the gate is around the channel send alone.
+Turning it off still prints a line saying the send happened and that the
+notice is off, because silence in the operator's own console is how a setting
+gets blamed for a bug.
+
+**No bold, anywhere.** Fifty markers across eight outbound paths: the advert,
+the completion notice, `@find` results, the private notices, the pack error,
+the debug channel. `theme.BOLD` stays defined - theme.py's own note is that
+bold and reset are IRC control characters with fixed meanings, and that is
+still true - and `blocks()` still returns eight values, because renaming an
+unpacking eight call sites share would have been churn to say nothing.
+
+**The golden fixture moved, and how it moved is the point.** `tests/_golden_
+palette.py` pins every outbound path to exact bytes, so removing bold failed
+six subtests, which is the fixture doing its job. Regenerating it by
+re-capturing would have been the easy way and the wrong one: a fresh capture
+absorbs anything ELSE that has drifted since, which is precisely what the file
+exists to prevent.
+
+So the difference was proved first - drive every path, strip `\x02` from each
+stored line, and check that this reproduces the new line **exactly**, for all
+eight:
+
+    ok    send_transfer_complete       bold removed: 14
+    ok    send_dcc_sending_notice      bold removed: 4
+    ok    send_search_result_header    bold removed: 12
+    ok    list.execute_search          bold removed: 12
+    ...
+    every path differs by bold alone
+
+and only then was that same transformation applied to the fixture. Its
+docstring now records that the baseline moved once, deliberately, and what has
+to be proved before it moves again.
+
+Eight mutants, all caught - including the one that matters most here: gating
+the debug line along with the channel notice, which every test that only
+checks "the channel went quiet" would have passed.
+
+### 🔴 Kicked from a channel, and nothing noticed
+
+Reported from a live channel:
+
+> a slight bug there, dccore doesn't appear to rejoin a chan if kicked or
+> banned, maybe add an option that it can try to rejoin when the advert timer
+> triggers
+
+**It was worse than not rejoining.** `KICK` was not parsed anywhere, so DCCore
+did not know it had left. It went on advertising into a channel it was not in
+- the server answers those with 404 and nothing reads it - and never asked to
+come back. `474 ERR_BANNEDFROMCHAN` was not parsed either, so a refused join
+was equally invisible: the bot could be locked out of a channel for weeks with
+no sign anywhere.
+
+**The retry rides on the advert timer**, exactly as suggested, and that is the
+right cadence for a reason beyond convenience: an instant rejoin reads as a
+fight with whoever kicked us, and is how a kick becomes a ban. The advert
+interval is already the bot's own rhythm, and it is the moment it was about to
+speak there anyway - so no new clock, and nothing to tune.
+
+**Giving up is the point, not retrying.** A channel answering "you are banned"
+will answer that way for as long as the ban stands, and a bot that keeps asking
+is a bot that earns a longer one. After `REJOIN_ATTEMPTS` refusals (3, or 0 to
+never rejoin at all) DCCore stops trying that channel and says so.
+
+Four numerics count as a refusal - `471` full, `473` invite-only, `474`
+banned, `475` bad key - because each will keep being a refusal until somebody
+changes something on their side, which is what makes a bounded retry the right
+shape rather than a backoff.
+
+**What it will not do:**
+
+- chase a channel that is not in `CHANNEL`. Somebody invited the bot
+  somewhere, or the operator has removed it since; rejoining would be the bot
+  deciding where it belongs.
+- count a refusal for a channel it was not already trying to return to. That
+  would turn an ordinary failed JOIN into the start of a retry schedule
+  nobody asked for.
+- treat a later kick as a continuation. The count is CONSECUTIVE refusals, so
+  a channel that let us back in and threw us out months later starts again.
+
+**Where the rule lives.** `irc.py` counts and decides; `announce.py`'s worker
+asks it what to send. The read thread must never block on a socket write, and
+the advert worker must not hold a lock or know what a kick is - so the worker
+carries no limit, no count and no comparison of its own. A test asserts that,
+because two copies of the rule could disagree about when to stop.
+
+**A mutation run found dead code**, which is worth recording because the two
+guards look identical and only one does anything. `channels_to_rejoin()` had
+an early `if limit <= 0: return []` above a comparison of `refusals < limit` -
+false for every entry that can exist when the limit is 0, so the guard was
+unreachable. In `gave_up_on()` the same line is load-bearing: there the
+comparison is `refusals >= limit`, TRUE for everything, so without it an
+operator who turned rejoining off would be told the bot had "given up" on a
+channel it had never tried. The dead one is gone, the live one is documented,
+and the asymmetry is a test.
+
+Eleven mutants, all caught.
+
 ### 🔴 One accented filename stopped the list rebuilding
 
 Reported from a live install on a Greek Windows box:
