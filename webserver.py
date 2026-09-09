@@ -2070,7 +2070,8 @@ SETTINGS_CATEGORIES = (
                                                 "MAX_LIST_TEXT_SIZE",
                                                 "FETCH_HISTORY_DAYS",
                                                 "FETCH_HISTORY_MAX_ROWS"]),
-    ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "BROADCAST_SEARCH_CHANNEL",
+    ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "ANNOUNCE_TRANSFERS",
+                                                "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN", "CTCP_VERSION_REPLY",
                                                 "MSG_DELAY", "DEBUG_MSG_DELAY"]),
     # Its own category, not a corner of "Advertising & search". The theme
@@ -2194,6 +2195,7 @@ SETTINGS_LABELS = {
     "CUSTOM_THEME_VALUE": "Custom theme: value colour",
     "CUSTOM_THEME_ALERT": "Custom theme: alert colour",
     "CUSTOM_THEME_ACCENT": "Custom theme: accent colour",
+    "ANNOUNCE_TRANSFERS": "Announce finished transfers in the channel",
     "REJOIN_ATTEMPTS": "Rejoin attempts after a kick (0 = never)",
     "ANNOUNCE_INTERVAL": "Advert interval (seconds)",
     "BROADCAST_SEARCH_CHANNEL": "Broadcast search channel",

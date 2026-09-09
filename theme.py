@@ -195,6 +195,13 @@ def blocks(settings=None):
 
     Returns (border, separator, textbox, reset, bold, value, alert, accent).
 
+    `bold` is still returned and is no longer used by any template. Asked for
+    directly: "theme shouldn't have bold in any location of the message ...
+    That's for everywhere bot advertisement answers to find requests etc. No
+    bolds." It stays in the tuple because it is a protocol constant that
+    remains true, and because removing it would renumber an unpacking that
+    eight call sites share for the sake of a name nobody reads.
+
     A tuple rather than the dict because every call site unpacks it into the
     local names its templates already use - which is what makes this a change
     of where the values come from and not a change to a single line of

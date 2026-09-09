@@ -349,6 +349,16 @@ FETCH_HISTORY_FILE: str = "./data/fetch_history.json"
 REJOIN_ATTEMPTS: int = 3
 
 
+# Announce a finished transfer in the channel it was requested from.
+#
+# This is the ONLY public message a transfer produces. The queue position, the
+# "Sending" notice and the DCC offer itself are private to whoever asked, so
+# turning this off does not make a request go unanswered - it only stops the
+# channel being told afterwards.
+#
+# Your own debug line still records every send either way.
+ANNOUNCE_TRANSFERS: bool = True
+
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------
