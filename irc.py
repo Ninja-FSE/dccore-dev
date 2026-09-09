@@ -340,6 +340,143 @@ def parse_privmsg(line):
     return match.group(1), match.group(2), match.group(3), match.group(4)
 
 
+# Numerics a server answers a JOIN with when it will not let us in. Each one
+# is a refusal that will keep being a refusal until somebody changes something
+# on their side, which is what makes a bounded retry the right shape.
+JOIN_REFUSED_NUMERICS = {
+    "471",   # ERR_CHANNELISFULL
+    "473",   # ERR_INVITEONLYCHAN
+    "474",   # ERR_BANNEDFROMCHAN
+    "475",   # ERR_BADCHANNELKEY
+}
+
+
+def parse_kick(line):
+    r"""(kicker, channel, victim) for a well-formed KICK, or None.
+
+    Anchored on the server prefix like every other parser here, and for the
+    same reason: an unanchored search matches the BODY of a PRIVMSG, so
+    anyone could type a KICK line into the channel and have the bot act on
+    it. See parse_privmsg()'s own note.
+
+    `\S+` for the channel, not a character class. A channel with an "&" or a
+    "^" in its name is legal (RFC 2812) and six parsers here used to drop it
+    silently - see is_valid_irc_target().
+    """
+    match = re.match(r"^:([^!\s]+)!\S*\s+KICK\s+(\S+)\s+(\S+)", line)
+    if not match:
+        return None
+    return match.group(1), match.group(2), match.group(3)
+
+
+def parse_join_refusal(line):
+    """(channel, numeric) when the server refuses a JOIN, or None.
+
+    The shape is `:server 474 ournick #chan :Cannot join channel (+b)`, so the
+    channel is the argument after our own nick.
+    """
+    match = re.match(r"^:\S+ (\d{3}) \S+ (\S+)", line)
+    if not match:
+        return None
+    numeric, channel = match.group(1), match.group(2)
+    if numeric not in JOIN_REFUSED_NUMERICS:
+        return None
+    return channel, numeric
+
+
+def configured_channel_set():
+    """The same channels as configured_channels(), folded for comparison.
+
+    A SET and lowercased, which is what a membership test wants and is not
+    what configured_channels() is for - that one is an ordered list because
+    the advert loop walks it and join_target_list() joins it in order.
+
+    Named differently on purpose: the first version of this WAS called
+    configured_channels(), which silently replaced the existing function
+    further up this file and handed a set to two callers that index it.
+    """
+    return {name.lower() for name in configured_channels()}
+
+
+def note_kicked_from(channel, by=""):
+    """Record that we are no longer in `channel`, if it is one of ours.
+
+    A kick from a channel the operator does not list is not our business -
+    somebody invited the bot somewhere, or it was in a channel that has since
+    been removed from CHANNEL - and rejoining it would be the bot deciding
+    where it belongs.
+    """
+    name = str(channel or "").strip().lower()
+    if not name or name not in configured_channel_set():
+        return False
+    with runtime.kicked_channels_lock:
+        config.kicked_channels[name] = {
+            "refusals": 0, "kicked_at": time.time(), "by": str(by or ""),
+        }
+    return True
+
+
+def note_join_refused(channel):
+    """Count one refusal against `channel`. Returns the new count.
+
+    Counts only for a channel we are already trying to get back into: a
+    refusal for anything else is the ordinary business of a JOIN that was
+    never going to work, and inventing a retry schedule for it would start
+    the bot knocking on doors nobody asked it to.
+    """
+    name = str(channel or "").strip().lower()
+    with runtime.kicked_channels_lock:
+        entry = config.kicked_channels.get(name)
+        if entry is None:
+            return 0
+        entry["refusals"] = int(entry.get("refusals", 0)) + 1
+        return entry["refusals"]
+
+
+def note_joined(channel):
+    """A join succeeded, so stop tracking it. Returns what was cleared."""
+    name = str(channel or "").strip().lower()
+    with runtime.kicked_channels_lock:
+        return config.kicked_channels.pop(name, None)
+
+
+def channels_to_rejoin(limit=None):
+    """The channels worth one more JOIN, in a stable order.
+
+    A pure read, so the advert worker can ask this without holding anything
+    and without knowing the rule. `limit` is REJOIN_ATTEMPTS: a channel that
+    has refused that many times is left alone until an operator does
+    something about it, which is the whole point of counting.
+    """
+    if limit is None:
+        limit = int(getattr(config, "REJOIN_ATTEMPTS", 3))
+    # No `limit <= 0` guard here on purpose: the comparison below is already
+    # `refusals < limit`, and with a limit of 0 that is false for every entry
+    # that can exist. The guard gave_up_on() carries is NOT redundant - see
+    # there - and this asymmetry is why they are written out rather than
+    # shared.
+    wanted = configured_channel_set()
+    with runtime.kicked_channels_lock:
+        return sorted(name for name, entry in config.kicked_channels.items()
+                      if name in wanted
+                      and int(entry.get("refusals", 0)) < limit)
+
+
+def gave_up_on(limit=None):
+    """The channels that used up their attempts. What the operator is told."""
+    if limit is None:
+        limit = int(getattr(config, "REJOIN_ATTEMPTS", 3))
+    # LOAD-BEARING, unlike its twin in channels_to_rejoin(). The comparison
+    # below is `refusals >= limit`, which with a limit of 0 is true for every
+    # entry - so without this, an operator who turned rejoining off would be
+    # told the bot had given up on a channel it had never tried.
+    if limit <= 0:
+        return []
+    with runtime.kicked_channels_lock:
+        return sorted(name for name, entry in config.kicked_channels.items()
+                      if int(entry.get("refusals", 0)) >= limit)
+
+
 def parse_notice(line):
     """(nick, target, message) for a well-formed NOTICE line, or None. See
     parse_privmsg()'s docstring for why the anchoring matters - the same
@@ -1879,6 +2016,18 @@ def irc_loop():
                         threading.Thread(target=delayed_join,
                                          args=(s, join_target_list()), daemon=True).start()
 
+                    # A JOIN that worked, whether it was the first one or
+                    # a rejoin. Clearing here rather than in the branch below
+                    # because that one only runs before activation - a channel
+                    # rejoined hours later would otherwise stay marked as
+                    # kicked for the life of the process, and be retried on
+                    # every advert until it ran out of attempts.
+                    if " 366 " in line:
+                        back = re.match(r"^:\S+ 366 \S+ (\S+)", line)
+                        if back and note_joined(back.group(1)) is not None:
+                            announce.send_debug(
+                                f"Rejoined {back.group(1)}.", category="JOIN")
+
                     if joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
                         # FIXED (issue #9): parses WHICH channel the 366 line refers to instead
                         # of just counting them. Activates only once every real target channel
@@ -2041,6 +2190,54 @@ def irc_loop():
                     #
                     # See parse_notice()'s own docstring (top of this file)
                     # for why the anchoring matters.
+                    # BEING THROWN OUT IS A THING THAT HAPPENS TO US, and
+                    # nothing here used to notice. Without this the bot keeps
+                    # advertising into a channel it is not in - the server
+                    # drops those with 404 and says nothing anyone reads - and
+                    # never asks to come back.
+                    #
+                    # Reported from a live channel: "dccore doesn't appear to
+                    # rejoin a chan if kicked or banned, maybe add an option
+                    # that it can try to rejoin when the advert timer
+                    # triggers". The retry rides on that timer; see
+                    # channels_to_rejoin().
+                    #
+                    # Read-only in this loop: the JOIN itself is sent from the
+                    # advert worker, so a kick cannot make this thread block
+                    # on a socket write.
+                    kick_parsed = parse_kick(line)
+                    if kick_parsed:
+                        kicker, kicked_chan, victim = kick_parsed
+                        if victim.lower() == str(getattr(config, "CURRENT_NICK",
+                                                         config.NICKNAME)).lower():
+                            if note_kicked_from(kicked_chan, kicker):
+                                announce.send_debug(
+                                    f"Kicked from {kicked_chan} by {kicker}. "
+                                    f"Will try to rejoin on the next advert.",
+                                    category="PART")
+                            else:
+                                print(f"[KICK] Removed from {kicked_chan}, which is "
+                                      f"not in CHANNEL - not rejoining.")
+
+                    # And the answer when it will not have us back. Counted
+                    # only for a channel we are already trying to return to -
+                    # see note_join_refused().
+                    refusal = parse_join_refusal(line)
+                    if refusal:
+                        refused_chan, numeric = refusal
+                        count = note_join_refused(refused_chan)
+                        if count:
+                            limit = int(getattr(config, "REJOIN_ATTEMPTS", 3))
+                            if count >= limit:
+                                announce.send_debug(
+                                    f"Cannot rejoin {refused_chan} ({numeric}) - "
+                                    f"gave up after {count} attempt(s). It will not "
+                                    f"be tried again until you rehash.",
+                                    category="PART")
+                            else:
+                                print(f"[REJOIN] {refused_chan} refused us "
+                                      f"({numeric}), attempt {count}/{limit}.")
+
                     notice_parsed = parse_notice(line)
                     if notice_parsed:
                         notice_user, notice_target, notice_text = notice_parsed
