@@ -4,6 +4,66 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 Kicked from a channel, and nothing noticed
+
+Reported from a live channel:
+
+> a slight bug there, dccore doesn't appear to rejoin a chan if kicked or
+> banned, maybe add an option that it can try to rejoin when the advert timer
+> triggers
+
+**It was worse than not rejoining.** `KICK` was not parsed anywhere, so DCCore
+did not know it had left. It went on advertising into a channel it was not in
+- the server answers those with 404 and nothing reads it - and never asked to
+come back. `474 ERR_BANNEDFROMCHAN` was not parsed either, so a refused join
+was equally invisible: the bot could be locked out of a channel for weeks with
+no sign anywhere.
+
+**The retry rides on the advert timer**, exactly as suggested, and that is the
+right cadence for a reason beyond convenience: an instant rejoin reads as a
+fight with whoever kicked us, and is how a kick becomes a ban. The advert
+interval is already the bot's own rhythm, and it is the moment it was about to
+speak there anyway - so no new clock, and nothing to tune.
+
+**Giving up is the point, not retrying.** A channel answering "you are banned"
+will answer that way for as long as the ban stands, and a bot that keeps asking
+is a bot that earns a longer one. After `REJOIN_ATTEMPTS` refusals (3, or 0 to
+never rejoin at all) DCCore stops trying that channel and says so.
+
+Four numerics count as a refusal - `471` full, `473` invite-only, `474`
+banned, `475` bad key - because each will keep being a refusal until somebody
+changes something on their side, which is what makes a bounded retry the right
+shape rather than a backoff.
+
+**What it will not do:**
+
+- chase a channel that is not in `CHANNEL`. Somebody invited the bot
+  somewhere, or the operator has removed it since; rejoining would be the bot
+  deciding where it belongs.
+- count a refusal for a channel it was not already trying to return to. That
+  would turn an ordinary failed JOIN into the start of a retry schedule
+  nobody asked for.
+- treat a later kick as a continuation. The count is CONSECUTIVE refusals, so
+  a channel that let us back in and threw us out months later starts again.
+
+**Where the rule lives.** `irc.py` counts and decides; `announce.py`'s worker
+asks it what to send. The read thread must never block on a socket write, and
+the advert worker must not hold a lock or know what a kick is - so the worker
+carries no limit, no count and no comparison of its own. A test asserts that,
+because two copies of the rule could disagree about when to stop.
+
+**A mutation run found dead code**, which is worth recording because the two
+guards look identical and only one does anything. `channels_to_rejoin()` had
+an early `if limit <= 0: return []` above a comparison of `refusals < limit` -
+false for every entry that can exist when the limit is 0, so the guard was
+unreachable. In `gave_up_on()` the same line is load-bearing: there the
+comparison is `refusals >= limit`, TRUE for everything, so without it an
+operator who turned rejoining off would be told the bot had "given up" on a
+channel it had never tried. The dead one is gone, the live one is documented,
+and the asymmetry is a test.
+
+Eleven mutants, all caught.
+
 ### 🔴 One accented filename stopped the list rebuilding
 
 Reported from a live install on a Greek Windows box:

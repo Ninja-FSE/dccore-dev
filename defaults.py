@@ -332,6 +332,22 @@ FETCHED_BOT_LISTS_FILE: str = "./data/fetched_bot_lists.json"
 # deliberately never written here, since none of those can mean anything
 # once the process that was driving them is gone.
 FETCH_HISTORY_FILE: str = "./data/fetch_history.json"
+# How many times to try rejoining a channel that has thrown us out, before
+# giving up on it.
+#
+# The retry rides on the advert timer rather than a clock of its own. That is
+# the moment the bot was about to speak there anyway, and it is slow enough
+# not to read as a fight with whoever kicked us - an instant rejoin is how a
+# kick becomes a ban.
+#
+# Giving up matters more than retrying. A channel that answers "you are
+# banned" will answer that way for as long as the ban stands, and a bot that
+# keeps asking is a bot that earns a longer one. After this many refusals
+# DCCore stops trying that channel and says so, rather than asking forever.
+#
+# 0 never rejoins at all.
+REJOIN_ATTEMPTS: int = 3
+
 
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
