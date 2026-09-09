@@ -87,6 +87,11 @@ RUNTIME_CONTAINERS = {
     # port), the DCC port range is small and reused, and a stale entry would
     # hand the next test's send an offset agreed for a different file.
     "dcc_send_offers": dict,
+    # Channels we have been kicked from, and how many rejoins have been
+    # refused. Left behind, a test that provokes a kick makes the next one
+    # think it is banned from a channel it never left - and the advert worker
+    # would try to rejoin it.
+    "kicked_channels": dict,
 }
 
 RUNTIME_FLAGS = {

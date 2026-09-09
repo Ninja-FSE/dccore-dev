@@ -271,12 +271,12 @@ def build_advert_line(channel, nickname, file_count, total_size, list_date,
     BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks(settings)
     return (
         f"PRIVMSG {channel} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Type: {B}{V}@{nickname}{R}{BG_TEXT_BOX} For My List Of: {B}{A}{file_count}{R}{BG_TEXT_BOX} Files ({total_size}) created {V}{list_date} "
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Type: {V}@{nickname}{R}{BG_TEXT_BOX} For My List Of: {A}{file_count}{R}{BG_TEXT_BOX} Files ({total_size}) created {V}{list_date} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {slots} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {queued} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {speed} / Record: {record} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {total_sent} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {B}{V}ON{R}{BG_TEXT_BOX} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Search: {V}ON{R}{BG_TEXT_BOX} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {version} {BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
     )
 
@@ -292,12 +292,12 @@ def build_transfer_complete_line(channel, user, shown_name, total_sent,
     BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks(settings)
     return (
         f"PRIVMSG {channel} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {B}{V}Sent{B}{BG_TEXT_BOX}: {B}{shown_name}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} To: {B}{V}{user}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {B}{V}{total_sent}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Yesterday: {B}{A}{yesterday}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Today: {B}{A}{today}{B} {X}[as of {at_time}] "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {B}{V}{speed}{B} "
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} {V}Sent{BG_TEXT_BOX}: {shown_name} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} To: {V}{user} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Total Sent: {V}{total_sent} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Yesterday: {A}{yesterday} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Today: {A}{today} {X}[as of {at_time}] "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Speed: {V}{speed} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
     )
 
@@ -355,11 +355,25 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     # The filename is the only unbounded field here and it comes straight off the disk. A
     # long classical track name pushed this line past 512 bytes and the server truncated it
     # mid-colour-code, so the channel saw the announcement smear into background colour.
-    msg = fit_irc_line(_build, file_name)
-    if oserve:
-        oserve.queue_message("channel_announce", msg)
-    print(f"[ANNOUNCE] Queued the block transfer complete notice for {channel}, "
-          f"user {user} ({speed_str})")
+    # THE ONLY PUBLIC MESSAGE A TRANSFER PRODUCES, and the only one an
+    # operator may not want. The other three - the queue position, the
+    # "Sending" notice and the DCC handshake itself - are private to the
+    # person who asked, so they are not covered by this and turning it off
+    # does not make a request go unanswered.
+    #
+    # The gate is around the CHANNEL send alone. The debug line below still
+    # goes out: an operator who does not want the channel told is not an
+    # operator who wants their own log to stop saying what was sent, and the
+    # figures this function reads are used by both.
+    if getattr(config, "ANNOUNCE_TRANSFERS", True):
+        msg = fit_irc_line(_build, file_name)
+        if oserve:
+            oserve.queue_message("channel_announce", msg)
+        print(f"[ANNOUNCE] Queued the block transfer complete notice for {channel}, "
+              f"user {user} ({speed_str})")
+    else:
+        print(f"[ANNOUNCE] Transfer complete for {user} ({speed_str}) - the "
+              f"channel notice is off (ANNOUNCE_TRANSFERS).")
 
     # The closing line, using the live 'speed_str' safely
     try:
@@ -387,8 +401,8 @@ def send_dcc_sending_notice(user, file_name):
     def _build(shown_name):
         return (
             f"NOTICE {user} :"
-            f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Sending: {B}{shown_name}{B} "
-            f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Status: {B}{V}Active Transfer Started{B} "
+            f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Sending: {shown_name} "
+            f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Status: {V}Active Transfer Started "
             f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
         )
 
@@ -465,6 +479,26 @@ def announce_worker():
                 # measurement window - see its docstring.
                 speed_bytes_per_sec = stats_mgr.live_speed()
                 speed_str = stats_mgr.format_speed(speed_bytes_per_sec)
+
+                # ASK TO COME BACK, at the moment we were about to speak
+                # there anyway. An instant rejoin after a kick reads as a
+                # fight with whoever did it, and is how a kick becomes a ban;
+                # the advert interval is slow enough to be polite and is
+                # already the bot's own rhythm, so it needs no clock of its
+                # own. Suggested exactly this way from a live channel.
+                #
+                # irc.py owns the rule and the counting - this only sends what
+                # it is told to, so the advert worker holds no lock and knows
+                # nothing about kicks.
+                try:
+                    import irc as irc_mod
+                    for waiting in irc_mod.channels_to_rejoin():
+                        if oserve:
+                            oserve.queue_message(
+                                "channel_announce", f"JOIN {waiting}\r\n")
+                            print(f"[REJOIN] Asking to rejoin {waiting}.")
+                except Exception as rejoin_err:
+                    print(f"[REJOIN ERROR] Could not attempt a rejoin: {rejoin_err}")
 
                 for chan in channels_to_spam:
                     chan = chan.strip()
@@ -566,11 +600,11 @@ def send_search_result_header(user, search_term, match_count, channel):
     def _build(shown_term):
         return (
         f"PRIVMSG {user} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Search Result: {B}{V}ON{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Found: {B}{A}{match_count}{B} Match(es) For {B}{V}{shown_term}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Sending: {B}{A}{sending_count}{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {B}{V}{free_slots}/{config.MAX_DCC_SLOTS}{B} Free "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {B}{V}{queued_count}{B} "
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} Search Result: {V}ON "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Found: {A}{match_count} Match(es) For {V}{shown_term} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Sending: {A}{sending_count} "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Slots: {V}{free_slots}/{config.MAX_DCC_SLOTS} Free "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Queued: {V}{queued_count} "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
         )
     
@@ -637,7 +671,7 @@ def send_debug(msg_text, category="INFO"):
     BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
     
     # 1. The opening block: the timestamp, framed in white
-    msg = f"PRIVMSG {config.DEBUG_CHANNEL} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} [{current_time}] {B}DEBUG{B} "
+    msg = f"PRIVMSG {config.DEBUG_CHANNEL} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} [{current_time}] DEBUG "
     
     # 2. The tag block, colour-coded by event
     if category.upper() == "SENT":
@@ -672,7 +706,7 @@ def send_debug(msg_text, category="INFO"):
     else:
         tag_str = f"{config.C_GREY}[INFO]{R}{BG_TEXT_BOX}"
   
-    msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} {B}Category{B}: {tag_str} "
+    msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Category: {tag_str} "
     
     # 3. The text block, stripped of any colour codes that would clash
     clean_text = msg_text.replace(config.C_BOLD, "").replace(config.C_RESET, "").replace("\x02", "").replace("\x0f", "")
@@ -740,8 +774,8 @@ def send_pack_error_notice(irc_sock, user):
     # Build the message inside the standard frame
     msg = (
         f"NOTICE {user} :"
-        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} DCC-PACK: {B}Access Denied{B} "
-        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Error: {B}Artist root folders cannot be requested. Please select a specific album sub-folder.{B} "
+        f"{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} DCC-PACK: Access Denied "
+        f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Error: Artist root folders cannot be requested. Please select a specific album sub-folder. "
         f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} \r\n"
     )
     
