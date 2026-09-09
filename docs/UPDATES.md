@@ -4,6 +4,71 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 No bold anywhere, and the channel need not be told
+
+Two things asked for together:
+
+> Should be able to hide that message if you don't want to send public
+> messages. In settings. Also theme shouldn't have bold in any location of the
+> message. That's for everywhere bot advertisement answers to find requests
+> etc. No bolds
+
+**One public message, and now it is optional.** A send produces four messages
+and only one of them is public:
+
+| message | to | |
+|---|---|---|
+| queue position | the requester | private NOTICE |
+| "Sending" | the requester | private NOTICE |
+| `DCC SEND` | the requester | private CTCP |
+| **"Sent: ... To: ..."** | **the channel** | **public PRIVMSG** |
+
+`ANNOUNCE_TRANSFERS` gates the last one and nothing else. Turning it off does
+not make a request go unanswered: whoever asked is told exactly what they were
+told before. It is the channel that stops being told afterwards.
+
+**And it does not take the operator's own log with it.**
+`send_transfer_complete()` also writes the debug line that records the send,
+and the obvious implementation - an early return - would have silenced both.
+Somebody who does not want the channel told is not somebody who wants to stop
+seeing their own transfers, so the gate is around the channel send alone.
+Turning it off still prints a line saying the send happened and that the
+notice is off, because silence in the operator's own console is how a setting
+gets blamed for a bug.
+
+**No bold, anywhere.** Fifty markers across eight outbound paths: the advert,
+the completion notice, `@find` results, the private notices, the pack error,
+the debug channel. `theme.BOLD` stays defined - theme.py's own note is that
+bold and reset are IRC control characters with fixed meanings, and that is
+still true - and `blocks()` still returns eight values, because renaming an
+unpacking eight call sites share would have been churn to say nothing.
+
+**The golden fixture moved, and how it moved is the point.** `tests/_golden_
+palette.py` pins every outbound path to exact bytes, so removing bold failed
+six subtests, which is the fixture doing its job. Regenerating it by
+re-capturing would have been the easy way and the wrong one: a fresh capture
+absorbs anything ELSE that has drifted since, which is precisely what the file
+exists to prevent.
+
+So the difference was proved first - drive every path, strip `\x02` from each
+stored line, and check that this reproduces the new line **exactly**, for all
+eight:
+
+    ok    send_transfer_complete       bold removed: 14
+    ok    send_dcc_sending_notice      bold removed: 4
+    ok    send_search_result_header    bold removed: 12
+    ok    list.execute_search          bold removed: 12
+    ...
+    every path differs by bold alone
+
+and only then was that same transformation applied to the fixture. Its
+docstring now records that the baseline moved once, deliberately, and what has
+to be proved before it moves again.
+
+Eight mutants, all caught - including the one that matters most here: gating
+the debug line along with the channel notice, which every test that only
+checks "the channel went quiet" would have passed.
+
 ### 🔴 One accented filename stopped the list rebuilding
 
 Reported from a live install on a Greek Windows box:

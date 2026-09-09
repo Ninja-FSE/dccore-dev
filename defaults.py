@@ -333,6 +333,16 @@ FETCHED_BOT_LISTS_FILE: str = "./data/fetched_bot_lists.json"
 # once the process that was driving them is gone.
 FETCH_HISTORY_FILE: str = "./data/fetch_history.json"
 
+# Announce a finished transfer in the channel it was requested from.
+#
+# This is the ONLY public message a transfer produces. The queue position, the
+# "Sending" notice and the DCC offer itself are private to whoever asked, so
+# turning this off does not make a request go unanswered - it only stops the
+# channel being told afterwards.
+#
+# Your own debug line still records every send either way.
+ANNOUNCE_TRANSFERS: bool = True
+
 # ---------------------------------------------------------------------
 # 4. CHANNEL ADVERTISING (THE ADVERT CLOCK)
 # ---------------------------------------------------------------------
