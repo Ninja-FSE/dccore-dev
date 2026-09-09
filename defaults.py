@@ -746,6 +746,7 @@ user_requests     = runtime.user_requests      # Command timestamps per user, an
 muted_until       = runtime.muted_until        # Timers for temporarily muted users
 whois_status      = runtime.whois_status       # Online status via WHO reply (True = online)
 frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in the freezer
+kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of, and rejoin refusals
 
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}
