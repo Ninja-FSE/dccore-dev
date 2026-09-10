@@ -2,6 +2,8 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **A list with no albums in it no longer carries an empty album section.** If everything you serve on a given list is film or series, that list can never offer an `!rar` album — but DCCore still built an album list for it and glued it onto the end of the download every user receives: a heading and nothing under it, in every copy. The album section is now written only when there is something to put in it. Libraries with music are unaffected, and turning off `!rar` packing entirely behaves exactly as before.
+
 - **Fixed: when a list rebuild failed, the dashboard showed “could not generate the list” and never said why.** The reason was there - a missing folder, a permission error, a drive that had gone away - but the message picked the last line the builder printed, and the builder always ends with that same generic line. The real explanation was one line above it, collected and discarded. It now shows the actual error.
 
 - **You can turn off the public “Sent:” message in the channel.** Settings → Advertising & search → **Announce finished transfers in the channel**. This is the only public message a transfer produces — the queue position, the “Sending” notice and the file offer itself all go privately to whoever asked, so turning it off does not stop requests being answered or leave anyone wondering what happened. Your own log still records every send. On by default; nothing changes unless you switch it off.

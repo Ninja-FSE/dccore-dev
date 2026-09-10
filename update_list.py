@@ -1192,6 +1192,41 @@ def generate_master_list(list_name=None):
     suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
     date_header_str = datetime.datetime.now().strftime(f"{day}{suffix} %b %Y")
     
+    # A LIST THAT CANNOT PRODUCE AN ALBUM DOES NOT GET AN ALBUM SECTION.
+    #
+    # serve_albums is one global read of RAR_ENABLED, applied to every list a
+    # build produces. That is right for the switch itself - an operator turning
+    # packing off means everywhere - and wrong as the only question asked,
+    # because a list can be incapable of packing anything regardless of the
+    # switch.
+    #
+    # A video-only list is the case that showed it. Since #288, a folder earns
+    # its !rar row by holding a file in RAR_EXTENSIONS, and those are the audio
+    # formats; LIST_VIDEO_EXTENSIONS and RAR_EXTENSIONS share not one entry. So
+    # its album list is not "usually empty" - it can never hold a row, for any
+    # library, under any configuration.
+    #
+    # It was still built, and still shipped: the masthead makes the file
+    # non-empty, so the `getsize > 0` test below let it into the archive every
+    # user downloads. Four dead lines and a heading with nothing behind it,
+    # once per download, forever.
+    #
+    # DECIDED AFTER THE SCAN, not from the extension sets. What actually
+    # matters is whether this list produced a packable folder, and the scan has
+    # just finished answering that exactly - where reasoning from the
+    # configured extensions would be predicting it, and would be wrong for a
+    # list whose folders simply hold no albums today and might tomorrow.
+    #
+    # Turning serve_albums off HERE rather than adding a second flag is what
+    # makes this small: every consequence already exists below - the masthead
+    # is skipped, no rows are written, the empty temp file fails the size test
+    # for the archive, and the `if not serve_albums:` branch removes it instead
+    # of publishing it.
+    if serve_albums and not packable_folders:
+        serve_albums = False
+        print("[LIST-GEN] No folder in this list can be packed - skipping the "
+              "album list rather than shipping an empty one.")
+
     try:
         with open(tmp_txt_path, "w", encoding="utf-8") as f, \
              open(tmp_rar_path, "w", encoding="utf-8") as f_rar:
