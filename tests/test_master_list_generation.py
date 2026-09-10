@@ -936,13 +936,37 @@ class OnlyWhatIsWorthPackingIsPackable(MasterListCase):
 
     def test_an_empty_packable_set_makes_nothing_packable(self):
         """A real configuration - "index everything, pack nothing" - and not
-        one that should fall back to packing everything."""
+        one that should fall back to packing everything.
+
+        THE ALBUM LIST IS NOT WRITTEN AT ALL now, where this used to assert it
+        was written with no rows. Both say nothing is packable; the file's
+        absence says it better. An album list holding only its own masthead is
+        four dead lines and a heading with nothing behind it, and it shipped
+        inside the archive every user downloads - see #383, and the identical
+        reasoning already applied when RAR_ENABLED is off."""
         self.set_config(RAR_EXTENSIONS=[])
         self.add("Music/Artist/Album/Track.flac")
 
         self.assertTrue(self.generate())
 
-        self.assertEqual(self.rar_rows(), [])
+        published = [n for n in os.listdir(self.tree.lists) if "-RAR-" in n]
+
+        self.assertEqual(published, [],
+                         "an album list that can never hold a row was still "
+                         "published")
+
+    def test_the_rest_of_the_list_is_unaffected_by_that(self):
+        """Guard on the guard: a build that produced nothing at all would also
+        satisfy the assertion above."""
+        self.set_config(RAR_EXTENSIONS=[])
+        self.add("Music/Artist/Album/Track.flac")
+
+        self.assertTrue(self.generate())
+
+        rows = [line for line in self.read_list().splitlines()
+                if line.startswith("!")]
+
+        self.assertTrue(rows, "the file list itself went missing too")
 
 
 class RarExtensionsIsAGateNotADisplayRule(MasterListCase):
