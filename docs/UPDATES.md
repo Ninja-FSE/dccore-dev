@@ -4,6 +4,68 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 The advert owns the trigger; the sender owns the identity
+
+Seen in a live console:
+
+    [ADVERT] Bsk- advertised as 'Bsk' - ignoring; the sender is the authority
+    on who a bot is.
+
+The log line is right about the principle and the code was applying it to the
+wrong field. **Bsk's RAR list was never learned at all.**
+
+**What the advert actually says:**
+
+    <+Bsk-> Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+
+Sender `Bsk-`, trigger `Bsk^`. `_parse_rar_folder_advert()` took the text
+inside the trigger and returned it as `nick`, the caller compared that against
+the sender, they differed, and the whole advert was discarded.
+
+That worked for the three bots it was written against, whose triggers happen
+to be their nick with a `^` on the end. Its docstring said so outright: *"Zkx
+sends this, 'Zkx^' does not exist."* True for Zkx. Not a rule.
+
+**The trigger is configurable and is not a name.** From the operator who
+reported it: mx.rarserver's default is `@<nick>^` *"but he could have w/e"*.
+So it cannot be derived from the nick, and the nick cannot be derived from it,
+in either direction. Two facts were being carried in one field.
+
+- The **sender** is the identity, exactly as the log line claims. The parser
+  returns `nick: None` now - "this advert makes no claim about who sent it" -
+  and the caller skips a comparison it has nothing to compare.
+- The **advert** is the authority on the trigger, captured verbatim as a
+  token. The regex no longer requires a `^`, because matching on that was
+  matching on somebody's default.
+
+**The other two wordings still have their name checked.** OmenServe and SPQR
+put the bot's own nick in the text, so a mismatch there really is one bot
+advertising as another, and that check is what refuses it. Relaxing it for one
+family must not relax it for those, which is a test.
+
+**Why relaxing it is safe here**, checked rather than assumed: a forged trigger
+would be recorded under the *forger's* key, and
+`dcc_fetch._claim_matching_offer_locked()` matches an incoming DCC offer
+against the bot the request went to. An offer from anyone else is already
+rejected as unsolicited. The residue is that DCCore could be made to type an
+odd `@string` into a channel it is already in - so the trigger is validated for
+shape before it is kept, and a trigger that could not be sent safely is
+dropped while the bot is still recorded as publishing a RAR list. Only the
+shortcut is lost.
+
+**What this does not do yet.** A list fetch still sends `@<nick>`, so the
+stored trigger is not used to *ask* for a RAR list - it is recorded, and
+`bot_publishes_a_rar_list()` now answers correctly for bots like Bsk that were
+previously invisible. Asking by trigger is a separate change with its own
+request type.
+
+Seven mutants, all caught. One survived first and the fix was not to delete the
+check it exposed: a trigger with a space cannot reach `_TRIGGER_RE` through the
+parser, because the advert regex captures `\S+`. The validator guards a value
+that ends up in a PRIVMSG, and what may reach it is the caller's business today
+and not necessarily tomorrow - so it is exercised directly instead, on its own
+terms.
+
 ### 🔴 A list that cannot produce an album no longer ships an album section
 
 Issue #383, a follow-up to #288 which is otherwise done. A video-only list was

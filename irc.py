@@ -736,9 +736,25 @@ _SPQR_NICK_RE = re.compile(r"type\s+@(\S+)", re.IGNORECASE)
 
 # The separate RAR-folder list: "Type @Zkx^ to get my list of 39,454 (5.48 TB)
 # RAR folders". The trigger carries a "^" the bot's own nick does not.
+# THE WHOLE TRIGGER, not "a nick and then a caret". mx.rarserver's default
+# trigger is @<nick>^, and the "^" is what the old pattern matched on - but the
+# trigger is configurable and the nick is not part of it at all. Bsk- advertises
+#
+#     Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+#
+# where the sender is "Bsk-" and the trigger is "Bsk^": not the nick, not the
+# nick plus a suffix, just a string that bot chose. Capturing the token and
+# asking nothing else of it is the only thing that works for every operator.
 _RAR_RE = re.compile(
-    r"Type\s+@(\S+?)\^\s+to\s+get\s+my\s+list\s+of\s+([\d,]+)\s*\(([^)]{1,20})\)\s*RAR\s+folders",
+    r"Type\s+@(\S+)\s+to\s+get\s+my\s+list\s+of\s+([\d,]+)\s*\(([^)]{1,20})\)\s*RAR\s+folders",
     re.IGNORECASE)
+
+# What a trigger may look like before we are willing to keep it. It ends up in
+# a PRIVMSG to a channel, so a space or a line ending would end the message and
+# start something else - see is_valid_irc_target() for the same reasoning about
+# a different field. Length capped because nothing legitimate is long and the
+# line budget is 512 bytes.
+_TRIGGER_RE = re.compile(r"^[^\s,\x00-\x1f]{1,64}$")
 
 # nick.lower() -> [first_seen, text_so_far] for an advert that may still be
 # continued on a following line. Module level rather than in runtime.py because
@@ -812,21 +828,47 @@ def _parse_rar_folder_advert(clean):
     (5.48 TB) RAR folders".
 
     A different list from the same bot, not a different bot - Zkx advertises
-    719,041 loose files in one message and 39,454 RAR folders in another. The
-    "^" belongs to the trigger, not to the nick, so it is stripped before the
-    sender check: Zkx sends this, "Zkx^" does not exist.
+    719,041 loose files in one message and 39,454 RAR folders in another.
+
+    NO IDENTITY CLAIM, which is the difference from the other two parsers and
+    the reason this one used to throw good adverts away. It returned the text
+    inside the trigger as `nick`, and the caller compares that against the
+    sender. That works for Zkx, whose trigger happens to be its nick with a
+    "^" on the end. It fails for anyone else:
+
+        <+Bsk-> Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+
+    Sender "Bsk-", trigger "Bsk^" - so `"bsk" != "bsk-"` and the whole advert
+    was discarded, with a log line saying the sender is the authority on who a
+    bot is. Which is TRUE, and is exactly why this parser should never have
+    been claiming to know. The trigger is configurable and has no relationship
+    to the nick that is safe to assume in either direction.
+
+    So: the sender is the identity, and the advert is the authority on the
+    trigger. `nick` is None, meaning "this advert makes no claim about who
+    sent it", and the caller skips the comparison rather than failing it.
+
+    A trigger that could not be sent safely is dropped rather than kept - the
+    bot is still recorded as publishing a RAR list, because rar_folders says
+    so, and only the shortcut to asking for it is lost.
     """
     found = _RAR_RE.search(clean)
     if not found:
         return None
 
-    return {
+    trigger = found.group(1)
+    advert = {
         "family": "rar",
-        "nick": found.group(1),
-        "rar_trigger": found.group(1) + "^",
+        "nick": None,
         "rar_folders": _as_int(found.group(2).replace(",", "")),
         "rar_size": re.sub(r"\s+", "", found.group(3)),
     }
+    if _TRIGGER_RE.match(trigger):
+        advert["rar_trigger"] = trigger
+    else:
+        print(f"[ADVERT] Ignoring a RAR trigger that cannot be sent safely: "
+              f"{trigger[:40]!r}")
+    return advert
 
 
 # Order matters only in that each wording is distinct enough not to overlap:
@@ -950,7 +992,13 @@ def _capture_channel_advert(user, target, msg, now=None):
 
     advert = parse_channel_advert(msg)
     if advert:
-        if advert["nick"].lower() != key:
+        # Only when the advert claims a name. The OmenServe and SPQR wordings
+        # put the bot's own nick in the text, so a mismatch there is somebody
+        # advertising as somebody else and is worth refusing. The RAR wording
+        # carries a TRIGGER, which is not a nick and is not required to
+        # resemble one - see _parse_rar_folder_advert(), which returns None
+        # here rather than a name it would have had to invent.
+        if advert.get("nick") and advert["nick"].lower() != key:
             print(f"[ADVERT] {user} advertised as {advert['nick']!r} - ignoring; "
                   f"the sender is the authority on who a bot is.")
             return

@@ -905,17 +905,32 @@ class SPQRSpeaksDifferently(CaptureTestCase):
 
 class ASecondListOfRarFolders(CaptureTestCase):
     """Three bots serve a SECOND list beside their loose files: RAR folders,
-    advertised in their own message under a "^"-suffixed trigger.
+    advertised in their own message under their own trigger.
 
     Zkx publishes 719,041 loose files and 39,454 RAR folders. They are two
     different lists with two different triggers, and collapsing them would
     report a number that is neither.
+
+    THE ADVERT MAKES NO CLAIM ABOUT WHO SENT IT, and these tests used to
+    assert that it did. The parser returned the text inside the trigger as
+    `nick`, which works only while the trigger happens to be the nick with a
+    "^" on the end - true for all three bots here, and false the moment a
+    fourth turned up:
+
+        <+Bsk-> Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+
+    Sender "Bsk-", trigger "Bsk^", so the sender check failed and the whole
+    advert was dropped. The trigger is configurable in mx.rarserver and has no
+    relationship to the nick that can be assumed in either direction, so
+    `nick` is None now and the sender is the only identity there is.
     """
 
     def test_it_parses(self):
         advert = irc.parse_channel_advert(ZKX_RAR)
 
-        self.assertEqual(advert["nick"], "Zkx")
+        self.assertIsNone(advert["nick"],
+                          "a RAR advert carries a trigger, not a name - "
+                          "claiming one is what dropped Bsk's")
         self.assertEqual(advert["rar_folders"], 39454)
         self.assertEqual(advert["rar_size"], "5.48TB")
         self.assertEqual(advert["rar_trigger"], "Zkx^")
@@ -952,9 +967,84 @@ class ASecondListOfRarFolders(CaptureTestCase):
         for nick, text in RAR_ADVERTS:
             with self.subTest(nick=nick):
                 advert = irc.parse_channel_advert(text)
-                self.assertEqual(advert["nick"], nick)
+                self.assertIsNone(advert["nick"])
                 self.assertEqual(advert["rar_trigger"], nick + "^")
                 self.assertGreater(advert["rar_folders"], 0)
+
+    def test_a_trigger_that_is_not_the_nick_is_kept_and_the_bot_recorded(self):
+        """The advert that used to be thrown away. Reported from a live
+        channel, where DCCore logged "Bsk- advertised as 'Bsk' - ignoring" and
+        never learned that bot had a RAR list at all."""
+        advert = irc.parse_channel_advert(
+            "Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders")
+
+        self.assertEqual(advert["rar_trigger"], "Bsk^")
+
+        self.capture("Bsk-", "Type @Bsk^ to get my list of 39,454 "
+                             "(5.48 TB) RAR folders")
+
+        self.assertIn("bsk-", runtime.known_bots,
+                      "recorded under the SENDER, which is who to ask")
+        self.assertEqual(self.entry("Bsk-")["rar_trigger"], "Bsk^")
+
+    def test_a_trigger_need_not_end_in_a_caret_at_all(self):
+        """mx.rarserver's default is @<nick>^ and the operator can set
+        anything. Matching on the "^" was matching on a default."""
+        advert = irc.parse_channel_advert(
+            "Type @rarlist to get my list of 12 (1 GB) RAR folders")
+
+        self.assertEqual(advert["rar_trigger"], "rarlist")
+
+    def test_a_trigger_that_could_not_be_sent_is_dropped_not_kept(self):
+        """It ends up in a PRIVMSG to a channel. A comma would make it two
+        targets; anything longer than a line is not a trigger."""
+        advert = irc.parse_channel_advert(
+            "Type @a,b to get my list of 12 (1 GB) RAR folders")
+
+        self.assertNotIn("rar_trigger", advert)
+        self.assertEqual(advert["rar_folders"], 12,
+                         "the bot still publishes a RAR list - only the "
+                         "shortcut to asking for it is lost")
+
+    def test_the_trigger_validator_refuses_everything_it_should(self):
+        """Exercised DIRECTLY, not through the parser.
+
+        The advert regex captures `\\S+`, so a trigger containing a space can
+        never reach the validator by that route - which means a test that
+        feeds one to parse_channel_advert() proves nothing about the space
+        check, and a mutation run said exactly that.
+
+        The check stays, and is asserted here, because _TRIGGER_RE is a guard
+        on a value that ends up in a PRIVMSG. What may reach it is the
+        caller's business today and not necessarily tomorrow; a validator that
+        only refuses what its current caller cannot produce is not a
+        validator.
+        """
+        for bad, why in (
+            ("has space", "a space ends the message and starts an argument"),
+            ("a,b", "a comma makes it two targets"),
+            ("with\rcr", "a bare CR ends the line"),
+            ("with\nlf", "a bare LF ends the line"),
+            ("", "nothing to send"),
+            ("x" * 65, "longer than anything legitimate"),
+        ):
+            with self.subTest(trigger=bad):
+                self.assertIsNone(irc._TRIGGER_RE.match(bad), why)
+
+    def test_and_accepts_what_bots_actually_use(self):
+        """Guard on the guard: a validator that refused everything would pass
+        every assertion above and drop every trigger there is."""
+        for good in ("Zkx^", "Bsk^", "rarlist", "bot-rar", "x" * 64):
+            with self.subTest(trigger=good):
+                self.assertIsNotNone(irc._TRIGGER_RE.match(good))
+
+    def test_the_other_families_still_have_their_name_checked(self):
+        """Relaxing the check for one wording must not relax it for the two
+        that really do put the bot's own nick in the text - that comparison is
+        what stops one bot advertising as another."""
+        advert = irc.parse_channel_advert(ZKX)
+
+        self.assertEqual(str(advert["nick"]).lower(), "zkx")
 
 
 class TheExactSizeComesFromTheCtcp(CaptureTestCase):
