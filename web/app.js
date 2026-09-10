@@ -138,6 +138,12 @@
     filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
     filelistsFreshness: document.getElementById("filelists-freshness"),
+    // filelistsPurgeListBtn, not filelistsPurgeBtn: #388 is adding a BULK
+    // "purge every offline bot's list" button to the toolbar under that
+    // exact name. Two keys with the same name in this object literal merge
+    // cleanly in git and then silently keep the last one, so one of the two
+    // buttons would stop working with no error anywhere.
+    filelistsPurgeListBtn: document.getElementById("filelists-purge-btn"),
     filelistsBotList: document.getElementById("filelists-bot-list"),
     filelistsPurgeBtn:    document.getElementById("filelists-purge-offline-btn"),
     filelistsPurgeStatus: document.getElementById("filelists-purge-status"),
@@ -1940,6 +1946,10 @@
       });
     }
 
+    if (el.filelistsPurgeListBtn) {
+      el.filelistsPurgeListBtn.addEventListener("click", purgeCurrentList);
+    }
+
     el.filelistsDownloadSelectedBtn.addEventListener("click", function () {
       var checked = el.filelistsBody.querySelectorAll(".filelists-check:checked");
       var items = Array.prototype.map.call(checked, function (box) {
@@ -2191,6 +2201,10 @@
   }
 
   function renderFilelistsFreshness() {
+    // Same trigger, same question: both read state.filelistsBots for the open
+    // source, so anywhere one needs redrawing the other does too.
+    renderFilelistsPurge();
+
     var banner = el.filelistsFreshness;
     if (!banner) { return; }
     var row = state.filelistsBots[state.filelistsSource];
@@ -2207,6 +2221,60 @@
       "Their list has changed since you downloaded it \u2014 they advertised " +
       describeAdvert(then) + ", and now advertise " + describeAdvert(now) +
       ". Fetch it again to see what they are offering now.";
+  }
+
+  // OFFERED ONLY WHERE IT MEANS SOMETHING. Your own list is the library and
+  // has no fetched copy to remove; a bot you have only seen advertising has
+  // nothing downloaded either. A button that is present but errors when
+  // pressed teaches people to distrust the whole toolbar.
+  function renderFilelistsPurge() {
+    var button = el.filelistsPurgeListBtn;
+    if (!button) { return; }
+    var source = state.filelistsSource || "__own__";
+    var row = state.filelistsBots[source];
+
+    button.hidden = isOwnSource(source) || !row || !row.held;
+    button.disabled = false;
+  }
+
+  function purgeCurrentList() {
+    var source = state.filelistsSource;
+    var row = state.filelistsBots[source];
+    if (!source || isOwnSource(source) || !row || !row.held) { return; }
+
+    var name = row.label || row.bot || source;
+    // Confirmed because it deletes files and cannot be undone from here -
+    // getting the list back means downloading it from that bot again, which
+    // needs the bot to still be around.
+    if (!window.confirm(
+        "Remove everything downloaded from " + name + "?" +
+        String.fromCharCode(10, 10) +
+        "The list, its extracted files and its rows in the cross-list " +
+        "search index are all deleted. Fetching it again is the only " +
+        "way back.")) {
+      return;
+    }
+
+    el.filelistsPurgeListBtn.disabled = true;
+    postJson("/api/filelists/" + encodeURIComponent(source) + "/purge", {})
+      .then(function (res) {
+        if (!res.ok) {
+          el.filelistsPurgeListBtn.disabled = false;
+          showFilelistsFetchStatus((res.data && res.data.error)
+                                  || "Could not purge that list.", true);
+          return;
+        }
+        showFilelistsFetchStatus((res.data && res.data.detail) || "Purged.",
+                                false);
+        // Back to our own list, because the one that was open no longer
+        // exists - leaving it selected would leave the table showing rows
+        // from a list that has just been deleted.
+        state.filelistsSource = "__own__";
+        state.filelistsOffset = 0;
+        state.filelistsHistory = [];
+        pollFilelistsBots();
+        loadFilelists();
+      });
   }
 
   function describeAdvert(advert) {

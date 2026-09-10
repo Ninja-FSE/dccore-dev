@@ -4,6 +4,150 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 A fetched list can be deleted
+
+Nothing ever removed an entry from `config.fetched_bot_lists`: no TTL, no cap,
+no route, no button (#385). A list fetched once stayed in the List Browser
+forever. The asymmetry is with the *advert* registry, which has had exactly
+this housekeeping for ages - `_prune_known_bots()` in `irc.py`, a TTL plus a
+count cap, evicting oldest-`last_seen` first - while the store the browser
+actually reads never got any.
+
+**The manual action first, and possibly only.** It is exact, it needs no new
+state, and it removes the row **today** rather than in N days. It also covers
+what a timer structurally cannot: a bot that renamed, a channel you have left,
+a list fetched by mistake, or one bot recorded twice because it reconnected on
+its alt nick - which is what produced the screenshot on the issue, and which a
+TTL would clear in N days and then let come back on the next collision.
+
+**Three stores go together or the operation is a lie.** The entry, or the
+sidebar offers a list whose files are gone. The extracted directory, or the
+disk never comes back - which is the whole point for anyone whose fetched
+directory has outgrown what they meant to keep. And the search index rows,
+which are **not** a correctness problem (`search_index()` already restricts
+its answer to lists currently held, because *"returning a row for a list we no
+longer have would offer a file that cannot be requested"*) but are roughly as
+large again as the lists they describe. A purge that skipped them would
+quietly keep the largest part of what it claimed to remove.
+
+**The whole bot, not one list.** `fetched_bot_lists` is keyed by nick and a
+single entry carries every list that bot's archive held - and they came out of
+one zip into one directory, so there is no per-list thing to remove even if
+the store were shaped for it. A `<nick>/<marker>` source is therefore resolved
+to its nick rather than refused: the row an operator clicks is a list, the
+thing that can be deleted is the bot.
+
+**The extra markers are read from the INDEX, not from the entry** - which has
+already been deleted by then, and which can drift from the index anyway: a
+re-fetch that returned fewer lists than the one before it leaves the old
+markers behind, and those are exactly the rows a purge exists to remove.
+
+#### Refusals, and one that is deliberately unlike its neighbour
+
+`__own__` and `__own__:<name>` are refused: those are not fetched from
+anywhere and their files are the library. Reaching the function at all would
+be a UI bug, so it answers rather than assuming it cannot happen.
+
+A fetch **in flight** is refused, including a `pending` one - and that is the
+interesting case, because `build_fetch_delete_result()` right next door
+*allows* a pending row to be deleted. They are different questions. Deleting a
+pending row removes the thing that would have started; purging leaves it
+queued and pointed at a directory that has just gone, so it would recreate
+what was purged a moment later. That reads as the purge having silently
+failed, which is worse than refusing.
+
+**409 rather than 400** for that case: the request is well formed and would be
+valid in a moment, which is what that code means, and what lets the page say
+"try again" rather than "that was wrong".
+
+**A directory that will not delete does not block the entry's removal.** The
+row is what the operator asked to be rid of, and leaving it would leave them
+with a row they cannot remove at all. The detail string says what was left
+behind rather than claiming the whole thing worked.
+
+#### Two things worth writing down
+
+The path is derived by `list_extract_dir()`, which sanitises the nick and
+`is_safe_path()`-checks the result - so nothing attacker-reachable builds it.
+It is checked **again** before the `rmtree` anyway, for the reason
+`build_fetch_delete_result()` gives about its own delete: download was
+protected twice and delete, the destructive one, only once.
+
+A test patched `shutil.rmtree` to make the delete fail, and took the whole
+fixture down with it - `shutil` is shared, `tearDown` runs *before*
+`addCleanup`, and the harness cleans its temp trees with that same function.
+The stub replaces `list_fetch`'s own reference instead. Worth remembering the
+ordering: a cleanup registered in the test body cannot restore something
+`tearDown` is going to use.
+
+#### It sits on #388's primitives, and fixes a leak in one of them
+
+#388 landed the **bulk** purge - "every bot showing the red dot" - first, and
+with it two primitives this one now calls instead of repeating:
+`list_fetch.forget_bot()` and `dcc_fetch.has_any_outstanding_request()`. The
+latter is the better-placed of the two versions we each wrote: it lives in
+`dcc_fetch` where the queue does, and it counts plain `file` rows, which the
+private one here reasoned about without naming.
+
+What is left here is only what a **per-list** purge needs and a bulk one does
+not: resolving a clicked `<nick>/<marker>` row to its bot, refusing
+`__own__`/`__own__:<name>`, and the HTTP shape (404/409/400).
+
+**`forget_bot()` leaked the extra lists' index rows.** It dropped
+`list_index.drop_bot(bot)` - the bare nick - but `_measure_extra_list()`
+indexes each further list under `index_key(bot, marker)`, `"<nick>/<marker>"`.
+So a bot whose archive held a films or series list kept those rows forever,
+pointing at files the same call had just deleted:
+
+    indexed before : ['somebot', 'somebot/films']
+    indexed after  : ['somebot/films']
+
+Not a correctness problem - `search_index()` already restricts its answer to
+lists currently held - but the index runs roughly as large again as the lists
+it describes, so on a multi-list bot the leak is **most of the space the purge
+had just claimed to free**, which is the entire point of the operation.
+
+Its own tests could not see it, and that is the part worth keeping: they seed
+a single bare-nick index entry, so `assertNotIn("otherbot", indexed_bots())`
+passes while `"otherbot/films"` survives - a *different string*. A fixture
+without a marker list in it cannot ask the question. Two tests here do, and
+the shipped behaviour is one of the mutants they kill.
+
+`| {""}` on the marker set, because an entry written before an archive could
+hold more than one list has no `lists` key at all and the bare nick must still
+go. And the `rmtree` stays wrapped **at the call site** rather than in a
+hoisted variable: `tests/test_list_fetch.py` walks the AST of every
+`rmtree()` in the module to check exactly that, and a local caught it
+immediately.
+
+**`ignore_errors=True` now reports what it hid.** A directory that will not go
+- a file held open on Windows, a permission problem on a share - left the
+operator with "purged" and the files still there, which is the one outcome
+nobody can act on. The entry still goes either way, because leaving a row
+nobody can remove is worse than leaving files somebody can delete by hand.
+
+#### A collision with #388 that git would have merged cleanly
+
+#388 lands a **bulk** purge - "every bot showing the red dot" - from its own
+toolbar button. The two are complementary and the ids differ, but both
+branches reached for the same obvious name in `app.js`'s element map:
+`filelistsPurgeBtn`.
+
+A duplicate key in a JavaScript object literal is **not an error**. The last
+one silently wins. So the merge is textually clean, nothing conflicts, no
+console error appears, and one of the two buttons simply does nothing - with
+nothing in any diff to look at. Whichever PR merged second would have broken
+the other.
+
+Renamed here to `filelistsPurgeListBtn`, and a guard added
+(`TheElementMapHasNoDuplicateKeys`) so the next pair of branches that both
+want `el.somethingBtn` fails a test instead of shipping a dead control. That
+guard immediately found a second symptom of the same mutation: the duplicate
+also pointed at an element id the page does not define, which
+`test_every_element_the_script_looks_up_exists` catches independently.
+
+Eleven mutants killed, including the two that matter most - the index rows
+left behind, and the extra markers left behind while the main list goes.
 ### 🟢 The one-listener test raced with itself
 
 `test_ten_concurrent_offers_open_one_listener` failed on **ubuntu/3.10 alone**

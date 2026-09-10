@@ -347,6 +347,51 @@ class TheQueueViewIgnoresAMalformedTransfer(DashboardRouteCase):
         self.assertEqual(rows[0]["preview"], "Song.flac")
 
 
+class ThePurgeRoute(DashboardRouteCase):
+    """The wiring only - what a purge actually removes is in
+    tests/test_purging_a_fetched_list.py."""
+
+    def test_the_source_reaches_the_builder(self):
+        self.log_in()
+
+        resp = self.client.post("/api/filelists/NoSuchBot/purge")
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.get_json(),
+                         webserver.build_fetched_list_purge_result(
+                             "NoSuchBot")[1])
+
+    def test_a_source_with_a_slash_in_it_reaches_the_route_at_all(self):
+        """A bot's other lists are named "<nick>/<marker>". A plain <source>
+        converter stops at the slash, so those rows - the ones most likely to
+        be purged, since they are the duplicates - would have 404'd on the
+        ROUTE rather than reaching the builder. <path:source> is what makes
+        them addressable."""
+        self.log_in()
+
+        resp = self.client.post("/api/filelists/NoSuchBot/films/purge")
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("NoSuchBot", resp.get_json().get("error", ""))
+
+    def test_a_get_does_not_purge(self):
+        """POST-only: it deletes files, and a GET that mutates gets fired by
+        anything that prefetches links.
+
+        Asserted on the STORE rather than on a status code. Whether the
+        framework answers 405 or 404 for a wrong method is its business and
+        has changed between versions; what must be true is that nothing was
+        deleted.
+        """
+        self.log_in()
+        config.fetched_bot_lists["somebot"] = {"bot": "SomeBot",
+                                               "entry_count": 1, "lists": {}}
+
+        self.client.get("/api/filelists/SomeBot/purge")
+
+        self.assertIn("somebot", config.fetched_bot_lists)
+
+
 class TheNoticesReadRoute(DashboardRouteCase):
     """/api/notices/read, the wiring only. What the builder decides - which
     notices are acknowledged, what the badge says afterwards - is in
