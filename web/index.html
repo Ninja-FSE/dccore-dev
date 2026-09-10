@@ -265,6 +265,16 @@
             <span><span class="legend-name is-not-held">name</span> not downloaded</span>
             <span><span class="legend-name is-unknown">name</span> cannot tell</span>
           </p>
+
+          <!-- Forgets every held list whose dot is red (#385): a fetch stays
+               forever otherwise, even for a bot that will never come back.
+               Never touches a bot that is here now, or the grey "still
+               joining" dot - only a confirmed "not in a channel" counts. -->
+          <button type="button" class="btn btn-small" id="filelists-purge-offline-btn"
+                  title="Forget every held list whose bot is not in a channel with you right now (the red dot above). A bot that is here, or one we have not finished checking, is left alone.">
+            Purge offline bots' lists
+          </button>
+          <p class="broadcast-status" id="filelists-purge-status" hidden></p>
         </div>
 
         <div class="filelists-files">

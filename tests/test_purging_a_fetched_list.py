@@ -104,6 +104,35 @@ class ItRemovesAllThree(PurgeCase):
 
         self.assertEqual(list(list_index.indexed_bots()), [])
 
+    def test_forget_bot_drops_every_marker_too(self):
+        """The leak #388 shipped with, asserted against the primitive itself
+        rather than only through the caller.
+
+        Its own tests could not see it: they seed one bare-nick index entry,
+        so `assertNotIn("otherbot", indexed_bots())` passes while
+        "otherbot/films" survives - a different string. The fixture has to
+        have a marker list in it for the question to be asked at all.
+        """
+        self.hold("SomeBot", markers=("films", "series"))
+        self.assertEqual(sorted(list_index.indexed_bots()),
+                         ["somebot", "somebot/films", "somebot/series"])
+
+        list_fetch.forget_bot("SomeBot")
+
+        self.assertEqual(list(list_index.indexed_bots()), [],
+                         "a further list's index rows outlived the purge, "
+                         "pointing at files it had just deleted")
+
+    def test_an_entry_written_before_archives_held_more_than_one_list(self):
+        """No "lists" key at all - the shape on disk for anyone who fetched
+        before that field existed. The bare nick still has to go, which is
+        what the `| {""}` in forget_bot() is for."""
+        self.hold("SomeBot")
+        del config.fetched_bot_lists["somebot"]["lists"]
+
+        self.assertTrue(list_fetch.forget_bot("SomeBot"))
+        self.assertEqual(list(list_index.indexed_bots()), [])
+
     def test_every_list_in_the_archive_goes_not_just_the_main_one(self):
         """One entry carries every list the archive held, and they all came
         out of one zip into one directory. Dropping only the bare nick would
@@ -275,10 +304,15 @@ class WhenTheFilesWillNotGo(PurgeCase):
         # module: shutil is shared, tearDown runs before addCleanup, and the
         # harness cleans its temp trees with the same function - so patching
         # the module made this test tear the whole fixture down with it.
+        #
+        # A NO-OP, not a raise. forget_bot() passes ignore_errors=True, so a
+        # directory that will not go does not raise - it simply stays there,
+        # which is exactly what this has to simulate. A stub that raised would
+        # be testing a path the real code cannot take.
         class OnlyRmtree:
             @staticmethod
             def rmtree(*_args, **_kwargs):
-                raise OSError("in use by another process")
+                return None
 
         real_shutil = list_fetch.shutil
         list_fetch.shutil = OnlyRmtree

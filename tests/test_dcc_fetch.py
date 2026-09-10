@@ -1781,6 +1781,11 @@ class EnqueueTimeBotAloneCollisionTests(DCCoreTestCase):
         self.assertIsNotNone(folder_rid)
         self.assertEqual(len(config.fetch_queue), 2)
 
+    def test_bot_name_comparison_is_case_and_whitespace_insensitive_for_files_too(self):
+        dcc_fetch.enqueue_fetch(" GoodBot ", "Track.flac", request_type="file")
+
+        self.assertEqual(len(config.fetch_queue), 1)
+
     def test_a_new_bot_alone_request_succeeds_once_the_first_has_completed(self):
         list_rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
         config.fetch_queue[list_rid]["state"] = "complete"
@@ -1833,6 +1838,56 @@ class EnqueueTimeBotAloneCollisionTests(DCCoreTestCase):
 
         self.assertIsNotNone(list_rid)
         self.assertEqual(len(config.fetch_queue), 2)
+
+
+class HasAnyOutstandingRequestTests(DCCoreTestCase):
+    """dcc_fetch.has_any_outstanding_request(), issue #385's purge feature.
+
+    Wider than has_outstanding_bot_alone_request() above: that one only
+    watches "list"/"folder" rows because those are the ambiguous ones at
+    claim time. This one is for a caller that wants to know "is it safe to
+    forget this bot entirely right now", and a plain "file" row in flight is
+    just as unsafe to forget as a bot-alone one - deleting the fetched-list
+    entry or extract directory a reply is about to be matched against would
+    still break something, even though the claim-time ambiguity itself does
+    not apply to "file" rows.
+    """
+
+    def test_false_with_an_empty_queue(self):
+        self.assertFalse(dcc_fetch.has_any_outstanding_request("goodbot"))
+
+    def test_true_for_a_plain_file_request(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Track.flac", request_type="file")
+        self.assertIsNotNone(rid)
+        self.assertTrue(dcc_fetch.has_any_outstanding_request("goodbot"))
+
+    def test_true_for_a_list_request(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "", request_type="list")
+        self.assertIsNotNone(rid)
+        self.assertTrue(dcc_fetch.has_any_outstanding_request("goodbot"))
+
+    def test_true_for_a_folder_request(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "!rar Artist/Album", request_type="folder")
+        self.assertIsNotNone(rid)
+        self.assertTrue(dcc_fetch.has_any_outstanding_request("goodbot"))
+
+    def test_false_once_the_row_reaches_a_terminal_state(self):
+        rid = dcc_fetch.enqueue_fetch("goodbot", "Track.flac", request_type="file")
+        with dcc_fetch._fetch_lock():
+            config.fetch_queue[rid]["state"] = "complete"
+
+        self.assertFalse(dcc_fetch.has_any_outstanding_request("goodbot"))
+
+    def test_a_request_for_a_different_bot_is_unaffected(self):
+        dcc_fetch.enqueue_fetch("goodbot", "Track.flac", request_type="file")
+
+        self.assertFalse(dcc_fetch.has_any_outstanding_request("otherbot"))
+
+    def test_bot_name_comparison_is_case_and_whitespace_insensitive(self):
+        dcc_fetch.enqueue_fetch(" GoodBot ", "Track.flac", request_type="file")
+
+        self.assertTrue(dcc_fetch.has_any_outstanding_request("goodbot"))
+        self.assertTrue(dcc_fetch.has_any_outstanding_request(" GOODBOT "))
 
 
 class RefusalNoticeFastFailTests(DCCoreTestCase):

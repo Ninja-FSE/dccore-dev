@@ -337,6 +337,14 @@ It refuses while a fetch from that bot is running or queued - that fetch would
 write into the directory being deleted, and it would put back what you just
 removed. Wait for it to finish, or delete the fetch from Downloads first.
 
+**To clear out several at once**, use **Purge offline bots' lists** in the
+toolbar above the bot list instead. That one takes every bot showing the red
+dot - offline right now - and leaves alone anything grey ("cannot tell yet",
+which is what every bot looks like before the daemon has finished joining its
+channels). Use the per-list button when you want a specific one gone whatever
+its dot: a bot that renamed, a list fetched by mistake, or one of a pair of
+rows left by a bot that reconnected under its alternate nickname.
+
 ## Retiring the channel commands
 
 `!ban`, `!unban`, `!rehash`, `!update` and `!clearqueue` still work when typed in

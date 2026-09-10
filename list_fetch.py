@@ -1318,35 +1318,95 @@ def get_fetched_bot_page(entry, offset, limit):
     return page, total_folders, total_rows, None
 
 
+def forget_bot(bot):
+    """Remove everything held for `bot`'s fetched list: the registry entry,
+    the extracted files on disk, and its rows in the cross-list search index.
+
+    True if there was an entry to remove, False if `bot` was not held at all
+    - the caller's own decision about whether to ask (is this bot offline,
+    is a fetch for it in flight) happens before this is ever called; this
+    function only does the removing, unconditionally, once asked.
+
+    Same lock as process_fetched_list_zip()/get_fetched_bot_page(): a forget
+    racing a fetch that is about to replace the same entry must not interleave
+    with either the dict write or the directory rewrite.
+    """
+    name = str(bot).strip().lower()
+    if not name:
+        return False
+
+    with _lock():
+        store = _ensure_fetched_bot_lists()
+        entry = store.pop(name, None)
+        if entry is None:
+            return False
+        db.save_fetched_bot_lists(dict(store))
+
+    # Off the lock: a slow rmtree on a network-mounted FETCHED_FILES_DIR must
+    # not hold up an unrelated fetch that only needs the dict, and the entry
+    # is already gone from the dict either way - nothing left can read it
+    # back mid-delete.
+    # Wrapped AT the call, not stored wrapped - the module's own "wrap on use"
+    # idiom, and tests/test_list_fetch.py asserts it with an AST walk over
+    # every rmtree() in this file, so a hoisted variable fails that guard.
+    extract = list_extract_dir(bot)
+    shutil.rmtree(platform_compat.long_path(extract), ignore_errors=True)
+    # ignore_errors hides a directory that would not go - a file held open on
+    # Windows, a permission problem on a mounted share - and reporting
+    # "purged" with the files still there is the one outcome an operator
+    # cannot act on. The entry still goes either way: leaving a row nobody can
+    # remove is worse than leaving files somebody can delete by hand.
+    if os.path.exists(platform_compat.long_path(extract)):
+        print(f"[LIST-FETCH] Forgot {bot}'s list, but {extract!r} could not "
+              f"be removed - delete it by hand to reclaim the space.")
+
+    # EVERY LIST THE ARCHIVE HELD, not just the main one. _measure_extra_list()
+    # indexes each further list under index_key(bot, marker) - "<nick>/<marker>"
+    # - so dropping the bare nick alone leaves the films/series rows behind
+    # forever, pointing at files this call has just deleted.
+    #
+    # Not a correctness problem: search_index() already restricts its answer to
+    # lists currently held, so nothing wrong is ever returned. It is a DISK
+    # problem, and the whole point of purging - the index runs roughly as large
+    # again as the lists it describes, so on a multi-list bot the leak is most
+    # of the space the purge just claimed to free.
+    #
+    # `| {""}` because an entry written before an archive could hold more than
+    # one list has no "lists" key at all, and the bare nick must still go.
+    markers = (entry.get("lists") or {}) if isinstance(entry, dict) else {}
+    for marker in set(markers) | {""}:
+        list_index.drop_bot(index_key(bot, marker))
+
+    real_nick = entry.get("bot", bot) if isinstance(entry, dict) else bot
+    print(f"[LIST-FETCH] Forgot {real_nick}'s fetched list.")
+    return True
+
+
 def purge_fetched_list(source):
-    """Forget everything we hold from one bot: the store entry, the extracted
-    files, and the search index rows. Returns (ok, detail).
+    """Forget one bot, named by any of its rows in the List Browser.
+
+    The removing itself is forget_bot()'s, and the "is a fetch in flight"
+    question is dcc_fetch.has_any_outstanding_request()'s - both landed in
+    #388 for the bulk purge, and there is no reason for either to exist twice.
+    What is here is only what a PER-LIST purge needs and a bulk one does not:
+    working out which bot a clicked row belongs to, and refusing the rows that
+    are not a fetched list at all.
+
+    Returns (ok, detail).
 
     THE WHOLE BOT, not one list. `fetched_bot_lists` is keyed by nick and a
     single entry carries every list that bot's archive held - and they came out
     of one zip into one directory, so there is no per-list thing to remove even
     if the store were shaped for it. A "<nick>/<marker>" source is therefore
-    accepted and resolved to its nick, rather than refused: the row the
-    operator clicked is a list, the thing that can be deleted is the bot.
-
-    Three stores, and all three must go together:
-
-      * the entry itself, or the sidebar keeps offering a list whose files are
-        gone - a Download button for nothing.
-      * `list_extract_dir(bot)`, or the disk never comes back. This is the
-        whole point of the operation for anyone whose fetched directory has
-        grown past what they meant to keep.
-      * the search index rows. NOT a correctness problem - search_index()
-        already restricts its answer to lists currently held, because
-        "returning a row for a list we no longer have would offer a file that
-        cannot be requested" - but the index is roughly as large again as the
-        lists it describes. A purge that skipped it would quietly keep the
-        largest part of what it claimed to remove.
+    resolved to its nick rather than refused: the row the operator clicked is a
+    list, the thing that can be deleted is the bot.
 
     Refused for our OWN lists, which are not fetched from anywhere and whose
     files are the library itself. `__own__` reaching this function at all would
     mean a UI bug, so it answers rather than assuming.
     """
+    import dcc_fetch
+
     text = str(source or "").strip()
     if not text:
         return False, "No list was named."
@@ -1358,92 +1418,32 @@ def purge_fetched_list(source):
     if not key:
         return False, "No list was named."
 
-    # A fetch in flight is keyed by this bot and will write into the very
-    # directory being removed. There is no cancellation path for a transfer
-    # thread already running - the same reason build_fetch_delete_result()
-    # refuses an in-flight row - so the answer is "not now", not a race.
-    if _a_fetch_is_in_flight_for(key):
+    if key not in _ensure_fetched_bot_lists():
+        return False, f"Nothing is held from {nick}."
+
+    # A fetch in flight will write into the very directory being removed, and
+    # there is no cancellation path for a transfer thread already running -
+    # the same reason build_fetch_delete_result() refuses an in-flight row. So
+    # the answer is "not now", not a race.
+    #
+    # This includes a PENDING fetch, deliberately unlike
+    # build_fetch_delete_result(), which allows a pending row to be deleted.
+    # Different questions: deleting a pending row removes the thing that would
+    # have started, while purging leaves it queued and pointed at a directory
+    # that has just gone - it would recreate what was purged a moment later,
+    # which reads as the purge having silently failed.
+    if dcc_fetch.has_any_outstanding_request(nick):
         return False, (f"{nick} has a fetch in progress. Wait for it to "
                        f"finish, then purge.")
 
-    store = _ensure_fetched_bot_lists()
-    with _lock():
-        if key not in store:
-            return False, f"Nothing is held from {nick}."
-        del store[key]
-        # Persisted inside the lock, for the reason process_fetched_list_zip()
-        # gives for persisting immediately: a crash before the write brings
-        # the entry back on the next boot, pointing at files this call is
-        # about to delete.
-        db.save_fetched_bot_lists(dict(store))
+    if not forget_bot(nick):
+        return False, f"Nothing is held from {nick}."
 
-    # The directory is derived from the nick by list_extract_dir(), which
-    # sanitises it and is_safe_path()-checks the result - so nothing
-    # attacker-reachable builds this path. Checked AGAIN here anyway, because
-    # this is the destructive direction and download was already protected
-    # twice while delete was protected once. Same argument as
-    # build_fetch_delete_result()'s.
-    base = os.path.abspath(getattr(config, "FETCHED_FILES_DIR", "./data/fetched"))
-    lists_root = os.path.join(base, "lists")
-    target = list_extract_dir(nick)
-    if not dcc.is_safe_path(lists_root, target):
-        print(f"[LIST-FETCH] Refused to purge {nick}: {target!r} is outside "
-              f"the fetched lists directory.")
-        return False, "Refused: that path is outside the fetched lists directory."
-
-    removed_files = True
-    try:
-        shutil.rmtree(platform_compat.long_path(target))
-    except FileNotFoundError:
-        pass
-    except OSError as err:
-        # The entry is already gone, so the sidebar is correct either way and
-        # the operator is not left with a row they cannot remove. Say what was
-        # left behind rather than pretending the whole thing worked.
-        removed_files = False
-        print(f"[LIST-FETCH] Purged {nick} from the list browser, but could "
-              f"not delete {target!r}: {err}")
-
-    list_index.drop_bot(index_key(nick, ""))
-    for marker in _index_markers_for(nick):
-        list_index.drop_bot(index_key(nick, marker))
-
-    if not removed_files:
+    # forget_bot() answers a bool and logs the detail, which is right for the
+    # bulk purge that calls it in a loop. A per-list purge has one status line
+    # to fill and an operator watching it, so it asks the question again here
+    # rather than reporting a success the disk does not agree with.
+    if os.path.exists(platform_compat.long_path(list_extract_dir(nick))):
         return True, (f"Removed {nick} from the list browser, but some files "
                       f"could not be deleted - see the log.")
     return True, f"Purged everything held from {nick}."
-
-
-def _a_fetch_is_in_flight_for(key):
-    """Is a fetch for this bot pending or actually running right now?
-
-    `pending` counts here even though build_fetch_delete_result() lets a
-    pending fetch be DELETED. The two are different questions: deleting a
-    pending row removes the thing that would have started, while purging
-    leaves it queued and pointed at a directory that has just been removed -
-    it would recreate what was purged a moment later, which reads as the purge
-    having silently failed.
-    """
-    import dcc_fetch
-
-    with dcc_fetch._fetch_lock():
-        rows = list(getattr(config, "fetch_queue", {}).values())
-    return any(str(row.get("bot", "")).strip().lower() == key
-               and row.get("state") in ("pending", "offered", "listening",
-                                        "receiving")
-               for row in rows)
-
-
-def _index_markers_for(nick):
-    """Every marker this bot has rows under in the search index.
-
-    Read from the INDEX rather than from the store entry, because the entry
-    has already been deleted by the time this is called - and because the two
-    can drift: a re-fetch that returned fewer lists than the one before it
-    leaves the old markers behind, and those are exactly the rows a purge
-    exists to remove.
-    """
-    prefix = str(nick).strip().lower() + "/"
-    return [split_index_key(name)[1]
-            for name in list_index.indexed_bots()
-            if str(name).lower().startswith(prefix)]
