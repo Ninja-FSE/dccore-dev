@@ -353,6 +353,11 @@
 # once the process that was driving them is gone.
 #FETCH_HISTORY_FILE = ./data/fetch_history.json
 
+# Where the operator-facing notices live - the kicks, the give-ups, the
+# rebuilds that failed. Persisted because the events worth telling somebody
+# about are the ones that happen while nobody is looking.
+#NOTICES_FILE = ./data/notices.json
+
 # How many times to try rejoining a channel that has thrown us out, before
 # giving up on it.
 # 

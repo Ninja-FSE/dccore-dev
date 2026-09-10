@@ -29,6 +29,8 @@ FETCHED_BOT_LISTS_FILE = getattr(config, "FETCHED_BOT_LISTS_FILE",
                                  os.path.join("data", "fetched_bot_lists.json"))
 FETCH_HISTORY_FILE = getattr(config, "FETCH_HISTORY_FILE",
                               os.path.join("data", "fetch_history.json"))
+NOTICES_FILE = getattr(config, "NOTICES_FILE",
+                       os.path.join("data", "notices.json"))
 
 
 def _atomic_write(path, text):
@@ -926,6 +928,58 @@ def load_fetch_history():
     except Exception as err:
         print(f"[DB ERROR] Could not read the fetch history, starting empty: {err}")
         return {}
+
+
+def load_notices():
+    """(list of notices, state dict) from disk, or ([], {"seen_id": 0}).
+
+    Persisted at all because the events worth a badge are exactly the ones
+    that happen while nobody is looking. A kick at three in the morning that
+    is gone by nine is a badge that never did its job.
+
+    Same posture as every other store here: a file that will not parse costs
+    an empty panel until the next event, not a refusal to start. And the
+    entries are filtered individually - one hand-edited row must not take the
+    other hundred and ninety-nine with it.
+    """
+    if not os.path.exists(NOTICES_FILE):
+        return [], {"seen_id": 0}
+    try:
+        with io.open(NOTICES_FILE, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if not isinstance(loaded, dict):
+            return [], {"seen_id": 0}
+        rows = [row for row in (loaded.get("notices") or [])
+                if isinstance(row, dict) and "id" in row]
+        state = loaded.get("state")
+        if not isinstance(state, dict):
+            state = {}
+        seen = state.get("seen_id", 0)
+        try:
+            seen = int(seen)
+        except (TypeError, ValueError):
+            seen = 0
+        return rows, {"seen_id": seen}
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the notices, starting empty: {err}")
+        return [], {"seen_id": 0}
+
+
+def save_notices(rows, state):
+    """Write the notices and the read marker together, atomically.
+
+    ONE FILE, because they are one fact. Written apart, a crash between the
+    two writes could leave a seen_id higher than any surviving notice - which
+    silently swallows everything that arrived in between, and the operator is
+    never told what they were never told about.
+    """
+    try:
+        with _disk_lock:
+            _atomic_write(NOTICES_FILE, json.dumps(
+                {"notices": list(rows), "state": dict(state)},
+                indent=1, sort_keys=True, ensure_ascii=False))
+    except Exception as err:
+        print(f"[DB ERROR] Could not save the notices: {err}")
 
 
 def save_fetch_history(rows):

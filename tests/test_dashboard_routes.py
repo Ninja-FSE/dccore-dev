@@ -44,7 +44,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import adminchat  # noqa: E402
+import adminchat
+import announce  # noqa: E402
 import defaults as config  # noqa: E402
 import webserver  # noqa: E402
 
@@ -61,6 +62,7 @@ READ_ONLY_ROUTES = [
     ("/api/tools/update-list/status", "build_update_list_status_payload"),
     ("/api/tools/verify-list", "build_verify_list_payload"),
     ("/api/console/log", "build_console_log_payload"),
+    ("/api/notices", "build_notices_payload"),
 ]
 
 
@@ -343,6 +345,49 @@ class TheQueueViewIgnoresAMalformedTransfer(DashboardRouteCase):
         self.assertEqual([r["user"] for r in rows], ["dave"])
         self.assertEqual(rows[0]["status"], "sending")
         self.assertEqual(rows[0]["preview"], "Song.flac")
+
+
+class TheNoticesReadRoute(DashboardRouteCase):
+    """/api/notices/read, the wiring only. What the builder decides - which
+    notices are acknowledged, what the badge says afterwards - is in
+    tests/test_tell_me_what_i_missed.py.
+
+    POST rather than GET because it CHANGES what the operator has
+    acknowledged, and a GET that mutates gets fired by anything that prefetches
+    links.
+    """
+
+    def test_it_answers_with_the_payload_the_builder_produces(self):
+        self.log_in()
+        announce.record_notice("Kicked from #example.", "warning")
+
+        resp = self.client.post("/api/notices/read")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["unread"], 0)
+        self.assertEqual(len(resp.get_json()["notices"]), 1)
+
+    def test_it_actually_marks_them_read(self):
+        """Control for the test above: a route that answered with a fresh
+        payload without marking anything would satisfy an equality check
+        against a builder call made after it."""
+        self.log_in()
+        announce.record_notice("Kicked from #example.", "warning")
+
+        self.client.post("/api/notices/read")
+
+        self.assertEqual(announce.unread_notices(), (0, ""))
+
+    def test_a_get_does_not_mark_them_read(self):
+        """The read route is POST-only, and the listing route beside it must
+        not quietly acknowledge things merely by being looked at - the panel
+        polls it every couple of seconds whether anybody is on that page."""
+        self.log_in()
+        announce.record_notice("Kicked from #example.", "warning")
+
+        self.client.get("/api/notices")
+
+        self.assertEqual(announce.unread_notices(), (1, "warning"))
 
 
 class TheConsoleGate(DashboardRouteCase):

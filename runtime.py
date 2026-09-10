@@ -219,6 +219,23 @@ known_bots_flushed_at = 0.0
 #
 # A channel is removed from this map the moment a join succeeds, so its
 # presence means "not in it, and still trying" and nothing else.
+# THINGS THE OPERATOR SHOULD BE TOLD ABOUT, newest last. Not a log - the
+# Console is the log, and it carries everything. This is the short list of
+# events that mean the bot's ability to do its job changed, and that somebody
+# may need to act on:
+#
+#     {"id": 7, "at": 1788904212.0, "severity": "error",
+#      "text": "Cannot rejoin #chan - gave up after 3 attempts."}
+#
+# `notice_state["seen_id"]` is the highest id the operator has acknowledged,
+# which is what the unread count is measured against. It lives INSIDE a dict
+# rather than beside it as a plain int because only mutable objects can be
+# bound onto config by reference - a scalar there would be a copy, and the
+# dashboard marking notices read would update a number the daemon never sees.
+notices = []
+notice_state = {"seen_id": 0}
+notices_lock = threading.Lock()
+
 kicked_channels = {}
 kicked_channels_lock = threading.Lock()
 

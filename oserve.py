@@ -228,6 +228,25 @@ def startup():
     # in-memory only until now, so a completed download and its Delete
     # button both silently vanished from the dashboard on every restart.
     config.fetch_queue.update(db.load_fetch_history())
+    # The notices survive a restart, which is the whole point of them: an
+    # event worth a badge is by definition one that happened while nobody was
+    # looking, and a kick at three in the morning that is gone by nine is a
+    # badge that never did its job.
+    #
+    # extend/update rather than assignment, like every other container loaded
+    # here - config.notices IS runtime.notices, and rebinding the name would
+    # leave the daemon writing into a list the dashboard cannot see.
+    try:
+        _notices, _notice_state = db.load_notices()
+        config.notices.extend(_notices)
+        config.notice_state.update(_notice_state)
+        if _notices:
+            print(f"[STARTUP] Notices: {len(_notices)} kept, "
+                  f"{announce.unread_notices()[0]} unread.")
+    except Exception as notices_err:
+        # A panel that cannot be restored is a panel; the bot still serves
+        # files. Nothing here is worth refusing to boot over.
+        print(f"[STARTUP] Could not restore the notices: {notices_err}")
     # #221: a bot that ran for months before retention existed loads all of it
     # back here. Pruning at startup as well as on the persist cycle means an
     # upgrade cleans up once rather than carrying the backlog forever.

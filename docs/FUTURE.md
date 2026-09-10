@@ -35,6 +35,7 @@ What DCCore does today, and what it does not do yet.
 
 - **Authenticated admin console over DCC CHAT**, gated on the operator's services host *and* a PBKDF2-hashed password. Read-only commands (`status`, `queue`, `slots`, `bans`, `uptime`, `version`) and action commands (`ban`, `unban`, `clearqueue`, `rehash`, `update`) — see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md).
 - **Optional web dashboard** — Search, Queue, List Browser grouped by folder, Downloads, a duplicate-filename verifier (which the build now warns about too, for operators who never open the dashboard), a list rebuilder, a Settings page, and a Console (the DCC CHAT admin console's commands and live log, in the browser — for an operator who wants neither a second IRC client nor a debug channel). Off by default, loopback by default, behind the same password as the DCC CHAT console.
+- **A notice badge in the dashboard** - the short list beside the long one. Kicks, channels given up on and failed rebuilds raise a counted, colour-coded notice in the status panel, kept across restarts; everything else stays in the Console's log where it belongs. See [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md).
 - **Guided first-run setup** — `python3 configure.py` asks a short series of questions and writes a working configuration.
 - **Pre-flight check** — `start-dccore.sh check` verifies the setup without opening a socket.
 - **Two configuration mechanisms** — `admin_config.py` for Python, `settings.conf` for plain text; the dashboard and console both write to the latter.

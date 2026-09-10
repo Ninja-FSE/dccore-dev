@@ -341,6 +341,10 @@ PRESERVE_RUNTIME = (
                           # receiver that has already been told to append from the
                           # middle. That is a silently corrupted download rather than
                           # a failed one - the transfer "succeeds" at both ends.
+    'notices',            # what the operator has not read yet. A rehash is not an
+                          # acknowledgement, and losing these would clear the badge
+                          # without anybody having looked at what it was for
+    'notice_state',       # and the "how much of it have I seen" marker beside them
 )
 
 
@@ -1300,14 +1304,21 @@ def handle_list_update_request(user, target_chan, authorised=False):
 
             else:
                 error_msg = subprocess_failure_message(process.stderr, process.stdout)
-                announce.send_debug(f"External update_list.py failed (Exit Code {process.returncode}): {error_msg}", category="INFO")
+                # A rebuild that failed is still failed tomorrow: the list
+                # being served is the last good one and nothing retries on its
+                # own, so this is the operator's to act on.
+                announce.send_debug(
+                    f"External update_list.py failed (Exit Code "
+                    f"{process.returncode}): {error_msg}",
+                    category="INFO", notice="error")
                 config.last_list_update_ok = False
                 config.last_list_update_error = error_msg
 
         except subprocess.TimeoutExpired:
             announce.send_debug(
-                f"List update FAILED: Script execution timed out after {list_update_timeout} seconds.",
-                category="INFO")
+                f"List update FAILED: Script execution timed out after "
+                f"{list_update_timeout} seconds.",
+                category="INFO", notice="error")
             config.last_list_update_ok = False
             config.last_list_update_error = f"timed out after {list_update_timeout}s"
         except Exception as e:

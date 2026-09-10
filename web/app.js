@@ -37,6 +37,11 @@
     download:  { title: "Downloads",  sub: "What you have asked other bots for, and how it is going." },
     filelists: { title: "List Browser", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
     tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." },
+    // Reached from the badge in the status panel, not from the nav rail:
+    // it is somewhere you are SENT when something happened, not somewhere
+    // you go looking. A permanent nav entry for a page that is empty almost
+    // always is a permanent reminder of nothing.
+    notices:   { title: "What happened", sub: "Kicks, bans and rebuilds that need looking at." },
     settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." },
     stats:     { title: "Stats",      sub: "Everything this bot knows about itself, including who is waiting." },
     console:   { title: "Console",    sub: "The DCC CHAT admin console's commands and live log, in the browser." }
@@ -109,6 +114,10 @@
     filelistsFilterAll: document.getElementById("filelists-filter-all"),
     filelistsFilterNone: document.getElementById("filelists-filter-none"),
     filelistsFilterReveal: document.getElementById("filelists-filter-reveal"),
+    statusNotices:  document.getElementById("status-notices"),
+    noticeBadge:    document.getElementById("notice-badge"),
+    noticeList:     document.getElementById("notice-list"),
+    noticesMarkRead: document.getElementById("notices-mark-read"),
     statSlots:    document.getElementById("stat-slots"),
     statFiles:    document.getElementById("stat-files"),
     statUsers:    document.getElementById("stat-users"),
@@ -282,6 +291,9 @@
     }
     if (name === "settings" && !state.settingsLoaded) { loadSettings(); }
     if (name === "stats") { loadStats(); }
+    // Loaded here rather than in the badge's own handler, so every way into
+    // this view draws it - the badge is the usual one, not the only one.
+    if (name === "notices") { loadNotices(true); }
   }
 
   el.navItems.forEach(function (btn) {
@@ -906,6 +918,80 @@
     }).join("");
   }
 
+  // WHAT THE OPERATOR MISSED. Two severities and no more: "warning" happened
+  // and is over, "error" is still true. A third would be a third thing nobody
+  // can tell apart at a glance, and a glance is the only moment a badge is
+  // read.
+  //
+  // The count and the colour come from the SERVER, which knows the read
+  // marker. Working them out here would mean the page holding a copy of that
+  // marker, and two places deciding whether to light up is two places that
+  // can disagree.
+  function renderNoticeBadge(payload) {
+    if (!el.statusNotices || !el.noticeBadge) { return; }
+    var unread = (payload && payload.unread) || 0;
+
+    // Hidden entirely when there is nothing, rather than showing a zero. A
+    // badge that is always there is furniture; one that appears is a message.
+    el.statusNotices.hidden = unread === 0;
+    if (!unread) { return; }
+
+    el.noticeBadge.textContent =
+      unread + (unread === 1 ? " thing to see" : " things to see");
+    el.noticeBadge.className = "notice-badge is-" +
+      (payload.severity === "error" ? "error" : "warning");
+  }
+
+  function loadNotices(render) {
+    return fetchJson("/api/notices").then(function (payload) {
+      renderNoticeBadge(payload);
+      if (render) { renderNoticeList(payload); }
+      return payload;
+    }).catch(function () {
+      // A dashboard that cannot reach the daemon has bigger problems and
+      // already says so elsewhere. Never leave a stale count on screen.
+      if (el.statusNotices) { el.statusNotices.hidden = true; }
+    });
+  }
+
+  function renderNoticeList(payload) {
+    if (!el.noticeList) { return; }
+    var rows = (payload && payload.notices) || [];
+    if (!rows.length) {
+      el.noticeList.innerHTML =
+        '<p class="notice-empty">Nothing has needed your attention.</p>';
+      return;
+    }
+    var seen = (payload && payload.seen_id) || 0;
+    el.noticeList.innerHTML = rows.map(function (row) {
+      var fresh = (row.id || 0) > seen;
+      return '<div class="notice-row is-' +
+        (row.severity === "error" ? "error" : "warning") +
+        (fresh ? " is-unread" : "") + '">' +
+        '<span class="notice-when">' + escapeHtml(noticeWhen(row.at)) + "</span>" +
+        '<span class="notice-text">' + escapeHtml(row.text || "") + "</span>" +
+        "</div>";
+    }).join("");
+  }
+
+  // The date as well as the time once it is not today: "14:32" on a notice
+  // from this morning is clear, and on one from last week it is a lie by
+  // omission - and a notice from last week is exactly the kind this exists
+  // to keep.
+  function noticeWhen(at) {
+    if (!at) { return ""; }
+    var when = new Date(at * 1000);
+    var now = new Date();
+    var sameDay = when.getFullYear() === now.getFullYear()
+      && when.getMonth() === now.getMonth()
+      && when.getDate() === now.getDate();
+    var clock = String(when.getHours()).padStart(2, "0") + ":" +
+                String(when.getMinutes()).padStart(2, "0");
+    if (sameDay) { return clock; }
+    return String(when.getDate()).padStart(2, "0") + "/" +
+           String(when.getMonth() + 1).padStart(2, "0") + " " + clock;
+  }
+
   function renderQueueStats(rows) {
     var sending = rows.filter(function (r) { return r.status === "sending"; }).length;
     var totalFiles = rows.reduce(function (sum, r) { return sum + (r.count || 0); }, 0);
@@ -1013,6 +1099,24 @@
 
   // A toggle, not a one-way door: somebody who looked at what was hidden
   // wants to put it back without retyping the term.
+  if (el.noticeBadge) {
+    el.noticeBadge.addEventListener("click", function () {
+      activateView("notices");
+    });
+  }
+
+  if (el.noticesMarkRead) {
+    el.noticesMarkRead.addEventListener("click", function () {
+      // The answer that clears the badge is the same answer that redraws the
+      // list, so the two cannot disagree about what was acknowledged.
+      postJson("/api/notices/read", {}).then(function (res) {
+        if (!res.ok) { return; }
+        renderNoticeBadge(res.data);
+        renderNoticeList(res.data);
+      });
+    });
+  }
+
   el.filelistsFilterReveal.addEventListener("click", function () {
     state.filelistsRevealEmpty = !state.filelistsRevealEmpty;
     rerenderFromFilterPayload();
@@ -4043,10 +4147,14 @@
   // The sidebar status card is useful on every view, not only Queue, so it
   // refreshes independently of which view is active.
   loadQueue();
+  loadNotices(false);
   setInterval(function () {
     // Keep the sidebar status fresh always; refresh the visible table only
     // when it is the one showing, so a search result is never clobbered by a
     // background poll.
+    // Same panel, same tick. The list underneath is redrawn only when it is
+    // the view on screen, for the reason the queue table gives just below.
+    loadNotices(state.active === "notices");
     fetchJson("/api/queue").then(function (rows) {
       markConnection(true);
       renderSidebarStatus(rows);

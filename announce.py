@@ -657,12 +657,105 @@ def send_dcc_queue_notice(user, file_name, position):
         oserve.queue_message(user, result_msg)
 
 
-def send_debug(msg_text, category="INFO"):
-    """Send a colour-block log line to the debug channel over a raw socket, undelayed."""
+# The two severities a notice can have, and the whole vocabulary on purpose.
+#
+#   "warning" - it happened, and it is over. Kicked and rejoined; a fetch that
+#               used up its retries. Worth knowing, nothing to do right now.
+#   "error"   - it is still true. Gave up rejoining; the list will not build.
+#               Something is not working until somebody acts.
+#
+# A third level would be a level nobody can tell apart from the other two at a
+# glance, which is the only moment a badge gets read.
+NOTICE_SEVERITIES = ("warning", "error")
+
+NOTICES_MAX = 200
+
+
+def record_notice(text, severity="warning"):
+    """Add one thing the operator should be told about, and return it.
+
+    NOT A LOG. send_debug() already writes everything to the Console and the
+    debug channel, and everything is what makes a log useful and a badge
+    useless. This is the short list of events meaning the bot's ability to do
+    its job changed - so it is written to explicitly, by the handful of call
+    sites that know they are one, rather than inferred from a category.
+    Inferring would be wrong in both directions: BAN and MUTE are DCCore
+    banning USERS, which is routine and would flood the badge, while the
+    things worth surfacing all sit under INFO.
+
+    Ids are monotonic and never reused, because the dashboard remembers the
+    highest one it has shown and asks "anything above this". A count would
+    break the moment two events arrived between polls.
+    """
+    import time
+
+    if severity not in NOTICE_SEVERITIES:
+        severity = "warning"
+
+    with runtime.notices_lock:
+        highest = config.notices[-1]["id"] if config.notices else 0
+        entry = {"id": highest + 1, "at": time.time(),
+                 "severity": severity, "text": str(text)}
+        config.notices.append(entry)
+        # Oldest first, and the cap is on the LIST rather than on age: an
+        # operator who has not looked in a month should still find the last
+        # two hundred rather than an empty panel that once held something.
+        while len(config.notices) > NOTICES_MAX:
+            config.notices.pop(0)
+
+    try:
+        import db
+        db.save_notices(config.notices, config.notice_state)
+    except Exception as err:
+        # A notice that cannot be written down is still worth showing until
+        # the process ends. Never let persistence take the event with it.
+        print(f"[NOTICE] Could not save notices: {err}")
+    return entry
+
+
+def unread_notices():
+    """(count, worst severity) above what the operator has acknowledged."""
+    with runtime.notices_lock:
+        seen = int(config.notice_state.get("seen_id", 0) or 0)
+        fresh = [n for n in config.notices if int(n.get("id", 0)) > seen]
+    worst = "error" if any(n.get("severity") == "error" for n in fresh) else (
+        "warning" if fresh else "")
+    return len(fresh), worst
+
+
+def mark_notices_read():
+    """Acknowledge everything recorded so far. Returns the id acknowledged."""
+    with runtime.notices_lock:
+        highest = config.notices[-1]["id"] if config.notices else 0
+        config.notice_state["seen_id"] = highest
+    try:
+        import db
+        db.save_notices(config.notices, config.notice_state)
+    except Exception as err:
+        print(f"[NOTICE] Could not save notices: {err}")
+    return highest
+
+
+def send_debug(msg_text, category="INFO", notice=None):
+    """Send a colour-block log line to the debug channel over a raw socket, undelayed.
+
+    `notice` is the severity to ALSO record this as something the operator
+    should be told about - "warning" or "error", or None for the overwhelming
+    majority of lines, which belong in the log and nowhere else.
+
+    Taken here rather than as a separate call so a caller cannot log an event
+    and forget to raise it, or raise one and word it differently from the log
+    line beside it. The SINK contract is unchanged - sinks still receive
+    (text, category) - so the Console and the admin chat need to know nothing
+    about any of this.
+    """
     import sys
     import time
     import defaults as config
     
+    if notice:
+        record_notice(msg_text, notice)
+
     current_time = time.strftime("%H:%M:%S")
     
     # ---------------------------------------------------------------------

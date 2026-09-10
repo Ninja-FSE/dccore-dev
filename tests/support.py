@@ -92,6 +92,10 @@ RUNTIME_CONTAINERS = {
     # think it is banned from a channel it never left - and the advert worker
     # would try to rejoin it.
     "kicked_channels": dict,
+    # Operator notices. A leftover here is a badge in the next test
+    # counting an event from the last one.
+    "notices": list,
+    "notice_state": dict,
 }
 
 RUNTIME_FLAGS = {
@@ -236,7 +240,11 @@ def silence_debug(announce_module):
     """
     captured = []
 
-    def fake_send_debug(msg_text, category="INFO"):
+    # Signature kept in step with announce.send_debug() itself. A double
+    # that is narrower than the real thing turns "a caller started
+    # passing a new argument" into a TypeError inside unrelated tests,
+    # reported as whatever those tests were actually about.
+    def fake_send_debug(msg_text, category="INFO", notice=None):
         captured.append((category, msg_text))
 
     announce_module.send_debug = fake_send_debug
@@ -397,6 +405,14 @@ class DCCoreTestCase(unittest.TestCase):
         self._fetch_history_dir = tempfile.mkdtemp(prefix="dccore-fetch-history-")
         self._real_fetch_history_file = db.FETCH_HISTORY_FILE
         db.FETCH_HISTORY_FILE = os.path.join(self._fetch_history_dir, "fetch_history.json")
+        # Fourth file, same rule. This one is easy to write by accident:
+        # announce.record_notice() persists on every call, and it is reached
+        # from send_debug(notice=...) - so any test exercising a kick, a
+        # rejoin or a failed rebuild writes it without mentioning notices at
+        # all, and the next run of the suite would start with the previous
+        # run's badge already showing.
+        self._real_notices_file = db.NOTICES_FILE
+        db.NOTICES_FILE = os.path.join(self._fetch_history_dir, "notices.json")
         dcc_fetch._last_persisted_terminal_snapshot = {}
         # Same reason, for the bot registry. oserve.start() loads it at boot,
         # so every test that boots the daemon was reading whatever bots this
@@ -517,6 +533,7 @@ class DCCoreTestCase(unittest.TestCase):
             tree.cleanup()
         import db
         db.FETCH_HISTORY_FILE = self._real_fetch_history_file
+        db.NOTICES_FILE = self._real_notices_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
         db.DOWNLOAD_COUNTS_FILE = self._real_download_counts_file
         db.DCC_QUEUE_FILE = self._real_dcc_queue_file
