@@ -4,6 +4,49 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 A list that cannot produce an album no longer ships an album section
+
+Issue #383, a follow-up to #288 which is otherwise done. A video-only list was
+building and delivering a `-RAR-` section that could never hold a row.
+
+**Verified rather than taken:** `LIST_VIDEO_EXTENSIONS` and `RAR_EXTENSIONS`
+share not one entry, so since #288 - which made a folder earn its `!rar` row by
+holding a packable file - a video-only list's album section is not *usually*
+empty. It cannot hold a row for any library under any configuration.
+
+**And it did not sit there inertly.** The masthead makes the file non-empty, so
+the `getsize > 0` test that decides what goes into the downloadable archive let
+it through: four dead lines and a heading with nothing behind it, inside every
+copy every user downloads.
+
+**Decided after the scan, not from the extension sets.** #383 suggested asking
+whether the list's configured extensions admit packable content. What actually
+matters is whether this list *produced* a packable folder, and the scan has
+just finished answering exactly that - where reasoning from the extensions
+would be predicting it, and would be wrong for a list whose folders merely hold
+no albums today and might tomorrow.
+
+**And it reuses `serve_albums` rather than adding a flag**, which is what makes
+it two lines. Every consequence is already written for `RAR_ENABLED` being off:
+the masthead is skipped, no rows are written, the empty temp file fails the
+archive's size test, and the `if not serve_albums:` branch removes it instead
+of publishing it. "This list has no albums" wants all four and nothing else.
+
+The two paths still say different things in the log - *"RAR_ENABLED is off"*
+and *"No folder in this list can be packed"* - because they call for different
+actions from whoever reads them.
+
+**An existing test asserted the weaker version** and has been moved to the
+stronger one: `test_an_empty_packable_set_makes_nothing_packable` checked that
+the album list was written with no rows. It now checks that it is not written.
+Both say nothing is packable; the file's absence says it better.
+
+Four mutants, all caught. And the first version of the new test failed for a
+reason worth recording: `TempTree` seeds two baseline `.flac` tracks, so a
+"video-only" library that merely *adds* films to it still holds two albums -
+the album list was correctly published and the test was wrong. It starts from
+`use_empty_library()` now.
+
 ### 🔴 The list failure reported the one line that never explains anything
 
 Reported from the same install as the code-page fix above, and only visible
