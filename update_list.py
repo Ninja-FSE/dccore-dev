@@ -1366,13 +1366,23 @@ def generate_master_list(list_name=None):
                         # is framed decoration, not a row AutoQ imports, so it can
                         # carry anything; and putting it there leaves this file at
                         # exactly one line per album, which a second ::INFO:: line
-                        # per row would not (AutoQ only discards ::INFO:: for .mp3
-                        # and .flac, so a bare one here would be queued as if it
-                        # were a request). Tracked in #69.
+                        # per row would not. Tracked in #69.
                         #
-                        # The file rows below end "::INFO:: <size>" and AutoQ copes
-                        # with that. It is a precedent for one trailing field, not a
-                        # licence for more - check against AutoQ before adding one.
+                        # THE REASON, corrected against AutoQ.mrc itself rather
+                        # than the second-hand version this comment used to give.
+                        # A !rar row takes AutoQ's verbatim branch -
+                        # `if (($2 == !rar) && ($3 != $null)) { aline -n $1- }` -
+                        # the whole line, untouched. So anything appended here is
+                        # sent as part of the request. That is absolute and has
+                        # nothing to do with extensions.
+                        #
+                        # The file rows below end "::INFO:: <size>", and AutoQ does
+                        # not merely cope with that: its file branch truncates at
+                        # the end of the extension, so it never sees the tail at
+                        # all. A further trailing field on a FILE row is therefore
+                        # safe for AutoQ - the constraint there is its accept list
+                        # (*.mp3 and *.rar), not the tail. See defaults.py's note
+                        # above LIST_IGNORED_EXTENSIONS for the quoted source.
                         if display_rar_folder not in written_rar_folders:
                             f_rar.write(f"!{config.NICKNAME} !rar {_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)

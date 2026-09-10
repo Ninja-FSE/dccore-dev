@@ -177,11 +177,15 @@
 # A note before relying on the list from a script: every row is written
 # "!<nick> <filename>  ::INFO:: <size>". This project's own parser (list.py)
 # splits on the ::INFO:: marker regardless of extension, as do the OmenServe
-# bots the convention came from. AutoQ.mrc is reported to strip that tail
-# only for .mp3 and .flac (see update_list.py's note at the row write), so a
-# row in any other format may reach it with the size still attached. That
-# costs an AutoQ user a failed request they can retry by hand; it does not
-# affect anyone reading the list themselves.
+# bots the convention came from.
+# 
+# AutoQ, the queue script most of these channels use, never looks at that
+# marker: for a file row it keeps only up to the end of the file extension
+# and discards the rest, so the size never reaches the request. What decides
+# whether it queues a row at all is mIRC's own accept list, which AutoQ seeds
+# with *.mp3 and *.rar - a row in any other format is dropped without a word.
+# See docs/INSTALL.md for what that means when choosing what to serve, and
+# update_list.py's note at the row write for the script's own code.
 #LIST_IGNORED_EXTENSIONS = .db, .ini, .lnk, .url, .tmp, .part, .crdownload, .!ut
 
 # Publish film and series as a SEPARATE list from the music, instead of one

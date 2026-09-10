@@ -29,6 +29,7 @@ import copy
 import importlib
 import io
 import os
+import subprocess
 import sys
 import unittest
 
@@ -351,6 +352,67 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
             "runtime.py is in the reload list, so a rehash re-executes it and "
             "empties every container - exactly the bug moving them there was "
             "meant to remove")
+
+
+class EveryContainerIsBoundInACleanInterpreter(unittest.TestCase):
+    """The one gap the tests above cannot see, because DCCoreTestCase's own
+    setUp() closes it before any of them run.
+
+    `kicked_channels` was added to runtime.py and to PRESERVE_RUNTIME
+    (#380/dccore#382), but the line binding it onto defaults.py - the one
+    every other container in that same block has - was never written.
+    `config.kicked_channels` did not exist, and the live bot crashed on its
+    first PRIVMSG: "module 'defaults' has no attribute 'kicked_channels'".
+
+    Every test in this file still passed. tests/support.py's reset_config()
+    runs before each one and does exactly what the missing line should have:
+    `setattr(config, name, getattr(runtime, name))` - a deliberate safety net
+    for test isolation, and here an accidental one for a real production gap.
+    ConfigAndRuntimeShareTheSameObjects above checks object identity, but by
+    the time it runs the harness has already repaired what defaults.py failed
+    to do itself.
+
+    A clean interpreter is the only place this question means anything - see
+    tests/test_import_graph.py's own reasoning for the same shape of check.
+    """
+
+    def bindings(self):
+        code = (
+            "import json\n"
+            "import defaults, runtime\n"
+            "containers = [n for n, v in vars(runtime).items()\n"
+            "              if isinstance(v, (dict, list)) and not n.startswith('_')]\n"
+            "result = {n: (hasattr(defaults, n)\n"
+            "              and getattr(defaults, n) is getattr(runtime, n))\n"
+            "          for n in containers}\n"
+            "print(json.dumps(result))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                "importing defaults/runtime in a clean interpreter failed:\n"
+                + result.stderr.strip()[-2000:])
+        import json as _json
+        return _json.loads(result.stdout)
+
+    def test_the_scan_finds_containers_to_check(self):
+        """Fixture invariant - an empty result would pass every assertion
+        below vacuously."""
+        self.assertTrue(self.bindings())
+
+    def test_every_runtime_container_is_bound_by_defaults_py_itself(self):
+        bound = self.bindings()
+        missing = sorted(name for name, ok in bound.items() if not ok)
+
+        self.assertEqual(
+            missing, [],
+            "these runtime.py containers have no working "
+            "`name = runtime.name` binding in defaults.py, so the real "
+            "daemon crashes on first use even though every test using "
+            "tests/support.py's reset_config() passes: " + ", ".join(missing))
 
 
 if __name__ == "__main__":
