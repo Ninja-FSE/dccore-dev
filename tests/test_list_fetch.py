@@ -27,6 +27,7 @@ import defaults as config  # noqa: E402
 import db  # noqa: E402
 import list as list_module  # noqa: E402
 import list_fetch  # noqa: E402
+import list_index  # noqa: E402
 
 from tests.support import DCCoreTestCase  # noqa: E402
 
@@ -1433,6 +1434,97 @@ class AListThatArrivedAsPlainText(DCCoreTestCase):
         _ok, reason = list_fetch.process_fetched_list_zip("bigtxtbot2", self.path)
 
         self.assertIn("MAX_LIST_TEXT_SIZE", reason)
+
+
+class ForgetBotTests(DCCoreTestCase):
+    """list_fetch.forget_bot(), issue #385's purge feature.
+
+    A held fetch is three things at once - the config.fetched_bot_lists
+    entry, the extracted files under FETCHED_FILES_DIR/lists/<bot>/, and the
+    bot's rows in the cross-list search index - and forget_bot() is the only
+    place all three are asked to agree that a bot is gone. Nothing has ever
+    called this in production before #385: these tests are also the first
+    exercise of the deletion path at all.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-forgetbot-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+        self.zip_path = os.path.join(self.tmp, "incoming.zip")
+
+    def _seed(self, bot):
+        _write_zip(self.zip_path,
+                   [(f"{bot}-2026-09-10.txt", _list_txt())])
+        ok, reason = list_fetch.process_fetched_list_zip(bot, self.zip_path)
+        self.assertTrue(ok, reason)
+
+    def test_false_when_nothing_is_held_for_that_bot(self):
+        self.assertFalse(list_fetch.forget_bot("nosuchbot"))
+
+    def test_true_and_removes_the_registry_entry(self):
+        self._seed("otherbot")
+
+        self.assertTrue(list_fetch.forget_bot("otherbot"))
+
+        self.assertNotIn("otherbot", config.fetched_bot_lists)
+
+    def test_the_extracted_files_are_gone_from_disk(self):
+        self._seed("otherbot")
+        extract_dir = list_fetch.list_extract_dir("otherbot")
+        self.assertTrue(os.path.isdir(extract_dir))
+
+        list_fetch.forget_bot("otherbot")
+
+        self.assertFalse(os.path.exists(extract_dir))
+
+    def test_the_bot_is_dropped_from_the_search_index_too(self):
+        self._seed("otherbot")
+        self.assertIn("otherbot", list_index.indexed_bots())
+
+        list_fetch.forget_bot("otherbot")
+
+        self.assertNotIn("otherbot", list_index.indexed_bots())
+
+    def test_the_removal_is_persisted_to_disk(self):
+        """Not just the in-memory dict - a restart must not bring the
+        forgotten bot back, the same guarantee process_fetched_list_zip()
+        already gives on the way in."""
+        self._seed("otherbot")
+
+        list_fetch.forget_bot("otherbot")
+
+        reloaded = db.load_fetched_bot_lists()
+        self.assertNotIn("otherbot", reloaded)
+
+    def test_a_second_forget_of_the_same_bot_is_a_clean_no_op(self):
+        self._seed("otherbot")
+        self.assertTrue(list_fetch.forget_bot("otherbot"))
+
+        self.assertFalse(list_fetch.forget_bot("otherbot"))
+
+    def test_bot_name_comparison_is_case_and_whitespace_insensitive(self):
+        """The registry key is always lower-cased on the way in - see
+        process_fetched_list_zip() - so the way out must fold the same way,
+        or an operator who types the nick with different casing than the
+        advert used would see 'nothing to purge' for a bot plainly held."""
+        self._seed("OtherBot")
+
+        self.assertTrue(list_fetch.forget_bot(" otherbot "))
+        self.assertNotIn("otherbot", config.fetched_bot_lists)
+
+    def test_forgetting_one_bot_leaves_another_bots_list_untouched(self):
+        self._seed("firstbot")
+        self._seed("secondbot")
+
+        list_fetch.forget_bot("firstbot")
+
+        self.assertNotIn("firstbot", config.fetched_bot_lists)
+        self.assertIn("secondbot", config.fetched_bot_lists)
+        self.assertTrue(os.path.isdir(list_fetch.list_extract_dir("secondbot")))
+        self.assertIn("secondbot", list_index.indexed_bots())
 
 
 if __name__ == "__main__":
