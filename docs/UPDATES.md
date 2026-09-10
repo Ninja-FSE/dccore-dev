@@ -80,6 +80,26 @@ The stub replaces `list_fetch`'s own reference instead. Worth remembering the
 ordering: a cleanup registered in the test body cannot restore something
 `tearDown` is going to use.
 
+#### A collision with #388 that git would have merged cleanly
+
+#388 lands a **bulk** purge - "every bot showing the red dot" - from its own
+toolbar button. The two are complementary and the ids differ, but both
+branches reached for the same obvious name in `app.js`'s element map:
+`filelistsPurgeBtn`.
+
+A duplicate key in a JavaScript object literal is **not an error**. The last
+one silently wins. So the merge is textually clean, nothing conflicts, no
+console error appears, and one of the two buttons simply does nothing - with
+nothing in any diff to look at. Whichever PR merged second would have broken
+the other.
+
+Renamed here to `filelistsPurgeListBtn`, and a guard added
+(`TheElementMapHasNoDuplicateKeys`) so the next pair of branches that both
+want `el.somethingBtn` fails a test instead of shipping a dead control. That
+guard immediately found a second symptom of the same mutation: the duplicate
+also pointed at an element id the page does not define, which
+`test_every_element_the_script_looks_up_exists` catches independently.
+
 Eleven mutants killed, including the two that matter most - the index rows
 left behind, and the extra markers left behind while the main list goes.
 

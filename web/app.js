@@ -138,7 +138,12 @@
     filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
     filelistsFreshness: document.getElementById("filelists-freshness"),
-    filelistsPurgeBtn: document.getElementById("filelists-purge-btn"),
+    // filelistsPurgeListBtn, not filelistsPurgeBtn: #388 is adding a BULK
+    // "purge every offline bot's list" button to the toolbar under that
+    // exact name. Two keys with the same name in this object literal merge
+    // cleanly in git and then silently keep the last one, so one of the two
+    // buttons would stop working with no error anywhere.
+    filelistsPurgeListBtn: document.getElementById("filelists-purge-btn"),
     filelistsBotList: document.getElementById("filelists-bot-list"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
@@ -1898,8 +1903,8 @@
       });
     }
 
-    if (el.filelistsPurgeBtn) {
-      el.filelistsPurgeBtn.addEventListener("click", purgeCurrentList);
+    if (el.filelistsPurgeListBtn) {
+      el.filelistsPurgeListBtn.addEventListener("click", purgeCurrentList);
     }
 
     el.filelistsDownloadSelectedBtn.addEventListener("click", function () {
@@ -2180,7 +2185,7 @@
   // nothing downloaded either. A button that is present but errors when
   // pressed teaches people to distrust the whole toolbar.
   function renderFilelistsPurge() {
-    var button = el.filelistsPurgeBtn;
+    var button = el.filelistsPurgeListBtn;
     if (!button) { return; }
     var source = state.filelistsSource || "__own__";
     var row = state.filelistsBots[source];
@@ -2207,11 +2212,11 @@
       return;
     }
 
-    el.filelistsPurgeBtn.disabled = true;
+    el.filelistsPurgeListBtn.disabled = true;
     postJson("/api/filelists/" + encodeURIComponent(source) + "/purge", {})
       .then(function (res) {
         if (!res.ok) {
-          el.filelistsPurgeBtn.disabled = false;
+          el.filelistsPurgeListBtn.disabled = false;
           showFilelistsFetchStatus((res.data && res.data.error)
                                   || "Could not purge that list.", true);
           return;

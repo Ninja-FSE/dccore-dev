@@ -247,6 +247,51 @@ class TheScriptAndThePageAgree(unittest.TestCase):
 
 
 
+class TheElementMapHasNoDuplicateKeys(unittest.TestCase):
+    """Two entries with the same name in `el` merge cleanly and break loudly
+    nowhere.
+
+    A duplicate key in a JavaScript object literal is not an error: the last
+    one silently wins. So two branches that each add a button and reach for
+    the same obvious name - `filelistsPurgeBtn` for a per-list purge on one
+    and a bulk purge on the other - produce a textually clean git merge and a
+    dashboard where one of the two buttons does nothing at all, with no
+    console error and nothing in any diff to look at.
+
+    Caught between #388 and #389, which did exactly that.
+    """
+
+    @staticmethod
+    def keys():
+        js = read("app.js")
+        block = js.split("var el = {", 1)[1]
+        # To the close of the literal: the first line that is a lone "};".
+        # To the close of the literal: the first line that is a lone "};",
+        # built without an escape so no editing tool can mangle it.
+        block = block.split(chr(10) + "  };", 1)[0]
+        return re.findall(r"^\s{4}([A-Za-z_]\w*)\s*:", block, re.M)
+
+    def test_the_map_this_reads_is_the_right_one(self):
+        """Fixture invariant: an empty list has no duplicates in it either."""
+        found = self.keys()
+
+        self.assertGreater(len(found), 20)
+        self.assertIn("navItems", found)
+
+    def test_no_name_is_used_twice(self):
+        found = self.keys()
+        seen, twice = set(), []
+        for name in found:
+            if name in seen:
+                twice.append(name)
+            seen.add(name)
+
+        self.assertEqual(twice, [],
+                         "these el keys are declared more than once, and only "
+                         "the last of each survives at runtime: "
+                         + ", ".join(twice))
+
+
 class TheNoticeBadgeKeepsRefreshing(unittest.TestCase):
     """A badge that only draws once is a badge that is always out of date.
 
