@@ -336,6 +336,11 @@ FETCHED_BOT_LISTS_FILE: str = "./data/fetched_bot_lists.json"
 # deliberately never written here, since none of those can mean anything
 # once the process that was driving them is gone.
 FETCH_HISTORY_FILE: str = "./data/fetch_history.json"
+
+# Where the operator-facing notices live - the kicks, the give-ups, the
+# rebuilds that failed. Persisted because the events worth telling somebody
+# about are the ones that happen while nobody is looking.
+NOTICES_FILE: str = "./data/notices.json"
 # How many times to try rejoining a channel that has thrown us out, before
 # giving up on it.
 #
@@ -751,6 +756,8 @@ muted_until       = runtime.muted_until        # Timers for temporarily muted us
 whois_status      = runtime.whois_status       # Online status via WHO reply (True = online)
 frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in the freezer
 kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of, and rejoin refusals
+notices           = runtime.notices             # Operator-facing events, newest last
+notice_state      = runtime.notice_state        # {"seen_id": highest acknowledged}
 
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}

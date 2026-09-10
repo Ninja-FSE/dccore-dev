@@ -316,6 +316,143 @@ html, body {
   background: var(--danger);
 }
 
+/* ---------------------------------------------------------------- Notices
+   The badge in the status card, and the panel it opens.
+
+   No new colour tokens: a warning borrows --status-frozen and an error
+   borrows --danger, which are already defined for all three theme states.
+   Anything new here would be a fourth thing to keep in step across them, for
+   two shades an operator would read as "amber" and "red" either way.
+
+   Each tinted background declares a solid colour FIRST and the color-mix
+   second, so a browser without color-mix takes the flat one instead of
+   nothing. The severity is carried by the border and the text as well as the
+   tint, so it survives even then - and survives a colour-blind reader, who
+   gets the same panel with a less useful tint. */
+
+/* `hidden` is an attribute and the UA gives it display:none at the lowest
+   specificity there is, so BOTH of these class rules outrank it. Without this
+   pair the badge is on screen from first paint and never goes away, which is
+   the opposite of what it is for - it means something by appearing. */
+.status-row[hidden] {
+  display: none;
+}
+
+.status-row.status-notices[hidden] {
+  display: none;
+}
+
+.status-row.status-notices {
+  /* The badge is the whole row: there is no label beside it, because a label
+     saying "Notices" next to a button saying what they are would be the same
+     word twice in a panel with no room for it. */
+  display: block;
+}
+
+.notice-badge {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* The dot, so the severity reads before the words do. */
+.notice-badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
+}
+
+.notice-badge.is-warning {
+  color: var(--status-frozen);
+  border-color: var(--status-frozen);
+  background: var(--bg-raised);
+  background: color-mix(in srgb, var(--status-frozen) 12%, var(--bg-raised));
+}
+
+.notice-badge.is-error {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--bg-raised);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-raised));
+}
+
+.notice-badge:hover {
+  filter: brightness(1.12);
+}
+
+.notice-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.notice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notice-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-soft);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  font-size: 13px;
+}
+
+.notice-row.is-warning { border-left-color: var(--status-frozen); }
+.notice-row.is-error   { border-left-color: var(--danger); }
+
+/* Unread is a weight and a tint, not a second colour: the severity already
+   owns the colour here, and a row cannot say two things with the same
+   property. */
+.notice-row.is-unread {
+  background: var(--bg-raised);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-raised));
+  font-weight: 600;
+}
+
+.notice-when {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.notice-text {
+  color: var(--text);
+  /* Long paths and channel names wrap rather than pushing the panel sideways. */
+  overflow-wrap: anywhere;
+}
+
+.notice-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
 .sidebar-foot {
   font-size: 11px;
   color: var(--text-faint);

@@ -272,6 +272,47 @@ when the channel or a console did take the line, nothing extra is printed.
 A console that has been switched on but is *not connected* counts as nobody
 listening, and so does a console whose sink raised. Both fall through to stdout.
 
+### The short list, next to the long one
+
+The Console and the debug channel are a **log**: everything the daemon does,
+in order. That is the right shape for reading back what happened, and the
+wrong shape for *"did anything go wrong while I was asleep?"* - everything is
+in it, so nothing stands out.
+
+The dashboard's status panel carries the other shape. When something happens
+that changed the bot's ability to do its job, a coloured badge appears under
+the queue counts saying how many things are waiting to be looked at. Clicking
+it opens **What happened**, which lists them newest first, and **Mark all
+read** clears the badge.
+
+Two severities, and the difference is whether it is over:
+
+| | |
+|---|---|
+| amber | it happened, and it is finished. Kicked from a channel and rejoined. |
+| red | it is still true. Gave up rejoining a channel; a list rebuild that failed. |
+
+The badge takes the worse of the two, and it counts only what has not been
+marked read - so a red that was acknowledged last week does not keep it lit.
+
+**There is no badge at all when there is nothing unread.** It is not a panel
+that sits there showing a zero; it means something by appearing.
+
+What raises one, and nothing else does:
+
+- being kicked from a channel (amber - a rejoin is already scheduled)
+- giving up on a channel after the configured number of rejoin attempts (red)
+- a list rebuild that failed or timed out (red)
+
+DCCore banning or muting a **user** does not, and that is deliberate: it is
+routine, it happens often, and a badge that counts routine events is a badge
+nobody reads. The Console still logs every one of them.
+
+The notices are kept in `data/notices.json` and survive a restart, which is
+the point of them - the events worth a badge are the ones that happen while
+nobody is looking. The last 200 are kept; `NOTICES_FILE` moves the file, and
+deleting it is safe.
+
 ## Retiring the channel commands
 
 `!ban`, `!unban`, `!rehash`, `!update` and `!clearqueue` still work when typed in

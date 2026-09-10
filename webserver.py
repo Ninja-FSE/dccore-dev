@@ -2102,7 +2102,8 @@ SETTINGS_CATEGORIES = (
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_PROGRESS_FILE", "LIBRARY_FOLDERS_FILE",
-                                                "LISTS_FILE", "ON_CONNECT_FILE"]),
+                                                "LISTS_FILE", "ON_CONNECT_FILE",
+                                                "NOTICES_FILE"]),
 )
 
 # A human-readable label per setting, since the raw config.py name
@@ -2179,6 +2180,7 @@ SETTINGS_LABELS = {
     "DOWNLOAD_COUNTS_FILE": "Download counts file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "FETCH_HISTORY_FILE": "Fetch history file",
+    "NOTICES_FILE": "Operator notices file",
     "LIST_SIZE_FILE": "List size file",
     "LIST_PROGRESS_FILE": "List rebuild progress file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
@@ -2422,6 +2424,45 @@ def theme_preview_overrides(payload):
             wanted[key] = (settings_file.coerce(key, value, "", str)
                            if isinstance(value, str) else "")
     return wanted
+
+
+def build_notices_payload():
+    """GET /api/notices: what the operator has not been told, and the rest.
+
+    Newest FIRST here, and oldest first in storage. The store appends, which
+    is the cheap end to write; a panel is read from the top, which is where
+    the thing that just happened belongs. Reversing at the boundary keeps both
+    ends natural rather than making one of them pay for the other.
+
+    `unread` and `severity` are what the badge draws, and they are computed
+    here rather than in the page: the page would have to know the read marker
+    to work them out, and two places computing "is there anything new" is two
+    places that can disagree about whether to light up.
+    """
+    import announce
+
+    count, worst = announce.unread_notices()
+    with runtime.notices_lock:
+        rows = list(reversed(config.notices))
+        seen = int(config.notice_state.get("seen_id", 0) or 0)
+
+    return {
+        "notices": rows,
+        "unread": count,
+        "severity": worst,
+        "seen_id": seen,
+    }
+
+
+def mark_notices_read_result():
+    """POST /api/notices/read: the operator has looked. Returns the payload
+    the page would have got from a fresh GET, so the badge clears from the
+    same answer that cleared it rather than from a second round trip that
+    could race a notice arriving in between."""
+    import announce
+
+    announce.mark_notices_read()
+    return build_notices_payload()
 
 
 def build_settings_payload():
@@ -3704,6 +3745,15 @@ if HAVE_FLASK:
             # only paths that actually gate the feature - the routes - while
             # everything else moved.
             return console_is_enabled()
+
+        @app.route("/api/notices")
+        def api_notices():
+            return jsonify(build_notices_payload())
+
+        @app.route("/api/notices/read", methods=["POST"])
+        def api_notices_read():
+            # POST because it changes what the operator has acknowledged.
+            return jsonify(mark_notices_read_result())
 
         @app.route("/api/console/log")
         def api_console_log():

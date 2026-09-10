@@ -79,6 +79,11 @@
         <span class="status-label">Queued</span>
         <span class="status-value" id="status-queued">&mdash;</span>
       </div>
+      <!-- Nothing at all when there is nothing unread, so it means something
+           when it appears. See renderNoticeBadge() for what decides that. -->
+      <div class="status-row status-notices" id="status-notices" hidden>
+        <button type="button" class="notice-badge" id="notice-badge"></button>
+      </div>
     </div>
 
     <div class="sidebar-foot">
@@ -296,6 +301,17 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <section class="view" id="view-notices">
+      <h1>What happened</h1>
+      <p class="view-subtitle">Kicks, bans and rebuilds that need looking at.
+        The Console has everything; this has only what somebody should act
+        on.</p>
+      <div class="notice-actions">
+        <button type="button" class="btn btn-small" id="notices-mark-read">Mark all read</button>
+      </div>
+      <div class="notice-list" id="notice-list"></div>
     </section>
 
     <section class="view" id="view-tools">

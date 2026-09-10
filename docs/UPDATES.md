@@ -4,6 +4,101 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 Tell me what I missed
+
+The Console, the debug channel and the admin chat all carry the same fan-out
+from `announce.send_debug()`. That is a **log**: everything, in order, which is
+the right shape for reading back what happened and the wrong shape for "did
+anything go wrong while I was asleep". Everything is in it, so nothing stands
+out.
+
+This is the other shape, beside it rather than instead of it. A badge in the
+status panel, hidden entirely when there is nothing unread, opening a panel
+that lists what happened newest first.
+
+**Raised explicitly, never inferred.** The handful of call sites that KNOW
+they are one of these events pass `notice="warning"` or `notice="error"` to the
+same `send_debug()` call they already make. Inferring from the log category
+would be wrong in both directions at once: `BAN` and `MUTE` are DCCore banning
+USERS, which is routine and would flood the badge into uselessness, while the
+three things actually worth surfacing all sit under `INFO` with a hundred
+ordinary lines. Taking it as an argument to `send_debug()` rather than as a
+second call beside it means a caller cannot log an event and forget to raise
+it, or raise one worded differently from the log line next to it - one string,
+used twice.
+
+**Two severities, and no third.** `warning` happened and is over (kicked, and
+a rejoin is already scheduled); `error` is still true (gave up on a channel;
+the list will not build). A third would be a level nobody can tell apart from
+the other two at a glance, and a glance is the only moment a badge is read.
+
+**The read marker is an id, not a count.** The page remembers the highest id it
+has been shown and asks "anything above this". A count breaks the moment two
+events arrive between two polls. Ids are monotonic and never reused, which
+means they come from the last entry rather than from `len()` - the same number
+until the 200-entry cap starts discarding, and different forever afterwards.
+That distinction is not theoretical: a mutant replacing it with `len()`
+**survived the first run of these tests**, because the test recorded three
+notices where the count and the highest id were both 3. Under that mutant the
+badge would never clear no matter how many times it was clicked. The test now
+asks where the two differ.
+
+**`notice_state` is a dict holding one integer, and the dict is the point.**
+Only mutable objects can be bound onto `defaults.py` by reference. A plain int
+there would be a copy, so the dashboard marking notices read would update a
+number the daemon never sees, and the badge would come back on the next poll.
+
+**Both containers satisfy all four runtime contracts** - in `runtime.py`, bound
+onto `defaults.py`, in `commands.PRESERVE_RUNTIME` (a rehash is not an
+acknowledgement), and reset by `tests/support.py`. The clean-interpreter check
+added after the `kicked_channels` crash walks every container in `runtime.py`,
+so it covered these two the moment they existed, without a line being added
+to it.
+
+**Persisted on every write, not on a timer.** The events worth a badge include
+the ones immediately before the process dies. The notices and the read marker
+go into one file because they are one fact: written apart, a crash between the
+two writes could leave a `seen_id` higher than any surviving notice, which
+silently swallows everything in between - and the operator is never told what
+they were never told about. A file that will not parse costs an empty panel,
+never a refusal to start, and rows are filtered individually so one
+hand-edited entry does not take the other hundred and ninety-nine with it.
+
+#### Three defects the existing tests found before a reviewer could
+
+1. **`hidden` did not hide.** `.status-row` sets `display`, and `hidden` is an
+   attribute the UA stylesheet gives `display: none` at the lowest specificity
+   there is - so the class rule outranks it and the badge would have been on
+   screen from first paint, permanently, saying nothing. `HiddenActuallyHides`
+   in `tests/test_web_assets.py` has been sweeping every element carrying that
+   attribute since `.filelists-filter-actions` did the same thing.
+
+2. **The badge opened a view that could not exist.** The handler called
+   `showView()`, which is not a function in this codebase - the router is
+   `activateView()` - and the `views` table had no `notices` entry, so
+   `views[name].title` would have thrown on undefined and taken the whole
+   router down with it, not just that one view.
+
+3. **The startup hunk sat at column 0**, which ends `startup()` early and
+   leaves the line after it an `IndentationError`.
+
+#### One test relaxed, and made stricter in the same edit
+
+`test_every_section_is_reachable` asserted that every view section has a nav
+button, because a section nobody can reach is dead markup that still costs a
+lookup on every switch. "What happened" is deliberately not in the nav rail: it
+is somewhere you are SENT when something happens, not somewhere you go looking,
+and a permanent nav entry for a page that is almost always empty is a permanent
+reminder of nothing.
+
+So reachability now means *a nav button **or** an `activateView("name")` call
+somewhere in the script* - and the new `test_the_openers_are_real_views` checks
+the other direction, that any name passed to `activateView()` is a real `views`
+key. Net, that is one more invariant than before, not one fewer: defect 2 above
+would now be caught by the tests rather than by reading the diff.
+
+---
+
 ### 🟢 The scan asks the filesystem once, not twice
 
 `os.walk` is built on `os.scandir`, which gets each entry's size from the

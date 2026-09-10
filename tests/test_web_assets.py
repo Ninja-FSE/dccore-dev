@@ -227,10 +227,17 @@ class TheScriptAndThePageAgree(unittest.TestCase):
         nav = set(re.findall(r'data-view="([^"]+)"', page))
         sections = set(re.findall(r'id="view-([^"]+)"', page))
 
-        self.assertEqual(nav, sections,
-                         f"nav buttons and view sections disagree: "
-                         f"buttons only {sorted(nav - sections)}, "
-                         f"sections only {sorted(sections - nav)}")
+        # A button with no section throws on the first click, so that
+        # direction is absolute. The other direction allows a section the
+        # script opens itself - see opened_in_code() above for why one exists.
+        opened = TheNavTheViewsAndTheSectionsAgree.opened_in_code(script)
+
+        self.assertEqual(sorted(nav - sections), [],
+                         f"nav button(s) with no view section, which throw on "
+                         f"the first click: {sorted(nav - sections)}")
+        self.assertEqual(sorted(sections - nav - opened), [],
+                         f"view section(s) nothing can open: "
+                         f"{sorted(sections - nav - opened)}")
         for name in sorted(nav):
             self.assertRegex(
                 script, r"\b%s:\s*\{" % re.escape(name),
@@ -238,6 +245,69 @@ class TheScriptAndThePageAgree(unittest.TestCase):
                 f"has no entry for it, so its title and subtitle would be "
                 f"undefined")
 
+
+
+class TheNoticeBadgeKeepsRefreshing(unittest.TestCase):
+    """A badge that only draws once is a badge that is always out of date.
+
+    loadQueue() is called ONCE, at startup - the sidebar's recurring refresh
+    is a separate inline function beside it that fetches /api/queue directly.
+    So a call placed in loadQueue() looks like it rides on the queue poll and
+    does not: the badge would be correct at page load and then frozen until
+    somebody pressed F5, which is exactly the moment it is least useful.
+
+    Nothing in this suite executes JavaScript (see this module's docstring),
+    so this reads the recurring block itself rather than trusting where the
+    call appears to be.
+    """
+
+    @staticmethod
+    def recurring_block():
+        """The body of the interval that refreshes the sidebar status card."""
+        js = read("app.js")
+        after = js.split("setInterval(function () {", 1)[1]
+        return after.split("}, REFRESH_MS);", 1)[0]
+
+    def test_the_block_this_reads_is_the_right_one(self):
+        """Fixture invariant. If the split ever stopped matching, the checks
+        below would run against an empty string and pass vacuously."""
+        body = self.recurring_block()
+
+        self.assertIn("/api/queue", body)
+        self.assertIn("renderSidebarStatus", body)
+
+    def test_the_badge_is_refreshed_on_every_tick(self):
+        self.assertIn("loadNotices(", self.recurring_block(),
+                      "the notice badge is not refreshed by the recurring "
+                      "sidebar poll, so it would never change while the "
+                      "dashboard stayed open")
+
+    def test_it_is_also_drawn_before_the_first_tick(self):
+        """REFRESH_MS of no badge after a reload, otherwise - on the one page
+        load where the operator is most likely to be looking for it.
+
+        Read from the INITIALISATION region only, between the first call to
+        loadQueue() and the interval that follows it. Everything before that
+        point includes loadNotices's own definition and the activateView()
+        branch that opens the panel, so a search over it matches whether or
+        not the startup call exists - which is how the first version of this
+        test passed against code with the call deleted.
+        """
+        js = read("app.js")
+        # The call statement, not the definition: "  loadQueue();" with
+        # its two-space indent occurs once, and only as the startup call.
+        startup = js.split("  loadQueue();", 1)[1]
+        startup = startup.split("setInterval(function () {", 1)[0]
+
+        self.assertIn("loadNotices(", startup,
+                      "nothing draws the badge between page load and the "
+                      "first tick of the sidebar poll")
+
+    def test_the_panel_underneath_redraws_only_when_it_is_on_screen(self):
+        """Same rule the queue table already follows: a background poll must
+        not clobber what the operator is reading on another view."""
+        self.assertIn('loadNotices(state.active === "notices")',
+                      self.recurring_block())
 
 
 class HiddenActuallyHides(unittest.TestCase):
@@ -474,10 +544,27 @@ class TheNavTheViewsAndTheSectionsAgree(unittest.TestCase):
         block = js.split("var views = {", 1)[1].split("};", 1)[0]
         return (set(re.findall(r"^\s*([a-z]+):", block, re.M)),
                 set(re.findall(r'id="view-([a-z]+)"', html)),
-                set(re.findall(r'data-view="([a-z]+)"', html)))
+                set(re.findall(r'data-view="([a-z]+)"', html)),
+                self.opened_in_code(js))
+
+    @staticmethod
+    def opened_in_code(js):
+        """Views something in the script opens directly, with no nav button.
+
+        The nav rail is where you GO; a view can instead be somewhere you are
+        SENT. "What happened" is the first: it is opened by the notices badge,
+        which appears only when there is something in it, and a permanent nav
+        entry for a page that is almost always empty is a permanent reminder
+        of nothing.
+
+        This keeps the reachability check honest rather than relaxing it - a
+        section still has to be openable by SOMETHING, and dead markup with
+        neither a button nor a call is still caught.
+        """
+        return set(re.findall(r'activateView\("([a-z]+)"\)', js))
 
     def test_every_views_key_has_a_section(self):
-        views, sections, _nav = self.sets()
+        views, sections, _nav, _opened = self.sets()
 
         self.assertEqual(sorted(views - sections), [],
                          "activateView() looks up view-<key> for every key in "
@@ -485,21 +572,36 @@ class TheNavTheViewsAndTheSectionsAgree(unittest.TestCase):
                          "EVERY view switch, not just that one")
 
     def test_every_nav_button_has_a_views_entry(self):
-        views, _sections, nav = self.sets()
+        views, _sections, nav, _opened = self.sets()
 
         self.assertEqual(sorted(nav - views), [],
                          "activateView() reads views[name].title, which is a "
                          "TypeError for a nav button with no entry")
 
     def test_every_section_is_reachable(self):
-        _views, sections, nav = self.sets()
+        """By a nav button, or by an activateView() call somewhere in the
+        script. A section with neither is markup nobody can ever see, and it
+        still costs a lookup on every single view switch."""
+        _views, sections, nav, opened = self.sets()
 
-        self.assertEqual(sorted(sections - nav), [],
-                         "a view section with no nav button cannot be opened")
+        self.assertEqual(sorted(sections - nav - opened), [],
+                         "a view section with no nav button and nothing "
+                         "calling activateView() for it cannot be opened")
+
+    def test_the_openers_are_real_views(self):
+        """The other direction, and the reason the test above is not a way to
+        wave anything through: a name passed to activateView() that is not a
+        `views` key reads views[name].title on undefined - a TypeError that
+        takes the router down for every view, not just that one."""
+        views, _sections, _nav, opened = self.sets()
+
+        self.assertEqual(sorted(opened - views), [],
+                         "activateView() is called with a name the views "
+                         "table does not define")
 
     def test_the_default_view_exists(self):
         """state.active starts at "search" before any click."""
-        views, sections, nav = self.sets()
+        views, sections, nav, _opened = self.sets()
 
         for name, group in (("views", views), ("sections", sections),
                             ("nav", nav)):

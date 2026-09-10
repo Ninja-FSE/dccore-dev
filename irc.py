@@ -2074,7 +2074,8 @@ def irc_loop():
                         back = re.match(r"^:\S+ 366 \S+ (\S+)", line)
                         if back and note_joined(back.group(1)) is not None:
                             announce.send_debug(
-                                f"Rejoined {back.group(1)}.", category="JOIN")
+                                f"Rejoined {back.group(1)}.", category="JOIN",
+                                notice="warning")
 
                     if joined and not getattr(config, 'activation_triggered', False) and " 366 " in line:
                         # FIXED (issue #9): parses WHICH channel the 366 line refers to instead
@@ -2262,7 +2263,7 @@ def irc_loop():
                                 announce.send_debug(
                                     f"Kicked from {kicked_chan} by {kicker}. "
                                     f"Will try to rejoin on the next advert.",
-                                    category="PART")
+                                    category="PART", notice="warning")
                             else:
                                 print(f"[KICK] Removed from {kicked_chan}, which is "
                                       f"not in CHANNEL - not rejoining.")
@@ -2281,7 +2282,7 @@ def irc_loop():
                                     f"Cannot rejoin {refused_chan} ({numeric}) - "
                                     f"gave up after {count} attempt(s). It will not "
                                     f"be tried again until you rehash.",
-                                    category="PART")
+                                    category="PART", notice="error")
                             else:
                                 print(f"[REJOIN] {refused_chan} refused us "
                                       f"({numeric}), attempt {count}/{limit}.")
