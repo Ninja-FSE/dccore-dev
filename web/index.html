@@ -273,6 +273,11 @@
             <button type="button" class="btn btn-small" id="filelists-expand-all">Expand all</button>
             <button type="button" class="btn btn-small" id="filelists-collapse-all">Collapse all</button>
             <button type="button" class="btn btn-accent btn-small" id="filelists-download-selected-btn" disabled title="Tick the files you want. Shift-click a second box to take everything between it and the last one you touched.">Download selected</button>
+            <!-- Shown only for a list fetched from another bot: your own is
+                 the library itself, and a bot you have only seen advertising
+                 has nothing to remove. renderFilelistsPurge() decides. -->
+            <button type="button" class="btn btn-small btn-danger" id="filelists-purge-btn" hidden
+                    title="Remove this bot&#39;s downloaded list, its files and its search index rows.">Purge this list</button>
           </div>
 
           <div class="table-wrap">

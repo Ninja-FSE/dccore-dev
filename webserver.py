@@ -1844,6 +1844,30 @@ def build_fetch_delete_result(request_id):
     return 200, {"deleted": request_id}
 
 
+def build_fetched_list_purge_result(source):
+    """POST /api/filelists/<source>/purge: forget one bot's fetched list(s).
+
+    Thin on purpose. list_fetch.purge_fetched_list() owns the store, its lock
+    and the three things that have to go together; this decides only what an
+    HTTP caller is told, the same split every other builder in this file
+    keeps.
+
+    409 rather than 400 for a fetch in flight: the request is well formed and
+    would be valid in a moment, which is what that code means and what tells
+    the page to say "try again" rather than "that was wrong".
+    """
+    import list_fetch
+
+    ok, detail = list_fetch.purge_fetched_list(source)
+    if ok:
+        return 200, {"purged": True, "detail": detail}
+    if "in progress" in detail:
+        return 409, {"error": detail}
+    if detail.startswith("Nothing is held"):
+        return 404, {"error": detail}
+    return 400, {"error": detail}
+
+
 def build_verify_list_payload():
     """GET /api/tools/verify-list payload: filenames the master list carries
     under more than one folder.
@@ -3745,6 +3769,14 @@ if HAVE_FLASK:
             # only paths that actually gate the feature - the routes - while
             # everything else moved.
             return console_is_enabled()
+
+        @app.route("/api/filelists/<path:source>/purge", methods=["POST"])
+        def api_filelists_purge(source):
+            # POST, and <path:source> because a bot's other lists are named
+            # "<nick>/<marker>" - a plain <source> stops at the slash and
+            # would 404 on exactly those rows.
+            status, result = build_fetched_list_purge_result(source)
+            return jsonify(result), status
 
         @app.route("/api/notices")
         def api_notices():

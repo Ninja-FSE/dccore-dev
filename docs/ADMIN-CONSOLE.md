@@ -313,6 +313,30 @@ the point of them - the events worth a badge are the ones that happen while
 nobody is looking. The last 200 are kept; `NOTICES_FILE` moves the file, and
 deleting it is safe.
 
+### Getting rid of a downloaded list
+
+Nothing used to remove one. A bot's list, once fetched, stayed in the List
+Browser forever - including for a bot that had renamed, left, or would never
+reconnect. Open the list and press **Purge this list** under the file table.
+
+It removes three things together, because leaving any one of them behind makes
+the operation a lie:
+
+- the entry, or the browser keeps offering a list whose files are gone
+- the extracted files under `FETCHED_FILES_DIR/lists/<bot>/`, which is the
+  disk you were trying to get back
+- the bot's rows in the cross-list search index, which is roughly as large
+  again as the lists it describes
+
+The button appears only where it can do something: not for your own lists,
+whose files are your library, and not for a bot you have merely seen
+advertising. It asks first, because **fetching the list again is the only way
+back** and that needs the bot to still be around.
+
+It refuses while a fetch from that bot is running or queued - that fetch would
+write into the directory being deleted, and it would put back what you just
+removed. Wait for it to finish, or delete the fetch from Downloads first.
+
 ## Retiring the channel commands
 
 `!ban`, `!unban`, `!rehash`, `!update` and `!clearqueue` still work when typed in
