@@ -71,16 +71,22 @@ class TheScanReportsWhereItIs(DCCoreTestCase):
         """The end an operator sees: what the page polls."""
         self.library_of("Rock", "Jazz", "Metal")
         seen = []
-        real_walk = os.walk
+        real_walk = update_list.walk_with_sizes
 
-        def watching_walk(*args, **kwargs):
+        # Hooked on walk_with_sizes(), the seam the scan uses. It hooked
+        # os.walk() while the scan asked for every file's size a second time
+        # through os.path.getsize(); the size now comes back with the name, so
+        # os.walk() is no longer on the path and a hook there observes
+        # nothing - which is a whole scan reporting no progress, and reads as
+        # the progress file being broken.
+        def watching_walk(top, onerror=None):
             found = webserver.read_list_progress()
             if found:
                 seen.append(found)
-            return real_walk(*args, **kwargs)
+            yield from real_walk(top, onerror=onerror)
 
-        os.walk = watching_walk
-        self.addCleanup(setattr, os, "walk", real_walk)
+        update_list.walk_with_sizes = watching_walk
+        self.addCleanup(setattr, update_list, "walk_with_sizes", real_walk)
 
         update_list.generate_master_list()
 
