@@ -156,11 +156,15 @@ LIST_FORMAT: str      = "zip"      # "txt", "zip" or "rar"
 # A note before relying on the list from a script: every row is written
 # "!<nick> <filename>  ::INFO:: <size>". This project's own parser (list.py)
 # splits on the ::INFO:: marker regardless of extension, as do the OmenServe
-# bots the convention came from. AutoQ.mrc is reported to strip that tail
-# only for .mp3 and .flac (see update_list.py's note at the row write), so a
-# row in any other format may reach it with the size still attached. That
-# costs an AutoQ user a failed request they can retry by hand; it does not
-# affect anyone reading the list themselves.
+# bots the convention came from.
+#
+# AutoQ, the queue script most of these channels use, never looks at that
+# marker: for a file row it keeps only up to the end of the file extension
+# and discards the rest, so the size never reaches the request. What decides
+# whether it queues a row at all is mIRC's own accept list, which AutoQ seeds
+# with *.mp3 and *.rar - a row in any other format is dropped without a word.
+# See docs/INSTALL.md for what that means when choosing what to serve, and
+# update_list.py's note at the row write for the script's own code.
 LIST_IGNORED_EXTENSIONS: list = [
     ".db", ".ini", ".lnk", ".url",          # Windows and shell droppings
     ".tmp", ".part", ".crdownload", ".!ut",  # downloads still in flight
@@ -746,6 +750,7 @@ user_requests     = runtime.user_requests      # Command timestamps per user, an
 muted_until       = runtime.muted_until        # Timers for temporarily muted users
 whois_status      = runtime.whois_status       # Online status via WHO reply (True = online)
 frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in the freezer
+kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of, and rejoin refusals
 
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}

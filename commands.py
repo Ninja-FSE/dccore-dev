@@ -1072,6 +1072,16 @@ def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
     else:
         announce.send_debug(f"Pattern {pattern} was not found in hard_bans.txt.", category="INFO")
 
+# The banners update_list.py's __main__ prints AFTER everything else, and the
+# reason the "last line" rule below stopped working. They say whether the run
+# failed, which the exit code already said, and never why.
+_GENERIC_RESULT_LINES = ("--- ERROR: could not generate the list. ---",
+                         "--- The list was updated successfully. ---")
+
+# The tags update_list.py puts on a real explanation.
+_ERROR_TAGS = ("[LIST-GEN ERROR]", "[CRITICAL]", "[LIST ERROR]", "[UPDATE ERROR]")
+
+
 def subprocess_failure_message(stderr, stdout):
     """The best available explanation for a failed subprocess run.
 
@@ -1081,16 +1091,42 @@ def subprocess_failure_message(stderr, stdout):
 
     #162 finding #4: update_list.py's own error handling prints via plain
     print() - stdout, not stderr - so a script-level failure (a directory
-    walk that raised, a write that failed) left stderr empty, and the
-    admin saw "Unknown script error" with no filename and no reason at
-    all. Falls back to stdout, and takes its LAST line - where
-    update_list.py's own "[LIST-GEN ERROR] ..." summary lands - mirroring
-    how update_list.py's own _write_rar_artifact() already reports a
-    subprocess failure.
+    walk that raised, a write that failed) left stderr empty, and the admin
+    saw "Unknown script error" with no filename and no reason at all. Hence
+    the fall back to stdout.
+
+    TAKING THE LAST LINE STOPPED WORKING, and reported the one line that
+    never explains anything. That rule was written when update_list.py's own
+    "[LIST-GEN ERROR] ..." summary really was last. Its __main__ now prints
+    a generic banner after it:
+
+        [LIST-GEN ERROR] 'Music' failed: <the actual reason>
+        [LIST-GEN ERROR] These lists were not rebuilt and are still serving...
+        --- ERROR: could not generate the list. ---      <- always last
+
+    so the dashboard reliably showed "--- ERROR: could not generate the
+    list. ---" while the reason sat in the output above it, captured and
+    discarded. Reported from a live install, where it replaced an earlier
+    failure that at least said which encoding gave up.
+
+    THE FIRST TAGGED LINE, not the last: later ones are consequences of the
+    first. "These lists were not rebuilt" is true and follows from whatever
+    broke the first one, and only the first names it.
     """
     output = (stderr or stdout or "").strip()
-    lines = output.splitlines()
-    return lines[-1] if lines else "Unknown script error"
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return "Unknown script error"
+
+    for line in lines:
+        if any(tag in line for tag in _ERROR_TAGS):
+            return line
+
+    # Nothing tagged - a traceback, or a failure from somewhere that does not
+    # use the tags. The last line is still the best guess, minus the banner
+    # that would otherwise always win.
+    useful = [line for line in lines if line not in _GENERIC_RESULT_LINES]
+    return useful[-1] if useful else lines[-1]
 
 
 # Reads ONLY line 1 of the real master list, so it costs almost nothing
