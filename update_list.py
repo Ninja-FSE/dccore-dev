@@ -168,9 +168,12 @@ def walk_with_sizes(top, onerror=None):
     syscall only when the entry really is a symlink; an ordinary file is
     answered from what the enumeration already returned.
 
-    `entry.is_dir(follow_symlinks=False)` does NOT follow them, which is
-    os.walk's own default - a symlinked directory is not descended into, so a
-    loop back up the tree cannot make this run forever.
+    A symlinked DIRECTORY is classified as a directory - `entry.is_dir()`,
+    following, exactly as os.walk does when deciding what goes in `dirs` - and
+    then not descended into, which is os.walk's followlinks=False default. Two
+    decisions, made separately, because collapsing them into
+    is_dir(follow_symlinks=False) answers False for a symlinked directory and
+    hands it back as a file.
 
     `onerror` is called with the OSError, matching os.walk's parameter of the
     same name, so an unreadable subtree is reported the way it always was
@@ -190,8 +193,24 @@ def walk_with_sizes(top, onerror=None):
         files = []
         for entry in entries:
             try:
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(entry.path)
+                # CLASSIFYING AND DESCENDING ARE TWO DECISIONS, and os.walk
+                # makes them separately. A symlink to a directory IS a
+                # directory - os.walk puts it in `dirs`, so it never reaches a
+                # caller as a file - and with followlinks=False it simply is
+                # not descended into.
+                #
+                # Doing both with is_dir(follow_symlinks=False) collapses them
+                # and gets the first one wrong: that answers False for a
+                # symlinked directory, which made this walk treat it as a FILE
+                # and stat it, and would have published a directory as a
+                # downloadable entry in the list.
+                #
+                # Caught by CI on Linux, where a symlink can be created without
+                # elevation, while the same test skipped on the Windows box
+                # that wrote it.
+                if entry.is_dir():
+                    if not entry.is_symlink():
+                        pending.append(entry.path)
                     continue
             except OSError as err:
                 # A directory entry that cannot even be classified. Report it

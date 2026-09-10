@@ -33,10 +33,46 @@ with a guard on the guard because two empty dicts compare equal.
 Traversal order differs and cannot matter: `all_files_data` is sorted by
 (folder, filename) before anything is written.
 
-`entry.stat()` **follows** symlinks, exactly as `os.path.getsize()` did, so a
-symlinked track still reports its target's size. `entry.is_dir(follow_symlinks=
-False)` does **not**, which is os.walk's own default - a library with a link
-back up its own tree would otherwise walk forever.
+**Symlinks are three decisions, not two, and collapsing two of them was a real
+bug that CI caught.** `entry.stat()` **follows**, exactly as
+`os.path.getsize()` did, so a symlinked track still reports its target's size.
+The other two look like one question and are not:
+
+    is_dir()       FOLLOW  - to CLASSIFY. A symlink to a directory IS a
+                             directory; os.walk puts it in `dirs`, where a
+                             caller never sees it as a file.
+    is_symlink()           - and then do not DESCEND, os.walk's followlinks=
+                             False default. A link back up the tree would
+                             otherwise walk forever.
+
+The first version asked `is_dir(follow_symlinks=False)` and used the one
+answer for both. That answers **False** for a symlinked directory - so the
+walk classified it as a *file*, stat'd it, and would have published a
+directory as a downloadable entry in the list. Not a crash, not a hang: a
+wrong list, quietly.
+
+**Why the local run did not catch it.** The test that proves this needs a real
+symlink, and creating one on Windows needs Developer Mode or elevation, so it
+is written to skip where it cannot. That is the right call - the alternative
+is a suite that fails on an ordinary developer machine for a reason that is
+not a defect - but a skip is a hole, and this machine is Windows. The bug
+survived the full suite, a preflight and a seven-mutant run here, and failed
+on all six Linux CI legs.
+
+So the skipping test now has a companion that runs **everywhere**. A
+`DirEntry` is a small enough surface to stand in for: the walk asks it exactly
+`is_dir()`, `is_symlink()` and `stat()`, and a fake that answers those three
+the way a symlinked directory does covers the same decision on the platform
+most likely to get it wrong again. The fake's `stat()` raises rather than
+returning a size, so "it was treated as a file" is an explicit failure rather
+than a number that looks plausible.
+
+One further trap, for the third time this release: the source-level guard that
+pins these decisions reads `walk_with_sizes`'s body, and both the docstring
+and the comments there **name the wrong call in order to explain why it is
+wrong**. A search over them matches the explanation instead of the code - this
+guard passed on the docstring first, then failed on a comment. It strips both
+now and reads only the code.
 
 **Four test stubs had to move**, and that is the honest cost of the change:
 they injected failures at `os.path.getsize` and `os.walk`, which the scan no

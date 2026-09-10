@@ -33,6 +33,7 @@ cannot reach the published list.
 
 import io
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -262,14 +263,18 @@ class TheTwoSymlinkDecisionsAreStated(unittest.TestCase):
     change to either decision goes unnoticed. A mutation run confirmed that:
     flipping both survived locally.
 
-    Two decisions, opposite answers, and the asymmetry is the point:
+    Three decisions, and the first two are separate on purpose:
 
-      * is_dir(follow_symlinks=False) - do NOT follow, which is os.walk's own
-        default. A library with a link back up its own tree would otherwise
-        walk forever.
-      * stat() - DO follow, which is what os.path.getsize() did, so a
-        symlinked track still reports the size of what it points at rather
-        than the size of the link.
+      * is_dir() - FOLLOW, to classify. A symlink to a directory is a
+        directory, and os.walk puts it in `dirs` where a caller never sees it
+        as a file. Answering this without following returns False and hands
+        back a directory as a downloadable entry.
+      * is_symlink() - and then do not DESCEND, which is os.walk's
+        followlinks=False default. A library with a link back up its own tree
+        would otherwise walk forever.
+      * stat() - FOLLOW, which is what os.path.getsize() did, so a symlinked
+        track still reports the size of what it points at rather than of the
+        link.
     """
 
     def source(self):
@@ -286,17 +291,129 @@ class TheTwoSymlinkDecisionsAreStated(unittest.TestCase):
                      encoding="utf-8") as handle:
             text = handle.read()
         body = text.split("def walk_with_sizes(", 1)[1].split("\ndef ", 1)[0]
-        # Everything after the docstring's closing quotes.
-        return body.split('"""', 2)[-1]
+        # Everything after the docstring's closing quotes, with the
+        # comments taken out too. Both explain these decisions, and both
+        # name the WRONG ones in order to say why they are wrong - so a
+        # search over either matches the explanation rather than the code.
+        # This guard passed on the docstring first, then on a comment.
+        body = body.split('\"\"\"', 2)[-1]
+        return re.sub(r'#[^\n]*', '', body)
 
-    def test_directories_are_not_followed(self):
-        self.assertIn("entry.is_dir(follow_symlinks=False)", self.source())
+    def test_a_symlinked_directory_is_classified_as_a_directory(self):
+        """Following, like os.walk does when filling `dirs`. Not following
+        answers False and hands a directory back as a file - which is what
+        the first version of this did, and what CI caught on Linux while the
+        behavioural test skipped on Windows."""
+        body = self.source()
+
+        self.assertIn("entry.is_dir()", body)
+        self.assertNotIn("is_dir(follow_symlinks=False)", body)
+
+    def test_but_it_is_not_descended_into(self):
+        """os.walk's followlinks=False default, and the separate decision. A
+        library with a link back up its own tree would otherwise walk
+        forever."""
+        self.assertIn("if not entry.is_symlink():", self.source())
 
     def test_but_sizes_are(self):
         body = self.source()
 
         self.assertIn("entry.stat().st_size", body)
         self.assertNotIn("stat(follow_symlinks=False)", body)
+
+
+class ASymlinkedDirectoryIsNeverAFile(ATreeCase):
+    """The bug CI caught, tested where symlinks cannot be created.
+
+    entry.is_dir(follow_symlinks=False) answers False for a symlink to a
+    directory, so the first version of this walk classified one as a FILE,
+    stat'd it, and handed it back - which would have published a directory as
+    a downloadable entry in the list.
+
+    The real-symlink test below is the honest check and it SKIPS on Windows,
+    where making one needs Developer Mode or elevation. That is the machine
+    this was written on, so the bug survived a full local suite, a preflight
+    and a seven-mutant run, and was caught by Linux CI.
+
+    A DirEntry is a small enough surface to stand in for: is_dir(), which
+    follows and says yes, and is_symlink(), which says it is a link. That is
+    all the walk asks, so this covers the same decision everywhere - including
+    the machine most likely to be the one that gets it wrong again.
+    """
+
+    def scandir_with_a_symlinked_dir(self, at):
+        real_scandir = os.scandir
+        target = os.path.normcase(os.path.abspath(at))
+
+        class LooksLikeALinkedDir:
+            def __init__(self, name, path):
+                self.name, self.path = name, path
+
+            def is_dir(self, follow_symlinks=True):
+                # Following, it is a directory. Not following, it is a link.
+                return bool(follow_symlinks)
+
+            def is_symlink(self):
+                return True
+
+            def stat(self, follow_symlinks=True):
+                raise AssertionError(
+                    "the walk stat'd a symlinked directory, which means it "
+                    "classified it as a file")
+
+        asked_for = self.asked_for = []
+
+        class Scandir:
+            def __init__(self, path="."):
+                asked_for.append(path)
+                entries = []
+                with real_scandir(path) as scanning:
+                    entries.extend(scanning)
+                if os.path.normcase(os.path.abspath(path)) == target:
+                    entries.append(LooksLikeALinkedDir(
+                        "loop", os.path.join(path, "loop")))
+                self._next = iter(entries)
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                return next(self._next)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        os.scandir = Scandir
+        self.addCleanup(setattr, os, "scandir", real_scandir)
+
+    def test_it_is_not_returned_as_a_file(self):
+        self.make("Artist/01.flac")
+        self.scandir_with_a_symlinked_dir(os.path.join(self.root, "Artist"))
+
+        names = [name for _root, files in update_list.walk_with_sizes(self.root)
+                 for name, _size in files]
+
+        self.assertIn("01.flac", names)
+        self.assertNotIn("loop", names,
+                         "a symlinked directory came back as a file, and "
+                         "would have been published as a downloadable entry")
+
+    def test_and_it_is_not_descended_into(self):
+        """The other half. Classifying it correctly is no use if the walk then
+        walks into it - that is the loop os.walk's followlinks=False avoids."""
+        self.make("Artist/01.flac")
+        self.scandir_with_a_symlinked_dir(os.path.join(self.root, "Artist"))
+
+        list(update_list.walk_with_sizes(self.root))
+
+        # What it TRIED to open, not what it yielded. A walk that descends into
+        # a link whose target does not exist yields nothing for it either way,
+        # so a check on the results cannot tell the two apart - and did not.
+        self.assertFalse([p for p in self.asked_for if p.endswith("loop")],
+                         "the walk descended into a symlinked directory")
 
 
 class SymlinkedDirectoriesAreNotFollowed(ATreeCase):
