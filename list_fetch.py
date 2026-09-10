@@ -1316,3 +1316,40 @@ def get_fetched_bot_page(entry, offset, limit):
     page, total_folders, total_rows = list_mod.page_folder_groups(
         groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
     return page, total_folders, total_rows, None
+
+
+def forget_bot(bot):
+    """Remove everything held for `bot`'s fetched list: the registry entry,
+    the extracted files on disk, and its rows in the cross-list search index.
+
+    True if there was an entry to remove, False if `bot` was not held at all
+    - the caller's own decision about whether to ask (is this bot offline,
+    is a fetch for it in flight) happens before this is ever called; this
+    function only does the removing, unconditionally, once asked.
+
+    Same lock as process_fetched_list_zip()/get_fetched_bot_page(): a forget
+    racing a fetch that is about to replace the same entry must not interleave
+    with either the dict write or the directory rewrite.
+    """
+    name = str(bot).strip().lower()
+    if not name:
+        return False
+
+    with _lock():
+        store = _ensure_fetched_bot_lists()
+        entry = store.pop(name, None)
+        if entry is None:
+            return False
+        db.save_fetched_bot_lists(dict(store))
+
+    # Off the lock: a slow rmtree on a network-mounted FETCHED_FILES_DIR must
+    # not hold up an unrelated fetch that only needs the dict, and the entry
+    # is already gone from the dict either way - nothing left can read it
+    # back mid-delete.
+    shutil.rmtree(platform_compat.long_path(list_extract_dir(bot)),
+                   ignore_errors=True)
+    list_index.drop_bot(bot)
+
+    real_nick = entry.get("bot", bot) if isinstance(entry, dict) else bot
+    print(f"[LIST-FETCH] Forgot {real_nick}'s fetched list.")
+    return True

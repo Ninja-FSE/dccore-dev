@@ -1386,6 +1386,50 @@ def build_fetched_bot_list_summaries():
     return rows
 
 
+def build_purge_offline_fetched_lists_result():
+    """POST /api/filelists/purge-offline payload: forget every held list
+    whose bot is showing the List Browser's red dot right now.
+
+    "Red dot" is `online is False` from build_fetched_bot_list_summaries()'s
+    own rule - present_nicks() answered and this bot was not in it. A bot
+    this daemon has not finished joining channels for yet reads `online:
+    None` (the grey dot, "cannot tell yet"), and is left alone: an empty
+    presence mirror is not evidence the bot is gone, it is evidence nobody
+    has looked yet, and issue #385 asked for the red dot specifically.
+
+    A bot with any request still outstanding (list, folder, or a plain file)
+    is skipped even if it is showing red - see dcc_fetch.
+    has_any_outstanding_request()'s docstring for why forgetting it under a
+    reply in flight is unsafe, not just untidy.
+
+    A currently-online bot is never a candidate at all, by construction: this
+    only iterates config.fetched_bot_lists, which is what list_fetch.
+    forget_bot() removes from, and never consults `known`/advert-only rows -
+    there is nothing held for those to purge.
+    """
+    import dcc_fetch
+    import list_fetch
+
+    store = dict(getattr(config, "fetched_bot_lists", {}) or {})
+    present = present_nicks()
+
+    purged = []
+    skipped_in_flight = []
+    for key, entry in store.items():
+        bot = entry.get("bot", key) if isinstance(entry, dict) else key
+        online = (bot.lower() in present) if present else None
+        if online is not False:
+            continue
+        if dcc_fetch.has_any_outstanding_request(bot):
+            skipped_in_flight.append(bot)
+            continue
+        if list_fetch.forget_bot(bot):
+            purged.append(bot)
+
+    return 200, {"purged": purged, "count": len(purged),
+                 "skipped_in_flight": skipped_in_flight}
+
+
 # JavaScript's Number.MAX_SAFE_INTEGER. Past this a JSON number no longer
 # survives the trip into the page unchanged.
 _MAX_SAFE_JS_INT = 2 ** 53 - 1
@@ -3584,6 +3628,14 @@ if HAVE_FLASK:
             # neither should start answering the other's.
             return jsonify(build_own_list_summaries()
                            + build_fetched_bot_list_summaries())
+
+        @app.route("/api/filelists/purge-offline", methods=["POST"])
+        def api_filelists_purge_offline():
+            # POST, not DELETE: it does not name what to remove - the caller
+            # asks "clear whatever is offline right now" rather than naming a
+            # specific bot, so there is no resource URL for DELETE to name.
+            status, result = build_purge_offline_fetched_lists_result()
+            return jsonify(result), status
 
         @app.route("/api/filelists/search")
         def api_filelists_search():

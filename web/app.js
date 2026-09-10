@@ -139,6 +139,8 @@
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
     filelistsFreshness: document.getElementById("filelists-freshness"),
     filelistsBotList: document.getElementById("filelists-bot-list"),
+    filelistsPurgeBtn:    document.getElementById("filelists-purge-offline-btn"),
+    filelistsPurgeStatus: document.getElementById("filelists-purge-status"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
@@ -1039,6 +1041,47 @@
   function showFilelistsFetchStatus(text, isError) {
     el.filelistsFetchStatus.textContent = text;
     el.filelistsFetchStatus.classList.toggle("is-error", !!isError);
+  }
+
+  // Purging offline bots' held lists (#385) ---------------------------------
+
+  el.filelistsPurgeBtn.addEventListener("click", function () {
+    if (!window.confirm(
+        "Forget every held list whose bot is not in a channel with you " +
+        "right now? A bot that is here, or one still joining, is left " +
+        "alone - this only removes the red-dot rows.")) {
+      return;
+    }
+    el.filelistsPurgeBtn.disabled = true;
+    postJson("/api/filelists/purge-offline", {}).then(function (res) {
+      if (!res.ok) {
+        showFilelistsPurgeStatus(
+          "Could not purge: " + (res.data && res.data.error || ("HTTP " + res.status)), true);
+        return;
+      }
+      var count = res.data.count || 0;
+      var skipped = (res.data.skipped_in_flight || []).length;
+      var text = count === 0
+        ? "Nothing to purge - no held list is currently showing the red dot."
+        : "Forgot " + count + " list" + (count === 1 ? "" : "s") + ": " +
+          res.data.purged.join(", ") + ".";
+      if (skipped > 0) {
+        text += " Left " + skipped + " alone - a fetch is still in flight for " +
+          (skipped === 1 ? "it" : "them") + ".";
+      }
+      showFilelistsPurgeStatus(text, false);
+      pollFilelistsBots();
+    }).catch(function (err) {
+      showFilelistsPurgeStatus("Request failed: " + err.message, true);
+    }).then(function () {
+      el.filelistsPurgeBtn.disabled = false;
+    });
+  });
+
+  function showFilelistsPurgeStatus(text, isError) {
+    el.filelistsPurgeStatus.textContent = text;
+    el.filelistsPurgeStatus.classList.toggle("is-error", !!isError);
+    el.filelistsPurgeStatus.hidden = false;
   }
 
   // Switching which bot's list is shown ------------------------------------

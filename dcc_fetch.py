@@ -323,6 +323,29 @@ def has_outstanding_bot_alone_request(bot):
         return _has_outstanding_bot_alone_request_locked(queue, bot)
 
 
+def has_any_outstanding_request(bot):
+    """True if ANY row - file, list or folder - is unresolved for `bot`.
+
+    Wider than has_outstanding_bot_alone_request() above, which only looks at
+    "list"/"folder" rows because those are the ones ambiguous at claim time.
+    A caller asking "is it safe to forget this bot entirely" (the List
+    Browser's purge, see webserver.build_purge_offline_fetched_lists_result())
+    cares about every request_type: forgetting a bot mid-download would not
+    misattribute anything the way two bot-alone rows would, but it would
+    still delete the fetched-list entry a "list" reply is about to be filed
+    under, or the extract directory a running "folder" fetch is about to
+    write into.
+    """
+    wanted_bot = str(bot).strip().lower()
+    queue = _ensure_fetch_queue()
+    with _fetch_lock():
+        return any(
+            row.get("state") in _UNRESOLVED_FETCH_STATES
+            and str(row.get("bot", "")).strip().lower() == wanted_bot
+            for row in queue.values()
+        )
+
+
 def enqueue_fetch(bot, filename, request_type="file"):
     """Append one `pending` row to config.fetch_queue and return its id, or
     None if the request was refused (see below) - callers must check for
