@@ -1778,16 +1778,24 @@ class UnreadableSubtreeKeepsThePreviousIndex(MasterListCase):
     touching real filesystem permissions at all."""
 
     def walk_erroring(self, err):
-        real_walk = os.walk
+        """Report an unreadable subtree without making one.
 
-        def fake_walk(top, *args, **kwargs):
-            onerror = kwargs.get("onerror")
+        Stubs update_list.walk_with_sizes(), which is the seam the scan
+        actually uses. It stubbed os.walk() before the scan stopped
+        asking for every size twice - and patching a stdlib function
+        globally reached further than it needed to, since shutil.rmtree
+        and the harness's own cleanup walk through the same name.
+        """
+        real_walk = update_list.walk_with_sizes
+
+        def fake_walk(top, onerror=None):
             if onerror is not None:
                 onerror(err)
-            yield from real_walk(top, *args, **kwargs)
+            yield from real_walk(top, onerror=onerror)
 
-        os.walk = fake_walk
-        self.addCleanup(lambda: setattr(os, "walk", real_walk))
+        update_list.walk_with_sizes = fake_walk
+        self.addCleanup(
+            lambda: setattr(update_list, "walk_with_sizes", real_walk))
 
     def test_a_walk_error_refuses_to_publish(self):
         self.add("Metallica/Black Album/01.flac")
@@ -1828,27 +1836,88 @@ class AnUnreadableFileIsExcludedNotPublishedAsZeroBytes(MasterListCase):
     """
 
     def getsize_raising_for(self, target_path):
-        real_getsize = os.path.getsize
+        """Make one file's size unreadable, at the point the scan reads it.
 
-        def fake_getsize(path):
-            # Compared through long_path() on BOTH sides, because that is how
-            # the code under test calls it: update_list.py:413 is
-            # os.path.getsize(platform_compat.long_path(full_file_path)).
-            #
-            # On Windows long_path() prefixes "\?\", so a plain normpath
-            # comparison never matched, this stub never raised, and both tests
-            # below silently exercised the READABLE path - passing on Linux,
-            # where long_path() is the identity function, and failing here.
-            #
-            # A stub has to match the way production calls the function, not
-            # the way the test happens to hold the path.
-            if (platform_compat.long_path(os.path.normpath(path))
-                    == platform_compat.long_path(os.path.normpath(target_path))):
-                raise OSError(13, "Permission denied", path)
-            return real_getsize(path)
+        THAT POINT MOVED. This used to stub os.path.getsize(), which is what
+        the scan called - one extra syscall per file for a number the
+        directory enumeration had already returned. walk_with_sizes() takes it
+        from the DirEntry now, so a getsize stub sits on a function the scan
+        no longer reaches, and both tests below would exercise the READABLE
+        path while still passing.
 
-        os.path.getsize = fake_getsize
-        self.addCleanup(lambda: setattr(os.path, "getsize", real_getsize))
+        Which is the second time that has happened here. The previous version
+        carried a note about silently testing the readable path on Windows,
+        because it compared paths without long_path(). A stub has to match the
+        way production calls the thing, not the way the test happens to hold
+        it - so this one wraps os.scandir and gives the target entry a stat()
+        that raises, which is what an unreadable file actually does.
+        """
+        real_scandir = os.scandir
+
+        def same_file(path):
+            """Compared through long_path() on BOTH sides, because that is how
+            the code under test walks: scan_root is
+            platform_compat.long_path(scan_folder.path), so on Windows every
+            entry.path carries the "\\?\\" prefix and a plain normpath
+            comparison never matches.
+
+            The version of this helper that stubbed os.path.getsize carried
+            the same note, for the same reason, after the same failure. It was
+            load-bearing then and it is load-bearing now: without it the stub
+            never fires, both tests below exercise the READABLE path, and they
+            pass while proving nothing."""
+            return (platform_compat.long_path(os.path.normcase(os.path.normpath(path)))
+                    == platform_compat.long_path(os.path.normcase(os.path.normpath(target_path))))
+
+        class Unreadable:
+            """A DirEntry that answers everything except its size."""
+
+            def __init__(self, entry):
+                self._entry = entry
+                self.name = entry.name
+                self.path = entry.path
+
+            def is_dir(self, follow_symlinks=True):
+                return self._entry.is_dir(follow_symlinks=follow_symlinks)
+
+            def is_file(self, follow_symlinks=True):
+                return self._entry.is_file(follow_symlinks=follow_symlinks)
+
+            def stat(self, follow_symlinks=True):
+                raise OSError(13, "Permission denied", self.path)
+
+        class FakeScandir:
+            """A stand-in for os.scandir, and it has to be a real ITERATOR.
+
+            walk_with_sizes() uses it as a context manager, so __enter__ and
+            __exit__ are needed - but this replaces os.scandir globally, and
+            shutil.rmtree calls next() on the result directly during cleanup.
+            A class with only __iter__ satisfies a for-loop and fails there
+            with "not an iterator", taking the temporary tree with it.
+            """
+
+            def __init__(self, path="."):
+                with real_scandir(path) as scanning:
+                    self._entries = [
+                        Unreadable(entry) if same_file(entry.path) else entry
+                        for entry in scanning
+                    ]
+                self._next = iter(self._entries)
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                return next(self._next)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        os.scandir = FakeScandir
+        self.addCleanup(lambda: setattr(os, "scandir", real_scandir))
 
     def test_the_unreadable_file_is_left_out(self):
         good_path = self.add("Metallica/Black Album/01.flac")
@@ -2035,36 +2104,35 @@ class FlatteningIsWiredIntoTheWriter(MasterListCase):
         below by leaving nothing to make them fail, not by the flattening
         actually working.
         """
-        real_walk = os.walk
-        real_getsize = os.path.getsize
+        real_walk = update_list.walk_with_sizes
         album = os.path.abspath(self.tree.album)
 
-        def fake_walk(top, *args, **kwargs):
-            for root, dirs, files in real_walk(top, *args, **kwargs):
-                # generate_master_list() now calls os.walk() against a
-                # platform_compat.long_path()-wrapped root (#162 finding
-                # #21), which on Windows prefixes every yielded `root`
-                # with "\\?\" - os.path.abspath() does not strip that, so
-                # comparing against the unwrapped `album` below would
-                # never match again without stripping it here too.
+        def fake_walk(top, onerror=None):
+            for root, files in real_walk(top, onerror=onerror):
+                # The scan walks a platform_compat.long_path()-wrapped
+                # root (#162 finding #21), which on Windows prefixes every
+                # yielded `root` - os.path.abspath() does not strip that,
+                # so comparing against the unwrapped `album` below would
+                # never match without stripping it here too.
                 root_compare = os.path.abspath(root)
-                if root_compare.startswith("\\\\?\\"):
+                if root_compare.startswith('\\\\?\\'):
                     root_compare = root_compare[4:]
                 if root_compare == album:
-                    yield root, dirs, list(names)
+                    # NAME AND SIZE TOGETHER, which is why the getsize
+                    # shim this used to need is gone. These names (a
+                    # newline, a lone CR, invalid UTF-8) generally cannot
+                    # exist as real files, so the old stub had to make
+                    # os.path.getsize answer 2048 for a path that was
+                    # never on disk - or every crafted entry raised
+                    # FileNotFoundError, was silently excluded, and every
+                    # assertion passed by having nothing left to fail on.
+                    yield root, [(name, 2048) for name in names]
                 else:
-                    yield root, dirs, files
+                    yield root, files
 
-        def fake_getsize(path):
-            try:
-                return real_getsize(path)
-            except OSError:
-                return 2048  # matches MasterListCase.add()'s own default size
-
-        os.walk = fake_walk
-        os.path.getsize = fake_getsize
-        self.addCleanup(lambda: setattr(os, "walk", real_walk))
-        self.addCleanup(lambda: setattr(os.path, "getsize", real_getsize))
+        update_list.walk_with_sizes = fake_walk
+        self.addCleanup(
+            lambda: setattr(update_list, "walk_with_sizes", real_walk))
 
     def test_a_newline_in_a_scanned_name_cannot_split_the_entry(self):
         self.walk_yielding("evil\nname.flac")

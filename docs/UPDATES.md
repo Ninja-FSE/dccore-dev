@@ -4,6 +4,61 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 The scan asks the filesystem once, not twice
+
+`os.walk` is built on `os.scandir`, which gets each entry's size from the
+directory enumeration - and then throws it away, because os.walk's contract is
+names only. The scan then asked `os.path.getsize()` for a number the
+filesystem had just finished telling us: **one redundant syscall per file**,
+and on a network share one redundant round trip per file.
+
+Measured, same tree, same answer from both:
+
+    the walk alone   0.356s -> 0.095s   3.8x   (20,000 files, local SSD)
+    a whole rebuild  2.51s  -> 1.56s    1.61x  (30,000 files)
+
+**Both figures are recorded on purpose.** Quoting the 3.8x alone would
+overstate it: writing and packing are the rest of the job and this does not
+touch them. The walk's share is what grows on a network drive, where the
+second ask is a round trip rather than a cached answer - and the library this
+was written for is 799,438 files on a mapped drive, where a rebuild takes
+fifteen and a half minutes.
+
+**The risk was never the speed.** This is the loop that decides what the bot
+hands out, so the tests that matter are the ones asserting the new walk answers
+*identically* to the old one - same files, same sizes - across an ordinary
+library, an empty directory, a deep tree, a zero-byte file and awkward names,
+with a guard on the guard because two empty dicts compare equal.
+
+Traversal order differs and cannot matter: `all_files_data` is sorted by
+(folder, filename) before anything is written.
+
+`entry.stat()` **follows** symlinks, exactly as `os.path.getsize()` did, so a
+symlinked track still reports its target's size. `entry.is_dir(follow_symlinks=
+False)` does **not**, which is os.walk's own default - a library with a link
+back up its own tree would otherwise walk forever.
+
+**Four test stubs had to move**, and that is the honest cost of the change:
+they injected failures at `os.path.getsize` and `os.walk`, which the scan no
+longer calls, so they would have sat on functions nothing reaches and passed
+while proving nothing. They hook `walk_with_sizes()` now - narrower than
+patching a stdlib function globally, which had been reaching `shutil.rmtree`
+and the harness's own cleanup. The flattening stub got simpler: it yields name
+and size together, so the `getsize` shim it needed for names that cannot exist
+as real files is gone.
+
+Seven mutants, all caught. Three survived first, and each was a different
+lesson:
+
+- the unreadable-subtree test passed **by luck of traversal order** - with the
+  bad directory visited last, abandoning the walk on an error changed nothing.
+  Two failing directories and a count is order-independent.
+- both symlink decisions were only covered by a test that **skips** where
+  symlinks need elevation, which is the machine most likely to run it.
+- and the source-level guard added to cover that matched the **docstring**,
+  which quotes the decision verbatim to explain it. It reads the code with the
+  docstring stripped now - the same trap this project has recorded before.
+
 ### 🔴 "No background" was not what it did
 
 From the beta, against the new colour picker: *"something is wrong with color
