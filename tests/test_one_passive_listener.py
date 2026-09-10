@@ -98,7 +98,36 @@ class OnlyOneListenerAtATime(unittest.TestCase):
                    for i in range(10)]
         for thread in threads:
             thread.start()
-        time.sleep(0.2)
+
+        # WAIT FOR THE LOSERS TO HAVE LOST, rather than sleeping and hoping.
+        #
+        # `_listening` is cleared in _listen_and_serve()'s `finally`, so the
+        # moment the winner returns the gate is open again. A refused thread
+        # exits immediately, so "nine of them have finished" is exactly the
+        # condition that every loser has already been turned away - and until
+        # that holds, releasing the winner lets a straggler through and the
+        # count is 2 through no fault of the code under test.
+        #
+        # The old 0.2s sleep assumed ten threads always get scheduled inside
+        # 200ms. They do on an idle machine; they did not on a CI runner that
+        # was simultaneously reporting "[Errno 24] Too many open files", where
+        # this failed on ubuntu/3.10 alone while the other five legs passed.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if sum(1 for thread in threads if thread.is_alive()) <= 1:
+                break
+            time.sleep(0.01)
+
+        # The wait must have SUCCEEDED, not timed out - otherwise a machine
+        # slow enough to blow the deadline would reach the assertion below
+        # with the losers still pending and pass it for the wrong reason,
+        # which is the failure this test exists to catch.
+        still_running = sum(1 for thread in threads if thread.is_alive())
+        self.assertEqual(still_running, 1,
+                         f"{still_running} threads were still running after "
+                         f"5s; the other nine should have been refused "
+                         f"immediately")
+
         release.set()
         for thread in threads:
             thread.join(5)

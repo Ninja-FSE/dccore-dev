@@ -102,6 +102,50 @@ also pointed at an element id the page does not define, which
 
 Eleven mutants killed, including the two that matter most - the index rows
 left behind, and the extra markers left behind while the main list goes.
+### 🟢 The one-listener test raced with itself
+
+`test_ten_concurrent_offers_open_one_listener` failed on **ubuntu/3.10 alone**
+while the other five legs passed, on a commit whose only changes were a
+changelog, a JavaScript rename and a test guard - nothing within reach of a
+socket or a thread. The runner was reporting `[Errno 24] Too many open files`
+a few lines above it.
+
+The defect was in the test, and it is worth writing down because the shape is
+common. It started ten threads, **slept 0.2s**, then released the one that had
+won the lock:
+
+    for thread in threads: thread.start()
+    time.sleep(0.2)
+    release.set()
+
+`_listening` is cleared in `_listen_and_serve()`'s `finally`, so the instant
+the winner returns the gate is open again. The sleep is a bet that all ten
+threads get scheduled inside 200ms. They do on an idle machine. On a runner
+that was out of file descriptors and contending for CPU, one straggler had not
+reached the check yet - so it arrived after the winner had already released,
+passed the gate honestly, and made the count 2. **The code under test was
+correct the whole time.**
+
+It now waits for the condition instead of for the clock: nine threads having
+*finished* is exactly "every loser has already been turned away", since a
+refused thread returns immediately.
+
+    while time.time() < deadline:
+        if sum(1 for t in threads if t.is_alive()) <= 1: break
+        time.sleep(0.01)
+
+**With a guard on the guard.** The wait has a deadline, and a machine slow
+enough to blow it would otherwise reach the original assertion with the losers
+still pending and pass for the wrong reason - which is the exact failure this
+test exists to catch. So it asserts the wait *succeeded* first.
+
+Verified both directions: removing the `_listening` check in `adminchat.py`
+still fails both tests in the file, and thirty consecutive runs under
+four-way CPU load pass, where the old shape is what CI tripped over.
+
+Worth remembering as a rule: **a sleep before an assertion is a bet on the
+scheduler, and CI is the machine that collects.** Wait for the state that
+makes the assertion meaningful, and assert that the wait worked.
 
 ---
 
