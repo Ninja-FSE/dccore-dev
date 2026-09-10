@@ -910,6 +910,14 @@ html, body {
   font-size: 0.9rem;
 }
 
+/* Said next to the menus rather than in the preview, because the preview
+   already shows the RESULT and this says the reason. */
+.irc-colour-warning {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
 /* Nothing picked is not a colour, so it does not get drawn as one. */
 .irc-colour-swatch.is-unset {
   background: repeating-linear-gradient(

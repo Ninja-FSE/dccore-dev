@@ -2704,6 +2704,23 @@
     return out;
   }
 
+  // THE THREE ROLES THAT ARE A SURFACE, not a text colour. theme.py defines
+  // them that way: border is "the outer block that frames a section",
+  // separator "the block between fields", textbox "the plate the text sits
+  // on". A block with no background is not a block, and a plate with no
+  // background is not a plate - whatever colour the previous segment left
+  // behind simply shows through.
+  //
+  // value, alert and accent are the opposite: they colour figures and
+  // secondary text, and a foreground on its own is exactly right for them.
+  var IRC_SURFACE_ROLES = ["BORDER", "SEPARATOR", "TEXTBOX"];
+
+  function isSurfaceRole(settingName) {
+    return IRC_SURFACE_ROLES.some(function (role) {
+      return settingName === "CUSTOM_THEME_" + role;
+    });
+  }
+
   // TWO MENUS AND A SWATCH, in place of a box that could not display what it
   // held. See _settings_field() in webserver.py for what the box was showing.
   //
@@ -2730,9 +2747,27 @@
       "</select>" +
       '<select data-irc-part="bg" aria-label="Background colour"' +
         (picked.fg === "" ? " disabled" : "") + ">" +
-        options(picked.bg, "No background") +
+        // NOT "No background", which is what this said and is not what it
+        // does. A colour code carrying only a foreground leaves the
+        // background exactly as the previous segment set it - that is the IRC
+        // formatting spec, not an implementation quirk - so the honest label
+        // is what actually happens. Reported from the beta: a border of blue
+        // on red with the text box left "No background" painted every field
+        // after it red, and the preview was right.
+        options(picked.bg, "Keep previous") +
       "</select>" +
+      surfaceWarningHtml(name, picked) +
     "</span>";
+  }
+
+  // Only on the three that are a surface, and only when there is something to
+  // warn about. A note that is always there is a note nobody reads.
+  function surfaceWarningHtml(settingName, picked) {
+    if (!isSurfaceRole(settingName)) { return ""; }
+    if (picked.fg === "" || picked.bg !== "") { return ""; }
+    return '<span class="irc-colour-warning">' +
+      "keeps the previous background \u2014 this one is drawn as a block" +
+      "</span>";
   }
 
   // The swatch is what the code MEANS, shown next to the menus that made it:

@@ -4,6 +4,70 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 "No background" was not what it did
+
+From the beta, against the new colour picker: *"something is wrong with color
+preview in website"*, then the sharper version - *"why half message is shown in
+red and other half in blue"*.
+
+**Nothing was wrong with the preview.** It was showing exactly what the channel
+would see, which is what it is for. What was wrong was the menu that produced
+the setting.
+
+The background dropdown offered **"No background"**, and that is not what
+choosing it does. A colour code carrying only a foreground leaves the
+background as the previous segment set it - the IRC formatting spec, not an
+implementation quirk:
+
+> If only the foreground color is set, the background color stays the same.
+
+Checked against the spec before touching anything, because the alternative
+was that the renderer was wrong, and a preview that lies is worse than no
+preview.
+
+**Why the message split in three**, which is the part worth writing down. The
+advert opens
+
+    {BORDER} {SEPARATOR} {TEXTBOX} Type: ...
+
+and every later section is
+
+    {SEPARATOR} {BORDER} {TEXTBOX} Slots: ...
+
+with the two blocks **in the opposite order**. So the first field inherits the
+separator's colour and every later field inherits the border's - the blue half
+and the red half. The stretch between them lands on the client default,
+because a reset clears both and a foreground-only text box never puts one
+back. Decoded from the real line rather than guessed:
+
+    royal blue     Type:  @DCCore
+    default        For My List Of:  719,041  Files (5.48 TB) created  Sep 7th
+    red            Slots: 3/3 - Queued: 0 - Speed - Total Sent - Search: ON
+
+**The fix is the label, and a warning where it matters.** The option now says
+**"Keep previous"**, which is what it does. And three of the six roles are a
+surface rather than a text colour - `theme.py` already says so: border is *"the
+outer block that frames a section"*, separator *"the block between fields"*,
+textbox *"the plate the text sits on"*. A block with no background is not a
+block. Those three warn when a foreground is set without one; `value`, `alert`
+and `accent` colour figures and secondary text, where a foreground alone is
+exactly right and a warning would be telling the operator off for using the
+feature correctly.
+
+**Every shipped preset gives all three surfaces a background** - which is why
+no preset has ever shown this, and why the picker letting one through was the
+defect. That is now a test, so a preset cannot quietly acquire the same
+problem.
+
+The test file reads the rendered line with a small mIRC parser rather than
+asserting on the codes, because the claim under test is about what a CLIENT
+does with them; asserting the codes would only restate the template.
+
+Seven mutants, all caught. One survived first, and it was the recurring shape:
+the warning's guard was replaced with `if (true)` and every assertion about
+the function's contents still passed, because they were all still there as
+dead code. The guard is named now.
+
 ### 🔴 The advert owns the trigger; the sender owns the identity
 
 Seen in a live console:
