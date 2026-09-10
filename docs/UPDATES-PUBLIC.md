@@ -2,6 +2,8 @@
 
 ## v1.12.0-RC1 — The Several Lists Release
 
+- **Fixed: when a list rebuild failed, the dashboard showed “could not generate the list” and never said why.** The reason was there - a missing folder, a permission error, a drive that had gone away - but the message picked the last line the builder printed, and the builder always ends with that same generic line. The real explanation was one line above it, collected and discarded. It now shows the actual error.
+
 - **You can turn off the public “Sent:” message in the channel.** Settings → Advertising & search → **Announce finished transfers in the channel**. This is the only public message a transfer produces — the queue position, the “Sending” notice and the file offer itself all go privately to whoever asked, so turning it off does not stop requests being answered or leave anyone wondering what happened. Your own log still records every send. On by default; nothing changes unless you switch it off.
 
 - **Bold has been removed from every message the bot sends.** The advert, the “Sent:” notice, `@find` results, the private “Sending” and queue notices and the debug channel. Colours are unchanged — only the bold is gone.

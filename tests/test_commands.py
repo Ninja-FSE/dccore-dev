@@ -855,23 +855,91 @@ class SubprocessFailureMessageTests(unittest.TestCase):
     half. update_list.py's own error handling prints via plain print() -
     stdout, not stderr - so a script-level failure used to leave stderr
     empty and the admin saw "Unknown script error" with no filename and no
-    reason at all, from the exact line this now replaces."""
+    reason at all, from the exact line this now replaces.
+
+    AND THEN IT REPORTED THE ONE LINE THAT NEVER EXPLAINS ANYTHING. "Take
+    the last line" was right when update_list.py's own summary was last. Its
+    __main__ now prints a generic banner after it, so the last line became
+    "--- ERROR: could not generate the list. ---" every time, with the reason
+    sitting in the output above it - captured, and thrown away.
+
+    The test below used to assert exactly that. It passed a Permission denied
+    and expected the trailing status line instead, which is the defect written
+    down as the expectation."""
 
     def test_stderr_wins_when_present(self):
         msg = commands.subprocess_failure_message(
             "Traceback...\nValueError: boom", "some stdout noise")
         self.assertEqual(msg, "ValueError: boom")
 
-    def test_falls_back_to_the_last_line_of_stdout_when_stderr_is_empty(self):
+    def test_the_reason_is_taken_from_stdout_not_the_status_line_after_it(self):
         """The exact gap this fixes: update_list.py's own error handler
-        prints its summary to stdout, not stderr."""
+        prints its summary to stdout, not stderr - and then keeps printing."""
         stdout = ("[LIST-GEN] Scanning the library in /music...\n"
                   "[LIST-GEN ERROR] Failed to generate the lists: "
                   "[Errno 13] Permission denied\n"
                   "[LIST-GEN] The previous list was left untouched and is still in use.")
+
         msg = commands.subprocess_failure_message("", stdout)
-        self.assertEqual(
-            msg, "[LIST-GEN] The previous list was left untouched and is still in use.")
+
+        self.assertEqual(msg, "[LIST-GEN ERROR] Failed to generate the lists: "
+                              "[Errno 13] Permission denied")
+
+    def test_the_final_banner_never_wins(self):
+        """What a live install actually saw. Every failed run ends with this
+        line, so taking the last one reported it every time."""
+        stdout = ("[LIST-GEN ERROR] 'Music' failed: [WinError 3] The system "
+                  "cannot find the path specified\n"
+                  "[LIST-GEN ERROR] These lists were not rebuilt and are still "
+                  "serving what they last built: 'Music'\n"
+                  "--- ERROR: could not generate the list. ---")
+
+        msg = commands.subprocess_failure_message("", stdout)
+
+        self.assertIn("WinError 3", msg)
+        self.assertNotIn("could not generate the list", msg)
+
+    def test_the_first_tagged_line_wins_because_the_rest_follow_from_it(self):
+        """"These lists were not rebuilt" is true and is a consequence. Only
+        the first names what broke."""
+        stdout = ("[LIST-GEN ERROR] 'Music' failed: disk full\n"
+                  "[LIST-GEN ERROR] These lists were not rebuilt\n")
+
+        self.assertEqual(commands.subprocess_failure_message("", stdout),
+                         "[LIST-GEN ERROR] 'Music' failed: disk full")
+
+    def test_a_critical_line_counts_as_a_reason(self):
+        """update_list.py refuses a missing library with [CRITICAL], so
+        that tag has to be recognised too.
+
+        Asserted with a line AFTER it, which is what makes the tag do any
+        work: on its own it is also the last line, so the untagged
+        fallback returns it either way and the test proves nothing. It
+        was written that way first and a mutation run said so."""
+        stdout = ("[CRITICAL] None of the configured music folders exist\n"
+                  "Check the mount and run it again.")
+
+        self.assertIn("None of the configured music folders exist",
+                      commands.subprocess_failure_message("", stdout))
+
+    def test_an_untagged_failure_still_reports_something_useful(self):
+        """A traceback carries no tag. The last line is still the best guess -
+        as long as the banner is not it."""
+        stdout = ("Traceback (most recent call last):\n"
+                  "  File \"update_list.py\", line 1\n"
+                  "MemoryError\n"
+                  "--- ERROR: could not generate the list. ---")
+
+        self.assertEqual(commands.subprocess_failure_message("", stdout),
+                         "MemoryError")
+
+    def test_a_banner_on_its_own_is_better_than_nothing(self):
+        """Guard against the filter emptying the list and returning nothing at
+        all, which would read as a run that produced no output."""
+        msg = commands.subprocess_failure_message(
+            "", "--- ERROR: could not generate the list. ---")
+
+        self.assertTrue(msg.strip())
 
     def test_no_stderr_and_no_stdout_says_so_rather_than_nothing(self):
         self.assertEqual(commands.subprocess_failure_message("", ""), "Unknown script error")

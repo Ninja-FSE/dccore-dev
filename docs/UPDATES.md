@@ -4,6 +4,55 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 The list failure reported the one line that never explains anything
+
+Reported from the same install as the code-page fix above, and only visible
+because that fix landed first: `!update` failed with
+
+    Failed: --- ERROR: could not generate the list. ---
+
+which says the run failed - something the exit code already said - and never
+why.
+
+**"Take the last line" was right when it was written, and quietly stopped
+being right.** `commands.subprocess_failure_message()` reaches for the last
+line of the child's output because `update_list.py` reports through plain
+`print()` to stdout, and its own summary used to land there. Its `__main__`
+now prints a generic banner **after** everything else:
+
+    [LIST-GEN ERROR] 'Music' failed: [WinError 3] The system cannot find the path specified
+    [LIST-GEN ERROR] These lists were not rebuilt and are still serving what they last built: 'Music'
+    --- ERROR: could not generate the list. ---      <- always last
+
+So the reason was captured and thrown away, every single time, and the one
+line guaranteed to be useless was the one shown.
+
+**The first tagged line, not the last.** `[LIST-GEN ERROR]`, `[CRITICAL]`,
+`[LIST ERROR]` and `[UPDATE ERROR]` mark a real explanation; the first of them
+is the root cause and the ones after it are consequences - "These lists were
+not rebuilt" is true, follows from whatever broke the first, and names
+nothing. With no tagged line at all - a traceback, say - the last line is
+still the best guess, minus the banner that would otherwise always win. And a
+banner on its own still beats returning nothing, which would read as a run
+that produced no output.
+
+**The old test asserted the defect.** It passed a `Permission denied` through
+and expected the trailing status line instead:
+
+```python
+self.assertEqual(
+    msg, "[LIST-GEN] The previous list was left untouched and is still in use.")
+```
+
+Written to prove the stdout fallback worked, which it did, it also wrote down
+"the last line is the answer" as the expectation - so the behaviour could not
+change without the test objecting, and the test was wrong.
+
+Five mutants, all caught. One survived first: the `[CRITICAL]` case passed a
+stdout whose only line was the `[CRITICAL]` one, so the untagged fallback
+returned it whether the tag was recognised or not. It has a line after it now,
+which is what makes the tag decide anything.
+
 ### 🟢 No bold anywhere, and the channel need not be told
 
 Two things asked for together:
