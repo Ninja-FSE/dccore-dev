@@ -6,6 +6,14 @@ public tree, `tests/` very much included, and this project has shipped
 identifiers three times already: a serving bot's nick in two test files, a
 real channel in a changelog, and an operator's own paths in fixtures.
 
+A FOURTH was caught in review rather than by this file, which is the reason
+the list below grew. The gap is structural and worth naming: a denylist only
+knows what it has been taught, so it cannot catch the first appearance of a
+name nobody has thought about yet. It catches the SECOND. That is still worth
+having - every one of these got in because somebody read a live console and
+carried the names across into a fix, and the same names come back every time
+- but it means review is the first line and this file is the net under it.
+
 Greps done by hand keep missing them, because they are written to find the
 thing already known about. This asks the export itself.
 
@@ -53,6 +61,23 @@ FORBIDDEN = {
     "13ea59307fc3f4ec": "the private development repository. Naming it in the "
                         "public tree points strangers at a repo they cannot "
                         "read, whose issue numbers resolve to nothing",
+    # THE FOURTH TIME, and the first the guard was already in place for.
+    #
+    # A live report names the channels and the bots it happened to involve,
+    # and the honest instinct is to carry those names into the fix so the test
+    # describes the real case. Three channels and a bot's nick reached a
+    # branch that way - in comments, in docstrings, in a set_config(CHANNEL=)
+    # and in the assertions themselves - and the suite passed, because this
+    # denylist only knows what it has already been taught.
+    #
+    # Nothing needs them. "a bot only in the second configured channel" is the
+    # same sentence, and #one/#two/SomeBot are what the rest of the suite
+    # already uses. The live detail belongs in the pull request, which does
+    # not ship.
+    "33870ebe3595990b": "a channel this bot serves",
+    "0f3fcff0f5c1e22d": "a channel this bot serves",
+    "6205a0d9a6086904": "a channel this bot serves",
+    "fcfd075cbe367c15": "a real bot on a real network, seen in a live console",
 }
 
 # Compared lowercased, so one hash covers every capitalisation.

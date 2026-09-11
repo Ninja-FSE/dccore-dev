@@ -4,6 +4,46 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 The guard learns four more names
+
+Caught in review on an open branch, not by the file that exists to catch it:
+three channels this bot serves and a real bot's nick had reached a fix - in
+comments, in docstrings, in a `set_config(CHANNEL=...)` and in the assertions
+themselves - across 41 occurrences in three files, two of them under `tests/`.
+
+`.gitattributes` export-ignores exactly two documents. Everything else reaches
+the public tree, `tests/` very much included.
+
+**The fourth time, and the first with the guard already in place.** That is
+worth being precise about rather than treating as a failure of the check: a
+denylist cannot catch the first appearance of a name nobody has thought about
+yet. It catches the second. The gap is structural, and the honest conclusion
+is that review is the first line and
+`tests/test_no_personal_identifiers_ship.py` is the net under it - so the
+file's own docstring now says so, instead of implying the net is the whole
+system.
+
+**Why it keeps happening is the useful part.** Every one of these got in the
+same way: somebody read a live console, and carried the names across into the
+fix so the test would describe the real case. That instinct is right about
+wanting the test to be concrete and wrong about where the concrete detail
+belongs - the live report goes in the pull request, which does not ship.
+Nothing in the test needs it. *"A bot only in the second configured channel
+had its fetch dispatched into the first"* is the same sentence, dates better,
+and `#one`/`#two`/`SomeBot` are already what the rest of the suite uses.
+
+Hashes, not words, for the reason that file's docstring has always given: it
+ships too, so a readable denylist would publish the very strings it exists to
+remove.
+
+Verified the way that matters - not that the suite still passes, but that the
+extended list actually **flags the branch it was written for**, by running the
+guard's own `word_hash()` over that branch's added lines. All four hit, 41
+times. A denylist that passes a clean tree proves nothing; one that fails a
+dirty one proves the hashes are right.
+
+---
+
 ### 🔴 A rebuild that is working is not hung
 
 Reported from the live bot: **`Failed: timed out after 1800s`**, on a library
