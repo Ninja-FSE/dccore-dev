@@ -98,6 +98,28 @@ RUNTIME_CONTAINERS = {
     "notice_state": dict,
 }
 
+# SETTINGS A TEST MAY CHANGE AND MUST NOT LEAVE CHANGED.
+#
+# Distinct from RUNTIME_FLAGS below, which is live state. These are ordinary
+# config values with a module-level default - and the trouble with those is
+# that a test which sets one is usually testing something else entirely, so
+# nothing about it looks like state management.
+#
+# BROADCAST_SEARCH_CHANNEL is the one that proved it. tests/
+# test_config_overrides.py sets it while checking that settings.conf overrides
+# a module default - which is exactly what that file is for - and nothing put
+# it back. Every later test then saw a channel it never configured.
+#
+# What that cost: test_a_bot_nowhere_we_know_of_falls_back_to_the_first_channel
+# reads the fallback channel through the same value, so it failed with
+# "'PRIVMSG #one :' not found in 'PRIVMSG #dccore-test :...'" - naming a
+# channel from a test file it has nothing to do with, in a run where three
+# consecutive full suites had just passed. It was read as a flake twice before
+# it was read as a leak.
+SETTINGS_DEFAULTS = {
+    "BROADCAST_SEARCH_CHANNEL": None,
+}
+
 RUNTIME_FLAGS = {
     "search_inprogress": False,
     "rar_inprogress": False,
@@ -142,6 +164,8 @@ def reset_config(**overrides):
         else:
             del canonical[:]
         setattr(config, name, canonical)
+    for name, value in SETTINGS_DEFAULTS.items():
+        setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
         setattr(config, name, value)
 
