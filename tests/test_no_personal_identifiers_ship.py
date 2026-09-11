@@ -3,8 +3,10 @@
 `.gitattributes` export-ignores exactly two files - `docs/UPDATES.md` and
 `docs/PUBLIC-REPO-WORKFLOW.md`. EVERYTHING else in the repository reaches the
 public tree, `tests/` very much included, and this project has shipped
-identifiers three times already: a serving bot's nick in two test files, a
-real channel in a changelog, and an operator's own paths in fixtures.
+identifiers four times already: a serving bot's nick in two test files, a
+real channel in a changelog, an operator's own paths in fixtures, and - the
+fourth time - three of an operator's real channel names plus a real bot's
+nick, in a fix's own comments, docstrings and assertions.
 
 Greps done by hand keep missing them, because they are written to find the
 thing already known about. This asks the export itself.
@@ -53,6 +55,10 @@ FORBIDDEN = {
     "13ea59307fc3f4ec": "the private development repository. Naming it in the "
                         "public tree points strangers at a repo they cannot "
                         "read, whose issue numbers resolve to nothing",
+    "fcfd075cbe367c15": "a real bot on a real network",
+    "33870ebe3595990b": "a channel this bot serves",
+    "0f3fcff0f5c1e22d": "a channel this bot serves",
+    "6205a0d9a6086904": "a channel this bot serves",
 }
 
 # Compared lowercased, so one hash covers every capitalisation.
