@@ -705,6 +705,96 @@ class DispatcherStateMachineTests(DCCoreTestCase):
         self.assertEqual(config.fetch_queue[rid]["state"], "listening")
 
 
+class ARequestGoesToTheBotsOwnChannel(DCCoreTestCase):
+    """Reported live: a bot only in the second of several configured
+    channels had its fetch dispatched into the first one instead, and every
+    request to it failed with "no response" - unsurprising, since the bot
+    never saw a request that never reached its channel. check_fetch_queue()
+    used to send every dispatched request into one fixed channel
+    (BROADCAST_SEARCH_CHANNEL, or else the first entry of config.CHANNEL)
+    no matter where the target bot actually was.
+
+    webserver.bot_not_here_error() already refuses to even enqueue a fetch
+    for a bot in none of our channels - these tests are about the bot BEING
+    somewhere, just not the one fixed channel dispatch used to assume.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(CHANNEL="#one,#two,#three")
+
+    def _dispatch(self, bot, filename="Song.flac", request_type="file"):
+        rid = dcc_fetch.enqueue_fetch(bot, filename, request_type=request_type)
+        dcc_fetch.check_fetch_queue()
+        self.assertEqual(len(self.oserve.queued), 1)
+        _user, message, _is_vip = self.oserve.queued[0]
+        return message
+
+    def test_the_request_goes_into_the_channel_the_bot_is_actually_in(self):
+        config.channel_users["#two"] = {"somebot"}
+
+        message = self._dispatch("SomeBot")
+
+        self.assertIn("PRIVMSG #two :", message)
+        self.assertNotIn("#one", message)
+
+    def test_a_list_request_goes_to_the_right_channel_too(self):
+        config.channel_users["#two"] = {"somebot"}
+
+        message = self._dispatch("SomeBot", request_type="list")
+
+        self.assertIn("PRIVMSG #two :@SomeBot", message)
+
+    def test_a_folder_request_goes_to_the_right_channel_too(self):
+        config.channel_users["#two"] = {"somebot"}
+
+        message = self._dispatch("SomeBot", "!rar Artist/Album", request_type="folder")
+
+        self.assertIn("PRIVMSG #two :!SomeBot", message)
+
+    def test_a_bot_nowhere_we_know_of_falls_back_to_the_first_channel(self):
+        """Presence changed between enqueue and this dispatch tick - the
+        request must still go somewhere rather than vanish silently, even
+        though it is no better off than before this fix."""
+        message = self._dispatch("ghostbot")
+
+        self.assertIn("PRIVMSG #one :", message)
+
+    def test_a_bot_present_in_more_than_one_channel_picks_the_configured_order(self):
+        config.channel_users["#two"] = {"multibot"}
+        config.channel_users["#three"] = {"multibot"}
+
+        message = self._dispatch("multibot")
+
+        self.assertIn("PRIVMSG #two :", message,
+                      "#two comes before #three in config.CHANNEL")
+
+    def test_the_match_is_case_insensitive_but_the_channel_keeps_its_own_case(self):
+        config.channel_users["#two"] = {"somebot"}
+
+        message = self._dispatch("SOMEBOT")
+
+        self.assertIn("PRIVMSG #two :", message)
+
+    def test_broadcast_search_channel_is_only_the_last_resort_now(self):
+        """BROADCAST_SEARCH_CHANNEL used to be dispatch's one and only
+        default - now the bot's own channel wins over it too, and it is
+        purely a fallback for a bot presence cannot place anywhere."""
+        self.set_config(BROADCAST_SEARCH_CHANNEL="#three")
+        config.channel_users["#two"] = {"somebot"}
+
+        message = self._dispatch("SomeBot")
+
+        self.assertIn("PRIVMSG #two :", message)
+
+    def test_broadcast_search_channel_still_answers_for_an_unplaceable_bot(self):
+        self.set_config(BROADCAST_SEARCH_CHANNEL="#three")
+
+        message = self._dispatch("ghostbot")
+
+        self.assertIn("PRIVMSG #three :", message)
+
+
 class LoopbackTransferTests(DCCoreTestCase):
     """Real sockets, like tests/test_adminchat.py's loopback pattern - not
     everything mocked, so the actual recv/write/size-accounting loop runs."""

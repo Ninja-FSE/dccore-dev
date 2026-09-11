@@ -324,6 +324,45 @@ def user_is_present_in_ram(user_key):
                     return True
     return False
 
+
+def channel_containing_user(user_key):
+    """WHICH of our own channels `user_key` is in right now, or None if none
+    of them - the answer user_is_present_in_ram() above deliberately throws
+    away by collapsing it to a bool.
+
+    Reported live: a fetch for a bot only in one of several configured
+    channels was sent into a different one instead - dcc_fetch.
+    check_fetch_queue() dispatched every request into one fixed channel
+    (BROADCAST_SEARCH_CHANNEL, or else config.CHANNEL's first entry)
+    regardless of where the target bot actually was, so the bot never saw it
+    and every request failed with "no response". Not a guess about who
+    would answer - the same observation bot_not_here_error() already makes
+    at enqueue time (webserver.py), just never carried through to the
+    PRIVMSG dispatch actually sends.
+
+    config.channel_users is keyed and valued in lower case for matching (see
+    irc.py's 353/JOIN handlers); this returns the channel in the CASE THE
+    OPERATOR CONFIGURED, which is what an outbound PRIVMSG should use, by
+    matching against irc.configured_channels() rather than the mirror's own
+    keys. Checked in that configured order, so a bot present in more than
+    one of our channels gets a stable, predictable answer rather than
+    whichever channel's 353 happened to arrive first.
+
+    Deferred import: irc.py imports THIS module at load time, so reaching
+    for it at the top would close a cycle. The same shape as
+    announce_channel_for()'s own deferred `import irc`, earlier in this file.
+    """
+    import irc
+    u = str(user_key).lower()
+    with runtime.channel_users_lock():
+        users_by_chan = {chan: set(users) for chan, users in
+                         (getattr(config, "channel_users", {}) or {}).items()}
+    for chan in irc.configured_channels():
+        if u in users_by_chan.get(chan.lower(), ()):
+            return chan
+    return None
+
+
 def discard_orphaned_temp_archives(user_key):
     """Delete the temp .rar files that only `user_key`'s queue rows still name.
 
