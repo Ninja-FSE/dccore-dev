@@ -677,7 +677,36 @@ MUTE_TIME: int      = 30       # Mute in seconds on the first flood violation
 FLOOD_BAN_SECONDS: int = 3600  # Ban in seconds when someone floods while muted
 MAX_SEND_FAILS: int = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
 RAR_TIMEOUT: int    = 1800     # Longest a rar packing run may take, in seconds, before it is abandoned
-LIST_UPDATE_TIMEOUT: int = 1800  # Longest a !update / update_list.py run may take, in seconds, before it is abandoned. A full NFS walk legitimately takes minutes, so this is shaped like RAR_TIMEOUT above, not a short fixed number.
+# A REBUILD THAT IS STILL WORKING IS NOT HUNG, and a wall clock cannot tell
+# the two apart. This used to be a flat 1800s, which is a bet that no library
+# takes longer than half an hour to walk - and an 80 TB library on a mapped
+# drive takes hours. Losing it at the thirty-minute mark costs the whole run
+# and leaves the old list in place, every time, with no setting an operator
+# could reasonably be expected to guess right.
+#
+# The child reports what it is doing to LIST_PROGRESS_FILE roughly twice a
+# second while scanning. So the question worth asking is not "how long has
+# this taken" but "when did it last do anything" - which is what
+# LIST_UPDATE_STALL_SECONDS below measures.
+#
+# 0 = no ceiling, and that is the default. The stall check is what protects
+# against a wedged mount now, and it does so in fifteen minutes rather than
+# thirty - strictly better than the old limit at both ends.
+LIST_UPDATE_TIMEOUT: int = 0  # Absolute cap on a !update run, in seconds. 0 = no cap; the stall check below is the real guard.
+
+# How long the rebuild may report NOTHING before it is treated as wedged.
+#
+# Generous on purpose. The scan writes on every directory it enters, but the
+# final phase - writing a several-hundred-megabyte list and packing it - is
+# one long step on a machine that has just walked 80 TB, and killing a rebuild
+# during the last thirty seconds of an eight-hour run would be the worst
+# possible outcome of a safety net.
+#
+# It only ever fires when the daemon can actually READ the progress file. A
+# rebuild that cannot report (a full disk, a read-only data/) is not evidence
+# of a rebuild that is stuck, so it is never killed for it - see
+# commands.handle_list_update_request().
+LIST_UPDATE_STALL_SECONDS: int = 900
 
 # ---------------------------------------------------------------------
 # 7. MIRC COLOUR CODES AND CONTROL CHARACTERS (IRC STANDARD)

@@ -683,6 +683,11 @@ def _write_text_artifact(tmp_path, members):
 def _write_zip_artifact(tmp_path, members):
     """Store the temp files under their FINAL names, so the archive users
     download is identical to what it always was."""
+    # One more heartbeat before the longest silent step in the run.
+    # Deflating a list this size is minutes on a machine that has just
+    # walked 80 TB, and the daemon's stall watch has nothing else to go
+    # on until it finishes - see commands.run_watching_for_a_stall().
+    write_progress("packing", force=True)
     with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for source, name in members:
             zipf.write(source, arcname=name)

@@ -4,6 +4,82 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 A rebuild that is working is not hung
+
+Reported from the live bot: **`Failed: timed out after 1800s`**, on a library
+of **80 TB+** that takes hours to walk. Every rebuild died at the thirty-minute
+mark, and the bot has been serving the same list ever since.
+
+The guard was `subprocess.run(timeout=LIST_UPDATE_TIMEOUT)` with a flat 1800s
+default, added in #162 to stop a hung mount wedging `search_inprogress` and
+`update_inprogress` permanently. That problem was real. The instrument was
+wrong.
+
+**A wall clock cannot tell a rebuild that is working from one that is stuck**,
+and the number cannot be fixed by making it bigger. Any value is either too
+small for somebody's library or too large to be a safety net, and the value an
+operator needs changes every time their library grows. The old default was
+asking every operator to guess how long their own filesystem takes - and to
+guess again next year.
+
+**The child already answers the right question.** `update_list.py` writes
+`LIST_PROGRESS_FILE` on every directory it enters, roughly twice a second. So
+the question is not "how long has this taken" but "when did it last do
+anything".
+
+`run_watching_for_a_stall()` replaces the flat timeout with three rules:
+
+    progress advancing   -> leave it alone, for as many hours as it needs
+    silent for `stall`   -> wedged; kill it (default 900s)
+    past `ceiling`       -> an absolute cap for anyone who wants one (default 0 = none)
+
+**Strictly better at both ends.** A genuine wedge is now noticed in fifteen
+minutes rather than thirty, and an honest eight-hour rebuild is never touched.
+
+#### The rule that matters most is the one about not knowing
+
+`last_progress_at()` answers `None` for "cannot tell" - no file, unreadable,
+no timestamp in it - and a `None` **never** kills the child. A rebuild that
+cannot write its progress file (a full disk, a read-only `data/`) is not
+evidence of a rebuild that is stuck, and killing one for it would turn a
+cosmetic failure into the loss of an eight-hour run. The mutant that treats
+"cannot tell" as "silent forever" is the most dangerous one in this change and
+three tests kill it.
+
+#### A stall is not a timeout
+
+They get separate endings and separate wording, because they point at
+different things. Going quiet points at the **library** - a mount that went
+away mid-walk - and says so: *"nothing reported for 20m 00s. The library it was
+reading may have gone away."* Running past a ceiling points at a **limit the
+operator chose**. Both raise an operator notice, and both record how long the
+run lasted.
+
+#### Two smaller pieces
+
+`_write_zip_artifact()` now writes one `"packing"` heartbeat before it starts.
+Deflating a several-hundred-megabyte list is the longest step in the run with
+nothing else to say, and without it the stall watch has only the last
+*scanning* write to go on while the largest libraries finish.
+
+`subprocess.run` -> `Popen` moved the seam every test mocked. Four test sites
+were updated, and two of them - in `test_webserver.py` - had **no cleanup at
+all**. That was survivable while they patched a stdlib attribute; leaving
+`commands.run_watching_for_a_stall` replaced would have silently disabled the
+real rebuild for every test that ran after them. Both restore it now.
+
+The test asserting *"the subprocess is given the configured timeout, not
+None"* was #162's own guard, and this change deliberately retires the contract
+it pins. It is replaced rather than deleted: the caller must still hand over
+both limits, and a stall must still clear `search_inprogress` /
+`update_inprogress` in the `finally`, which is the part #162 actually cared
+about.
+
+Five mutants, all killed, including a pure wall-clock regression and a ceiling
+of 0 being enforced as zero seconds.
+
+---
+
 ### 🟢 How long has this been running
 
 The rebuild progress line said what it was DOING - *"Scanning folder 3 of 10 ·

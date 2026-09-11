@@ -568,7 +568,18 @@ class ListUpdateToolTests(DCCoreTestCase):
             import types
             return types.SimpleNamespace(returncode=0, stdout="List of 1 Files\n", stderr="")
 
-        subprocess.run = fake_run
+        # The seam moved to run_watching_for_a_stall(): the rebuild is
+        # watched rather than timed, and started with Popen.
+        #
+        # RESTORED, unlike the subprocess.run patch this replaces. That one
+        # leaked too, but patching a stdlib module attribute is re-imported
+        # everywhere and got away with it; leaving commands' own function
+        # replaced would silently disable the real rebuild for every test
+        # that ran afterwards.
+        real_runner = commands.run_watching_for_a_stall
+        commands.run_watching_for_a_stall = fake_run
+        self.addCleanup(setattr, commands, "run_watching_for_a_stall",
+                        real_runner)
         self.addCleanup(setattr, subprocess, "run", real_run)
 
     def test_a_clean_run_starts_and_finishes_synchronously_under_the_fake_thread(self):
@@ -640,7 +651,10 @@ class ListUpdateToolTests(DCCoreTestCase):
             import types
             return types.SimpleNamespace(returncode=1, stdout="", stderr="disk full")
 
-        subprocess.run = failing_run
+        real_runner = commands.run_watching_for_a_stall
+        commands.run_watching_for_a_stall = failing_run
+        self.addCleanup(setattr, commands, "run_watching_for_a_stall",
+                        real_runner)
 
         status, _result = webserver.start_list_update()
         self.assertEqual(status, 200, "starting the rebuild itself still succeeds")

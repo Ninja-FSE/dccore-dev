@@ -189,6 +189,31 @@ gets.
 The preview changes nothing. Until you press **Save**, the daemon is still
 advertising in the colours it started with.
 
+## If your library is very large
+
+Nothing to configure — this is here because the default changed and the old
+one was a trap.
+
+DCCore used to abandon a list rebuild after 30 minutes. That is comfortable for
+a few terabytes and impossible for eighty, and the failure looked like
+`Failed: timed out after 1800s` with the previous list left in place, every
+time.
+
+It now watches the rebuild's **progress** instead of a clock. While the rebuild
+is still reporting — it does so on every folder it enters — it runs for as long
+as it needs. It is abandoned only if it goes completely silent for
+`LIST_UPDATE_STALL_SECONDS` (15 minutes by default), which is what a drive that
+has gone away mid-scan looks like.
+
+**There is no time cap by default.** If you want one regardless, set
+`LIST_UPDATE_TIMEOUT` (Settings → Advanced, or `settings.conf`) to a number of
+seconds; `0` means none. You do not need one for safety — the silence check is
+the guard, and it reacts twice as fast as the old limit did.
+
+If a rebuild is abandoned, the reason says which of the two happened. *"Nothing
+reported for 20m 00s"* points at the library — a mount that dropped. *"Timed
+out"* points at a cap you set.
+
 ## Upgrading
 
 Your settings and data are never touched by an upgrade: `settings.conf`, `admin_config.py` and everything under `data/` are gitignored, so updating the code cannot overwrite them. That is also the one thing to watch — see step 4.
