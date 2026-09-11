@@ -1980,6 +1980,10 @@ def build_update_list_status_payload():
         "running": bool(getattr(config, "update_inprogress", False)),
         "ok": getattr(config, "last_list_update_ok", None),
         "error": getattr(config, "last_list_update_error", None),
+        # How long the LAST finished rebuild took, whole seconds. None until
+        # one has finished in this process - the same "never run yet is not a
+        # claim about the last run" rule `ok` follows just above.
+        "seconds": getattr(config, "last_list_update_seconds", None),
     }
     progress = read_list_progress()
     if progress:
@@ -2017,6 +2021,30 @@ def read_list_progress():
         except (TypeError, ValueError):
             return 0
 
+    # HOW LONG IT HAS BEEN GOING, computed here rather than in the page.
+    #
+    # The page cannot do it: it has no idea when the rebuild started, only
+    # when it happened to open. Subtracting here also means one clock is used
+    # for both ends - the daemon's - where a browser with a skewed clock
+    # against a server timestamp can produce a negative elapsed, or an hour of
+    # it, on the first frame.
+    #
+    # `started_at` is absent from a progress file written by an older build
+    # mid-upgrade, which is `None` and not zero: "not reported" and "started
+    # at the epoch" are different claims, and the second would render as
+    # 56 years.
+    started_at = loaded.get("started_at")
+    elapsed = None
+    try:
+        if started_at is not None:
+            # Clamped at zero rather than shown negative. The child stamps its
+            # own clock, so a machine whose time steps backwards mid-rebuild
+            # (ntp correcting a drift) would otherwise report a run that has
+            # not begun.
+            elapsed = max(0, int(time.time() - float(started_at)))
+    except (TypeError, ValueError):
+        elapsed = None
+
     folder_count = whole("folder_count")
     folder_index = min(whole("folder_index"), folder_count) if folder_count else 0
     percent = None
@@ -2032,6 +2060,7 @@ def read_list_progress():
         "folder_count": folder_count,
         "files": whole("files"),
         "percent": percent,
+        "elapsed": elapsed,
     }
 
 

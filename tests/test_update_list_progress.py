@@ -269,16 +269,34 @@ class ThePageRendersIt(unittest.TestCase):
 
         self.assertIn("showUpdateListProgress(payload.progress)", source)
 
+    def progress_body(self):
+        """showUpdateListProgress()'s body, to the start of the next function.
+
+        This used to be a fixed character budget - [:400] and [:1600] - which
+        is a bet on the function never growing. It grew: adding the elapsed
+        clock pushed "is-indeterminate" past 1600 characters and failed a test
+        that was not about the clock at all, while the code it checks was
+        untouched and still correct.
+        """
+        marker = chr(10) + "  function "
+        return self.source().split(
+            "function showUpdateListProgress(", 1)[1].split(marker, 1)[0]
+
+    def test_the_extraction_stops_at_the_next_function(self):
+        """Fixture invariant. If the split stopped matching, the body would be
+        the whole rest of the file and every check below would pass on
+        something else's code."""
+        body = self.progress_body()
+
+        self.assertIn("el.updateListBarFill", body)
+        self.assertNotIn("function pollUpdateListStatus", body)
+
     def test_it_falls_back_when_there_is_no_progress_yet(self):
         """The first poll can land before the child has written anything."""
-        body = self.source().split("function showUpdateListProgress(", 1)[1][:400]
-
-        self.assertIn("Rebuilding the master list", body)
+        self.assertIn("Rebuilding the master list", self.progress_body())
 
     def test_the_writing_phase_is_indeterminate(self):
-        body = self.source().split("function showUpdateListProgress(", 1)[1][:1600]
-
-        self.assertIn("is-indeterminate", body)
+        self.assertIn("is-indeterminate", self.progress_body())
 
     def test_the_bar_markup_exists(self):
         with io.open(os.path.join(REPO_ROOT, "web", "index.html"),

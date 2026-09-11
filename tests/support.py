@@ -106,6 +106,9 @@ RUNTIME_FLAGS = {
     "update_inprogress": False,
     "last_list_update_ok": None,
     "last_list_update_error": None,
+    # A leftover here is worse than a missing one: it would be shown against
+    # a rebuild it did not measure.
+    "last_list_update_seconds": None,
     "connection_epoch": 1,
     "broadcast_search_inprogress": False,
     "broadcast_search_deadline": 0,

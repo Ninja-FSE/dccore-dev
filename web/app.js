@@ -2582,6 +2582,19 @@
   // This says which folder it is in, how far through the folders it is, and
   // how many files it has indexed - the file count moves even while the bar
   // does not, which is what tells an operator it is alive.
+  // Seconds as something a person reads. Mirrors commands.describe_duration()
+  // deliberately: the same rebuild is reported here and in the debug channel,
+  // and two wordings for one number reads as two different measurements.
+  function describeDuration(seconds) {
+    var total = Math.max(0, Math.floor(Number(seconds) || 0));
+    if (total < 60) { return total + "s"; }
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    if (total < 3600) {
+      return Math.floor(total / 60) + "m " + pad(total % 60) + "s";
+    }
+    return Math.floor(total / 3600) + "h " + pad(Math.floor((total % 3600) / 60)) + "m";
+  }
+
   function showUpdateListProgress(progress) {
     if (!progress) {
       showUpdateListStatus("Rebuilding the master list…", false);
@@ -2600,6 +2613,16 @@
     }
     if (progress.files) {
       parts.push(progress.files.toLocaleString() + " files so far");
+    }
+    // LAST, because it is the part that changes on every tick. Reading down
+    // the line, what the rebuild is DOING should not move about under the eye
+    // while the clock counts.
+    //
+    // Only when the daemon reported one: a progress file written by an older
+    // build mid-upgrade has no start time, and "0s" forever would read as a
+    // stalled rebuild rather than as a missing field.
+    if (progress.elapsed !== null && progress.elapsed !== undefined) {
+      parts.push(describeDuration(progress.elapsed));
     }
 
     el.updateListStatus.textContent = parts.join(" · ");
@@ -2635,10 +2658,19 @@
       // #224: "running" alone cannot tell a rebuild that worked from one
       // that failed - this used to say "Done" unconditionally the moment
       // running flipped false, whichever it was.
+      // How long it took, on both outcomes. On a failure it is the more
+      // useful half of the message: a rebuild that died after four seconds
+      // never reached the library, and one that died after forty minutes
+      // did - and that is the difference between a typo in a path and a
+      // mount that went away mid-walk.
+      var took = (payload.seconds === null || payload.seconds === undefined)
+        ? "" : " in " + describeDuration(payload.seconds);
       if (payload.ok === false) {
-        showUpdateListStatus("Failed: " + (payload.error || "unknown error"), true);
+        showUpdateListStatus(
+          "Failed" + took + ": " + (payload.error || "unknown error"), true);
       } else {
-        showUpdateListStatus("Done. Check Stats for the new file count.", false);
+        showUpdateListStatus(
+          "Done" + took + ". Check Stats for the new file count.", false);
       }
     }).catch(function (err) {
       markConnection(false);

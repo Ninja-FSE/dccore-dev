@@ -699,6 +699,19 @@ PROGRESS_WRITE_SECONDS = 0.5
 
 _progress_last_write = [0.0]
 
+# WHEN THIS RUN BEGAN, stamped once and repeated in every write.
+#
+# The dashboard cannot work it out for itself: update_list.py is a SUBPROCESS,
+# so the only thing the two share is this file, and the daemon may have been
+# restarted - or the page opened - long after the rebuild started. Deriving it
+# from when the file first appeared would be wrong for the same reason, since
+# the file survives the run that wrote it.
+#
+# Module scope, not per call: a rebuild is one process, so "when did this
+# process start" is the honest answer to "how long has this been running", and
+# it cannot drift as the run proceeds.
+_started_at = time.time()
+
 
 def progress_path():
     """Where a rebuild reports what it is doing. Resolved per call, like every
@@ -722,7 +735,8 @@ def write_progress(phase, folder="", folder_index=0, folder_count=0,
         return
     _progress_last_write[0] = now
     payload = {"phase": phase, "folder": folder, "folder_index": folder_index,
-               "folder_count": folder_count, "files": files, "at": now}
+               "folder_count": folder_count, "files": files, "at": now,
+               "started_at": _started_at}
     try:
         path = progress_path()
         directory = os.path.dirname(os.path.abspath(path))
