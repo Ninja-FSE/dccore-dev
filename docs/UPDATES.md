@@ -4,6 +4,89 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 The list is not a download
+
+Reported from the live bot: the master list was showing up in **Most
+downloaded**.
+
+It has been counted since those tables existed, because it goes out through
+the same `start_dcc_send()` as everything else and `download_count_identity()`
+had two branches - album, or file - with nothing in between. The list fell
+into "file".
+
+**It is the wrong thing to count, not merely an extra one.** The list is how
+somebody finds out what the downloads ARE. It is sent to everyone who has ever
+typed the nickname, which makes it the most-requested item on every bot,
+forever, in a table whose entire job is to say which of the *files* people
+want. One row that is always first tells you nothing you did not know.
+
+And it is worse than one row. The artifact's name carries the build date:
+
+    SomeBot-2026-07-01.zip    5
+    SomeBot-2026-08-01.zip   91
+    SomeBot-FULL-2026-09-01.txt    2
+
+Every rebuild starts a **new key**, so the table slowly fills with dated
+copies of the same list and pushes real files out of the top ten. On a bot
+that rebuilds weekly the top of that table is eventually nothing else.
+
+There is a third symptom underneath. The list lives in `LOCAL_LIST_DIR`, not
+under any library folder, so `library_count_key()` has nothing to make it
+relative to and falls back to the **absolute path** - the one form #151 made
+these keys relative to avoid, because it breaks every counter the moment a
+library moves.
+
+**A None key is the "do not count this" signal.** `db.record_download()`
+already returned early on a falsy key as a defensive check; that check is now
+load-bearing and says so. The decision stays in the one place that already
+decides what a send counts as, rather than becoming a second condition at the
+call site - which is what `test_it_records_what_download_count_identity_
+decides` exists to prevent.
+
+**Checked AFTER the album branch, on purpose.** An album is identified by
+*where it is* - `TMP_ZIP_DIR`, which this module wrote - and that is
+unambiguous. A folder that happens to pack as `<base name>-<date>.rar` would
+otherwise match the list naming rule and stop being counted. There is a test
+for exactly that ordering.
+
+#### The fix is invisible to everybody who already has the rows
+
+Which is everybody who reported it. So `prune_list_artifact_download_counts()`
+runs at startup, beside the migration that already tidies this same file, and
+takes two rules because neither catches everything:
+
+  * the **name** is a list artifact - `<base>-<date>.zip|.rar`,
+    `<base>-FULL-<date>.txt` - which finds them wherever they were keyed.
+  * the **key** is an absolute path inside `LOCAL_LIST_DIR`, which finds them
+    after the bot has been renamed, since the name rule is anchored on the
+    *current* `LIST_BASE_NAME` and an old row no longer matches it. That
+    directory holds the further lists' subdirectories too, so one check covers
+    every list a bot serves.
+
+Nothing served can legitimately be keyed by an absolute path: a library file
+is keyed by its label and the path beneath it, which is the whole point of
+`library_count_key()`.
+
+It runs on **every** boot rather than once, and is a no-op the moment there is
+nothing to remove - an operator restoring an old `download_counts.json` should
+not get the rows back permanently. Same posture as its neighbour otherwise: it
+never raises, because these counters describe history nothing else reads, so
+losing them is cosmetic and refusing to boot over them would not be.
+
+**The totals are untouched.** "Files sent" and the byte counters still include
+the list, because they are a record of what the bot actually sent and it
+actually sent it. Only the "which of my files do people want" table stops
+counting it.
+
+Seven mutants, and one of them earned its keep: removing the **name** rule
+from the sweep passed everything, because every fixture row was also keyed
+inside the current `LOCAL_LIST_DIR` and the path rule caught them all. The
+case that rule exists for - an operator who repoints `LOCAL_LIST_DIR`, leaving
+rows keyed under a directory the daemon no longer knows about - had no test.
+It does now.
+
+---
+
 ### 🟢 A fetched list can be deleted
 
 Nothing ever removed an entry from `config.fetched_bot_lists`: no TTL, no cap,

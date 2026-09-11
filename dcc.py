@@ -144,6 +144,31 @@ def download_count_identity(file_path, file_name):
         name = file_name[:-4] if str(file_name).lower().endswith(".rar") else file_name
         return file_name, name, "album"
 
+    # THE LIST ITSELF IS NOT A DOWNLOAD. It is how somebody finds out what the
+    # downloads ARE, so counting it answers a question nobody asked: it is
+    # sent to everyone who has ever typed the nickname, which makes it the
+    # most-requested item on every bot, forever, in a table whose whole job is
+    # to say which of the FILES people want.
+    #
+    # Worse than one wrong row. The artifact's name carries the build date, so
+    # every rebuild starts a new key - the table slowly fills with dated
+    # copies of the same list and pushes real files out of the top ten. And
+    # because the list lives in LOCAL_LIST_DIR rather than under any library
+    # folder, library_count_key() cannot make it relative to anything and
+    # falls back to the ABSOLUTE path, which is the one form #151 made these
+    # keys relative to avoid.
+    #
+    # A None key is the "do not count this" signal - see db.record_download(),
+    # which returns on it. The rule stays here, with the other two, rather
+    # than becoming a second condition at the call site.
+    #
+    # Checked AFTER the album branch on purpose: an album is identified by
+    # where it is (TMP_ZIP_DIR, which this module wrote), and that is
+    # unambiguous. A folder packed as "<base name>-<date>.rar" would otherwise
+    # match the list naming rule and go uncounted.
+    if list_mod.is_list_artifact_name(file_name):
+        return None, file_name, "list"
+
     return library_count_key(file_path), file_name, "file"
 
 
