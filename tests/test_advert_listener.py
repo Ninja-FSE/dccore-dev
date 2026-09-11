@@ -1046,6 +1046,56 @@ class ASecondListOfRarFolders(CaptureTestCase):
 
         self.assertEqual(str(advert["nick"]).lower(), "zkx")
 
+    def test_a_rar_advert_split_across_two_lines_does_not_crash_the_capture(self):
+        """From a live console: two AttributeErrors in a row,
+        'NoneType' object has no attribute 'lower'.
+
+        ZKX_RAR's "Type @Zkx^ to get my list of ... RAR folders" phrase sits
+        near the FRONT of the message; every field the trailing half carries
+        (slots, queue, sent, speed, the software tag) is decoration the
+        parser does not need. So the essential phrase routinely fits inside
+        IRC's 512-byte line limit on its own, is recorded once as a complete
+        advert (and seeds the continuation buffer - see the "if advert:"
+        branch above), and the DECORATION is what overflows onto a second
+        line, arriving moments later as its own PRIVMSG.
+
+        That second line does not parse as anything by itself - asserted
+        below - so it falls to the stitching branch. Concatenated back onto
+        the first line, the SAME "Type ... RAR folders" phrase is still
+        there and matches again - and this branch still read
+        merged["nick"].lower() unconditionally, where the "if advert:"
+        branch a few lines above it already knows to check
+        merged.get("nick") first. The RAR family's nick is None by design
+        (_parse_rar_folder_advert()'s docstring, added when the sender/
+        trigger split landed) - not absent, actually None - so the direct
+        index found it and .lower() raised. This branch was simply never
+        updated to match.
+
+        never_breaks_the_read_loop() (irc.py, wrapping this same function)
+        caught it, so the connection survived - which is also why a naive
+        assertion on rar_folders/rar_trigger alone would not catch this: the
+        FIRST line already carries both and records them before the second
+        line is ever read, so the bug and the fix look identical on those
+        two fields. last_seen is the one thing only a SUCCESSFUL second call
+        updates - the crash happens before _record_bot() is ever reached for
+        that call, so a caught exception leaves it exactly where the first
+        line put it.
+        """
+        head, sep, tail = ZKX_RAR.partition("Available slots:")
+        tail = sep + tail
+        self.assertIsNone(irc.parse_channel_advert(tail),
+                           "the second line must not parse alone, or this "
+                           "test proves nothing about the stitching branch")
+
+        self.capture("Zkx", head, now=T0)
+        self.capture("Zkx", tail, now=T0 + 3)
+
+        self.assertEqual(self.entry("Zkx")["rar_folders"], 39454)
+        self.assertEqual(self.entry("Zkx")["rar_trigger"], "Zkx^")
+        self.assertEqual(self.entry("Zkx")["last_seen"], T0 + 3,
+                          "the second line was never actually recorded - "
+                          "the exception was only caught, not fixed")
+
 
 class TheExactSizeComesFromTheCtcp(CaptureTestCase):
     """Every OmenServe-family bot follows its advert with a CTCP SLOTS line,
