@@ -1020,7 +1020,15 @@ def _capture_channel_advert(user, target, msg, now=None):
         return
 
     merged = parse_channel_advert(stitched)
-    if not merged or merged["nick"].lower() != key:
+    if not merged:
+        return
+    # Same "no claim, no comparison" rule as the fresh-advert branch above -
+    # the RAR wording's `nick` is None on purpose (see
+    # _parse_rar_folder_advert()'s docstring), and merged["nick"].lower()
+    # here raised AttributeError on every RAR advert that happened to arrive
+    # split across two lines, silently losing the continuation to
+    # never_breaks_the_read_loop()'s guard instead of recording it.
+    if merged.get("nick") and merged["nick"].lower() != key:
         return
 
     # Keep the ORIGINAL timestamp: a bot that talks steadily must not be able
