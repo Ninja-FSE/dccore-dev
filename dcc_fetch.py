@@ -724,9 +724,24 @@ def check_fetch_queue():
         return
 
     oserve = sys.modules.get("oserve")
-    channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
-               or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
+    # ONE FIXED FALLBACK, still - but no longer the only answer. Reported
+    # live: a bot only in one of several configured channels had its fetch
+    # dispatched into a different one, because every request used to go
+    # into this single channel regardless of where the target bot actually
+    # was - so it never saw the request, and every one of them failed with
+    # "no response". webserver.bot_not_here_error() already checks presence
+    # at enqueue time; this is that same check carried through to where the
+    # PRIVMSG is actually built, per request rather than once for the whole
+    # batch.
+    default_channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
+                       or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
     for rid, bot, filename, request_type in to_dispatch:
+        # The bot's own channel wins when we can find one - a stale fallback
+        # is exactly the bug above. Only a bot that left between enqueue and
+        # this dispatch tick (bot_not_here_error() already refused any that
+        # were never seen at all) falls through to the fixed default, which
+        # is no worse than what every request did before this fix.
+        channel = dcc.channel_containing_user(bot) or default_channel
         # Defense-in-depth only, expected to be unreachable: `bot` (and, for
         # a "file" row, `filename`) already passed
         # webserver.reject_if_unsafe_for_irc_line() - which now delegates to
