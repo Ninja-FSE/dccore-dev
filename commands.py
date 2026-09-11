@@ -1173,6 +1173,105 @@ def count_from_master_list():
         return 0
 
 
+class ListUpdateStalled(Exception):
+    """The child stopped reporting for longer than the stall window.
+
+    Its own exception rather than subprocess.TimeoutExpired, because the two
+    now mean different things and the operator is told different things: this
+    one says the rebuild went silent, which points at the library; the other
+    that it ran past an absolute cap the operator set deliberately.
+    """
+
+    def __init__(self, silent_for):
+        self.silent_for = silent_for
+        super().__init__(f"no progress for {int(silent_for)}s")
+
+
+def last_progress_at():
+    """When the running rebuild last reported, or None if we cannot tell.
+
+    None is "cannot tell", never "a long time ago". A rebuild that cannot
+    write its progress file - a full disk, a read-only data/ - is not evidence
+    of a rebuild that is stuck, and killing one for it would turn a cosmetic
+    failure into the loss of an eight-hour run.
+    """
+    import json
+    import platform_compat
+
+    path = getattr(config, "LIST_PROGRESS_FILE", None)
+    if not path:
+        return None
+    try:
+        with open(platform_compat.long_path(path), encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return float(loaded["at"])
+    except Exception:
+        return None
+
+
+def run_watching_for_a_stall(argv, ceiling=0, stall=900, tick=5.0):
+    """Run the list builder, killing it only when it stops making progress.
+
+    Returns the same CompletedProcess shape subprocess.run() did, so the
+    caller's success path is unchanged.
+
+    THREE RULES:
+
+      * The child reports to LIST_PROGRESS_FILE roughly twice a second while
+        scanning. While that timestamp is advancing the rebuild is working -
+        for as many hours as it needs - and nothing here interferes.
+      * If it has not advanced for `stall` seconds, the rebuild is wedged and
+        is killed. Fifteen minutes by default: more generous than the old flat
+        thirty-minute cap for a long run, and quicker than it for a genuinely
+        hung one.
+      * `ceiling` is an absolute cap for an operator who wants one anyway.
+        0, the default, means none.
+
+    A rebuild that has never written a progress file is never killed for
+    stalling. That is the case where working and stuck cannot be told apart,
+    and the honest answer is to let the ceiling decide - which is what an
+    operator who set one asked for, and no limit at all otherwise.
+    """
+    import subprocess
+    # Imported here like every other use in this module - commands.py has no
+    # module-level `time`, and this function is called from a nested one that
+    # imports its own.
+    import time
+
+    begun = time.time()
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True,
+                               encoding="utf-8", errors="replace")
+    while True:
+        try:
+            # communicate() is the only safe way to wait while draining the
+            # pipes: a child that fills its stderr buffer blocks forever
+            # otherwise, and this one prints a line per folder. Calling it
+            # again after TimeoutExpired is the documented way to keep
+            # waiting - it resumes rather than restarting.
+            out, err = process.communicate(timeout=tick)
+            return subprocess.CompletedProcess(argv, process.returncode,
+                                               out, err)
+        except subprocess.TimeoutExpired:
+            pass
+
+        now = time.time()
+        if ceiling and (now - begun) >= ceiling:
+            process.kill()
+            process.communicate()
+            raise subprocess.TimeoutExpired(argv, ceiling)
+
+        reported_at = last_progress_at()
+        if reported_at is None:
+            # Cannot tell. Never kill for it.
+            continue
+        silent_for = now - reported_at
+        if silent_for >= stall:
+            process.kill()
+            process.communicate()
+            raise ListUpdateStalled(silent_for)
+
+
 def describe_duration(seconds):
     """A rebuild's runtime, for a person rather than for arithmetic.
 
@@ -1262,13 +1361,19 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 config.last_list_update_seconds = int(time.time() - started)
                 return
                 
-            # 2. Threaded run, bounded by LIST_UPDATE_TIMEOUT (default 1800s, shaped
-            # like dcc.py's RAR_TIMEOUT) rather than waiting forever. A full NFS walk
-            # legitimately takes minutes, so this is generous rather than tight - the
-            # point is only that a hung mount cannot wedge config.search_inprogress /
-            # config.update_inprogress permanently. subprocess.run() kills the child
-            # itself when the timeout fires.
-            list_update_timeout = getattr(config, 'LIST_UPDATE_TIMEOUT', 1800)
+            # 2. Threaded run. A hung mount must not wedge
+            # config.search_inprogress / config.update_inprogress permanently -
+            # but a rebuild that is still working is NOT hung, and a wall clock
+            # cannot tell the two apart. This was a flat 1800s, which is a bet
+            # that no library takes longer than half an hour to walk; an 80 TB
+            # library on a mapped drive takes hours, and lost the whole run at
+            # the thirty-minute mark every single time.
+            #
+            # So the child is watched rather than timed: it reports what it is
+            # doing to LIST_PROGRESS_FILE about twice a second, and going
+            # silent is the thing that means something. See
+            # run_watching_for_a_stall() for the rules.
+            list_update_timeout = getattr(config, 'LIST_UPDATE_TIMEOUT', 0)
             # utf-8 with errors="replace", NOT the locale code page.
             # text=True alone decodes the child with whatever the console
             # uses - cp1253 on a Greek install - and one byte outside it
@@ -1279,10 +1384,10 @@ def handle_list_update_request(user, target_chan, authorised=False):
             # update_list.py); this guards our reading of them, so a
             # future child that does not still cannot take the daemon's
             # report away with it.
-            process = subprocess.run([sys.executable, script_path],
-                                     capture_output=True, text=True,
-                                     encoding="utf-8", errors="replace",
-                                     timeout=list_update_timeout)
+            process = run_watching_for_a_stall(
+                [sys.executable, script_path],
+                ceiling=list_update_timeout,
+                stall=getattr(config, 'LIST_UPDATE_STALL_SECONDS', 900))
             
             if process.returncode == 0:
                 # ---------------------------------------------------------------------
@@ -1350,6 +1455,21 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 config.last_list_update_error = error_msg
                 config.last_list_update_seconds = int(time.time() - started)
 
+        except ListUpdateStalled as stall_err:
+            # Distinct from the timeout below on purpose: this one means the
+            # rebuild went QUIET, which points at the library - a mount that
+            # went away mid-walk - rather than at a limit the operator set.
+            announce.send_debug(
+                f"List update ABANDONED: nothing reported for "
+                f"{describe_duration(stall_err.silent_for)}. The library it "
+                f"was reading may have gone away; the previous list is still "
+                f"being served.",
+                category="INFO", notice="error")
+            config.last_list_update_ok = False
+            config.last_list_update_error = (
+                f"stalled - nothing reported for "
+                f"{describe_duration(stall_err.silent_for)}")
+            config.last_list_update_seconds = int(time.time() - started)
         except subprocess.TimeoutExpired:
             announce.send_debug(
                 f"List update FAILED: Script execution timed out after "

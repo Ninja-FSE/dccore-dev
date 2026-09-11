@@ -1486,14 +1486,29 @@ class TheRequestTriggerIsStable(MasterListCase):
         import types
 
         calls = []
-        real_run = subprocess.run
+        real_popen = subprocess.Popen
+
+        class FakeChild:
+            """Enough of Popen for run_watching_for_a_stall() to finish on its
+            first communicate(). Popen, not run: the child is watched rather
+            than timed now, so that is where it is actually started - and this
+            test is about it being a SEPARATE PROCESS at all, which is the
+            part that must not quietly become an in-process call."""
+
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                return "", ""
+
+            def kill(self):
+                pass
 
         def recorder(args, **kwargs):
             calls.append(args)
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            return FakeChild()
 
-        subprocess.run = recorder
-        self.addCleanup(setattr, subprocess, "run", real_run)
+        subprocess.Popen = recorder
+        self.addCleanup(setattr, subprocess, "Popen", real_popen)
 
         commands.handle_list_update_request("operator", "#channel", authorised=True)
 

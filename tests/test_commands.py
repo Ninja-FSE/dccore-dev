@@ -992,37 +992,91 @@ class ListUpdateTimeoutTests(DCCoreTestCase):
         time.sleep = lambda *_a, **_k: None
         self.addCleanup(setattr, time, "sleep", real_sleep)
 
-    def test_the_subprocess_is_given_the_configured_timeout_not_none(self):
-        import subprocess
-        seen_kwargs = {}
-        real_run = subprocess.run
+    def fake_runner(self, result=None, raises=None):
+        """Stand in for commands.run_watching_for_a_stall().
 
-        def fake_run(cmd, **kwargs):
-            seen_kwargs.update(kwargs)
-            import types
-            return types.SimpleNamespace(returncode=0, stdout="List of 1 Files\n", stderr="")
+        The seam moved here from subprocess.run(): the child is now watched
+        rather than timed, so "what timeout was subprocess given" is no longer
+        a question that has an answer. What the caller must still get right is
+        which limits it hands over and how it reports each ending.
+        """
+        import types
 
-        subprocess.run = fake_run
-        self.addCleanup(setattr, subprocess, "run", real_run)
+        seen = {}
+
+        def runner(argv, **kwargs):
+            seen.update(kwargs)
+            if raises is not None:
+                raise raises
+            return result or types.SimpleNamespace(
+                returncode=0, stdout="List of 1 Files\n", stderr="")
+
+        real = commands.run_watching_for_a_stall
+        commands.run_watching_for_a_stall = runner
+        self.addCleanup(setattr, commands, "run_watching_for_a_stall", real)
+        return seen
+
+    def test_the_runner_is_given_both_limits_from_config(self):
+        """Rewritten from test_the_subprocess_is_given_the_configured_timeout_
+        not_none, whose contract this change deliberately replaces.
+
+        A wall clock cannot tell a rebuild that is working from one that is
+        hung, and #162's fix - "the timeout must not be None" - made an 80 TB
+        library impossible to index at all, because any number an operator
+        guesses is either too small for their library or too large to be a
+        safety net. The child is watched instead, so what the caller must hand
+        over is the stall window, and the hard cap only if one is set.
+        """
+        self.set_config(LIST_UPDATE_TIMEOUT=0, LIST_UPDATE_STALL_SECONDS=900)
+        seen = self.fake_runner()
 
         commands.handle_list_update_request("admin", "#chan", authorised=True)
 
-        self.assertEqual(seen_kwargs.get("timeout"), config.LIST_UPDATE_TIMEOUT)
-        self.assertIsNotNone(seen_kwargs.get("timeout"),
-                             "a hung update_list.py must not be able to wedge "
-                             "search_inprogress/update_inprogress forever")
+        self.assertEqual(seen.get("stall"), 900)
+        self.assertEqual(seen.get("ceiling"), 0)
+
+    def test_an_operator_who_sets_a_hard_cap_still_gets_one(self):
+        """0 is the default, not the only value. Somebody who wants a rebuild
+        abandoned after two hours whatever it is doing can still say so."""
+        self.set_config(LIST_UPDATE_TIMEOUT=7200)
+        seen = self.fake_runner()
+
+        commands.handle_list_update_request("admin", "#chan", authorised=True)
+
+        self.assertEqual(seen.get("ceiling"), 7200)
+
+    def test_a_stall_is_reported_as_a_stall_not_as_a_timeout(self):
+        """Different endings, different causes. Going quiet points at the
+        library - a mount that went away mid-walk - while running past a cap
+        points at a limit the operator chose."""
+        self.fake_runner(raises=commands.ListUpdateStalled(1200))
+
+        commands.handle_list_update_request("admin", "#chan", authorised=True)
+
+        messages = [msg for _cat, msg in self.debug]
+        self.assertTrue(any("nothing reported for" in msg for msg in messages),
+                        messages)
+        self.assertFalse(config.last_list_update_ok)
+        self.assertIn("stalled", config.last_list_update_error)
+        self.assertFalse(config.search_inprogress)
+        self.assertFalse(config.update_inprogress)
+
+    def test_a_stall_says_how_long_the_silence_was(self):
+        """"No progress for a while" is not actionable. Twenty minutes of
+        silence on a library that normally reports twice a second is."""
+        self.fake_runner(raises=commands.ListUpdateStalled(1200))
+
+        commands.handle_list_update_request("admin", "#chan", authorised=True)
+
+        self.assertIn("20m 00s", " ".join(msg for _cat, msg in self.debug))
 
     def test_a_real_timeout_reports_the_configured_limit_not_a_stale_90(self):
         """The dead handler used to claim '90 seconds' unconditionally,
         regardless of what timeout was actually (not) applied."""
         import subprocess
 
-        def fake_run(cmd, **kwargs):
-            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
-
-        real_run = subprocess.run
-        subprocess.run = fake_run
-        self.addCleanup(setattr, subprocess, "run", real_run)
+        self.set_config(LIST_UPDATE_TIMEOUT=7200)
+        self.fake_runner(raises=subprocess.TimeoutExpired(["x"], 7200))
 
         commands.handle_list_update_request("admin", "#chan", authorised=True)
 
@@ -1074,9 +1128,13 @@ class ListUpdateTimeoutTests(DCCoreTestCase):
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
         import subprocess
-        real_run = subprocess.run
-        subprocess.run = fake_run
-        self.addCleanup(setattr, subprocess, "run", real_run)
+        # The seam is run_watching_for_a_stall() now, not subprocess.run:
+        # the child is watched rather than timed, so it is started with
+        # Popen and nothing patches subprocess.run any more.
+        real_runner = commands.run_watching_for_a_stall
+        commands.run_watching_for_a_stall = fake_run
+        self.addCleanup(setattr, commands, "run_watching_for_a_stall",
+                        real_runner)
 
         commands.handle_list_update_request("admin", "#chan", authorised=True)
 
