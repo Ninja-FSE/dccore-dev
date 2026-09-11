@@ -158,6 +158,12 @@ def startup():
     # After the side files and before anything serves: the counters are read
     # by the dashboard and -stats, and both would show a half-migrated table.
     db.migrate_download_counts_to_labels()
+    # And drop what the master list left in those counters before it stopped
+    # being counted - one row per rebuild, sitting at the top of a table meant
+    # for files. Runs every boot rather than once: it is a no-op the moment
+    # there is nothing to remove, and an operator restoring an old
+    # download_counts.json should not get the rows back for good.
+    db.prune_list_artifact_download_counts()
 
     # Before find_latest_list() below: defaults.py's LIST_BASE_NAME derivation
     # (an untouched value takes NICKNAME's own value once NICKNAME is set)

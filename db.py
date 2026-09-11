@@ -757,6 +757,12 @@ def record_download(key, name, kind):
     Not bounded, and it does not need to be: a bot can only send what it
     shares, so the row count is capped by the size of the library itself.
     """
+    # A FALSY KEY MEANS "DO NOT COUNT THIS", and it is deliberate as well as
+    # defensive. dcc.download_count_identity() answers None for the master
+    # list, which is sent to everybody who types the nickname and is how a
+    # person finds out what the downloads are rather than being one - see its
+    # own note. Returning here keeps that decision in the one place that
+    # already decides what a send counts as.
     if not key:
         return
     with _disk_lock:
@@ -777,6 +783,70 @@ def record_download(key, name, kind):
         except Exception as err:
             print(f"[DB ERROR] Could not save the download counts: {err}")
         return row["count"]
+
+
+def prune_list_artifact_download_counts():
+    """Drop rows the master list left in the counters before it stopped being
+    counted. Returns how many went.
+
+    Needed because the fix alone is invisible to anybody who already has them:
+    the list has been counted since these tables existed, its name carries the
+    build date so there is a row per rebuild, and they sit at the top of
+    "Most downloaded" where they crowd out the files the table is for.
+
+    Two rules, because neither catches everything on its own:
+
+      * the NAME is a list artifact - "<base>-<date>.zip|.rar",
+        "<base>-FULL-<date>.txt" - which finds them wherever they were keyed.
+      * the KEY is an absolute path inside LOCAL_LIST_DIR, which finds them
+        even after the operator has renamed the bot, since the name rule is
+        anchored on the CURRENT LIST_BASE_NAME and an old row would no longer
+        match it. That directory holds the further lists' subdirectories too,
+        so one check covers every list a bot serves.
+
+    Nothing served can legitimately be keyed that way: a library folder is
+    keyed by its label and the path beneath it, never absolutely - which is
+    the whole point of library_count_key().
+
+    Same posture as migrate_download_counts_to_labels() next door, and for the
+    same reason: this runs from oserve.startup(), and these counters describe
+    history that nothing else reads. Losing them is cosmetic; refusing to boot
+    over them is not. So it never raises.
+    """
+    try:
+        # Both imported here, not at module scope: dcc imports db, so a
+        # top-level `import dcc` would close the cycle, and list_mod is only
+        # wanted for this one sweep.
+        import dcc
+        import list as list_mod
+
+        lists_root = os.path.abspath(
+            getattr(config, "LOCAL_LIST_DIR", "./lists") or "./lists")
+
+        with _disk_lock:
+            counts = _load_download_counts_unlocked()
+            doomed = []
+            for key, row in counts.items():
+                name = row.get("name") if isinstance(row, dict) else None
+                if list_mod.is_list_artifact_name(name or key):
+                    doomed.append(key)
+                    continue
+                if os.path.isabs(str(key)) and dcc.is_safe_path(lists_root, str(key)):
+                    doomed.append(key)
+            if not doomed:
+                return 0
+            for key in doomed:
+                del counts[key]
+            _atomic_write(DOWNLOAD_COUNTS_FILE,
+                          json.dumps(counts, indent=1, sort_keys=True,
+                                     ensure_ascii=False))
+        print(f"[DB] Removed {len(doomed)} master-list row(s) from the "
+              f"download counters; the list is not a download.")
+        return len(doomed)
+    except Exception as err:
+        print(f"[DB] Could not tidy the download counters ({err}); "
+              f"the master list may still appear under Most downloaded.")
+        return 0
 
 
 def top_downloads(limit=10, kind=None):
