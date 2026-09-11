@@ -721,6 +721,18 @@ KNOWN_BOTS_FLUSH_SECONDS = 30.0
 KNOWN_BOTS_TTL_SECONDS = 7 * 24 * 60 * 60
 KNOWN_BOTS_MAX = 2000
 
+# The SHORTER TTL for a bot _bot_confirmed_absent() can actually vouch for -
+# not merely quiet, but not in any channel we share right now. A day, not the
+# full week: the List Browser's own red dot already says this bot is gone,
+# and there is no reason to keep repeating "not one this bot is going to be
+# asked about" for six more days once presence has already answered that.
+#
+# A bot that has simply gone quiet - still present, just not advertising for
+# a while - is untouched by this and keeps the full KNOWN_BOTS_TTL_SECONDS:
+# presence says nothing is wrong with it, and going quiet is not the same
+# claim as being gone.
+KNOWN_BOTS_ABSENT_TTL_SECONDS = 24 * 60 * 60
+
 _ADVERT_NICK_RE = re.compile(r"Type:\s*@(\S+)", re.IGNORECASE)
 _ADVERT_COUNT_RE = re.compile(
     r"For\s+My\s+List\s+Of:?\s*([\d,]+)\s*Files", re.IGNORECASE)
@@ -1041,10 +1053,17 @@ def _prune_known_bots(now):
     as infinitely old rather than kept for ever: the field is written on every
     single capture, so a missing one means the entry predates this and is not
     being refreshed.
+
+    TWO TTLs, not one - see KNOWN_BOTS_ABSENT_TTL_SECONDS's own comment. A bot
+    that has simply gone quiet keeps the full week; one _bot_confirmed_absent()
+    can actually vouch for is gone by the next day instead, because the List
+    Browser's red dot has already said so and there is nothing left to wait
+    for. Reported from an operator who watched a screenful of confirmed-gone
+    bots sit there for most of a week regardless.
     """
     registry = runtime.known_bots
     for key in [k for k, entry in registry.items()
-                if now - float((entry or {}).get("last_seen") or 0) > KNOWN_BOTS_TTL_SECONDS]:
+                if _known_bot_is_stale(k, entry, now)]:
         del registry[key]
 
     if len(registry) > KNOWN_BOTS_MAX:
@@ -1052,6 +1071,41 @@ def _prune_known_bots(now):
                         key=lambda kv: float((kv[1] or {}).get("last_seen") or 0))
         for key, _entry in by_age[:len(registry) - KNOWN_BOTS_MAX]:
             del registry[key]
+
+
+def _known_bot_is_stale(key, entry, now):
+    """Whether _prune_known_bots() should drop this entry.
+
+    `key` is already the lower-cased registry key - see _capture_channel_
+    advert()'s own `key = user.lower()` - so it compares directly against
+    the lower-cased nicks _bot_confirmed_absent() reads from channel_users.
+    """
+    age = now - float((entry or {}).get("last_seen") or 0)
+    if age > KNOWN_BOTS_TTL_SECONDS:
+        return True
+    return age > KNOWN_BOTS_ABSENT_TTL_SECONDS and _bot_confirmed_absent(key)
+
+
+def _bot_confirmed_absent(key):
+    """True only once we actually know `key` is gone - not merely that
+    nothing has proven it is still there.
+
+    An EMPTY config.channel_users - still joining, in the settle window right
+    after a (re)connect, before the first NAMES reply has landed for any
+    channel - must never read as "confirmed absent". Reading it that way
+    would prune every known bot within KNOWN_BOTS_ABSENT_TTL_SECONDS of every
+    restart, whether or not a single one of them had actually left: nothing
+    known yet is not the same claim as nobody there. This mirrors
+    webserver.present_nicks()'s identical "empty means unknown" rule, for the
+    identical reason - that function just answers it for the whole set at
+    once, where this only ever needs one name.
+    """
+    with runtime.channel_users_lock():
+        channels = getattr(config, "channel_users", None) or {}
+        if not any(users for users in channels.values()):
+            return False
+        return not any(str(nick).lower() == key
+                       for users in channels.values() for nick in users)
 
 
 def _prune_advert_tails(now):
