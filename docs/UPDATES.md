@@ -4,6 +4,100 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 How long has this been running
+
+The rebuild progress line said what it was DOING - *"Scanning folder 3 of 10 ·
+4,211 files so far"* - and never how long it had been doing it. That leaves the
+one question an operator actually has while watching a rebuild unanswered on
+the page: **is this normal, or has it hung?**
+
+Now: `Scanning folder 3 of 10 · Flac · 4,211 files so far · 1m 15s`, and
+`Done in 3m 04s.` when it finishes.
+
+**The page cannot work the elapsed time out for itself**, which is why this
+touches three files rather than one. `update_list.py` runs as a SUBPROCESS, so
+the progress file is the only thing it shares with the daemon; and the
+dashboard may have been opened - or the daemon restarted - long after the
+rebuild began. Deriving it from when the file first appeared fails for the same
+reason: the file outlives the run that wrote it. So the child stamps
+`started_at` in every write, once per process.
+
+**Subtracted on the daemon's clock, at both ends.** A browser subtracting a
+server timestamp against its own clock shows a negative elapsed, or an hour of
+it, on any machine whose time is slightly off - and the first frame is exactly
+when somebody is looking.
+
+Two values that look alike and are not:
+
+  * `progress.elapsed` - how long the SCAN has been going, live.
+  * `seconds` - how long the whole OPERATION took, recorded when it ends. That
+    covers spawning python, the two-second NFS sync pause after the child
+    exits, and the re-count afterwards. On a slow mount those are not
+    rounding, and reporting the scan's own figure as the total would quietly
+    understate every rebuild.
+
+**The clock starts inside the thread, not when the request arrives.** `!update`
+can wait on the maintenance lock, and time spent queued is not time spent
+rebuilding.
+
+**Every ending records one** - success, failure, timeout, and the unexpected -
+because a duration left over from the previous rebuild is worse than none: it
+would be shown against a run it did not measure. There is a test that counts
+the two against each other rather than naming the paths, so a fifth ending
+added later cannot quietly skip it.
+
+**On a failure it is the more useful half of the message.** A rebuild that died
+after four seconds never reached the library; one that died after forty minutes
+did - and that is the difference between a typo in a path and a mount that went
+away mid-walk.
+
+#### Two wordings for one number
+
+`describe_duration()` exists in Python and again in JavaScript, because the
+same rebuild is reported in the debug channel and on the page. Seconds under a
+minute, `2m 04s` above it, `1h 12m` above an hour - a large library on a mapped
+drive runs into the hours, and `4331s` is a number nobody converts in their
+head. The smaller unit is zero-padded so consecutive rebuilds line up read one
+under another in a log.
+
+Both are pinned, including the boundaries: an off-by-one there shows `60m 00s`
+or `0h 59m` to a real operator, and 3599/3600 are tested on both sides.
+
+#### Missing, not zero
+
+A progress file written by an older build, read mid-upgrade, has no
+`started_at`. That is `None`, never `0` - the second renders as fifty-odd
+years - and the page omits the clock entirely rather than showing `0s` forever,
+which would read as a stalled rebuild rather than as a missing field. A clock
+that steps backwards mid-run (ntp correcting a drift) clamps at zero rather
+than reporting a rebuild that has not begun.
+
+Eight mutants, seven killed. The eighth is **equivalent and recorded as such**:
+dropping the explicit `started_at is not None` check changes nothing, because
+`float(None)` raises and the surrounding `except` produces the same `None`. The
+check stays anyway - an operator upgrading mid-rebuild is an expected case, and
+expected cases should not be handled by catching an exception.
+
+#### A test that was a bet on a function never growing
+
+`test_the_writing_phase_is_indeterminate` read the renderer as
+`source().split("function showUpdateListProgress(", 1)[1][:1600]` - a fixed
+character budget. Adding the elapsed clock and its comment pushed
+`is-indeterminate` past 1600, and a test that is not about the clock failed
+against code it checks that was untouched and still correct.
+
+Both slices now extract to the start of the next function, with a fixture
+invariant asserting the split still matches - otherwise the "body" becomes the
+whole rest of the file and every check passes on somebody else's code. The
+invariant is mutation-checked, which is the only way to know a fixture guard
+is load-bearing.
+
+The `!update` completion line also loses its last ``, which the "no bold
+anywhere" sweep had left behind in `commands.py`. **19 more remain in that
+file** and are not touched here; they belong to a sweep of their own.
+
+---
+
 ### 🟢 The list is not a download
 
 Reported from the live bot: the master list was showing up in **Most

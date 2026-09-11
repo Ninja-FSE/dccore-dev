@@ -1173,6 +1173,27 @@ def count_from_master_list():
         return 0
 
 
+def describe_duration(seconds):
+    """A rebuild's runtime, for a person rather than for arithmetic.
+
+    Whole seconds under a minute, "2m 04s" above it, "1h 12m" above an hour -
+    a rebuild of a large library on a mapped drive runs into the hours, and
+    "4331s" is a number nobody converts in their head.
+
+    The smaller unit is zero-padded so consecutive rebuilds line up when they
+    are read one under the other in a log.
+    """
+    try:
+        total = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        return "an unknown time"
+    if total < 60:
+        return f"{total}s"
+    if total < 3600:
+        return f"{total // 60}m {total % 60:02d}s"
+    return f"{total // 3600}h {(total % 3600) // 60:02d}m"
+
+
 def handle_list_update_request(user, target_chan, authorised=False):
     """Run update_list.py, wait for it, and read the file count from line 1 of the list."""
     import subprocess
@@ -1215,6 +1236,16 @@ def handle_list_update_request(user, target_chan, authorised=False):
     old_count = count_from_master_list()
     announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory, bot paused...", category="INFO")
     def async_list_updater():
+        # HOW LONG THE WHOLE THING TOOK, from here rather than from the
+        # subprocess's own progress file. That file reports the scan; this
+        # measures what the operator actually waited for, which also covers
+        # spawning python, the NFS sync pause after the child exits, and the
+        # re-count afterwards. On a slow mount those are not rounding.
+        #
+        # Recorded on EVERY exit below - success, failure, timeout and the
+        # unexpected - because a duration left over from the last run is worse
+        # than none: it would be attached to a rebuild it did not measure.
+        started = time.time()
         try:
             base_path = os.path.dirname(os.path.abspath(__file__))
             script_path = os.path.join(base_path, "update_list.py")
@@ -1228,6 +1259,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 # `running` flipped false, whether the rebuild worked or not.
                 config.last_list_update_ok = False
                 config.last_list_update_error = "update_list.py not found"
+                config.last_list_update_seconds = int(time.time() - started)
                 return
                 
             # 2. Threaded run, bounded by LIST_UPDATE_TIMEOUT (default 1800s, shaped
@@ -1292,7 +1324,9 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 else:
                     # 4. Confirm, through the VIP express lane
                     announce.send_debug(
-                        f"List update successfully completed! MasterList now contains {config.C_BOLD}{new_count:,}{config.C_RESET} files. "
+                        f"List update successfully completed in "
+                        f"{describe_duration(time.time() - started)}! MasterList "
+                        f"now contains {new_count:,} files. "
                         f"Added {added_files:,} new file(s) since last index.",
                         category="INFO"
                     )
@@ -1301,6 +1335,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 # of the rebuild process #224 is about.
                 config.last_list_update_ok = True
                 config.last_list_update_error = None
+                config.last_list_update_seconds = int(time.time() - started)
 
             else:
                 error_msg = subprocess_failure_message(process.stderr, process.stdout)
@@ -1313,6 +1348,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
                     category="INFO", notice="error")
                 config.last_list_update_ok = False
                 config.last_list_update_error = error_msg
+                config.last_list_update_seconds = int(time.time() - started)
 
         except subprocess.TimeoutExpired:
             announce.send_debug(
@@ -1321,11 +1357,13 @@ def handle_list_update_request(user, target_chan, authorised=False):
                 category="INFO", notice="error")
             config.last_list_update_ok = False
             config.last_list_update_error = f"timed out after {list_update_timeout}s"
+            config.last_list_update_seconds = int(time.time() - started)
         except Exception as e:
             print(f"[UPDATE ERROR] The list update could not be run: {e}")
             announce.send_debug(f"List update FAILED critical error: {e}", category="INFO")
             config.last_list_update_ok = False
             config.last_list_update_error = str(e)
+            config.last_list_update_seconds = int(time.time() - started)
         finally:
             # Release the global pause lock again
             config.search_inprogress = False
