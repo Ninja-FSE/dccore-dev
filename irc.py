@@ -24,6 +24,58 @@ import security
 # Tracks whether the channels have been joined
 bot_joined_channel = False
 
+# Reconnect NAMES sync fires once per channel, all within a few seconds of
+# a single JOIN command naming every channel at once - exactly the burst
+# window where the server's flood allowance is smallest. A debug line per
+# channel there turns "reconnected to 14 channels" into 14 debug lines
+# landing together, on top of whatever else send_debug() is already
+# carrying - the specific burst that let a 14-channel reconnect flood a bot
+# off (#406). Batched here into one line, sent only once the burst itself
+# has gone quiet.
+_RECONNECT_THAW_QUIET_SECONDS = 2.0
+_reconnect_thaw_lock = threading.Lock()
+_reconnect_thaw_summary = {"total": 0, "channels": set(), "timer": None}
+
+
+def _flush_reconnect_thaw_summary():
+    with _reconnect_thaw_lock:
+        total = _reconnect_thaw_summary["total"]
+        channels = len(_reconnect_thaw_summary["channels"])
+        _reconnect_thaw_summary["total"] = 0
+        _reconnect_thaw_summary["channels"] = set()
+        _reconnect_thaw_summary["timer"] = None
+
+    if not total:
+        return
+    import announce
+    plural = "" if channels == 1 else "s"
+    announce.send_debug(
+        f"Reconnect sync: thawed {config.C_BOLD}{total}{config.C_RESET} "
+        f"queue(s) across {channels} channel{plural}.", category="JOIN")
+
+
+def _note_reconnect_thaw(channel, thawed_count):
+    """Record one channel's NAMES-sync thaw, batching same-burst channels
+    into a single debug line instead of one per channel.
+
+    Debounced rather than emitted immediately: every reconnect fires one of
+    these per channel within a few seconds of each other, and a fresh call
+    cancels and restarts the timer - so the summary fires once, shortly
+    after the LAST channel in the burst settles, not a fixed time after the
+    first.
+    """
+    with _reconnect_thaw_lock:
+        _reconnect_thaw_summary["total"] += thawed_count
+        _reconnect_thaw_summary["channels"].add(channel)
+        existing_timer = _reconnect_thaw_summary["timer"]
+        if existing_timer is not None:
+            existing_timer.cancel()
+        new_timer = threading.Timer(_RECONNECT_THAW_QUIET_SECONDS,
+                                     _flush_reconnect_thaw_summary)
+        new_timer.daemon = True
+        _reconnect_thaw_summary["timer"] = new_timer
+        new_timer.start()
+
 
 def _release_socket():
     """Clear the shared network reference as soon as a socket has closed.
@@ -2314,7 +2366,7 @@ def irc_loop():
                                 threading.Thread(target=dcc.check_queue_and_send, args=(s, frozen_user), daemon=True).start()
 
                             if thawed_users:
-                                announce.send_debug(f"Reconnect sync in {chan}: thawed {config.C_BOLD}{len(thawed_users)}{config.C_RESET} queue(s) for users who never left.", category="JOIN")
+                                _note_reconnect_thaw(chan, len(thawed_users))
 
                     # Anchored: " JOIN " matched the word anywhere, so a PRIVMSG containing
                     # it thawed the speaker's own frozen queue on demand, and let them insert
@@ -2587,20 +2639,33 @@ def irc_loop():
                                     continue
                                 if ctcp_cmd == "VERSION":
                                     # Answered inline rather than on a thread:
-                                    # one send, nothing read from disk, and
-                                    # irc.py already sends directly from this
-                                    # loop (see the RAM-CHECK reply below).
+                                    # one send, nothing read from disk. Not
+                                    # answered DIRECTLY to the socket any more
+                                    # though (see the RAM-CHECK reply below
+                                    # for why that changed) - queued VIP so it
+                                    # still jumps ahead of an ordinary
+                                    # per-user backlog, and paced through
+                                    # runtime.outbound_pacer like every other
+                                    # outbound line (#406).
                                     #
                                     # VERSION is in the is_bot_command list
-                                    # above, so a flooding user's query is
-                                    # dropped before reaching here. An
-                                    # unthrottled CTCP responder is a standard
-                                    # way to make a bot flood ITSELF off the
-                                    # network: a few hundred queries and the
-                                    # bot's own replies trip excess-flood.
+                                    # above, so a flooding user's own query is
+                                    # dropped before reaching here - but many
+                                    # ordinary clients send exactly one CTCP
+                                    # VERSION unasked, on sight, the moment
+                                    # they see a new nick. A bot that just
+                                    # joined 14 channels can collect a dozen
+                                    # of those within a second or two, and an
+                                    # unpaced responder answering each the
+                                    # instant it arrived was a second way to
+                                    # flood the bot off - ordinary politeness
+                                    # from a dozen strangers, nobody
+                                    # misbehaving, and no per-user gate to
+                                    # catch it because it is a dozen different
+                                    # users asking once each.
                                     version_reply = ctcp_version_reply(user)
-                                    if version_reply:
-                                        s.send(version_reply.encode())
+                                    if version_reply and oserve:
+                                        oserve.queue_message(user, version_reply, is_vip=True)
                                     continue
                                 if ctcp_cmd == "QUE":
                                     threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
@@ -2639,10 +2704,20 @@ def irc_loop():
                                     have_count = hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users
                                     if have_count:
                                         current_qty = len(config.channel_users[target_chan.lower()])
+                                # Queued VIP and paced, not sent straight to the
+                                # socket - same reasoning as the CTCP VERSION
+                                # reply above (#406): a direct send here shares
+                                # nothing with queue_mgr.py's or announce.py's
+                                # own pacing, so however unlikely a flood of
+                                # !debugnames is, this is one more line that
+                                # could add to one without the shared clock
+                                # knowing it happened.
                                 if have_count:
-                                    s.send(f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n".encode())
+                                    ram_check = f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n"
                                 else:
-                                    s.send(f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n".encode())
+                                    ram_check = f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n"
+                                if oserve:
+                                    oserve.queue_message(user, ram_check, is_vip=True)
                             elif msg.lower() == "!ping":
                                 threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
                             # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these

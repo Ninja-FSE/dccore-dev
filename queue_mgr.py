@@ -4,6 +4,7 @@ import sys
 import builtins
 import socket
 import defaults as config
+import runtime
 import stats_mgr
 
 # The ordinary flood-protection queue
@@ -56,6 +57,11 @@ def queue_worker():
             # ---------------------------------------------------------------------
             if hasattr(config, 'vip_queue') and config.vip_queue:
                 msg = config.vip_queue.pop(0)
+                # Shared with announce.py's debug drain - see runtime.OutboundPacer.
+                # Reserved before the send, not slept after it, so a message that
+                # fails to send still costs its slot rather than letting a broken
+                # pipe retry in a tight loop.
+                runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
                 try:
                     if current_sock:
                         current_sock.send(msg.encode())
@@ -73,7 +79,6 @@ def queue_worker():
                     time.sleep(1.0)
                     continue
 
-                time.sleep(config.MSG_DELAY)
                 continue  # Straight back up to check for more VIP data
             # ---------------------------------------------------------------------
 
@@ -84,6 +89,8 @@ def queue_worker():
                 for user in active_users:
                     if user in config.send_queue and config.send_queue[user]:
                         msg = config.send_queue[user].pop(0)
+                        # See the VIP lane above: same shared clock.
+                        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
 
                         try:
                            if current_sock:
@@ -95,8 +102,6 @@ def queue_worker():
                            break
                         except Exception as e:
                            print(f"[ERROR] Failed to send queued message: {e}")
-
-                        time.sleep(config.MSG_DELAY)
 
                     if user in config.send_queue and not config.send_queue[user]:
                         del config.send_queue[user]
