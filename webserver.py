@@ -2252,6 +2252,15 @@ SETTINGS_CATEGORIES = (
                                                 "CUSTOM_THEME_ACCENT"]),
     ("anti-flood",    "Anti-flood",            ["MAX_REQUESTS", "REQUEST_WINDOW", "MUTE_TIME",
                                                 "FLOOD_BAN_SECONDS"]),
+    # Its own category for the reason Appearance gives above. The cooldown
+    # below is an anti-flood setting by mechanism, but an operator looking
+    # for it is thinking about private messages, not about flooding.
+    ("private-messages", "Private messages",   ["PRIVATE_MESSAGES_ENABLED",
+                                                "PRIVATE_MESSAGE_COOLDOWN_SECONDS",
+                                                "PRIVATE_MESSAGE_DECLINE_TEXT",
+                                                "PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS",
+                                                "PRIVATE_MESSAGE_DECLINE_BURST",
+                                                "PRIVATE_MESSAGE_DECLINE_BURST_SECONDS"]),
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
                                                 "ADMIN_CHANNEL_COMMANDS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
@@ -2272,7 +2281,8 @@ SETTINGS_CATEGORIES = (
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_PROGRESS_FILE", "LIBRARY_FOLDERS_FILE",
                                                 "LISTS_FILE", "ON_CONNECT_FILE",
-                                                "NOTICES_FILE"]),
+                                                "NOTICES_FILE",
+                                                "PRIVATE_MESSAGES_FILE"]),
 )
 
 # A human-readable label per setting, since the raw config.py name
@@ -2350,6 +2360,13 @@ SETTINGS_LABELS = {
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "FETCH_HISTORY_FILE": "Fetch history file",
     "NOTICES_FILE": "Operator notices file",
+    "PRIVATE_MESSAGES_FILE": "Private messages file",
+    "PRIVATE_MESSAGE_COOLDOWN_SECONDS": "Record one private message per sender every (seconds)",
+    "PRIVATE_MESSAGES_ENABLED": "Keep private messages (off: keep none, reply once instead)",
+    "PRIVATE_MESSAGE_DECLINE_TEXT": "That reply's wording (%admin becomes the admin nick)",
+    "PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS": "Reply to the same sender once every (seconds)",
+    "PRIVATE_MESSAGE_DECLINE_BURST": "Most replies to send in one burst window",
+    "PRIVATE_MESSAGE_DECLINE_BURST_SECONDS": "How long that burst window is (seconds)",
     "LIST_SIZE_FILE": "List size file",
     "LIST_PROGRESS_FILE": "List rebuild progress file",
     "LIST_RAWBYTES_FILE": "List raw bytes file",
@@ -2633,6 +2650,72 @@ def mark_notices_read_result():
 
     announce.mark_notices_read()
     return build_notices_payload()
+
+
+def messages_are_off():
+    """True when this bot keeps no private messages at all."""
+    return not getattr(config, "PRIVATE_MESSAGES_ENABLED", True)
+
+
+def messages_payload_or_404():
+    """(payload, status) for GET /api/messages.
+
+    404, NOT an empty list. An empty list means "nobody has messaged you",
+    which is a fact about the world; this is "there is no such page here",
+    which is a fact about the bot. web/app.js hides the Messages nav item on
+    exactly this status - the same signal the Console has used since it got
+    an off-switch.
+
+    Out here rather than inside the route because Flask is an optional
+    dependency: a bot running without it still serves nothing, and logic that
+    lives in a route body is logic no test in this repo can reach.
+    """
+    if messages_are_off():
+        return {"error": "Private messages are turned off."}, 404
+    return build_messages_payload(), 200
+
+
+def messages_read_or_404():
+    """(payload, status) for POST /api/messages/read. Same gate: turned off
+    while somebody had the page open must not be a button that silently does
+    nothing."""
+    if messages_are_off():
+        return {"error": "Private messages are turned off."}, 404
+    return mark_messages_read_result(), 200
+
+
+def build_messages_payload():
+    """GET /api/messages: private messages nobody answered.
+
+    Newest FIRST here and oldest first in storage, for the reason
+    build_notices_payload() gives: appending is the cheap end to write, and a
+    list is read from the top.
+
+    No reply field and no per-message action that sends anything. The bot has
+    no conversation path at all - see announce.record_private_message() - and
+    an API that looked like it could answer would be a promise the daemon
+    cannot keep.
+    """
+    import announce
+
+    with runtime.private_messages_lock:
+        rows = list(reversed(config.private_messages))
+        seen = int(config.private_message_state.get("seen_id", 0) or 0)
+
+    return {
+        "messages": rows,
+        "unread": announce.unread_private_messages(),
+        "seen_id": seen,
+    }
+
+
+def mark_messages_read_result():
+    """POST /api/messages/read: the operator has looked. Returns what a fresh
+    GET would say, so the count and the list cannot disagree."""
+    import announce
+
+    announce.mark_private_messages_read()
+    return build_messages_payload()
 
 
 def build_settings_payload():
@@ -3935,6 +4018,17 @@ if HAVE_FLASK:
             # would 404 on exactly those rows.
             status, result = build_fetched_list_purge_result(source)
             return jsonify(result), status
+
+        @app.route("/api/messages")
+        def api_messages():
+            payload, status = messages_payload_or_404()
+            return jsonify(payload), status
+
+        @app.route("/api/messages/read", methods=["POST"])
+        def api_messages_read():
+            # POST because it changes what the operator has acknowledged.
+            payload, status = messages_read_or_404()
+            return jsonify(payload), status
 
         @app.route("/api/notices")
         def api_notices():

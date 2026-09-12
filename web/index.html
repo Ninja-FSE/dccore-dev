@@ -55,6 +55,10 @@
       <button class="nav-item" data-view="stats">
         <span class="nav-icon">&#9673;</span> Stats
       </button>
+      <button class="nav-item" data-view="messages">
+        <span class="nav-icon">&#9993;</span> Messages
+        <span class="nav-count" id="messages-nav-count" hidden></span>
+      </button>
       <button class="nav-item" data-view="settings">
         <span class="nav-icon">&#9998;</span> Settings
       </button>
@@ -342,6 +346,24 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <section class="view" id="view-messages">
+      <h1>Messages</h1>
+      <!-- SAYING THE BOT DOES NOT REPLY, right at the top and before the
+           list. Everything here looks like a conversation and is not one:
+           there is no reply box, and there never will be, because a bot that
+           answers unrecognised messages is one that can be made to flood
+           itself off the network. Somebody would otherwise type an answer
+           into the first field they found. -->
+      <p class="view-subtitle">People who messaged the bot privately and got
+        no answer, because what they sent was not a command. <strong>The bot
+        never replies to these</strong> - if you want to answer, message them
+        yourself from your own client.</p>
+      <div class="messages-actions">
+        <button type="button" class="btn btn-small" id="messages-mark-read">Mark all read</button>
+      </div>
+      <div class="message-list" id="message-list"></div>
     </section>
 
     <section class="view" id="view-notices">

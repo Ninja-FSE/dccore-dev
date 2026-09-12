@@ -2740,6 +2740,33 @@ def irc_loop():
                                 and target_chan.lower() == config.NICKNAME.lower())
                         )
                         if is_bot_command and security.is_flooding(user):
+                            continue
+
+                        # SOMEBODY SPOKE TO THE BOT AND IT WILL SAY NOTHING
+                        # BACK. Recorded here and nowhere else, because this
+                        # is the one point where everything is known: the
+                        # message is private (a channel line is one the
+                        # operator can already see), it is not a command, it
+                        # is not a CTCP - which is a client talking to a
+                        # client, not a person typing - and the sender has
+                        # already passed the ban check above.
+                        #
+                        # Deliberately AFTER is_flooding() so a flood cannot
+                        # fill the panel, and it still does not answer: see
+                        # announce.record_private_message() for why silence
+                        # stays the behaviour and only the record changes.
+                        if (not is_bot_command
+                                and target_chan.lower() == config.NICKNAME.lower()
+                                and not msg.startswith("\x01")):
+                            # ONE OR THE OTHER, never both. Recording it and
+                            # replying are two different contracts with the
+                            # person who messaged: one keeps it for the
+                            # operator and says nothing, the other keeps
+                            # nothing and says where to go instead.
+                            if getattr(config, "PRIVATE_MESSAGES_ENABLED", True):
+                                announce.record_private_message(user, msg)
+                            else:
+                                announce.decline_private_message(user)
                             continue 
                             
                         try:

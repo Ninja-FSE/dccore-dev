@@ -352,6 +352,12 @@ PRESERVE_RUNTIME = (
     'nick_aliases',       # the merges already inferred. Losing this un-merges
                           # every bot the List Browser had already combined,
                           # for no reason connected to the setting that changed
+    'private_messages',   # somebody spoke to the bot and it said nothing back. A
+                          # rehash is not a reply, and losing these would drop the
+                          # only record that anybody tried
+    'private_message_state',
+    'private_message_decline_sends',  # and the burst window, so a rehash is not
+                                      # a way to get the bot talking again
 )
 
 

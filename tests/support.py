@@ -102,6 +102,13 @@ RUNTIME_CONTAINERS = {
     # behind and get merged with it in the List Browser.
     "recent_departures": dict,
     "nick_aliases": dict,
+    # Same reasoning: a leftover is one test's message showing up in the next
+    # test's panel.
+    "private_messages": list,
+    "private_message_state": dict,
+    # And the burst window, or one test's flood ceiling is still half full
+    # when the next test asks whether a reply went out.
+    "private_message_decline_sends": list,
 }
 
 # SETTINGS A TEST MAY CHANGE AND MUST NOT LEAVE CHANGED.
@@ -124,6 +131,16 @@ RUNTIME_CONTAINERS = {
 # it was read as a leak.
 SETTINGS_DEFAULTS = {
     "BROADCAST_SEARCH_CHANNEL": None,
+    # A test that turns private messages off, or names an admin, must not
+    # leave either behind: the next test would be talking to strangers.
+    "PRIVATE_MESSAGES_ENABLED": True,
+    "PRIVATE_MESSAGE_DECLINE_TEXT": (
+        "This bot does not accept private messages. "
+        "Please message %admin instead."),
+    "PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS": 86400,
+    "PRIVATE_MESSAGE_DECLINE_BURST": 20,
+    "PRIVATE_MESSAGE_DECLINE_BURST_SECONDS": 600,
+    "ADMIN_NICK": None,
 }
 
 RUNTIME_FLAGS = {
@@ -453,6 +470,11 @@ class DCCoreTestCase(unittest.TestCase):
         # run's badge already showing.
         self._real_notices_file = db.NOTICES_FILE
         db.NOTICES_FILE = os.path.join(self._fetch_history_dir, "notices.json")
+        # Fifth file, same rule. Reached from the IRC read loop, so any test
+        # that feeds it a private message writes this without mentioning it.
+        self._real_pm_file = db.PRIVATE_MESSAGES_FILE
+        db.PRIVATE_MESSAGES_FILE = os.path.join(self._fetch_history_dir,
+                                                "private_messages.json")
         dcc_fetch._last_persisted_terminal_snapshot = {}
         # Same reason, for the bot registry. oserve.start() loads it at boot,
         # so every test that boots the daemon was reading whatever bots this
@@ -586,6 +608,7 @@ class DCCoreTestCase(unittest.TestCase):
         # a target at any point in the run.
         db.FETCH_HISTORY_FILE = _ORPHANED_WRITE_SINK
         db.NOTICES_FILE = self._real_notices_file
+        db.PRIVATE_MESSAGES_FILE = self._real_pm_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
         db.DOWNLOAD_COUNTS_FILE = self._real_download_counts_file
         db.DCC_QUEUE_FILE = self._real_dcc_queue_file

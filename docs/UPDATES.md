@@ -238,6 +238,161 @@ fake must only end the way the code under test ends it.
 
 ---
 
+### 🟢 Somebody messaged your bot
+
+Asked by an operator making DCCore their primary server: *"what happens to
+private messages the bot gets?"*
+
+Checked rather than answered from memory, and the answer was **nothing at
+all**. An unrecognised private message is dropped in the read loop: no reply,
+and no record either. The whole PRIVMSG block contains three logging calls and
+all three are error handlers; nothing writes to disk; the Console buffer only
+carries `send_debug()` output. So somebody could message the bot every day and
+the operator would never know anyone had tried.
+
+    ignored   hello?
+    ignored   are you there
+    ignored   can you send me the new album please
+    COMMAND   @<nick>-help
+    COMMAND   @find ...
+
+**The silence is right and it stays.** A bot that answers every stray line is
+one that can be made to flood itself off the network, which is exactly why the
+rate limiter upstream exists. But there is a real gap between *"do not reply to
+strangers"* and *"the operator never finds out anyone spoke to it"* - and
+somebody messaging a file server is usually somebody who wants something from
+it and does not know the syntax. Only the record changes.
+
+#### Kept apart from the notices, deliberately
+
+A notice is something that went **wrong** and carries one of two severities. A
+message is neither wrong nor right, and giving it a severity would mean
+inventing a third that nobody can tell apart at a glance - which the notices
+design says in as many words it will not do.
+
+So they get their own store, their own file, and their own page. The unread
+count sits on the **nav item**, not on the status badge: a notice wants you
+now, a message is waiting whenever you next look, and mixing them makes one of
+the two mean less.
+
+#### Where the capture sits is the whole design
+
+One point in the read loop, where four things are already known:
+
+  * **not a command** - those are answered normally and are not this;
+  * **sent privately** - a channel line is one the operator can already see,
+    and recording those would be a log of other people's conversations rather
+    than of anybody talking to us;
+  * **not a CTCP** - that is a client talking to a client (VERSION, a DCC
+    offer), not a person typing something they expect an answer to;
+  * **past the ban check and the flood gate** - so a ban silences somebody in
+    the panel too, and a flood cannot fill it.
+
+There is a test for each, and one that asserts the capture sends nothing -
+no notice, no queue, no socket write. The bot still says nothing.
+
+#### And an off-switch that answers instead of recording
+
+Asked for by the same operator: a way to turn the whole thing off, without
+even the page showing in the menu - and, when it is off, to tell whoever
+messaged where to go instead.
+
+That is not the same feature with its panel hidden. They are two different
+contracts with the person who typed:
+
+    PRIVATE_MESSAGES_ENABLED = true    recorded, page shown, bot silent
+    PRIVATE_MESSAGES_ENABLED = false   nothing kept, page gone, sender told once
+
+The second is the only mode that tells them anything, which is what makes it
+worth having rather than just a checkbox. Somebody messaging a file server is
+usually somebody who wants something from it and does not know the syntax;
+until now their two possible outcomes were "recorded and ignored" and
+"dropped and ignored".
+
+The page disappears the way the Console's does - its API answers **404** and
+`web/app.js` hides the nav item on that status. 404 rather than an empty list
+on purpose: an empty list means *nobody has messaged you*, which is a fact
+about the world, and this is *there is no such page here*, which is a fact
+about the bot. The section itself stays in the DOM and is only hidden,
+because deleting it made `activateView()` throw on every view switch and took
+the rest of the navigation with it - found on a real install, on the Console,
+and not worth finding twice.
+
+#### The reply is the only thing here that puts a line on the wire
+
+An auto-reply to anyone who messages you is the classic way for a bot to be
+flooded off a network by strangers, so it has four brakes and they cover
+different things:
+
+  * **A NOTICE, never a PRIVMSG.** RFC 1459 forbids a client auto-replying to
+    a NOTICE; it is what every other user-facing answer here already uses;
+    and - decisively - `irc.py`'s own parser matches `PRIVMSG` alone, so two
+    bots both running this **cannot** answer each other into a loop. That one
+    is structural rather than a check somebody has to remember to write.
+  * **Once per sender per day**, persisted. RAM alone would mean the bot
+    repeating itself to everybody every time the operator restarts it.
+  * **A ceiling across every sender together**, which the per-sender rule
+    cannot give: two hundred nicks messaging within a minute are two hundred
+    *first* messages, each individually owed a reply. That would sit in the
+    send queue for minutes and delay the transfer notices people are actually
+    waiting on. Past the ceiling the replies are dropped silently - nobody is
+    owed an explanation of why they did not get one, and a line saying "too
+    busy to answer" would be the same flood.
+  * **The ordinary send lane, never VIP**, so it waits behind real work and
+    goes out one `outbound_pacer` slot apart like everything else the bot
+    says. Ten people messaging at once become ten notices spread out, not ten
+    lines at once - which is the same clock the Excess Flood work put in.
+
+`%admin` in the text becomes `ADMIN_NICK`, or **"the bot's owner"** when none
+is set: the bug worth naming is *"Please message None instead"*, sent to
+somebody who now knows less than before they asked. Startup says so once when
+the feature is off and no admin nick is configured.
+
+Blanking the text is a real third position - no record, no page, and no line
+on the wire either - for an operator who wants the bot completely silent to
+strangers without editing code.
+
+Thirteen mutation-checked properties, including the two that survived the
+first pass: a blank text that still spoke, and an `activateView("search")`
+asserted as a bare call rather than as the whole statement, which passed
+happily on a page that stranded whoever was reading it.
+
+#### One person repeating themselves is one person
+
+Somebody typing four lines because the first got no answer is one person
+trying to ask something, and four rows of it buries the next person who tries.
+The first is kept and the rest dropped for `PRIVATE_MESSAGE_COOLDOWN_SECONDS`
+(300 by default), **per sender** - a throttle that silenced everybody after one
+message would hide exactly the person worth hearing from, and there is a test
+that fails if it ever becomes global.
+
+The cooldown lives in RAM only, on purpose: its job is to stop one person
+filling the panel in one sitting, and an operator restarting the bot is
+entitled to see that somebody is still trying.
+
+#### The page says what it cannot do
+
+Everything on that page looks like a conversation and is not one. So the
+subtitle says *"the bot never replies to these"* **above** the list rather than
+below it, there is no reply field, and the payload carries no action that
+sends anything. A reply box would be a promise the daemon cannot keep -
+there is no conversation path in the bot at all. Two tests pin that: the
+warning comes before the list, and the section contains no text input.
+
+The message text is kept, not just a count. *"Three people messaged you"* is
+not something an operator can act on; *"can you send me the new album"* is.
+Trimmed at 400 characters - somebody pasting is still somebody asking, and the
+first part says what they wanted.
+
+Six mutants, all killed, including a global cooldown, a case-sensitive one,
+and the text being thrown away for a count.
+
+One of my own guards had to be fixed first: it split the source on
+`record_private_message(` to find the capture block, and the **comment** above
+the call names the function too - so the extract stopped before any of the
+conditions and three tests were asserting against prose. It splits on the call
+with its arguments now, and strips comments. That is the third time this
+session; the pattern is always the same, and always mine.
 ### 🟢 A thread that outlived its test wrote real state
 
 Preflight's state-write guard kept failing with

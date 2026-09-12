@@ -31,6 +31,8 @@ FETCH_HISTORY_FILE = getattr(config, "FETCH_HISTORY_FILE",
                               os.path.join("data", "fetch_history.json"))
 NOTICES_FILE = getattr(config, "NOTICES_FILE",
                        os.path.join("data", "notices.json"))
+PRIVATE_MESSAGES_FILE = getattr(config, "PRIVATE_MESSAGES_FILE",
+                                os.path.join("data", "private_messages.json"))
 
 
 def _atomic_write(path, text):
@@ -1033,6 +1035,59 @@ def load_notices():
     except Exception as err:
         print(f"[DB ERROR] Could not read the notices, starting empty: {err}")
         return [], {"seen_id": 0}
+
+
+def load_private_messages():
+    """(rows, state) of unanswered private messages, or ([], {"seen_id": 0}).
+
+    Same posture as the notices beside it: a file that will not parse costs an
+    empty panel until the next message, never a refusal to start, and rows are
+    filtered individually so one hand-edited entry does not take the rest.
+    """
+    if not os.path.exists(PRIVATE_MESSAGES_FILE):
+        return [], {"seen_id": 0}
+    try:
+        with io.open(PRIVATE_MESSAGES_FILE, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if not isinstance(loaded, dict):
+            return [], {"seen_id": 0}
+        rows = [row for row in (loaded.get("messages") or [])
+                if isinstance(row, dict) and "id" in row]
+        state = loaded.get("state")
+        if not isinstance(state, dict):
+            state = {}
+        try:
+            seen = int(state.get("seen_id", 0))
+        except (TypeError, ValueError):
+            seen = 0
+        # Rebuilt entry by entry, same as the rows above: one unparseable
+        # timestamp in a hand-edited file must not cost the whole record of
+        # who has already been told, which would make the bot repeat itself
+        # to everybody at once.
+        declined = {}
+        for name, when in (state.get("declined") or {}).items():
+            try:
+                declined[str(name).lower()] = float(when)
+            except (TypeError, ValueError):
+                continue
+        return rows, {"seen_id": seen, "declined": declined}
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the private messages, starting "
+              f"empty: {err}")
+        return [], {"seen_id": 0}
+
+
+def save_private_messages(rows, state):
+    """Both together and atomically, for the reason save_notices() gives: a
+    seen marker higher than any surviving row silently swallows everything in
+    between."""
+    try:
+        with _disk_lock:
+            _atomic_write(PRIVATE_MESSAGES_FILE, json.dumps(
+                {"messages": list(rows), "state": dict(state)},
+                indent=1, sort_keys=True, ensure_ascii=False))
+    except Exception as err:
+        print(f"[DB ERROR] Could not save the private messages: {err}")
 
 
 def save_notices(rows, state):
