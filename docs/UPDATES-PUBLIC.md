@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.12.0-RC1 — The Several Lists Release
+## v1.12.0-RC2 — The Several Lists Release
 
 - **Rebuilding your list is faster, and more so the slower your disk is.** The scan was asking the filesystem for every file's size a second time, having already been told it while listing the folder. On a local disk that makes the whole rebuild about **1.6x** quicker; on a network drive or NAS the saving is larger, because that second question was a round trip over the network for every single file. Nothing about the list itself changes — same files, same sizes, same order.
 
