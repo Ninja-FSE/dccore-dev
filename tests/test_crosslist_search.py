@@ -1193,5 +1193,105 @@ class TheRequestBodyHasACeiling(DCCoreTestCase):
         self.assertNotEqual(resp.status_code, 413)
 
 
+class AWriteCheckpointsTheWalLogAfterward(IndexCase):
+    """Reported live: an 845MB index and a 128MB .db-wal file that only ever
+    grew. SQLite's own automatic checkpoint is PASSIVE (best-effort) and can
+    only run between transactions - index_bot_list() deletes and re-inserts a
+    whole bot's list as ONE transaction, and the largest bot measured on the
+    live index is 1.3 million rows, so the log grows to that entire write's
+    size before there is even a boundary for the passive checkpoint to
+    attempt, and a concurrent read (the dashboard's filter bar, polled
+    continuously) can leave it incomplete when it does attempt one.
+
+    A manual `PRAGMA wal_checkpoint(TRUNCATE)` against the live file cleared
+    128MB to zero in one call, with nothing in flight - confirming SQLite's
+    own checkpoint can always do this when nothing stops it; what was missing
+    was ever asking for a FULL one after the writes most likely to need it.
+    """
+
+    def _wal_path(self):
+        return config.LIST_INDEX_FILE + "-wal"
+
+    def _wal_size(self):
+        try:
+            return os.path.getsize(self._wal_path())
+        except OSError:
+            return 0
+
+    def test_indexing_a_bot_leaves_the_wal_log_small(self):
+        self.index("BigTruck", *[f"Track {n}.flac" for n in range(500)])
+
+        self.assertLess(self._wal_size(), 4096,
+                        "a checkpoint should have folded the write back into "
+                        "the main file rather than leaving it in the log")
+
+    def test_dropping_a_bot_leaves_the_wal_log_small_too(self):
+        self.index("BigTruck", "Track.flac")
+
+        list_index.drop_bot("BigTruck")
+
+        self.assertLess(self._wal_size(), 4096)
+
+    def test_a_checkpoint_failure_is_caught_inside_the_helper_itself(self):
+        """_checkpoint_locked() must never raise out - index_bot_list() and
+        drop_bot() call it AFTER their own conn.commit(), inside the same
+        try/except that decides whether the WRITE succeeded. An exception
+        escaping from here would be caught by that outer handler and
+        reported as a failed index/drop, even though the row change had
+        already committed successfully - turning a checkpoint problem into a
+        false failure report for an operation that worked.
+
+        A fake connection, not the real sqlite3 one: sqlite3.Connection.
+        execute is read-only on the C extension type and cannot be wrapped
+        to raise on demand, which a first version of this test found out the
+        hard way. _checkpoint_locked() only ever calls conn.execute(sql), so
+        any object with that method exercises it identically."""
+        class _BoomConnection:
+            def execute(self, sql, *args, **kwargs):
+                raise sqlite3.OperationalError("database is locked")
+
+        list_index._checkpoint_locked(_BoomConnection())  # must not raise
+
+    def test_index_bot_list_checkpoints_after_committing(self):
+        """The wiring: index_bot_list() actually calls the helper, and a
+        write still reports success when it does."""
+        calls = []
+        real_checkpoint = list_index._checkpoint_locked
+        list_index._checkpoint_locked = lambda conn: calls.append(conn)
+        self.addCleanup(setattr, list_index, "_checkpoint_locked", real_checkpoint)
+
+        indexed = self.index("BigTruck", "Track.flac")
+
+        self.assertEqual(indexed, 1)
+        self.assertEqual(len(calls), 1)
+
+    def test_drop_bot_checkpoints_after_committing_too(self):
+        self.index("BigTruck", "Track.flac")
+        calls = []
+        real_checkpoint = list_index._checkpoint_locked
+        list_index._checkpoint_locked = lambda conn: calls.append(conn)
+        self.addCleanup(setattr, list_index, "_checkpoint_locked", real_checkpoint)
+
+        dropped = list_index.drop_bot("BigTruck")
+
+        self.assertTrue(dropped)
+        self.assertEqual(len(calls), 1)
+
+    def test_the_checkpoint_is_the_truncating_kind(self):
+        """TRUNCATE, not the default PASSIVE mode wal_checkpoint() would run
+        with no argument - PASSIVE can succeed while still leaving the log
+        file at whatever size it last grew to, which is exactly the
+        behaviour reported live. Read from the live function object rather
+        than re-run against the real connection (sqlite3.Connection.execute
+        cannot be wrapped to observe the call - see the test above), the
+        same "ask the source what it actually sends" idiom already used
+        elsewhere in this suite for a query built as a string."""
+        import inspect
+
+        source = inspect.getsource(list_index._checkpoint_locked)
+
+        self.assertIn("wal_checkpoint(TRUNCATE)", source)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -320,6 +320,7 @@ def index_bot_list(bot, rows):
                   str(row.get("size") or ""))
                  for row in rows))
             conn.commit()
+            _checkpoint_locked(conn)
             return len(rows)
         except Exception as err:
             try:
@@ -343,10 +344,45 @@ def drop_bot(bot):
         try:
             conn.execute("DELETE FROM entries WHERE bot = ?", (name,))
             conn.commit()
+            _checkpoint_locked(conn)
             return True
         except Exception as err:
             print(f"[LIST-INDEX] Could not drop {name} from the index: {err}")
             return False
+
+
+def _checkpoint_locked(conn):
+    """Force a full WAL checkpoint after a write. Caller must hold _conn_lock.
+
+    WAL mode (set in _connect()) means every write lands in a separate
+    .db-wal log first, normally folded back into the main file by SQLite's
+    own automatic checkpoint. That default is PASSIVE - best-effort, and it
+    can only run BETWEEN transactions, never inside one. index_bot_list()
+    deletes and re-inserts a whole bot's list as one transaction, and the
+    largest bot measured here is 1.3 million rows - so the log grows to that
+    entire write's size before there is a transaction boundary for the
+    passive checkpoint to even attempt, and if a concurrent read (the
+    dashboard's filter bar, polled continuously) holds an older snapshot at
+    the moment it tries, it is left incomplete. Measured on the live index:
+    a 128MB .db-wal file that a manual TRUNCATE checkpoint cleared to zero
+    in one call, with nothing in it in flight.
+
+    TRUNCATE forces the checkpoint through and shrinks the log file back to
+    empty rather than leaving it at whatever size the last checkpoint grew
+    it to (the default PASSIVE mode's own behaviour even when it succeeds).
+
+    Never raises, and never rolled back into by the caller: the row change
+    just committed is safe either way (in the main file or still in the
+    WAL), so a checkpoint that fails costs disk space, not correctness - the
+    next successful one, from here or from SQLite's own passive attempts,
+    catches up.
+    """
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+    except Exception as err:
+        print(f"[LIST-INDEX] Could not checkpoint the index after a write "
+              f"({err}); the .db-wal file may stay larger than it needs to "
+              f"be until the next one succeeds.")
 
 
 def indexed_bots():
