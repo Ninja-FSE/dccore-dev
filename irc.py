@@ -24,6 +24,58 @@ import security
 # Tracks whether the channels have been joined
 bot_joined_channel = False
 
+# Reconnect NAMES sync fires once per channel, all within a few seconds of
+# a single JOIN command naming every channel at once - exactly the burst
+# window where the server's flood allowance is smallest. A debug line per
+# channel there turns "reconnected to 14 channels" into 14 debug lines
+# landing together, on top of whatever else send_debug() is already
+# carrying - the specific burst that let a 14-channel reconnect flood a bot
+# off (#406). Batched here into one line, sent only once the burst itself
+# has gone quiet.
+_RECONNECT_THAW_QUIET_SECONDS = 2.0
+_reconnect_thaw_lock = threading.Lock()
+_reconnect_thaw_summary = {"total": 0, "channels": set(), "timer": None}
+
+
+def _flush_reconnect_thaw_summary():
+    with _reconnect_thaw_lock:
+        total = _reconnect_thaw_summary["total"]
+        channels = len(_reconnect_thaw_summary["channels"])
+        _reconnect_thaw_summary["total"] = 0
+        _reconnect_thaw_summary["channels"] = set()
+        _reconnect_thaw_summary["timer"] = None
+
+    if not total:
+        return
+    import announce
+    plural = "" if channels == 1 else "s"
+    announce.send_debug(
+        f"Reconnect sync: thawed {config.C_BOLD}{total}{config.C_RESET} "
+        f"queue(s) across {channels} channel{plural}.", category="JOIN")
+
+
+def _note_reconnect_thaw(channel, thawed_count):
+    """Record one channel's NAMES-sync thaw, batching same-burst channels
+    into a single debug line instead of one per channel.
+
+    Debounced rather than emitted immediately: every reconnect fires one of
+    these per channel within a few seconds of each other, and a fresh call
+    cancels and restarts the timer - so the summary fires once, shortly
+    after the LAST channel in the burst settles, not a fixed time after the
+    first.
+    """
+    with _reconnect_thaw_lock:
+        _reconnect_thaw_summary["total"] += thawed_count
+        _reconnect_thaw_summary["channels"].add(channel)
+        existing_timer = _reconnect_thaw_summary["timer"]
+        if existing_timer is not None:
+            existing_timer.cancel()
+        new_timer = threading.Timer(_RECONNECT_THAW_QUIET_SECONDS,
+                                     _flush_reconnect_thaw_summary)
+        new_timer.daemon = True
+        _reconnect_thaw_summary["timer"] = new_timer
+        new_timer.start()
+
 
 def _release_socket():
     """Clear the shared network reference as soon as a socket has closed.
@@ -2313,7 +2365,7 @@ def irc_loop():
                                 threading.Thread(target=dcc.check_queue_and_send, args=(s, frozen_user), daemon=True).start()
 
                             if thawed_users:
-                                announce.send_debug(f"Reconnect sync in {chan}: thawed {config.C_BOLD}{len(thawed_users)}{config.C_RESET} queue(s) for users who never left.", category="JOIN")
+                                _note_reconnect_thaw(chan, len(thawed_users))
 
                     # Anchored: " JOIN " matched the word anywhere, so a PRIVMSG containing
                     # it thawed the speaker's own frozen queue on demand, and let them insert

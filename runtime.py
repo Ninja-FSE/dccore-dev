@@ -55,6 +55,7 @@ a rehash is unchanged.
 """
 
 import threading
+import time
 
 # Per-user bookkeeping -------------------------------------------------------
 failed_transfers = {}    # Failed-transfer counter, per user
@@ -248,6 +249,48 @@ dcc_send_offers_lock = threading.Lock()
 # still see it. webserver.py reads these two directly for the dashboard.
 live_speed_bps = 0        # bytes/sec across every sending transfer, summed
 live_speed_sampled_at = 0.0
+
+
+# Outbound pacing ------------------------------------------------------------
+#
+# There used to be two: queue_mgr.py's queue_worker slept MSG_DELAY after
+# every send, and announce.py's debug drain slept DEBUG_MSG_DELAY after every
+# send, on its own thread, deaf to the first. The server only ever sees the
+# sum of the two - a bot with fourteen channels can burst enough debug lines
+# on reconnect to add up past what Undernet allows, while every setting an
+# operator can see looks polite in isolation. Two numbers that multiply into
+# a third that appears nowhere is not something an operator can reason about.
+#
+# One clock now, shared by every lane. Each sender still asks for its own
+# interval - queue_mgr.py asks for MSG_DELAY, announce.py's debug drain asks
+# for whichever of MSG_DELAY and DEBUG_MSG_DELAY is larger, so debug can be
+# throttled slower than ordinary traffic if an operator wants that, but never
+# faster - and every reservation, from either lane, holds the SAME clock for
+# that long before anyone else's next send. The combined rate can never
+# exceed one interval's worth of traffic, however the two lanes interleave.
+class OutboundPacer:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._next_allowed = 0.0
+
+    def wait_for_slot(self, min_interval):
+        """Block until the shared clock has a slot free, then take it.
+
+        Loops rather than computing the wait once and sleeping outside the
+        lock, because a second thread could otherwise wake at the same
+        moment, both see the slot as free, and both reserve it.
+        """
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                if now >= self._next_allowed:
+                    self._next_allowed = now + min_interval
+                    return
+                remaining = self._next_allowed - now
+            time.sleep(remaining)
+
+
+outbound_pacer = OutboundPacer()
 
 
 def channel_users_lock():

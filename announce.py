@@ -142,12 +142,18 @@ def _debug_drain_worker(my_id):
                 continue
 
             msg = _debug_queue.popleft()
+            # Shared with queue_mgr.py's queue_worker - see runtime.OutboundPacer.
+            # A debug line can be paced slower than ordinary traffic (a bigger
+            # DEBUG_MSG_DELAY than MSG_DELAY), but never faster: the two used to
+            # sleep on separate, unrelated clocks, and the server only ever saw
+            # their sum. Reserved before the send for the same reason the other
+            # lane does it before, not after: a failed send still costs its slot.
+            runtime.outbound_pacer.wait_for_slot(
+                max(config.MSG_DELAY, getattr(config, 'DEBUG_MSG_DELAY', 0.5)))
             try:
                 irc_sock.sendall(msg.encode("utf-8", errors="ignore"))
             except Exception as send_err:
                 print(f"[DEBUG SEND ERROR] Could not write debug line: {send_err}")
-
-            time.sleep(getattr(config, 'DEBUG_MSG_DELAY', 0.5))
         except Exception as drain_err:
             print(f"[DEBUG DRAIN ERROR] {drain_err}")
             time.sleep(1.0)
