@@ -1925,6 +1925,25 @@
       }
     });
 
+    // Reported live: ticking the select-all box in a FLAT list's table head
+    // did nothing to the rows below it. renderFlatListControls() moves that
+    // checkbox into el.filelistsHeadCheck - a <th>, a sibling of
+    // el.filelistsBody rather than something inside it - and the listener
+    // just above is delegated on filelistsBody alone, so a change event
+    // starting in the head never reached it. Same handler, attached to the
+    // one other place a ".filelists-folder-check" can appear; its own
+    // innerHTML is rebuilt exactly like the body's rows are, for the same
+    // reason a listener belongs on the stable parent instead of the
+    // checkbox itself.
+    el.filelistsHeadCheck.addEventListener("change", function (evt) {
+      var target = evt.target;
+      if (!target.classList || !target.classList.contains("filelists-folder-check")) {
+        return;
+      }
+      setFolderChecked(target.dataset.folderIndex, target.checked);
+      updateFilelistsDownloadSelectedState();
+    });
+
     // TICK EVERY FILE IN ONE FOLDER, including the rows of a COLLAPSED one.
     // They are in the document already - collapsing hides them rather than
     // removing them - so a folder can be selected without being opened, which
@@ -1974,6 +1993,12 @@
 
     function folderCheckFor(index) {
       if (index === undefined || index === null || index === "") { return null; }
+      // A flat list's own folder-check lives in the table HEAD, not the body
+      // (see renderFlatListControls()) - checked first since a flat list has
+      // no folder heading in the body to find one under anyway.
+      var head = el.filelistsHeadCheck
+        && el.filelistsHeadCheck.querySelector(".filelists-folder-check");
+      if (head && head.dataset.folderIndex === String(index)) { return head; }
       var boxes = el.filelistsBody.querySelectorAll(".filelists-folder-check");
       for (var i = 0; i < boxes.length; i++) {
         if (boxes[i].dataset.folderIndex === String(index)) { return boxes[i]; }
@@ -4544,6 +4569,15 @@
       return "<tr><td>" + escapeHtml(row.name) +
              "</td><td class=\"col-num\">" + escapeHtml(String(row.count)) + "</td></tr>";
     }).join("");
+    // Full name on hover - the name column now truncates with an ellipsis
+    // (.stat-top-table td:first-child) so two of these fit side by side.
+    // Set as a PROPERTY, not concatenated into the markup above:
+    // escapeHtml() leaves a double quote alone, so a filename containing one
+    // could break out of a title="..." attribute built that way.
+    var cells = node.querySelectorAll("td:first-child");
+    for (var i = 0; i < cells.length; i++) {
+      cells[i].title = rows[i].name;
+    }
   }
 
   function renderTopDownloads(top) {
