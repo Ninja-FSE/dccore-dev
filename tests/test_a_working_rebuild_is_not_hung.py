@@ -45,6 +45,9 @@ class FakeChild:
     """
 
     def __init__(self, ticks=1, returncode=0, stdout="ok", stderr=""):
+        # ticks=None means NEVER finishes, which is the only honest fixture
+        # for a test whose subject is the watcher giving up. See the note in
+        # communicate().
         self.ticks = ticks
         self.returncode = returncode
         self._out = (stdout, stderr)
@@ -52,8 +55,25 @@ class FakeChild:
         self.waits = 0
 
     def communicate(self, timeout=None):
+        """Raise TimeoutExpired until `ticks` is used up, then finish.
+
+        A FINITE tick count races the ceiling, and that race is what made
+        TheCeilingIsOptional fail on another machine while passing 45 times in
+        a row on this one. The watcher's loop does no real waiting against
+        this fake, so with ticks=99 and a 1ms ceiling the question is whether
+        99 no-op iterations take longer than a millisecond - which depends on
+        how warm the filesystem cache is when last_progress_at() reads the
+        progress file. Lose that race and the fake FINISHES, the watcher
+        returns normally, and the test fails asking why no timeout was raised.
+
+        ticks=None never finishes, so for a test about the watcher giving up
+        the only way out of the loop is the thing being tested. No margin, no
+        machine dependency.
+        """
         self.waits += 1
-        if self.killed or self.waits > self.ticks:
+        if self.killed:
+            return self._out
+        if self.ticks is not None and self.waits > self.ticks:
             return self._out
         raise subprocess.TimeoutExpired(["child"], timeout)
 
@@ -114,7 +134,7 @@ class WatchingRatherThanTiming(DCCoreTestCase):
                          "killed anyway")
 
     def test_a_child_that_has_gone_quiet_is_killed(self):
-        child = self.install(FakeChild(ticks=99))
+        child = self.install(FakeChild(ticks=None))
         self.reported(seconds_ago=1200)
 
         with self.assertRaises(commands.ListUpdateStalled):
@@ -125,7 +145,7 @@ class WatchingRatherThanTiming(DCCoreTestCase):
     def test_the_silence_is_measured_and_reported(self):
         """"It stalled" is not actionable; "it reported nothing for twenty
         minutes" is."""
-        self.install(FakeChild(ticks=99))
+        self.install(FakeChild(ticks=None))
         self.reported(seconds_ago=1200)
 
         with self.assertRaises(commands.ListUpdateStalled) as caught:
@@ -225,7 +245,7 @@ class TheCeilingIsOptional(DCCoreTestCase):
         self.assertFalse(child.killed)
 
     def test_a_ceiling_that_is_set_is_enforced(self):
-        child = self.install(FakeChild(ticks=99))
+        child = self.install(FakeChild(ticks=None))
 
         with self.assertRaises(subprocess.TimeoutExpired):
             commands.run_watching_for_a_stall(["x"], ceiling=0.001, stall=900,
@@ -237,7 +257,7 @@ class TheCeilingIsOptional(DCCoreTestCase):
         """Two endings, two causes: running past a limit the operator chose is
         not the same event as the library going quiet, and the operator is
         told different things."""
-        self.install(FakeChild(ticks=99))
+        self.install(FakeChild(ticks=None))
 
         with self.assertRaises(subprocess.TimeoutExpired):
             commands.run_watching_for_a_stall(["x"], ceiling=0.001, tick=0.01)

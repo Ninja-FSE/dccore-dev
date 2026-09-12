@@ -132,6 +132,39 @@ original defect) and "only the first channel is updated".
 
 ---
 
+### 🟢 My ceiling test raced its own fixture
+
+Reported by the co-maintainer against `main`, while checking whether a failure
+in their own branch was theirs - it was not, and checking rather than assuming
+is what found this.
+
+`TheCeilingIsOptional` failed on their machine and passes here. Not a timing
+margin that wants widening: **the fixture races the thing under test.**
+
+`FakeChild(ticks=99)` finishes after 99 no-op waits, and the ceiling under
+test is 1ms. The watcher does no real waiting against a fake, so the test is
+actually asking *"do 99 iterations of the watcher's loop take longer than a
+millisecond?"* - which depends on how warm the filesystem cache is when
+`last_progress_at()` reads the progress file. Lose that race and the fake
+**finishes**, the watcher returns normally, and the test fails asking why no
+timeout was raised.
+
+Measured here: those 99 iterations take **11.2ms**, an 11x margin. That is why
+it passed 45 consecutive runs locally, including 25 under six-way CPU load,
+and still failed on somebody else's machine. A margin that large looks safe
+and is not a guarantee.
+
+`ticks=None` now means never finishes, and the four tests whose subject is the
+watcher **giving up** use it - so the only way out of the loop is the thing
+being tested. No margin to tune, no machine dependency, nothing to widen next
+time somebody gets faster hardware.
+
+Worth stating as a rule, because it is the third fixture problem this release:
+**a fake that can finish on its own is racing any test about giving up.** The
+fake must only end the way the code under test ends it.
+
+---
+
 ### 🔴 A rebuild that is working is not hung
 
 Reported from the live bot: **`Failed: timed out after 1800s`**, on a library
