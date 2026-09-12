@@ -60,7 +60,7 @@ Ordered by what unblocks what, not by preference.
 
 ### Multiple lists, and multiple folders per list
 
-The largest gap against OmenServe, which has had both since long before this project started. DCCore now serves **several** directories into **one** list; more than one list is still to come.
+The largest gap against OmenServe, which has had both since long before this project started. DCCore now serves **several** directories into **one** list, and **several** lists, each bound to its own channels — #26 below is complete.
 
 `SEPARATE_VIDEO_LIST` is not that feature and does not pre-empt it: it splits one scan's output by content type, where this splits by folder set and binds each list to a channel. An operator whose film and music already live in separate folders wants this one, and turns that switch off.
 
