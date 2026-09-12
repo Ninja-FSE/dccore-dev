@@ -467,7 +467,7 @@
 
     if (group.files.length) {
       // The header's count is what it FOUND; the rows are what it SENT.
-      // Beezer finds 12 and sends 5, and saying only "5" would hide that
+      // CrateBot finds 12 and sends 5, and saying only "5" would hide that
       // refining the search is worth doing.
       if (typeof h.matches === "number" && h.matches > group.files.length) {
         bits.push(h.matches + " matches, showing " + group.files.length);

@@ -47,7 +47,7 @@ Full guide, including configuring it by hand and upgrading from an older install
 | [ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) | the authenticated DCC CHAT console |
 | [WINDOWS.md](docs/WINDOWS.md) | the Windows guide |
 | [CONVENTIONS.md](docs/CONVENTIONS.md) | how this codebase is written, if you want to contribute |
-| [UPDATES.md](docs/UPDATES.md) | the changelog |
+| [UPDATES-PUBLIC.md](docs/UPDATES-PUBLIC.md) | the changelog |
 | [SECURITY.md](docs/SECURITY.md) | how to report a vulnerability |
 
 ## How it is put together

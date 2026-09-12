@@ -807,8 +807,8 @@ _FETCH_TOKEN_RE = re.compile(r'^!(\S+)\s+(.+)$')
 # When a search matches more than it will send, it says so instead of
 # listing slots:
 #
-#   Search Result 12 Matches For X   Get My List Of 94,952 Files By Typing
-#   @Beezer In The Channel Or Refine Your Search. Sending first 5 Results
+#   Search Result 12 Matches For X   Get My List Of 41,238 Files By Typing
+#   @CrateBot In The Channel Or Refine Your Search. Sending first 5 Results
 #
 # SPQR is an older, less widely used mIRC script - a minority of operators
 # still run it. Different shape, no version string, no match count, and its
@@ -831,7 +831,7 @@ _HDR_SPQR_QUEUE = re.compile(r'\(Que:\s*(\d+)\s*/\s*(\d+)\)', re.I)
 
 
 def _as_int(text):
-    """"94,952" -> 94952. Returns None for anything that is not a number."""
+    """"41,238" -> 41238. Returns None for anything that is not a number."""
     try:
         return int(str(text).replace(",", "").strip())
     except (TypeError, ValueError):

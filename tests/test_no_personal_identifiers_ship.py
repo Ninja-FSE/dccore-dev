@@ -97,10 +97,63 @@ FORBIDDEN = {
                         "list-browser test fixture",
     "590ab98251d542a2": "a real bot on a real network, used as a "
                         "list-fetch test fixture",
+
+    # Found by a pre-publication audit, after three earlier passes had walked
+    # past them. Every one of these was reachable by `git grep` the whole
+    # time; what kept them here was where they sat, not how well they hid.
+    "1df80a0541cf3a97": "a real third-party bot, with its real library size, "
+                        "in a worked example copied into the daemon source, "
+                        "the dashboard's own comments and a parser test",
+    "87b26fb49df919fc": "a real nick holding a real speed record, inside the "
+                        "BODY of a captured advert - the sender field beside "
+                        "it had already been renamed",
+    "8b04871d9242d20c": "a second real record-holder nick, same position, "
+                        "same reason it was missed",
+    "808fda88007c81d8": "a real bot's own slogan, carrying its nick, inside "
+                        "the advert text rather than the sender field",
+    "82ba622139a37c9b": "a real bot that requested a list, left in a pasted "
+                        "console line by a scrub that edited the filename on "
+                        "the SAME LINE and stopped there",
 }
 
 # Compared lowercased, so one hash covers every capitalisation.
 WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+
+# ESCAPE SEQUENCES ARE BLANKED BEFORE ANY WORD IS READ, and this is the whole
+# reason three scrub passes missed three real nicks sitting in plain sight.
+#
+# The scan runs over SOURCE TEXT, not over the values that source evaluates
+# to. In a fixture holding a captured IRC line the colour codes are still
+# escapes, so the source reads:
+#
+#     'Record: 4788.6 by \x0311SomeNick\x032]'
+#
+# WORD starts at the "x" - a letter like any other - and takes the whole of
+# "x0311SomeNick" as ONE word. That hashes to something nobody has ever put
+# in FORBIDDEN, so a forbidden name in that position is INVISIBLE here no
+# matter how many hashes are added above it.
+#
+# Verified by counterfactual rather than argument: four names ALREADY in
+# FORBIDDEN also go undetected when placed immediately after a colour escape,
+# while the same name written as "@Name" is caught. That is exactly the
+# pattern of what the earlier passes found and what they walked past.
+#
+# Each escape becomes the SAME NUMBER OF SPACES rather than an empty string,
+# so every byte offset after it is unchanged and the reported line numbers
+# stay true.
+ESCAPE = re.compile(
+    r"\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}"
+    r"|N\{[^}]*\}|[0-7]{1,3}|[abfnrtv])")
+
+
+def words(text):
+    """(word, offset) for every word in `text`, escapes blanked first.
+
+    The offset is into the ORIGINAL text, which is what lets the caller keep
+    reporting a real line number.
+    """
+    flattened = ESCAPE.sub(lambda m: " " * len(m.group(0)), text)
+    return [(m.group(0), m.start()) for m in WORD.finditer(flattened)]
 
 
 def word_hash(word):
@@ -183,11 +236,11 @@ class NothingIdentifyingShips(unittest.TestCase):
         found = {}
         for path in self.files():
             text = self.read(path)
-            for match in WORD.finditer(text):
-                why = FORBIDDEN.get(word_hash(match.group(0)))
+            for word, offset in words(text):
+                why = FORBIDDEN.get(word_hash(word))
                 if why is None:
                     continue
-                line = text.count("\n", 0, match.start()) + 1
+                line = text.count("\n", 0, offset) + 1
                 found.setdefault(why, []).append(f"{path}:{line}")
 
         self.assertEqual(
@@ -195,6 +248,38 @@ class NothingIdentifyingShips(unittest.TestCase):
             "these ship to the public repository:\n  "
             + "\n  ".join(f"{why}\n    {sorted(set(where))[:6]}"
                           for why, where in found.items()))
+
+    def test_a_name_next_to_an_escape_is_still_one_word(self):
+        """The hole that let three real nicks through three scrub passes.
+
+        A captured IRC line keeps its colour codes as ESCAPES in the source,
+        and the scan reads source rather than evaluated values. Without the
+        blanking step the "x" of "\x0311" starts a word and swallows the nick
+        behind it, so the name hashes to something no FORBIDDEN entry can ever
+        match. Every hash above is worthless in that position.
+        """
+        line = "Record: 4788.6 by " + chr(92) + "x0311SomeNick" + chr(92) + "x032]"
+
+        found = [word for word, _offset in words(line)]
+
+        self.assertIn("SomeNick", found,
+                      "a nick written straight after a colour escape must "
+                      "still be read as its own word - it is not, if the "
+                      "escape is left in place for WORD to start on")
+        self.assertNotIn("x0311SomeNick", found)
+
+    def test_blanking_an_escape_does_not_move_the_line_numbers(self):
+        """Escapes become spaces, not nothing. An empty replacement shortens
+        the text and every line number reported after the first escape in a
+        file becomes wrong - which is worse than useless in a failure whose
+        entire job is to say WHERE."""
+        text = ("first" + chr(10) + "second " + chr(92) + "x03" + "Target"
+                + chr(10) + "third")
+
+        offset = [o for w, o in words(text) if w == "Target"][0]
+
+        self.assertEqual(text.count(chr(10), 0, offset) + 1, 2)
+        self.assertEqual(text[offset:offset + 6], "Target")
 
     def test_no_real_ip_address_is_in_the_export(self):
         found = []
