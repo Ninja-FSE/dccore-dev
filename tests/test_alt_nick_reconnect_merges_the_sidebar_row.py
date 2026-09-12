@@ -351,6 +351,25 @@ class ThePresentNetworkCanDisproveAnOldAlias(DCCoreTestCase):
 
         self.assertEqual(rows["SomeBot_"]["nick"], "SomeBot")
 
+    def test_an_advertised_only_row_is_disproved_too(self):
+        """The SECOND row site. build_fetched_bot_list_summaries() builds two
+        kinds of row - one for a bot whose list we hold, one for a bot we have
+        only seen advertising - and applies _display_nick() at both. Every
+        other test above only exercises the held kind, which left the
+        advertised-only site free to regress back to a bare
+        resolve_display_nick() with the whole suite still green."""
+        config.fetched_bot_lists.clear()
+        runtime.known_bots["somebot"] = {"nick": "SomeBot", "files": 10}
+        runtime.known_bots["somebot_"] = {"nick": "SomeBot_", "files": 12}
+        config.channel_users["#chan"] = {"somebot", "somebot_"}
+
+        rows = self.rows_by_bot()
+
+        self.assertFalse(rows["SomeBot_"]["held"],
+                         "Meant to exercise the advertised-only row site.")
+        self.assertEqual(rows["SomeBot"]["nick"], "SomeBot")
+        self.assertEqual(rows["SomeBot_"]["nick"], "SomeBot_")
+
 
 class TheHandlersActuallyCallTheseFunctions(unittest.TestCase):
     """Structural, for the same reason test_a_rename_carries_the_users_state.py's
