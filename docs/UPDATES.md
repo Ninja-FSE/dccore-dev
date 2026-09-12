@@ -4,6 +4,79 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🔴 The search index's WAL log only ever grew
+
+Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
+never shrank back down.
+
+`index_bot_list()` deletes and re-inserts a whole bot's list as one
+transaction, and the largest bot on the live index is 1.3 million rows - so
+the WAL log grows to the size of that whole write before there is even a
+transaction boundary for SQLite's own automatic checkpoint to attempt. That
+default (PASSIVE, best-effort) can leave the checkpoint incomplete when a
+concurrent read - the dashboard's filter bar, polled continuously - holds an
+older snapshot at the moment it tries, and one incomplete checkpoint compounds
+with the next big write.
+
+Confirmed rather than assumed: a manual `PRAGMA wal_checkpoint(TRUNCATE)`
+against the live file cleared it to zero in one call, and a check of the main
+database found no orphaned rows from bots no longer held - all 3.88M rows
+belonged to a bot still present, 13 for 13. The 845MB was real, current data,
+not a leak.
+
+`_checkpoint_locked()` now runs a full TRUNCATE checkpoint after the commit
+in both `index_bot_list()` and `drop_bot()`, inside its own `try`/`except` so
+a checkpoint failure - which costs disk space, never correctness - can never
+be mistaken for the write itself failing.
+
+### 🔴 A completed fetch drops its temporary id
+
+Reported live: fetched files and fetched list zips both piling up with names
+like `058c4cc8ee9a_Some Track.mp3` and
+`ef31cd79d1f5_SomeBot-Default(2026-01-02)-OS.zip` forever.
+
+The id is folded into the stored filename so two in-flight fetches racing
+for the same cleaned name can never collide - but nothing about that needs
+to survive once a fetch finishes. For a fetched list specifically, unzipping
+it on an operator's own machine carried the id even further: a plain list
+zip has no folder recorded inside it for an unzip tool to extract "into" the
+way one packed with rar's `-ep1` does, so Windows named the unzipped result
+after the zip file itself, id and all.
+
+A completed `"file"` or `"folder"` fetch is now renamed from its id-prefixed
+staging name to the plain one, never overwriting a file already there. A
+completed list fetch has its raw zip removed entirely once it has been
+safely extracted - the List Browser reads only from the extracted copy, and
+nothing ever reopens the zip afterward - and the zip is left in place on
+failure, as the only diagnostic evidence for why a peer's archive could not
+be read. The Downloads tab's Download button, which used to appear
+regardless of whether anything was actually left to download, now checks
+for that first and offers "Browse it in List Browser" instead when there
+isn't.
+
+### 🔴 A dash-separated size was part of the filename
+
+Reported live:
+
+    [FETCH] Requested "A101. Donna Summer - I Feel Love (Original 12''
+    Version).mp3 ---- 18.8Mb" from SomeBot (request 7c311f24a8a1).
+    [FETCH] Rejected unsolicited DCC SEND from SomeBot: no matching pending
+    request.
+
+SomeBot runs bot software outside the OmenServe family, and its master list
+carries no `::INFO::` marker at all - just a bare filename, two or more
+hyphens, and a size. `strip_info_suffix()` only recognised `::INFO::`, so the
+trailing `" ---- 18.8Mb"` stayed attached to what the dashboard then
+requested, and the real DCC SEND that came back - bearing only the bare
+filename - never matched it. The same failure mode `::INFO::` itself was
+hardened against a while back, just via a different bot's marker convention.
+
+A second pattern is now tried once the `::INFO::` search has failed: a
+trailing `-{2,}<size>` shape anchored to the end of the line, only trusted
+once what follows the dashes actually looks like a size (digits, optional
+decimal point, optional K/M/G/T, then B) - a real title can contain a run of
+hyphens, but essentially never one immediately followed by a size unit.
+
 ### 🟢 One test leaked a channel into every later one
 
 Chased as a flake twice before it was read as a leak, which is the part worth
