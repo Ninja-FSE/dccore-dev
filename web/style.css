@@ -656,6 +656,41 @@ html, body {
   overflow-y: auto;
 }
 
+/* The two "most downloaded" tables, side by side rather than stacked - same
+   minmax(0, 1fr) reasoning as .filelists-layout above: a bare 1fr track
+   would grow to fit a long filename instead of letting the name truncate
+   inside its own column. */
+.stat-top-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 700px) {
+  .stat-top-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Fixed, so the two columns keep a stable width regardless of what the
+   longest row happens to contain - without it, "Times sent" would still be
+   pushed around by "File", the one column meant to give way. */
+.stat-top-table {
+  table-layout: fixed;
+}
+
+.stat-top-table .col-num {
+  width: 92px;
+}
+
+.stat-top-table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -1376,6 +1411,21 @@ mark.filter-hit {
   font-family: var(--font-mono);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
+}
+
+/* How many lists a grouped row (#399) speaks for - open it and the tabs
+   above the table are where the rest of them are. Absent on every ungrouped
+   row, which is every own list and most fetched ones. */
+.bot-row-lists-badge {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 2px 6px;
 }
 
 /* The dot is never the only carrier of the state: every one has a title, the
@@ -2238,6 +2288,56 @@ mark.filter-hit {
 }
 
 .browse-actions { padding-top: 12px; }
+
+/* One tab per list the open bot publishes (#399) - hidden by
+   renderFilelistsTabs() whenever there is only one, so it never sits above
+   the table as an empty bar. */
+.filelists-list-tabs[hidden] {
+  display: none;
+}
+
+.filelists-list-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+/* Outlined in the accent colour even before anything is picked - asked for
+   after the first version shipped too small and too close to the sidebar's
+   own colours to read as a separate, clickable choice at a glance. */
+.filelists-list-tab {
+  background: var(--bg-inset);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 22px;
+}
+
+.filelists-list-tab:hover { background: var(--accent-dim); }
+
+/* Same pairing as .btn-accent - filled, not just outlined, so the one
+   currently open reads as pressed rather than merely highlighted. */
+.filelists-list-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.filelists-list-search {
+  margin: 0 0 12px;
+}
+
+.filelists-list-search .search-input {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
+}
 
 /* The List Browser's staleness banner (#133).
    --status-frozen rather than --danger, because this is not an error: the

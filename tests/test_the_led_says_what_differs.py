@@ -157,8 +157,10 @@ class TheTooltipShowsThem(unittest.TestCase):
         become part of a concatenated attribute."""
         # On the NAME now. The dot became presence when the two signals
         # were split, and the freshness explanation went with the colour it
-        # explains.
-        self.assertIn("name.title = ledTitle(row);", app_js())
+        # explains. "primary", not "row": #399 grouped a bot's several lists
+        # under one sidebar row, whose own signals come from whichever of
+        # that group's lists speaks for it (see primaryEntry() in app.js).
+        self.assertIn("name.title = ledTitle(primary);", app_js())
 
 
 class ItReusesTheBannerFormatter(unittest.TestCase):

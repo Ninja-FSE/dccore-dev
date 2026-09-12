@@ -360,6 +360,18 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
         # immediately before this one must not delay this one's first send.
         self._real_pacer = runtime.outbound_pacer
         runtime.outbound_pacer = runtime.OutboundPacer()
+        # DEFENSIVE, against a pre-existing gap this shared pacer makes worse:
+        # once any earlier test in the suite triggers a real send_debug()
+        # without silencing it, announce._ensure_debug_drain() starts a REAL
+        # background thread that never stops for the rest of the process -
+        # _debug_drain_started has no reset. That thread re-reads
+        # sys.modules['oserve'] and runtime.outbound_pacer on every loop, so
+        # it happily attaches itself to whatever THIS test's fake oserve and
+        # fresh pacer are - writing stray debug lines into this test's own
+        # RecordingSocket and eating shared-clock slots meant for it. This
+        # cannot stop such a thread (it is not this test's to stop), only
+        # keep it from having anything queued to drain at the start.
+        announce._debug_queue.clear()
 
     def tearDown(self):
         self.shim.stopped.set()
@@ -378,7 +390,13 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
         self.worker = threading.Thread(target=run, daemon=True)
         self.worker.start()
 
-    def wait_until(self, predicate, timeout=1.0):
+    # 5.0s, not 1.0s: a stray real debug-drain thread from an earlier,
+    # unrelated test (see the setUp comment above) competes for the same
+    # shared runtime.outbound_pacer, which can delay - never lose - this
+    # worker's own sends past a short window under a full-suite run. A
+    # ceiling, not a delay: the ordinary case is still done in well under a
+    # second.
+    def wait_until(self, predicate, timeout=5.0):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if predicate():
@@ -437,15 +455,7 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
         self.oserve.irc_connection = sock
         config.vip_queue.append("PRIVMSG #dccore-test :fresh vip\r\n")
 
-        # A generous ceiling, not the 1.0s default: this assertion is about
-        # whether the thread is still ALIVE and scheduled at all, not about
-        # how fast it reacts - and under a full-suite run with several
-        # thousand other tests' worth of daemon threads still winding down,
-        # real OS scheduling latency for this one thread's next turn can
-        # occasionally run past 1.0s on its own, with nothing wrong. Costs
-        # nothing in the ordinary case, where the predicate is true within
-        # a few hundred milliseconds either way.
-        self.assertTrue(self.wait_until(lambda: "fresh vip" in sock.text(), timeout=5.0),
+        self.assertTrue(self.wait_until(lambda: "fresh vip" in sock.text()),
                         "the worker thread must still be pumping after a broken pipe")
         self.assertTrue(self.worker.is_alive())
 

@@ -81,6 +81,14 @@
     // two different questions, and conflating them is what let a stale reply
     // through.
     filelistsLoadToken: 0,
+    // The per-list search (#399's follow-up) - a different question from the
+    // sidebar's filelistsFilter above: this one narrows the SINGLE open
+    // list's own rows server-side, rather than spanning every list held and
+    // replacing the whole view. Own debounce token, same reasoning as
+    // filelistsFilterToken's comment; the reply itself is still guarded by
+    // filelistsLoadToken, which every load shares regardless of what
+    // triggered it.
+    filelistsListQuery: "", filelistsListQueryToken: 0,
     // Which bots the operator has switched OFF while filtering, and the last
     // answer the server gave. Toggling re-renders from that answer rather
     // than asking again: the rows are already here, and a round trip per
@@ -138,6 +146,8 @@
     filelistsFetchInput:  document.getElementById("filelists-fetch-input"),
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
     filelistsFreshness: document.getElementById("filelists-freshness"),
+    filelistsListTabs: document.getElementById("filelists-list-tabs"),
+    filelistsListSearchInput: document.getElementById("filelists-list-search-input"),
     // filelistsPurgeListBtn, not filelistsPurgeBtn: #388 is adding a BULK
     // "purge every offline bot's list" button to the toolbar under that
     // exact name. Two keys with the same name in this object literal merge
@@ -1117,8 +1127,14 @@
     // does a different thing: the table is showing every list at once, so
     // "switch to this one" has nothing to mean. Clicking toggles whether
     // that bot's matches are on screen instead.
+    //
+    // KEYED BY NICK, not by the row's own dataset.bot (#399): switching a
+    // bot's results on and off is a per-BOT choice - a row now stands for
+    // every list that bot has, and excluding only the one list currently
+    // showing would leave its other lists' matches on screen with no row
+    // left to toggle them back off.
     if ((state.filelistsFilter || "").trim() && !isOwnSource(row.dataset.bot)) {
-      var key = String(row.dataset.bot || "").toLowerCase();
+      var key = String(row.dataset.nick || row.dataset.bot || "").toLowerCase();
       if (state.filelistsExcluded[key]) {
         delete state.filelistsExcluded[key];
       } else {
@@ -1128,11 +1144,38 @@
       return;
     }
 
-    if (row.dataset.bot === state.filelistsSource) { return; }
+    // ALREADY OPEN, by bot rather than by exact list (#399): re-clicking a
+    // row whose RAR tab is open must leave the RAR tab open, not silently
+    // reset to the main list every time the sidebar happens to redraw.
+    if (nickOfSource(row.dataset.bot) === nickOfSource(state.filelistsSource)) {
+      return;
+    }
+    // A genuinely NEW bot always opens on its primary list; picking a
+    // different one from here is what the tabs above the table are for.
     state.filelistsSource = row.dataset.bot;
     markFilelistsActiveBot();
     state.filelistsOffset = 0;
     state.filelistsHistory = [];
+    // A search scoped to the PREVIOUS bot's list means nothing here - left
+    // in place it would silently narrow a bot the operator never asked to
+    // filter, on the very first page they see of it.
+    resetFilelistsListQuery();
+    loadFilelists();
+  });
+
+  // Delegated for the same reason the sidebar's listener is: the tab bar is
+  // rebuilt every time the open bot or its lists change.
+  el.filelistsListTabs.addEventListener("click", function (evt) {
+    var tab = evt.target.closest ? evt.target.closest(".filelists-list-tab") : null;
+    if (!tab || tab.dataset.bot === state.filelistsSource) { return; }
+    state.filelistsSource = tab.dataset.bot;
+    markFilelistsActiveBot();
+    state.filelistsOffset = 0;
+    state.filelistsHistory = [];
+    // Switching tabs is switching which FILE this bot's search words would
+    // run against - a term meant for the main list rarely means anything in
+    // its RAR list, so start that list's own search fresh too.
+    resetFilelistsListQuery();
     loadFilelists();
   });
 
@@ -1140,6 +1183,13 @@
     state.filelistsFilter = el.filelistsFilterInput.value;
     runFilelistsFilter();
   });
+
+  if (el.filelistsListSearchInput) {
+    el.filelistsListSearchInput.addEventListener("input", function () {
+      state.filelistsListQuery = el.filelistsListSearchInput.value;
+      runFilelistsListQuery();
+    });
+  }
 
   el.filelistsFilterAll.addEventListener("click", function () {
     setEveryListShown(true);
@@ -1244,9 +1294,30 @@
     // through the dashboard could not find it afterwards: the page offered
     // to make a thing and then would not show it. Only the server knows how
     // many lists there are and what they are called.
+    //
+    // GROUPED BY NICK (#399), one sidebar row per BOT rather than per list.
+    // The server still returns one flat row per list - "<nick>/<marker>" for
+    // everything but a bot's main list - because that shape is also what
+    // /api/filelists/search answers against, and duplicating it here would
+    // be a second thing to keep in step. Two bots' own lists (Main, video)
+    // never collide with this: own_list_source() gives each its own nick, so
+    // grouping never merges them - only a FETCHED bot's own several lists
+    // group under its one nick.
+    var groupOrder = [];
+    var groupsByNick = {};
     rows.forEach(function (row) {
       state.filelistsBots[row.bot] = row;
-      list.appendChild(botRow(row));
+      var nickKey = String(row.nick || row.bot).toLowerCase();
+      var group = groupsByNick[nickKey];
+      if (!group) {
+        group = { nick: row.nick || row.bot, entries: [] };
+        groupsByNick[nickKey] = group;
+        groupOrder.push(nickKey);
+      }
+      group.entries.push(row);
+    });
+    groupOrder.forEach(function (nickKey) {
+      list.appendChild(botRow(groupsByNick[nickKey]));
     });
 
     // A source that has gone - the bot dropped out of the registry, or its
@@ -1281,15 +1352,35 @@
     }
   }
 
-  function botRow(row) {
+  // The list a group's own row speaks for when nothing else has been picked
+  // yet - its main list where there is one, the first list otherwise (an
+  // own list, and every not-held advert-only row, always has exactly one
+  // entry and IS that entry either way).
+  function primaryEntry(group) {
+    for (var i = 0; i < group.entries.length; i++) {
+      if (!group.entries[i].list) { return group.entries[i]; }
+    }
+    return group.entries[0];
+  }
+
+  function botRow(group) {
+    var primary = primaryEntry(group);
+    var grouped = group.entries.length > 1;
+
     var button = document.createElement("button");
     button.type = "button";
     button.className = "bot-row";
-    button.dataset.bot = row.bot;
+    // ALWAYS THE PRIMARY LIST'S KEY, never "whichever tab is open" - the row
+    // itself does not track which of a bot's lists is currently showing;
+    // renderFilelistsTabs() and markFilelistsActiveBot() answer that by NICK
+    // instead (see both), which is what lets this stay a single, simple
+    // value rather than something that has to be kept in sync on every tab
+    // click.
+    button.dataset.bot = primary.bot;
     // The NICK as well as the identity. They are the same for a bot's main
     // list and differ for every other one, and the fetch box wants the nick.
-    button.dataset.nick = row.nick || splitFetchedSource(row.bot).nick;
-    button.dataset.held = row.held ? "yes" : "no";
+    button.dataset.nick = group.nick;
+    button.dataset.held = primary.held ? "yes" : "no";
 
     // TWO SIGNALS, TWO PLACES. The dot used to carry the list's freshness,
     // which left presence - the thing that decides whether asking is worth
@@ -1299,25 +1390,41 @@
     // The dot is now whether they are HERE, and the name's colour is what we
     // hold from them. Asked for exactly that way in the beta.
     var led = document.createElement("span");
-    led.className = "led " + presenceClass(row.online);
-    led.title = presenceTitle(row.online);
+    led.className = "led " + presenceClass(primary.online);
+    led.title = presenceTitle(primary.online);
     button.appendChild(led);
 
     var name = document.createElement("span");
-    name.className = "bot-row-name " + freshnessClass(row.freshness);
-    name.title = ledTitle(row);
-    name.textContent = row.label || row.bot;
+    name.className = "bot-row-name " + freshnessClass(primary.freshness);
+    name.title = ledTitle(primary);
+    // grouped: the bare nick, since "label" is a per-LIST string ("SomeBot -
+    // rar") that a row now representing several lists at once cannot use
+    // without picking one of them to speak for all. Every ungrouped row -
+    // which is every own list, and the ordinary case for a fetched one -
+    // keeps its existing label untouched, own lists included ("Our own
+    // list", or the list's own name).
+    name.textContent = grouped ? group.nick : (primary.label || primary.bot);
     button.appendChild(name);
+
+    if (grouped) {
+      var badge = document.createElement("span");
+      badge.className = "bot-row-lists-badge";
+      badge.textContent = String(group.entries.length);
+      badge.title = group.entries.length + " lists - open this bot to switch between them.";
+      button.appendChild(badge);
+    }
 
     var count = document.createElement("span");
     count.className = "bot-row-count";
     // An em dash, not 0: a bot that published no count did not say, and
-    // saying zero would be a claim they never made.
-    count.textContent = row.count === undefined || row.count === null
-      ? "\u2014" : Number(row.count).toLocaleString();
+    // saying zero would be a claim they never made. The PRIMARY's count,
+    // not a sum across lists - a RAR list packs the same albums the main
+    // list already counts, so adding the two would not be a real total.
+    count.textContent = primary.count === undefined || primary.count === null
+      ? "\u2014" : Number(primary.count).toLocaleString();
     button.appendChild(count);
 
-    if (!row.held && !isOwnSource(row.bot)) {
+    if (!primary.held && !isOwnSource(primary.bot)) {
       button.title = "You have not downloaded this bot's list. " +
         "Click to put its nick in the fetch box.";
     }
@@ -1347,6 +1454,31 @@
     return cut < 0
       ? { nick: text, list: "" }
       : { nick: text.slice(0, cut), list: text.slice(cut + 1) };
+  }
+
+  // Which BOT a source key belongs to (#399), for everything that used to
+  // compare two source keys for equality and now has to ask "same bot" -
+  // several sources ("d_f_d", "d_f_d/rar") can be one grouped sidebar row.
+  // Works for an own source too: splitFetchedSource() only splits on "/",
+  // own_list_source()'s "__own__:<name>" has none, so it comes back whole -
+  // exactly what group.nick already carries for it (see renderFilelistsSwitcher).
+  function nickOfSource(source) {
+    return splitFetchedSource(source).nick;
+  }
+
+  // Every row currently held for one bot, wherever state.filelistsBots put
+  // them - not a separate map kept in step by hand, so it can never disagree
+  // with what the sidebar last rendered from the same rows.
+  function entriesForNick(nick) {
+    var nickLower = String(nick || "").toLowerCase();
+    var out = [];
+    Object.keys(state.filelistsBots).forEach(function (key) {
+      var row = state.filelistsBots[key];
+      if (String(row.nick || row.bot || "").toLowerCase() === nickLower) {
+        out.push(row);
+      }
+    });
+    return out;
   }
 
   // The ?list= for a source key, or "" for the primary.
@@ -1422,9 +1554,14 @@
   }
 
   function markFilelistsActiveBot() {
+    // BY NICK, not by exact key (#399): the open list can be a bot's RAR or
+    // VIDEO list, whose row shows the bot's PRIMARY key in dataset.bot - the
+    // row still has to read as "active" for any of its own bot's lists, not
+    // only its primary one.
+    var openNick = nickOfSource(state.filelistsSource).toLowerCase();
     var rows = el.filelistsBotList.querySelectorAll(".bot-row");
     for (var i = 0; i < rows.length; i++) {
-      var active = rows[i].dataset.bot === state.filelistsSource;
+      var active = String(rows[i].dataset.nick || "").toLowerCase() === openNick;
       rows[i].classList.toggle("is-active", active);
       // aria-current, not aria-selected: these are ordinary buttons the
       // operator tabs through, not the options of a listbox, and claiming
@@ -1436,6 +1573,58 @@
         rows[i].removeAttribute("aria-current");
       }
     }
+    renderFilelistsTabs();
+  }
+
+  // ONE TAB PER LIST THE OPEN BOT PUBLISHES (#399), shown above the table in
+  // place of the second, third sidebar row a bot with more than one list
+  // used to need. Reads a list's own marker straight off `list` - "RAR",
+  // "VIDEO", whatever an OmenServe-family bot's own list is actually called -
+  // rather than the sidebar's "label" field, which is built for a single row
+  // ("SomeBot - rar") and was never meant to be split back apart into a name a
+  // tab strip can reuse.
+  function renderFilelistsTabs() {
+    var container = el.filelistsListTabs;
+    if (!container) { return; }
+
+    var entries = entriesForNick(nickOfSource(state.filelistsSource));
+    if (entries.length < 2) {
+      container.hidden = true;
+      container.innerHTML = "";
+      return;
+    }
+
+    // The primary list first, then the rest alphabetically by marker - the
+    // same order the server already returns them in (see
+    // build_fetched_bot_list_summaries()), kept here rather than trusted,
+    // since this function does not know whether that order survived
+    // whatever put these rows into state.filelistsBots.
+    entries.sort(function (a, b) {
+      var listA = String(a.list || "");
+      var listB = String(b.list || "");
+      if (listA === listB) { return 0; }
+      if (!listA) { return -1; }
+      if (!listB) { return 1; }
+      return listA.toLowerCase() < listB.toLowerCase() ? -1 : 1;
+    });
+
+    container.innerHTML = "";
+    entries.forEach(function (entry) {
+      var tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "filelists-list-tab";
+      tab.dataset.bot = entry.bot;
+      // "Main" for the bare list, never the raw empty string - a tab with no
+      // text is not a tab an operator can click on purpose.
+      tab.textContent = entry.list ? entry.list : "Main";
+      var active = entry.bot === state.filelistsSource;
+      tab.classList.toggle("is-active", active);
+      if (active) {
+        tab.setAttribute("aria-current", "true");
+      }
+      container.appendChild(tab);
+    });
+    container.hidden = false;
   }
 
   // Loading the table itself ------------------------------------------------
@@ -1760,6 +1949,25 @@
       }
     });
 
+    // Reported live: ticking the select-all box in a FLAT list's table head
+    // did nothing to the rows below it. renderFlatListControls() moves that
+    // checkbox into el.filelistsHeadCheck - a <th>, a sibling of
+    // el.filelistsBody rather than something inside it - and the listener
+    // just above is delegated on filelistsBody alone, so a change event
+    // starting in the head never reached it. Same handler, attached to the
+    // one other place a ".filelists-folder-check" can appear; its own
+    // innerHTML is rebuilt exactly like the body's rows are, for the same
+    // reason a listener belongs on the stable parent instead of the
+    // checkbox itself.
+    el.filelistsHeadCheck.addEventListener("change", function (evt) {
+      var target = evt.target;
+      if (!target.classList || !target.classList.contains("filelists-folder-check")) {
+        return;
+      }
+      setFolderChecked(target.dataset.folderIndex, target.checked);
+      updateFilelistsDownloadSelectedState();
+    });
+
     // TICK EVERY FILE IN ONE FOLDER, including the rows of a COLLAPSED one.
     // They are in the document already - collapsing hides them rather than
     // removing them - so a folder can be selected without being opened, which
@@ -1809,6 +2017,12 @@
 
     function folderCheckFor(index) {
       if (index === undefined || index === null || index === "") { return null; }
+      // A flat list's own folder-check lives in the table HEAD, not the body
+      // (see renderFlatListControls()) - checked first since a flat list has
+      // no folder heading in the body to find one under anyway.
+      var head = el.filelistsHeadCheck
+        && el.filelistsHeadCheck.querySelector(".filelists-folder-check");
+      if (head && head.dataset.folderIndex === String(index)) { return head; }
       var boxes = el.filelistsBody.querySelectorAll(".filelists-folder-check");
       for (var i = 0; i < boxes.length; i++) {
         if (boxes[i].dataset.folderIndex === String(index)) { return boxes[i]; }
@@ -2040,10 +2254,20 @@
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       var bot = String(row.dataset.bot || "").toLowerCase();
+      var nick = String(row.dataset.nick || "").toLowerCase();
+      // GROUP-WIDE (#399): a row now answers for every list its bot has, so
+      // it reads as having "nothing" only if NONE of them matched - one
+      // matching list is reason enough to keep the row on screen, even
+      // though the tab open on it right now might be a different, empty one.
+      var group = entriesForNick(nick);
+      var groupKeys = group.length
+        ? group.map(function (entry) { return String(entry.bot).toLowerCase(); })
+        : [bot];
       // Our own list is not one of the lists the filter searches - it covers
       // lists FETCHED from other bots - so it is never marked by it.
-      var nothing = filtering && !isOwnSource(bot) && empty[bot] === true;
-      var pinned = bot === String(state.filelistsSource || "").toLowerCase()
+      var nothing = filtering && !isOwnSource(bot)
+        && groupKeys.every(function (key) { return empty[key] === true; });
+      var pinned = nick === String(nickOfSource(state.filelistsSource) || "").toLowerCase()
         || row.contains(document.activeElement);
       var away = nothing && !pinned && !state.filelistsRevealEmpty;
       if (away) { hidden += 1; }
@@ -2054,10 +2278,11 @@
       row.classList.toggle("is-filtered-out", nothing && !away);
       // Switched off BY THE OPERATOR, which is a different thing from having
       // nothing to show and reads differently: one is an answer, the other is
-      // a choice, and the choice is reversible by clicking again.
+      // a choice, and the choice is reversible by clicking again. Keyed by
+      // nick, same as the toggle that sets it - see the sidebar click handler.
       row.classList.toggle(
         "is-excluded",
-        filtering && !!state.filelistsExcluded[bot]);
+        filtering && !!state.filelistsExcluded[nick]);
     }
 
     renderRevealButton(filtering, hidden);
@@ -2104,7 +2329,10 @@
   function visibleFilterGroups(groups) {
     if (!(state.filelistsFilter || "").trim()) { return groups; }
     return groups.filter(function (group) {
-      return !state.filelistsExcluded[String(group.bot || "").toLowerCase()];
+      // By nick (#399): group.bot is the exact list ("d_f_d/rar") a search
+      // result folder came from, but exclusion is a per-BOT choice made in
+      // the sidebar - see the click handler there for why.
+      return !state.filelistsExcluded[nickOfSource(group.bot).toLowerCase()];
     });
   }
 
@@ -2169,8 +2397,11 @@
     if (!shown) {
       var payload = state.filelistsFilterPayload;
       var names = (payload && payload.matched) || [];
+      // By nick (#399): `names` are exact list keys ("d_f_d", "d_f_d/rar"),
+      // exclusion is per bot - mapping both of one bot's keys onto the same
+      // nick here is harmless, it just sets the same flag twice.
       names.forEach(function (name) {
-        state.filelistsExcluded[String(name).toLowerCase()] = true;
+        state.filelistsExcluded[nickOfSource(name).toLowerCase()] = true;
       });
     }
     rerenderFromFilterPayload();
@@ -2201,6 +2432,37 @@
       if (token !== state.filelistsFilterToken) { return; }
       loadFilelists();
     }, term ? FILELISTS_FILTER_DEBOUNCE_MS : 0);
+  }
+
+  // #399's follow-up: search the ONE list currently open, server-side, so
+  // finding a file in a bot's ten-thousand-row archive does not mean paging
+  // through it 200 rows at a time. A different question from
+  // runFilelistsFilter() above, which spans every list held and replaces
+  // this whole view - this one narrows loadFilelists()'s own request
+  // instead (see its "q" handling), so the tabs, the pager and everything
+  // else about "which list is open" stay exactly as they are.
+  function runFilelistsListQuery() {
+    state.filelistsListQueryToken += 1;
+    var token = state.filelistsListQueryToken;
+    var term = (state.filelistsListQuery || "").trim();
+
+    state.filelistsOffset = 0;
+    state.filelistsHistory = [];
+
+    window.setTimeout(function () {
+      if (token !== state.filelistsListQueryToken) { return; }
+      loadFilelists();
+    }, term ? FILELISTS_FILTER_DEBOUNCE_MS : 0);
+  }
+
+  // Bumping the token here, not just clearing the field/state, cancels
+  // whatever debounced call is already in flight for the list being left -
+  // without it, a still-pending timer from the OLD list could fire after
+  // the switch and briefly narrow the new one by a term nobody typed there.
+  function resetFilelistsListQuery() {
+    state.filelistsListQuery = "";
+    state.filelistsListQueryToken += 1;
+    if (el.filelistsListSearchInput) { el.filelistsListSearchInput.value = ""; }
   }
 
   function renderFilelistsFreshness() {
@@ -2245,16 +2507,22 @@
     var row = state.filelistsBots[source];
     if (!source || isOwnSource(source) || !row || !row.held) { return; }
 
-    var name = row.label || row.bot || source;
+    // THE BOT, not row.label (#399): the request removes every list that bot
+    // has (POST /api/filelists/<source>/purge resolves <nick>/<marker> to
+    // its bot and purges the whole thing - one archive is one directory),
+    // and the tab open right now might be its RAR or VIDEO list rather than
+    // its main one - "Remove everything downloaded from SomeBot - rar?" would
+    // undersell exactly what is about to happen.
+    var name = row.nick || row.label || row.bot || source;
     // Confirmed because it deletes files and cannot be undone from here -
     // getting the list back means downloading it from that bot again, which
     // needs the bot to still be around.
     if (!window.confirm(
         "Remove everything downloaded from " + name + "?" +
         String.fromCharCode(10, 10) +
-        "The list, its extracted files and its rows in the cross-list " +
-        "search index are all deleted. Fetching it again is the only " +
-        "way back.")) {
+        "Every list this bot has, its extracted files and its rows in the " +
+        "cross-list search index are all deleted. Fetching from it again " +
+        "is the only way back.")) {
       return;
     }
 
@@ -2275,6 +2543,7 @@
         state.filelistsSource = "__own__";
         state.filelistsOffset = 0;
         state.filelistsHistory = [];
+        resetFilelistsListQuery();
         pollFilelistsBots();
         loadFilelists();
       });
@@ -2331,6 +2600,12 @@
             + (parts.list ? "?list=" + encodeURIComponent(parts.list) + "&" : "?");
         }
         url = base + "offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+        // #399's follow-up: narrows THIS list's own rows, unlike the
+        // sidebar's filter above which replaces the view entirely.
+        var listQuery = (state.filelistsListQuery || "").trim();
+        if (listQuery) {
+          url += "&q=" + encodeURIComponent(listQuery);
+        }
       }
 
       fetchJson(url)
@@ -4356,6 +4631,15 @@
       return "<tr><td>" + escapeHtml(row.name) +
              "</td><td class=\"col-num\">" + escapeHtml(String(row.count)) + "</td></tr>";
     }).join("");
+    // Full name on hover - the name column now truncates with an ellipsis
+    // (.stat-top-table td:first-child) so two of these fit side by side.
+    // Set as a PROPERTY, not concatenated into the markup above:
+    // escapeHtml() leaves a double quote alone, so a filename containing one
+    // could break out of a title="..." attribute built that way.
+    var cells = node.querySelectorAll("td:first-child");
+    for (var i = 0; i < cells.length; i++) {
+      cells[i].title = rows[i].name;
+    }
   }
 
   function renderTopDownloads(top) {

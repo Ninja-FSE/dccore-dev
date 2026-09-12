@@ -642,6 +642,28 @@ def build_queue_payload(user=None):
     return rows
 
 
+def split_list_search_words(query):
+    """A raw query string into the pre-split, lower-cased word list
+    list.find_matching_entries() takes - the same splitting rule
+    execute_search() has always used for @find, so a phrase means the same
+    thing here, on the Search tab, and in the List Browser's per-list search
+    (#399's follow-up) rather than three separate ideas of "contains".
+
+    An empty result (no words survived, or the query was empty/blank) is
+    NOT the same as "no filter" to every caller - find_matching_entries()
+    treats an empty list as "match everything", which build_filelists_payload()
+    and build_fetched_bot_list_payload() want but build_search_payload()
+    historically did not (a term that stripped to nothing returned no
+    results, not the whole list) - so each caller decides what to do with an
+    empty return rather than this function guessing for all of them.
+    """
+    import re
+
+    raw_clean = str(query or "")
+    clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
+    return [w.strip().lower() for w in clean_term.split() if w.strip()]
+
+
 def build_search_payload(query):
     """The Search view's data: up to WEBUI_MAX_SEARCH_RESULTS matches for `query`.
 
@@ -651,11 +673,8 @@ def build_search_payload(query):
     and its own JSON shape instead of IRC formatting.
     """
     import list as list_mod
-    import re
 
-    raw_clean = str(query or "")
-    clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
-    search_words = [w.strip().lower() for w in clean_term.split() if w.strip()]
+    search_words = split_list_search_words(query)
     if not search_words:
         return []
 
@@ -678,12 +697,20 @@ def build_search_payload(query):
     ]
 
 
-def build_filelists_payload(offset=0, limit=None, name=None):
+def build_filelists_payload(offset=0, limit=None, name=None, q=""):
     """The File Lists view's data: a page of one of THIS bot's own lists.
 
     `name` picks which. None means the primary, which is what every list
     function already resolves it to and what this route meant before lists
     had names - so an unqualified request is unchanged.
+
+    `q`, when given, narrows the list to rows matching every word in it -
+    #399's follow-up, the List Browser's own per-list search, asked for
+    because a fetched bot's archive can run to tens of thousands of rows and
+    paging through them by hand to find one file is not a real option.
+    split_list_search_words("") is [], and find_matching_entries() already
+    treats an empty word list as "match everything" - the same rule that
+    makes an unfiltered page unchanged, so this needs no branch of its own.
 
     v1 scope is deliberately THIS BOT ONLY - it serves DCCore's own master
     list, decomposed into rows, with "source" hardcoded to config.NICKNAME.
@@ -709,7 +736,8 @@ def build_filelists_payload(offset=0, limit=None, name=None):
     if limit is None:
         limit = FILELISTS_DEFAULT_PAGE_SIZE
 
-    entries, _total = list_mod.find_matching_entries([], limit=None, name=name)
+    search_words = split_list_search_words(q)
+    entries, _total = list_mod.find_matching_entries(search_words, limit=None, name=name)
     rows = list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
     groups = list_mod.group_rows_by_folder(rows)
     page, total_folders, total_rows = list_mod.page_folder_groups(
@@ -1515,7 +1543,7 @@ def _fetched_list_entry(entry, marker):
     return picked
 
 
-def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker=""):
+def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker="", q=""):
     """GET /api/filelists/bot/<nick> payload: (http_status, payload_dict).
 
     Issue #76, options 2 and 3 together: the fetched bot's rows are no longer
@@ -1526,6 +1554,11 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker=""):
     for this bot's own list (both go through list.entries_to_filelist_rows()),
     so the frontend's File Lists table rendering needs no changes to display
     either one - only the data source (which endpoint it polled) differs.
+
+    `q` is the same per-list search build_filelists_payload() takes (#399's
+    follow-up) - split here, once, rather than inside get_fetched_bot_page(),
+    so that function keeps taking pre-split words the way find_matching_entries()
+    itself does everywhere else it is called.
 
     A 404 covers "never fetched" (no entry in config.fetched_bot_lists at
     all); a 502 covers "was fetched, but the on-disk file behind it can no
@@ -1552,8 +1585,9 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker=""):
     # peer's next archive need not carry the same lists as the last.
     entry = _fetched_list_entry(entry, list_marker)
 
+    search_words = split_list_search_words(q)
     page, total_folders, total_rows, error = list_fetch.get_fetched_bot_page(
-        entry, offset, limit)
+        entry, offset, limit, search_words=search_words)
     if error:
         return 502, {"error": error}
 
@@ -3608,8 +3642,11 @@ if HAVE_FLASK:
             offset, limit = parse_pagination_params(
                 request.args.get("offset"), request.args.get("limit"))
             # ?list= names one of OUR served lists; absent means the primary.
+            # ?q= narrows it to rows matching every word in it (#399's
+            # follow-up) - absent or blank means unfiltered, same as before.
             return jsonify(build_filelists_payload(
-                offset, limit, name=requested_own_list(request.args.get("list"))))
+                offset, limit, name=requested_own_list(request.args.get("list")),
+                q=request.args.get("q", "")))
 
         # ------------------------------------------------------------------
         # These routes below DO mutate state (queuing an outbound IRC line,
@@ -3709,7 +3746,8 @@ if HAVE_FLASK:
             offset, limit = parse_pagination_params(
                 request.args.get("offset"), request.args.get("limit"))
             status, result = build_fetched_bot_list_payload(
-                nick, offset, limit, list_marker=request.args.get("list", ""))
+                nick, offset, limit, list_marker=request.args.get("list", ""),
+                q=request.args.get("q", ""))
             return jsonify(result), status
 
         @app.route("/api/fetch/<request_id>/download")

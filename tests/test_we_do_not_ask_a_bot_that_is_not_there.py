@@ -146,12 +146,16 @@ class EachSignalIsWiredToItsOwnQuestion(unittest.TestCase):
         return body.split("\n  }", 1)[0]
 
     def test_the_dot_is_fed_by_presence(self):
-        self.assertIn('led.className = "led " + presenceClass(row.online);',
+        # "primary", not "row": #399 grouped a bot's several lists under one
+        # sidebar row, and the row's own signals now come from whichever of
+        # that group's lists speaks for the collapsed row (see primaryEntry()
+        # in app.js) - the wiring under test is unchanged, only its name.
+        self.assertIn('led.className = "led " + presenceClass(primary.online);',
                       self.row())
 
     def test_the_name_is_fed_by_freshness(self):
         self.assertIn(
-            'name.className = "bot-row-name " + freshnessClass(row.freshness);',
+            'name.className = "bot-row-name " + freshnessClass(primary.freshness);',
             self.row())
 
     def test_neither_reads_the_other_s_field(self):
@@ -159,8 +163,8 @@ class EachSignalIsWiredToItsOwnQuestion(unittest.TestCase):
         call with the wrong argument."""
         row = self.row()
 
-        self.assertNotIn("presenceClass(row.freshness)", row)
-        self.assertNotIn("freshnessClass(row.online)", row)
+        self.assertNotIn("presenceClass(primary.freshness)", row)
+        self.assertNotIn("freshnessClass(primary.online)", row)
 
 
 class ThePresenceTheSidebarShows(DCCoreTestCase):

@@ -24,6 +24,15 @@ group 0.
 And the two controls that only make sense with folders go away while there are
 none. Expand all and Collapse all over a table with nothing to expand are
 worse than absent: they claim a structure the table does not have.
+
+THAT LAST CLAIM WAS WRONG. The class and index carry over, but the change
+LISTENER that reacts to them did not: it was delegated on el.filelistsBody,
+and the moved checkbox now lives in a <th>, a sibling of filelistsBody rather
+than something inside it - so a tick there never reached the handler at all.
+Reported live, on a flat RAR list: the box showed checked and nothing below
+it was. Fixed by attaching the same handler to
+el.filelistsHeadCheck directly, and by teaching folderCheckFor() to look there
+too, so an individual row ticked by hand still syncs the header box back.
 """
 
 import io
@@ -152,6 +161,27 @@ class TheSelectAllMovesRatherThanDisappearing(unittest.TestCase):
         body = self.controls()
 
         self.assertIn(': ""', body)
+
+    def test_a_listener_is_actually_attached_to_the_header_box(self):
+        """The defect: the class and the index moved, but the delegated
+        listener that reacts to them was left behind on filelistsBody - a
+        sibling of the <th> this checkbox now lives in, so a change event
+        starting there never bubbled to it. Ticking the class and index
+        alone proves nothing reads them."""
+        self.assertIn("el.filelistsHeadCheck.addEventListener(\"change\"",
+                      code_only())
+
+    def test_the_header_listener_calls_the_same_select_all_helper(self):
+        head = code_only().split(
+            'el.filelistsHeadCheck.addEventListener("change"', 1)[1][:400]
+        self.assertIn("setFolderChecked(", head)
+
+    def test_syncing_a_ticked_row_back_can_find_the_header_box_too(self):
+        """The other direction: ticking one row by hand has to be able to
+        put the header box into its checked/indeterminate state, not only a
+        folder heading inside filelistsBody."""
+        body = function("folderCheckFor")
+        self.assertIn("el.filelistsHeadCheck", body)
 
 
 class TheControlsThatNeedFolders(unittest.TestCase):
