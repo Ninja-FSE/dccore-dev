@@ -561,6 +561,124 @@ class TheFirstRunWizardsEntryPoint(unittest.TestCase):
         self.assertTrue(asked, "the operator was never asked")
 
 
+class TheWebDependenciesAreOfferedOnFirstRun(unittest.TestCase):
+    """configure.py's offer_to_install_web_requirements() (#69): answering
+    "yes" to enabling the dashboard used to just print `pip install flask`
+    and leave it there, so the very first run of a freshly enabled
+    dashboard failed with an ImportError the operator had to go find
+    themselves. Now offers to run the install there and then.
+
+    Flask is genuinely installed in this test environment - webserver.py's
+    own tests need it - so "missing" is simulated with sys.modules['flask']
+    = None, the standard way to make the NEXT `import flask` raise
+    ImportError without touching whatever already-loaded modules elsewhere
+    in the suite hold onto from their own earlier `from flask import ...`.
+    Restored in tearDown either way, so no other test sees Flask as absent.
+    """
+
+    def setUp(self):
+        import configure
+        self.setup = configure
+        self._real_flask_entry = sys.modules.get("flask")
+        import builtins
+        self._real_input = builtins.input
+        import subprocess
+        self._real_run = subprocess.run
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        import builtins
+        import subprocess
+        if self._real_flask_entry is not None:
+            sys.modules["flask"] = self._real_flask_entry
+        else:
+            sys.modules.pop("flask", None)
+        builtins.input = self._real_input
+        subprocess.run = self._real_run
+
+    def make_flask_missing(self):
+        sys.modules["flask"] = None
+
+    def fake_input(self, *answers):
+        import builtins
+        answer_iter = iter(answers)
+        builtins.input = lambda prompt="": next(answer_iter)
+
+    def record_subprocess(self, returncode=0):
+        import subprocess
+
+        class _Result:
+            pass
+
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(args)
+            result = _Result()
+            result.returncode = returncode
+            return result
+
+        subprocess.run = fake_run
+        return calls
+
+    def test_flask_already_installed_asks_nothing_and_installs_nothing(self):
+        """The common case, on every run after the first: no network
+        access, no prompt, for an operator who already has it."""
+        import builtins
+
+        def fail_if_asked(prompt=""):
+            raise AssertionError("must not prompt when Flask is already importable")
+
+        builtins.input = fail_if_asked
+        calls = self.record_subprocess()
+
+        self.setup.offer_to_install_web_requirements()
+
+        self.assertEqual(calls, [])
+
+    def test_flask_missing_and_the_operator_says_yes_installs_it(self):
+        self.make_flask_missing()
+        self.fake_input("y")
+        calls = self.record_subprocess()
+
+        self.setup.offer_to_install_web_requirements()
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0][0], sys.executable)
+        self.assertIn("requirements-web.txt", calls[0][0][-1])
+
+    def test_a_blank_answer_defaults_to_installing(self):
+        """[Y/n] - the operator just asked to enable the dashboard, so the
+        default has to be the thing that makes it work, not the thing that
+        leaves it broken."""
+        self.make_flask_missing()
+        self.fake_input("")
+        calls = self.record_subprocess()
+
+        self.setup.offer_to_install_web_requirements()
+
+        self.assertEqual(len(calls), 1)
+
+    def test_flask_missing_and_the_operator_declines_does_not_install(self):
+        self.make_flask_missing()
+        self.fake_input("n")
+        calls = self.record_subprocess()
+
+        self.setup.offer_to_install_web_requirements()
+
+        self.assertEqual(calls, [])
+
+    def test_a_failed_install_does_not_raise(self):
+        """Nothing here is fatal - a dashboard that cannot import Flask
+        already logs it and stays off; this must not make setup itself
+        crash on top of that."""
+        self.make_flask_missing()
+        self.fake_input("y")
+        self.record_subprocess(returncode=1)
+
+        self.setup.offer_to_install_web_requirements()  # must not raise
+
+
 class TheRehashHandlerIsEntered(DCCoreTestCase):
     """commands.handle_rehash_request - the most dangerous operation in the
     daemon, and one the audit found had no behavioural coverage at all.

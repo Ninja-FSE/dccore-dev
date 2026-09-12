@@ -207,11 +207,11 @@ def collect_answers():
     print()
     print("Web dashboard (optional) - search / queue / file lists, over a")
     print("small Flask app in a browser. Off by default; needs Flask")
-    print("installed (`pip install flask`), but never stops the daemon from")
-    print("starting if it is not.")
+    print("installed, but never stops the daemon from starting if it is not.")
     enable_webui = input("Enable it? [y/N]: ").strip().lower() in ("y", "yes")
     changes["WEBUI_ENABLED"] = enable_webui
     if enable_webui:
+        offer_to_install_web_requirements()
         lan = input("  Reachable from other devices on your LAN (phone, "
                     "laptop), not just this machine? [y/N]: ").strip().lower() in ("y", "yes")
         changes["WEBUI_HOST"] = "0.0.0.0" if lan else "127.0.0.1"
@@ -221,6 +221,51 @@ def collect_answers():
             print("  and never port-forward this port to the internet.")
 
     return changes, password_hash
+
+
+def offer_to_install_web_requirements():
+    """Install Flask for the web dashboard just enabled, or say how to.
+
+    Answers the half of #69 that shipping WEBUI_ENABLED's own yes/no prompt
+    never did: saying yes here used to just print `pip install flask` and
+    leave it at that, so an operator who answered "yes" still had a
+    dashboard that would not start on the very first run until they read
+    the log, found the ImportError, and typed the command themselves.
+
+    Checked with the same try/import webserver.py itself uses (HAVE_FLASK),
+    not a subprocess or importlib.util.find_spec probe - Flask is either
+    importable in THIS interpreter or it is not, and that is the exact
+    question this function needs answered.
+
+    Nothing here is fatal. A failed or declined install still lets setup
+    finish and the daemon still starts - a dashboard that cannot import
+    Flask logs it and stays off, exactly as it does today; this only
+    changes whether an operator has to go looking for the fix themselves.
+    """
+    try:
+        import flask  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    print("  Flask is not installed yet, so the dashboard will not start "
+          "until it is.")
+    install = input("  Install it now (pip install -r requirements-web.txt)? "
+                    "[Y/n]: ").strip().lower() in ("", "y", "yes")
+    if not install:
+        print("  Skipped. Run 'pip install -r requirements-web.txt' "
+              "yourself before starting the daemon, or the dashboard will "
+              "log that Flask is missing and stay off.")
+        return
+
+    print("  Installing...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-r",
+         os.path.join(REPO_ROOT, "requirements-web.txt")])
+    if result.returncode != 0:
+        print("  Install failed - see the output above. Run "
+              "'pip install -r requirements-web.txt' yourself once the "
+              "problem is fixed; the dashboard stays off until then.")
 
 
 def write_settings_conf(changes, path=None):
