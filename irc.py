@@ -398,6 +398,86 @@ def configured_channel_set():
     return {name.lower() for name in configured_channels()}
 
 
+def note_nick_change(old_nick, new_nick):
+    """Carry a user's live state across a rename. Returns what moved.
+
+    THE SERVER IS TELLING US, and it is the only time it will. A NICK message
+    names the old nick and the new one, so there is nothing to infer - but it
+    arrives once, and every store still keyed on the old name keeps that name
+    until something else happens to rebuild it.
+
+    This used to move `send_queue` and nothing else, which left a renamed user
+    in a state that is worse than either name alone:
+
+      * `channel_users` still held the OLD nick, so dcc.user_is_present_in_ram()
+        answered False for the name they now use and True for one nobody has.
+        That mirror is what dcc.py treats as proof somebody is there before
+        dispatching to them or thawing a frozen queue - so their transfers
+        stopped while they were sitting in the channel.
+      * `dcc_queue` still held their files under the old name, so `!que` under
+        the new one showed nothing and the bot had nobody to send them to.
+
+    NOT the sanctions. `muted_until` and `banned_users` are keyed on the nick
+    too, and carrying those across would be a change of policy rather than a
+    fix: DCCore already answers nick-hopping with hard bans, which match a
+    HOSTMASK pattern and are unaffected by any of this. Moving a mute here
+    would quietly make a soft sanction behave like a hard one, which is a
+    decision for an operator and not a side effect of a bug fix.
+
+    `whois_status` is left alone for a different reason - it is a cache of
+    what a WHO reply said, rebuilt on the next one, and asserting the new nick
+    is online because the old one was is inventing an answer the server has
+    not given.
+    """
+    old_key = str(old_nick or "").strip().lower()
+    new_key = str(new_nick or "").strip().lower()
+    if not old_key or not new_key or old_key == new_key:
+        return []
+
+    moved = []
+
+    # PRESENCE FIRST, because it is the one that silently breaks transfers.
+    # Every channel we share with them, not just the one the message arrived
+    # through - a NICK is not per-channel, and the server sends it once.
+    with runtime.channel_users_lock():
+        users_by_channel = getattr(config, "channel_users", None) or {}
+        for _chan, users in users_by_channel.items():
+            if old_key in users:
+                users.discard(old_key)
+                users.add(new_key)
+                if "presence" not in moved:
+                    moved.append("presence")
+
+    # The queues, under the same lock the rest of the queue code takes.
+    import dcc
+
+    with dcc.queue_lock:
+        for name in ("dcc_queue", "frozen_queues"):
+            store = getattr(config, name, None)
+            if isinstance(store, dict) and old_key in store:
+                # Never clobber an existing entry under the new name: somebody
+                # else may have owned that nick a moment ago and still have a
+                # queue under it. Their files are not this user's to inherit.
+                if new_key in store:
+                    print(f"[NICK] {old_nick} -> {new_nick}: leaving their "
+                          f"{name} entry alone, the new nick already has one.")
+                    continue
+                store[new_key] = store.pop(old_key)
+                moved.append(name)
+
+    # Unchanged behaviour, kept here so one function owns the whole rename.
+    send_queue = getattr(config, "send_queue", None)
+    if isinstance(send_queue, dict) and old_key in send_queue:
+        if new_key not in send_queue:
+            send_queue[new_key] = send_queue.pop(old_key)
+            moved.append("send_queue")
+
+    if moved:
+        print(f"[NICK] {old_nick} is now {new_nick}; carried over: "
+              f"{', '.join(moved)}.")
+    return moved
+
+
 def note_kicked_from(channel, by=""):
     """Record that we are no longer in `channel`, if it is one of ours.
 
@@ -2171,11 +2251,10 @@ def irc_loop():
                     if is_user_event(line, "NICK"):
                         nick_match = re.match(r"^:([^!\s]+)!\S*\s+NICK\s+:?(\S+)", line)
                         if nick_match:
-                            old_nick = nick_match.group(1).lower()
-                            new_nick = nick_match.group(2).strip()
-                            if old_nick in config.send_queue:
-                                import queue_mgr
-                                queue_mgr.config.send_queue[new_nick.lower()] = queue_mgr.config.send_queue.pop(old_nick)
+                            # Everything this user owns, not just their
+                            # outbound messages - see note_nick_change().
+                            note_nick_change(nick_match.group(1),
+                                             nick_match.group(2).strip())
                             
                     # Anchored: this writes straight into config.whois_status.
                     if is_server_numeric(line, "352"):
