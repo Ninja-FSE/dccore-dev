@@ -925,6 +925,16 @@ known_bots = runtime.known_bots
 # mid-handshake.
 dcc_send_offers = runtime.dcc_send_offers
 
+# Alt-nick reconnects (#376): a peer bot's own nick disappearing and an
+# ordinary collision variant of it (an added "_" or digit) joining shortly
+# after gets its List Browser sidebar row merged into one, display only - see
+# runtime.py's own comment above these two for what each holds and why
+# neither is ever allowed to touch fetched_bot_lists, known_bots, or a
+# download counter. Bound from runtime.py for the same reason as everything
+# above it.
+recent_departures = runtime.recent_departures
+nick_aliases = runtime.nick_aliases
+
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
 # ---------------------------------------------------------------------

@@ -96,6 +96,12 @@ RUNTIME_CONTAINERS = {
     # counting an event from the last one.
     "notices": list,
     "notice_state": dict,
+    # #376's alt-nick merge. A leftover departure or alias here is exactly
+    # the false positive the feature's own safeguards exist to avoid - a
+    # later, unrelated test's nick could match a timestamp this test left
+    # behind and get merged with it in the List Browser.
+    "recent_departures": dict,
+    "nick_aliases": dict,
     # Same reasoning: a leftover is one test's message showing up in the next
     # test's panel.
     "private_messages": list,
