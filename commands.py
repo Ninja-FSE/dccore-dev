@@ -345,6 +345,13 @@ PRESERVE_RUNTIME = (
                           # acknowledgement, and losing these would clear the badge
                           # without anybody having looked at what it was for
     'notice_state',       # and the "how much of it have I seen" marker beside them
+    'recent_departures',  # #376's alt-nick reconnect window - a PART/QUIT seen
+                          # moments before a rehash would otherwise be forgotten,
+                          # so the alt-nick's join right after loses the merge it
+                          # would have earned
+    'nick_aliases',       # the merges already inferred. Losing this un-merges
+                          # every bot the List Browser had already combined,
+                          # for no reason connected to the setting that changed
 )
 
 
