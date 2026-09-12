@@ -1378,6 +1378,21 @@ mark.filter-hit {
   font-variant-numeric: tabular-nums;
 }
 
+/* How many lists a grouped row (#399) speaks for - open it and the tabs
+   above the table are where the rest of them are. Absent on every ungrouped
+   row, which is every own list and most fetched ones. */
+.bot-row-lists-badge {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
 /* The dot is never the only carrier of the state: every one has a title, the
    row that cannot be browsed is dimmed, and the legend below names all four
    in words. Colour alone would leave the distinction invisible to about one
@@ -2238,6 +2253,39 @@ mark.filter-hit {
 }
 
 .browse-actions { padding-top: 12px; }
+
+/* One tab per list the open bot publishes (#399) - hidden by
+   renderFilelistsTabs() whenever there is only one, so it never sits above
+   the table as an empty bar. */
+.filelists-list-tabs[hidden] {
+  display: none;
+}
+
+.filelists-list-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.filelists-list-tab {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  padding: 5px 12px;
+}
+
+.filelists-list-tab:hover { background: var(--bg-raised); }
+
+.filelists-list-tab.is-active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* The List Browser's staleness banner (#133).
    --status-frozen rather than --danger, because this is not an error: the

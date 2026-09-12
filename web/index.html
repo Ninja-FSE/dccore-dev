@@ -278,6 +278,15 @@
         </div>
 
         <div class="filelists-files">
+          <!-- One tab per list the SELECTED bot publishes (#399). Hidden
+               whenever that bot has only one - which is every own list, and
+               most fetched ones - so this never appears as an empty bar.
+               renderFilelistsTabs() decides what goes in it and when it
+               shows; the sidebar itself carries one row per bot, not one per
+               list, so a bot's RAR or VIDEO list no longer needs a second
+               row of its own to be reachable. -->
+          <div class="filelists-list-tabs" id="filelists-list-tabs" hidden
+               aria-label="Which of this bot's lists to show"></div>
           <p class="filelists-freshness" id="filelists-freshness" hidden></p>
           <div class="folder-controls">
             <button type="button" class="btn btn-small" id="filelists-expand-all">Expand all</button>
@@ -285,9 +294,12 @@
             <button type="button" class="btn btn-accent btn-small" id="filelists-download-selected-btn" disabled title="Tick the files you want. Shift-click a second box to take everything between it and the last one you touched.">Download selected</button>
             <!-- Shown only for a list fetched from another bot: your own is
                  the library itself, and a bot you have only seen advertising
-                 has nothing to remove. renderFilelistsPurge() decides. -->
+                 has nothing to remove. renderFilelistsPurge() decides.
+                 Removes every list the bot has, not just the one open here -
+                 wording says so since the sidebar stopped showing a row per
+                 list (#399). -->
             <button type="button" class="btn btn-small btn-danger" id="filelists-purge-btn" hidden
-                    title="Remove this bot&#39;s downloaded list, its files and its search index rows.">Purge this list</button>
+                    title="Remove everything downloaded from this bot: every list, its files and its search index rows.">Purge this bot's lists</button>
           </div>
 
           <div class="table-wrap">
