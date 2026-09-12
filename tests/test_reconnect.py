@@ -35,6 +35,7 @@ import db
 import dcc
 import irc
 import queue_mgr
+import runtime
 
 
 FREEZE_TIMEOUT = 300.0  # dcc.check_queue_and_send's hard-coded stale-freeze timeout
@@ -339,19 +340,33 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
 
     def setUp(self):
         super().setUp()
-        config.MSG_DELAY = 0.05
+        # SMALL, not the operator-facing default (5.0) or even 0.05 this used
+        # to read: the pacing sleep this pays now lives in
+        # runtime.OutboundPacer.wait_for_slot() (#406), which loops against
+        # time.monotonic() rather than sleeping a single, cappable duration -
+        # so _SleepShim's cap on queue_mgr.time.sleep() below no longer
+        # shortens it at all, it only makes the loop check more often over
+        # the SAME real wall-clock span. The value itself is what has to be
+        # small now.
+        config.MSG_DELAY = 0.01
         config.vip_queue = []
         config.send_queue = {}
         self._real_time = queue_mgr.time
         self.shim = _SleepShim()
         queue_mgr.time = self.shim
         self.worker = None
+        # A fresh clock per test - runtime.outbound_pacer is a process-wide
+        # singleton, and a reservation left over from whichever test ran
+        # immediately before this one must not delay this one's first send.
+        self._real_pacer = runtime.outbound_pacer
+        runtime.outbound_pacer = runtime.OutboundPacer()
 
     def tearDown(self):
         self.shim.stopped.set()
         if self.worker is not None:
             self.worker.join(timeout=3.0)
         queue_mgr.time = self._real_time
+        runtime.outbound_pacer = self._real_pacer
         super().tearDown()
 
     def start_worker(self):
