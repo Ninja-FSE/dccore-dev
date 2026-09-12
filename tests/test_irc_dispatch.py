@@ -811,17 +811,17 @@ class SearchHeaderStats(DCCoreTestCase):
                 self.assertEqual(stats["server"], "OmeNServE v2.60")
 
     def test_a_bot_that_found_more_than_it_sent(self):
-        """Beezer answers with a list size and a truncation notice instead of
+        """CrateBot answers with a list size and a truncation notice instead of
         slot counts. The gap between 'matches' and what arrives is the whole
         reason to show it - otherwise five looks like all there is."""
         stats = irc.parse_search_header(
             "Search Result  12 Matches For Testament Souls   Get My List Of "
-            "94,952 Files By Typing @Beezer In The Channel Or Refine Your "
+            "41,238 Files By Typing @CrateBot In The Channel Or Refine Your "
             "Search. Sending first 5 Results   OmeNServE v2.60")
 
         self.assertEqual(stats["matches"], 12)
         self.assertEqual(stats["sending"], 5)
-        self.assertEqual(stats["list_size"], 94952)
+        self.assertEqual(stats["list_size"], 41238)
         self.assertNotIn("slots_free", stats, "this header reports no slots - "
                                               "absent must not become zero")
 

@@ -8,12 +8,27 @@ we hold for them is still current.
 THE FIXTURES ARE REAL
 
 Every advert below was captured from a busy public file-sharing channel by a
-read-only observer: 392 lines, 33 bots, twenty minutes. They are reproduced as they
-arrived, not tidied, because the untidiness is the point - no two bots format
-alike, and a parser written against a cleaned-up sample is a parser written
-against a bot nobody runs.
+read-only observer: 392 lines, 33 bots, twenty minutes. The SHAPE of each one
+is exactly as it arrived, not tidied, because the untidiness is the point - no
+two bots format alike, and a parser written against a cleaned-up sample is a
+parser written against a bot nobody runs.
 
-One transformation was applied, and only because the daemon applies it first.
+THE NAMES, HOWEVER, ARE NOT REAL, and this paragraph used to say otherwise.
+
+Every bot nick here is invented. None of those 33 operators agreed to appear
+in a public repository, and this file ships in one. The senders were renamed
+in 992b410; three more names were found later sitting INSIDE the advert text
+rather than in the sender field - a record holder, a second record holder, and
+a bot's own slogan - and renamed too. Replacements keep the original character
+length, so nothing that depends on where a 512-byte line breaks has moved.
+
+Saying "reproduced as they arrived" was not a harmless simplification. It told
+every later reader that a name in here had to be safe, which is exactly why
+three real ones survived three separate scrub passes. If you add a fixture,
+invent the nick before you paste it, never after.
+
+One further transformation was applied, and only because the daemon applies it
+first.
 Several bots decorate their fields with bytes that are not valid UTF-8, and
 irc.py reads the socket with errors="ignore" - so those bytes never reach the
 parser. Those adverts appear here as the daemon actually sees them, separators
@@ -125,7 +140,7 @@ LOADBOT = (
     '\x035DCC Status\x032, type \x035@LoadBot \x032and \x035@LoadBot-stats\x032. '
     '[(\x0311\x02\x020\x032/\x02\x027) Slots (\x0311\x02\x020\x032/\x02\x02216) Ques Taken] [Next Send: '
     '\x0311\x02\x02Open Slot Ready\x032] [CPS in Use: \x0311\x02\x020\x032] [Highest Cps '
-    'Record: \x0311\x02\x024788.6\x032 by \x0311FtpBandit\x032] [Total Files Served: '
+    'Record: \x0311\x02\x024788.6\x032 by \x0311SenderOne\x032] [Total Files Served: '
     '\x0311\x02\x02755993\x032] \x03'
 )
 
@@ -341,7 +356,7 @@ OUTLOOK = (
     'type \x038@outlook \x030and \x038@outlook-stats\x030. [(\x0313\x02\x020\x030/\x02\x025) '
     'Slots (\x0313\x02\x020\x030/\x02\x0295) Ques Taken] [Next Send: \x0313\x02\x02Open Slot '
     'Ready\x030] [CPS in Use: \x0313\x02\x020\x030] [Highest Cps Record: '
-    '\x0313\x02\x026557\x030 by \x0313tempest\x030] [Total File Served: \x0313\x02\x0222805\x030] '
+    '\x0313\x02\x026557\x030 by \x0313peakbot\x030] [Total File Served: \x0313\x02\x0222805\x030] '
     '\x03\x031,15\x02 \x02\x036\x0313 \x03'
 )
 
@@ -375,7 +390,7 @@ QUIRKZ = (
 )
 
 VA45TIDE = (
-    '\x0309,01Wsm_Mlm For President\x0313,01\xae \x0304,01Type:\x0309,01 @va45tide- '
+    '\x0309,01Bot_Two For President\x0313,01\xae \x0304,01Type:\x0309,01 @va45tide- '
     '\x0304,01For My List Of:\x0309,01 95,747 \x0304,01Files \x0313,01\xae '
     '\x0304,01Slots:\x0309,01 8/8 \x0313,01\xae \x0304,01Queued:\x0309,01 0 \x0313,01\xae '
     '\x0304,01Speed:\x0309,01 0cps \x0313,01\xae \x0304,01Next: \x0309,01NOW \x0313,01\xae '
