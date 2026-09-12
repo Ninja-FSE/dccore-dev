@@ -2690,7 +2690,11 @@
     var current = payload.current || {};
     var values = payload.values || {};
     var byTarget = {
-      "Files sent": "total_files",
+      // Two labels share one target (#414): %mx.rarsent (packed/RAR sends)
+      // and %sdmpxsent (OmenServe's own plain-file count) both feed
+      // total_files, summed server-side before this ever arrives here.
+      "Files sent (packed)": "total_files",
+      "Files sent (plain)": "total_files",
       "Bytes sent": "total_bytes",
       "Speed record": "speed_record"
     };

@@ -67,8 +67,21 @@ class Field(object):
 # and then out of existence on the first write of a new day. They are still
 # shown, because an operator can see them in their own file and deserves to be
 # told why they are not coming across rather than left to notice.
+#
+# %mx.rarsent and %sdmpxsent both land in total_files, and are SUMMED rather
+# than one replacing the other (#414): %mx.rarsent is mxrarserver's count of
+# packed (RAR) sends, %sdmpxsent is OmenServe's own count of plain sends, and
+# an install running both add-ons has both as genuinely separate real counts.
+# Before this, %sdmpxsent was not read at all - on a plain-sends-only install
+# that dropped the large majority of real sends from the import entirely.
+#
+# Bytes has no equivalent second field: OmenServe records no byte total for
+# plain sends at all, so %mx.rartsent (also packed-only) is the only bytes
+# counter there is to import. read_install() adds a permanent note about that
+# gap rather than pretending total_bytes covers everything total_files does.
 FIELDS = (
-    Field("%mx.rarsent", "total_files", "Files sent", "files"),
+    Field("%mx.rarsent", "total_files", "Files sent (packed)", "files"),
+    Field("%sdmpxsent", "total_files", "Files sent (plain)", "files"),
     Field("%mx.rartsent", "total_bytes", "Bytes sent", "bytes"),
     Field("%SDmaxspeed", "speed_record", "Speed record", "bytes/s"),
 
@@ -215,8 +228,13 @@ def read_install(text):
         # This is the same rule the module already states for an ABSENT
         # variable, applied to the value that means the same thing: an
         # OmenServe install that has sent nothing has nothing to give.
+        #
+        # ADDS rather than assigns, because two Fields can share a target
+        # (%mx.rarsent and %sdmpxsent both feed total_files) and an install
+        # running both add-ons has both as genuinely separate real counts -
+        # the second one found must not overwrite the first.
         if field.target and number:
-            values[field.target] = number
+            values[field.target] = values.get(field.target, 0) + number
         elif field.target and number == 0:
             notes.append(f"{field.variable} is present but zero - skipped, "
                          f"so your own {field.label.lower()} is left alone.")
@@ -226,6 +244,16 @@ def read_install(text):
                      "scripts/vars.ini - the counters come from the OmenServe "
                      "add-ons (mxrarserver, OS-Limits), so an install without "
                      "them has no history to bring across.")
+
+    # Permanent, not conditional on a mismatch: OmenServe itself keeps no byte
+    # total for plain sends at all, so %mx.rartsent - packed sends only - is
+    # the only bytes counter there is to import, ever. An operator running
+    # both add-ons would otherwise read total_bytes as a full match for
+    # total_files (which DOES cover both kinds) and never learn it does not.
+    if "total_bytes" in values:
+        notes.append("Bytes sent covers packed (RAR) sends only - OmenServe "
+                     "keeps no byte total for plain sends, so this number "
+                     "will not include them.")
 
     # The shape a mis-parse takes, and worth saying rather than silently
     # importing. Not refused: an unusual add-on mix could genuinely produce it.
