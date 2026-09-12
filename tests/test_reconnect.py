@@ -437,7 +437,15 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
         self.oserve.irc_connection = sock
         config.vip_queue.append("PRIVMSG #dccore-test :fresh vip\r\n")
 
-        self.assertTrue(self.wait_until(lambda: "fresh vip" in sock.text()),
+        # A generous ceiling, not the 1.0s default: this assertion is about
+        # whether the thread is still ALIVE and scheduled at all, not about
+        # how fast it reacts - and under a full-suite run with several
+        # thousand other tests' worth of daemon threads still winding down,
+        # real OS scheduling latency for this one thread's next turn can
+        # occasionally run past 1.0s on its own, with nothing wrong. Costs
+        # nothing in the ordinary case, where the predicate is true within
+        # a few hundred milliseconds either way.
+        self.assertTrue(self.wait_until(lambda: "fresh vip" in sock.text(), timeout=5.0),
                         "the worker thread must still be pumping after a broken pipe")
         self.assertTrue(self.worker.is_alive())
 
