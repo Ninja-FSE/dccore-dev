@@ -247,7 +247,7 @@ That lists every setting the sample knows about and your file does not. Most of 
 
 Nothing breaks if you skip this — every setting has a working default and the daemon runs fine without any of them being present. You simply will not know what became available. The changelog is the readable version of the same information.
 
-**5. Read the changelog.** [UPDATES.md](UPDATES.md) says what changed and, where it matters, what you have to do about it.
+**5. Read the changelog.** [UPDATES-PUBLIC.md](UPDATES-PUBLIC.md) says what changed and, where it matters, what you have to do about it.
 
 **6. Verify before going live.**
 
