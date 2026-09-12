@@ -1358,8 +1358,15 @@ def build_fetched_bot_list_summaries():
                 # lists are "<nick>/<marker>". Everything that acts on the BOT
                 # rather than the list - re-fetching, packing a folder, the
                 # freshness verdict - reads "nick" below instead.
+                #
+                # "bot" stays the REAL nick this list is actually keyed under
+                # - re-fetching, purging and the online check all still target
+                # it untouched. "nick" is the one field #376's alt-nick
+                # merge may substitute, and only for grouping/labelling the
+                # sidebar row - see runtime.resolve_display_nick()'s own
+                # comment for why nothing else is allowed to change here.
                 "bot": list_fetch.index_key(bot, marker),
-                "nick": bot,
+                "nick": runtime.resolve_display_nick(bot),
                 "list": marker,
                 "label": f"{bot} - {marker}" if marker else bot,
                 "held": True,
@@ -1398,7 +1405,7 @@ def build_fetched_bot_list_summaries():
         now = _advert_now(known, bot)
         rows.append({
             "bot": bot,
-            "nick": bot,
+            "nick": runtime.resolve_display_nick(bot),
             "list": "",
             "label": bot,
             "held": False,

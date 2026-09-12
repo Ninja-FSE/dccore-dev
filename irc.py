@@ -530,6 +530,153 @@ def note_nick_change(old_nick, new_nick):
     return moved
 
 
+# Alt-nick reconnects (#376) --------------------------------------------------
+#
+# note_nick_change() above handles a REAL NICK message - proof, not inference,
+# because the server names both the old and new nick in one line. It cannot
+# help with a 433 at CONNECT time: the client has not joined anything yet, so
+# there is no NICK event to see, only the old nick disappearing from every
+# channel we shared with it and, moments later, an unrelated-looking new one
+# joining. The functions below infer that case instead, for display only.
+#
+# A 433 retry is seconds, not minutes - long enough for registration and the
+# join burst, short enough that anything further out is a different session
+# and quite possibly a different person.
+ALT_NICK_RECONNECT_WINDOW_SECONDS = 15
+
+# The ordinary shape a client's own collision retry produces: the nick it
+# wanted, plus a trailing run of underscores and/or digits it did not choose.
+# Anchored to the END only - "bot_2" and "bot" match (strip "_2"), "2bot" and
+# "bot" do not (the digit is not trailing), which is deliberate: a LEADING
+# digit or underscore is somebody's actual nick, not a retry suffix.
+_COLLISION_SUFFIX_RE = re.compile(r"[_\d]+$")
+
+
+def _is_collision_variant(a, b):
+    """Whether `a` and `b` are the same base nick, one with an ordinary
+    collision suffix the other lacks - not merely two nicks that share a
+    prefix.
+
+    Deliberately narrow: stripping a trailing run of "_"/digits from EITHER
+    one must land exactly on the OTHER, unchanged. "somebot" and "somebot_"
+    match. "bot1" and "bot2" do not - both carry a suffix, neither is the
+    other's bare base, and they are just as likely to be two different
+    people whose nicks happen to end in a digit.
+    """
+    a = str(a or "").strip().lower()
+    b = str(b or "").strip().lower()
+    if not a or not b or a == b:
+        return False
+    stripped_a = _COLLISION_SUFFIX_RE.sub("", a)
+    stripped_b = _COLLISION_SUFFIX_RE.sub("", b)
+    return bool((stripped_a and stripped_a == b) or
+                (stripped_b and stripped_b == a))
+
+
+def note_observed_departure(nick, channel, now=None):
+    """Record that `nick` was just seen leaving `channel`, for
+    note_possible_reconnect() to match against a moment later.
+
+    OBSERVED ONLY. Call this only after actually finding and removing `nick`
+    from config.channel_users - never merely because it stopped appearing.
+    Absence alone cannot tell "just left" from "was never in a channel we
+    share", which is exactly the weakness a presence-gap heuristic would have
+    without this: a false positive here silently merges two different
+    operators' libraries into one sidebar row, which looks like a correct
+    merge rather than a visible mistake.
+    """
+    key = str(nick or "").strip().lower()
+    if not key:
+        return
+    with runtime.recent_departures_lock:
+        runtime.recent_departures[key] = {
+            # Real case kept alongside the lowercased key, because it is what
+            # ends up shown as the merged row's label if this turns into an
+            # alias - "somebot", lowercased for matching, is not what the
+            # List Browser should say the bot is called.
+            "nick": str(nick).strip(),
+            "channel": str(channel or "").strip().lower(),
+            "at": time.time() if now is None else now,
+        }
+
+
+def _prune_recent_departures(now):
+    with runtime.recent_departures_lock:
+        stale = [key for key, dep in runtime.recent_departures.items()
+                 if now - float((dep or {}).get("at") or 0)
+                 > ALT_NICK_RECONNECT_WINDOW_SECONDS]
+        for key in stale:
+            del runtime.recent_departures[key]
+
+
+def note_possible_reconnect(new_nick, now=None):
+    """Alias `new_nick` to a just-departed nick, if this JOIN looks like the
+    same connection coming back under an ordinary collision suffix.
+
+    All three have to hold, each decided on #376 rather than guessed:
+
+      * the old nick's departure was OBSERVED - note_observed_departure() is
+        the only writer of runtime.recent_departures, and only the PART/QUIT
+        handlers call it, only after actually removing the nick from
+        config.channel_users;
+      * it happened within ALT_NICK_RECONNECT_WINDOW_SECONDS;
+      * the two nicks fit _is_collision_variant()'s narrow shape.
+
+    Also clears `new_nick`'s OWN departure record when it rejoins as itself -
+    an ordinary reconnect under the same name has no alt-nick story to tell,
+    and leaving the stale record behind could otherwise let it wrongly match
+    a much later, unrelated join of a collision-shaped nick.
+
+    DISPLAY ONLY, and that is a property of what this touches, not a promise
+    made in a comment: the only thing written is runtime.nick_aliases, which
+    only webserver.build_fetched_bot_list_summaries() ever reads, to decide
+    which nick a row is grouped and labelled under. Nothing here reaches
+    config.channel_users, fetched_bot_lists, known_bots, or a download
+    counter - a wrong guess mis-groups one sidebar row and nothing else,
+    which is what makes a heuristic an acceptable answer here at all.
+
+    Returns the nick this was aliased to, or None.
+    """
+    now = time.time() if now is None else now
+    _prune_recent_departures(now)
+    key = str(new_nick or "").strip().lower()
+    if not key:
+        return None
+
+    with runtime.recent_departures_lock:
+        # Back under its own name: no alt-nick story, and popping it here
+        # keeps a stale record from matching some unrelated nick much later.
+        own_departure = runtime.recent_departures.pop(key, None)
+    if own_departure is not None:
+        return None
+
+    with runtime.recent_departures_lock:
+        # dict.copy(), not list(...) - this module already shadows the
+        # builtin with its own `import list` (list.py, the file-list code).
+        candidates = runtime.recent_departures.copy().items()
+
+    for departed_key, dep in candidates:
+        # Belt and braces with the prune above, which already removed
+        # anything this old using the same `now` - kept so this loop's own
+        # correctness does not silently depend on a prune call elsewhere
+        # continuing to run first.
+        if now - float((dep or {}).get("at") or 0) > ALT_NICK_RECONNECT_WINDOW_SECONDS:
+            continue
+        if not _is_collision_variant(key, departed_key):
+            continue
+        # Real case, not the lowercased registry key - see
+        # note_observed_departure()'s own comment on why it is kept.
+        departed_nick = str((dep or {}).get("nick") or departed_key)
+        with runtime.nick_aliases_lock:
+            runtime.nick_aliases[key] = departed_nick
+        with runtime.recent_departures_lock:
+            runtime.recent_departures.pop(departed_key, None)
+        print(f"[ALT-NICK] {new_nick} looks like {departed_nick} reconnecting "
+              f"- merging its List Browser row for display.")
+        return departed_nick
+    return None
+
+
 def note_kicked_from(channel, by=""):
     """Record that we are no longer in `channel`, if it is one of ours.
 
@@ -2383,7 +2530,13 @@ def irc_loop():
                                 if joined_chan.lower() not in config.channel_users:
                                     config.channel_users[joined_chan.lower()] = set()
                                 config.channel_users[joined_chan.lower()].add(j_key)
-                            
+
+                            # #376: does this look like a nick we just saw leave,
+                            # reconnecting under the ordinary collision suffix?
+                            # Display only - see note_possible_reconnect()'s own
+                            # docstring for the three things this checks.
+                            note_possible_reconnect(joined_user)
+
                             # One pop, not `in` then `del`. Between the two, the
                             # freeze sweep in check_queue_and_send() - which runs
                             # on every dispatch thread and deletes every user it
@@ -2408,6 +2561,9 @@ def irc_loop():
                             with runtime.channel_users_lock():
                                 if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
                                     config.channel_users[p_chan].remove(p_user)
+                                    # #376: OBSERVED, not inferred - we just
+                                    # found and removed them ourselves.
+                                    note_observed_departure(p_user, p_chan)
 
                     # Anchored: the worst of the three, because it removes the user from
                     # EVERY channel at once. "@find QUIT PLAYING GAMES" is an ordinary
@@ -2418,9 +2574,16 @@ def irc_loop():
                         if quit_match:
                             q_user = quit_match.group(1).lower()
                             with runtime.channel_users_lock():
+                                quit_chan = None
                                 for chan in config.channel_users:
                                     if q_user in config.channel_users[chan]:
                                         config.channel_users[chan].remove(q_user)
+                                        quit_chan = chan
+                            # #376: OBSERVED, not inferred - outside the lock
+                            # above like note_nick_change()'s own pattern, and
+                            # only when we actually found them somewhere.
+                            if quit_chan is not None:
+                                note_observed_departure(q_user, quit_chan)
 
                     # Cross-bot search broadcast capture, NOTICE half. NOTICE
                     # lines are not parsed anywhere else in this loop - many

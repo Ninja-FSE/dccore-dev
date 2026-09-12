@@ -243,6 +243,51 @@ kicked_channels_lock = threading.Lock()
 dcc_send_offers = {}
 dcc_send_offers_lock = threading.Lock()
 
+# Alt-nick reconnects (#376) --------------------------------------------------
+# Two small, RAM-only registries that together let the List Browser sidebar
+# merge a peer bot's two nicks (its usual one, and the alt it fell back to
+# after a 433 at connect) into one row, instead of showing what looks like two
+# unrelated bots.
+#
+# recent_departures: nick.lower() -> {"channel", "at"}. Written ONLY by
+# irc.py's PART/QUIT handlers, and only for a nick they actually saw removed
+# from config.channel_users - never for a nick that merely stopped appearing,
+# which absence alone cannot tell apart from "was never in a channel we
+# share". Read, briefly, by irc.py's JOIN handler (note_possible_reconnect())
+# to decide whether a newly-joining nick is the same connection coming back.
+# Self-pruning on a short TTL of its own (ALT_NICK_RECONNECT_WINDOW_SECONDS in
+# irc.py) - the inference is only trustworthy for seconds, not minutes.
+recent_departures = {}
+recent_departures_lock = threading.Lock()
+
+# nick_aliases: alias_nick.lower() -> primary_nick, REAL case, written only when
+# note_possible_reconnect() decides a join matches the shape above. DISPLAY
+# ONLY - resolve_display_nick() below is the one reader, and
+# webserver.build_fetched_bot_list_summaries() is its one caller. Nothing
+# here ever reaches config.channel_users, fetched_bot_lists, known_bots or a
+# download counter: a wrong guess mis-groups one sidebar row and nothing else,
+# which is the whole reason this is allowed to be a heuristic rather than
+# something requiring proof.
+nick_aliases = {}
+nick_aliases_lock = threading.Lock()
+
+
+def resolve_display_nick(nick):
+    """The nick a List Browser row should be grouped and labelled under.
+
+    `nick` itself, unless irc.py's note_possible_reconnect() has aliased it to
+    a nick it just replaced - see nick_aliases's own comment above for what
+    that is and, as importantly, is not allowed to affect. Pure lookup, no
+    lock ordering concerns with anything else: this is the only place
+    nick_aliases is read.
+    """
+    key = str(nick or "").strip().lower()
+    if not key:
+        return nick
+    with nick_aliases_lock:
+        primary = nick_aliases.get(key)
+    return primary if primary else nick
+
 # Live transfer rate ---------------------------------------------------------
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can
