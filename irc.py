@@ -2595,7 +2595,15 @@ def irc_loop():
                         if (not is_bot_command
                                 and target_chan.lower() == config.NICKNAME.lower()
                                 and not msg.startswith("\x01")):
-                            announce.record_private_message(user, msg)
+                            # ONE OR THE OTHER, never both. Recording it and
+                            # replying are two different contracts with the
+                            # person who messaged: one keeps it for the
+                            # operator and says nothing, the other keeps
+                            # nothing and says where to go instead.
+                            if getattr(config, "PRIVATE_MESSAGES_ENABLED", True):
+                                announce.record_private_message(user, msg)
+                            else:
+                                announce.decline_private_message(user)
                             continue 
                             
                         try:

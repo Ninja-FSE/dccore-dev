@@ -6,9 +6,14 @@ contains three logging calls and all three are error handlers, nothing writes
 to disk, and the Console buffer only carries send_debug() output. So an
 operator could never find out that anybody had tried.
 
-THE SILENCE STAYS. A bot that answers every stray line is one that can be made
-to flood itself off the network, which is why the rate limiter upstream
-exists. Only the record changes.
+THE SILENCE STAYS WHILE THE MESSAGES ARE KEPT. A bot that answers every stray
+line is one that can be made to flood itself off the network, which is why the
+rate limiter upstream exists. Only the record changes.
+
+Turning the feature OFF is the one case that speaks - it keeps nothing and
+tells the sender once where to go instead, under four separate brakes. That is
+a different contract with the person who typed, and it lives in
+test_a_bot_that_does_not_take_messages.py.
 
 It is kept apart from the notices, and that is a design decision rather than a
 filing one. A notice is something that went WRONG and carries one of two
@@ -319,8 +324,15 @@ class WhatTheCaptureDecides(unittest.TestCase):
                         body.index("record_private_message("))
 
     def test_the_bot_still_says_nothing(self):
-        """The behaviour that must not change. Nothing in the capture sends,
-        queues or notices anything - it writes the message down and moves on.
+        """The behaviour that must not change ON THE RECORDING ARM. Nothing
+        between the flood gate and the call sends, queues or notices anything
+        - it writes the message down and moves on.
+
+        The other arm of that branch DOES speak, and deliberately: a bot with
+        PRIVATE_MESSAGES_ENABLED off keeps nothing and tells the sender once
+        where to go instead. That is a different contract and is guarded
+        separately, in test_a_bot_that_does_not_take_messages.py. This extract
+        stops at the recording call, so it covers only the arm it names.
         """
         capture = self.capture()
 

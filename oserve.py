@@ -252,9 +252,17 @@ def startup():
         _pms, _pm_state = db.load_private_messages()
         config.private_messages.extend(_pms)
         config.private_message_state.update(_pm_state)
-        if _pms:
+        if _pms and getattr(config, "PRIVATE_MESSAGES_ENABLED", True):
             print(f"[STARTUP] Private messages: {len(_pms)} kept, "
                   f"{announce.unread_private_messages()} unread.")
+        # Loaded either way - who has already been told is only useful across
+        # a restart - but said out loud only when it is about to matter.
+        if not getattr(config, "PRIVATE_MESSAGES_ENABLED", True):
+            if not str(getattr(config, "ADMIN_NICK", "") or "").strip():
+                print("[STARTUP] Private messages are off and ADMIN_NICK is "
+                      "not set, so anyone who messages this bot will be sent "
+                      "to \"the bot's owner\" by name. Set ADMIN_NICK to "
+                      "point them at you.")
     except Exception as notices_err:
         # A panel that cannot be restored is a panel; the bot still serves
         # files. Nothing here is worth refusing to boot over.

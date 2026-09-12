@@ -255,7 +255,26 @@ notices_lock = threading.Lock()
 # a severity would mean inventing a third one that nobody can tell apart at a
 # glance - which the notice design says explicitly it will not do.
 private_messages = []
+
+# Also carries {"declined": {nick.lower(): when}} when PRIVATE_MESSAGES_ENABLED
+# is off - who has already been told where to go instead.
+#
+# Kept HERE, in the state dict that is already persisted, rather than in a
+# sixth state file: a restart that forgot this would tell everybody again,
+# and "the bot repeats itself every time the operator restarts it" is most of
+# what this record exists to prevent. It is pruned on write rather than left
+# to grow, because an entry older than the interval can never stop a reply
+# again and keeping it is keeping a fact that has stopped meaning anything.
 private_message_state = {"seen_id": 0}
+
+# When the last few declines went out, newest last, for the across-everyone
+# ceiling. RAM only and deliberately so: this one is about a burst happening
+# RIGHT NOW, and a bot that has just restarted is not in the middle of one.
+private_message_decline_sends = []
+
+# One lock for all three. They are written together by
+# announce.decline_private_message() and read together by the Messages
+# payload, so a second lock would buy nothing but an ordering question.
 private_messages_lock = threading.Lock()
 
 kicked_channels = {}

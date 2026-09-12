@@ -1060,7 +1060,17 @@ def load_private_messages():
             seen = int(state.get("seen_id", 0))
         except (TypeError, ValueError):
             seen = 0
-        return rows, {"seen_id": seen}
+        # Rebuilt entry by entry, same as the rows above: one unparseable
+        # timestamp in a hand-edited file must not cost the whole record of
+        # who has already been told, which would make the bot repeat itself
+        # to everybody at once.
+        declined = {}
+        for name, when in (state.get("declined") or {}).items():
+            try:
+                declined[str(name).lower()] = float(when)
+            except (TypeError, ValueError):
+                continue
+        return rows, {"seen_id": seen, "declined": declined}
     except Exception as err:
         print(f"[DB ERROR] Could not read the private messages, starting "
               f"empty: {err}")

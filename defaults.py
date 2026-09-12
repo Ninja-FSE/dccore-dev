@@ -354,6 +354,52 @@ PRIVATE_MESSAGES_FILE: str = "./data/private_messages.json"
 # lines because the first got no answer is one person trying to ask
 # something, and four rows of it buries the next person who tries.
 PRIVATE_MESSAGE_COOLDOWN_SECONDS: int = 300
+
+# WHETHER THE BOT KEEPS PRIVATE MESSAGES AT ALL.
+#
+# True: an unrecognised private message is recorded and the Messages page
+# shows it. The bot still says nothing back - see
+# announce.record_private_message() for why silence is the behaviour.
+#
+# False: nothing is recorded, nothing is stored, the page and its nav item
+# disappear (its API answers 404, which is how the Console's own off-switch
+# already works), and the sender is told once where to go instead. Those are
+# two different contracts with the person messaging, not one feature with its
+# panel hidden - and the second one is the only mode that tells them anything.
+#
+# The default is the silent one. A bot that starts answering strangers
+# because somebody upgraded it is a surprise nobody asked for.
+PRIVATE_MESSAGES_ENABLED: bool = True
+
+# What that one reply says.
+#
+# "%admin" becomes ADMIN_NICK, or "the bot's owner" when no admin nick is
+# configured - grammatical in the same sentence, and it never puts a literal
+# "None" on the wire in front of a stranger.
+#
+# BLANK TURNS THE REPLY OFF while leaving the feature off too: no record, no
+# page, and no line on the wire either. That is a real third position and an
+# operator who wants the bot completely silent should be able to say so
+# without editing code.
+PRIVATE_MESSAGE_DECLINE_TEXT: str = (
+    "This bot does not accept private messages. Please message %admin instead.")
+
+# One reply per sender per day. Long on purpose: the reply exists so somebody
+# learns where to go, and telling the same person twice teaches them nothing
+# while costing another line on the wire.
+PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS: int = 86400
+
+# A ceiling across EVERY sender, which the per-sender interval above cannot
+# provide on its own: two hundred nicks messaging within a minute are two
+# hundred first messages, each one individually owed a reply. That would sit
+# in the send queue for minutes and delay the transfer notices people are
+# actually waiting on.
+#
+# A mass private-message flood is exactly when a bot should say less rather
+# than more, so past this the replies are dropped silently until the window
+# moves on. Nobody is owed an explanation of why they did not get one.
+PRIVATE_MESSAGE_DECLINE_BURST: int = 20
+PRIVATE_MESSAGE_DECLINE_BURST_SECONDS: int = 600
 # How many times to try rejoining a channel that has thrown us out, before
 # giving up on it.
 #
@@ -801,7 +847,8 @@ kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of,
 notices           = runtime.notices             # Operator-facing events, newest last
 notice_state      = runtime.notice_state        # {"seen_id": highest acknowledged}
 private_messages  = runtime.private_messages   # PMs nobody answered, newest last
-private_message_state = runtime.private_message_state  # {"seen_id": acknowledged}
+private_message_state = runtime.private_message_state  # {"seen_id": .., "declined": ..}
+private_message_decline_sends = runtime.private_message_decline_sends  # burst window
 
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}

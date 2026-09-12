@@ -1030,12 +1030,32 @@
     el.messagesNavCount.textContent = unread > 99 ? "99+" : String(unread);
   }
 
+  // The Console's off-switch, followed exactly. HIDDEN, not removed, and
+  // #view-messages stays in the DOM: activateView() walks every key in
+  // `views` and touches getElementById("view-" + key).classList for each, so
+  // deleting the section makes that throw on EVERY view switch and takes the
+  // rest of the navigation down with it. That was found on a real install
+  // once already - see disableConsoleUi() for the full account.
+  function disableMessagesUi() {
+    var navButton = document.querySelector(".nav-item[data-view=\"messages\"]");
+    if (navButton) { navButton.hidden = true; }
+    if (el.messagesNavCount) { el.messagesNavCount.hidden = true; }
+    if (state.active === "messages") { activateView("search"); }
+  }
+
   function loadMessages(render) {
     return fetchJson("/api/messages").then(function (payload) {
       renderMessagesCount(payload);
       if (render) { renderMessageList(payload); }
       return payload;
-    }).catch(function () {
+    }).catch(function (err) {
+      // 404 is the bot saying it does not keep private messages at all,
+      // which is a different answer from "the request failed" - a network
+      // blip must not quietly delete a page that is still there.
+      if (err && String(err.message) === "HTTP 404") {
+        disableMessagesUi();
+        return;
+      }
       if (el.messagesNavCount) { el.messagesNavCount.hidden = true; }
     });
   }
@@ -1262,7 +1282,12 @@
   if (el.messagesMarkRead) {
     el.messagesMarkRead.addEventListener("click", function () {
       postJson("/api/messages/read", {}).then(function (res) {
-        if (!res.ok) { return; }
+        if (!res.ok) {
+          // Turned off while the page was open: the same 404, handled the
+          // same way, rather than a button that silently does nothing.
+          if (res.status === 404) { disableMessagesUi(); }
+          return;
+        }
         renderMessagesCount(res.data);
         renderMessageList(res.data);
       });

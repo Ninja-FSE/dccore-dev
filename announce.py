@@ -789,6 +789,104 @@ def record_private_message(nick, text):
     return entry
 
 
+def _decline_text_for(nick):
+    """The line to send, or "" for send nothing.
+
+    An operator who blanks PRIVATE_MESSAGE_DECLINE_TEXT has asked for a bot
+    that is completely silent to strangers - no record AND no reply - which is
+    a real third position and wants no special setting of its own.
+    """
+    template = str(getattr(config, "PRIVATE_MESSAGE_DECLINE_TEXT", "") or "").strip()
+    if not template:
+        return ""
+    # "the bot's owner" rather than ADMIN_NICK's None, which would otherwise
+    # reach a stranger as the literal word None and teach them nothing.
+    admin = str(getattr(config, "ADMIN_NICK", "") or "").strip() or "the bot's owner"
+    return template.replace("%admin", admin)
+
+
+def decline_private_message(nick, now=None):
+    """Tell somebody, once, that this bot does not keep private messages.
+
+    Only reached when PRIVATE_MESSAGES_ENABLED is off. Returns True if a reply
+    was actually queued.
+
+    THIS IS THE ONLY PART OF THE FEATURE THAT PUTS A LINE ON THE WIRE, and an
+    auto-reply to anyone who messages you is the classic way to be flooded off
+    a network by strangers - so it has four brakes, each covering something
+    the others do not:
+
+    1. A NOTICE, never a PRIVMSG. RFC 1459 forbids a client auto-replying to a
+       NOTICE, it is what every other user-facing answer here uses, and - the
+       decisive one - irc.py's own parser matches PRIVMSG alone, so two bots
+       running this cannot answer each other into a loop. That protection is
+       structural rather than a check somebody can forget to write.
+    2. Once per sender per PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS, persisted,
+       so a restart is not a way to make the bot repeat itself.
+    3. PRIVATE_MESSAGE_DECLINE_BURST across every sender together, which the
+       per-sender rule cannot give: two hundred nicks messaging at once are
+       two hundred FIRST messages, all of them individually owed a reply.
+    4. Queued on the ordinary lane, never VIP - so it waits behind the
+       transfer notices people are actually waiting on, and goes out one
+       outbound_pacer slot apart like everything else the bot says.
+    """
+    import sys
+    import time
+
+    now = time.time() if now is None else now
+    name = str(nick or "").strip()
+    if not name:
+        return False
+    text = _decline_text_for(name)
+    if not text:
+        return False
+
+    key = name.lower()
+    interval = getattr(config, "PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS", 86400)
+    burst = getattr(config, "PRIVATE_MESSAGE_DECLINE_BURST", 20)
+    burst_window = getattr(config, "PRIVATE_MESSAGE_DECLINE_BURST_SECONDS", 600)
+
+    with runtime.private_messages_lock:
+        declined = config.private_message_state.setdefault("declined", {})
+        # None, not 0. A sender who has never been told is not a sender who
+        # was told at the epoch, and with any injected clock smaller than the
+        # interval the second reading silences the bot completely.
+        last = declined.get(key)
+        if interval and last is not None and (now - float(last)) < interval:
+            return False
+
+        # Pruned to the window before it is measured, so the ceiling is
+        # "this many recently" and not "this many ever".
+        sends = config.private_message_decline_sends
+        sends[:] = [when for when in sends if (now - float(when)) < burst_window]
+        if burst and len(sends) >= burst:
+            print(f"[PM] {name} messaged a bot that does not accept private "
+                  f"messages, but {len(sends)} replies have already gone out "
+                  f"in the last {burst_window}s - staying quiet.")
+            return False
+        sends.append(now)
+
+        declined[key] = now
+        # Anything past the interval can never stop a reply again, so keeping
+        # it is keeping a fact that has stopped meaning anything.
+        for old_name in [n for n, when in declined.items()
+                         if interval and (now - float(when or 0)) > interval]:
+            declined.pop(old_name, None)
+
+    oserve = sys.modules.get("oserve")
+    if oserve:
+        oserve.queue_message(name, f"NOTICE {name} :{text}\r\n")
+    try:
+        import db
+        db.save_private_messages(config.private_messages,
+                                 config.private_message_state)
+    except Exception as err:
+        print(f"[PM] Could not save who has been told: {err}")
+    print(f"[PM] {name} messaged a bot that does not accept private messages "
+          f"- told once where to go instead.")
+    return True
+
+
 def unread_private_messages():
     """How many have arrived since the operator last looked."""
     with runtime.private_messages_lock:
