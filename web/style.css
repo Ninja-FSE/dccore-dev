@@ -2329,6 +2329,16 @@ mark.filter-hit {
   color: var(--on-accent);
 }
 
+.filelists-list-search {
+  margin: 0 0 12px;
+}
+
+.filelists-list-search .search-input {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
 /* The List Browser's staleness banner (#133).
    --status-frozen rather than --danger, because this is not an error: the
    list works, it is simply not what that bot is offering now. It is also

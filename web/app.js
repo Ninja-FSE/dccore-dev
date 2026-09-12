@@ -81,6 +81,14 @@
     // two different questions, and conflating them is what let a stale reply
     // through.
     filelistsLoadToken: 0,
+    // The per-list search (#399's follow-up) - a different question from the
+    // sidebar's filelistsFilter above: this one narrows the SINGLE open
+    // list's own rows server-side, rather than spanning every list held and
+    // replacing the whole view. Own debounce token, same reasoning as
+    // filelistsFilterToken's comment; the reply itself is still guarded by
+    // filelistsLoadToken, which every load shares regardless of what
+    // triggered it.
+    filelistsListQuery: "", filelistsListQueryToken: 0,
     // Which bots the operator has switched OFF while filtering, and the last
     // answer the server gave. Toggling re-renders from that answer rather
     // than asking again: the rows are already here, and a round trip per
@@ -139,6 +147,7 @@
     filelistsFetchStatus: document.getElementById("filelists-fetch-status"),
     filelistsFreshness: document.getElementById("filelists-freshness"),
     filelistsListTabs: document.getElementById("filelists-list-tabs"),
+    filelistsListSearchInput: document.getElementById("filelists-list-search-input"),
     // filelistsPurgeListBtn, not filelistsPurgeBtn: #388 is adding a BULK
     // "purge every offline bot's list" button to the toolbar under that
     // exact name. Two keys with the same name in this object literal merge
@@ -1147,6 +1156,10 @@
     markFilelistsActiveBot();
     state.filelistsOffset = 0;
     state.filelistsHistory = [];
+    // A search scoped to the PREVIOUS bot's list means nothing here - left
+    // in place it would silently narrow a bot the operator never asked to
+    // filter, on the very first page they see of it.
+    resetFilelistsListQuery();
     loadFilelists();
   });
 
@@ -1159,6 +1172,10 @@
     markFilelistsActiveBot();
     state.filelistsOffset = 0;
     state.filelistsHistory = [];
+    // Switching tabs is switching which FILE this bot's search words would
+    // run against - a term meant for the main list rarely means anything in
+    // its RAR list, so start that list's own search fresh too.
+    resetFilelistsListQuery();
     loadFilelists();
   });
 
@@ -1166,6 +1183,13 @@
     state.filelistsFilter = el.filelistsFilterInput.value;
     runFilelistsFilter();
   });
+
+  if (el.filelistsListSearchInput) {
+    el.filelistsListSearchInput.addEventListener("input", function () {
+      state.filelistsListQuery = el.filelistsListSearchInput.value;
+      runFilelistsListQuery();
+    });
+  }
 
   el.filelistsFilterAll.addEventListener("click", function () {
     setEveryListShown(true);
@@ -2410,6 +2434,37 @@
     }, term ? FILELISTS_FILTER_DEBOUNCE_MS : 0);
   }
 
+  // #399's follow-up: search the ONE list currently open, server-side, so
+  // finding a file in a bot's ten-thousand-row archive does not mean paging
+  // through it 200 rows at a time. A different question from
+  // runFilelistsFilter() above, which spans every list held and replaces
+  // this whole view - this one narrows loadFilelists()'s own request
+  // instead (see its "q" handling), so the tabs, the pager and everything
+  // else about "which list is open" stay exactly as they are.
+  function runFilelistsListQuery() {
+    state.filelistsListQueryToken += 1;
+    var token = state.filelistsListQueryToken;
+    var term = (state.filelistsListQuery || "").trim();
+
+    state.filelistsOffset = 0;
+    state.filelistsHistory = [];
+
+    window.setTimeout(function () {
+      if (token !== state.filelistsListQueryToken) { return; }
+      loadFilelists();
+    }, term ? FILELISTS_FILTER_DEBOUNCE_MS : 0);
+  }
+
+  // Bumping the token here, not just clearing the field/state, cancels
+  // whatever debounced call is already in flight for the list being left -
+  // without it, a still-pending timer from the OLD list could fire after
+  // the switch and briefly narrow the new one by a term nobody typed there.
+  function resetFilelistsListQuery() {
+    state.filelistsListQuery = "";
+    state.filelistsListQueryToken += 1;
+    if (el.filelistsListSearchInput) { el.filelistsListSearchInput.value = ""; }
+  }
+
   function renderFilelistsFreshness() {
     // Same trigger, same question: both read state.filelistsBots for the open
     // source, so anywhere one needs redrawing the other does too.
@@ -2488,6 +2543,7 @@
         state.filelistsSource = "__own__";
         state.filelistsOffset = 0;
         state.filelistsHistory = [];
+        resetFilelistsListQuery();
         pollFilelistsBots();
         loadFilelists();
       });
@@ -2544,6 +2600,12 @@
             + (parts.list ? "?list=" + encodeURIComponent(parts.list) + "&" : "?");
         }
         url = base + "offset=" + offset + "&limit=" + FILELISTS_PAGE_SIZE;
+        // #399's follow-up: narrows THIS list's own rows, unlike the
+        // sidebar's filter above which replaces the view entirely.
+        var listQuery = (state.filelistsListQuery || "").trim();
+        if (listQuery) {
+          url += "&q=" + encodeURIComponent(listQuery);
+        }
       }
 
       fetchJson(url)

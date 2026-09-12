@@ -1229,7 +1229,7 @@ def _install_fetched_list(bot, zip_path, extract_dir):
     return True, None
 
 
-def get_fetched_bot_page(entry, offset, limit):
+def get_fetched_bot_page(entry, offset, limit, search_words=None):
     """Issue #76, option 2's on-demand reader: given one
     config.fetched_bot_lists[...] entry (the dict process_fetched_list_zip()
     above builds - "bot", "fetched_at", "list_path", "entry_count",
@@ -1238,6 +1238,12 @@ def get_fetched_bot_page(entry, offset, limit):
     caching between calls, exactly like webserver.build_filelists_payload()
     already does for this bot's own list - dedup, and return one page of the
     result.
+
+    `search_words`, when given, is passed straight through to
+    find_matching_entries() - the same pre-split word list @find and the
+    Search tab already build from a raw query, so "search this list" (#399's
+    follow-up) means the same thing as every other search in this project
+    rather than a second implementation of "contains".
 
     Returns (page_rows, total_folders, total_rows, error): `error` is None on
     success. Four values, not the three this said until #232 - a new caller
@@ -1297,7 +1303,7 @@ def get_fetched_bot_page(entry, offset, limit):
 
         try:
             entries, _total = list_mod.find_matching_entries(
-                [], limit=None, list_path=resolved_path)
+                search_words or [], limit=None, list_path=resolved_path)
             rows = list_mod.entries_to_filelist_rows(entries, bot)
         except OSError as err:
             # Caught here, not left to propagate into the Flask route: a file

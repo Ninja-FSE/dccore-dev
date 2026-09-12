@@ -287,6 +287,20 @@
                row of its own to be reachable. -->
           <div class="filelists-list-tabs" id="filelists-list-tabs" hidden
                aria-label="Which of this bot's lists to show"></div>
+
+          <!-- Searches the ONE list currently open, server-side against its
+               full contents rather than only the page on screen - the
+               sidebar's own "Filter every list you hold" box (#133) answers
+               a different question: it spans every list held at once and
+               replaces this whole view while a term is typed there. Reuses
+               find_matching_entries() - the same match rule @find and the
+               Search tab already use - rather than a second search engine,
+               so a phrase means the same thing everywhere it is typed. -->
+          <div class="filelists-list-search">
+            <input type="search" id="filelists-list-search-input" class="search-input"
+                   placeholder="Search this list…" autocomplete="off">
+          </div>
+
           <p class="filelists-freshness" id="filelists-freshness" hidden></p>
           <div class="folder-controls">
             <button type="button" class="btn btn-small" id="filelists-expand-all">Expand all</button>
