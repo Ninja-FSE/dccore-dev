@@ -249,6 +249,12 @@ def startup():
         if _notices:
             print(f"[STARTUP] Notices: {len(_notices)} kept, "
                   f"{announce.unread_notices()[0]} unread.")
+        _pms, _pm_state = db.load_private_messages()
+        config.private_messages.extend(_pms)
+        config.private_message_state.update(_pm_state)
+        if _pms:
+            print(f"[STARTUP] Private messages: {len(_pms)} kept, "
+                  f"{announce.unread_private_messages()} unread.")
     except Exception as notices_err:
         # A panel that cannot be restored is a panel; the bot still serves
         # files. Nothing here is worth refusing to boot over.

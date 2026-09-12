@@ -719,6 +719,99 @@ def record_notice(text, severity="warning"):
     return entry
 
 
+# How many unanswered messages are kept. Smaller than NOTICES_MAX on purpose:
+# a notice is a thing that needs doing and is worth keeping a long backlog of,
+# while a message somebody sent last month is a conversation that has moved on
+# without us.
+PRIVATE_MESSAGES_MAX = 50
+
+# The last time each sender had a message recorded, for the cooldown. RAM
+# only, deliberately - the point of it is to stop one person filling the panel
+# in one sitting, and an operator restarting the bot is entitled to see that
+# somebody is still trying.
+_pm_last_recorded = {}
+
+
+def record_private_message(nick, text):
+    """Somebody sent the bot something it does not understand. Returns the
+    entry, or None if it was throttled.
+
+    NOT A REPLY, and this must never become one. The bot stays silent: an
+    unrecognised private message gets no answer, because a bot that responds
+    to every stray line is one that can be made to flood itself off the
+    network - which is why the rate limiter upstream exists. This only writes
+    it down.
+
+    THROTTLED PER SENDER. Somebody typing four lines because the first got no
+    answer is one person trying to ask something, not four events; recording
+    all four buries the next person who tries. The first is kept and the rest
+    are dropped for PRIVATE_MESSAGE_COOLDOWN_SECONDS.
+
+    The text is kept, not just a count. "Three people messaged you" is not
+    something an operator can act on; "can you send me the new album" is - and
+    the message was addressed to their bot, by somebody who wanted something
+    from it.
+    """
+    import time
+
+    name = str(nick or "").strip()
+    body = str(text or "").strip()
+    if not name or not body:
+        return None
+
+    key = name.lower()
+    now = time.time()
+    cooldown = getattr(config, "PRIVATE_MESSAGE_COOLDOWN_SECONDS", 300)
+    last = _pm_last_recorded.get(key, 0)
+    if cooldown and (now - last) < cooldown:
+        return None
+    _pm_last_recorded[key] = now
+
+    with runtime.private_messages_lock:
+        highest = (config.private_messages[-1]["id"]
+                   if config.private_messages else 0)
+        entry = {"id": highest + 1, "at": now, "nick": name,
+                 # Trimmed, not summarised. A message far longer than this is
+                 # somebody pasting, and the first part of it says what they
+                 # wanted just as well.
+                 "text": body[:400]}
+        config.private_messages.append(entry)
+        while len(config.private_messages) > PRIVATE_MESSAGES_MAX:
+            config.private_messages.pop(0)
+
+    try:
+        import db
+        db.save_private_messages(config.private_messages,
+                                 config.private_message_state)
+    except Exception as err:
+        print(f"[PM] Could not save the private messages: {err}")
+    print(f"[PM] {name} sent something the bot does not answer; recorded.")
+    return entry
+
+
+def unread_private_messages():
+    """How many have arrived since the operator last looked."""
+    with runtime.private_messages_lock:
+        seen = int(config.private_message_state.get("seen_id", 0) or 0)
+        return sum(1 for row in config.private_messages
+                   if int(row.get("id", 0)) > seen)
+
+
+def mark_private_messages_read():
+    """Acknowledge everything recorded so far. Returns the id acknowledged."""
+    with runtime.private_messages_lock:
+        highest = (config.private_messages[-1]["id"]
+                   if config.private_messages else 0)
+        config.private_message_state["seen_id"] = highest
+    try:
+        import db
+        db.save_private_messages(config.private_messages,
+                                 config.private_message_state)
+    except Exception as err:
+        print(f"[PM] Could not save the private messages: {err}")
+    return highest
+
+
 def unread_notices():
     """(count, worst severity) above what the operator has acknowledged."""
     with runtime.notices_lock:

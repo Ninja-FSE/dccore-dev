@@ -238,6 +238,95 @@ fake must only end the way the code under test ends it.
 
 ---
 
+### 🟢 Somebody messaged your bot
+
+Asked by an operator making DCCore their primary server: *"what happens to
+private messages the bot gets?"*
+
+Checked rather than answered from memory, and the answer was **nothing at
+all**. An unrecognised private message is dropped in the read loop: no reply,
+and no record either. The whole PRIVMSG block contains three logging calls and
+all three are error handlers; nothing writes to disk; the Console buffer only
+carries `send_debug()` output. So somebody could message the bot every day and
+the operator would never know anyone had tried.
+
+    ignored   hello?
+    ignored   are you there
+    ignored   can you send me the new album please
+    COMMAND   @<nick>-help
+    COMMAND   @find ...
+
+**The silence is right and it stays.** A bot that answers every stray line is
+one that can be made to flood itself off the network, which is exactly why the
+rate limiter upstream exists. But there is a real gap between *"do not reply to
+strangers"* and *"the operator never finds out anyone spoke to it"* - and
+somebody messaging a file server is usually somebody who wants something from
+it and does not know the syntax. Only the record changes.
+
+#### Kept apart from the notices, deliberately
+
+A notice is something that went **wrong** and carries one of two severities. A
+message is neither wrong nor right, and giving it a severity would mean
+inventing a third that nobody can tell apart at a glance - which the notices
+design says in as many words it will not do.
+
+So they get their own store, their own file, and their own page. The unread
+count sits on the **nav item**, not on the status badge: a notice wants you
+now, a message is waiting whenever you next look, and mixing them makes one of
+the two mean less.
+
+#### Where the capture sits is the whole design
+
+One point in the read loop, where four things are already known:
+
+  * **not a command** - those are answered normally and are not this;
+  * **sent privately** - a channel line is one the operator can already see,
+    and recording those would be a log of other people's conversations rather
+    than of anybody talking to us;
+  * **not a CTCP** - that is a client talking to a client (VERSION, a DCC
+    offer), not a person typing something they expect an answer to;
+  * **past the ban check and the flood gate** - so a ban silences somebody in
+    the panel too, and a flood cannot fill it.
+
+There is a test for each, and one that asserts the capture sends nothing -
+no notice, no queue, no socket write. The bot still says nothing.
+
+#### One person repeating themselves is one person
+
+Somebody typing four lines because the first got no answer is one person
+trying to ask something, and four rows of it buries the next person who tries.
+The first is kept and the rest dropped for `PRIVATE_MESSAGE_COOLDOWN_SECONDS`
+(300 by default), **per sender** - a throttle that silenced everybody after one
+message would hide exactly the person worth hearing from, and there is a test
+that fails if it ever becomes global.
+
+The cooldown lives in RAM only, on purpose: its job is to stop one person
+filling the panel in one sitting, and an operator restarting the bot is
+entitled to see that somebody is still trying.
+
+#### The page says what it cannot do
+
+Everything on that page looks like a conversation and is not one. So the
+subtitle says *"the bot never replies to these"* **above** the list rather than
+below it, there is no reply field, and the payload carries no action that
+sends anything. A reply box would be a promise the daemon cannot keep -
+there is no conversation path in the bot at all. Two tests pin that: the
+warning comes before the list, and the section contains no text input.
+
+The message text is kept, not just a count. *"Three people messaged you"* is
+not something an operator can act on; *"can you send me the new album"* is.
+Trimmed at 400 characters - somebody pasting is still somebody asking, and the
+first part says what they wanted.
+
+Six mutants, all killed, including a global cooldown, a case-sensitive one,
+and the text being thrown away for a count.
+
+One of my own guards had to be fixed first: it split the source on
+`record_private_message(` to find the capture block, and the **comment** above
+the call names the function too - so the extract stopped before any of the
+conditions and three tests were asserting against prose. It splits on the call
+with its arguments now, and strips comments. That is the third time this
+session; the pattern is always the same, and always mine.
 ### 🟢 A thread that outlived its test wrote real state
 
 Preflight's state-write guard kept failing with

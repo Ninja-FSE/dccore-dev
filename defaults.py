@@ -341,6 +341,19 @@ FETCH_HISTORY_FILE: str = "./data/fetch_history.json"
 # rebuilds that failed. Persisted because the events worth telling somebody
 # about are the ones that happen while nobody is looking.
 NOTICES_FILE: str = "./data/notices.json"
+
+# Where unanswered private messages are kept. Persisted for the same reason
+# the notices are: the ones worth telling somebody about arrive while nobody
+# is looking.
+PRIVATE_MESSAGES_FILE: str = "./data/private_messages.json"
+
+# How long one sender is ignored for after their message has been recorded.
+#
+# The rate limiter upstream already stops a flood reaching the bot at all;
+# this is about the RECORD rather than the traffic. Somebody typing four
+# lines because the first got no answer is one person trying to ask
+# something, and four rows of it buries the next person who tries.
+PRIVATE_MESSAGE_COOLDOWN_SECONDS: int = 300
 # How many times to try rejoining a channel that has thrown us out, before
 # giving up on it.
 #
@@ -787,6 +800,8 @@ frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in t
 kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of, and rejoin refusals
 notices           = runtime.notices             # Operator-facing events, newest last
 notice_state      = runtime.notice_state        # {"seen_id": highest acknowledged}
+private_messages  = runtime.private_messages   # PMs nobody answered, newest last
+private_message_state = runtime.private_message_state  # {"seen_id": acknowledged}
 
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}

@@ -345,6 +345,10 @@ PRESERVE_RUNTIME = (
                           # acknowledgement, and losing these would clear the badge
                           # without anybody having looked at what it was for
     'notice_state',       # and the "how much of it have I seen" marker beside them
+    'private_messages',   # somebody spoke to the bot and it said nothing back. A
+                          # rehash is not a reply, and losing these would drop the
+                          # only record that anybody tried
+    'private_message_state',
 )
 
 

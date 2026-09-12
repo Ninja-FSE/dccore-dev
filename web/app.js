@@ -42,6 +42,7 @@
     // you go looking. A permanent nav entry for a page that is empty almost
     // always is a permanent reminder of nothing.
     notices:   { title: "What happened", sub: "Kicks, bans and rebuilds that need looking at." },
+    messages:  { title: "Messages",   sub: "People who spoke to the bot privately and got no answer." },
     settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." },
     stats:     { title: "Stats",      sub: "Everything this bot knows about itself, including who is waiting." },
     console:   { title: "Console",    sub: "The DCC CHAT admin console's commands and live log, in the browser." }
@@ -125,6 +126,9 @@
     statusNotices:  document.getElementById("status-notices"),
     noticeBadge:    document.getElementById("notice-badge"),
     noticeList:     document.getElementById("notice-list"),
+    messageList:     document.getElementById("message-list"),
+    messagesMarkRead: document.getElementById("messages-mark-read"),
+    messagesNavCount: document.getElementById("messages-nav-count"),
     noticesMarkRead: document.getElementById("notices-mark-read"),
     statSlots:    document.getElementById("stat-slots"),
     statFiles:    document.getElementById("stat-files"),
@@ -312,6 +316,7 @@
     // Loaded here rather than in the badge's own handler, so every way into
     // this view draws it - the badge is the usual one, not the only one.
     if (name === "notices") { loadNotices(true); }
+    if (name === "messages") { loadMessages(true); }
   }
 
   el.navItems.forEach(function (btn) {
@@ -1013,6 +1018,53 @@
            String(when.getMonth() + 1).padStart(2, "0") + " " + clock;
   }
 
+  // AN INBOX FOR A BOT THAT NEVER REPLIES. Everything here looks like a
+  // conversation and is not one, which is why the count lives on the nav item
+  // rather than on the status badge beside the notices: a notice is something
+  // that went wrong and wants you now, a message is something waiting for you
+  // whenever you next look. Mixing them would make one of the two mean less.
+  function renderMessagesCount(payload) {
+    if (!el.messagesNavCount) { return; }
+    var unread = (payload && payload.unread) || 0;
+    el.messagesNavCount.hidden = unread === 0;
+    el.messagesNavCount.textContent = unread > 99 ? "99+" : String(unread);
+  }
+
+  function loadMessages(render) {
+    return fetchJson("/api/messages").then(function (payload) {
+      renderMessagesCount(payload);
+      if (render) { renderMessageList(payload); }
+      return payload;
+    }).catch(function () {
+      if (el.messagesNavCount) { el.messagesNavCount.hidden = true; }
+    });
+  }
+
+  function renderMessageList(payload) {
+    if (!el.messageList) { return; }
+    var rows = (payload && payload.messages) || [];
+    if (!rows.length) {
+      // Says what the emptiness MEANS. "No messages" reads as though
+      // something might be broken; nobody having needed to ask is the
+      // ordinary, good state.
+      el.messageList.innerHTML =
+        '<p class="message-empty">Nobody has messaged the bot. Requests that ' +
+        'use the right command are answered normally and do not appear here.</p>';
+      return;
+    }
+    var seen = (payload && payload.seen_id) || 0;
+    el.messageList.innerHTML = rows.map(function (row) {
+      var fresh = (row.id || 0) > seen;
+      return '<div class="message-row' + (fresh ? " is-unread" : "") + '">' +
+        '<div class="message-head">' +
+          '<span class="message-who">' + escapeHtml(row.nick || "?") + "</span>" +
+          '<span class="message-when">' + escapeHtml(noticeWhen(row.at)) + "</span>" +
+        "</div>" +
+        '<p class="message-text">' + escapeHtml(row.text || "") + "</p>" +
+        "</div>";
+    }).join("");
+  }
+
   function renderQueueStats(rows) {
     var sending = rows.filter(function (r) { return r.status === "sending"; }).length;
     var totalFiles = rows.reduce(function (sum, r) { return sum + (r.count || 0); }, 0);
@@ -1204,6 +1256,16 @@
   if (el.noticeBadge) {
     el.noticeBadge.addEventListener("click", function () {
       activateView("notices");
+    });
+  }
+
+  if (el.messagesMarkRead) {
+    el.messagesMarkRead.addEventListener("click", function () {
+      postJson("/api/messages/read", {}).then(function (res) {
+        if (!res.ok) { return; }
+        renderMessagesCount(res.data);
+        renderMessageList(res.data);
+      });
     });
   }
 
@@ -4573,6 +4635,7 @@
   // refreshes independently of which view is active.
   loadQueue();
   loadNotices(false);
+  loadMessages(false);
   setInterval(function () {
     // Keep the sidebar status fresh always; refresh the visible table only
     // when it is the one showing, so a search result is never clobbered by a
@@ -4580,6 +4643,7 @@
     // Same panel, same tick. The list underneath is redrawn only when it is
     // the view on screen, for the reason the queue table gives just below.
     loadNotices(state.active === "notices");
+    loadMessages(state.active === "messages");
     fetchJson("/api/queue").then(function (rows) {
       markConnection(true);
       renderSidebarStatus(rows);

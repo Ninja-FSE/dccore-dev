@@ -237,6 +237,27 @@ notices = []
 notice_state = {"seen_id": 0}
 notices_lock = threading.Lock()
 
+# SOMEBODY SPOKE TO THE BOT AND IT SAID NOTHING BACK, newest last.
+#
+# A private message that is not a recognised command is dropped in the read
+# loop - no reply, and until now no record either. That silence is deliberate
+# and mostly right: a bot that answers every stray message is a bot that can
+# be made to flood itself off the network. But there is a real gap between
+# "do not reply to strangers" and "the operator never finds out anyone spoke
+# to it", and somebody messaging a file server is usually somebody who wants
+# something from it and does not know the syntax.
+#
+#     {"id": 4, "at": 1788904212.0, "nick": "SomeUser",
+#      "text": "can you send me the new album"}
+#
+# Kept apart from `notices` on purpose. A notice is something that went WRONG
+# and has two severities; a message is neither wrong nor right, and giving it
+# a severity would mean inventing a third one that nobody can tell apart at a
+# glance - which the notice design says explicitly it will not do.
+private_messages = []
+private_message_state = {"seen_id": 0}
+private_messages_lock = threading.Lock()
+
 kicked_channels = {}
 kicked_channels_lock = threading.Lock()
 

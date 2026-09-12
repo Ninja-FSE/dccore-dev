@@ -398,6 +398,92 @@ html, body {
   outline-offset: 2px;
 }
 
+/* ------------------------------------------------------------- Messages
+   An inbox for a bot that never replies. Styled like something you READ
+   rather than something you act on: no affordance that looks like a reply,
+   because there is nothing behind it. Quieter than the notices beside it -
+   a message is not a problem. */
+
+.nav-count {
+  margin-left: auto;
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The nav item lays its children out in a row; `hidden` is an attribute at
+   the lowest specificity there is, so without this the count sits there
+   showing nothing. Same pair as .status-row and .filelists-tabs. */
+.nav-count[hidden] {
+  display: none;
+}
+
+.messages-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-row {
+  padding: 11px 13px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+/* Unread is a left edge and a tint, not a colour on the text: the text is
+   somebody's words and recolouring them would read as the bot's own. */
+.message-row.is-unread {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-raised);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-raised));
+}
+
+.message-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.message-who {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.message-when {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.message-text {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  /* Somebody else's text: it wraps, it never stretches the panel, and a very
+     long word does not push the timestamp off the edge. */
+  overflow-wrap: anywhere;
+}
+
+.message-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
 .notice-actions {
   display: flex;
   justify-content: flex-end;

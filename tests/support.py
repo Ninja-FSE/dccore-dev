@@ -96,6 +96,10 @@ RUNTIME_CONTAINERS = {
     # counting an event from the last one.
     "notices": list,
     "notice_state": dict,
+    # Same reasoning: a leftover is one test's message showing up in the next
+    # test's panel.
+    "private_messages": list,
+    "private_message_state": dict,
 }
 
 # SETTINGS A TEST MAY CHANGE AND MUST NOT LEAVE CHANGED.
@@ -447,6 +451,11 @@ class DCCoreTestCase(unittest.TestCase):
         # run's badge already showing.
         self._real_notices_file = db.NOTICES_FILE
         db.NOTICES_FILE = os.path.join(self._fetch_history_dir, "notices.json")
+        # Fifth file, same rule. Reached from the IRC read loop, so any test
+        # that feeds it a private message writes this without mentioning it.
+        self._real_pm_file = db.PRIVATE_MESSAGES_FILE
+        db.PRIVATE_MESSAGES_FILE = os.path.join(self._fetch_history_dir,
+                                                "private_messages.json")
         dcc_fetch._last_persisted_terminal_snapshot = {}
         # Same reason, for the bot registry. oserve.start() loads it at boot,
         # so every test that boots the daemon was reading whatever bots this
@@ -580,6 +589,7 @@ class DCCoreTestCase(unittest.TestCase):
         # a target at any point in the run.
         db.FETCH_HISTORY_FILE = _ORPHANED_WRITE_SINK
         db.NOTICES_FILE = self._real_notices_file
+        db.PRIVATE_MESSAGES_FILE = self._real_pm_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
         db.DOWNLOAD_COUNTS_FILE = self._real_download_counts_file
         db.DCC_QUEUE_FILE = self._real_dcc_queue_file
