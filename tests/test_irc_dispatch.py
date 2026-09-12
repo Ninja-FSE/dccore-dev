@@ -549,6 +549,28 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
                 self.assertEqual(entry["filename"], expected_filename)
                 self.assertNotIn("::INFO::", entry["filename"])
 
+    def test_a_dash_separated_size_with_no_marker_word_is_stripped_too(self):
+        """Reported live: SDFind v3.91 by SDSailor (the bot 'Alex_Tune' runs)
+        does not use "::INFO::" at all - its master list writes
+        "!<nick> <filename> ---- <size>", two or more hyphens between
+        spaces, no marker word. strip_info_suffix() only recognised the
+        marker, so the whole trailing " ---- 18.8Mb" stayed attached to
+        what the dashboard then requested - and the real DCC SEND that came
+        back (bearing only the bare filename) never matched it, rejected as
+        unsolicited exactly like the marker-spacing bug above. Drawn from
+        the bot's real, currently-held list file."""
+        raw_reply = (
+            "!Alex_Tune A101. Donna Summer - I Feel Love (Original 12'' "
+            "Version).mp3 ---- 18.8Mb")
+
+        irc._capture_broadcast_search_reply("OtherBot", "DCCore", raw_reply)
+
+        entry = config.broadcast_search_results[0]
+        self.assertEqual(entry["bot"], "Alex_Tune")
+        self.assertEqual(
+            entry["filename"],
+            "A101. Donna Summer - I Feel Love (Original 12'' Version).mp3")
+
     def test_no_token_means_no_bot_filename_fields(self):
         irc._capture_broadcast_search_reply("OtherBot", "DCCore", "Found 3 matches, use my list command")
         entry = config.broadcast_search_results[0]
@@ -570,6 +592,63 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
         irc._capture_broadcast_search_reply(config.NICKNAME, config.NICKNAME, "@find sandman")
         self.assertEqual(len(config.broadcast_search_results), len(before) + 1)
 
+
+class StripInfoSuffixDirectly(unittest.TestCase):
+    """list.strip_info_suffix() in isolation - BroadcastSearchCaptureTests
+    above exercises it through a real caller; this pins down the function's
+    own contract, including the "::INFO::" marker taking priority over the
+    dash-separated form when a line somehow carried both."""
+
+    def strip(self, rest):
+        import list as list_mod
+        return list_mod.strip_info_suffix(rest)
+
+    def test_the_dash_form_needs_at_least_two_hyphens(self):
+        """A single hyphen is an ordinary word separator in a real title -
+        "Song - Remix.mp3" must not lose "Remix.mp3" to this."""
+        filename, size = self.strip("Song - Remix.mp3")
+
+        self.assertEqual(filename, "Song - Remix.mp3")
+        self.assertEqual(size, "")
+
+    def test_the_dash_form_needs_a_size_shaped_tail(self):
+        """Two-or-more hyphens alone are not enough - a title that happens to
+        contain a run of dashes but no trailing size must be left whole."""
+        filename, size = self.strip("Track ---- Extended Mix.mp3")
+
+        self.assertEqual(filename, "Track ---- Extended Mix.mp3")
+        self.assertEqual(size, "")
+
+    def test_a_size_with_no_decimal_point_is_still_recognised(self):
+        filename, size = self.strip("A104. Cerrone - Supernature.mp3 ---- 25Mb")
+
+        self.assertEqual(filename, "A104. Cerrone - Supernature.mp3")
+        self.assertEqual(size, "25Mb")
+
+    def test_other_units_are_recognised_too(self):
+        for unit in ("KB", "kb", "GB", "Gb", "TB", "B"):
+            with self.subTest(unit=unit):
+                filename, size = self.strip(f"Track.flac ---- 1.5{unit}")
+                self.assertEqual(filename, "Track.flac")
+                self.assertEqual(size, f"1.5{unit}")
+
+    def test_the_info_marker_wins_when_a_line_somehow_carries_both(self):
+        """Defense-in-depth over a hypothetical, not a reported shape - the
+        far more specific and far more common marker is tried first and
+        takes the whole rest of the line, exactly as it always has."""
+        filename, size = self.strip("Track.mp3 ---- 5MB ::INFO:: 5.00MB OmenServe")
+
+        self.assertEqual(filename, "Track.mp3 ---- 5MB")
+        self.assertEqual(size, "5.00MB OmenServe")
+
+    def test_only_the_trailing_dash_group_is_treated_as_the_separator(self):
+        """A title with an earlier, unrelated run of hyphens must not be cut
+        at the first one - only the LAST "----<size>" shape, anchored to the
+        end of the line, is the separator."""
+        filename, size = self.strip("Artist ---- Working Title.mp3 ---- 12MB")
+
+        self.assertEqual(filename, "Artist ---- Working Title.mp3")
+        self.assertEqual(size, "12MB")
 
 
 class BroadcastRepliesFromRealBots(DCCoreTestCase):
