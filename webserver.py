@@ -1366,7 +1366,7 @@ def build_fetched_bot_list_summaries():
                 # sidebar row - see runtime.resolve_display_nick()'s own
                 # comment for why nothing else is allowed to change here.
                 "bot": list_fetch.index_key(bot, marker),
-                "nick": runtime.resolve_display_nick(bot),
+                "nick": _display_nick(bot, present),
                 "list": marker,
                 "label": f"{bot} - {marker}" if marker else bot,
                 "held": True,
@@ -1405,7 +1405,7 @@ def build_fetched_bot_list_summaries():
         now = _advert_now(known, bot)
         rows.append({
             "bot": bot,
-            "nick": runtime.resolve_display_nick(bot),
+            "nick": _display_nick(bot, present),
             "list": "",
             "label": bot,
             "held": False,
@@ -1419,6 +1419,35 @@ def build_fetched_bot_list_summaries():
 
     rows.sort(key=lambda row: str(row["bot"]).lower())
     return rows
+
+
+def _display_nick(bot, present):
+    """resolve_display_nick(), minus any alias the network is CURRENTLY
+    disproving.
+
+    #376's alt-nick merge bounds how long it TRUSTS a departure
+    (ALT_NICK_RECONNECT_WINDOW_SECONDS in irc.py) but not how long the
+    resulting alias is APPLIED: runtime.nick_aliases never expires, so a
+    merge made from good evidence fifteen seconds ago is still asserted
+    indefinitely afterwards - including at a moment the network has since
+    disproved it.
+
+    Two nicks present at the same instant are two connections; one bot
+    cannot be both. So if the alias's primary and the row's own real nick
+    are BOTH currently online, that is not weaker evidence than the
+    departure/rejoin pattern that created the alias - it is evidence of the
+    opposite, arriving later, and it is preferred. `present` is already
+    computed once for the whole payload, so this costs nothing extra and
+    stays exactly as "display only" as resolve_display_nick() itself: it
+    changes what one row is grouped under, never fetched_bot_lists,
+    known_bots, or a download counter.
+    """
+    primary = runtime.resolve_display_nick(bot)
+    if primary == bot or not present:
+        return primary
+    if primary.lower() in present and bot.lower() in present:
+        return bot
+    return primary
 
 
 def build_purge_offline_fetched_lists_result():

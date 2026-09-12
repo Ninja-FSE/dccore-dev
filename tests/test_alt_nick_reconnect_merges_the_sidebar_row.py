@@ -291,6 +291,67 @@ class TheSidebarPayloadUsesTheResolvedNickOnly(DCCoreTestCase):
         self.assertEqual(rows[0]["bot"], "SomeBot")
 
 
+class ThePresentNetworkCanDisproveAnOldAlias(DCCoreTestCase):
+    """webserver._display_nick(): nick_aliases never expires, so the 15-second
+    window only bounds how long a departure is TRUSTED, not how long the
+    resulting alias is APPLIED. Found on review: two nicks online at the SAME
+    instant are two connections - one bot cannot be both - so that is not
+    weaker evidence than the departure/rejoin pattern that created the alias,
+    it is the opposite arriving later, and it must win."""
+
+    def setUp(self):
+        super().setUp()
+        runtime.nick_aliases["somebot_"] = "SomeBot"
+        config.fetched_bot_lists["somebot"] = {
+            "bot": "SomeBot", "fetched_at": 1000, "entry_count": 5,
+        }
+        config.fetched_bot_lists["somebot_"] = {
+            "bot": "SomeBot_", "fetched_at": 2000, "entry_count": 7,
+        }
+
+    def rows_by_bot(self):
+        return {row["bot"]: row for row in webserver.build_fetched_bot_list_summaries()}
+
+    def test_both_nicks_online_at_once_splits_the_rows_back_apart(self):
+        """The concrete failure: two visibly-online bots merged into one
+        sidebar identity, when the network itself is proving they cannot be
+        the same connection."""
+        config.channel_users["#chan"] = {"somebot", "somebot_"}
+
+        rows = self.rows_by_bot()
+
+        self.assertEqual(rows["SomeBot"]["nick"], "SomeBot")
+        self.assertEqual(rows["SomeBot_"]["nick"], "SomeBot_")
+
+    def test_only_the_alt_online_is_the_real_reconnect_and_stays_merged(self):
+        """The ordinary case this whole feature exists for: the old nick is
+        gone, the alt is the one actually connected - nothing here disproves
+        the alias, so it still applies."""
+        config.channel_users["#chan"] = {"somebot_"}
+
+        rows = self.rows_by_bot()
+
+        self.assertEqual(rows["SomeBot"]["nick"], "SomeBot")
+        self.assertEqual(rows["SomeBot_"]["nick"], "SomeBot")
+
+    def test_neither_online_falls_back_to_the_alias(self):
+        """Both have signed off. Nothing currently disproves the merge, so it
+        is left as the best evidence there is."""
+        rows = self.rows_by_bot()
+
+        self.assertEqual(rows["SomeBot_"]["nick"], "SomeBot")
+
+    def test_an_empty_presence_mirror_does_not_split_anything(self):
+        """An empty config.channel_users means "still joining", not "nobody
+        is here" - present_nicks() returns it as falsy for exactly that
+        reason, and this must not mistake it for a disproof."""
+        self.assertEqual(dict(config.channel_users), {})
+
+        rows = self.rows_by_bot()
+
+        self.assertEqual(rows["SomeBot_"]["nick"], "SomeBot")
+
+
 class TheHandlersActuallyCallTheseFunctions(unittest.TestCase):
     """Structural, for the same reason test_a_rename_carries_the_users_state.py's
     own TheHandlerActuallyCallsIt class is: the read loop is not run here, and

@@ -268,6 +268,22 @@ recent_departures_lock = threading.Lock()
 # download counter: a wrong guess mis-groups one sidebar row and nothing else,
 # which is the whole reason this is allowed to be a heuristic rather than
 # something requiring proof.
+#
+# ONLY GROWS, and deliberately: an alias is one tiny dict entry, the event
+# that creates one is rare, and the alternative - expiring it - would mean a
+# genuine reconnect eventually un-merging itself for no reason connected to
+# anything having changed. Not a memory concern at any realistic uptime.
+# What DOES stop a stale alias being trusted forever is webserver.py's own
+# `_display_nick()`, which checks CURRENT presence at display time rather
+# than relying on this dict's age - see that function's docstring.
+#
+# SINGLE-HOP ONLY: resolving "SomeBot__" after two collisions in a row lands
+# on "SomeBot_" (whichever nick it actually replaced), not on "SomeBot" -
+# resolve_display_nick() does one dict lookup, not a walk to a fixed point.
+# A bot that collides twice in a row therefore still splits into two sidebar
+# identities instead of merging into one - strictly better than today's
+# three, but not the full transitive merge the name of this feature might
+# suggest.
 nick_aliases = {}
 nick_aliases_lock = threading.Lock()
 
