@@ -83,9 +83,14 @@ class ARealShapedFile(unittest.TestCase):
 
         self.assertTrue(targets <= {"total_files", "total_bytes", "speed_record"})
 
-    def test_nothing_is_flagged_on_a_complete_file(self):
-        """Control: the notes exist to warn, so a healthy file must be quiet."""
-        self.assertEqual(self.result["notes"], [])
+    def test_nothing_unexpected_is_flagged_on_a_complete_file(self):
+        """Control: the notes exist to warn, so a healthy file must be quiet -
+        apart from the one permanent note every bytes import carries."""
+        self.assertEqual(self.result["notes"], [
+            "Bytes sent covers packed (RAR) sends only - OmenServe keeps no "
+            "byte total for plain sends, so this number will not include "
+            "them.",
+        ])
 
 
 class MissingIsNotZero(unittest.TestCase):
@@ -128,6 +133,86 @@ class MissingIsNotZero(unittest.TestCase):
                             for note in result["notes"]))
 
 
+class PackedAndPlainSendsAreSummedNotOverwritten(unittest.TestCase):
+    """#414: %mx.rarsent (mxrarserver's packed/RAR count) and %sdmpxsent
+    (OmenServe's own plain-file count) both feed total_files. An install
+    running both add-ons has both as genuinely separate real counts, so the
+    second one found must ADD to the first, not replace it - the bug that
+    dropped 87% of a real install's sends was %sdmpxsent not being read at
+    all, and a naive fix that just added the field without also fixing the
+    assignment would have replaced one real count with the other instead of
+    combining them."""
+
+    def test_both_present_are_summed(self):
+        result = omenserve_import.read_install(
+            "n0=%mx.rarsent 45902\nn1=%sdmpxsent 317519")
+
+        self.assertEqual(result["values"]["total_files"], 363421)
+
+    def test_only_the_plain_counter_present_is_not_dropped(self):
+        """The concrete defect: before this fix, %sdmpxsent was not in
+        FIELDS at all, so an install using only OmenServe's own counter (no
+        mxrarserver) imported nothing."""
+        result = omenserve_import.read_install("n0=%sdmpxsent 317519")
+
+        self.assertEqual(result["values"]["total_files"], 317519)
+
+    def test_only_the_packed_counter_present_still_works_alone(self):
+        """Unchanged behaviour for an install that only runs mxrarserver."""
+        result = omenserve_import.read_install("n0=%mx.rarsent 45902")
+
+        self.assertEqual(result["values"]["total_files"], 45902)
+
+    def test_a_present_zero_on_one_does_not_erase_the_other_s_real_count(self):
+        result = omenserve_import.read_install(
+            "n0=%mx.rarsent 45902\nn1=%sdmpxsent 0")
+
+        self.assertEqual(result["values"]["total_files"], 45902)
+        self.assertTrue(any("sdmpxsent is present but zero" in note.lower()
+                            for note in result["notes"]))
+
+    def test_both_present_and_zero_leaves_the_total_absent(self):
+        """Same "present zero is not a figure to import" rule as a single
+        field, applied to the combined target - it must not sum to a zero
+        that then overwrites a real total already stored elsewhere."""
+        result = omenserve_import.read_install(
+            "n0=%mx.rarsent 0\nn1=%sdmpxsent 0")
+
+        self.assertNotIn("total_files", result["values"])
+
+    def test_both_fields_appear_separately_in_the_preview(self):
+        """The preview must not collapse the two into one row - an operator
+        looking at their own file needs to see both counters accounted for
+        under distinct labels, not one "Files sent" row that looks like it
+        matches only one of the two variables."""
+        rows = {row["label"]: row for row in
+                omenserve_import.read_install(
+                    "n0=%mx.rarsent 45902\nn1=%sdmpxsent 317519")["rows"]}
+
+        self.assertEqual(rows["Files sent (packed)"]["value"], 45902)
+        self.assertEqual(rows["Files sent (plain)"]["value"], 317519)
+
+
+class TheBytesCaveatIsPermanentNotConditional(unittest.TestCase):
+    """OmenServe never recorded a byte total for plain sends, so
+    %mx.rartsent - packed only - is the only bytes counter there is, ever.
+    That gap has to be told to every operator whose bytes get imported, not
+    just the ones whose file/bytes counts happen to mismatch."""
+
+    def test_the_note_appears_whenever_bytes_are_imported(self):
+        result = omenserve_import.read_install("n0=%mx.rartsent 16295360049140")
+
+        self.assertTrue(any("packed (rar) sends only" in note.lower()
+                            for note in result["notes"]))
+
+    def test_the_note_is_silent_when_no_bytes_were_imported(self):
+        """Nothing to caveat about a number that was never written."""
+        result = omenserve_import.read_install("n0=%mx.rarsent 45902")
+
+        self.assertFalse(any("packed (rar) sends only" in note.lower()
+                             for note in result["notes"]))
+
+
 class TheDayBucketsAreShownAndLeft(unittest.TestCase):
     """%OSL.Today reads "Friday" - a weekday NAME. Nothing can tell whether
     "today" means today or six days ago, and db._rotate_day_unlocked() would
@@ -153,7 +238,7 @@ class TheDayBucketsAreShownAndLeft(unittest.TestCase):
         rows = {row["label"]: row for row in self.result["rows"]}
 
         self.assertFalse(rows["Files today"]["imported"])
-        self.assertTrue(rows["Files sent"]["imported"])
+        self.assertTrue(rows["Files sent (packed)"]["imported"])
 
 
 class AwkwardInput(unittest.TestCase):
