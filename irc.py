@@ -2638,20 +2638,33 @@ def irc_loop():
                                     continue
                                 if ctcp_cmd == "VERSION":
                                     # Answered inline rather than on a thread:
-                                    # one send, nothing read from disk, and
-                                    # irc.py already sends directly from this
-                                    # loop (see the RAM-CHECK reply below).
+                                    # one send, nothing read from disk. Not
+                                    # answered DIRECTLY to the socket any more
+                                    # though (see the RAM-CHECK reply below
+                                    # for why that changed) - queued VIP so it
+                                    # still jumps ahead of an ordinary
+                                    # per-user backlog, and paced through
+                                    # runtime.outbound_pacer like every other
+                                    # outbound line (#406).
                                     #
                                     # VERSION is in the is_bot_command list
-                                    # above, so a flooding user's query is
-                                    # dropped before reaching here. An
-                                    # unthrottled CTCP responder is a standard
-                                    # way to make a bot flood ITSELF off the
-                                    # network: a few hundred queries and the
-                                    # bot's own replies trip excess-flood.
+                                    # above, so a flooding user's own query is
+                                    # dropped before reaching here - but many
+                                    # ordinary clients send exactly one CTCP
+                                    # VERSION unasked, on sight, the moment
+                                    # they see a new nick. A bot that just
+                                    # joined 14 channels can collect a dozen
+                                    # of those within a second or two, and an
+                                    # unpaced responder answering each the
+                                    # instant it arrived was a second way to
+                                    # flood the bot off - ordinary politeness
+                                    # from a dozen strangers, nobody
+                                    # misbehaving, and no per-user gate to
+                                    # catch it because it is a dozen different
+                                    # users asking once each.
                                     version_reply = ctcp_version_reply(user)
-                                    if version_reply:
-                                        s.send(version_reply.encode())
+                                    if version_reply and oserve:
+                                        oserve.queue_message(user, version_reply, is_vip=True)
                                     continue
                                 if ctcp_cmd == "QUE":
                                     threading.Thread(target=commands.handle_queue_check, args=(s, user, target_chan), daemon=True).start()
@@ -2690,10 +2703,20 @@ def irc_loop():
                                     have_count = hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users
                                     if have_count:
                                         current_qty = len(config.channel_users[target_chan.lower()])
+                                # Queued VIP and paced, not sent straight to the
+                                # socket - same reasoning as the CTCP VERSION
+                                # reply above (#406): a direct send here shares
+                                # nothing with queue_mgr.py's or announce.py's
+                                # own pacing, so however unlikely a flood of
+                                # !debugnames is, this is one more line that
+                                # could add to one without the shared clock
+                                # knowing it happened.
                                 if have_count:
-                                    s.send(f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n".encode())
+                                    ram_check = f"NOTICE {user} :[RAM-CHECK] Currently tracking {current_qty} user(s) live via 353-numeric in {target_chan}.\r\n"
                                 else:
-                                    s.send(f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n".encode())
+                                    ram_check = f"NOTICE {user} :[RAM-CHECK] Critical: No 353 names loaded yet for {target_chan} in config structure.\r\n"
+                                if oserve:
+                                    oserve.queue_message(user, ram_check, is_vip=True)
                             elif msg.lower() == "!ping":
                                 threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
                             # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these

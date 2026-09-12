@@ -17,6 +17,7 @@ interleave.
 
 import contextlib
 import io
+import os
 import threading
 import time
 import unittest
@@ -239,6 +240,71 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
         self.assertGreaterEqual(
             elapsed, 7 * config.MSG_DELAY * 0.8,
             "the two lanes must share one clock, not pace independently")
+
+
+class TheThirdUnpacedWriterIsFixedToo(unittest.TestCase):
+    """A THIRD path fed the server unpaced traffic, found reviewing this
+    fix: irc.py's CTCP VERSION reply and its "!debugnames" RAM-CHECK notice
+    both wrote straight to the socket from inside irc_loop(), sharing
+    nothing with queue_mgr.py's or announce.py's now-shared clock.
+
+    Fits the reported trigger (#406) at least as well as the reconnect
+    burst: many ordinary IRC clients send exactly one CTCP VERSION, unasked,
+    the moment they see a new nick - a bot joining 14 channels at once can
+    collect a dozen of those within a second or two. Ten different users
+    asking once each is ten different requests, so the per-user flood gate
+    (is_bot_command's own throttle) never sees a repeat offender to catch -
+    the gate answers "is THIS user flooding", not "is the SOCKET flooding".
+
+    Structural, not executed: irc_loop() is the single monolithic function
+    reading a live socket that this suite does not run line by line (same
+    caveat as ReconnectThawSummaryTests' own wiring check in
+    tests/test_reconnect.py).
+    """
+
+    def source(self):
+        with open(os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "irc.py"), encoding="utf-8") as f:
+            return f.read()
+
+    def version_reply_block(self):
+        return self.source().split('if ctcp_cmd == "VERSION":', 1)[1].split(
+            "continue", 1)[0]
+
+    def debugnames_block(self):
+        return self.source().split('elif msg.lower() == "!debugnames":', 1)[1][:1500]
+
+    def test_the_version_reply_no_longer_writes_the_socket_directly(self):
+        self.assertNotIn("s.send(version_reply", self.version_reply_block())
+
+    def test_the_version_reply_is_queued_vip(self):
+        block = self.version_reply_block()
+        self.assertIn("oserve.queue_message(user, version_reply, is_vip=True)",
+                      block)
+
+    def test_the_ram_check_notice_no_longer_writes_the_socket_directly(self):
+        block = self.debugnames_block()
+        self.assertNotIn("s.send(", block)
+
+    def test_the_ram_check_notice_is_queued_vip(self):
+        block = self.debugnames_block()
+        self.assertIn("oserve.queue_message(user, ram_check, is_vip=True)", block)
+
+    def test_the_vip_lane_is_itself_paced(self):
+        """The point of routing through queue_message(is_vip=True) rather
+        than some other fix: the VIP lane already reserves a slot from
+        runtime.outbound_pacer before every send (queue_mgr.py), so these
+        two gain that pacing for free instead of a third bespoke mechanism."""
+        vip_lane = queue_mgr_source().split(
+            'if hasattr(config, \'vip_queue\') and config.vip_queue:', 1)[1][:700]
+        self.assertIn("runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)",
+                      vip_lane)
+
+
+def queue_mgr_source():
+    with open(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "queue_mgr.py"), encoding="utf-8") as f:
+        return f.read()
 
 
 if __name__ == "__main__":
