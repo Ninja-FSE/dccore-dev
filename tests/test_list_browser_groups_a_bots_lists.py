@@ -1,12 +1,12 @@
 """#399: a bot's several lists share one sidebar row, with tabs above the
-table to switch between them, instead of "D_F_D" and "D_F_D - rar" reading as
-two unrelated bots.
+table to switch between them, instead of "SomeBot" and "SomeBot - rar"
+reading as two unrelated bots.
 
 Reported live, with a screenshot: an operator's sidebar carried a second row
 for every bot that happens to publish a RAR or VIDEO list alongside its main
-one - "Bsk" next to "Bsk - Bsk^-Musica-MX", "D_F_D" next to "D_F_D - rar" -
-which reads as two bots sharing oddly similar names rather than one bot with
-two lists.
+one - two different real bots each shown twice under oddly similar names -
+which reads as pairs of bots sharing similar names rather than one bot each
+with two lists.
 
 Structural, like every other JS check in this suite - nothing here executes
 JavaScript, so these assert that the expected wiring is written into app.js
@@ -87,9 +87,9 @@ class TheCollapsedRowSpeaksForItsGroup(unittest.TestCase):
         self.assertIn('button.dataset.nick = group.nick;', body)
 
     def test_a_grouped_row_shows_the_bare_nick_not_a_per_list_label(self):
-        """The concrete defect: "D_F_D - rar" as a name is a per-LIST label
+        """The concrete defect: "SomeBot - rar" as a name is a per-LIST label
         wearing a per-BOT row - it names one of the lists the row now
-        represents, and reads as a different bot from "D_F_D" beside it."""
+        represents, and reads as a different bot from "SomeBot" beside it."""
         self.assertIn(
             'name.textContent = grouped ? group.nick : (primary.label || primary.bot);',
             self.body())
@@ -219,7 +219,7 @@ class ThePurgeButtonNamesWhatItActuallyRemoves(unittest.TestCase):
         self.assertNotIn(">Purge this list<", html)
 
     def test_the_confirm_dialog_names_the_bot_not_the_open_tab_s_label(self):
-        """row.label could be "D_F_D - rar" if that happens to be the list
+        """row.label could be "SomeBot - rar" if that happens to be the list
         open when Purge is pressed - confirming a bot-wide delete with a
         single list's name understates what is about to happen."""
         body = function_body(app_js(), "purgeCurrentList")

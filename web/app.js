@@ -1397,7 +1397,7 @@
     var name = document.createElement("span");
     name.className = "bot-row-name " + freshnessClass(primary.freshness);
     name.title = ledTitle(primary);
-    // grouped: the bare nick, since "label" is a per-LIST string ("D_F_D -
+    // grouped: the bare nick, since "label" is a per-LIST string ("SomeBot -
     // rar") that a row now representing several lists at once cannot use
     // without picking one of them to speak for all. Every ungrouped row -
     // which is every own list, and the ordinary case for a fetched one -
@@ -1581,7 +1581,7 @@
   // used to need. Reads a list's own marker straight off `list` - "RAR",
   // "VIDEO", whatever an OmenServe-family bot's own list is actually called -
   // rather than the sidebar's "label" field, which is built for a single row
-  // ("D_F_D - rar") and was never meant to be split back apart into a name a
+  // ("SomeBot - rar") and was never meant to be split back apart into a name a
   // tab strip can reuse.
   function renderFilelistsTabs() {
     var container = el.filelistsListTabs;
@@ -2511,7 +2511,7 @@
     // has (POST /api/filelists/<source>/purge resolves <nick>/<marker> to
     // its bot and purges the whole thing - one archive is one directory),
     // and the tab open right now might be its RAR or VIDEO list rather than
-    // its main one - "Remove everything downloaded from D_F_D - rar?" would
+    // its main one - "Remove everything downloaded from SomeBot - rar?" would
     // undersell exactly what is about to happen.
     var name = row.nick || row.label || row.bot || source;
     // Confirmed because it deletes files and cannot be undone from here -
