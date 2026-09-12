@@ -225,13 +225,13 @@ class WhichBotsHaveNothing(IndexCase):
 
     def test_a_bot_with_no_match_is_empty(self):
         self.index("BigTruck", "Enter Sandman.flac")
-        self.index("TapeDeck", "Nevermind.flac")
+        self.index("ReelBot", "Nevermind.flac")
 
         matched, empty = list_index.bots_with_a_match(
-            ["sandman"], ["BigTruck", "TapeDeck"])
+            ["sandman"], ["BigTruck", "ReelBot"])
 
         self.assertEqual(matched, {"bigtruck"})
-        self.assertEqual(empty, {"tapedeck"})
+        self.assertEqual(empty, {"reelbot"})
 
     def test_a_held_bot_that_was_never_indexed_is_empty_not_missing(self):
         """A list held from before the index existed, or one whose indexing
@@ -387,14 +387,14 @@ class ThePayloadTheBrowserRenders(IndexCase):
         """What makes cross-list selection work: the checkbox reads its bot
         from here, so a page of results from four bots queues correctly."""
         self.index("BigTruck", "Enter Sandman.flac")
-        self.index("TapeDeck", "Sandman Live.flac")
-        self.hold("BigTruck", "TapeDeck")
+        self.index("ReelBot", "Sandman Live.flac")
+        self.hold("BigTruck", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("sandman")
         sources = {entry["source"]
                    for group in payload["folders"] for entry in group["entries"]}
 
-        self.assertEqual(sources, {"BigTruck", "TapeDeck"})
+        self.assertEqual(sources, {"BigTruck", "ReelBot"})
 
     def test_two_bots_sharing_a_folder_path_stay_apart(self):
         """list.group_rows_by_folder() keys on the folder string, which is
@@ -404,23 +404,23 @@ class ThePayloadTheBrowserRenders(IndexCase):
         came first."""
         shared = "D:\\MUSIC\\Metallica\\"
         self.index("BigTruck", "Enter Sandman.flac", folder=shared)
-        self.index("TapeDeck", "Sandman Live.flac", folder=shared)
-        self.hold("BigTruck", "TapeDeck")
+        self.index("ReelBot", "Sandman Live.flac", folder=shared)
+        self.hold("BigTruck", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("sandman")
 
         self.assertEqual(len(payload["folders"]), 2)
         self.assertEqual({group["bot"] for group in payload["folders"]},
-                         {"BigTruck", "TapeDeck"})
+                         {"BigTruck", "ReelBot"})
 
     def test_the_bots_with_nothing_are_named_for_the_sidebar(self):
         self.index("BigTruck", "Enter Sandman.flac")
-        self.hold("BigTruck", "TapeDeck", "MetalHead")
+        self.hold("BigTruck", "ReelBot", "MetalHead")
 
         payload = webserver.build_crosslist_search_payload("sandman")
 
         self.assertEqual(payload["matched"], ["bigtruck"])
-        self.assertEqual(payload["empty"], ["metalhead", "tapedeck"])
+        self.assertEqual(payload["empty"], ["metalhead", "reelbot"])
 
     def test_a_bot_is_not_called_empty_just_because_the_page_filled_up(self):
         """The reason matched/empty is asked separately rather than derived
@@ -428,13 +428,13 @@ class ThePayloadTheBrowserRenders(IndexCase):
         past the cap would look empty when it is not - and the sidebar would
         cross out a list that has exactly what the operator is looking for."""
         self.index("BigTruck", *[f"Track {i}.flac" for i in range(30)])
-        self.index("TapeDeck", "Track Rare.flac")
-        self.hold("BigTruck", "TapeDeck")
+        self.index("ReelBot", "Track Rare.flac")
+        self.hold("BigTruck", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("track", limit=5)
 
         self.assertEqual(payload["empty"], [])
-        self.assertEqual(sorted(payload["matched"]), ["bigtruck", "tapedeck"])
+        self.assertEqual(sorted(payload["matched"]), ["bigtruck", "reelbot"])
 
     def test_it_says_when_it_had_to_stop_early(self):
         self.index("BigTruck", *[f"Track {i}.flac" for i in range(30)])
@@ -449,13 +449,13 @@ class ThePayloadTheBrowserRenders(IndexCase):
         """A cleared box goes back to browsing; it must not cross out every
         bot on the way."""
         self.index("BigTruck", "Enter Sandman.flac")
-        self.hold("BigTruck", "TapeDeck")
+        self.hold("BigTruck", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("")
 
         self.assertEqual(payload["folders"], [])
         self.assertEqual(payload["matched"], [])
-        self.assertEqual(payload["empty"], ["bigtruck", "tapedeck"])
+        self.assertEqual(payload["empty"], ["bigtruck", "reelbot"])
 
 
 class WhenTheIndexIsNotThere(IndexCase):
@@ -683,8 +683,8 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
         """Two bots can hold a file of the same name. Asking one for it says
         nothing about the other, and marking both would claim a request that
         was never made."""
-        self.index("TapeDeck", "Asked.flac")
-        self.hold("BigTruck", "TapeDeck")
+        self.index("ReelBot", "Asked.flac")
+        self.hold("BigTruck", "ReelBot")
         self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
                       "request_type": "file", "state": "receiving"})
 
@@ -693,7 +693,7 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
                  for group in payload["folders"] for entry in group["entries"]}
 
         self.assertEqual(marks[("BigTruck", "Asked.flac")], "requested")
-        self.assertEqual(marks[("TapeDeck", "Asked.flac")], "")
+        self.assertEqual(marks[("ReelBot", "Asked.flac")], "")
 
     def test_a_whole_list_request_does_not_mark_a_file(self):
         """A "list" row asks for the bot's list, not for any row in the

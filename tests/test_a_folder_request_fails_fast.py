@@ -79,7 +79,7 @@ class RecognisingABotThatPacks(DCCoreTestCase):
         self.assertFalse(list_fetch.bot_publishes_a_rar_list(BOT))
 
     def test_a_bot_that_advertises_a_rar_folder_list(self):
-        """"Type @Zkx^ to get my list of 39,454 RAR folders" - parsed since
+        """"Type @PackBot^ to get my list of 39,454 RAR folders" - parsed since
         #133, and read outside the registry for the first time here."""
         runtime.known_bots[BOT] = {"nick": BOT, "rar_folders": 39454}
 
