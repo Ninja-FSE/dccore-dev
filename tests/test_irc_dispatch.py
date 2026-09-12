@@ -697,7 +697,7 @@ class BroadcastRepliesFromRealBots(DCCoreTestCase):
         ("[rigserv]", "![rigserv] Testament (1990) Souls Of Black.rar  ::INFO:: "
                      "89.92MB : OmenServe v2.71 :",
          "Testament (1990) Souls Of Black.rar"),
-        ("kurtb66", "!kurtb66 14 - Testament - Souls Of Black.mp3  ::INFO:: "
+        ("somereq66", "!somereq66 14 - Testament - Souls Of Black.mp3  ::INFO:: "
                     "4.8MB OmenServe v2.71",
          "14 - Testament - Souls Of Black.mp3"),
     ]
@@ -787,7 +787,7 @@ class SearchHeaderStats(DCCoreTestCase):
     def test_an_omenserve_header(self):
         stats = irc.parse_search_header(
             "Search Result 4 Matches For Testament Souls Copy And Paste "
-            "!kurtb66 FILENAME To The Channel To Request. (10/10) Free Slots, "
+            "!somereq66 FILENAME To The Channel To Request. (10/10) Free Slots, "
             "0 Queued OmenServe v2.71")
 
         self.assertEqual(stats["family"], "omenserve")
@@ -854,7 +854,7 @@ class SearchHeaderStats(DCCoreTestCase):
         """SPQR matches carry no ::INFO:: tag at all - a bare token and a
         filename."""
         self.assertIsNone(irc.parse_search_header(
-            "!BigRig Testament - Souls of Black.mp3"))
+            "!LoadBot Testament - Souls of Black.mp3"))
 
     def test_unrelated_chatter_is_not_a_header(self):
         self.assertIsNone(irc.parse_search_header(
@@ -873,13 +873,13 @@ class SearchHeaderStats(DCCoreTestCase):
         config.broadcast_search_results = []
 
         irc._capture_broadcast_search_reply(
-            "kurtb66", "DCCore",
-            "Search Result 4 Matches For X Copy And Paste !kurtb66 FILENAME "
+            "somereq66", "DCCore",
+            "Search Result 4 Matches For X Copy And Paste !somereq66 FILENAME "
             "To The Channel To Request. (10/10) Free Slots, 0 Queued "
             "OmenServe v2.71")
         irc._capture_broadcast_search_reply(
-            "kurtb66", "DCCore",
-            "!kurtb66 14 - Testament - Souls Of Black.mp3  ::INFO:: 4.8MB")
+            "somereq66", "DCCore",
+            "!somereq66 14 - Testament - Souls Of Black.mp3  ::INFO:: 4.8MB")
 
         header, result = config.broadcast_search_results
         self.assertIn("header", header)

@@ -120,9 +120,9 @@ KELTA = (
     '\x0301,08OFF \x0308,08 \x0301,08Mode: \x0301,08Normal \x0308,08'
 )
 
-BIGRIG = (
+LOADBOT = (
     '\x032,14 For \x035My List\x032(\x0311\x02\x0219527\x032files:\x0311\x02\x02163812\x032MB) and '
-    '\x035DCC Status\x032, type \x035@BigRig \x032and \x035@BigRig-stats\x032. '
+    '\x035DCC Status\x032, type \x035@LoadBot \x032and \x035@LoadBot-stats\x032. '
     '[(\x0311\x02\x020\x032/\x02\x027) Slots (\x0311\x02\x020\x032/\x02\x02216) Ques Taken] [Next Send: '
     '\x0311\x02\x02Open Slot Ready\x032] [CPS in Use: \x0311\x02\x020\x032] [Highest Cps '
     'Record: \x0311\x02\x024788.6\x032 by \x0311FtpBandit\x032] [Total Files Served: '
@@ -138,8 +138,8 @@ COBRRT = (
     '\x0304,00ON \x0314,00\x95 \x0312,00Mode: \x0304,00Normal \x0314,00\x95'
 )
 
-ZKX = (
-    '\x0304,00\x0314,00\x95 \x0312,00Type:\x0304,00 @Zkx \x0312,00For My List '
+PACKBOT = (
+    '\x0304,00\x0314,00\x95 \x0312,00Type:\x0304,00 @PackBot \x0312,00For My List '
     'Of:\x0304,00 719,041 \x0312,00Files \x0314,00\x95 \x0312,00Slots:\x0304,00 10/10 '
     '\x0314,00\x95 \x0312,00Queued:\x0304,00 0 \x0314,00\x95 \x0312,00Speed:\x0304,00 0cps '
     '\x0314,00\x95 \x0312,00Next: \x0304,00NOW \x0314,00\x95 \x0312,00Served:\x0304,00 '
@@ -147,8 +147,8 @@ ZKX = (
     '\x0312,00Search: \x0304,00ON \x0314,00\x95 \x0312,00Mode: \x0304,00Normal \x0314,00\x95'
 )
 
-ZKX_RAR = (
-    '\x0315,02 Type\x0309,02 @Zkx^ \x0315,02to get my list of \x0309,0239,454 '
+PACKBOT_RAR = (
+    '\x0315,02 Type\x0309,02 @PackBot^ \x0315,02to get my list of \x0309,0239,454 '
     '(5.48 TB) \x0315,02RAR folders \x0304,02\u25a0\x0315,02 Available slots: '
     '\x0309,0228/29 \x0304,02\u25a0\x0315,02 Folders in queue: \x0309,020 '
     '\x0304,02\u25a0\x0315,02 Folders sent: \x0309,0211,334 \x0304,02\u25a0\x0315,02 Transfer '
@@ -444,9 +444,9 @@ ALL_CAPTURED = [
     ('aditerra', ADITERRA),
     ('Wren', WREN),
     ('Kelta', KELTA),
-    ('BigRig', BIGRIG),
+    ('LoadBot', LOADBOT),
     ('cobrrt', COBRRT),
-    ('Zkx', ZKX),
+    ('PackBot', PACKBOT),
     ('Den', DEN),
     ('Q_R_Q', Q_R_Q),
     ('DCCore', DCCORE),
@@ -485,7 +485,7 @@ SPLIT_ADVERTS = [
 
 # Bots serving a SECOND, separate list of RAR folders under a "^" trigger.
 RAR_ADVERTS = [
-    ('Zkx', ZKX_RAR),
+    ('PackBot', PACKBOT_RAR),
     ('Teravista', TERAVISTA_RAR),
     ('ValOgg', VALOGG_RAR),
 ]
@@ -497,9 +497,9 @@ RIGSERV_SLOTS = 'SLOTS 6 6 NOW 0 999 0 77018 10134698994329 0 1788010070 24063 O
 AVENIO_SLOTS = 'SLOTS 3 2 NOW 4 999 0 150623 10762353186689 0 1783537564 216072 OmeNServE v2.60'
 ADITERRA_SLOTS = 'SLOTS 4 4 NOW 0 999 0 184437 1874763496619 0 1787931200 25861 OmenServe v2.73'
 WREN_SLOTS = 'SLOTS 2 2 NOW 1 999 0 389136 1456773738862 0 1781954554 23166 OmeNServE v2.60'
-BIGRIG_SLOTS = 'SLOTS 7 7 NOW 0 216 4788600 19527'
+LOADBOT_SLOTS = 'SLOTS 7 7 NOW 0 216 4788600 19527'
 COBRRT_SLOTS = 'SLOTS 5 0 NOW 0 999 0 32119 133054739706 0 1787075324 11 OmeNServE v2.60'
-ZKX_SLOTS = 'SLOTS 10 10 NOW 0 999 0 719041 3894929430520 0 1786359244 25511 OmenServe v2.73'
+PACKBOT_SLOTS = 'SLOTS 10 10 NOW 0 999 0 719041 3894929430520 0 1786359244 25511 OmenServe v2.73'
 DEN_SLOTS = 'SLOTS 4 4 NOW 0 999 0 10965 80635194448 0 1788036122 23463 OmeNServE v2.60'
 Q_R_Q_SLOTS = 'SLOTS 2 2 NOW 0 999 0 127312 1034287370931 0 1787959965 16873 OmeNServE v2.60'
 DCCORE_SLOTS = 'SLOTS 3 3 NOW 0 999 0 61101 2021971462739 0 260125 272760943592 DCCore v1.10.0-RC3'
@@ -526,9 +526,9 @@ ALL_SLOTS = [
     ('AvenIo', AVENIO_SLOTS),
     ('aditerra', ADITERRA_SLOTS),
     ('Wren', WREN_SLOTS),
-    ('BigRig', BIGRIG_SLOTS),
+    ('LoadBot', LOADBOT_SLOTS),
     ('cobrrt', COBRRT_SLOTS),
-    ('Zkx', ZKX_SLOTS),
+    ('PackBot', PACKBOT_SLOTS),
     ('Den', DEN_SLOTS),
     ('Q_R_Q', Q_R_Q_SLOTS),
     ('DCCore', DCCORE_SLOTS),
@@ -575,9 +575,9 @@ class ReadingRealAdverts(unittest.TestCase):
     """The OmenServe wording - 28 of the 33 bots."""
 
     def test_a_typical_advert(self):
-        advert = irc.parse_channel_advert(ZKX)
+        advert = irc.parse_channel_advert(PACKBOT)
 
-        self.assertEqual(advert["nick"], "Zkx")
+        self.assertEqual(advert["nick"], "PackBot")
         self.assertEqual(advert["files"], 719041)
         self.assertEqual(advert["list_date"], "Aug 10th")
 
@@ -609,7 +609,7 @@ class ReadingRealAdverts(unittest.TestCase):
         double-encoded. That makes them valid UTF-8, so unlike the ones above
         they survive - and strip_control_codes() does not remove them either,
         since it strips mIRC formatting rather than C1."""
-        for text, nick in ((ZKX, "Zkx"), (DJPHANTOM, "DJPhantom"),
+        for text, nick in ((PACKBOT, "PackBot"), (DJPHANTOM, "DJPhantom"),
                            (FALLBACK77, "fallback77"), (AUDIOVAULT, "AudioVault")):
             with self.subTest(nick=nick):
                 self.assertEqual(irc.parse_channel_advert(text)["nick"], nick)
@@ -672,7 +672,7 @@ class ReadingRealAdverts(unittest.TestCase):
     def test_a_missing_size_is_absent_not_zero(self):
         """The same rule parse_search_header() follows: absent means "did not
         say". A freshness check that treats silence as a value invents one."""
-        for text in (ZKX, Q_R_Q, RIGSERV, DJPHANTOM, WREN, DISCO_PAL):
+        for text in (PACKBOT, Q_R_Q, RIGSERV, DJPHANTOM, WREN, DISCO_PAL):
             with self.subTest(text=text[:24]):
                 self.assertNotIn("list_size", irc.parse_channel_advert(text))
 
@@ -686,7 +686,7 @@ class ReadingRealAdverts(unittest.TestCase):
         would read the colour number as part of the count and return a file
         count off by a factor of ten thousand.
         """
-        coloured = ZKX.replace("719,041", "\x0304719,041\x03")
+        coloured = PACKBOT.replace("719,041", "\x0304719,041\x03")
 
         self.assertEqual(irc.parse_channel_advert(coloured)["files"], 719041)
 
@@ -767,21 +767,21 @@ class TheAdvertDoesNotAlwaysFitOneLine(CaptureTestCase):
     def test_ordinary_chatter_after_an_advert_changes_nothing(self):
         """A complete advert followed by the bot saying something. The merge
         re-reads the whole thing, so the fields simply come out the same."""
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", "brb, restarting", now=T0 + 2)
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", "brb, restarting", now=T0 + 2)
 
-        self.assertEqual(self.entry("Zkx")["files"], 719041)
-        self.assertEqual(self.entry("Zkx")["list_date"], "Aug 10th")
+        self.assertEqual(self.entry("PackBot")["files"], 719041)
+        self.assertEqual(self.entry("PackBot")["list_date"], "Aug 10th")
 
     def test_a_later_line_cannot_overwrite_a_field_the_advert_already_gave(self):
         """The patterns take their FIRST match, so a bot chatting about some
         other date after a complete advert cannot move its list date. Echosonic
         works only because its own line 1 ends ON the label with nothing after
         it."""
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", "my next List: Dec 25th maybe", now=T0 + 2)
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", "my next List: Dec 25th maybe", now=T0 + 2)
 
-        self.assertEqual(self.entry("Zkx")["list_date"], "Aug 10th")
+        self.assertEqual(self.entry("PackBot")["list_date"], "Aug 10th")
 
     def test_a_talkative_bot_cannot_walk_the_window_forward(self):
         """The buffer keeps the ORIGINAL timestamp when it grows. Without that,
@@ -839,14 +839,14 @@ class TheAdvertDoesNotAlwaysFitOneLine(CaptureTestCase):
         """Constructed, not captured - nothing in the sample splits three ways.
         The buffer keeps the stitched text, so an advert broken into more than
         two pieces costs nothing extra."""
-        head, _, rest = ZKX.partition("Slots:")
+        head, _, rest = PACKBOT.partition("Slots:")
         middle, _, tail = rest.partition("List:")
 
-        self.capture("Zkx", head, now=T0)
-        self.capture("Zkx", "Slots:" + middle, now=T0 + 1)
-        self.capture("Zkx", "List:" + tail, now=T0 + 2)
+        self.capture("PackBot", head, now=T0)
+        self.capture("PackBot", "Slots:" + middle, now=T0 + 1)
+        self.capture("PackBot", "List:" + tail, now=T0 + 2)
 
-        self.assertEqual(self.entry("Zkx")["list_date"], "Aug 10th")
+        self.assertEqual(self.entry("PackBot")["list_date"], "Aug 10th")
 
     def test_the_stitched_text_cannot_grow_without_bound(self):
         """Asserted on the buffer, for the same reason as the window test above:
@@ -862,22 +862,22 @@ class TheAdvertDoesNotAlwaysFitOneLine(CaptureTestCase):
     def test_the_buffer_does_not_keep_growing(self):
         """One entry per bot, dropped once it is too old to be continued."""
         for index in range(50):
-            self.capture("Zkx", ZKX, now=T0 + index * 60)
+            self.capture("PackBot", PACKBOT, now=T0 + index * 60)
 
         self.assertLessEqual(len(irc._advert_tails), 1)
 
 
 class SPQRSpeaksDifferently(CaptureTestCase):
-    """BigRig and outlook run SPQR, which shares not one phrase with the
+    """LoadBot and outlook run SPQR, which shares not one phrase with the
     OmenServe wording - no colon after "Type", no "Of:", and the count and size
     inside one parenthesis. Both were invisible to this daemon until it was
     taught the sentence.
     """
 
     def test_it_parses(self):
-        advert = irc.parse_channel_advert(BIGRIG)
+        advert = irc.parse_channel_advert(LOADBOT)
 
-        self.assertEqual(advert["nick"], "BigRig")
+        self.assertEqual(advert["nick"], "LoadBot")
         self.assertEqual(advert["files"], 19527)
         self.assertEqual(advert["list_size"], "163812MB")
 
@@ -888,26 +888,26 @@ class SPQRSpeaksDifferently(CaptureTestCase):
         self.assertEqual(advert["files"], 36342)
 
     def test_the_stats_trigger_is_not_mistaken_for_the_nick(self):
-        """The sentence names two triggers - "type @BigRig and
-        @BigRig-stats" - and only the first is the bot."""
-        self.assertEqual(irc.parse_channel_advert(BIGRIG)["nick"], "BigRig")
+        """The sentence names two triggers - "type @LoadBot and
+        @LoadBot-stats" - and only the first is the bot."""
+        self.assertEqual(irc.parse_channel_advert(LOADBOT)["nick"], "LoadBot")
 
     def test_it_publishes_no_date(self):
         """Which is exactly why absent has to mean "did not say": SPQR bots
         would otherwise all read as infinitely stale."""
-        self.assertNotIn("list_date", irc.parse_channel_advert(BIGRIG))
+        self.assertNotIn("list_date", irc.parse_channel_advert(LOADBOT))
 
     def test_it_reaches_the_registry(self):
-        self.capture("BigRig", BIGRIG)
+        self.capture("LoadBot", LOADBOT)
 
-        self.assertEqual(self.entry("BigRig")["files"], 19527)
+        self.assertEqual(self.entry("LoadBot")["files"], 19527)
 
 
 class ASecondListOfRarFolders(CaptureTestCase):
     """Three bots serve a SECOND list beside their loose files: RAR folders,
     advertised in their own message under their own trigger.
 
-    Zkx publishes 719,041 loose files and 39,454 RAR folders. They are two
+    PackBot publishes 719,041 loose files and 39,454 RAR folders. They are two
     different lists with two different triggers, and collapsing them would
     report a number that is neither.
 
@@ -926,28 +926,28 @@ class ASecondListOfRarFolders(CaptureTestCase):
     """
 
     def test_it_parses(self):
-        advert = irc.parse_channel_advert(ZKX_RAR)
+        advert = irc.parse_channel_advert(PACKBOT_RAR)
 
         self.assertIsNone(advert["nick"],
                           "a RAR advert carries a trigger, not a name - "
                           "claiming one is what dropped Bsk's")
         self.assertEqual(advert["rar_folders"], 39454)
         self.assertEqual(advert["rar_size"], "5.48TB")
-        self.assertEqual(advert["rar_trigger"], "Zkx^")
+        self.assertEqual(advert["rar_trigger"], "PackBot^")
 
     def test_the_trigger_suffix_is_not_part_of_the_nick(self):
-        """"Zkx^" is what you type at it; "Zkx" is who sends it. Keeping the
+        """"PackBot^" is what you type at it; "PackBot" is who sends it. Keeping the
         "^" would fail the sender check and drop every one of these."""
-        self.capture("Zkx", ZKX_RAR)
+        self.capture("PackBot", PACKBOT_RAR)
 
-        self.assertIn("zkx", runtime.known_bots)
-        self.assertEqual(self.entry("Zkx")["rar_trigger"], "Zkx^")
+        self.assertIn("packbot", runtime.known_bots)
+        self.assertEqual(self.entry("PackBot")["rar_trigger"], "PackBot^")
 
     def test_a_bot_keeps_both_lists(self):
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", ZKX_RAR, now=T0 + 60)
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", PACKBOT_RAR, now=T0 + 60)
 
-        entry = self.entry("Zkx")
+        entry = self.entry("PackBot")
         self.assertEqual(entry["files"], 719041)
         self.assertEqual(entry["list_date"], "Aug 10th")
         self.assertEqual(entry["rar_folders"], 39454)
@@ -956,10 +956,10 @@ class ASecondListOfRarFolders(CaptureTestCase):
         """Order must not matter. The RAR advert carries no file count and the
         file advert carries no folder count, so whichever lands second must
         leave the other alone."""
-        self.capture("Zkx", ZKX_RAR, now=T0)
-        self.capture("Zkx", ZKX, now=T0 + 60)
+        self.capture("PackBot", PACKBOT_RAR, now=T0)
+        self.capture("PackBot", PACKBOT, now=T0 + 60)
 
-        entry = self.entry("Zkx")
+        entry = self.entry("PackBot")
         self.assertEqual(entry["files"], 719041)
         self.assertEqual(entry["rar_folders"], 39454)
 
@@ -1034,7 +1034,7 @@ class ASecondListOfRarFolders(CaptureTestCase):
     def test_and_accepts_what_bots_actually_use(self):
         """Guard on the guard: a validator that refused everything would pass
         every assertion above and drop every trigger there is."""
-        for good in ("Zkx^", "Bsk^", "rarlist", "bot-rar", "x" * 64):
+        for good in ("PackBot^", "Bsk^", "rarlist", "bot-rar", "x" * 64):
             with self.subTest(trigger=good):
                 self.assertIsNotNone(irc._TRIGGER_RE.match(good))
 
@@ -1042,15 +1042,15 @@ class ASecondListOfRarFolders(CaptureTestCase):
         """Relaxing the check for one wording must not relax it for the two
         that really do put the bot's own nick in the text - that comparison is
         what stops one bot advertising as another."""
-        advert = irc.parse_channel_advert(ZKX)
+        advert = irc.parse_channel_advert(PACKBOT)
 
-        self.assertEqual(str(advert["nick"]).lower(), "zkx")
+        self.assertEqual(str(advert["nick"]).lower(), "packbot")
 
     def test_a_rar_advert_split_across_two_lines_does_not_crash_the_capture(self):
         """From a live console: two AttributeErrors in a row,
         'NoneType' object has no attribute 'lower'.
 
-        ZKX_RAR's "Type @Zkx^ to get my list of ... RAR folders" phrase sits
+        PACKBOT_RAR's "Type @PackBot^ to get my list of ... RAR folders" phrase sits
         near the FRONT of the message; every field the trailing half carries
         (slots, queue, sent, speed, the software tag) is decoration the
         parser does not need. So the essential phrase routinely fits inside
@@ -1081,18 +1081,18 @@ class ASecondListOfRarFolders(CaptureTestCase):
         that call, so a caught exception leaves it exactly where the first
         line put it.
         """
-        head, sep, tail = ZKX_RAR.partition("Available slots:")
+        head, sep, tail = PACKBOT_RAR.partition("Available slots:")
         tail = sep + tail
         self.assertIsNone(irc.parse_channel_advert(tail),
                            "the second line must not parse alone, or this "
                            "test proves nothing about the stitching branch")
 
-        self.capture("Zkx", head, now=T0)
-        self.capture("Zkx", tail, now=T0 + 3)
+        self.capture("PackBot", head, now=T0)
+        self.capture("PackBot", tail, now=T0 + 3)
 
-        self.assertEqual(self.entry("Zkx")["rar_folders"], 39454)
-        self.assertEqual(self.entry("Zkx")["rar_trigger"], "Zkx^")
-        self.assertEqual(self.entry("Zkx")["last_seen"], T0 + 3,
+        self.assertEqual(self.entry("PackBot")["rar_folders"], 39454)
+        self.assertEqual(self.entry("PackBot")["rar_trigger"], "PackBot^")
+        self.assertEqual(self.entry("PackBot")["last_seen"], T0 + 3,
                           "the second line was never actually recorded - "
                           "the exception was only caught, not fixed")
 
@@ -1105,7 +1105,7 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
     READING IT BY POSITION DOES NOT WORK
 
     Three layouts in one channel. fallback77's line is one field shorter than
-    everyone else's, so the index that holds 719,041 files for Zkx holds
+    everyone else's, so the index that holds 719,041 files for PackBot holds
     14,247,378,895,149 for fallback77 - which as a file count is fourteen
     trillion files, and would have gone onto the dashboard as one.
 
@@ -1115,7 +1115,7 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
     """
 
     def test_the_common_layout(self):
-        found = irc.parse_advert_slots(ZKX_SLOTS, 719041)
+        found = irc.parse_advert_slots(PACKBOT_SLOTS, 719041)
 
         self.assertEqual(found["list_bytes"], 3894929430520)      # 3.54 TB
         self.assertEqual(found["software"], "OmenServe v2.73")
@@ -1136,9 +1136,9 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
         self.assertEqual(fields[6], "39659", "the count is at 6, not 7")
 
     def test_spqr_publishes_no_size_and_none_is_invented(self):
-        """BigRig's line ends at the file count. There is no field beside it,
+        """LoadBot's line ends at the file count. There is no field beside it,
         so there is no size - not a zero, and not whatever came before."""
-        found = irc.parse_advert_slots(BIGRIG_SLOTS, 19527)
+        found = irc.parse_advert_slots(LOADBOT_SLOTS, 19527)
 
         self.assertNotIn("list_bytes", found)
 
@@ -1147,13 +1147,13 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
         is a fact about that bot. A line that does not agree is a fact about
         the line. Both mean "record nothing" and they are still not the same,
         so one is {} and the other is None."""
-        self.assertEqual(irc.parse_advert_slots(BIGRIG_SLOTS, 19527), {})
-        self.assertIsNone(irc.parse_advert_slots(BIGRIG_SLOTS, 999))
+        self.assertEqual(irc.parse_advert_slots(LOADBOT_SLOTS, 19527), {})
+        self.assertIsNone(irc.parse_advert_slots(LOADBOT_SLOTS, 999))
 
     def test_a_line_that_disagrees_with_the_advert_is_refused(self):
         """If the count is not in the line at all, nothing in it can be located
         with confidence, so none of it is used."""
-        self.assertIsNone(irc.parse_advert_slots(ZKX_SLOTS, 12345))
+        self.assertIsNone(irc.parse_advert_slots(PACKBOT_SLOTS, 12345))
 
     def test_an_ambiguous_count_is_refused(self):
         """Two fields carrying the same number means two candidate neighbours.
@@ -1179,11 +1179,11 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
         """A count of zero is not something to calibrate on. Three of the 27
         captured lines carry exactly one "0" field, so a bot whose list is
         still empty - a fresh install, which is every install once - would
-        match it and read the field beside it as its library size. BigRig's
+        match it and read the field beside it as its library size. LoadBot's
         line would make that 216 bytes.
         """
-        self.assertIsNone(irc.parse_advert_slots(BIGRIG_SLOTS, 0))
-        self.assertIsNone(irc.parse_advert_slots(BIGRIG_SLOTS, None))
+        self.assertIsNone(irc.parse_advert_slots(LOADBOT_SLOTS, 0))
+        self.assertIsNone(irc.parse_advert_slots(LOADBOT_SLOTS, None))
 
     def test_a_file_offer_is_not_a_slots_line(self):
         """Serving bots send CTCPs other than SLOTS. fallback77 offers
@@ -1206,8 +1206,8 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
     def test_nothing_is_read_without_a_count_to_check_against(self):
         """The calibration IS the safety check, so a bot that has not
         advertised gets nothing read from its CTCP."""
-        self.assertIsNone(irc.parse_advert_slots(ZKX_SLOTS, None))
-        self.assertIsNone(irc.parse_advert_slots(ZKX_SLOTS, 0))
+        self.assertIsNone(irc.parse_advert_slots(PACKBOT_SLOTS, None))
+        self.assertIsNone(irc.parse_advert_slots(PACKBOT_SLOTS, 0))
 
     def test_the_software_version_is_read_as_a_suffix(self):
         """Read as whatever trails the numbers rather than at an index, so the
@@ -1220,19 +1220,19 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
             "OmeNServE v")
 
     def test_spqr_sends_no_version_and_none_is_invented(self):
-        self.assertNotIn("software", irc.parse_advert_slots(BIGRIG_SLOTS, 19527))
+        self.assertNotIn("software", irc.parse_advert_slots(LOADBOT_SLOTS, 19527))
 
     def test_a_bot_that_has_not_advertised_gets_nothing_recorded(self):
         """Through the capture path: a CTCP on its own registers nobody."""
-        self.capture("Zkx", CTCP + ZKX_SLOTS + CTCP)
+        self.capture("PackBot", CTCP + PACKBOT_SLOTS + CTCP)
 
         self.assertEqual(runtime.known_bots, {})
 
     def test_the_advert_and_the_ctcp_together(self):
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", CTCP + ZKX_SLOTS + CTCP, now=T0 + 5)
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", CTCP + PACKBOT_SLOTS + CTCP, now=T0 + 5)
 
-        entry = self.entry("Zkx")
+        entry = self.entry("PackBot")
         self.assertEqual(entry["files"], 719041)
         self.assertEqual(entry["list_date"], "Aug 10th")
         self.assertEqual(entry["list_bytes"], 3894929430520)
@@ -1241,11 +1241,11 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
     def test_a_stranger_cannot_resize_a_bot_s_library(self):
         """The CTCP is looked up by SENDER, so someone else's SLOTS line finds
         no entry of that bot's to write into."""
-        self.capture("Zkx", ZKX, now=T0)
-        forged = ZKX_SLOTS.replace("3894929430520", "9000000000000")
+        self.capture("PackBot", PACKBOT, now=T0)
+        forged = PACKBOT_SLOTS.replace("3894929430520", "9000000000000")
         self.capture("randomuser", CTCP + forged + CTCP, now=T0 + 5)
 
-        self.assertNotIn("list_bytes", self.entry("Zkx"))
+        self.assertNotIn("list_bytes", self.entry("PackBot"))
 
     def test_every_captured_slots_line_reads_or_refuses(self):
         """The whole sample. Every one of the 27 either yields a size that
@@ -1388,7 +1388,7 @@ class NotAnAdvert(unittest.TestCase):
         self.assertIsNone(irc.parse_channel_advert("anyone got the new Slayer?"))
 
     def test_someone_telling_a_friend_what_to_type(self):
-        self.assertIsNone(irc.parse_channel_advert("just type @Zkx and wait"))
+        self.assertIsNone(irc.parse_channel_advert("just type @PackBot and wait"))
 
     def test_a_count_with_no_trigger(self):
         self.assertIsNone(irc.parse_channel_advert("For My List Of: 500 Files"))
@@ -1398,7 +1398,7 @@ class NotAnAdvert(unittest.TestCase):
         would - and an advert is a bot describing its own list, so without a
         count there is nothing to describe."""
         self.assertIsNone(irc.parse_channel_advert(
-            "welcome - Type: @Zkx in the channel and he will send you his list"))
+            "welcome - Type: @PackBot in the channel and he will send you his list"))
 
     def test_a_bot_quoted_in_conversation(self):
         self.assertIsNone(irc.parse_channel_advert(
@@ -1406,7 +1406,7 @@ class NotAnAdvert(unittest.TestCase):
 
     def test_a_search_result_line(self):
         self.assertIsNone(irc.parse_channel_advert(
-            "!Zkx Slayer - Angel Of Death.mp3  ::INFO:: 4.6MB"))
+            "!PackBot Slayer - Angel Of Death.mp3  ::INFO:: 4.6MB"))
 
     def test_a_file_offer_from_a_serving_bot(self):
         """fallback77 advertises individual files between its list adverts.
@@ -1429,12 +1429,12 @@ class TheSenderIsTheAuthority(CaptureTestCase):
     """
 
     def test_an_advert_matching_its_sender_is_recorded(self):
-        self.capture("Zkx", ZKX)
+        self.capture("PackBot", PACKBOT)
 
-        self.assertEqual(self.entry("Zkx")["files"], 719041)
+        self.assertEqual(self.entry("PackBot")["files"], 719041)
 
     def test_a_user_claiming_to_be_a_bot_is_ignored(self):
-        self.capture("randomuser", ZKX)
+        self.capture("randomuser", PACKBOT)
 
         self.assertEqual(runtime.known_bots, {},
                          "a user impersonated a bot and it was believed")
@@ -1450,22 +1450,22 @@ class TheSenderIsTheAuthority(CaptureTestCase):
     def test_the_match_is_case_insensitive(self):
         """IRC nicks are case-insensitive, and a server may echo a different
         case than the bot uses inside its own advert."""
-        self.capture("ZKX", ZKX)
+        self.capture("PACKBOT", PACKBOT)
 
-        self.assertIn("zkx", runtime.known_bots)
+        self.assertIn("packbot", runtime.known_bots)
 
     def test_the_sender_supplies_the_casing_too(self):
         """The advert text is a template the bot wrote once; the sender nick is
         what the server says it is called right now. That is the one somebody
         would type at it, so that is the one worth storing."""
-        self.capture("ZKX", ZKX)      # the text says "Zkx"
+        self.capture("PACKBOT", PACKBOT)      # the text says "PackBot"
 
-        self.assertEqual(self.entry("Zkx")["nick"], "ZKX")
+        self.assertEqual(self.entry("PackBot")["nick"], "PACKBOT")
 
     def test_a_private_message_is_not_a_channel_advert(self):
         """Adverts are broadcast. A direct message shaped like one is somebody
         trying something."""
-        self.capture("Zkx", ZKX, channel="DCCoreWin")
+        self.capture("PackBot", PACKBOT, channel="DCCoreWin")
 
         self.assertEqual(runtime.known_bots, {})
 
@@ -1473,35 +1473,35 @@ class TheSenderIsTheAuthority(CaptureTestCase):
         """Bots send a CTCP SLOTS seconds after their advert. It is not an
         advert and must not be treated as one - nor as a continuation of the
         advert it follows."""
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", "\x01SLOTS 10 10 NOW 0 999 0 719041 3894929430520\x01",
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", "\x01SLOTS 10 10 NOW 0 999 0 719041 3894929430520\x01",
                      now=T0 + 5)
 
-        self.assertEqual(self.entry("Zkx")["files"], 719041)
+        self.assertEqual(self.entry("PackBot")["files"], 719041)
 
     def test_ordinary_chatter_registers_nobody(self):
-        self.capture("Zkx", "back in 10")
+        self.capture("PackBot", "back in 10")
 
         self.assertEqual(runtime.known_bots, {})
 
     def test_a_later_advert_updates_rather_than_duplicates(self):
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", ZKX.replace("719,041", "720,000"), now=T0 + 300)
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", PACKBOT.replace("719,041", "720,000"), now=T0 + 300)
 
         self.assertEqual(len(runtime.known_bots), 1)
-        self.assertEqual(self.entry("Zkx")["files"], 720000)
+        self.assertEqual(self.entry("PackBot")["files"], 720000)
 
     def test_a_field_a_bot_stops_publishing_is_not_forgotten(self):
         """Adverts get truncated. Dropping a date because one advert arrived
         without it would flip a bot to "freshness unknown" at random."""
-        truncated = ZKX[:ZKX.index("List:")]
+        truncated = PACKBOT[:PACKBOT.index("List:")]
         self.assertIsNone(irc.parse_channel_advert(truncated).get("list_date"),
                           "the fixture still carries a date - nothing is tested")
 
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", truncated, now=T0 + 300)
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", truncated, now=T0 + 300)
 
-        self.assertEqual(self.entry("Zkx")["list_date"], "Aug 10th")
+        self.assertEqual(self.entry("PackBot")["list_date"], "Aug 10th")
 
 
 class TheWholeCapturedSample(CaptureTestCase):
@@ -1521,7 +1521,7 @@ class TheWholeCapturedSample(CaptureTestCase):
         self.assertEqual(self.entry("[rigserv]")["files"], 77018)
         self.assertEqual(self.entry("Q_R_Q")["list_date"], "Aug 28th")
         self.assertEqual(self.entry("DCCoreWin")["list_size"], "1.21TB")
-        self.assertEqual(self.entry("BigRig")["list_size"], "163812MB")
+        self.assertEqual(self.entry("LoadBot")["list_size"], "163812MB")
 
     def test_every_entry_knows_where_and_when_it_was_seen(self):
         for nick, entry in runtime.known_bots.items():
@@ -1559,25 +1559,25 @@ class SurvivingARestart(CaptureTestCase):
         runtime.known_bots_flushed_at = 0.0
 
     def test_a_registry_round_trips(self):
-        self.capture("Zkx", ZKX)
+        self.capture("PackBot", PACKBOT)
         irc._flush_known_bots(force=True)
         runtime.known_bots.clear()
 
         runtime.known_bots.update(db.load_known_bots())
 
-        self.assertEqual(runtime.known_bots["zkx"]["files"], 719041)
-        self.assertEqual(runtime.known_bots["zkx"]["list_date"], "Aug 10th")
+        self.assertEqual(runtime.known_bots["packbot"]["files"], 719041)
+        self.assertEqual(runtime.known_bots["packbot"]["list_date"], "Aug 10th")
 
     def test_both_of_a_bot_s_lists_survive(self):
-        self.capture("Zkx", ZKX, now=T0)
-        self.capture("Zkx", ZKX_RAR, now=T0 + 60)
+        self.capture("PackBot", PACKBOT, now=T0)
+        self.capture("PackBot", PACKBOT_RAR, now=T0 + 60)
         irc._flush_known_bots(force=True)
         runtime.known_bots.clear()
 
         runtime.known_bots.update(db.load_known_bots())
 
-        self.assertEqual(runtime.known_bots["zkx"]["files"], 719041)
-        self.assertEqual(runtime.known_bots["zkx"]["rar_folders"], 39454)
+        self.assertEqual(runtime.known_bots["packbot"]["files"], 719041)
+        self.assertEqual(runtime.known_bots["packbot"]["rar_folders"], 39454)
 
     def test_no_file_yet_is_an_empty_registry_not_an_error(self):
         self.assertEqual(db.load_known_bots(), {})
@@ -1606,7 +1606,7 @@ class SurvivingARestart(CaptureTestCase):
     def test_writes_are_throttled(self):
         """Thirty-three bots on a five-minute cycle is a write every ten
         seconds for nothing - the file is read once, at startup."""
-        self.capture("Zkx", ZKX)                      # first flush
+        self.capture("PackBot", PACKBOT)                      # first flush
         written_at = os.path.getmtime(self.path)
         stamp = runtime.known_bots_flushed_at
 
@@ -1616,7 +1616,7 @@ class SurvivingARestart(CaptureTestCase):
         self.assertEqual(os.path.getmtime(self.path), written_at)
 
     def test_the_throttle_lets_a_later_write_through(self):
-        self.capture("Zkx", ZKX)
+        self.capture("PackBot", PACKBOT)
         stamp = runtime.known_bots_flushed_at
 
         self.assertTrue(

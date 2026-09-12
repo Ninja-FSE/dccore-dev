@@ -59,6 +59,25 @@ FORBIDDEN = {
     "33870ebe3595990b": "a channel this bot serves",
     "0f3fcff0f5c1e22d": "a channel this bot serves",
     "6205a0d9a6086904": "a channel this bot serves",
+    # THE FIFTH SWEEP, and the one that showed the sweep itself needs a
+    # method. A scrub of five known names still left three more in the tree,
+    # and a fourth that could not be ruled out - all of them nick-shaped
+    # tokens pasted from a live console into a comment or a fixture, none
+    # findable by a denylist that had not been taught them.
+    #
+    # What found them: extract the real `git archive` export, list every token
+    # used in an IRC nick POSITION - a `!nick`/`@nick` request, a
+    # ":nick!user@host PRIVMSG" prefix, a "nick": fixture field - and subtract
+    # the invented cast. What is left is short enough to read by eye, and the
+    # real ones stand out because they arrive with a real file count and a
+    # real library size beside them.
+    "d50e92c47be2206c": "a real bot, with its real file count and library size",
+    "4d65a69389a3655d": "a real bot, from a pasted advert line",
+    "d316ed577e44e5ac": "a real requester, with a real request line",
+    # Not proven real, and replaced anyway: it sat in the same fixtures as a
+    # confirmed one, so it was most likely seen beside it. Replacing an
+    # invented name costs nothing; missing a real one ships it.
+    "62f42c35a98d86c1": "a bot seen alongside a confirmed real one",
 }
 
 # Compared lowercased, so one hash covers every capitalisation.

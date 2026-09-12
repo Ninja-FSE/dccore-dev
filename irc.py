@@ -737,18 +737,18 @@ def parse_search_header(text):
 # THREE WORDINGS, PLUS OUR OWN
 #
 #   OmenServe / OmenTweak / DCCore - 28 of the 33, the "Type: @nick" wording:
-#     Type: @Zkx For My List Of: 719,041 Files <> Slots: 10/10 <> Queued: 0
+#     Type: @PackBot For My List Of: 719,041 Files <> Slots: 10/10 <> Queued: 0
 #     <> Speed: 0cps <> Served: 3,456,016 <> List: Aug 10th <> Mode: Normal
 #
-#   SPQR - BigRig and outlook, a different sentence entirely, and the only
+#   SPQR - LoadBot and outlook, a different sentence entirely, and the only
 #   family that puts a size in the PRIVMSG advert:
-#     For My List(19527files:163812MB) and DCC Status, type @BigRig and
-#     @BigRig-stats. [(0/7) Slots (0/216) Ques Taken]
+#     For My List(19527files:163812MB) and DCC Status, type @LoadBot and
+#     @LoadBot-stats. [(0/7) Slots (0/216) Ques Taken]
 #
 #   RAR folders - a SECOND, separate list some bots serve beside their loose
 #   files, under a "^"-suffixed trigger, with its own count and its own size:
-#     Type @Zkx^ to get my list of 39,454 (5.48 TB) RAR folders
-#   Zkx publishes both: 719,041 loose files AND 39,454 RAR folders. They are
+#     Type @PackBot^ to get my list of 39,454 (5.48 TB) RAR folders
+#   PackBot publishes both: 719,041 loose files AND 39,454 RAR folders. They are
 #   two different lists and are kept apart in the registry for that reason.
 #
 # WHAT THE SAMPLE SETTLES
@@ -821,12 +821,12 @@ _ADVERT_DATE_RE = re.compile(
     r"(?:List:|Date:|created)\s*([A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?)",
     re.IGNORECASE)
 
-# SPQR: "For My List(19527files:163812MB) ... type @BigRig and @BigRig-stats."
+# SPQR: "For My List(19527files:163812MB) ... type @LoadBot and @LoadBot-stats."
 _SPQR_LIST_RE = re.compile(
     r"For\s+My\s+List\s*\(\s*([\d,]+)\s*files\s*:\s*([\d,.]+\s*[KMGT]?B)\s*\)", re.IGNORECASE)
 _SPQR_NICK_RE = re.compile(r"type\s+@(\S+)", re.IGNORECASE)
 
-# The separate RAR-folder list: "Type @Zkx^ to get my list of 39,454 (5.48 TB)
+# The separate RAR-folder list: "Type @PackBot^ to get my list of 39,454 (5.48 TB)
 # RAR folders". The trigger carries a "^" the bot's own nick does not.
 # THE WHOLE TRIGGER, not "a nick and then a caret". mx.rarserver's default
 # trigger is @<nick>^, and the "^" is what the old pattern matched on - but the
@@ -892,7 +892,7 @@ def _parse_omenserve_advert(clean):
 
 
 def _parse_spqr_advert(clean):
-    """SPQR's wording: "For My List(19527files:163812MB) ... type @BigRig".
+    """SPQR's wording: "For My List(19527files:163812MB) ... type @LoadBot".
 
     No colon after "Type", no "Of:", and the count and size share one
     parenthesis - so none of the patterns above see it, and both bots running
@@ -916,16 +916,16 @@ def _parse_spqr_advert(clean):
 
 
 def _parse_rar_folder_advert(clean):
-    """The separate RAR-folder list: "Type @Zkx^ to get my list of 39,454
+    """The separate RAR-folder list: "Type @PackBot^ to get my list of 39,454
     (5.48 TB) RAR folders".
 
-    A different list from the same bot, not a different bot - Zkx advertises
+    A different list from the same bot, not a different bot - PackBot advertises
     719,041 loose files in one message and 39,454 RAR folders in another.
 
     NO IDENTITY CLAIM, which is the difference from the other two parsers and
     the reason this one used to throw good adverts away. It returned the text
     inside the trigger as `nick`, and the caller compares that against the
-    sender. That works for Zkx, whose trigger happens to be its nick with a
+    sender. That works for PackBot, whose trigger happens to be its nick with a
     "^" on the end. It fails for anyone else:
 
         <+Bsk-> Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
@@ -969,7 +969,7 @@ _ADVERT_PARSERS = (_parse_omenserve_advert, _parse_spqr_advert, _parse_rar_folde
 
 # What each family is entitled to write into a registry entry. A bot's RAR
 # advert must not overwrite the count of its loose-file list, and the other way
-# round - they are two lists and Zkx publishes both.
+# round - they are two lists and PackBot publishes both.
 _ADVERT_FIELDS = {
     "omenserve": ("files", "list_date", "list_size"),
     "spqr": ("files", "list_size"),

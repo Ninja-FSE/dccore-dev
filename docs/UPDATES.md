@@ -878,8 +878,8 @@ inside the trigger and returned it as `nick`, the caller compared that against
 the sender, they differed, and the whole advert was discarded.
 
 That worked for the three bots it was written against, whose triggers happen
-to be their nick with a `^` on the end. Its docstring said so outright: *"Zkx
-sends this, 'Zkx^' does not exist."* True for Zkx. Not a rule.
+to be their nick with a `^` on the end. Its docstring said so outright: *"PackBot
+sends this, 'PackBot^' does not exist."* True for PackBot. Not a rule.
 
 **The trigger is configurable and is not a name.** From the operator who
 reported it: mx.rarserver's default is `@<nick>^` *"but he could have w/e"*.
@@ -4424,7 +4424,7 @@ working feature on upgrade and one that passed everything would not be a cap.
 **`Vibessono` is a real bot**, one of the 32 observed advertising in the
 channel #133 was written from - the issue discusses it by name, as the only one
 of the 32 publishing no list date. It was being used as an ordinary fixture
-nick in three test files, 33 times, and `tests/` ships. Renamed to `TapeDeck`.
+nick in three test files, 33 times, and `tests/` ships. Renamed to `ReelBot`.
 
 The distinction that matters, since this project deliberately does the
 opposite elsewhere: `tests/test_advert_listener.py` says **"THE FIXTURES ARE

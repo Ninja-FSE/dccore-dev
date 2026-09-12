@@ -53,10 +53,10 @@ class WhatTheyAdvertisedWhenWeFetched(DCCoreTestCase):
                                  runtime.known_bots.update(self.original)))
 
     def test_it_records_what_that_bot_published(self):
-        runtime.known_bots["tapedeck"] = {
-            "nick": "TapeDeck", "files": 12004, "list_date": "Aug 28th"}
+        runtime.known_bots["reelbot"] = {
+            "nick": "ReelBot", "files": 12004, "list_date": "Aug 28th"}
 
-        self.assertEqual(list_fetch._advert_snapshot("TapeDeck"),
+        self.assertEqual(list_fetch._advert_snapshot("ReelBot"),
                          {"files": 12004, "list_date": "Aug 28th"})
 
     def test_a_bot_we_have_never_seen_records_nothing(self):
@@ -132,13 +132,13 @@ class TheSummariesCarryIt(DCCoreTestCase):
         self.addCleanup(lambda: (runtime.known_bots.clear(),
                                  runtime.known_bots.update(self.original)))
         runtime.known_bots.update({
-            "tapedeck": {"nick": "TapeDeck", "files": 12004,
+            "reelbot": {"nick": "ReelBot", "files": 12004,
                           "list_date": "Aug 28th"},
             "bigtruck": {"nick": "BigTruck", "files": 8110,
                          "list_date": "Aug 28th"},
         })
         self.set_config(fetched_bot_lists={
-            "tapedeck": {"bot": "TapeDeck", "fetched_at": 1,
+            "reelbot": {"bot": "ReelBot", "fetched_at": 1,
                           "entry_count": 12004,
                           "advert_when_fetched": {"files": 12004,
                                                   "list_date": "Aug 28th"}},
@@ -153,7 +153,7 @@ class TheSummariesCarryIt(DCCoreTestCase):
                 for row in webserver.build_fetched_bot_list_summaries()}
 
     def test_an_unchanged_list_reads_current(self):
-        self.assertEqual(self.rows()["TapeDeck"]["freshness"], "current")
+        self.assertEqual(self.rows()["ReelBot"]["freshness"], "current")
 
     def test_a_changed_list_reads_changed(self):
         self.assertEqual(self.rows()["BigTruck"]["freshness"], "changed")
@@ -178,7 +178,7 @@ class TheSummariesCarryIt(DCCoreTestCase):
     def test_the_existing_fields_are_untouched(self):
         """The switcher renders bot and count; adding freshness must not
         disturb what was already there."""
-        row = self.rows()["TapeDeck"]
+        row = self.rows()["ReelBot"]
 
         self.assertEqual(row["count"], 12004)
         self.assertEqual(row["fetched_at"], 1)
@@ -332,18 +332,18 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
             list_fetch.auto_refetch_worker(sleep=stop)
 
     def test_a_list_its_bot_says_has_changed_is_due(self):
-        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"})
-        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+        self.hold("ReelBot", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("ReelBot", {"files": 250, "list_date": "Sep 6th"})
 
         self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9),
-                         ["TapeDeck"])
+                         ["ReelBot"])
 
     def test_a_list_that_has_not_changed_is_left_alone(self):
         """Otherwise this is a timer, and a timer re-asks every bot for a list
         we already have."""
         same = {"files": 100, "list_date": "Aug 1st"}
-        self.hold("TapeDeck", same)
-        self.advertise("TapeDeck", same)
+        self.hold("ReelBot", same)
+        self.advertise("ReelBot", same)
 
         self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9), [])
 
@@ -351,8 +351,8 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
         """A bot that publishes no date gives no evidence either way, and
         acting on no evidence is what makes an automatic feature
         untrustworthy."""
-        self.hold("TapeDeck", {})
-        self.advertise("TapeDeck", {"files": 250})
+        self.hold("ReelBot", {})
+        self.advertise("ReelBot", {"files": 250})
 
         self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9), [])
 
@@ -360,8 +360,8 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
         """It spends other people's bandwidth and other people's slots, which
         is a decision to make rather than one to inherit."""
         self.set_config(AUTO_REFETCH_LISTS=False)
-        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"})
-        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+        self.hold("ReelBot", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("ReelBot", {"files": 250, "list_date": "Sep 6th"})
 
         self.assertEqual(list_fetch.lists_worth_refetching(now=10 ** 9), [])
 
@@ -369,16 +369,16 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
         """A bot rebuilding its list hourly would otherwise be re-fetched
         hourly, however loudly its advert changed."""
         self.set_config(AUTO_REFETCH_INTERVAL_HOURS=24)
-        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"},
+        self.hold("ReelBot", {"files": 100, "list_date": "Aug 1st"},
                   fetched_at=1000.0)
-        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+        self.advertise("ReelBot", {"files": 250, "list_date": "Sep 6th"})
 
         # An hour after the fetch: changed, but not yet stale enough.
         self.assertEqual(list_fetch.lists_worth_refetching(now=1000.0 + 3600), [])
         # Two days after: due.
         self.assertEqual(
             list_fetch.lists_worth_refetching(now=1000.0 + 48 * 3600),
-            ["TapeDeck"])
+            ["ReelBot"])
 
     def test_the_stalest_go_first_and_a_sweep_is_capped(self):
         """A bot back after a month offline has a lot of stale lists, and
@@ -398,8 +398,8 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
     def test_a_sweep_asks_through_the_same_enqueue_the_dashboard_uses(self):
         """So the slot limits, the duplicate guard and the queue ceiling all
         apply exactly as they do to a fetch started by hand."""
-        self.hold("TapeDeck", {"files": 100, "list_date": "Aug 1st"})
-        self.advertise("TapeDeck", {"files": 250, "list_date": "Sep 6th"})
+        self.hold("ReelBot", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("ReelBot", {"files": 250, "list_date": "Sep 6th"})
         calls = []
         import webserver
         real = webserver.build_list_fetch_enqueue_result
@@ -413,7 +413,7 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
 
         started = list_fetch.refetch_due_lists(log=lambda *_a: None, now=10 ** 9)
 
-        self.assertEqual(calls, [{"bot": "TapeDeck"}])
+        self.assertEqual(calls, [{"bot": "ReelBot"}])
         # `started` is what the enqueue ACCEPTED, and in this fixture it
         # refuses - there is no live connection to ask over. That is the right
         # answer and worth pinning: a sweep reports what was actually queued,
