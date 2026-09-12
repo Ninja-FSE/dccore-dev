@@ -140,6 +140,13 @@ RUNTIME_FLAGS = {
 }
 
 
+# Where a write from a thread that outlived its test goes. One path for the
+# whole run, inside the system temp directory, and never created: the point is
+# that it is not data/, not that anything reads it.
+_ORPHANED_WRITE_SINK = os.path.join(
+    tempfile.gettempdir(), "dccore-orphaned-test-write", "fetch_history.json")
+
+
 def reset_config(**overrides):
     """Return config to a known-clean state, then apply any overrides.
 
@@ -559,7 +566,19 @@ class DCCoreTestCase(unittest.TestCase):
         for tree in self._trees:
             tree.cleanup()
         import db
-        db.FETCH_HISTORY_FILE = self._real_fetch_history_file
+        # NOT RESTORED to the real path, deliberately. dcc_fetch's dispatcher
+        # persists the fetch history every 2s on a daemon thread that outlives
+        # the test that started it, so restoring the real path here opens a
+        # window: a tick landing between this line and the end of the run
+        # writes the operator's own data/fetch_history.json. That is what
+        # preflight's state-write guard kept catching - intermittently, because
+        # it needs a 2s tick to land inside a teardown, which is exactly the
+        # kind of failure that reads as a flake and is not one.
+        #
+        # Pointed at a dead temp path instead: a late tick then fails to write
+        # a file nobody reads, which costs nothing, while the real one is never
+        # a target at any point in the run.
+        db.FETCH_HISTORY_FILE = _ORPHANED_WRITE_SINK
         db.NOTICES_FILE = self._real_notices_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
         db.DOWNLOAD_COUNTS_FILE = self._real_download_counts_file

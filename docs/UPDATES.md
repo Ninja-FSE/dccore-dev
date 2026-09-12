@@ -238,6 +238,50 @@ fake must only end the way the code under test ends it.
 
 ---
 
+### 🟢 A thread that outlived its test wrote real state
+
+Preflight's state-write guard kept failing with
+
+    THE SUITE WROTE REAL STATE FILES:
+      modified dataetch_history.json
+
+and passing on the next run with nothing changed. Read as a flake twice, and
+re-run past. It is not a flake.
+
+`dcc_fetch`'s dispatcher persists the fetch history **every 2 seconds on a
+daemon thread** that outlives the test that started it. `tests/support.py`
+redirected `db.FETCH_HISTORY_FILE` into a temp directory for each test and
+restored the **real path** in `tearDown` - so a tick landing between that
+restore and the end of the run wrote the operator's own
+`data/fetch_history.json`. It needs a 2-second tick to fall inside a teardown,
+which is why it appeared perhaps one run in three.
+
+The restore now points at a dead temp path instead of the real one. A late
+tick then fails to write a file nobody reads, which costs nothing, and the
+real file is **never a target at any point in the run** - there is no window
+left to land in.
+
+    after a test finishes, db.FETCH_HISTORY_FILE points at:
+      ...\Temp\dccore-orphaned-test-writeetch_history.json
+    is that the operator's real file? -> no
+
+#### The same shape as the drain flake, found independently
+
+The co-maintainer hit this class on #413 at nearly the same time, in a
+different thread: `announce._ensure_debug_drain()` starts a drain that never
+stops, re-reads `sys.modules['oserve']` every loop, and therefore writes stray
+debug lines into whatever the CURRENT test's fake socket is.
+
+Two threads, one shape: **a daemon thread that outlives its test and
+re-resolves its target on every loop attaches itself to whatever is current.**
+One of them contaminated assertions; this one wrote real operator data.
+
+That is the useful generalisation, and it suggests where to look next rather
+than only what to fix now: any module-level `_ensure_*` that starts a thread,
+and any teardown that restores a path a live thread still holds.
+
+---
+
 ### 🔴 A rebuild that is working is not hung
 
 Reported from the live bot: **`Failed: timed out after 1800s`**, on a library
