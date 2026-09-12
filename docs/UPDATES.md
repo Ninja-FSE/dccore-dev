@@ -4,6 +4,39 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
 
+### 🟢 One test leaked a channel into every later one
+
+Chased as a flake twice before it was read as a leak, which is the part worth
+recording.
+
+`test_a_bot_nowhere_we_know_of_falls_back_to_the_first_channel` failed inside
+a preflight run with
+
+    'PRIVMSG #one :' not found in 'PRIVMSG #dccore-test :...'
+
+naming a channel from a test file it has nothing to do with - in a session
+where three consecutive full suites had just passed, and where preflight's own
+second pass passed too.
+
+**`BROADCAST_SEARCH_CHANNEL` was never reset between tests.**
+`tests/test_config_overrides.py` sets it while checking that `settings.conf`
+overrides a module default, which is exactly what that file is for, and
+nothing put it back. Every later test in the run then saw a channel it never
+configured - and `dcc_fetch` reads that value as the fallback for a bot
+presence cannot place, so the leak silently redirected fetch requests.
+
+Reproduced deterministically before fixing anything: set the value, run the
+one test, watch it fail with the identical message. That is the difference
+between a flake and a leak, and it took two false starts to go looking for it.
+
+`RUNTIME_FLAGS` already covered live state, and every container in
+`runtime.py` is emptied between tests. **Ordinary config values with a
+module-level default had nothing**, and they are the harder case: a test that
+changes one is usually testing something else entirely, so nothing about it
+looks like state management. `SETTINGS_DEFAULTS` now covers them, with a
+fixture invariant that the list is not empty and that every name in it is a
+real setting - a typo there would reset nothing and say nothing.
+
 ### 🔴 A rename carries the user's state
 
 Found while checking #376's premise - that `config.channel_users` can serve as
