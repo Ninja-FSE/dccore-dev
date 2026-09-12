@@ -863,17 +863,17 @@ dead code. The guard is named now.
 
 Seen in a live console:
 
-    [ADVERT] Bsk- advertised as 'Bsk' - ignoring; the sender is the authority
+    [ADVERT] SomeBot- advertised as 'SomeBot' - ignoring; the sender is the authority
     on who a bot is.
 
 The log line is right about the principle and the code was applying it to the
-wrong field. **Bsk's RAR list was never learned at all.**
+wrong field. **SomeBot's RAR list was never learned at all.**
 
 **What the advert actually says:**
 
-    <+Bsk-> Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+    <+SomeBot-> Type @SomeBot^ to get my list of 39,454 (5.48 TB) RAR folders
 
-Sender `Bsk-`, trigger `Bsk^`. `_parse_rar_folder_advert()` took the text
+Sender `SomeBot-`, trigger `SomeBot^`. `_parse_rar_folder_advert()` took the text
 inside the trigger and returned it as `nick`, the caller compared that against
 the sender, they differed, and the whole advert was discarded.
 
@@ -910,7 +910,7 @@ shortcut is lost.
 
 **What this does not do yet.** A list fetch still sends `@<nick>`, so the
 stored trigger is not used to *ask* for a RAR list - it is recorded, and
-`bot_publishes_a_rar_list()` now answers correctly for bots like Bsk that were
+`bot_publishes_a_rar_list()` now answers correctly for bots like SomeBot that were
 previously invisible. Asking by trigger is a separate change with its own
 request type.
 

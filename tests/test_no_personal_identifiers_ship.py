@@ -3,10 +3,17 @@
 `.gitattributes` export-ignores exactly two files - `docs/UPDATES.md` and
 `docs/PUBLIC-REPO-WORKFLOW.md`. EVERYTHING else in the repository reaches the
 public tree, `tests/` very much included, and this project has shipped
-identifiers four times already: a serving bot's nick in two test files, a
-real channel in a changelog, an operator's own paths in fixtures, and - the
-fourth time - three of an operator's real channel names plus a real bot's
-nick, in a fix's own comments, docstrings and assertions.
+identifiers six times already: a serving bot's nick in two test files, a
+real channel in a changelog, an operator's own paths in fixtures, the
+fourth time three of an operator's real channel names plus a real bot's
+nick in a fix's own comments, docstrings and assertions, the fifth time
+five more real bot nicks that had each ridden in on an unrelated bug
+report - a marker-format fix, a rename fix, an admin's own account name in
+a speed-reporting test, and two list-browser fixtures - and the sixth,
+found independently and at the same time as the fifth, four more real bot
+nicks and requesters pasted from a live console into a comment or a
+fixture. Every one of the six arrived the same way: a realistic-sounding
+example is, every time, somebody's actual nick.
 
 Greps done by hand keep missing them, because they are written to find the
 thing already known about. This asks the export itself.
@@ -78,6 +85,18 @@ FORBIDDEN = {
     # confirmed one, so it was most likely seen beside it. Replacing an
     # invented name costs nothing; missing a real one ships it.
     "62f42c35a98d86c1": "a bot seen alongside a confirmed real one",
+    # A SEPARATE, INDEPENDENT SWEEP, done in parallel with the one above -
+    # five more names, each riding in on an unrelated bug report the same
+    # way every prior leak did.
+    "964b3e699ec98455": "a real bot on a real network, named in a bug "
+                        "report about its list's size-suffix format",
+    "4bf41f93d01e4044": "a real bot on a real network, named in a bug "
+                        "report about its RAR-trigger not matching its nick",
+    "53b6f872a5e617cd": "an operator's own account name",
+    "79aa93c94eb078df": "a real bot on a real network, used as a "
+                        "list-browser test fixture",
+    "590ab98251d542a2": "a real bot on a real network, used as a "
+                        "list-fetch test fixture",
 }
 
 # Compared lowercased, so one hash covers every capitalisation.

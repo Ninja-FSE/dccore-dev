@@ -550,7 +550,7 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
                 self.assertNotIn("::INFO::", entry["filename"])
 
     def test_a_dash_separated_size_with_no_marker_word_is_stripped_too(self):
-        """Reported live: SDFind v3.91 by SDSailor (the bot 'Alex_Tune' runs)
+        """Reported live: SDFind v3.91 by SDSailor (the bot 'SomeBot' runs)
         does not use "::INFO::" at all - its master list writes
         "!<nick> <filename> ---- <size>", two or more hyphens between
         spaces, no marker word. strip_info_suffix() only recognised the
@@ -560,13 +560,13 @@ class BroadcastSearchCaptureTests(DCCoreTestCase):
         unsolicited exactly like the marker-spacing bug above. Drawn from
         the bot's real, currently-held list file."""
         raw_reply = (
-            "!Alex_Tune A101. Donna Summer - I Feel Love (Original 12'' "
+            "!SomeBot A101. Donna Summer - I Feel Love (Original 12'' "
             "Version).mp3 ---- 18.8Mb")
 
         irc._capture_broadcast_search_reply("OtherBot", "DCCore", raw_reply)
 
         entry = config.broadcast_search_results[0]
-        self.assertEqual(entry["bot"], "Alex_Tune")
+        self.assertEqual(entry["bot"], "SomeBot")
         self.assertEqual(
             entry["filename"],
             "A101. Donna Summer - I Feel Love (Original 12'' Version).mp3")

@@ -830,11 +830,12 @@ _SPQR_NICK_RE = re.compile(r"type\s+@(\S+)", re.IGNORECASE)
 # RAR folders". The trigger carries a "^" the bot's own nick does not.
 # THE WHOLE TRIGGER, not "a nick and then a caret". mx.rarserver's default
 # trigger is @<nick>^, and the "^" is what the old pattern matched on - but the
-# trigger is configurable and the nick is not part of it at all. Bsk- advertises
+# trigger is configurable and the nick is not part of it at all. SomeBot-
+# advertises
 #
-#     Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+#     Type @SomeBot^ to get my list of 39,454 (5.48 TB) RAR folders
 #
-# where the sender is "Bsk-" and the trigger is "Bsk^": not the nick, not the
+# where the sender is "SomeBot-" and the trigger is "SomeBot^": not the nick, not the
 # nick plus a suffix, just a string that bot chose. Capturing the token and
 # asking nothing else of it is the only thing that works for every operator.
 _RAR_RE = re.compile(
@@ -928,9 +929,9 @@ def _parse_rar_folder_advert(clean):
     sender. That works for PackBot, whose trigger happens to be its nick with a
     "^" on the end. It fails for anyone else:
 
-        <+Bsk-> Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+        <+SomeBot-> Type @SomeBot^ to get my list of 39,454 (5.48 TB) RAR folders
 
-    Sender "Bsk-", trigger "Bsk^" - so `"bsk" != "bsk-"` and the whole advert
+    Sender "SomeBot-", trigger "SomeBot^" - so `"somebot" != "somebot-"` and the whole advert
     was discarded, with a log line saying the sender is the authority on who a
     bot is. Which is TRUE, and is exactly why this parser should never have
     been claiming to know. The trigger is configurable and has no relationship

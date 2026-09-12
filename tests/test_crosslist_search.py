@@ -92,7 +92,7 @@ class IndexCase(DCCoreTestCase):
 class TheIndexAnswersTheQuestionsTheFilterAsks(IndexCase):
 
     def test_a_term_finds_a_file_in_a_held_list(self):
-        self.index("BigTruck", "01 - Enter Sandman.flac")
+        self.index("BoomBox", "01 - Enter Sandman.flac")
 
         found = list_index.search(["sandman"])
 
@@ -102,14 +102,14 @@ class TheIndexAnswersTheQuestionsTheFilterAsks(IndexCase):
     def test_a_partial_word_finds_it_too(self):
         """The point of a filter bar rather than a search button: results
         appear before the word is finished."""
-        self.index("BigTruck", "01 - Enter Sandman.flac")
+        self.index("BoomBox", "01 - Enter Sandman.flac")
 
         self.assertEqual(len(list_index.search(["sandm"])), 1)
 
     def test_every_word_must_match(self):
         """The same AND-across-words rule find_matching_entries() applies, so
         narrowing a term narrows the result rather than widening it."""
-        self.index("BigTruck", "Enter Sandman.flac", "Sad But True.flac")
+        self.index("BoomBox", "Enter Sandman.flac", "Sad But True.flac")
 
         self.assertEqual(len(list_index.search(["enter", "sandman"])), 1)
         self.assertEqual(len(list_index.search(["enter", "nirvana"])), 0)
@@ -119,19 +119,19 @@ class TheIndexAnswersTheQuestionsTheFilterAsks(IndexCase):
         FTS5 tokenises; "andma" is not a token or a prefix of one. Substring
         matching over four million rows is the 1.4-second query this whole
         module exists to avoid, and @find over our own list still does it."""
-        self.index("BigTruck", "01 - Enter Sandman.flac")
+        self.index("BoomBox", "01 - Enter Sandman.flac")
 
         self.assertEqual(list_index.search(["andma"]), [])
 
     def test_matching_ignores_case(self):
-        self.index("BigTruck", "01 - Enter SANDMAN.flac")
+        self.index("BoomBox", "01 - Enter SANDMAN.flac")
 
         self.assertEqual(len(list_index.search(["sandman"])), 1)
 
     def test_an_empty_term_finds_nothing_rather_than_everything(self):
         """A cleared filter box must not page four million rows through the
         route on its way to showing the browse view again."""
-        self.index("BigTruck", "01 - Enter Sandman.flac")
+        self.index("BoomBox", "01 - Enter Sandman.flac")
 
         self.assertEqual(list_index.search([]), [])
         self.assertEqual(list_index.search(["   "]), [])
@@ -146,7 +146,7 @@ class TheIndexAnswersTheQuestionsTheFilterAsks(IndexCase):
         best-effort and swallows its own failures, which is right for
         production and means "did not raise" passes whether the term was
         quoted or not. A mutation removing the quoting proved exactly that."""
-        self.index("BigTruck", "AC-DC Back In Black.flac", "Nirvana.flac")
+        self.index("BoomBox", "AC-DC Back In Black.flac", "Nirvana.flac")
 
         self.assertEqual([row["filename"] for row in list_index.search(["ac-dc"])],
                          ["AC-DC Back In Black.flac"])
@@ -169,23 +169,23 @@ class TheIndexAnswersTheQuestionsTheFilterAsks(IndexCase):
                 self.assertIsNone(list_index.build_match_query(nothing))
 
     def test_a_refetch_replaces_a_list_rather_than_doubling_it(self):
-        self.index("BigTruck", "Old Track.flac")
-        self.index("BigTruck", "New Track.flac")
+        self.index("BoomBox", "Old Track.flac")
+        self.index("BoomBox", "New Track.flac")
 
         found = [row["filename"] for row in list_index.search(["track"])]
 
         self.assertEqual(found, ["New Track.flac"])
 
     def test_dropping_a_bot_forgets_its_list(self):
-        self.index("BigTruck", "Only Track.flac")
+        self.index("BoomBox", "Only Track.flac")
 
-        list_index.drop_bot("BigTruck")
+        list_index.drop_bot("BoomBox")
 
         self.assertEqual(list_index.search(["track"]), [])
         self.assertEqual(list_index.indexed_bots(), set())
 
     def test_the_page_is_capped(self):
-        self.index("BigTruck", *[f"Track {i}.flac" for i in range(50)])
+        self.index("BoomBox", *[f"Track {i}.flac" for i in range(50)])
 
         self.assertEqual(len(list_index.search(["track"], limit=10)), 10)
 
@@ -197,7 +197,7 @@ class TheIndexAnswersTheQuestionsTheFilterAsks(IndexCase):
         table every limit returns five, so the clamp is invisible and a
         mutation removing it passes."""
         over = list_index.MAX_SEARCH_LIMIT + 10
-        self.index("BigTruck", *[f"Track {i}.flac" for i in range(over)])
+        self.index("BoomBox", *[f"Track {i}.flac" for i in range(over)])
 
         self.assertEqual(len(list_index.search(["track"], limit=10 ** 9)),
                          list_index.MAX_SEARCH_LIMIT)
@@ -216,21 +216,21 @@ class WhichBotsHaveNothing(IndexCase):
     """
 
     def test_a_bot_with_a_match_is_matched(self):
-        self.index("BigTruck", "Enter Sandman.flac")
+        self.index("BoomBox", "Enter Sandman.flac")
 
-        matched, empty = list_index.bots_with_a_match(["sandman"], ["BigTruck"])
+        matched, empty = list_index.bots_with_a_match(["sandman"], ["BoomBox"])
 
-        self.assertEqual(matched, {"bigtruck"})
+        self.assertEqual(matched, {"boombox"})
         self.assertEqual(empty, set())
 
     def test_a_bot_with_no_match_is_empty(self):
-        self.index("BigTruck", "Enter Sandman.flac")
+        self.index("BoomBox", "Enter Sandman.flac")
         self.index("ReelBot", "Nevermind.flac")
 
         matched, empty = list_index.bots_with_a_match(
-            ["sandman"], ["BigTruck", "ReelBot"])
+            ["sandman"], ["BoomBox", "ReelBot"])
 
-        self.assertEqual(matched, {"bigtruck"})
+        self.assertEqual(matched, {"boombox"})
         self.assertEqual(empty, {"reelbot"})
 
     def test_a_held_bot_that_was_never_indexed_is_empty_not_missing(self):
@@ -281,9 +281,9 @@ class WhichBotsHaveNothing(IndexCase):
                       "stopping at the first proof")
 
     def test_no_term_greys_nobody(self):
-        self.index("BigTruck", "Enter Sandman.flac")
+        self.index("BoomBox", "Enter Sandman.flac")
 
-        matched, empty = list_index.bots_with_a_match([], ["BigTruck"])
+        matched, empty = list_index.bots_with_a_match([], ["BoomBox"])
 
         self.assertEqual((matched, empty), (set(), set()))
 
@@ -305,12 +305,12 @@ class TheIndexIsNotTheRecordOfWhatIsHeld(IndexCase):
         is the payload's job - build_crosslist_search_payload maps back
         through `fetched_bot_lists`, which is keyed the same way and holds the
         real spelling."""
-        self.index("BigTruck", "Enter Sandman.flac")
+        self.index("BoomBox", "Enter Sandman.flac")
         self.index("GoneBot", "Enter Sandman.flac")
 
-        found = list_index.search(["sandman"], bots=["BigTruck"])
+        found = list_index.search(["sandman"], bots=["BoomBox"])
 
-        self.assertEqual([row["bot"] for row in found], ["bigtruck"])
+        self.assertEqual([row["bot"] for row in found], ["boombox"])
 
     def test_a_refetch_typed_differently_replaces_rather_than_doubles(self):
         """The reason the key is normalised at all.
@@ -353,14 +353,14 @@ class TheIndexIsNotTheRecordOfWhatIsHeld(IndexCase):
         self.assertEqual(list_index.search(["sandman"], bots=[]), [])
 
     def test_the_route_only_ever_offers_held_lists(self):
-        self.index("BigTruck", "Enter Sandman.flac")
+        self.index("BoomBox", "Enter Sandman.flac")
         self.index("GoneBot", "Enter Sandman.flac")
-        self.hold("BigTruck")
+        self.hold("BoomBox")
 
         payload = webserver.build_crosslist_search_payload("sandman")
 
         self.assertEqual([group["bot"] for group in payload["folders"]],
-                         ["BigTruck"])
+                         ["BoomBox"])
 
 
 class ThePayloadTheBrowserRenders(IndexCase):
@@ -373,8 +373,8 @@ class ThePayloadTheBrowserRenders(IndexCase):
     """
 
     def test_it_returns_folder_groups_like_the_browse_view(self):
-        self.index("BigTruck", "Enter Sandman.flac")
-        self.hold("BigTruck")
+        self.index("BoomBox", "Enter Sandman.flac")
+        self.hold("BoomBox")
 
         payload = webserver.build_crosslist_search_payload("sandman")
 
@@ -386,15 +386,15 @@ class ThePayloadTheBrowserRenders(IndexCase):
     def test_every_row_carries_the_bot_it_came_from(self):
         """What makes cross-list selection work: the checkbox reads its bot
         from here, so a page of results from four bots queues correctly."""
-        self.index("BigTruck", "Enter Sandman.flac")
+        self.index("BoomBox", "Enter Sandman.flac")
         self.index("ReelBot", "Sandman Live.flac")
-        self.hold("BigTruck", "ReelBot")
+        self.hold("BoomBox", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("sandman")
         sources = {entry["source"]
                    for group in payload["folders"] for entry in group["entries"]}
 
-        self.assertEqual(sources, {"BigTruck", "ReelBot"})
+        self.assertEqual(sources, {"BoomBox", "ReelBot"})
 
     def test_two_bots_sharing_a_folder_path_stay_apart(self):
         """list.group_rows_by_folder() keys on the folder string, which is
@@ -403,23 +403,23 @@ class ThePayloadTheBrowserRenders(IndexCase):
         other's heading and the folder's !rar button would point at whichever
         came first."""
         shared = "D:\\MUSIC\\Metallica\\"
-        self.index("BigTruck", "Enter Sandman.flac", folder=shared)
+        self.index("BoomBox", "Enter Sandman.flac", folder=shared)
         self.index("ReelBot", "Sandman Live.flac", folder=shared)
-        self.hold("BigTruck", "ReelBot")
+        self.hold("BoomBox", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("sandman")
 
         self.assertEqual(len(payload["folders"]), 2)
         self.assertEqual({group["bot"] for group in payload["folders"]},
-                         {"BigTruck", "ReelBot"})
+                         {"BoomBox", "ReelBot"})
 
     def test_the_bots_with_nothing_are_named_for_the_sidebar(self):
-        self.index("BigTruck", "Enter Sandman.flac")
-        self.hold("BigTruck", "ReelBot", "MetalHead")
+        self.index("BoomBox", "Enter Sandman.flac")
+        self.hold("BoomBox", "ReelBot", "MetalHead")
 
         payload = webserver.build_crosslist_search_payload("sandman")
 
-        self.assertEqual(payload["matched"], ["bigtruck"])
+        self.assertEqual(payload["matched"], ["boombox"])
         self.assertEqual(payload["empty"], ["metalhead", "reelbot"])
 
     def test_a_bot_is_not_called_empty_just_because_the_page_filled_up(self):
@@ -427,18 +427,18 @@ class ThePayloadTheBrowserRenders(IndexCase):
         from the rows. The page is capped, so a bot whose matches all fall
         past the cap would look empty when it is not - and the sidebar would
         cross out a list that has exactly what the operator is looking for."""
-        self.index("BigTruck", *[f"Track {i}.flac" for i in range(30)])
+        self.index("BoomBox", *[f"Track {i}.flac" for i in range(30)])
         self.index("ReelBot", "Track Rare.flac")
-        self.hold("BigTruck", "ReelBot")
+        self.hold("BoomBox", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("track", limit=5)
 
         self.assertEqual(payload["empty"], [])
-        self.assertEqual(sorted(payload["matched"]), ["bigtruck", "reelbot"])
+        self.assertEqual(sorted(payload["matched"]), ["boombox", "reelbot"])
 
     def test_it_says_when_it_had_to_stop_early(self):
-        self.index("BigTruck", *[f"Track {i}.flac" for i in range(30)])
-        self.hold("BigTruck")
+        self.index("BoomBox", *[f"Track {i}.flac" for i in range(30)])
+        self.hold("BoomBox")
 
         self.assertTrue(
             webserver.build_crosslist_search_payload("track", limit=5)["truncated"])
@@ -448,14 +448,14 @@ class ThePayloadTheBrowserRenders(IndexCase):
     def test_an_empty_term_greys_nobody_and_returns_nothing(self):
         """A cleared box goes back to browsing; it must not cross out every
         bot on the way."""
-        self.index("BigTruck", "Enter Sandman.flac")
-        self.hold("BigTruck", "ReelBot")
+        self.index("BoomBox", "Enter Sandman.flac")
+        self.hold("BoomBox", "ReelBot")
 
         payload = webserver.build_crosslist_search_payload("")
 
         self.assertEqual(payload["folders"], [])
         self.assertEqual(payload["matched"], [])
-        self.assertEqual(payload["empty"], ["bigtruck", "reelbot"])
+        self.assertEqual(payload["empty"], ["boombox", "reelbot"])
 
 
 class WhenTheIndexIsNotThere(IndexCase):
@@ -478,7 +478,7 @@ class WhenTheIndexIsNotThere(IndexCase):
         list_index.reset_for_tests()
 
         self.assertEqual(list_index.search(["anything"]), [])
-        self.assertEqual(list_index.index_bot_list("BigTruck", []), 0)
+        self.assertEqual(list_index.index_bot_list("BoomBox", []), 0)
 
     def test_the_handle_it_could_not_use_is_closed_before_it_is_dropped(self):
         """sqlite3.connect() is LAZY - it succeeds on a corrupt file, on a
@@ -523,7 +523,7 @@ class WhenTheIndexIsNotThere(IndexCase):
         self.set_config(LIST_INDEX_FILE=path)
         list_index.reset_for_tests()
 
-        matched, empty = list_index.bots_with_a_match(["x"], ["BigTruck"])
+        matched, empty = list_index.bots_with_a_match(["x"], ["BoomBox"])
 
         self.assertEqual((matched, empty), (set(), set()))
 
@@ -623,14 +623,14 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
 
     def setUp(self):
         super().setUp()
-        self.index("BigTruck", "Asked.flac", "Have.flac", "Failed.flac",
+        self.index("BoomBox", "Asked.flac", "Have.flac", "Failed.flac",
                    "Untouched.flac")
-        self.hold("BigTruck")
+        self.hold("BoomBox")
 
     def test_an_in_flight_request_reads_as_asked(self):
         for state in ("pending", "offered", "listening", "receiving"):
             with self.subTest(state=state):
-                self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+                self.queue(a={"bot": "BoomBox", "requested_filename": "Asked.flac",
                               "request_type": "file", "state": state})
                 self.assertEqual(self.marks_for()["Asked.flac"], "requested")
 
@@ -641,12 +641,12 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
 
         for state in dcc_fetch._UNRESOLVED_FETCH_STATES:
             with self.subTest(state=state):
-                self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+                self.queue(a={"bot": "BoomBox", "requested_filename": "Asked.flac",
                               "request_type": "file", "state": state})
                 self.assertEqual(self.marks_for()["Asked.flac"], "requested")
 
     def test_a_completed_one_reads_as_received(self):
-        self.queue(a={"bot": "BigTruck", "requested_filename": "Have.flac",
+        self.queue(a={"bot": "BoomBox", "requested_filename": "Have.flac",
                       "request_type": "file", "state": "complete"})
 
         self.assertEqual(self.marks_for()["Have.flac"], "received")
@@ -654,7 +654,7 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
     def test_a_failed_one_is_not_marked_at_all(self):
         """The useful action is to ask again, and a mark would discourage
         it."""
-        self.queue(a={"bot": "BigTruck", "requested_filename": "Failed.flac",
+        self.queue(a={"bot": "BoomBox", "requested_filename": "Failed.flac",
                       "request_type": "file", "state": "failed"})
 
         self.assertEqual(self.marks_for()["Failed.flac"], "")
@@ -672,9 +672,9 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
         # deleted - the completed row happened to be seen last and won by
         # accident rather than by rule.
         self.queue(
-            a={"bot": "BigTruck", "requested_filename": "Have.flac",
+            a={"bot": "BoomBox", "requested_filename": "Have.flac",
                "request_type": "file", "state": "complete"},
-            b={"bot": "BigTruck", "requested_filename": "Have.flac",
+            b={"bot": "BoomBox", "requested_filename": "Have.flac",
                "request_type": "file", "state": "receiving"})
 
         self.assertEqual(self.marks_for()["Have.flac"], "received")
@@ -684,28 +684,28 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
         nothing about the other, and marking both would claim a request that
         was never made."""
         self.index("ReelBot", "Asked.flac")
-        self.hold("BigTruck", "ReelBot")
-        self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+        self.hold("BoomBox", "ReelBot")
+        self.queue(a={"bot": "BoomBox", "requested_filename": "Asked.flac",
                       "request_type": "file", "state": "receiving"})
 
         payload = webserver.build_crosslist_search_payload("asked")
         marks = {(group["bot"], entry["title"]): entry["mark"]
                  for group in payload["folders"] for entry in group["entries"]}
 
-        self.assertEqual(marks[("BigTruck", "Asked.flac")], "requested")
+        self.assertEqual(marks[("BoomBox", "Asked.flac")], "requested")
         self.assertEqual(marks[("ReelBot", "Asked.flac")], "")
 
     def test_a_whole_list_request_does_not_mark_a_file(self):
         """A "list" row asks for the bot's list, not for any row in the
         table. Marking a filename from one would claim something that never
         happened - and the filename field of such a row is empty anyway."""
-        self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+        self.queue(a={"bot": "BoomBox", "requested_filename": "Asked.flac",
                       "request_type": "list", "state": "receiving"})
 
         self.assertEqual(self.marks_for()["Asked.flac"], "")
 
     def test_a_folder_request_does_not_mark_a_file_either(self):
-        self.queue(a={"bot": "BigTruck", "requested_filename": "Asked.flac",
+        self.queue(a={"bot": "BoomBox", "requested_filename": "Asked.flac",
                       "request_type": "folder", "state": "receiving"})
 
         self.assertEqual(self.marks_for()["Asked.flac"], "")
@@ -714,7 +714,7 @@ class MarkingWhatYouAlreadyAskedFor(IndexCase):
         """The list writes whatever that bot wrote; the request carries
         whatever was clicked. They agree in practice and must not depend on
         it."""
-        self.queue(a={"bot": "bigtruck", "requested_filename": "ASKED.FLAC",
+        self.queue(a={"bot": "boombox", "requested_filename": "ASKED.FLAC",
                       "request_type": "file", "state": "receiving"})
 
         self.assertEqual(self.marks_for()["Asked.flac"], "requested")
@@ -767,7 +767,7 @@ class ListsHeldFromBeforeTheIndexExisted(IndexCase):
                 "list_path": path}
 
     def test_a_held_list_is_indexed_at_startup(self):
-        held = {"bigtruck": self.held_list("BigTruck", "Enter Sandman.flac")}
+        held = {"boombox": self.held_list("BoomBox", "Enter Sandman.flac")}
         self.assertEqual(list_index.search(["sandman"]), [])
 
         list_index.backfill_missing(held, log=lambda _m: None)
@@ -779,7 +779,7 @@ class ListsHeldFromBeforeTheIndexExisted(IndexCase):
         """Through find_matching_entries + entries_to_filelist_rows, not a
         second parser - which is also what stops the row-key mismatch that
         made every indexed name empty from happening again on this path."""
-        held = {"bigtruck": self.held_list("BigTruck", "A Song.flac")}
+        held = {"boombox": self.held_list("BoomBox", "A Song.flac")}
 
         list_index.backfill_missing(held, log=lambda _m: None)
 
@@ -791,8 +791,8 @@ class ListsHeldFromBeforeTheIndexExisted(IndexCase):
         """Idempotent, because this runs on every start. Re-indexing every
         held list at boot would re-parse hundreds of megabytes to arrive
         where it already was."""
-        self.index("BigTruck", "Enter Sandman.flac")
-        held = {"bigtruck": self.held_list("BigTruck", "Something Else.flac")}
+        self.index("BoomBox", "Enter Sandman.flac")
+        held = {"boombox": self.held_list("BoomBox", "Something Else.flac")}
 
         self.assertEqual(list_index.backfill_missing(held, log=lambda _m: None), 0)
         self.assertEqual([row["filename"] for row in list_index.search(["sandman"])],
@@ -802,16 +802,16 @@ class ListsHeldFromBeforeTheIndexExisted(IndexCase):
     def test_an_entry_whose_file_has_gone_is_skipped(self):
         """The extracted list can be deleted while the entry survives. That
         costs its own row in the filter, not the startup."""
-        entry = self.held_list("BigTruck", "Enter Sandman.flac")
+        entry = self.held_list("BoomBox", "Enter Sandman.flac")
         os.remove(entry["list_path"])
 
         self.assertEqual(
-            list_index.backfill_missing({"bigtruck": entry}, log=lambda _m: None), 0)
+            list_index.backfill_missing({"boombox": entry}, log=lambda _m: None), 0)
 
     def test_one_unreadable_list_does_not_stop_the_others(self):
         held = {
             "broken": {"bot": "Broken", "list_path": None},
-            "bigtruck": self.held_list("BigTruck", "Enter Sandman.flac"),
+            "boombox": self.held_list("BoomBox", "Enter Sandman.flac"),
         }
 
         self.assertEqual(list_index.backfill_missing(held, log=lambda _m: None), 1)
@@ -1219,16 +1219,16 @@ class AWriteCheckpointsTheWalLogAfterward(IndexCase):
             return 0
 
     def test_indexing_a_bot_leaves_the_wal_log_small(self):
-        self.index("BigTruck", *[f"Track {n}.flac" for n in range(500)])
+        self.index("BoomBox", *[f"Track {n}.flac" for n in range(500)])
 
         self.assertLess(self._wal_size(), 4096,
                         "a checkpoint should have folded the write back into "
                         "the main file rather than leaving it in the log")
 
     def test_dropping_a_bot_leaves_the_wal_log_small_too(self):
-        self.index("BigTruck", "Track.flac")
+        self.index("BoomBox", "Track.flac")
 
-        list_index.drop_bot("BigTruck")
+        list_index.drop_bot("BoomBox")
 
         self.assertLess(self._wal_size(), 4096)
 
@@ -1260,19 +1260,19 @@ class AWriteCheckpointsTheWalLogAfterward(IndexCase):
         list_index._checkpoint_locked = lambda conn: calls.append(conn)
         self.addCleanup(setattr, list_index, "_checkpoint_locked", real_checkpoint)
 
-        indexed = self.index("BigTruck", "Track.flac")
+        indexed = self.index("BoomBox", "Track.flac")
 
         self.assertEqual(indexed, 1)
         self.assertEqual(len(calls), 1)
 
     def test_drop_bot_checkpoints_after_committing_too(self):
-        self.index("BigTruck", "Track.flac")
+        self.index("BoomBox", "Track.flac")
         calls = []
         real_checkpoint = list_index._checkpoint_locked
         list_index._checkpoint_locked = lambda conn: calls.append(conn)
         self.addCleanup(setattr, list_index, "_checkpoint_locked", real_checkpoint)
 
-        dropped = list_index.drop_bot("BigTruck")
+        dropped = list_index.drop_bot("BoomBox")
 
         self.assertTrue(dropped)
         self.assertEqual(len(calls), 1)

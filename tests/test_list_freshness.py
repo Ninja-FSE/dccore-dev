@@ -77,9 +77,9 @@ class WhatTheyAdvertisedWhenWeFetched(DCCoreTestCase):
     def test_the_lookup_is_case_insensitive(self):
         """known_bots is keyed by nick.lower(); the bot argument is whatever
         the operator or the advert spelled."""
-        runtime.known_bots["bigtruck"] = {"nick": "BigTruck", "files": 1}
+        runtime.known_bots["boombox"] = {"nick": "BoomBox", "files": 1}
 
-        self.assertEqual(list_fetch._advert_snapshot("  BIGTRUCK  "),
+        self.assertEqual(list_fetch._advert_snapshot("  BOOMBOX  "),
                          {"files": 1})
 
 
@@ -134,7 +134,7 @@ class TheSummariesCarryIt(DCCoreTestCase):
         runtime.known_bots.update({
             "reelbot": {"nick": "ReelBot", "files": 12004,
                           "list_date": "Aug 28th"},
-            "bigtruck": {"nick": "BigTruck", "files": 8110,
+            "boombox": {"nick": "BoomBox", "files": 8110,
                          "list_date": "Aug 28th"},
         })
         self.set_config(fetched_bot_lists={
@@ -142,7 +142,7 @@ class TheSummariesCarryIt(DCCoreTestCase):
                           "entry_count": 12004,
                           "advert_when_fetched": {"files": 12004,
                                                   "list_date": "Aug 28th"}},
-            "bigtruck": {"bot": "BigTruck", "fetched_at": 1,
+            "boombox": {"bot": "BoomBox", "fetched_at": 1,
                          "entry_count": 7902,
                          "advert_when_fetched": {"files": 7902,
                                                  "list_date": "Aug 10th"}},
@@ -156,13 +156,13 @@ class TheSummariesCarryIt(DCCoreTestCase):
         self.assertEqual(self.rows()["ReelBot"]["freshness"], "current")
 
     def test_a_changed_list_reads_changed(self):
-        self.assertEqual(self.rows()["BigTruck"]["freshness"], "changed")
+        self.assertEqual(self.rows()["BoomBox"]["freshness"], "changed")
 
     def test_both_adverts_are_returned_so_the_page_can_say_what_changed(self):
         """The banner names the numbers - "they advertised 7,902 files built
         10 Aug, and now advertise 8,110 built 28 Aug" - which it cannot do
         from a verdict alone."""
-        row = self.rows()["BigTruck"]
+        row = self.rows()["BoomBox"]
 
         self.assertEqual(row["advert_then"]["files"], 7902)
         self.assertEqual(row["advert_now"]["files"], 8110)

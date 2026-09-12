@@ -84,16 +84,16 @@ class TheRowsComeFromBothPlaces(DCCoreTestCase):
     def test_a_bot_that_is_both_appears_once_as_the_held_one(self):
         """A held row carries a real verdict and a real count we parsed. The
         advert row would overwrite both with a claim and a nothing."""
-        runtime.known_bots["bigtruck"] = {
-            "nick": "BigTruck", "files": 8110, "list_date": "Aug 28th"}
+        runtime.known_bots["boombox"] = {
+            "nick": "BoomBox", "files": 8110, "list_date": "Aug 28th"}
         self.set_config(fetched_bot_lists={
-            "bigtruck": {"bot": "BigTruck", "fetched_at": 99,
+            "boombox": {"bot": "BoomBox", "fetched_at": 99,
                          "entry_count": 7902,
                          "advert_when_fetched": {"files": 7902,
                                                  "list_date": "Aug 10th"}}})
 
         rows = [row for row in webserver.build_fetched_bot_list_summaries()
-                if row["bot"] == "BigTruck"]
+                if row["bot"] == "BoomBox"]
 
         self.assertEqual(len(rows), 1)
         self.assertIs(rows[0]["held"], True)

@@ -2,7 +2,7 @@
 
 FROM THE BETA, on a list zip:
 
-    Sent: "SamothDCCore-2026-09-07.zip" to CSEv2 [138.63MB/s]
+    Sent: "SomeBotDCCore-2026-09-07.zip" to CSEv2 [138.63MB/s]
     "this seems to high to be true"
 
 It was. sendall() returns once the bytes are in the KERNEL, not once the peer
