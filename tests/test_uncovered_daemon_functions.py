@@ -15,6 +15,7 @@ one caller that would notice it disappearing. Several are richer than that
 because the function turned out to be interesting once looked at.
 """
 
+import contextlib
 import io
 import os
 import sys
@@ -580,6 +581,8 @@ class TheWebDependenciesAreOfferedOnFirstRun(unittest.TestCase):
         import configure
         self.setup = configure
         self._real_flask_entry = sys.modules.get("flask")
+        self._real_pip_entry = sys.modules.get("pip")
+        self._real_is_windows = configure.platform_compat.IS_WINDOWS
         import builtins
         self._real_input = builtins.input
         import subprocess
@@ -593,11 +596,19 @@ class TheWebDependenciesAreOfferedOnFirstRun(unittest.TestCase):
             sys.modules["flask"] = self._real_flask_entry
         else:
             sys.modules.pop("flask", None)
+        if self._real_pip_entry is not None:
+            sys.modules["pip"] = self._real_pip_entry
+        else:
+            sys.modules.pop("pip", None)
+        self.setup.platform_compat.IS_WINDOWS = self._real_is_windows
         builtins.input = self._real_input
         subprocess.run = self._real_run
 
     def make_flask_missing(self):
         sys.modules["flask"] = None
+
+    def make_pip_missing(self):
+        sys.modules["pip"] = None
 
     def fake_input(self, *answers):
         import builtins
@@ -677,6 +688,65 @@ class TheWebDependenciesAreOfferedOnFirstRun(unittest.TestCase):
         self.record_subprocess(returncode=1)
 
         self.setup.offer_to_install_web_requirements()  # must not raise
+
+    def test_pip_missing_asks_nothing_and_installs_nothing(self):
+        """Asking "Install it now?" when pip cannot possibly do it would be
+        asking about something already known to fail - checked and refused
+        before the prompt, not discovered by running a subprocess that was
+        never going to work."""
+        import builtins
+
+        def fail_if_asked(prompt=""):
+            raise AssertionError("must not prompt when pip is not importable")
+
+        self.make_flask_missing()
+        self.make_pip_missing()
+        builtins.input = fail_if_asked
+        calls = self.record_subprocess()
+
+        self.setup.offer_to_install_web_requirements()
+
+        self.assertEqual(calls, [])
+
+    def test_pip_missing_on_windows_points_at_windows_md(self):
+        import builtins
+
+        def fail_if_asked(prompt=""):
+            raise AssertionError("must not prompt when pip is not importable")
+
+        self.make_flask_missing()
+        self.make_pip_missing()
+        self.setup.platform_compat.IS_WINDOWS = True
+        builtins.input = fail_if_asked
+        buf = io.StringIO()
+
+        with contextlib.redirect_stdout(buf):
+            self.setup.offer_to_install_web_requirements()
+
+        self.assertIn("docs/WINDOWS.md", buf.getvalue())
+        self.assertNotIn("docs/INSTALL.md", buf.getvalue())
+
+    def test_pip_missing_elsewhere_points_at_install_md(self):
+        """Not Windows - the "tick the py launcher/pip boxes" fix in
+        WINDOWS.md does not apply, so this must not send a Linux operator
+        looking for a Windows installer checkbox that does not exist for
+        them."""
+        import builtins
+
+        def fail_if_asked(prompt=""):
+            raise AssertionError("must not prompt when pip is not importable")
+
+        self.make_flask_missing()
+        self.make_pip_missing()
+        self.setup.platform_compat.IS_WINDOWS = False
+        builtins.input = fail_if_asked
+        buf = io.StringIO()
+
+        with contextlib.redirect_stdout(buf):
+            self.setup.offer_to_install_web_requirements()
+
+        self.assertIn("docs/INSTALL.md", buf.getvalue())
+        self.assertNotIn("docs/WINDOWS.md", buf.getvalue())
 
 
 class TheRehashHandlerIsEntered(DCCoreTestCase):

@@ -241,6 +241,13 @@ def offer_to_install_web_requirements():
     finish and the daemon still starts - a dashboard that cannot import
     Flask logs it and stays off, exactly as it does today; this only
     changes whether an operator has to go looking for the fix themselves.
+
+    pip itself is checked the same way, separately, before asking anything:
+    `python -m pip` does `import pip` internally, so a missing pip module
+    fails identically whether asked here first or discovered by running the
+    subprocess - checking first means the operator is not asked "Install it
+    now?" for something already known to fail, and is told the actual
+    problem (no pip, not "the install failed") with somewhere to go for it.
     """
     try:
         import flask  # noqa: F401
@@ -250,6 +257,26 @@ def offer_to_install_web_requirements():
 
     print("  Flask is not installed yet, so the dashboard will not start "
           "until it is.")
+
+    try:
+        import pip  # noqa: F401
+    except ImportError:
+        if platform_compat.IS_WINDOWS:
+            print("  pip is not installed for this Python, so it cannot be "
+                  "installed automatically. This usually means Python was "
+                  "installed without ticking the pip/py launcher boxes - see "
+                  "docs/WINDOWS.md (\"Before you start\") for how to fix that.")
+        else:
+            print("  pip is not installed for this Python, so it cannot be "
+                  "installed automatically. On many Linux distributions pip "
+                  "is a separate package from Python itself (for example "
+                  "python3-pip on Debian/Ubuntu) - see docs/INSTALL.md for "
+                  "the exact command to install the dashboard's dependencies "
+                  "once you have it.")
+        print("  Skipped. The dashboard will log that Flask is missing and "
+              "stay off until you install it.")
+        return
+
     install = input("  Install it now (pip install -r requirements-web.txt)? "
                     "[Y/n]: ").strip().lower() in ("", "y", "yes")
     if not install:
