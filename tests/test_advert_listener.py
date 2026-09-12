@@ -917,9 +917,9 @@ class ASecondListOfRarFolders(CaptureTestCase):
     "^" on the end - true for all three bots here, and false the moment a
     fourth turned up:
 
-        <+Bsk-> Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders
+        <+SomeBot-> Type @SomeBot^ to get my list of 39,454 (5.48 TB) RAR folders
 
-    Sender "Bsk-", trigger "Bsk^", so the sender check failed and the whole
+    Sender "SomeBot-", trigger "SomeBot^", so the sender check failed and the whole
     advert was dropped. The trigger is configurable in mx.rarserver and has no
     relationship to the nick that can be assumed in either direction, so
     `nick` is None now and the sender is the only identity there is.
@@ -930,7 +930,7 @@ class ASecondListOfRarFolders(CaptureTestCase):
 
         self.assertIsNone(advert["nick"],
                           "a RAR advert carries a trigger, not a name - "
-                          "claiming one is what dropped Bsk's")
+                          "claiming one is what dropped SomeBot's")
         self.assertEqual(advert["rar_folders"], 39454)
         self.assertEqual(advert["rar_size"], "5.48TB")
         self.assertEqual(advert["rar_trigger"], "PackBot^")
@@ -973,19 +973,19 @@ class ASecondListOfRarFolders(CaptureTestCase):
 
     def test_a_trigger_that_is_not_the_nick_is_kept_and_the_bot_recorded(self):
         """The advert that used to be thrown away. Reported from a live
-        channel, where DCCore logged "Bsk- advertised as 'Bsk' - ignoring" and
+        channel, where DCCore logged "SomeBot- advertised as 'SomeBot' - ignoring" and
         never learned that bot had a RAR list at all."""
         advert = irc.parse_channel_advert(
-            "Type @Bsk^ to get my list of 39,454 (5.48 TB) RAR folders")
+            "Type @SomeBot^ to get my list of 39,454 (5.48 TB) RAR folders")
 
-        self.assertEqual(advert["rar_trigger"], "Bsk^")
+        self.assertEqual(advert["rar_trigger"], "SomeBot^")
 
-        self.capture("Bsk-", "Type @Bsk^ to get my list of 39,454 "
+        self.capture("SomeBot-", "Type @SomeBot^ to get my list of 39,454 "
                              "(5.48 TB) RAR folders")
 
-        self.assertIn("bsk-", runtime.known_bots,
+        self.assertIn("somebot-", runtime.known_bots,
                       "recorded under the SENDER, which is who to ask")
-        self.assertEqual(self.entry("Bsk-")["rar_trigger"], "Bsk^")
+        self.assertEqual(self.entry("SomeBot-")["rar_trigger"], "SomeBot^")
 
     def test_a_trigger_need_not_end_in_a_caret_at_all(self):
         """mx.rarserver's default is @<nick>^ and the operator can set
@@ -1034,7 +1034,7 @@ class ASecondListOfRarFolders(CaptureTestCase):
     def test_and_accepts_what_bots_actually_use(self):
         """Guard on the guard: a validator that refused everything would pass
         every assertion above and drop every trigger there is."""
-        for good in ("PackBot^", "Bsk^", "rarlist", "bot-rar", "x" * 64):
+        for good in ("PackBot^", "SomeBot^", "rarlist", "bot-rar", "x" * 64):
             with self.subTest(trigger=good):
                 self.assertIsNotNone(irc._TRIGGER_RE.match(good))
 

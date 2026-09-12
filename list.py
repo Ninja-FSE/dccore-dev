@@ -409,7 +409,7 @@ _INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
 
 # The other family of size suffix seen in production, from bots that do not
 # use "::INFO::" at all: "SDFind v3.91 by SDSailor" writes
-# "!Alex_Tune A101. Donna Summer - I Feel Love (Original 12'' Version).mp3
+# "!SomeBot A101. Donna Summer - I Feel Love (Original 12'' Version).mp3
 # ---- 18.8Mb" - two or more hyphens between spaces, then a bare size with no
 # marker word at all.
 #

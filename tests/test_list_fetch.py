@@ -1368,7 +1368,7 @@ class AListThatArrivedAsPlainText(DCCoreTestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp,
                                                             ignore_errors=True))
         config.FETCHED_FILES_DIR = self.tmp
-        self.path = os.path.join(self.tmp, "Heywood-default(2026-07-31)-OS.txt")
+        self.path = os.path.join(self.tmp, "OtherBot-default(2026-07-31)-OS.txt")
 
     def write(self, text):
         with io.open(self.path, "w", encoding="utf-8") as handle:
@@ -1377,12 +1377,12 @@ class AListThatArrivedAsPlainText(DCCoreTestCase):
     def test_it_is_accepted_and_its_rows_are_read(self):
         self.write(_list_txt(files=(("Real Track.flac", "5.0MB"),)))
 
-        ok, reason = list_fetch.process_fetched_list_zip("heywood", self.path)
+        ok, reason = list_fetch.process_fetched_list_zip("otherbot", self.path)
 
         self.assertTrue(ok, reason)
         held = dict(getattr(config, "fetched_bot_lists", {}) or {})
-        self.assertIn("heywood", held)
-        self.assertGreater(held["heywood"].get("entry_count", 0), 0)
+        self.assertIn("otherbot", held)
+        self.assertGreater(held["otherbot"].get("entry_count", 0), 0)
 
     def test_a_file_that_is_not_a_list_is_still_refused(self):
         """The zip route gets its plausibility from the archive guards and
