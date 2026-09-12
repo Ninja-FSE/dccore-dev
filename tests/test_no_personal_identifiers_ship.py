@@ -249,6 +249,52 @@ class NothingIdentifyingShips(unittest.TestCase):
             + "\n  ".join(f"{why}\n    {sorted(set(where))[:6]}"
                           for why, where in found.items()))
 
+    def test_no_real_ip_address_is_in_the_export(self):
+        found = []
+        for path in self.files():
+            text = self.read(path)
+            for match in IP.finditer(text):
+                if ALLOWED_IP.match(match.group(0)):
+                    continue
+                line = text.count("\n", 0, match.start()) + 1
+                found.append(f"{path}:{line} {match.group(0)}")
+
+        self.assertEqual(found, [],
+                         "only loopback, private and documentation ranges may "
+                         "ship; these are somebody's real machine")
+
+    def test_the_tests_are_covered_by_this_guard(self):
+        """The premise the whole file rests on: nothing export-ignores
+        `tests/`, so a fixture is as public as the daemon and has to be
+        scanned like one.
+
+        What ships, and what must not, is NOT re-asserted here -
+        tests/test_internal_files_do_not_ship.py owns that question and had it
+        first. Two guards for one property drift apart, and the one nobody
+        looks at is the one that quietly stops meaning anything.
+        """
+        scanned = [p for p in self.files() if p.startswith("tests/")]
+
+        self.assertGreater(len(scanned), 100,
+                           "tests/ is missing from the scan - if it ever "
+                           "stopped shipping, this file's premise changed")
+
+
+
+class ReadingWordsOutOfSource(unittest.TestCase):
+    """words(), on its own, with no repository involved.
+
+    Deliberately NOT part of NothingIdentifyingShips. That class asks git for
+    the list of files that would ship and skips itself wherever git cannot
+    answer - a reasonable thing for a scan of the export to do, and exactly
+    the wrong thing for these two, which test a pure function over a string
+    and are the only cover the blanking step has.
+
+    Left in that class they skipped in every environment without git, which
+    is to say the regression tests for the hole would not have run in the
+    place the hole was found.
+    """
+
     def test_a_name_next_to_an_escape_is_still_one_word(self):
         """The hole that let three real nicks through three scrub passes.
 
@@ -280,37 +326,6 @@ class NothingIdentifyingShips(unittest.TestCase):
 
         self.assertEqual(text.count(chr(10), 0, offset) + 1, 2)
         self.assertEqual(text[offset:offset + 6], "Target")
-
-    def test_no_real_ip_address_is_in_the_export(self):
-        found = []
-        for path in self.files():
-            text = self.read(path)
-            for match in IP.finditer(text):
-                if ALLOWED_IP.match(match.group(0)):
-                    continue
-                line = text.count("\n", 0, match.start()) + 1
-                found.append(f"{path}:{line} {match.group(0)}")
-
-        self.assertEqual(found, [],
-                         "only loopback, private and documentation ranges may "
-                         "ship; these are somebody's real machine")
-
-    def test_the_tests_are_covered_by_this_guard(self):
-        """The premise the whole file rests on: nothing export-ignores
-        `tests/`, so a fixture is as public as the daemon and has to be
-        scanned like one.
-
-        What ships, and what must not, is NOT re-asserted here -
-        tests/test_internal_files_do_not_ship.py owns that question and had it
-        first. Two guards for one property drift apart, and the one nobody
-        looks at is the one that quietly stops meaning anything.
-        """
-        scanned = [p for p in self.files() if p.startswith("tests/")]
-
-        self.assertGreater(len(scanned), 100,
-                           "tests/ is missing from the scan - if it ever "
-                           "stopped shipping, this file's premise changed")
-
 
 if __name__ == "__main__":
     unittest.main()

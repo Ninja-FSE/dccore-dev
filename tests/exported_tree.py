@@ -1,8 +1,8 @@
 """Telling this repository apart from an extracted public tree.
 
 `docs/UPDATES.md` is export-ignored in `.gitattributes`. It is the internal
-changelog: it exists here, in `dccore-dev`, and by design it never reaches the
-public repository, which gets `docs/UPDATES-PUBLIC.md` instead.
+changelog: it exists in the development repository and, by design, never
+reaches the public one, which gets `docs/UPDATES-PUBLIC.md` instead.
 
 That leaves any test which READS the internal changelog with two different
 absences to tell apart, and getting it wrong is expensive in both directions:
