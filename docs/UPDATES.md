@@ -37,6 +37,99 @@ looks like state management. `SETTINGS_DEFAULTS` now covers them, with a
 fixture invariant that the list is not empty and that every name in it is a
 real setting - a typo there would reset nothing and say nothing.
 
+### 🔴 A rename carries the user's state
+
+Found while checking #376's premise - that `config.channel_users` can serve as
+a presence history for inferring alt-nick identity. It has a hole in it at
+exactly the event that issue is trying to reason about.
+
+`irc.py`'s NICK handler has always parsed the message correctly and moved
+**one** store:
+
+```python
+if old_nick in config.send_queue:
+    queue_mgr.config.send_queue[new_nick.lower()] = queue_mgr.config.send_queue.pop(old_nick)
+```
+
+Everything else keyed on the nick stayed where it was. Demonstrated against
+the module rather than argued:
+
+    BEFORE  someuser -> someuser_
+      present as 'someuser'  : True
+      present as 'someuser_' : False
+      dcc_queue keys         : ['someuser']
+
+    AFTER (handler moves send_queue only)
+      present as 'someuser'  : True    <- nobody by that name now
+      present as 'someuser_' : False   <- the name they actually use
+      dcc_queue keys         : ['someuser']
+      send_queue keys        : ['someuser_']   <- moved, correctly
+
+**Two of those matter immediately.**
+
+`channel_users` is what `dcc.user_is_present_in_ram()` reads, and dcc.py
+treats it as proof somebody is there before dispatching to them and before
+thawing a frozen queue. Stale, it answers **False for the name they now use
+and True for one nobody has** - so a user who changes nick mid-session has
+their transfers stop while they are sitting in the channel, and nothing
+anywhere says why.
+
+`dcc_queue` holds their files. Stale, `!que` under the new nick shows nothing
+and the bot has nobody to send them to.
+
+The server tells us this **once**. There is nothing to infer - a NICK names
+the old nick and the new one - but nothing rebuilds those stores until an
+unrelated NAMES or rejoin happens to.
+
+#### What it deliberately does not carry
+
+`muted_until` and `banned_users` are nick-keyed too, and moving them would be
+a **change of policy rather than a fix**. DCCore already answers nick-hopping
+with hard bans, which match a HOSTMASK pattern and are unaffected by any of
+this - so a soft sanction being escapable by rename is a designed property
+with a designed escalation, not an oversight to quietly close inside a bug
+fix. There is a test pinning that it does not move, and a mutant that makes it
+move is killed.
+
+`whois_status` is left for a different reason: it caches what a WHO reply
+said, and asserting the new nick is online because the old one was is
+answering on the server's behalf.
+
+#### One thing worth stealing for any future move-the-key code
+
+It never overwrites an existing entry under the new name. Nicks get reused,
+and somebody else may hold that name with a queue of their own - handing one
+person another's files is a worse failure than the one being fixed. It logs
+and leaves both alone instead.
+
+The helper is `note_nick_change()`, beside the other `note_*` functions, so it
+can be tested without running the read loop - which is why the original
+one-third-of-the-job version was never caught. Two structural tests check the
+handler actually calls it, and that the old inline `send_queue` line has not
+come back.
+
+#### It broke a security guard, which is the guard working
+
+`test_the_nick_change_handler_is_gated_on_nick` anchors on a line inside the
+NICK handler, walks outwards to the enclosing `if`, and **evaluates** that
+condition against a genuine NICK line and against a forged
+`:attacker!u@h PRIVMSG #c :hey NICK :victim`. It exists because
+`" QUIT " in line` once matched an ordinary `@find QUIT PLAYING GAMES`.
+
+Moving the body into `note_nick_change()` deleted the line it anchors on, and
+the guard refused to guess - *"matched 0 lines in irc.py; it must match
+exactly one"* - rather than silently checking nothing. Exactly right: a marker
+matching zero lines and a marker matching two are both a test that has stopped
+testing.
+
+The gate is untouched; only the marker moved, onto the call itself rather than
+the function name, which also appears at the definition and would match two
+lines. Re-verified the guard still earns its place by un-anchoring the gate to
+`if " NICK " in line:` - it fails, as it should.
+
+Six mutants on the fix, all killed, including "presence is not updated" (the
+original defect) and "only the first channel is updated".
+
 ---
 
 ### 🔴 A rebuild that is working is not hung
