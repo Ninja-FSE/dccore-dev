@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟦 v1.12.0-RC1 (2026-09-07) - "The Several Lists Release"
+## 🟦 v1.12.0-RC2 (2026-09-12) - "The Several Lists Release"
 
 ### 🟢 One test leaked a channel into every later one
 
