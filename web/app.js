@@ -856,8 +856,11 @@
       var action;
       if (rejected) {
         action = "<span class=\"col-dim\">" + escapeHtml(row.list_processing_error) + "</span> " + retryBtn + deleteBtn;
-      } else if (state === "complete") {
+      } else if (state === "complete" && row.stored_filename) {
         action = "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a> " + deleteBtn;
+      } else if (state === "complete") {
+        // A fetched list, extracted - dcc_fetch.py already removed its zip.
+        action = "<span class=\"col-dim\">Browse it in List Browser</span> " + deleteBtn;
       } else if (state === "failed") {
         action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + retryBtn + deleteBtn;
       } else if (state === "pending") {

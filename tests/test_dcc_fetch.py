@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import unittest
+import zipfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -921,6 +922,220 @@ class LoopbackTransferTests(DCCoreTestCase):
         row = config.fetch_queue[rid]
         self.assertEqual(row["state"], "failed")
         self.assertIn("connect error", row["reason"])
+
+
+class PromoteCleanFilenameTests(DCCoreTestCase):
+    """dcc_fetch._promote_clean_filename() in isolation.
+
+    Reported live: an operator's fetched files and fetched list zips both
+    carrying a name like "058c4cc8ee9a_Some Track.mp3" forever - the request
+    id in _resolve_destination_path()'s stored name exists only to keep two
+    in-flight fetches from colliding on the same cleaned filename, and that
+    risk is over the moment one of them finishes.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-promote-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+
+    def _touch(self, name, content=b"data"):
+        with open(os.path.join(self.tmp, name), "wb") as f:
+            f.write(content)
+
+    def test_the_id_prefix_is_dropped(self):
+        self._touch("abcdef012345_Track.flac", b"payload")
+
+        result = dcc_fetch._promote_clean_filename(self.tmp, "abcdef012345_Track.flac")
+
+        self.assertEqual(result, "Track.flac")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "Track.flac")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "abcdef012345_Track.flac")))
+
+    def test_a_name_already_taken_keeps_the_longer_one(self):
+        """Never overwrites - the same rule note_nick_change() applies for the
+        identical reason (irc.py): no data lost, the file just keeps its
+        longer name on this one occasion rather than clobbering whatever
+        else is already using the plain name."""
+        self._touch("abcdef012345_Track.flac", b"new")
+        self._touch("Track.flac", b"already here")
+
+        result = dcc_fetch._promote_clean_filename(self.tmp, "abcdef012345_Track.flac")
+
+        self.assertEqual(result, "abcdef012345_Track.flac")
+        with open(os.path.join(self.tmp, "Track.flac"), "rb") as f:
+            self.assertEqual(f.read(), b"already here")
+        with open(os.path.join(self.tmp, "abcdef012345_Track.flac"), "rb") as f:
+            self.assertEqual(f.read(), b"new")
+
+    def test_a_name_with_no_id_prefix_is_left_alone(self):
+        """Defense-in-depth: nothing calls this on a name that was never
+        built by _resolve_destination_path(), but it must not mangle one
+        that reaches it anyway."""
+        self._touch("Track.flac")
+
+        result = dcc_fetch._promote_clean_filename(self.tmp, "Track.flac")
+
+        self.assertEqual(result, "Track.flac")
+
+    def test_a_rename_failure_falls_back_to_the_original_name(self):
+        self._touch("abcdef012345_Track.flac")
+        real_rename = os.rename
+
+        def _boom(*a, **k):
+            raise OSError("permission denied")
+
+        dcc_fetch.os.rename = _boom
+        self.addCleanup(setattr, dcc_fetch.os, "rename", real_rename)
+
+        result = dcc_fetch._promote_clean_filename(self.tmp, "abcdef012345_Track.flac")
+
+        self.assertEqual(result, "abcdef012345_Track.flac")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "abcdef012345_Track.flac")))
+
+
+class ACompletedFetchDropsItsTemporaryId(DCCoreTestCase):
+    """End to end, through the real transfer loop - PromoteCleanFilenameTests
+    above covers the helper in isolation; this covers it actually being
+    called from _run_transfer() for "file" and "folder" rows."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-fetch-id-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.port = self.listener.getsockname()[1]
+        self.addCleanup(self.listener.close)
+
+    def _serve_and_fetch(self, bot, filename, payload, request_type="file"):
+        rid = dcc_fetch.enqueue_fetch(bot, filename, request_type=request_type)
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time()
+
+        def serve():
+            self.listener.settimeout(5.0)
+            conn, _ = self.listener.accept()
+            conn.settimeout(5.0)
+            conn.sendall(payload)
+            conn.close()
+
+        server_thread = threading.Thread(target=serve, daemon=True)
+        server_thread.start()
+        offer_line = f"DCC SEND {filename} {ip_long('127.0.0.1')} {self.port} {len(payload)}"
+        dcc_fetch.handle_incoming_offer(None, bot, offer_line)
+        server_thread.join(timeout=5.0)
+        return rid
+
+    def test_a_completed_file_fetch_has_no_id_in_its_stored_name(self):
+        payload = b"FLAC" + (b"\x01\x02\x03\x04" * 1024)
+        rid = self._serve_and_fetch("peerbot", "Song.flac", payload)
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "complete")
+        self.assertEqual(row["stored_filename"], "Song.flac")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "Song.flac")))
+
+    def test_a_completed_folder_fetch_has_no_id_in_its_stored_name_either(self):
+        payload = b"RAR" + (b"\x05" * 200)
+        rid = self._serve_and_fetch("peerbot", "Album.rar", payload, request_type="folder")
+
+        row = config.fetch_queue[rid]
+        self.assertEqual(row["state"], "complete")
+        self.assertEqual(row["stored_filename"], "Album.rar")
+
+    def test_two_fetches_racing_for_the_same_name_do_not_collide(self):
+        """The reason the id exists at all - two overlapping fetches for a
+        name that will collide once both are done. Served sequentially here
+        (this test does not need real concurrency to prove the outcome:
+        whichever finishes second must not silently destroy the first)."""
+        first_payload = b"first-file-data"
+        second_payload = b"second-file-data-longer"
+
+        first_rid = self._serve_and_fetch("botone", "Track.flac", first_payload)
+        second_rid = self._serve_and_fetch("bottwo", "Track.flac", second_payload)
+
+        first_name = config.fetch_queue[first_rid]["stored_filename"]
+        second_name = config.fetch_queue[second_rid]["stored_filename"]
+        self.assertNotEqual(first_name, second_name)
+
+        with open(os.path.join(self.tmp, first_name), "rb") as f:
+            self.assertEqual(f.read(), first_payload)
+        with open(os.path.join(self.tmp, second_name), "rb") as f:
+            self.assertEqual(f.read(), second_payload)
+
+
+class ACompletedListFetchRemovesItsZip(DCCoreTestCase):
+    """dcc_fetch._handle_completed_list_fetch(): the raw zip is dead weight
+    once list_fetch.py has safely extracted it - nothing ever reopens it
+    afterward, including a re-fetch, which downloads a fresh one. Reported
+    live: downloading one of these to an operator's own machine and
+    unzipping it there put the request id into the resulting filename too,
+    since a plain list zip has no folder recorded inside it for an unzip
+    tool to extract "into" the way a folder packed with rar's -ep1 does."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="dccore-listzip-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        config.FETCHED_FILES_DIR = self.tmp
+
+    def _write_real_list_zip(self, bot, path):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(
+                f"{bot}-2026-09-12.txt",
+                "List of 1 Files generated on Sep 12th\n"
+                "To request a file, copy/paste to the channel... !x FILENAME\n\n\n"
+                + "=" * 53 + "\n"
+                "Folder\\Path\\\n"
+                f"!{bot} Track.flac  ::INFO:: 1.0MB\n")
+        with open(path, "wb") as fh:
+            fh.write(buf.getvalue())
+
+    def test_the_zip_is_removed_on_success(self):
+        zip_path = os.path.join(self.tmp, "abcdef012345_GoodBot-2026-09-12.zip")
+        self._write_real_list_zip("goodbot", zip_path)
+        row = {"bot": "goodbot"}
+
+        dcc_fetch._handle_completed_list_fetch(row, zip_path)
+
+        self.assertFalse(os.path.exists(zip_path))
+        self.assertIsNone(row["stored_filename"])
+        self.assertNotIn("list_processing_error", row)
+
+    def test_the_list_is_actually_browsable_afterward(self):
+        """Not just "the zip is gone" - the point of removing it is that the
+        extracted copy already stands on its own."""
+        zip_path = os.path.join(self.tmp, "abcdef012345_GoodBot-2026-09-12.zip")
+        self._write_real_list_zip("goodbot", zip_path)
+        row = {"bot": "goodbot"}
+
+        dcc_fetch._handle_completed_list_fetch(row, zip_path)
+
+        self.assertIn("goodbot", dict(getattr(config, "fetched_bot_lists", {}) or {}))
+
+    def test_a_failed_extraction_keeps_the_zip(self):
+        """The one piece of diagnostic evidence for why a peer's archive
+        could not be read - removing it would trade that for nothing."""
+        zip_path = os.path.join(self.tmp, "abcdef012345_BadBot.zip")
+        with open(zip_path, "wb") as f:
+            f.write(b"not a zip file at all")
+        row = {"bot": "badbot", "stored_filename": "abcdef012345_BadBot.zip"}
+
+        dcc_fetch._handle_completed_list_fetch(row, zip_path)
+
+        self.assertTrue(os.path.exists(zip_path))
+        self.assertIn("list_processing_error", row)
+        self.assertEqual(row["stored_filename"], "abcdef012345_BadBot.zip",
+                         "a failed extraction must not touch stored_filename - "
+                         "the zip is still exactly where that name points")
 
 
 class FetchListenerPortOrderingTests(DCCoreTestCase):

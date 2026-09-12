@@ -1175,6 +1175,63 @@ def _resolve_destination_path(request_id, raw_filename):
     return dest_dir, stored_name
 
 
+# Exactly what _resolve_destination_path() above prefixes: uuid.uuid4().hex[:12],
+# always hex, always followed by the underscore joining it to the cleaned
+# name. _fit_name_component() only ever shrinks from the END (it shrinks the
+# STEM and keeps the extension - see its own docstring), so this prefix is
+# never itself truncated away; it is always intact at the front of a stored
+# name built by that function.
+_REQUEST_ID_PREFIX_RE = re.compile(r"^[0-9a-f]{12}_")
+
+
+def _promote_clean_filename(dest_dir, stored_name):
+    """Rename a just-completed fetch from its ID-prefixed staging name to
+    the plain name the peer offered, now that the collision the ID guarded
+    against - two fetches racing for the same name while neither had
+    finished yet - can no longer happen for this one. Returns the name
+    actually on disk afterward (the plain one on success, `stored_name`
+    unchanged otherwise).
+
+    Reported live: an operator's Downloads folder and List Browser fetches
+    both filling up with names like "058c4cc8ee9a_Some Track.mp3" and
+    "ef31cd79d1f5_SomeBot-Default(2026-01-02)-OS.zip" - the ID never meant
+    anything to a human, and for a fetched list it survived even further:
+    downloading the zip and unzipping it on Windows produced a folder named
+    after the ZIP FILE ITSELF (there is no folder recorded inside a plain
+    list zip for Explorer to unpack "into", the way there would be for a
+    folder packed with rar's -ep1 - see dcc.py's own use of that flag), so
+    the id rode all the way onto the operator's own disk.
+
+    Never overwrites an existing file at the plain name - a fetch of the
+    same filename from a different bot, or an operator's own file already
+    there - the same "log and leave both alone" rule note_nick_change()
+    already applies for the identical reason (irc.py). No data is lost
+    either way; the file just keeps its longer name on this one occasion.
+
+    Never raises: a rename that fails for any OS-level reason costs a
+    readable name, not the fetch, which has already succeeded by the time
+    this runs.
+    """
+    match = _REQUEST_ID_PREFIX_RE.match(stored_name)
+    if not match:
+        return stored_name
+    plain_name = stored_name[match.end():]
+    if not plain_name:
+        return stored_name
+
+    old_path = os.path.join(dest_dir, stored_name)
+    new_path = os.path.join(dest_dir, plain_name)
+    if os.path.exists(platform_compat.long_path(new_path)):
+        return stored_name
+    try:
+        os.rename(platform_compat.long_path(old_path), platform_compat.long_path(new_path))
+        return plain_name
+    except OSError as err:
+        print(f"[FETCH] Could not drop the request id from {stored_name!r} "
+              f"after completion ({err}); keeping the longer name.")
+        return stored_name
+
+
 def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
     """Entry point, dispatched from irc.py's CTCP branch in a daemon thread.
 
@@ -1500,6 +1557,25 @@ def _handle_completed_list_fetch(row, zip_path):
     at top level: keeps this module's own import graph minimal and avoids a
     cycle (list_fetch.py imports dcc_fetch's sibling modules, not the other
     way around).
+
+    THE ZIP IS REMOVED ON SUCCESS. List Browser reads exclusively from
+    list_fetch.py's own extracted copy under FETCHED_FILES_DIR/lists/<bot>/
+    (get_fetched_bot_page() re-parses that file fresh on every view - see
+    its own docstring) - nothing anywhere re-opens the raw zip once
+    process_fetched_list_zip() has returned True, including a re-fetch,
+    which downloads a fresh one rather than touching the old. Reported
+    live: an operator downloaded one of these zips to their own machine and
+    unzipped it, and the request id ended up in the resulting filename too
+    - there is no folder recorded inside a plain list zip for an unzip tool
+    to extract "into" the way there would be for one packed with rar's
+    -ep1 (see dcc.py's own use of that flag), so Explorer named the result
+    after the zip itself. Removing the zip is the fix for that as much as
+    for the disk space: the raw download was never the deliverable, the
+    browsable list is, and it already exists on its own.
+
+    On FAILURE the zip is left exactly where it was - the one piece of
+    diagnostic evidence for why a peer's archive could not be read, and
+    deleting it would trade that for nothing.
     """
     try:
         import list_fetch
@@ -1508,6 +1584,7 @@ def _handle_completed_list_fetch(row, zip_path):
             row["list_processing_error"] = reason or "no recognizable list file found in the zip"
             print(f"[FETCH] {row.get('bot')}'s fetched list zip was received "
                   f"successfully but could not be processed: {row['list_processing_error']}")
+            return
     except Exception as err:
         # Defense-in-depth, expected to be unreachable: list_fetch.py's own
         # entry point already catches everything it knows how to anticipate.
@@ -1516,6 +1593,22 @@ def _handle_completed_list_fetch(row, zip_path):
         # transfer that itself already completed successfully.
         row["list_processing_error"] = f"unexpected error: {err}"
         print(f"[FETCH] Unexpected error processing {row.get('bot')}'s fetched list zip: {err!r}")
+        return
+
+    try:
+        os.remove(platform_compat.long_path(zip_path))
+        # None, not the now-deleted name: webserver.api_fetch_download()
+        # already answers a missing stored_filename with 404 either way, but
+        # leaving the stale name would offer a Download button in the
+        # dashboard for a file that no longer exists - browsing the list
+        # itself is how this fetch is meant to be used from here on.
+        row["stored_filename"] = None
+    except OSError as err:
+        # The list is already safely extracted and browsable either way -
+        # only the now-redundant raw zip failed to go, which costs disk
+        # space, not correctness.
+        print(f"[FETCH] {row.get('bot')}'s list was extracted successfully, "
+              f"but its zip could not be removed afterward ({err}).")
 
 
 def _offer_timeout_for(row, offer_timeout, folder_timeout, unadvertised_timeout):
@@ -1681,7 +1774,6 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     if failure_reason is None and bytes_received == total_size:
         row["state"] = "complete"
         row["bytes_received"] = bytes_received
-        print(f"[FETCH] Complete: {stored_name} ({bytes_received} bytes) from {peer_desc}.")
         if row.get("request_type") == "list":
             # The DCC transfer itself succeeded (declared size matched what
             # arrived) - that is what "complete" above means, and is left
@@ -1691,7 +1783,21 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
             # docstring: zip-slip, zip-bomb, "no recognisable list file
             # inside"), so it is handled by a dedicated module and never
             # allowed to raise back into this transfer's own success path.
+            #
+            # No _promote_clean_filename() call here: on success the raw zip
+            # is about to be removed entirely (see _handle_completed_list_fetch()'s
+            # own comment on why), so renaming it first would be wasted work.
+            print(f"[FETCH] Complete: {stored_name} ({bytes_received} bytes) from {peer_desc}.")
             _handle_completed_list_fetch(row, dest_path)
+        else:
+            # The id in stored_name only ever existed to keep this transfer
+            # from colliding with another one racing for the same cleaned
+            # name - see _resolve_destination_path()'s own docstring. That
+            # risk ends the moment the file is fully written, so the
+            # operator's own copy does not have to go on carrying it.
+            final_name = _promote_clean_filename(dest_dir, stored_name)
+            row["stored_filename"] = final_name
+            print(f"[FETCH] Complete: {final_name} ({bytes_received} bytes) from {peer_desc}.")
         return
 
     if failure_reason is None:

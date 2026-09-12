@@ -2387,6 +2387,54 @@ class RejectedListArchiveRenderingTests(DCCoreTestCase):
                          "zip entry would extract outside")
 
 
+class ADownloadButtonNeedsAFileBehindIt(DCCoreTestCase):
+    """dcc_fetch._handle_completed_list_fetch() (issue reported live) now
+    removes a successfully-extracted list's raw zip and clears
+    row["stored_filename"] - the browsable copy is the deliverable, not the
+    zip nothing ever reopens. renderDownloads() used to offer a Download
+    button for any state === "complete" row regardless, which would now be
+    a link that always answers 404. Structural, like every other check on
+    this page - nothing here executes JavaScript."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"), "r", encoding="utf-8") as f:
+            cls.app_js = f.read()
+
+    def _render_downloads_source(self):
+        start = self.app_js.index("  function renderDownloads(")
+        end = self.app_js.index(chr(10) + "  function ", start + 10)
+        return self.app_js[start:end]
+
+    def test_a_completed_row_needs_stored_filename_for_the_download_link(self):
+        body = self._render_downloads_source()
+        # The exact condition, not just that the string appears somewhere -
+        # a state === "complete" check with stored_filename tested in some
+        # OTHER branch would pass a looser assertIn without fixing anything.
+        self.assertIn('state === "complete" && row.stored_filename', body)
+
+    def test_a_completed_row_with_no_file_gets_no_download_link(self):
+        """The branch that condition guards must not simply vanish - a
+        completed row with nothing to download still needs SOME action
+        rendered (its Delete button, at least), or the row goes from a dead
+        link to no controls at all."""
+        body = self._render_downloads_source()
+        # Split TWICE: once past the has-a-file branch (which legitimately
+        # contains "/download" - that is the link this test must not catch),
+        # then again to isolate just the no-file branch up to whatever comes
+        # after it.
+        after_has_file_branch = body.split(
+            'state === "complete" && row.stored_filename', 1)[1]
+        no_file_branch = after_has_file_branch.split(
+            'else if (state === "complete")', 1)[1].split(
+            'else if (state === "failed")', 1)[0]
+
+        self.assertNotIn("/download", no_file_branch,
+                         "a completed row with no stored file must not "
+                         "still offer a link to /api/fetch/.../download")
+        self.assertIn("deleteBtn", no_file_branch,
+                      "a completed row with no stored file still needs a "
+                      "way to forget it")
 
 
 class FetchRoutesRefuseWhenTheFeatureIsOff(DCCoreTestCase):
