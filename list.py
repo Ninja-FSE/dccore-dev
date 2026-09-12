@@ -407,6 +407,22 @@ def all_list_paths(name=None):
 
 _INFO_MARKER_RE = re.compile(r'\s*::INFO::\s*', re.IGNORECASE)
 
+# The other family of size suffix seen in production, from bots that do not
+# use "::INFO::" at all: "SDFind v3.91 by SDSailor" writes
+# "!Alex_Tune A101. Donna Summer - I Feel Love (Original 12'' Version).mp3
+# ---- 18.8Mb" - two or more hyphens between spaces, then a bare size with no
+# marker word at all.
+#
+# Anchored to the END of the string ($), and requires what follows the dashes
+# to actually look like a size (digits, an optional decimal point, an
+# optional K/M/G/T, then B) - unlike "::INFO::", "----" is not a string that
+# only ever appears as this one bot's deliberate marker, so matching it
+# ANYWHERE (the way the marker split above safely can) would risk cutting a
+# real filename that happens to contain a run of hyphens. Requiring a
+# size-shaped tail at the very end is what keeps this from firing on one.
+_DASH_SIZE_SUFFIX_RE = re.compile(
+    r'\s+-{2,}\s+([\d,]*\.?[\d,]+\s*[KMGTkmgt]?[Bb])\s*$')
+
 
 def strip_info_suffix(rest):
     """Split "<filename> ::INFO:: <everything after>" into (filename, rest).
@@ -428,19 +444,30 @@ def strip_info_suffix(rest):
     unsolicited. Matching on the marker itself, tolerant of any amount of
     whitespace around it, and discarding EVERYTHING after it (not just a
     size field) fixes that for every bot's format, not just this project's
-    own. Best-effort on purpose: a line that does not carry the marker at
-    all returns the whole thing as the filename with an empty second value,
-    rather than raising. Shared by `_split_entry_line()` below (this bot's
-    own master list) and irc.py's cross-bot broadcast-search capture, which
-    extracts the same shape out of another bot's reply and must not mistake
-    any of the trailing tag for part of the filename when it later requests
-    that exact name back with `!<nick> <filename>`.
+    own.
+
+    A bot with NO marker word at all is the second, separate case - see
+    _DASH_SIZE_SUFFIX_RE above. Tried only once the marker search above has
+    already failed, so a line that happens to carry both would still prefer
+    "::INFO::", the far more specific and far more common of the two.
+
+    Best-effort beyond that: a line that carries neither returns the whole
+    thing as the filename with an empty second value, rather than raising.
+    Shared by `_split_entry_line()` below (this bot's own master list) and
+    irc.py's cross-bot broadcast-search capture, which extracts the same
+    shape out of another bot's reply and must not mistake any of the
+    trailing tag for part of the filename when it later requests that exact
+    name back with `!<nick> <filename>`.
     """
     parts = _INFO_MARKER_RE.split(rest, maxsplit=1)
     if len(parts) == 2:
         filename, size = parts
     else:
-        filename, size = rest, ""
+        dash_match = _DASH_SIZE_SUFFIX_RE.search(rest)
+        if dash_match:
+            filename, size = rest[:dash_match.start()], dash_match.group(1)
+        else:
+            filename, size = rest, ""
     return filename.strip(), size.strip()
 
 
