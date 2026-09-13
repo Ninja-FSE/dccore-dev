@@ -128,7 +128,18 @@ def problems(commands, delay_seconds, ignore_blanks=False):
         # The NORMALIZED form, not the stored one - normalize() can grow a
         # line (PRIVMSG is longer than msg), and the 510-byte limit is about
         # what actually goes on the wire, not what the operator typed.
-        size = len(normalize(text).encode("utf-8", "replace"))
+        wire = normalize(text)
+
+        # A line that normalizes to nothing is new (#486): "/" on its own is
+        # not blank to _clean_command(), but once the leading slash comes off
+        # there is no command left, and what would reach the server is a bare
+        # CRLF. Caught here rather than sent, because a stray empty line the
+        # server discards is indistinguishable from a command that ran.
+        if not wire.strip():
+            found.append(f"command {index}: a slash and nothing else.")
+            continue
+
+        size = len(wire.encode("utf-8", "replace"))
         if size > MAX_COMMAND_BYTES:
             found.append(f"command {index}: {size} bytes, over the "
                          f"{MAX_COMMAND_BYTES}-byte IRC line limit. The server "
@@ -203,27 +214,48 @@ _MSG_SHORTHAND_RE = re.compile(r"^\s*msg\s+(\S+)\s+(.*)$", re.IGNORECASE)
 
 
 def normalize(command):
-    """Rewrite the one client shorthand that does not match its wire form.
+    """Do to the line what a client does before it reaches the wire.
 
-    The dashboard's own instructions say to write these "exactly as you
-    would type it into a client" - and for the single most common line this
-    file exists for, an X login or a NickServ IDENTIFY, that instruction is
-    only true if the client's `/msg <target> <text>` is translated to the
-    `PRIVMSG <target> :<text>` the server actually understands. mIRC and
-    every other client do that translation invisibly before the line ever
-    reaches the wire; this module used to send the operator's line verbatim,
-    so a "msg X@channels.undernet.org LOGIN name pass" typed exactly as
-    documented reached Undernet as a literal, nonexistent "MSG" command and
-    came back `421 Unknown command: msg`.
+    The dashboard's instructions say to write these "exactly as you would
+    type it into a client". A client does two things to a typed line, and
+    this used to do neither.
 
-    MSG only. MODE, JOIN, NOTICE and everything else an on-connect script is
-    likely to need are already spelled the same in a client and on the wire
-    - PRIVMSG is the one mismatch, and the one nearly every X-login or
-    NickServ instruction anyone will paste in here is written as.
+    THE LEADING SLASH (#486)
+
+    In a client you type `/msg`, not `msg`. The slash is how the client
+    tells a command from something to say, and it is consumed there - it
+    never goes on the wire. Sent verbatim it comes back
+    `421 Unknown command`, which is the failure #474 was opened for, one
+    keystroke away: that operator happened to omit the slash, and the X
+    login instructions they were following tell them to include it.
+
+    It was never a `msg` problem either. Every on-connect line had it -
+    `/mode`, `/join`, `/nick` were all sent with the slash attached and all
+    rejected.
+
+    Exactly one slash comes off, whatever follows it, which also settles
+    `//` (an escaped literal slash in most clients) by construction: it
+    keeps one rather than losing both.
+
+    THE MSG SHORTHAND (#474)
+
+    `msg <target> <text>` is the one command whose client spelling is not
+    its wire spelling - the wire wants `PRIVMSG <target> :<text>`. MODE,
+    JOIN, NOTICE and everything else an on-connect script is likely to need
+    are spelled the same in both places. PRIVMSG is the one mismatch, and
+    the one nearly every X-login or NickServ instruction is written as.
+
+    The slash comes off FIRST, so this catches `/msg` for nothing.
     """
-    match = _MSG_SHORTHAND_RE.match(str(command or ""))
+    text = str(command or "")
+
+    stripped = text.lstrip()
+    if stripped.startswith("/"):
+        text = stripped[1:]
+
+    match = _MSG_SHORTHAND_RE.match(text)
     if not match:
-        return str(command or "")
+        return text
     target, message = match.groups()
     return f"PRIVMSG {target} :{message}"
 
