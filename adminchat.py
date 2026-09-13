@@ -1122,6 +1122,13 @@ def _listen_and_serve(irc_sock, nick, host, token=None):
     try:
         _listen_and_serve_locked(irc_sock, nick, host, token)
     finally:
+        # #423: a safety net now, not the release point. The two return paths
+        # in _listen_and_serve_locked before it ever opens a listener land
+        # here directly, and so would any exception neither of its own
+        # try/finally blocks catches - but the normal path already cleared
+        # this flag itself, right after the listener closed, well before
+        # _serve() started blocking for the session's life. Clearing an
+        # already-clear flag here is a harmless no-op.
         with _state_lock:
             _listening = False
 
@@ -1130,6 +1137,8 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None):
     """The listener itself. Only ever called with _listening set, so at most
     one of these holds a port at a time."""
     import dcc
+
+    global _listening
 
     ip_long = dcc.get_public_ip_long()
     if not ip_long:
@@ -1172,6 +1181,18 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None):
             listener.close()
         except OSError:
             pass
+        # #423: released HERE, not left to the wrapper in _listen_and_serve.
+        # That wrapper's own finally only fires once THIS function returns -
+        # and it used to return only after _serve() did, which blocks for the
+        # whole session's life (up to IDLE_TIMEOUT, 1800s). For that entire
+        # window every other passive DCC CHAT offer was refused outright, so
+        # an operator whose own client could not be dialled had no way to
+        # take over an existing console session at all - the one thing
+        # _promote() exists to guarantee. The port itself is already given
+        # back by listener.close() just above; the one-SESSION rule from here
+        # on is _pending's and _promote()'s job, not this flag's.
+        with _state_lock:
+            _listening = False
 
     # The peer address is only known now, so the blocklist is checked here rather
     # than before the offer, as it is on the dial-out path.
