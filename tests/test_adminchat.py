@@ -779,6 +779,106 @@ class ListenModeEndToEnd(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
 
+@unittest.skipUnless(LOOPBACK_OK, NEEDS_LOOPBACK)
+class TheListenerFlagReleasesBeforeTheSessionBlocks(unittest.TestCase):
+    """#423: _listening used to stay True for the LIFE of the authenticated
+    session, not just while a listener was waiting to be dialled.
+
+    _listen_and_serve()'s own finally only fires once _listen_and_serve_locked
+    returns - and that function used to return only after _serve() did, which
+    blocks in _reader_loop() for as long as the session lasts (up to
+    IDLE_TIMEOUT). So the moment one operator authenticated over a passive DCC
+    CHAT offer, every OTHER passive offer was refused outright until that
+    session ended - the takeover _promote() exists to guarantee could never
+    reach a second console, because the second session never got a socket to
+    authenticate on.
+
+    test_one_passive_listener.py's five tests all stub
+    _listen_and_serve_locked, so none of them ever reach the real accept-then-
+    _serve() path this bug lived in - this is the one exercising it for real,
+    the same way the issue's own repro did.
+    """
+
+    def setUp(self):
+        adminchat.reset_state_for_tests()
+        self.addCleanup(adminchat.reset_state_for_tests)
+        config.ADMIN_HOSTMASKS = ["*!*@SysOp.users.undernet.org"]
+        config.ADMIN_PASSWORD_HASH = adminchat.make_password_hash(PASSWORD, iterations=1000)
+        config.MY_IP_OR_DOCK = "127.0.0.1"
+        self.sent = []
+
+        outer = self
+
+        class RecordingIrcSocket:
+            def send(self, payload):
+                outer.sent.append(payload.decode("utf-8", "replace"))
+                return len(payload)
+            sendall = send
+
+        self.irc = RecordingIrcSocket()
+
+    def offered_ports(self, count, timeout=5.0):
+        """Pull `count` distinct offered ports out of everything sent so far."""
+        deadline = time.time() + timeout
+        seen = []
+        while time.time() < deadline and len(seen) < count:
+            seen = [int(line.strip().strip("\x01").split()[-1])
+                    for line in self.sent if "DCC CHAT chat" in line]
+            if len(seen) < count:
+                time.sleep(0.02)
+        return seen
+
+    def authenticate(self, port):
+        client = socket.create_connection(("127.0.0.1", port), timeout=5.0)
+        self.addCleanup(client.close)
+        client.settimeout(5.0)
+
+        buffer = ""
+        deadline = time.time() + 5.0
+        while "Enter Your Password:" not in buffer and time.time() < deadline:
+            try:
+                chunk = client.recv(4096)
+            except socket.timeout:
+                break
+            buffer += chunk.decode("utf-8", "replace")
+        self.assertIn("Enter Your Password:", buffer)
+
+        client.sendall((PASSWORD + "\n").encode())
+        self.assertTrue(wait_for(lambda: adminchat.active_session() is not None))
+        return client
+
+    def test_the_flag_is_clear_while_an_authenticated_session_is_being_served(self):
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp", "DCC CHAT chat 0 11283")
+        first_port = self.offered_ports(1)[0]
+        self.authenticate(first_port)
+
+        # The session above is now blocking in _serve()'s _reader_loop, same
+        # as it would for up to IDLE_TIMEOUT (1800s) in production. The whole
+        # bug was this flag staying True for exactly that stretch.
+        self.assertFalse(adminchat._listening,
+                         "the one-listener flag must release once the "
+                         "listener has handed off to an authenticated "
+                         "session, not stay held for the session's life")
+
+    def test_a_second_offer_is_not_refused_while_the_first_is_authenticated(self):
+        """The user-visible symptom: a takeover offer silently going nowhere."""
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp", "DCC CHAT chat 0 11283")
+        first_port = self.offered_ports(1)[0]
+        self.authenticate(first_port)
+
+        adminchat.handle_dcc_chat(self.irc, ADMIN_LINE, "SysOp", "DCC CHAT chat 0 22222")
+
+        # Two offers, not necessarily two DIFFERENT ports: the first listener
+        # already closed (its accept() completed) by the time the second one
+        # opens, so reusing the same port is expected, not a sign anything is
+        # wrong. What matters is that a second CTCP went out at all.
+        ports = self.offered_ports(2)
+        self.assertEqual(len(ports), 2,
+                         "the second offer must open its own listener and "
+                         "send its own CTCP back, not be silently dropped "
+                         "at the one-listener gate")
+
+
 class BadIpTracking(unittest.TestCase):
     """Per-session attempt counting is useless alone - an attacker reconnects."""
 
