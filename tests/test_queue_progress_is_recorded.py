@@ -152,53 +152,72 @@ class TheTransferRowCarriesItsOwnSize(DCCoreTestCase):
 
         self.drain()
 
+    def _read_watching_for_mid_flight(self, client, sample):
+        """Drain in small steps, calling `sample()` after every one, until
+        either it reports success or the file finishes.
+
+        Not a single read-then-check: bytes_sent is only updated in whole
+        DCC_BLOCK_SIZE (64KB) jumps, right after the sender's own sendall()
+        returns for that chunk - and the interpreter can switch threads on
+        any bytecode boundary, not only at I/O calls, so a single check
+        immediately after one 64KB read can land in the narrow window before
+        that update statement has run, on a fast enough runner. Reading in
+        small 4KB steps and sampling after each of the ~250 of them gives the
+        sender thread many chances to have already applied its own update by
+        the time any one sample runs, and CONTENT (1MB) is large enough that
+        the whole transfer cannot plausibly complete inside one scheduler
+        quantum.
+        """
+        received = 0
+        deadline = time.time() + 20
+        while received < len(CONTENT) and time.time() < deadline:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            received += len(chunk)
+            if sample():
+                return True
+        return False
+
     def test_bytes_sent_advances_against_that_size_while_still_in_flight(self):
         import defaults as config
         client = self.dial()
 
-        received = 0
-        deadline = time.time() + 20
-        # Read a chunk, then check the row without reading to EOF - proving
-        # the fraction is genuinely live, not just correct at the very end.
-        while received < 65536 and time.time() < deadline:
-            chunk = client.recv(65536)
-            if not chunk:
-                break
-            received += len(chunk)
+        def sample():
+            row = config.active_transfers[0] if config.active_transfers else None
+            return row is not None and 0 < row.get("bytes_sent", 0) < row.get("size", 0)
 
-        row = config.active_transfers[0] if config.active_transfers else None
-        self.assertIsNotNone(row, "the transfer finished before this test "
-                                  "could read it mid-flight - CONTENT may "
-                                  "need to be larger")
-        self.assertEqual(row["size"], len(CONTENT))
-        self.assertGreater(row["bytes_sent"], 0)
-        self.assertLess(row["bytes_sent"], len(CONTENT),
-                        "the whole file was already reported sent - this "
-                        "test proves progress mid-transfer, not at the end")
+        seen_mid_flight = self._read_watching_for_mid_flight(client, sample)
 
+        self.assertTrue(seen_mid_flight,
+                        "never observed 0 < bytes_sent < size while the "
+                        "transfer was still running")
         self.drain()
 
     def test_the_webserver_payload_reports_a_genuine_in_progress_percentage(self):
         """The point of recording it at all: build_queue_payload() can now
         answer with something other than 0% or 100%."""
-        import defaults as config
         client = self.dial()
+        seen_pct = {}
 
-        received = 0
-        deadline = time.time() + 20
-        while received < 65536 and time.time() < deadline:
-            chunk = client.recv(65536)
-            if not chunk:
-                break
-            received += len(chunk)
+        def sample():
+            rows = {row["user"]: row for row in webserver.build_queue_payload()}
+            row = rows.get(USER)
+            if row is None or not row.get("size"):
+                return False
+            pct = 100 * row["bytes_sent"] / row["size"]
+            if 0 < pct < 100:
+                seen_pct["value"] = pct
+                return True
+            return False
 
-        rows = {row["user"]: row for row in webserver.build_queue_payload()}
-        row = rows.get(USER)
-        self.assertIsNotNone(row, "the sending user has no row at all")
-        self.assertEqual(row["size"], len(CONTENT))
-        pct = 100 * row["bytes_sent"] / row["size"]
-        self.assertGreater(pct, 0)
-        self.assertLess(pct, 100)
+        found = self._read_watching_for_mid_flight(client, sample)
+
+        self.assertTrue(found, "build_queue_payload() never reported a "
+                               "percentage strictly between 0 and 100 while "
+                               "the transfer was still running")
+        self.assertGreater(seen_pct["value"], 0)
+        self.assertLess(seen_pct["value"], 100)
 
         self.drain()
 
