@@ -202,9 +202,14 @@ console borrows a port from it too when it has to listen.
 
 This is not a bug. The daemon advertises its **public** IP in every DCC offer,
 and most routers will not route a connection from inside the network back to
-themselves. Either test from a second machine or a phone, or set
-`MY_IP_OR_DOCK` to this PC's LAN address in `admin_config.py` for local testing
-only — and remove it before real use.
+themselves. Test from a second machine or a phone.
+
+Pinning `MY_IP_OR_DOCK` to this PC's LAN address does **not** work as a way
+round it, and this page used to suggest it. `dcc.is_offerable_to_strangers()`
+refuses every private, loopback, link-local and reserved address — an offer
+carrying one is an offer to nobody — so the send is refused outright rather
+than failing to connect. The symptom is the daemon declining to send at all,
+which looks like a different fault entirely.
 
 ---
 
