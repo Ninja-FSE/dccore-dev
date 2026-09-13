@@ -740,7 +740,7 @@ def build_filelists_payload(offset=0, limit=None, name=None, q=""):
     entries, _total = list_mod.find_matching_entries(search_words, limit=None, name=name)
     rows = list_mod.entries_to_filelist_rows(entries, getattr(config, "NICKNAME", "?"))
     groups = list_mod.group_rows_by_folder(rows)
-    page, total_folders, total_rows = list_mod.page_folder_groups(
+    page, total_folders, total_rows, row_capped = list_mod.page_folder_groups(
         groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
     return {
         "folders": page,
@@ -752,6 +752,10 @@ def build_filelists_payload(offset=0, limit=None, name=None, q=""):
         # so the frontend advances by this rather than by `limit` - otherwise
         # a truncated page would silently skip the folders it did not receive.
         "returned": len(page),
+        # #477: distinguishes "this page is short because the safety valve
+        # cut it" from "this page is short because it is the last one" - a
+        # page of one huge folder otherwise reads as the pager being broken.
+        "row_capped": row_capped,
     }
 
 
@@ -1622,7 +1626,7 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker="", q
     entry = _fetched_list_entry(entry, list_marker)
 
     search_words = split_list_search_words(q)
-    page, total_folders, total_rows, error = list_fetch.get_fetched_bot_page(
+    page, total_folders, total_rows, row_capped, error = list_fetch.get_fetched_bot_page(
         entry, offset, limit, search_words=search_words)
     if error:
         return 502, {"error": error}
@@ -1643,6 +1647,7 @@ def build_fetched_bot_list_payload(nick, offset=0, limit=None, list_marker="", q
         "offset": offset,
         "limit": limit,
         "returned": len(page),
+        "row_capped": row_capped,
     }
 
 

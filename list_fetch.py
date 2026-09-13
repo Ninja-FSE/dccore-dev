@@ -1245,16 +1245,26 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
     follow-up) means the same thing as every other search in this project
     rather than a second implementation of "contains".
 
-    Returns (page_rows, total_folders, total_rows, error): `error` is None on
-    success. Four values, not the three this said until #232 - a new caller
-    written from the docstring alone would have unpacked it wrong.
-    otherwise a short, human-readable string (e.g. the file having gone
-    missing from disk since the fetch - an operator manually clearing
-    data/fetched/, or some other bug entirely) and `page_rows`/`total` are
-    ([], 0). Never raises - the caller (webserver.build_fetched_bot_list_payload)
-    turns a non-None `error` into an HTTP error response, the same "pure
-    logic returns a result, the route just serialises it" shape as every
-    other build_*_payload() function in webserver.py.
+    Returns (page_rows, total_folders, total_rows, row_capped, error):
+    `error` is None on success, otherwise a short, human-readable string
+    (e.g. the file having gone missing from disk since the fetch - an
+    operator manually clearing data/fetched/, or some other bug entirely)
+    and `page_rows`/`total`/`row_capped` are ([], 0, False). Never raises -
+    the caller (webserver.build_fetched_bot_list_payload) turns a non-None
+    `error` into an HTTP error response, the same "pure logic returns a
+    result, the route just serialises it" shape as every other
+    build_*_payload() function in webserver.py.
+
+    `row_capped` (#477) is True when list.page_folder_groups()'s own
+    FILELISTS_MAX_PAGE_ROWS safety valve is the reason this page came back
+    with fewer folders than `limit` asked for - never when the page is
+    merely the last, shorter one. See that function's own docstring: a page
+    cut down to one outsized folder otherwise reads as the pager being
+    broken rather than the valve doing its job.
+
+    Five values, not the four this said until #477 - the same warning #232
+    left here the first time this grew a value: a new caller written from
+    the docstring alone would unpack it wrong.
 
     `offset`/`limit` are applied to the deduped row list, after re-parsing -
     the same slicing webserver.py applies to this bot's own list, so the two
@@ -1290,7 +1300,7 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
     if not list_path:
         reason = f"no list file is on record for {bot}'s fetched list"
         print(f"[LIST-FETCH] {reason}.")
-        return [], 0, 0, reason
+        return [], 0, 0, False, reason
 
     resolved_path = platform_compat.long_path(list_path)
     with _lock():
@@ -1299,7 +1309,7 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
                        f"({os.path.basename(list_path)!r} is missing - it may have "
                        f"been cleared manually since the fetch); fetch the list again")
             print(f"[LIST-FETCH] {reason}.")
-            return [], 0, 0, reason
+            return [], 0, 0, False, reason
 
         try:
             entries, _total = list_mod.find_matching_entries(
@@ -1313,15 +1323,15 @@ def get_fetched_bot_page(entry, offset, limit, search_words=None):
             # the missing-file case above, just caught a moment later.
             reason = f"could not read {bot}'s fetched list file: {err}"
             print(f"[LIST-FETCH] {reason}")
-            return [], 0, 0, reason
+            return [], 0, 0, False, reason
 
     # Grouped and paged by FOLDER, the same contract as this bot's own list -
     # see list.FILELISTS_MAX_PAGE_ROWS for why a folder count alone is not a
     # sufficient bound.
     groups = list_mod.group_rows_by_folder(rows)
-    page, total_folders, total_rows = list_mod.page_folder_groups(
+    page, total_folders, total_rows, row_capped = list_mod.page_folder_groups(
         groups, offset, limit, max_rows=list_mod.FILELISTS_MAX_PAGE_ROWS)
-    return page, total_folders, total_rows, None
+    return page, total_folders, total_rows, row_capped, None
 
 
 def forget_bot(bot):

@@ -960,7 +960,7 @@ FILELISTS_MAX_PAGE_ROWS = 2500
 def page_folder_groups(groups, offset, limit, max_rows=None):
     """One page of folder groups, sliced by FOLDER rather than by row.
 
-    Returns (page, total_folders, total_rows).
+    Returns (page, total_folders, total_rows, row_capped).
 
     A folder is never split across a page: whatever the caller asked for, a
     group is returned whole or not at all. Grouping only helps if opening a
@@ -973,6 +973,13 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
     next folder would exceed it, and always returns at least one folder even
     if that folder alone is larger, because returning nothing would leave the
     caller unable to advance.
+
+    `row_capped` is True exactly when the valve is the reason this page has
+    fewer folders than `limit` asked for - never when it simply ran out of
+    groups. #477: without this, a page cut short by one outsized folder (down
+    to a single folder, in the reported case) is indistinguishable from a
+    short LAST page, and reads as the pager being broken rather than a
+    safety valve doing its job.
     """
     total_folders = len(groups)
     total_rows = sum(group["count"] for group in groups)
@@ -982,12 +989,14 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
     window = groups[offset:offset + limit] if limit else groups[offset:]
 
     if not max_rows:
-        return window, total_folders, total_rows
+        return window, total_folders, total_rows, False
 
     page = []
     rows_so_far = 0
+    row_capped = False
     for group in window:
         if page and rows_so_far + group["count"] > max_rows:
+            row_capped = True
             break
         if not page and group["count"] > max_rows:
             # One folder larger than the whole ceiling. Returning it whole
@@ -1008,10 +1017,11 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
                 "truncated": True,
             })
             rows_so_far += max_rows
+            row_capped = True
             break
         page.append(group)
         rows_so_far += group["count"]
-    return page, total_folders, total_rows
+    return page, total_folders, total_rows, row_capped
 
 
 def execute_search(irc_sock, user, search_term, channel):
