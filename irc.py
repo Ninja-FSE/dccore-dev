@@ -2099,7 +2099,7 @@ def irc_loop():
             
         # Send the handshake immediately; the server decides the nick via real 433 replies
         try:
-            s.send(f"NICK {config.NICKNAME}\r\n".encode())
+            s.sendall(f"NICK {config.NICKNAME}\r\n".encode("utf-8", errors="ignore"))
             
             auth_buffer = b""
             while True:
@@ -2112,7 +2112,7 @@ def irc_loop():
                     if " 433 " in a_line or "erroneous nickname" in a_line.lower():
                         alt_nick = resolve_alt_nick(config.ORIGINAL_NICK)
                         print(f"[SERVER 433] The nick {config.NICKNAME} was taken. Switching CURRENT_NICK to: {alt_nick}")
-                        s.send(f"NICK {alt_nick}\r\n".encode())
+                        s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
                         config.NICKNAME = alt_nick
                     
                     # What the server actually calls us, taken from the numeric
@@ -2145,7 +2145,7 @@ def irc_loop():
                     if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
                         ident_str = getattr(config, 'IDENT', 'dccore')
                         real_str = getattr(config, 'REALNAME', 'dccore bot')
-                        s.send(f"USER {ident_str} 0 * :{real_str}\r\n".encode())
+                        s.sendall(f"USER {ident_str} 0 * :{real_str}\r\n".encode("utf-8", errors="ignore"))
                         break
                 else:
                     continue
@@ -2280,7 +2280,7 @@ def irc_loop():
                     if not main_nick_active:
                         print(f"\n[NICK RECOVERY] The ghost nick {main_nick} timed out. Changing nick...")
                         try:
-                            sock_inst.send(f"NICK {main_nick}\r\n".encode())
+                            sock_inst.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
                             config.NICKNAME = main_nick
                             break
                         except:
@@ -2360,7 +2360,7 @@ def irc_loop():
 
                     if quiet_for > KEEPALIVE_AFTER and (now - last_ping_sent) > KEEPALIVE_AFTER:
                         try:
-                            s.send(b"PING :lagcheck\r\n")
+                            s.sendall(b"PING :lagcheck\r\n")
                             last_ping_sent = now
                         except Exception as ping_err:
                             print(f"[TIMEOUT] The keepalive PING did not get through ({ping_err}). Dropping the link to reconnect.")
@@ -2434,7 +2434,7 @@ def irc_loop():
                         parts = line.split()
                         if len(parts) > 1:
                             pong_code = parts[1].lstrip(':')
-                            s.send(f"PONG {pong_code}\r\n".encode())
+                            s.sendall(f"PONG {pong_code}\r\n".encode("utf-8", errors="ignore"))
                     
                     # Anchored with is_server_numeric(), for the same reason
                     # the 513 handler three lines below is: an unanchored
@@ -2461,7 +2461,7 @@ def irc_loop():
                     if is_server_numeric(line, "513") and "PONG" in line:
                         parts = line.split()
                         pong_code = parts[-1].strip()
-                        s.send(f"PONG {pong_code}\r\n".encode())
+                        s.sendall(f"PONG {pong_code}\r\n".encode("utf-8", errors="ignore"))
 
                     # 005 is where the server states its own limits, and it
                     # arrives after 001 - so by now the shortened nick has
@@ -2496,7 +2496,7 @@ def irc_loop():
                         if str(config.NICKNAME).lower() == main_nick.lower():
                             alt_nick = resolve_alt_nick(main_nick)
                             print(f"[LIVE NICK COLLISION] The server reported a genuine collision for {main_nick}. Fallback nick: {alt_nick}")
-                            s.send(f"NICK {alt_nick}\r\n".encode())
+                            s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
                             config.NICKNAME = alt_nick
 
                     # Reclaim the main nick the moment the other client releases it
@@ -2511,7 +2511,7 @@ def irc_loop():
                             if event_source_nick(line) == main_nick.lower():
                                 print(f"[NICK RECOVERY] The main nick {main_nick} logged out. Reclaiming it now...")
                                 try:
-                                    s.send(f"NICK {main_nick}\r\n".encode())
+                                    s.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
                                     config.NICKNAME = main_nick
                                 except Exception as recovery_err:
                                     print(f"[NICK RECOVERY ERROR] Could not reclaim the nick: {recovery_err}")
@@ -2563,7 +2563,7 @@ def irc_loop():
                                     line = on_connect.expand(
                                         on_connect.normalize(command),
                                         config.NICKNAME)
-                                    socket_conn.send(
+                                    socket_conn.sendall(
                                         (line + "\r\n").encode(
                                             "utf-8", errors="ignore"))
                                 if commands:

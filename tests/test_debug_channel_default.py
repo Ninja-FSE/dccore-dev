@@ -249,7 +249,11 @@ class AnOperatorWhoWantsOneStillGetsIt(unittest.TestCase):
         and still passed, because the comment sat mid-line. The third parsed
         the AST and was genuinely correct, right up until the debug channel
         stopped being a JOIN statement of its own - at which point it was
-        asserting the shape of the old fix rather than the behaviour.
+        asserting the shape of the old fix rather than the behaviour. (A
+        fourth correction crossed with this one in #504, narrowing that AST
+        check from ".send(" to ".send" so it could not pass merely because
+        "sendall(" contains "send" - right, and superseded by dropping the
+        source read altogether.)
 
         The behaviour is: a configured debug channel is one of the channels
         the connect path asks for. That is a function now, so ask it - and

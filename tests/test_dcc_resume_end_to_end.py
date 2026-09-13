@@ -75,6 +75,12 @@ class RecordingIrcSocket:
         self.handshake = None
         self.handshake_seen = threading.Event()
 
+    def sendall(self, payload):
+        # Delegated (#504): the handshake this test waits on goes out through
+        # sendall() now, and a fake that answered only send() would sit on
+        # its Event until the timeout.
+        self.send(payload)
+
     def send(self, payload):
         text = payload.decode("utf-8", "replace")
         self.lines.append(text)

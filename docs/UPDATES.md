@@ -300,6 +300,63 @@ still refuses to write one.
 
 Six mutation-checked properties, no survivors.
 
+### 🟢 No socket write is a partial write
+
+Closes #504, which was filed while checking that #456's fix was complete
+rather than local. It was not: twenty more sites across five modules had the
+same fault.
+
+`socket.send()` returns how many bytes it managed to hand to the kernel, and
+the caller has to loop on the rest. `sendall()` does that loop. Every one of
+these dropped the return value, so on Linux - with the socket's send buffer
+within a few hundred bytes of full - the line goes out truncated and the
+server reads whatever arrived as a complete command.
+
+What it looks like when it happens, which is the argument for converting all
+of them rather than the ones that look risky: a truncated `PONG` is a ping
+timeout and therefore a disconnect; a truncated `USER` is a failed
+registration; a truncated DCC SEND handshake is a transfer that never starts
+with the slot still held. None of those report themselves as a short write.
+
+**No truncation has been observed.** A short write needs the buffer nearly
+full, which needs a slow server read or a burst, and most of these lines are
+short and sent one at a time. The reason to fix them anyway is that the cost
+is one word per site, the failure is silent, and "this line is short so it
+cannot be truncated" is exactly the reasoning that left `queue_mgr` broken:
+the buffer being full is a property of the CONNECTION, not of the line.
+
+Every site that encodes a string does it the way `announce.py`'s debug drain
+always has, so a name the socket cannot spell costs a character rather than
+raising on whichever thread is holding the socket - the reader thread, for a
+PONG.
+
+This changes nothing about WHICH path a line takes. Several of these bypass
+`oserve.queue_message()` deliberately - the DCC negotiation lines do it for
+latency and say so where it happens - and that is untouched.
+
+#### The guard is the deliverable
+
+A test listing the twenty known sites would pass forever while somebody added
+a twenty-first, so it asks the opposite question: is there any `.send(` left
+in a daemon module at all?
+
+That works because this codebase has exactly one non-socket `send` -
+`adminchat.Session.send()`, which writes a line to an admin's DCC CHAT
+session. So the allowlist is three receiver names in one file, and anything
+else is a finding rather than a judgement call. It reads the AST rather than
+the text, so a `send(` inside a comment is not a finding (`webserver.py` has
+three, describing this very thing) and a call split across lines still is.
+
+Three of its six tests guard the guard: the allowlist must still describe
+something real, `Session.send` must still be a method rather than a name the
+exemption now excuses by accident, and the calls must not have been deleted
+rather than converted. That last one is a coarse backstop and says so - what
+actually owns "the line is still sent" is the rest of the suite, verified by
+replacing the USER registration with `pass` and watching six tests in other
+files go red.
+
+Six mutation-checked properties, no survivors.
+
 ### 🟢 A file the bot advertises, refused for its spelling
 
 Closes #445.
