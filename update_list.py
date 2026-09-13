@@ -1149,8 +1149,41 @@ def generate_master_list(list_name=None):
     # once the walk finishes, so one bad subtree costs the whole run
     # (keeping the previous index) rather than a silent partial one.
     walk_errors = []
+    denied_dirs = []
 
     def _on_walk_error(err):
+        # TWO DIFFERENT FAILURES, AND ONLY ONE OF THEM IS WORTH ABORTING FOR
+        # (#441).
+        #
+        # A directory that is PERMANENTLY unreadable - a Windows volume root's
+        # System Volume Information, a POSIX lost+found, anything whose ACL
+        # excludes the account the daemon runs as - fails identically on every
+        # future scan. Treating it as "keep the previous index" meant the list
+        # could never be rebuilt again on that install: every !update ran the
+        # whole scan and then threw the result away, for ever, and the log line
+        # said only that part of the library could not be read.
+        #
+        # A directory that has VANISHED mid-scan is the opposite: it means the
+        # library changed underneath us, the scan we just did is of a state
+        # that no longer exists, and publishing it would be publishing a
+        # snapshot known to be wrong. That one still aborts.
+        #
+        # The test is whether the path is still there. Permission denied on a
+        # directory that exists is a fact about the ACL, not about the scan.
+        denied = isinstance(err, PermissionError)
+        if denied:
+            try:
+                denied = os.path.isdir(err.filename)
+            except Exception:
+                denied = False
+
+        if denied:
+            denied_dirs.append(err.filename)
+            print(f"[LIST-GEN] Skipping {err.filename!r}: permission denied, and "
+                  f"it is still there - excluded from the list rather than "
+                  f"failing the whole rebuild.")
+            return
+
         walk_errors.append(err)
         print(f"[LIST-GEN ERROR] Could not read {err.filename!r} during the scan: {err}")
 
@@ -1277,8 +1310,27 @@ def generate_master_list(list_name=None):
               "read - keeping the previous index rather than publishing a truncated one.")
         return False
 
+    if denied_dirs:
+        # Said once, with the count, because it is a standing condition rather
+        # than an event: these folders will be missing from every list until
+        # the operator changes their permissions, and an operator comparing
+        # the file count against their own expectation deserves to know why
+        # it is short.
+        print(f"[LIST-GEN] {len(denied_dirs)} folder(s) were excluded because "
+              f"the daemon cannot read them. They are not in this list and "
+              f"will not be in the next one until their permissions change: "
+              f"{', '.join(repr(p) for p in denied_dirs[:5])}"
+              f"{' ...' if len(denied_dirs) > 5 else ''}")
+
     # Sort by the real folder and file names
     all_files_data.sort(key=lambda x: (str(x[0]).lower(), str(x[1]).lower()))
+    # THE SAME ORDER, FOR THE SAME REASON (#443). all_files_data has been
+    # sorted here since the beginning; video_files_data is built by the same
+    # walk and was only ever appended to, so the film and series list came out
+    # in whatever order the filesystem handed the directories over - which is
+    # reverse-ish on NTFS and arbitrary elsewhere. A reader scanning for a
+    # title has no way to guess where it is.
+    video_files_data.sort(key=lambda x: (str(x[0]).lower(), str(x[1]).lower()))
 
     total_files_count = len(all_files_data)
     scan_end = time.time()
@@ -1346,6 +1398,11 @@ def generate_master_list(list_name=None):
         print("[LIST-GEN] No folder in this list can be packed - skipping the "
               "album list rather than shipping an empty one.")
 
+    # Set the moment the swap completes, and read by the handler at the
+    # bottom - which has to tell a failure BEFORE the swap from one
+    # after it. Declared out here so the early failures do not meet an
+    # unbound name in the very handler meant to report them.
+    published = False
     try:
         with open(tmp_txt_path, "w", encoding="utf-8") as f, \
              open(tmp_rar_path, "w", encoding="utf-8") as f_rar:
@@ -1677,6 +1734,13 @@ def generate_master_list(list_name=None):
             swaps.append((tmp_rar_path, rar_path))
         _publish_artifacts(swaps)
 
+        # THE POINT OF NO RETURN (#442). Everything from here to the except is
+        # tail work - side files, cleanup, bookkeeping - and any of it can
+        # raise. The swap has already happened, so the NEW list is the one in
+        # use from this line onward, and the handler must not go on claiming
+        # the old one was kept.
+        published = True
+
         # The two side files are published HERE, AFTER every swap above has
         # already succeeded, and atomically. They used to be written before
         # the swaps - so a failure partway through (a Windows os.replace can
@@ -1762,7 +1826,18 @@ def generate_master_list(list_name=None):
             
     except Exception as e:
         print(f"[LIST-GEN ERROR] Failed to generate the lists: {e}")
-        print("[LIST-GEN] The previous list was left untouched and is still in use.")
+        if published:
+            # THE SWAP ALREADY HAPPENED. Saying the old list was kept would be
+            # exactly backwards: the new list is live and serving, and only
+            # the tail work after the swap failed. An operator told "the
+            # previous list is still in use" reasonably concludes nothing
+            # changed and that the rebuild can simply be retried - while the
+            # bot is already serving the new one.
+            print("[LIST-GEN] The new list WAS published and is in use - the "
+                  "failure above happened afterwards, in the tail work. Do "
+                  "not treat this as 'nothing changed'.")
+        else:
+            print("[LIST-GEN] The previous list was left untouched and is still in use.")
         _discard_temp_lists(*tmp_all_paths)
         return False
 
