@@ -365,6 +365,11 @@ class DebugDrainDeliveryTests(QuietTestCase):
         self.addCleanup(self._close_gate)
         # Speed the pump up; the default pause between lines is 0.5s.
         self.config.DEBUG_MSG_DELAY = 0.01
+        # #424: send_debug() now requires a non-blank DEBUG_CHANNEL before
+        # queuing at all, which ships blank - unrelated to what this class
+        # tests (the drain thread's own two gates), so a channel is set here
+        # purely to keep these lines reaching the queue in the first place.
+        self.config.DEBUG_CHANNEL = "#chan"
 
     def _close_gate(self):
         self.oserve.irc_connection = None

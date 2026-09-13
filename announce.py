@@ -840,7 +840,17 @@ def send_debug(msg_text, category="INFO", notice=None):
     # ---------------------------------------------------------------------
     delivered = 0
 
-    if getattr(config, "DEBUG_TO_CHANNEL", True):
+    # #424: DEBUG_CHANNEL ships blank ("no debug channel", per defaults.py's
+    # own comment), and DEBUG_TO_CHANNEL defaults on regardless. Queuing
+    # anyway sent "PRIVMSG  :<...>" - two spaces, no recipient - to the
+    # server on a stock install, which the server silently rejects, so
+    # `delivered` counted a send that never reached anyone and the stdout
+    # floor below never fired. Same guard irc.py already applies before the
+    # debug-channel JOIN, so a blank value is treated identically everywhere
+    # it is used rather than needing to be re-learned at each call site.
+    debug_chan = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip()
+
+    if debug_chan and getattr(config, "DEBUG_TO_CHANNEL", True):
         _debug_queue.append(msg)
         _ensure_debug_drain()
         delivered += 1
