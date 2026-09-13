@@ -420,6 +420,38 @@ def discard_orphaned_temp_archives(user_key):
     return removed
 
 
+def live_irc_socket(captured=None):
+    """The socket the daemon is using RIGHT NOW, not the one this thread was
+    handed however long ago.
+
+    Every dispatch path in this module threads the IRC socket down as a
+    parameter, and until this existed nothing here ever looked at
+    `oserve.irc_connection` - `grep -c irc_connection dcc.py` returned zero
+    while six other modules read it. A thread armed before a reconnect went on
+    using the closed socket afterwards, which is not a narrow race:
+    `user_queue_timer()` waits up to FIVE MINUTES holding one, and
+    `redispatch_waiting_pack()` and `delayed_port_retry()` carry the same
+    object.
+
+    Resolving at the point of USE rather than fixing each capture site covers
+    all of them at once, including the next one somebody writes.
+
+    The live socket wins whenever there is one. When there is not - the daemon
+    is between connections, or this is a test driving the send path directly -
+    the captured one is all there is, and is returned: writing to a socket
+    that turns out to be closed is now harmless, because the caller returns
+    instead of waiting for a guest who was never invited.
+
+    None means neither exists, and callers must treat that as "hold the
+    queue" rather than as a failure to charge to the user.
+    """
+    import sys
+
+    oserve = sys.modules.get("oserve")
+    live = getattr(oserve, "irc_connection", None) if oserve is not None else None
+    return live if live is not None else captured
+
+
 def release_queue_entry(user, next_file, delivered, reason=""):
     """Settle the queue row for a finished attempt. Returns True if the row was kept.
 
@@ -2294,6 +2326,13 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         return
 
     conn = None
+    # Set when the offer never left this machine, so the finally below can
+    # tell "the user did not take the file we offered" from "we never
+    # managed to offer it". Only the first of those is theirs to answer for,
+    # and only the first is charged to their row. Declared BEFORE the try so
+    # the finally can always read it, whatever raised.
+    offer_never_sent = False
+
     try:
         # settimeout() and listen() USED TO SIT ABOVE this try - the one whose
         # finally is the only thing that releases the slot and closes this
@@ -2345,11 +2384,36 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                             offered_name_from_handshake(ctcp_handshake),
                             file_size)
 
+
+        # THE SOCKET THE DAEMON HAS NOW. This thread may have been waiting
+        # since before a reconnect - user_queue_timer() holds one for up to
+        # five minutes - and the one it was handed is then closed.
+        handshake_sock = live_irc_socket(irc_sock)
+        if handshake_sock is None:
+            # Disconnected. The row is left exactly as it is, for the same
+            # reason the missing-address return above leaves it: nothing about
+            # this user's request failed, so nothing should be charged to it.
+            print(f"[DCC QUEUE] {user}'s queue is untouched - the bot has no "
+                  f"connection to send the offer over. It waits for one.")
+            # The lock and the listening socket are both released by the
+            # finally below, which every exit through this try reaches.
+            offer_never_sent = True
+            return
+
         try:
-            irc_sock.send(ctcp_handshake.encode())
+            handshake_sock.send(ctcp_handshake.encode())
             print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
         except Exception as e:
             print(f"[DCC ERROR] Failed to send the handshake: {e}")
+            # NOBODY WAS INVITED, SO NOBODY IS COMING. This used to fall
+            # straight through into accept() below, which then blocked for the
+            # full socket timeout waiting for a connection that could not
+            # happen - and the timeout was charged to the row as a send
+            # failure. Three of those and the user's file was deleted from
+            # their queue with a notice blaming the send, over a socket that
+            # by then worked again.
+            offer_never_sent = True
+            return
 
         conn, addr = dcc_sock.accept()
         conn.settimeout(60.0)
@@ -2636,12 +2700,28 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         #    unconditional pop(0), which removed whatever was first at that instant rather
         #    than the entry actually sent. See release_queue_entry.
         row_retained = False
-        try:
-            row_retained = release_queue_entry(
-                user, next_file, delivered=transfer_completed,
-                reason="transfer complete" if transfer_completed else "transfer did not complete")
-        except Exception as pop_err:
-            print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
+        if offer_never_sent:
+            # NOTHING WAS OFFERED, SO NOTHING IS OWED. The retry budget on the
+            # row counts times the user was given a file and did not take it;
+            # a handshake this machine could not put on the wire is not one of
+            # those. Charging it anyway meant three reconnects at the wrong
+            # moment deleted somebody's queued file and told them the send had
+            # failed - over a connection that was working again by the time
+            # they read it.
+            #
+            # The row is left exactly as it was, which is what the
+            # missing-address return earlier in this function does for the
+            # same reason. No retry is scheduled from here: the next dispatch
+            # trigger picks it up, and a reconnect produces one.
+            print(f"[DCC QUEUE] {user}'s row is unchanged - the offer never "
+                  f"left this machine, so nothing is charged against it.")
+        else:
+            try:
+                row_retained = release_queue_entry(
+                    user, next_file, delivered=transfer_completed,
+                    reason="transfer complete" if transfer_completed else "transfer did not complete")
+            except Exception as pop_err:
+                print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
 
         # 6. Release the memory lock and rule out duplicate threads.
         # #162 finding #6: a plain audio file never owned rar_inprogress - this ran

@@ -317,7 +317,11 @@ class TheSendPathUsesIt(unittest.TestCase):
         thread. Registering afterwards would miss it."""
         source = self.source()
         register_at = source.index("register_send_offer(user, assigned_port")
-        send_at = source.index("irc_sock.send(ctcp_handshake.encode())")
+        # Named by what it does rather than by the variable holding the
+        # socket: that was renamed when the send started resolving the LIVE
+        # connection instead of the one this thread was handed, and this
+        # guard failed on the rename while the property it checks was intact.
+        send_at = source.index(".send(ctcp_handshake.encode())")
 
         self.assertLess(register_at, send_at)
 

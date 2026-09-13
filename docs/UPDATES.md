@@ -4,6 +4,48 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC2 (2026-09-12) - "The Several Lists Release"
 
+### 🔴 A thread that outlived its connection
+
+Found by the pre-publication audit sweep. Closes #430.
+
+Every dispatch path in `dcc.py` threads the IRC socket down as a parameter,
+and nothing in the module ever looked at the live one. `grep -c
+irc_connection dcc.py` returned **zero**, while six other modules read it - so
+`oserve.py`'s own comment, that "irc.py and dcc.py reach through sys.modules
+to find the live socket", was simply untrue of `dcc.py`.
+
+A thread armed before a reconnect therefore went on using the closed socket
+afterwards. Not a narrow race either: `user_queue_timer()` waits up to **five
+minutes** holding one before it dispatches, and `redispatch_waiting_pack()`
+and `delayed_port_retry()` carry the same object.
+
+#### What it cost the person who was queued
+
+The handshake raised. The bare `except` printed and execution fell straight
+through into `accept()`, which then blocked for the full socket timeout -
+about thirty seconds - waiting for a connection nobody had been invited to
+make. That timeout was charged to their queue row as a send failure, and
+three of those deleted the file from their queue with a notice blaming the
+send, delivered over a connection that by then worked again.
+
+#### Two changes
+
+The socket is resolved at the point of **use**, which covers every capture
+site at once, including the next one somebody writes. The live connection wins
+whenever there is one; between connections the captured socket is all there
+is, and trying it is now harmless because the caller returns rather than
+waiting. Only when there is neither does the queue simply hold.
+
+And an offer that never left this machine is not charged to the row. The retry
+budget counts times a user was offered a file and did not take it; a handshake
+this machine could not put on the wire is not one of those.
+
+Along the way, two explicit releases of `user_processing_lock` were removed
+rather than added: the `finally` already discards it for every exit that
+reaches it, and duplicating that only makes it look conditional.
+
+Six mutation-checked properties, no survivors.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
