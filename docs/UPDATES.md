@@ -4,6 +4,33 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC2 (2026-09-12) - "The Several Lists Release"
 
+### 🔴 A debug channel nobody set
+
+Found by the pre-publication audit sweep. Closes #424.
+
+`DEBUG_TO_CHANNEL` defaults to **True**. `DEBUG_CHANNEL` defaults to **""**.
+Out of the box those two combine into
+
+    PRIVMSG  :<debug text>
+
+a PRIVMSG with no target, put on the wire for every runtime report the daemon
+makes - by a bot that has just connected and has not been configured yet.
+
+That is not a corner case. It is the state EVERY fresh install starts in, so
+it was the state every new operator's first run was in, and the first thing a
+newly published release would have done on somebody else's network.
+
+The fix is not to refuse to log. Without a channel the line falls through to
+the console - where somebody running a bot for the first time is watching
+anyway - and startup says once that this is what is happening, because
+silence is otherwise indistinguishable from working.
+
+A channel of only spaces counts as unset. `settings.conf` is a text file
+edited by hand, and `DEBUG_CHANNEL = ` with a trailing space reads back as a
+string that is true and is not a channel.
+
+Five mutation-checked properties, no survivors.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that

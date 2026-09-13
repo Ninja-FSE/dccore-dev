@@ -253,6 +253,17 @@ def startup():
         # A panel that cannot be restored is a panel; the bot still serves
         # files. Nothing here is worth refusing to boot over.
         print(f"[STARTUP] Could not restore the notices: {notices_err}")
+
+    # Said once, because silence is indistinguishable from working. With
+    # DEBUG_TO_CHANNEL on and DEBUG_CHANNEL unset - which is what a fresh
+    # install is - runtime reports used to leave as "PRIVMSG  :<text>", a
+    # line with no target. They now go to the console instead, and the
+    # operator is told that is what is happening.
+    if (getattr(config, "DEBUG_TO_CHANNEL", True)
+            and not str(getattr(config, "DEBUG_CHANNEL", "") or "").strip()):
+        print("[STARTUP] DEBUG_TO_CHANNEL is on but DEBUG_CHANNEL is not set, "
+              "so runtime reports go to the console only. Set DEBUG_CHANNEL "
+              "to have them sent to a channel as well.")
     # #221: a bot that ran for months before retention existed loads all of it
     # back here. Pruning at startup as well as on the persist cycle means an
     # upgrade cleans up once rather than carrying the backlog forever.

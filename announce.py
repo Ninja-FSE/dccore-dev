@@ -840,7 +840,23 @@ def send_debug(msg_text, category="INFO", notice=None):
     # ---------------------------------------------------------------------
     delivered = 0
 
-    if getattr(config, "DEBUG_TO_CHANNEL", True):
+    # A CHANNEL HAS TO EXIST BEFORE ANYTHING CAN BE SENT TO IT.
+    #
+    # DEBUG_TO_CHANNEL defaults to True and DEBUG_CHANNEL defaults to "", so
+    # out of the box those two combine into
+    #
+    #     PRIVMSG  :<debug text>
+    #
+    # - a PRIVMSG with no target, put on the wire for every runtime report the
+    # daemon makes. That is a malformed line sent to the server by a bot that
+    # has just connected and has not been configured yet, which is the state
+    # EVERY fresh install starts in.
+    #
+    # Falling through to the console rather than refusing to log: the operator
+    # still gets the line, in the place a new install is most likely to be
+    # watching anyway.
+    debug_channel = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip()
+    if getattr(config, "DEBUG_TO_CHANNEL", True) and debug_channel:
         _debug_queue.append(msg)
         _ensure_debug_drain()
         delivered += 1

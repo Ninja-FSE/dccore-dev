@@ -39,9 +39,17 @@ class DebugRouting(DCCoreTestCase):
         announce._debug_queue.clear()
         self.addCleanup(announce._debug_queue.clear)
 
-        for name in ("DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE"):
+        for name in ("DEBUG_TO_CHANNEL", "DEBUG_TO_CONSOLE", "DEBUG_CHANNEL"):
             original = getattr(config, name, True)
             self.addCleanup(lambda n=name, v=original: setattr(config, n, v))
+
+        # These tests are about WHERE a line is routed, which presumes there is
+        # somewhere to route it to. DEBUG_CHANNEL ships blank, and a blank one
+        # now means "no channel" rather than a PRIVMSG addressed to nobody -
+        # so without this they would be modelling an unconfigured bot while
+        # asserting about a configured one. The unconfigured case has its own
+        # file, tests/test_a_debug_channel_nobody_set.py.
+        config.DEBUG_CHANNEL = "#dccore-debug"
 
         # The drain thread would empty the queue underneath the assertions, so
         # it is kept from starting; what matters here is what was ENQUEUED.
