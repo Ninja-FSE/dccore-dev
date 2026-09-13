@@ -2367,8 +2367,16 @@ def irc_loop():
                                 for index, command in enumerate(commands):
                                     if index:
                                         time.sleep(gap)
-                                    line = on_connect.expand(command,
-                                                             config.NICKNAME)
+                                    # normalize() first: translates the one
+                                    # client shorthand (msg -> PRIVMSG) that
+                                    # does not match its own wire form, so
+                                    # the dashboard's "exactly as you would
+                                    # type it into a client" is actually
+                                    # true for the X-login/NickServ line
+                                    # nearly every operator pastes in here.
+                                    line = on_connect.expand(
+                                        on_connect.normalize(command),
+                                        config.NICKNAME)
                                     socket_conn.send(
                                         (line + "\r\n").encode(
                                             "utf-8", errors="ignore"))

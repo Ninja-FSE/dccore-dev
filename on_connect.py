@@ -37,6 +37,7 @@ here rather than left to callers:
 import io
 import json
 import os
+import re
 
 import defaults as config
 import platform_compat
@@ -124,7 +125,10 @@ def problems(commands, delay_seconds, ignore_blanks=False):
             if not ignore_blanks:
                 found.append(f"command {index}: blank.")
             continue
-        size = len(text.encode("utf-8", "replace"))
+        # The NORMALIZED form, not the stored one - normalize() can grow a
+        # line (PRIVMSG is longer than msg), and the 510-byte limit is about
+        # what actually goes on the wire, not what the operator typed.
+        size = len(normalize(text).encode("utf-8", "replace"))
         if size > MAX_COMMAND_BYTES:
             found.append(f"command {index}: {size} bytes, over the "
                          f"{MAX_COMMAND_BYTES}-byte IRC line limit. The server "
@@ -193,6 +197,35 @@ def save(commands, delay_seconds, path=None):
         raise
 
     return cleaned
+
+
+_MSG_SHORTHAND_RE = re.compile(r"^\s*msg\s+(\S+)\s+(.*)$", re.IGNORECASE)
+
+
+def normalize(command):
+    """Rewrite the one client shorthand that does not match its wire form.
+
+    The dashboard's own instructions say to write these "exactly as you
+    would type it into a client" - and for the single most common line this
+    file exists for, an X login or a NickServ IDENTIFY, that instruction is
+    only true if the client's `/msg <target> <text>` is translated to the
+    `PRIVMSG <target> :<text>` the server actually understands. mIRC and
+    every other client do that translation invisibly before the line ever
+    reaches the wire; this module used to send the operator's line verbatim,
+    so a "msg X@channels.undernet.org LOGIN name pass" typed exactly as
+    documented reached Undernet as a literal, nonexistent "MSG" command and
+    came back `421 Unknown command: msg`.
+
+    MSG only. MODE, JOIN, NOTICE and everything else an on-connect script is
+    likely to need are already spelled the same in a client and on the wire
+    - PRIVMSG is the one mismatch, and the one nearly every X-login or
+    NickServ instruction anyone will paste in here is written as.
+    """
+    match = _MSG_SHORTHAND_RE.match(str(command or ""))
+    if not match:
+        return str(command or "")
+    target, message = match.groups()
+    return f"PRIVMSG {target} :{message}"
 
 
 def expand(command, nickname=None):
