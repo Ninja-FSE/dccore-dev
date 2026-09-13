@@ -605,10 +605,26 @@ def announce_worker():
                         raw_record = db.get_speed_record()
                         record_str = stats_mgr.format_speed(raw_record) if raw_record > 0 else "0k/s"
 
-                        announce_msg = build_advert_line(
-                            chan, config.NICKNAME, formatted_count, total_size,
-                            list_date, slots_str, queued_str, speed_str,
-                            record_str, total_sent_str, config.SCRIPT_VERSION)
+                        # #434: the one outbound template with no budget
+                        # enforcement - announce.py's other four all go
+                        # through fit_irc_line(). A large library in a long
+                        # channel name (or a CUSTOM_THEME_* override, which
+                        # interpolates each role 8-9 times) can push this
+                        # past IRC_LINE_BUDGET; a recipient with a long
+                        # enough hostmask then has the SERVER cut the line,
+                        # and the cut can land inside a colour code, smearing
+                        # the background to the end of the line - exactly
+                        # what fit_irc_line() exists to prevent. total_sent
+                        # is what gives way: it costs the most (it only ever
+                        # grows) and informs the least of anything on the
+                        # line - an operator watching this channel already
+                        # saw it, in full, in every earlier advert.
+                        announce_msg = fit_irc_line(
+                            lambda ts: build_advert_line(
+                                chan, config.NICKNAME, formatted_count, total_size,
+                                list_date, slots_str, queued_str, speed_str,
+                                record_str, ts, config.SCRIPT_VERSION),
+                            total_sent_str)
 
                         if oserve:
                             oserve.queue_message("channel_announce", announce_msg)
