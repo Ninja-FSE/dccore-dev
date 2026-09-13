@@ -263,6 +263,17 @@ html, body {
   color: var(--accent-strong);
 }
 
+/* #438: `.nav-item` above is an author-origin `display: flex`, which
+   outranks the UA stylesheet's `display: none` for `hidden` at equal
+   specificity regardless of load order - the same trap documented where
+   `.status-row[hidden]` needs its own pair, below. Without this,
+   disableConsoleUi() setting navButton.hidden = true (app.js, on the
+   Console's first 404) left the button on screen: clickable, opening an
+   empty log pane, with anything typed there posting into a 404 route. */
+.nav-item[hidden] {
+  display: none;
+}
+
 .nav-icon {
   width: 18px;
   text-align: center;
