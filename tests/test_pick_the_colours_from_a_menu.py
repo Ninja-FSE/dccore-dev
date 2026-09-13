@@ -186,6 +186,103 @@ class TheValueSurvivesTheRoundTrip(DCCoreTestCase):
         self.assertEqual(shown, posted)
 
 
+class AControlCharacterCannotHideBehindTheEscape(DCCoreTestCase):
+    """#436: the escape text is how a colour crosses settings.conf safely -
+    but "\\x0a" and "\\x0d" decode to a REAL newline/carriage return, which
+    is exactly what the plain line-break check further down settings_file.py
+    cannot see, because the ENCODED text holds no line break at all. A value
+    saved this way came back out of config as a real \\n, and
+    theme.blocks() interpolates one CUSTOM_THEME_* value 8-9 times into a
+    single outbound line - turning one advert into nine separate IRC
+    commands sent in one send(), reserving exactly one outbound_pacer slot
+    for all nine.
+
+    Exercised through the real settings_file.save() round trip, the same
+    one TheValueSurvivesTheRoundTrip above uses for the safe case - not
+    coerce() alone, since the defect was specifically that encode_irc_escapes()
+    ran AFTER decode_irc_escapes() had already produced the byte, hiding it
+    from the line-break check that runs after both.
+    """
+
+    def saved(self, name, posted):
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, "settings.conf")
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write("NICKNAME = SomeBot\n")
+        settings_file.save(vars(config), {name: posted},
+                           path=path, log=lambda *a, **k: None)
+        with io.open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_documented_newline_escape_is_refused(self):
+        with self.assertRaises(settings_file.SettingsWriteError):
+            self.saved("CUSTOM_THEME_BORDER", "\\x0a")
+
+    def test_the_documented_carriage_return_escape_is_refused(self):
+        with self.assertRaises(settings_file.SettingsWriteError):
+            self.saved("CUSTOM_THEME_BORDER", "\\x0d")
+
+    def test_a_null_byte_escape_is_refused_too(self):
+        with self.assertRaises(settings_file.SettingsWriteError):
+            self.saved("CUSTOM_THEME_BORDER", "\\x00")
+
+    def test_the_newline_hidden_in_a_longer_value_is_still_caught(self):
+        """Not just a bare "\\x0a" - the exact reported shape mixes it with
+        real colour codes on either side."""
+        with self.assertRaises(settings_file.SettingsWriteError):
+            self.saved("CUSTOM_THEME_BORDER", "\\x0304,05\\x0a\\x0301,00")
+
+    def test_an_ordinary_colour_still_saves(self):
+        """Control: the fix must not refuse what TheValueSurvivesTheRoundTrip
+        above already proved works."""
+        written = self.saved("CUSTOM_THEME_BORDER", "\\x0304,05")
+        self.assertIn("CUSTOM_THEME_BORDER = \\x0304,05", written)
+
+    def test_a_value_past_the_length_cap_is_refused(self):
+        """8-9 repeats of one role compete with everything else for
+        announce.IRC_LINE_BUDGET - a role need not contain a control
+        character to be a problem if it is simply very long."""
+        with self.assertRaises(settings_file.SettingsWriteError):
+            self.saved("CUSTOM_THEME_BORDER", "\\x0304,05" * 10)
+
+    def test_the_length_cap_measures_the_decoded_bytes_not_the_escape_text(self):
+        """The escape spelling is ~4x longer than the byte it decodes to -
+        capping the TEXT typed would refuse ordinary multi-code values that
+        are perfectly short on the wire."""
+        # "\x0304,05" x3 decodes to 18 bytes on the wire (COLOUR + "04,05"
+        # is 6 bytes each), comfortably under CUSTOM_THEME_MAX_BYTES (30) -
+        # but its escape spelling ("\\x0304,05" x3) is 27 characters, close
+        # enough to the cap that measuring the posted TEXT instead of the
+        # decoded value could wrongly refuse it.
+        written = self.saved("CUSTOM_THEME_BORDER", "\\x0304,05" * 3)
+        self.assertIn("CUSTOM_THEME_BORDER = ", written)
+
+
+class TheTemplatesCannotBeHandedARawControlCharacterEither(unittest.TestCase):
+    """#436's defence in depth: settings_file.py's writer is the only
+    guarded PATH IN, but theme.palette() is the one place every outbound
+    template gets its colours from - a hand-edited settings.conf or
+    admin_config.py answers to neither coerce() nor _check_writable()."""
+
+    def test_a_raw_newline_in_config_does_not_reach_the_palette(self):
+        painted = theme.palette({"CUSTOM_THEME_BORDER": "x\ny"})
+
+        self.assertNotIn("\n", painted["border"])
+
+    def test_a_raw_carriage_return_does_not_reach_the_palette(self):
+        painted = theme.palette({"CUSTOM_THEME_BORDER": "x\ry"})
+
+        self.assertNotIn("\r", painted["border"])
+
+    def test_a_value_that_is_nothing_but_a_newline_keeps_the_preset(self):
+        """Stripped to nothing, not published as an empty role - the same
+        rule an absent override already follows."""
+        plain = theme.palette()
+        painted = theme.palette({"CUSTOM_THEME_BORDER": "\n"})
+
+        self.assertEqual(painted["border"], plain["border"])
+
+
 class WhatTheMenusCanSay(unittest.TestCase):
     """The parse rule is one regular expression in app.js, and it is the whole
     decision - so it is lifted out of the file and RUN, rather than checked

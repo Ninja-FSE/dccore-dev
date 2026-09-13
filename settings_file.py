@@ -384,6 +384,13 @@ def decode_irc_escapes(text):
 
 _IRC_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
+# #436: a real theme role is a handful of mIRC control codes - "\x0302,02" is
+# 8 bytes, the longest in the shipped THEMES table - so this leaves an
+# operator plenty of room to combine a couple of codes while still bounding
+# how much one role can eat out of announce.IRC_LINE_BUDGET when it is
+# interpolated 8-9 times into a single line.
+CUSTOM_THEME_MAX_BYTES = 30
+
 
 def encode_irc_escapes(text):
     r"""The way back out: control bytes as the `\xHH` an operator can read.
@@ -704,6 +711,34 @@ def _check_writable(name, value, namespace, types):
     # on save. decode_irc_escapes() was half a round trip; this is the half
     # that was missing.
     #
+    # #436: the ENCODED form is what the line-break check below is blind
+    # to - an escaped "\x0a" holds no line break at all, so
+    # decode_irc_escapes() (already run by coerce() above) is the last
+    # point that ever sees the real byte before it goes back into hiding.
+    # theme.blocks() interpolates a CUSTOM_THEME_* value 8-9 times into a
+    # single outbound line, so a real \n or \r here - typed as the
+    # documented \x0a/\x0d escape, which is otherwise perfectly legal -
+    # turned one advert into nine separate IRC commands sent in a single
+    # send(), reserving exactly one runtime.outbound_pacer slot for all
+    # nine: an Excess Flood disconnect on every reconnect, with nothing in
+    # the log naming the setting. \x00 is refused for the same reason
+    # settings.conf itself cannot carry it. The length cap exists because
+    # 8-9 repeats of one role compete with everything else for
+    # announce.IRC_LINE_BUDGET.
+    if name.startswith("CUSTOM_THEME_") and text:
+        if any(ch in text for ch in ("\x00", "\x0a", "\x0d")):
+            raise SettingsWriteError(
+                f"{name}: cannot contain a newline or a null byte, even "
+                f"written as the \\x0a/\\x0d escape - it would be "
+                f"interpolated into every outbound line as a real one.")
+        encoded_len = len(text.encode("utf-8", "ignore"))
+        if encoded_len > CUSTOM_THEME_MAX_BYTES:
+            raise SettingsWriteError(
+                f"{name}: too long ({encoded_len} bytes, max "
+                f"{CUSTOM_THEME_MAX_BYTES}) - this is interpolated 8-9 "
+                f"times into a single outbound line, so a long value can "
+                f"push an ordinary advert over the IRC line budget.")
+
     # BEFORE the checks below, not after, so they weigh what will actually be
     # written. The line-break check in particular: an escaped value holds no
     # line break at all, so a control character that would have been refused
