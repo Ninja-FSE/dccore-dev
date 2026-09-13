@@ -469,6 +469,16 @@ def note_nick_change(old_nick, new_nick):
       * `dcc_queue` still held their files under the old name, so `!que` under
         the new one showed nothing and the bot had nobody to send them to.
 
+    Moving the queue and nothing else (#431) then left a THIRD, worse gap:
+    dcc.handle_download_request()'s slot-admission check reads
+    `active_transfers`, `user_processing_lock` and `dcc_queue` together to
+    decide whether a nick already has something running. With only the queue
+    carried across, a user mid-transfer looked entirely idle under their new
+    name - no transfer, no lock, no queue - and the gate handed them another
+    slot immediately. Three renames bought three slots, with no flood check
+    involved at all: `user_processing_lock` and the `"user"` field on any
+    matching `active_transfers` row now move too.
+
     NOT the sanctions. `muted_until` and `banned_users` are keyed on the nick
     too, and carrying those across would be a change of policy rather than a
     fix: DCCore already answers nick-hopping with hard bans, which match a
@@ -516,6 +526,38 @@ def note_nick_change(old_nick, new_nick):
                     continue
                 store[new_key] = store.pop(old_key)
                 moved.append(name)
+
+        # #431: dcc.handle_download_request()'s slot-admission gate is built
+        # from exactly three things - active_transfers, user_processing_lock
+        # and dcc_queue (moved above) - all keyed on the CURRENT nick. Moving
+        # the queue while leaving the other two behind meant a nick change
+        # made a busy user look entirely idle under their new name: no
+        # transfer running, no in-progress lock, no queue, so the gate handed
+        # them an immediate extra slot. Three /nick commands, three requests,
+        # one person holding every slot the bot has - no flood gate involved.
+        # A plain membership set, unlike dcc_queue/frozen_queues above: adding
+        # new_key can never destroy another holder's data the way overwriting
+        # a dict value could, so this moves unconditionally rather than only
+        # when new_key is free - leaving old_key locked whenever new_key
+        # happened to already be a member would strand it there until
+        # whatever transfer owns new_key's lock happens to release it.
+        lock = getattr(config, "user_processing_lock", None)
+        if isinstance(lock, set) and old_key in lock:
+            lock.discard(old_key)
+            lock.add(new_key)
+            moved.append("user_processing_lock")
+
+        # hasattr(..., "append"), not isinstance(transfers, list) - this
+        # module already shadows the builtin with its own `import list`
+        # (list.py, the file-list code), the same trap #376's alt-nick work
+        # hit calling the builtin list() a few functions below this one.
+        transfers = getattr(config, "active_transfers", None)
+        if hasattr(transfers, "append"):
+            for row in transfers:
+                if isinstance(row, dict) and str(row.get("user", "")).lower() == old_key:
+                    row["user"] = new_nick
+                    if "active_transfers" not in moved:
+                        moved.append("active_transfers")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)
