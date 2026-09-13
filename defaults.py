@@ -787,6 +787,7 @@ frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in t
 kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of, and rejoin refusals
 notices           = runtime.notices             # Operator-facing events, newest last
 notice_state      = runtime.notice_state        # {"seen_id": highest acknowledged}
+ping_state        = runtime.ping_state         # {"last_sent": monotonic} for the !ping cooldown
 
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}

@@ -1444,6 +1444,13 @@ def handle_resume_request(irc_sock, user, body):
     reply = (f"PRIVMSG {user} :\x01DCC ACCEPT {offered_name} "
              f"{port} {position}\x01\r\n")
     try:
+        # THROUGH THE SHARED CLOCK, not straight onto the socket. A resume
+        # handshake is latency-sensitive, so it is not queued behind the
+        # round-robin - but it is still a PRIVMSG leaving this connection,
+        # and a peer that reconnects and resumes repeatedly could otherwise
+        # emit them as fast as it asked for them. Waiting for a slot keeps
+        # the reply prompt while still counting it against the same budget.
+        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
         irc_sock.send(reply.encode())
     except Exception as err:
         print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")

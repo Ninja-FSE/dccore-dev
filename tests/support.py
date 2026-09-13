@@ -72,6 +72,9 @@ RUNTIME_CONTAINERS = {
     "failed_transfers": dict,
     "vip_queue": list,
     "send_queue": dict,
+    # The latency probe's cooldown is process-wide by design, so one
+    # test's probe would otherwise silence the next test's.
+    "ping_state": dict,
     "user_processing_lock": set,
     "broadcast_search_results": list,
     "fetch_queue": dict,
@@ -181,6 +184,14 @@ def reset_config(**overrides):
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
         setattr(config, name, value)
+
+    # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a
+    # process-wide singleton holding "the earliest moment the next line may
+    # leave", so a test that sends anything leaves the next test's first send
+    # blocked for up to MSG_DELAY - five seconds by default. That is leaked
+    # state like any other, and it costs real wall-clock in every suite run.
+    # test_a_shared_outbound_pace.py already did this by hand for itself.
+    runtime.outbound_pacer = runtime.OutboundPacer()
 
     config.debug_flood_lock = threading.Lock()
     config.fetch_queue_lock = threading.Lock()

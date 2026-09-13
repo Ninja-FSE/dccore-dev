@@ -4,6 +4,60 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC2 (2026-09-12) - "The Several Lists Release"
 
+### 🔴 Two writes that skipped the shared clock
+
+Found by the pre-publication audit sweep. Closes #425 and #453.
+
+Every outbound line the bot sends waits for a slot on
+`runtime.outbound_pacer` - the shared clock added after this bot was
+disconnected with **Excess Flood** in production. Two lines did not, and
+both went straight onto the socket.
+
+#### The latency probe, which anybody can ask for
+
+`!ping` is dispatched in the **ordinary-user** branch of the read loop, above
+the `ADMIN_CHANNEL_COMMANDS` block, so anybody in the channel can trigger it.
+It wrote `PING :OSERVE_LATENCY_CHECK` directly to the socket.
+
+The per-user flood limiter is structurally unable to cover this. It stops one
+person asking repeatedly; it has nothing at all to say about ten different
+people asking once each - and the server does not meter users, it meters this
+connection. Ten unpaced PINGs leaving together is exactly the burst shape the
+bot has already been disconnected for.
+
+A shared cooldown is the right answer rather than a per-user one, because the
+probe measures the **server**, not the asker. Ten people asking is one
+question asked ten times, and the answer would be the same to three decimals.
+
+It also fixed a second fault in the same handler: a second request overwrote
+`ping_start_time` while the first probe was still in flight, so two people
+asking together produced two PINGs and one meaningless measurement. The
+cooldown and that state now move under one lock.
+
+#### The resume handshake
+
+`DCC ACCEPT` answers a peer that already holds part of a file. It is a
+`PRIVMSG` leaving this connection like any other, and a peer that reconnects
+and resumes repeatedly could emit them as fast as it asked.
+
+Neither line was moved into the round-robin queue. A latency probe and a
+resume handshake are both things somebody is waiting on, so they stay
+immediate; what changed is that they now take a slot on the same clock rather
+than ignoring it.
+
+#### While fixing it
+
+The `!ping` literal was rewritten during the fix and briefly became
+`b"PING :OSERVE_LATENCY_CHECK\\r\\n"` - two literal backslashes rather
+than a line ending, which would have put a malformed line on the wire every
+time. Caught by reading the parsed constant out of the AST rather than the
+source, and there is now a test that asserts the bytes end in CRLF.
+
+Seven mutation-checked properties, no survivors: removing either pacer call,
+moving the DCC one after the write, removing the cooldown, making the
+cooldown per-user, letting a refused ask disturb the probe in flight, and the
+malformed line ending.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
