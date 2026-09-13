@@ -515,17 +515,24 @@ def _channels_to_sync(config):
     Lowercased, because the JOIN/PART comparison this feeds is by name and IRC
     channel names are case-insensitive.
 
-    DEBUG_CHANNEL is a channel the daemon joins (irc.py, at connect) and talks
-    in (announce.send_debug), so it is part of "where the bot should be" even
-    though it is deliberately NOT in settings_file.REQUIRED and is blank on a
-    fresh install. Blank means no debug channel, not a channel named "".
+    DELEGATED TO irc.py (#510), which is where the connect path asks the same
+    question. This used to be a second, hand-written answer to "where does
+    this bot belong" - and the file three modules away already carries a
+    comment about exactly that hazard, for exactly this setting (#193): a
+    second source of truth that disagrees with the first, in the one place it
+    decides whether to PART a channel.
+
+    Imported here rather than at module scope because irc.py imports commands
+    (lazily, inside its own handlers) and this file is reloaded by !rehash.
+
+    `config` is now unused and kept deliberately. The rehash calls this twice,
+    before and after the reload, passing the config module both times - and it
+    is the SAME module object either way, reloaded in place, which is what
+    makes reading it through irc.py equivalent. Dropping the parameter would
+    make the two call sites look like they are asking different questions.
     """
-    raw = str(getattr(config, "CHANNEL", "") or "")
-    chans = [part.strip().lower() for part in raw.split(",") if part.strip()]
-    debug_chan = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip().lower()
-    if debug_chan and debug_chan not in chans:
-        chans.append(debug_chan)
-    return chans
+    import irc
+    return [name.lower() for name in irc.channels_we_should_be_in()]
 
 
 # One IRC line is 512 bytes including the trailing CRLF, so 510 for the

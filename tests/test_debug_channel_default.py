@@ -104,14 +104,28 @@ class ABlankValueJoinsNothing(unittest.TestCase):
     """The guard that makes blank safe. Without it a blank value sends a bare
     `JOIN` with no channel, which is a malformed line, not a no-op."""
 
-    def test_the_join_is_guarded_by_the_value_being_present(self):
-        body = irc_source()
-        start = body.index("debug_chan = str(getattr(config, 'DEBUG_CHANNEL'")
-        window = body[start:start + 500]
+    def test_a_blank_value_puts_nothing_in_the_join(self):
+        """Driven now rather than read (#510). The guard used to be an
+        `if debug_chan:` wrapped around a JOIN of its own, and this test
+        asserted that shape - but the debug channel rides in the ordinary
+        batching since the connect path stopped sending it as a lone trailing
+        command that the server was dropping. Same property, different place
+        to ask it.
 
-        self.assertIn("if debug_chan:", window)
-        self.assertLess(window.index("if debug_chan:"), window.index("JOIN {debug_chan}"),
-                        "the JOIN is built before the value is checked")
+        A bare `JOIN` with no channel is a malformed line, not a no-op, which
+        is why blank has to be dropped rather than passed through.
+        """
+        import irc
+
+        config.CHANNEL = "#alpha,#beta"
+        config.DEBUG_CHANNEL = ""
+
+        wanted = irc.channels_we_should_be_in()
+
+        self.assertEqual(wanted, ["#alpha", "#beta"])
+        for payload in irc.join_batches(wanted):
+            with self.subTest(payload=payload):
+                self.assertTrue(all(part for part in payload.split(",")), payload)
 
     def test_the_operator_is_told_none_was_joined(self):
         """Silently not joining is indistinguishable from joining and being
@@ -227,31 +241,35 @@ class AnOperatorWhoWantsOneStillGetsIt(unittest.TestCase):
     """The control. Blanking the default must not disable the feature."""
 
     def test_a_configured_channel_is_still_joined(self):
-        """Requires a LIVE send, not merely the text "JOIN {debug_chan}"
-        somewhere in the window. The first version of this test asserted the
-        substring, and passed against `pass  # socket_conn.send(...)` - which
-        is the whole feature commented out. Comment lines are skipped here for
-        exactly that reason."""
-        body = irc_source()
-        start = body.index("debug_chan = str(getattr(config, 'DEBUG_CHANNEL'")
-        window = body[start:start + 500]
+        """DRIVEN, not read (#510).
 
-        # Parsed, not grepped. A line-based check has to guess where the code
-        # ends and a comment begins, and the second version of this test still
-        # passed against `pass  # socket_conn.send(f"JOIN {debug_chan}")`
-        # because the comment sits mid-line. The AST simply does not contain
-        # commented-out code.
-        tree = ast.parse(body)
-        live = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            segment = ast.get_source_segment(body, node) or ""
-            if "JOIN {debug_chan}" in segment and ".send(" in segment:
-                live.append(node.lineno)
+        Three earlier versions of this test read the source. The first
+        asserted a substring and passed against `pass  # socket_conn.send(...)`
+        - the whole feature commented out. The second skipped comment lines
+        and still passed, because the comment sat mid-line. The third parsed
+        the AST and was genuinely correct, right up until the debug channel
+        stopped being a JOIN statement of its own - at which point it was
+        asserting the shape of the old fix rather than the behaviour.
 
-        self.assertTrue(live, "nothing actually sends a JOIN for a configured "
-                              "debug channel; the call is missing or commented out")
+        The behaviour is: a configured debug channel is one of the channels
+        the connect path asks for. That is a function now, so ask it - and
+        check separately that the connect path is still built from it, so this
+        cannot pass against a function nothing calls.
+        """
+        import irc
+
+        config.CHANNEL = "#alpha,#beta"
+        config.DEBUG_CHANNEL = "#thedebug"
+
+        asked_for = []
+        for payload in irc.join_batches(irc.channels_we_should_be_in()):
+            asked_for.extend(payload.split(","))
+
+        self.assertIn("#thedebug", asked_for,
+                      "a configured debug channel is not in the JOIN at all")
+        self.assertIn("join_batches(", irc_source(),
+                      "the connect path no longer sends what join_batches() "
+                      "builds, so the check above proves nothing about it")
 
     def test_the_debug_sinks_are_still_wired(self):
         """DEBUG_TO_CHANNEL is what actually routes output there; blanking the

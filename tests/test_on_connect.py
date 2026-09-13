@@ -128,7 +128,13 @@ class WhatIsSafeToShow(OnConnectCase):
         raw command never reaches print()."""
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
-        body = code.split("def delayed_join(", 1)[1].split("JOIN {channels}", 1)[0]
+        # "join_batches(" is where the JOIN begins (#510). The marker used to
+        # be "JOIN {channels}" - one line sending every channel at once, which
+        # the server truncated - so it moved with the mechanism. Worth keeping
+        # in step rather than letting it rot: str.split() returns the WHOLE
+        # body when it finds nothing, so a stale marker widens these windows
+        # to the entire function and they go on passing.
+        body = code.split("def delayed_join(", 1)[1].split("join_batches(", 1)[0]
 
         self.assertIn("on_connect.redacted(commands)", body)
         self.assertNotIn("print(f\"[CONNECT] Sending {commands}", body)
@@ -146,7 +152,7 @@ class WhenTheyAreSent(OnConnectCase):
         body = code.split("def delayed_join(", 1)[1]
 
         self.assertLess(body.index("on_connect.load()"),
-                        body.index("JOIN {channels}"),
+                        body.index("join_batches("),
                         "the JOIN happens before the on-connect commands")
 
     def test_the_gap_is_taken_between_commands(self):
@@ -159,7 +165,7 @@ class WhenTheyAreSent(OnConnectCase):
         a check for "is there a sleep"."""
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
-        body = code.split("def delayed_join(", 1)[1].split("JOIN {channels}", 1)[0]
+        body = code.split("def delayed_join(", 1)[1].split("join_batches(", 1)[0]
         loop = body.split("for index, command in enumerate(commands):", 1)
 
         self.assertEqual(len(loop), 2, "the commands are not sent in a loop")
@@ -174,7 +180,7 @@ class WhenTheyAreSent(OnConnectCase):
         worse off than one that joined without its usermode."""
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
-        body = code.split("def delayed_join(", 1)[1].split("JOIN {channels}", 1)[0]
+        body = code.split("def delayed_join(", 1)[1].split("join_batches(", 1)[0]
 
         self.assertIn("joining anyway", body)
 
@@ -259,7 +265,7 @@ class TheMsgShorthandBecomesPrivmsg(unittest.TestCase):
         loop, not just exist as a function nothing calls."""
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
-        body = code.split("def delayed_join(", 1)[1].split("JOIN {channels}", 1)[0]
+        body = code.split("def delayed_join(", 1)[1].split("join_batches(", 1)[0]
 
         self.assertIn("on_connect.normalize(command)", body)
 

@@ -113,8 +113,16 @@ class ParsingARefusal(unittest.TestCase):
 
     def test_the_set_is_what_it_claims(self):
         """Guard on the guard: an empty set would make every assertion above
-        about parsing pass and the counting never happen."""
-        self.assertEqual(irc.JOIN_REFUSED_NUMERICS, {"471", "473", "474", "475"})
+        about parsing pass and the counting never happen.
+
+        405 joined the four in #510. It belongs with them rather than with a
+        throttle - "you have joined too many channels" keeps being true until
+        the operator serves fewer, which is the same shape as a ban and the
+        same reason a bounded retry is right. It is answered in different
+        WORDS, because "gave up after 3 attempts" would send somebody looking
+        for a fault on the channel's side."""
+        self.assertEqual(irc.JOIN_REFUSED_NUMERICS,
+                         {"405", "471", "473", "474", "475"})
 
 
 class WhatWeStartTrackingAndWhy(DCCoreTestCase):

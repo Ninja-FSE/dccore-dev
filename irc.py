@@ -118,26 +118,110 @@ def configured_channels():
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
-def join_target_list():
-    """The channels formatted for a JOIN, which is stricter than it looks.
+# HOW MANY CHANNELS GO IN ONE JOIN, and why there is a limit at all (#510).
+#
+# Reported live: an operator with fourteen configured channels was in eleven.
+# The three missing were the last three in configured order, and the debug
+# channel - sent as a separate command after them - was missing too. The
+# server takes the head of an over-long JOIN and drops the tail, and says so
+# with a numeric nothing here counted at connect time.
+#
+# Four is chosen to be uninteresting rather than clever: comfortably under any
+# per-JOIN limit a server is likely to apply, and few enough that a burst of
+# them still looks like a client connecting rather than a script. Fourteen
+# channels become four lines over about six seconds, which is nothing against
+# the five-second settle this function already waits.
+JOIN_BATCH_SIZE = 4
 
-    RFC 2812 is `JOIN <channel>{,<channel>} [<key>{,<key>}]` - SPACE-separated
-    parameters. So a space anywhere in the list ends it: sending
+# The gap between those lines. Long enough that a join throttle counts them
+# separately; short enough that the bot is in every channel well inside
+# ACTIVATION_TIMEOUT, which is what decides whether the advert starts without
+# them.
+JOIN_BATCH_GAP = 2.0
 
-        JOIN #one, #two, #three
+# One IRC line is 512 bytes including the trailing CRLF.
+MAX_JOIN_LINE_BYTES = 510
 
-    joins "#one" and hands the server "#two," as a channel KEY. The rest is
-    discarded silently, because nothing about it is an error - the server did
-    exactly what it was told.
 
-    config.CHANNEL used to be passed to JOIN verbatim, so an operator who put
-    a space after each comma - which reads naturally, and is how configure.py
-    echoes the value back at them - joined their first channel and no others.
-    No warning and no failure: just five channels that never appeared, and an
-    advert loop happily addressing them, because announce.py strips per entry
-    where the JOIN did not.
+def channels_we_should_be_in():
+    """Every channel the bot belongs in: CHANNEL, in order, plus the debug
+    channel.
+
+    ONE DEFINITION, deliberately. irc.py's own connect path used to build this
+    by joining CHANNEL and then sending a second JOIN for DEBUG_CHANNEL, and
+    commands._channels_to_sync() built the same idea separately for the rehash
+    - which is a second source of truth for "where does this bot belong", and
+    the file already carries a comment about exactly that hazard for exactly
+    this setting (#193). commands delegates here now.
+
+    DEBUG_CHANNEL is a channel the daemon joins and talks in, so it is part of
+    the answer even though it is deliberately not in settings_file.REQUIRED
+    and is blank on a fresh install. Blank means no debug channel, not a
+    channel named "".
     """
-    return ",".join(configured_channels())
+    chans = configured_channels()
+    seen = {name.lower() for name in chans}
+    debug_chan = str(getattr(config, "DEBUG_CHANNEL", "") or "").strip()
+    if debug_chan and debug_chan.lower() not in seen:
+        chans = chans + [debug_chan]
+    return chans
+
+
+def channels_we_should_be_in_set():
+    """channels_we_should_be_in(), folded for comparison - see
+    A SET and lowercased, which is what a membership test wants - unlike
+    channels_we_should_be_in() above, which is an ordered list because the
+    connect path joins it in that order."""
+    return {name.lower() for name in channels_we_should_be_in()}
+
+
+def join_batches(channels, per_join=None, max_bytes=None):
+    """`channels` as JOIN payloads, a few at a time.
+
+    Returns the comma-separated argument for each line, without the verb -
+    the caller owns the wire format, the way it owns the CRLF.
+
+    NO SPACE EVER REACHES A JOIN, which is stricter than it looks. RFC 2812
+    is `JOIN <channel>{,<channel>} [<key>{,<key>}]` - SPACE-separated
+    parameters - so a space anywhere in the list ends it: `JOIN #one, #two`
+    joins "#one" and hands the server "#two," as a channel KEY. The rest is
+    discarded silently, because nothing about it is an error; the server did
+    exactly what it was told. config.CHANNEL was passed to JOIN verbatim once,
+    and an operator who put a space after each comma - which reads naturally,
+    and is how configure.py echoes the value back at them - joined their first
+    channel and no others.
+
+    That is inherited rather than re-done here: configured_channels() strips
+    every entry, and channels_we_should_be_in() is built from it. This joins
+    what it is given with commas and nothing else, which is why the test for
+    it asserts on the payloads rather than on the setting.
+
+    Bounded by COUNT first and by bytes second. The count is what a server's
+    join handling actually limits; the byte cap is the ordinary 510-byte line
+    budget, and only bites for channel names far longer than RFC 2812's fifty
+    characters. A single channel over the budget on its own still goes out
+    alone rather than being dropped - refusing to ask is worse than asking and
+    being refused, because only one of those leaves the operator something to
+    read.
+    """
+    size = int(per_join or JOIN_BATCH_SIZE)
+    if size < 1:
+        size = 1
+    budget = int(max_bytes or MAX_JOIN_LINE_BYTES)
+
+    batches = []
+    batch = []
+    for channel in channels:
+        too_many = len(batch) >= size
+        too_long = batch and len(
+            ",".join(batch + [channel]).encode("utf-8")) + len("JOIN ") > budget
+        if too_many or too_long:
+            batches.append(",".join(batch))
+            batch = []
+        batch.append(channel)
+    if batch:
+        batches.append(",".join(batch))
+    return batches
 
 
 def resolve_alt_nick(main_nick):
@@ -396,11 +480,21 @@ def parse_privmsg(line):
 # is a refusal that will keep being a refusal until somebody changes something
 # on their side, which is what makes a bounded retry the right shape.
 JOIN_REFUSED_NUMERICS = {
+    "405",   # ERR_TOOMANYCHANNELS - the server will not put us in another one
     "471",   # ERR_CHANNELISFULL
     "473",   # ERR_INVITEONLYCHAN
     "474",   # ERR_BANNEDFROMCHAN
     "475",   # ERR_BADCHANNELKEY
 }
+
+# 405 belongs with the four above rather than with a throttle: it keeps being
+# true until the operator serves fewer channels, which is the same shape as a
+# ban or an invite-only channel and the same reason a bounded retry is right.
+# It is called out separately because the answer is not "ask again later" -
+# it is "you are configured for more channels than this server allows", and
+# an operator reading "gave up after 3 attempts" would go looking for a fault
+# on the channel's side instead (#510).
+JOIN_REFUSED_AT_THE_LIMIT = "405"
 
 
 def parse_kick(line):
@@ -434,20 +528,6 @@ def parse_join_refusal(line):
     if numeric not in JOIN_REFUSED_NUMERICS:
         return None
     return channel, numeric
-
-
-def configured_channel_set():
-    """The same channels as configured_channels(), folded for comparison.
-
-    A SET and lowercased, which is what a membership test wants and is not
-    what configured_channels() is for - that one is an ordered list because
-    the advert loop walks it and join_target_list() joins it in order.
-
-    Named differently on purpose: the first version of this WAS called
-    configured_channels(), which silently replaced the existing function
-    further up this file and handed a set to two callers that index it.
-    """
-    return {name.lower() for name in configured_channels()}
 
 
 def note_nick_change(old_nick, new_nick):
@@ -728,11 +808,49 @@ def note_kicked_from(channel, by=""):
     where it belongs.
     """
     name = str(channel or "").strip().lower()
-    if not name or name not in configured_channel_set():
+    if not name or name not in channels_we_should_be_in_set():
         return False
     with runtime.kicked_channels_lock:
         config.kicked_channels[name] = {
             "refusals": 0, "kicked_at": time.time(), "by": str(by or ""),
+            "reason": "kicked",
+        }
+    return True
+
+
+def note_join_unconfirmed(channel):
+    """Remember a channel that never answered its JOIN, so it is tried again.
+    Returns True if this call started tracking it.
+
+    THE RETRY MACHINERY WAS KICK-ONLY (#510). config.kicked_channels was
+    written to by exactly one thing - the KICK handler - so the daemon had a
+    bounded retry for a channel it was thrown out of and nothing at all for a
+    channel it never got into. A JOIN lost to a server limit, a throttle, or a
+    numeric nobody enumerated simply left the bot out of that channel for the
+    life of the connection.
+
+    Seeded from activation_watchdog()'s `missing` set, which already computed
+    exactly the right answer - the channels asked for, minus the ones whose
+    "End of NAMES" came back - and then only printed it.
+
+    Not an error in itself: the same entry shape a kick uses, so
+    channels_to_rejoin() and the attempt limit need no special case. The
+    reason is recorded because the operator-facing wording differs - "gave up
+    after 3 attempts" reads very differently for a channel that threw us out
+    and one that never let us in.
+
+    An existing entry is left alone. A kick is the more specific answer, and a
+    channel already being retried does not need a second reason to be.
+    """
+    name = str(channel or "").strip().lower()
+    if not name or name not in channels_we_should_be_in_set():
+        return False
+    with runtime.kicked_channels_lock:
+        if name in config.kicked_channels:
+            return False
+        config.kicked_channels[name] = {
+            "refusals": 0, "kicked_at": time.time(), "by": "",
+            "reason": "never confirmed",
         }
     return True
 
@@ -776,7 +894,10 @@ def channels_to_rejoin(limit=None):
     # that can exist. The guard gave_up_on() carries is NOT redundant - see
     # there - and this asymmetry is why they are written out rather than
     # shared.
-    wanted = configured_channel_set()
+    # The wider set (#510): the debug channel is one the bot belongs in, and
+    # gating on CHANNEL alone meant a debug channel that failed to join could
+    # be tracked and never retried.
+    wanted = channels_we_should_be_in_set()
     with runtime.kicked_channels_lock:
         return sorted(name for name, entry in config.kicked_channels.items()
                       if name in wanted
@@ -2186,14 +2307,35 @@ def irc_loop():
                 print("[WATCHDOG] Connection changed before the timeout elapsed. Standing down.")
                 return
             if joined and not getattr(config, 'activation_triggered', False):
-                missing = target_channels - channels_confirmed
+                # THE WIDER SET (#510). target_channels is CHANNEL only, and
+                # deliberately so - activation must not wait on the debug
+                # channel, or one broken debug channel silences every advert.
+                # But "what never confirmed" is a different question from
+                # "may we start advertising", and answering it with the
+                # narrow set is why a debug channel lost to a truncated JOIN
+                # was not even in the list of things that went missing.
+                missing = channels_we_should_be_in_set() - channels_confirmed
                 config.activation_triggered = True
                 if missing:
-                    print(f"[WARNING] Activating the advert despite {len(missing)} unconfirmed channel(s): {', '.join(missing)}")
+                    print(f"[WARNING] Activating the advert despite {len(missing)} unconfirmed channel(s): {', '.join(sorted(missing))}")
+                    # TRIED AGAIN, not just reported (#510). This set is
+                    # already exactly the right answer and was only ever
+                    # printed; feeding it to the retry machinery gives a
+                    # channel that never let us in the same bounded second
+                    # chance a channel that threw us out has had since #191.
+                    for unconfirmed in sorted(missing):
+                        note_join_unconfirmed(unconfirmed)
                     try:
+                        # notice="error", which send_debug() turns into a
+                        # dashboard notice (#510). Without it the ONLY
+                        # operator-facing copy of this went to the debug
+                        # channel - which, when a truncated JOIN is the cause,
+                        # is routinely one of the channels that went missing.
+                        # The message about losing channels cannot be
+                        # delivered only to one of them.
                         announce.send_debug(
-                            f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(missing)}",
-                            category="PART")
+                            f"Activated after {int(ACTIVATION_TIMEOUT)}s with {config.C_BOLD}{len(missing)}{config.C_RESET} channel(s) never confirmed via NAMES: {', '.join(sorted(missing))}. Retrying them on the advert timer.",
+                            category="PART", notice="error")
                     except Exception as watchdog_debug_err:
                         print(f"[WARNING] Could not send the watchdog debug notice: {watchdog_debug_err}")
                 else:
@@ -2435,17 +2577,43 @@ def irc_loop():
                                 print(f"[CONNECT] On-connect commands failed "
                                       f"({on_connect_err}); joining anyway.")
                             try:
-                                socket_conn.send(f"JOIN {channels}\r\n".encode())
-                                # An empty fallback rather than a channel name, and then an
-                                # actual check: "JOIN \r\n" is a malformed line, and joining
-                                # some channel the operator never configured is worse than
-                                # joining none at all.
+                                # A FEW AT A TIME, NOT ALL AT ONCE (#510).
+                                #
+                                # This was one JOIN carrying every channel,
+                                # followed by a second command for the debug
+                                # channel with no gap at all. Reported live:
+                                # fourteen configured channels, eleven joined,
+                                # the missing ones being the tail of the line -
+                                # and the debug channel, which was last of all.
+                                # The server takes what it will and drops the
+                                # rest, and nothing here noticed.
+                                #
+                                # The debug channel rides in the batching now
+                                # rather than trailing it. It was the most
+                                # exposed line in the burst and is the one
+                                # whose loss costs the operator the message
+                                # saying anything was lost.
+                                wanted = channels
+                                batches = join_batches(wanted)
+                                for index, payload in enumerate(batches):
+                                    if index:
+                                        time.sleep(JOIN_BATCH_GAP)
+                                    socket_conn.sendall(
+                                        f"JOIN {payload}\r\n".encode(
+                                            "utf-8", errors="ignore"))
                                 debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').strip()
                                 if debug_chan:
-                                    socket_conn.send(f"JOIN {debug_chan}\r\n".encode())
-                                    print(f"[JOIN] Joined the main channels and the debug channel: {debug_chan}")
+                                    print(f"[JOIN] Asked for {len(wanted)} channel(s) "
+                                          f"in {len(batches)} batch(es), including the "
+                                          f"debug channel {debug_chan}.")
                                 else:
-                                    print("[JOIN] Joined the main channels. No DEBUG_CHANNEL is set, so none was joined.")
+                                    # The sentence is kept whole rather than
+                                    # wrapped mid-phrase: an operator greps
+                                    # their log for it, and so does
+                                    # tests/test_debug_channel_default.py.
+                                    print(f"[JOIN] Asked for {len(wanted)} channel(s) "
+                                          f"in {len(batches)} batch(es). "
+                                          f"No DEBUG_CHANNEL is set, so none was joined.")
                                 # NEW (issue #9): start the watchdog HERE, right after the JOIN
                                 # has actually been sent, so the timeout starts from the right moment.
                                 threading.Thread(target=activation_watchdog, daemon=True).start()
@@ -2454,9 +2622,15 @@ def irc_loop():
                                 
                         # Normalised, not raw: a space after a comma turns the
                         # rest of the list into a channel key and joins only the
-                        # first. See join_target_list().
+                        # first - see join_batches(), which inherits that from
+                        # configured_channels() stripping every entry.
+                        #
+                        # The DEBUG CHANNEL is in here too (#510). It used to be
+                        # a second JOIN command sent after this one with no gap,
+                        # which made it the most exposed line in the burst.
                         threading.Thread(target=delayed_join,
-                                         args=(s, join_target_list()), daemon=True).start()
+                                         args=(s, channels_we_should_be_in()),
+                                         daemon=True).start()
 
                     # A JOIN that worked, whether it was the first one or
                     # a rejoin. Clearing here rather than in the branch below
@@ -2686,7 +2860,15 @@ def irc_loop():
                         count = note_join_refused(refused_chan)
                         if count:
                             limit = int(getattr(config, "REJOIN_ATTEMPTS", 3))
-                            if count >= limit:
+                            if numeric == JOIN_REFUSED_AT_THE_LIMIT:
+                                announce.send_debug(
+                                    f"{refused_chan}: this server will not put "
+                                    f"the bot in any more channels ({numeric}). "
+                                    f"It is configured for more than the server "
+                                    f"allows - remove some from CHANNEL rather "
+                                    f"than waiting for this to clear.",
+                                    category="PART", notice="error")
+                            elif count >= limit:
                                 announce.send_debug(
                                     f"Cannot rejoin {refused_chan} ({numeric}) - "
                                     f"gave up after {count} attempt(s). It will not "
@@ -2695,6 +2877,14 @@ def irc_loop():
                             else:
                                 print(f"[REJOIN] {refused_chan} refused us "
                                       f"({numeric}), attempt {count}/{limit}.")
+                        else:
+                            # Not counted - note_join_refused() only counts for
+                            # a channel already being retried, deliberately.
+                            # Said out loud anyway (#510): a refusal at CONNECT
+                            # time was discarded in silence, which is most of
+                            # why serving eleven of fourteen channels looked
+                            # like nothing had happened.
+                            print(f"[JOIN] {refused_chan} refused us ({numeric}).")
 
                     notice_parsed = parse_notice(line)
                     if notice_parsed:
