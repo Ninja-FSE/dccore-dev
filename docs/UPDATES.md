@@ -89,6 +89,37 @@ advert, the "Sent:" notice, `@find` results, the private notices and the debug
 channel are all bold-free. The claim now matches, and names the replies that
 still use bold deliberately.
 
+### 🟢 Two faults a fresh install meets
+
+Found by the pre-publication audit sweep. Closes #446 and #447.
+
+**A byte-order mark ate the first setting.** `settings.conf` was read as plain
+`utf-8`, so a file saved with a BOM - three invisible bytes that Notepad
+writes as a matter of course - kept the mark attached to its first line. The
+first setting therefore parsed as `﻿MSG_DELAY`, landed in the report's
+`unknown` list, and was silently ignored while the default stood. The operator
+is looking at a file that plainly sets it.
+
+Both sides now read `utf-8-sig`, which consumes a mark when present and is
+identical to `utf-8` when not. The save side matters as much as the read one:
+it decodes the same file to edit it in place, so a mark left there would
+reappear inside the first line of the rewritten file and the bug would come
+back on the next save.
+
+**The pre-flight check reported a console that was switched off.**
+`ADMIN_HOSTMASKS = [""]` is a truthy list of one, so counting it produced
+"enabled for 1 host pattern(s)" while `adminchat.admin_host_patterns()`
+returned `[]` and the daemon accepted nothing. `[""]` is exactly what a fresh
+install can end up with, because `configure.py`'s password prompt is mandatory
+while the hostmask is not.
+
+The check now asks the daemon what it will actually accept. A pre-flight that
+reports a feature as enabled when it is disabled is worse than one that says
+nothing, because the operator stops looking - and it is guarded so the check
+can never itself be what breaks the check.
+
+Three mutation-checked properties, no survivors.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
