@@ -608,6 +608,24 @@ class ListenerUsesTheConfiguredRange(unittest.TestCase):
         self.addCleanup(lambda: setattr(config, "DCC_PORT_START", self._range[0]))
         self.addCleanup(lambda: setattr(config, "DCC_PORT_END", self._range[1]))
 
+        # A RANGE OF THIS CLASS'S OWN, pinned rather than inherited.
+        #
+        # These tests ask for TWO listeners at once. They used to run against
+        # whatever DCC_PORT_START/END happened to hold, which is two separate
+        # problems: this class does not call the harness setUp, so a previous
+        # test's value survives into it - and test_adminchat.py's own
+        # port-exhaustion test narrows the range to a SINGLE port - while the
+        # shipped default is eleven ports that test_dcc_fetch.py binds in too.
+        #
+        # The result was a failure that only appeared in a full run, and only
+        # sometimes: "the range needs two free ports for this test". Preflight
+        # runs the suite twice, so it hit it more often than a single run did.
+        #
+        # A hundred ports of its own, away from 55000-55010, removes the
+        # competition rather than hoping to win it.
+        config.DCC_PORT_START = 55100
+        config.DCC_PORT_END = 55199
+
     def test_the_listener_binds_inside_the_range(self):
         sock, port = adminchat._open_chat_listener()
         self.addCleanup(sock.close)
