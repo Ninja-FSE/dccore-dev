@@ -1021,8 +1021,20 @@ def load_notices():
             loaded = json.load(handle)
         if not isinstance(loaded, dict):
             return [], {"seen_id": 0}
-        rows = [row for row in (loaded.get("notices") or [])
-                if isinstance(row, dict) and "id" in row]
+        # THE ID HAS TO BE A NUMBER, not merely present (#451). seen_id two
+        # lines below is already coerced with a guarded int(); a row's id was
+        # not, so a hand-edited "id": "first" survived the loader and raised
+        # wherever ids are compared - unread_notices(), the mark-read marker -
+        # taking the whole panel out rather than the one bad row.
+        rows = []
+        for row in (loaded.get("notices") or []):
+            if not isinstance(row, dict) or "id" not in row:
+                continue
+            try:
+                row["id"] = int(row["id"])
+            except (TypeError, ValueError):
+                continue
+            rows.append(row)
         state = loaded.get("state")
         if not isinstance(state, dict):
             state = {}
@@ -1131,16 +1143,31 @@ def save_dcc_queue():
     import json
 
     try:
-        # Drop users whose queue is now empty.
-        for user_key in list(config.dcc_queue.keys()):
-            if not config.dcc_queue[user_key]:
-                del config.dcc_queue[user_key]
+        # ONE COPY, THEN WALK THE COPY (#452). Both loops below used to walk
+        # config.dcc_queue live while holding only _disk_lock - which guards
+        # the FILE, not the dict. Every writer mutates it under queue_lock,
+        # so a key added or removed mid-walk raised "dictionary changed size
+        # during iteration" and the whole save was abandoned: the queue stayed
+        # only in RAM until the next successful save, and a restart in between
+        # lost it.
+        #
+        # queue_lock cannot be taken here - five of the six callers in dcc.py
+        # are already inside `with queue_lock:` and it is a plain
+        # threading.Lock, so locking would deadlock the request path. dict()
+        # copies the mapping in one step under the GIL, which is what #432
+        # settled on for get_total_queued_count() for the same reason: a
+        # concurrent change can leave this snapshot one entry stale, never
+        # raise.
+        live = dict(config.dcc_queue)
+
+        # Drop users whose queue is now empty. Deleting from the real dict is
+        # the point, but the KEYS come from the copy.
+        for user_key, files in live.items():
+            if not files:
+                config.dcc_queue.pop(user_key, None)
 
         with _disk_lock:
-            # Serialise from a snapshot: another thread mutating config.dcc_queue during
-            # json.dump would otherwise raise "dictionary changed size during iteration"
-            # and abort the save.
-            snapshot = {k: list(v) for k, v in config.dcc_queue.items()}
+            snapshot = {k: list(v) for k, v in live.items() if v}
             _atomic_write(DCC_QUEUE_FILE, json.dumps(snapshot, indent=4))
 
         print("[DB-QUEUE] Queue structure saved and sanitised successfully.")
@@ -1169,8 +1196,29 @@ def load_dcc_queue():
         if not isinstance(loaded, dict):
             raise ValueError(f"expected a JSON object, got {type(loaded).__name__}")
         config.dcc_queue.clear()
-        config.dcc_queue.update(loaded)
-        total = sum(len(v) for v in loaded.values() if isinstance(v, list))
+        # ROW BY ROW, like every loader beside it (#450). The top level was
+        # checked and nothing below it: a value that is not a list, or a row
+        # that is not a dict, went straight into config.dcc_queue and failed
+        # later - on a dispatch thread, far from the file that caused it, with
+        # nothing naming the file.
+        #
+        # A queue file is hand-editable by design (the docs say so), so one
+        # bad entry has to cost that entry and not the whole queue.
+        clean = {}
+        dropped = 0
+        for user_key, files in loaded.items():
+            if not isinstance(files, list):
+                dropped += 1
+                continue
+            rows = [row for row in files if isinstance(row, dict)]
+            dropped += len(files) - len(rows)
+            if rows:
+                clean[str(user_key)] = rows
+        if dropped:
+            print(f"[DB-QUEUE] Dropped {dropped} unusable entr(ies) from "
+                  f"{DCC_QUEUE_FILE}; the rest of the queue was kept.")
+        config.dcc_queue.update(clean)
+        total = sum(len(v) for v in clean.values())
         print(f"[DB] Loaded {total} saved queue slot(s) for {len(loaded)} user(s) from disk.")
     except Exception as e:
         config.dcc_queue.clear()

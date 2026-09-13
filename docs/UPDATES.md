@@ -59,6 +59,44 @@ The `is-error` fix is guarded as a property over every site rather than the
 one that was wrong: any element app.js marks as an error must carry a class
 that can actually show it. Four mutation-checked properties, no survivors.
 
+### 🟢 Three loaders that trusted the file
+
+Found by the pre-publication audit sweep. Closes #450, #451 and #452.
+
+State files are hand-editable by design - the documentation says so - and
+every loader in `db.py` filters row by row for that reason: one bad entry
+costs that entry and not the rest. Two did not.
+
+`load_dcc_queue()` checked that the top level was a dict and then `update()`d
+the file's contents wholesale. A value that was not a list, or a row that was
+not a dict, reached `config.dcc_queue` intact and failed later - on a dispatch
+thread, far from the file that caused it, with nothing naming the file. It now
+filters like its neighbours, says how many entries it dropped, and counts what
+it kept rather than what it read.
+
+`load_notices()` kept any row that merely HAD an `id`, while the `seen_id`
+marker two lines below was already coerced with a guarded `int()`. So a
+hand-edited `"id": "first"` survived the loader and raised wherever ids are
+compared - `unread_notices()`, the mark-read marker - taking the whole panel
+out rather than the one bad row. Ids are now coerced or the row is dropped,
+and `"3"` becomes `3` rather than being thrown away, because hand-edited JSON
+quotes numbers all the time.
+
+`save_dcc_queue()` walked `config.dcc_queue` live while holding only
+`_disk_lock`, which guards the FILE rather than the dict. It now walks one
+copy taken in a single step. `queue_lock` cannot be taken there - five of the
+six callers in `dcc.py` are already inside it and it is not reentrant - which
+is the same conclusion #432 reached for `get_total_queued_count()`.
+
+#### What could not be shown
+
+The #452 race did not reproduce. Sixty concurrent saves against a queue being
+mutated by another thread raised nothing, with the fix and without it: the
+prune already snapshotted its keys with `list()`, so only the final
+comprehension was ever exposed, and that window is too narrow for a stress
+test to land in reliably. The fix is right by inspection and costs nothing,
+but its guard reads the source rather than claiming a reproduction nobody got.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
