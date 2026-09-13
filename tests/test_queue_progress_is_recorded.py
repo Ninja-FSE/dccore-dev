@@ -103,6 +103,9 @@ class TheTransferRowCarriesItsOwnSize(DCCoreTestCase):
             DCC_PORT_START=PORT_START, DCC_PORT_END=PORT_END)
 
         self.irc = RecordingIrcSocket()
+        # #430: start_dcc_send() dispatches through the LIVE socket
+        # sys.modules['oserve'] reports, not the thread argument alone.
+        self.oserve.irc_connection = self.irc
         self.sender = threading.Thread(
             target=dcc.start_dcc_send,
             args=(self.irc, USER, self.served, "Big_File.bin", "#somechannel",
