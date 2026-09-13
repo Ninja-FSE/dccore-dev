@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC2 (2026-09-12) - "The Several Lists Release"
 
+### 🔴 The resume handshake takes its turn
+
+Found by the pre-publication audit sweep. Closes #453.
+
+Every outbound line waits for a slot on `runtime.outbound_pacer` - the shared
+clock added after this bot was disconnected with **Excess Flood** in
+production. `!ping` was one exception and was fixed in #425; the `DCC ACCEPT`
+that answers a peer's resume request was the other, and went straight onto
+the socket.
+
+It is not queued behind the round-robin. A resume handshake is something a
+peer is actively waiting on, so it stays immediate - what changes is that it
+takes a slot on the same clock instead of ignoring it. The wait is only ever
+paid when the bot has just sent something else, and is at most `MSG_DELAY`.
+
+#### And a clock that outlived the test that wound it
+
+`runtime.outbound_pacer` is a process-wide singleton holding "the earliest
+moment the next line may leave". A test that sent anything left the next
+test's first send blocked for up to `MSG_DELAY` - five seconds by default -
+which is leaked state like any other, and wall-clock every suite run paid.
+`tests/support.py` now hands each test a fresh clock, which
+`test_a_shared_outbound_pace.py` was already doing by hand for itself.
+
+Three mutation-checked properties, no survivors.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
