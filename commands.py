@@ -103,13 +103,26 @@ def handle_help_request(s, user, target):
         f"To search every bot at once, type: {bold}{red}@find <words>{reset}")
 
     for line in lines:
-        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n", is_vip=True)
+        # #426: NOT is_vip=True. The VIP lane is strict-priority with no
+        # aging - a channel advert waiting behind it is the reason it
+        # exists, but being ahead of the advert does not require being
+        # ahead of every OTHER user's own reply. A single user typing
+        # -help repeatedly, well inside the ordinary flood limits, used to
+        # be able to fill the 200-line VIP cap and starve config.send_queue
+        # completely - @find results, "Preparing full list" and queue
+        # position notices for everyone else stopped reaching anyone.
+        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n")
 
     print(f"[HELP] Sent the usage notice to {user} (asked in {target}).")
 
 
 def handle_queue_check(s, user, target):
-    """Count one user's queued files and answer them through the VIP queue."""
+    """Count one user's queued files and answer them.
+
+    #426: NOT the VIP lane, despite what this docstring used to claim - see
+    handle_help_request()'s own comment for why a per-user reply does not
+    belong in the lane channel adverts exist for.
+    """
     user_key = user.lower()
     oserve = sys.modules.get('oserve')
     import list
@@ -154,7 +167,7 @@ def handle_queue_check(s, user, target):
 
         
     if oserve:
-        oserve.queue_message(user, msg, is_vip=True)
+        oserve.queue_message(user, msg)
     print(f"[COMMANDS] {user} checked their queue status ({file_count} files).")
 
 def handle_queue_remove(s, user, target):
@@ -1620,7 +1633,9 @@ def handle_stats_request(s, user, target):
     ]
 
     for line in lines:
-        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n", is_vip=True)
+        # #426: see handle_help_request()'s own comment - a per-user reply
+        # does not belong in the lane channel adverts exist for.
+        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n")
 
     print(f"[STATS] Sent the stats notice to {user} (asked in {target}).")
 
@@ -1691,6 +1706,8 @@ def handle_top_request(s, user, target):
             f"send. Get my list with {bold}{red}@{config.NICKNAME}{reset}.")
 
     for line in lines:
-        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n", is_vip=True)
+        # #426: see handle_help_request()'s own comment - a per-user reply
+        # does not belong in the lane channel adverts exist for.
+        oserve.queue_message(user, f"NOTICE {user} :{line}\r\n")
 
     print(f"[TOP] Sent the most-requested notice to {user} (asked in {target}).")

@@ -242,6 +242,91 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
             "the two lanes must share one clock, not pace independently")
 
 
+class TheStandardLaneIsNoLongerStarvedByVip(DCCoreTestCase):
+    """#426: the VIP lane used to `continue` straight back to the top after
+    every send, so the standard lane below never ran at all for as long as
+    ANYTHING remained in vip_queue - reachable by a single nick well inside
+    the ordinary flood limits (is_flooding() permits 10 commands/5s; -help
+    alone used to queue 5 VIP lines per request). Runs the real queue_worker
+    thread, same fixture shape as TheCombinedOutboundRateIsCapped above.
+    """
+
+    def setUp(self):
+        super().setUp()
+        config.MSG_DELAY = 0.01
+        config.vip_queue = []
+        config.send_queue = {}
+        config.bot_joined_channel = True
+        self.oserve.bot_joined_channel = True
+        runtime.outbound_pacer = runtime.OutboundPacer()
+        self.sock = TimestampedSocket()
+        self.oserve.irc_connection = self.sock
+        self._real_queue_time = queue_mgr.time
+        self.queue_shim = _SleepShim()
+        queue_mgr.time = self.queue_shim
+        self.queue_worker_thread = None
+
+    def tearDown(self):
+        self.queue_shim.stopped.set()
+        if self.queue_worker_thread is not None:
+            self.queue_worker_thread.join(timeout=3.0)
+        queue_mgr.time = self._real_queue_time
+        runtime.outbound_pacer = runtime.OutboundPacer()
+        super().tearDown()
+
+    def start_queue_worker(self):
+        def run():
+            with contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    queue_mgr.queue_worker()
+                except SystemExit:
+                    pass
+        self.queue_worker_thread = threading.Thread(target=run, daemon=True)
+        self.queue_worker_thread.start()
+
+    def sent_bytes(self):
+        return [payload for _t, payload in self.sock.sent]
+
+    def test_a_large_vip_backlog_does_not_delay_an_ordinary_reply(self):
+        """A backlog too large to drain within the test's own deadline at
+        MSG_DELAY's pace (2000 lines * 0.01s = 20s) - so seeing dave's reply
+        arrive well inside that deadline is only possible if the standard
+        lane runs WHILE vip_queue is still non-empty, not after it empties."""
+        for i in range(2000):
+            config.vip_queue.append(f"PRIVMSG #chan :vip {i}\r\n")
+        config.send_queue["dave"] = ["NOTICE dave :your reply\r\n"]
+
+        self.start_queue_worker()
+
+        deadline = time.time() + 1.5
+        delivered = False
+        while time.time() < deadline:
+            if any(b"NOTICE dave" in payload for payload in self.sent_bytes()):
+                delivered = True
+                break
+            time.sleep(0.01)
+
+        self.assertTrue(delivered,
+                        "dave's own reply never went out while VIP had a "
+                        "large backlog - the standard lane was starved")
+
+    def test_vip_still_drains_promptly_when_it_has_a_backlog(self):
+        """Control: the fix must not have slowed VIP down to achieve
+        fairness - it should still send on every iteration it has
+        something, exactly as before."""
+        for i in range(20):
+            config.vip_queue.append(f"PRIVMSG #chan :vip {i}\r\n")
+
+        self.start_queue_worker()
+
+        deadline = time.time() + 2.0
+        while time.time() < deadline and len(self.sock.sent) < 20:
+            time.sleep(0.01)
+
+        self.assertEqual(len(self.sock.sent), 20,
+                         "VIP no longer drains at its own pace")
+
+
 class TheThirdUnpacedWriterIsFixedToo(unittest.TestCase):
     """A THIRD path fed the server unpaced traffic, found reviewing this
     fix: irc.py's CTCP VERSION reply and its "!debugnames" RAM-CHECK notice
