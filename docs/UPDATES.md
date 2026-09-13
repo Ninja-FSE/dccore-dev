@@ -108,6 +108,35 @@ between the gate and the work puts the flag back; leaving it raised would deny
 every future update for the life of the process.
 
 Five mutation-checked properties, no survivors.
+### 🟢 Three documents that were wrong
+
+Found by the pre-publication audit sweep. Closes #448, #449 and #466.
+
+**docs/WINDOWS.md advised something that cannot work.** It told an operator
+testing a download from their own machine to pin `MY_IP_OR_DOCK` to the PC's
+LAN address. `dcc.is_offerable_to_strangers()` refuses every private,
+loopback, link-local and reserved address - an offer carrying one is an offer
+to nobody - so the daemon refuses the send outright rather than failing to
+connect. The symptom is the bot declining to send at all, which reads as a
+different fault entirely. The page now says what actually works, and why the
+shortcut does not.
+
+**.gitattributes ships a line that is wrong in the place it lands.** Here,
+`docs/UPDATES.md` is the internal changelog and is deliberately
+export-ignored. In the PUBLIC repository that same path IS the changelog -
+extraction step 3 renames `UPDATES-PUBLIC.md` onto it. Shipped unchanged, the
+line tells any `git archive` run in the public repository to drop its own
+changelog, and nobody would find out until a release tarball came out without
+one. Extraction step 2 now strips it, with the reason attached, and a guard
+fails if that step is ever removed or stops saying why.
+
+**The public changelog claimed more than the code does.** "Bold has been
+removed from every message the bot sends" is false: `C_BOLD` is still used
+thirty-one times across `announce.py`, `commands.py` and `dcc.py`. The
+enumeration that followed the sentence was always the accurate part - the
+advert, the "Sent:" notice, `@find` results, the private notices and the debug
+channel are all bold-free. The claim now matches, and names the replies that
+still use bold deliberately.
 
 ### 🔴 The search index's WAL log only ever grew
 
