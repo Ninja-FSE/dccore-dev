@@ -142,6 +142,73 @@ class ABlankValueJoinsNothing(unittest.TestCase):
         self.assertEqual(offenders, [], "; ".join(offenders))
 
 
+class ABlankChannelDropsNoLineEither(unittest.TestCase):
+    """#424: the JOIN guard above stops a blank DEBUG_CHANNEL from producing
+    a malformed JOIN. announce.send_debug() had no equivalent guard at all -
+    on the shipped defaults (DEBUG_CHANNEL="", DEBUG_TO_CHANNEL=True), it
+    queued "PRIVMSG  :<...>" - two spaces, no recipient - which the server
+    silently rejects, and counted it as delivered so the stdout floor never
+    fired. Every send_debug-only outcome (several in commands.py have no
+    print() beside them) was invisible on IRC, on the console and on stdout
+    alike, on a stock install.
+    """
+
+    def setUp(self):
+        import announce
+
+        self.announce = announce
+        self.real_channel = getattr(config, "DEBUG_CHANNEL", "")
+        self.real_to_channel = getattr(config, "DEBUG_TO_CHANNEL", True)
+        self.real_to_console = getattr(config, "DEBUG_TO_CONSOLE", True)
+        self.addCleanup(setattr, config, "DEBUG_CHANNEL", self.real_channel)
+        self.addCleanup(setattr, config, "DEBUG_TO_CHANNEL", self.real_to_channel)
+        self.addCleanup(setattr, config, "DEBUG_TO_CONSOLE", self.real_to_console)
+
+        # A thread left over from an earlier test could otherwise drain
+        # whatever this test queues before the assertion runs.
+        announce._debug_queue.clear()
+        self.addCleanup(announce._debug_queue.clear)
+
+    def test_a_blank_channel_is_not_queued_for_the_server(self):
+        config.DEBUG_CHANNEL = ""
+        config.DEBUG_TO_CHANNEL = True
+        config.DEBUG_TO_CONSOLE = False
+
+        self.announce.send_debug("Admin SysOp added a ban", category="BAN")
+
+        self.assertEqual(list(self.announce._debug_queue), [],
+                         "a recipient-less PRIVMSG was queued for a channel "
+                         "that does not exist")
+
+    def test_a_blank_channel_falls_through_to_stdout(self):
+        """The floor this whole feature rests on: nothing may vanish."""
+        config.DEBUG_CHANNEL = ""
+        config.DEBUG_TO_CHANNEL = True
+        config.DEBUG_TO_CONSOLE = False
+
+        buf = io.StringIO()
+        real_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            self.announce.send_debug("Admin SysOp added a ban", category="BAN")
+        finally:
+            sys.stdout = real_stdout
+
+        self.assertIn("Admin SysOp added a ban", buf.getvalue())
+
+    def test_a_configured_channel_is_still_queued(self):
+        """Control: an operator who DOES set one must not lose the feature -
+        the same reason AnOperatorWhoWantsOneStillGetsIt exists for the JOIN
+        side of this."""
+        config.DEBUG_CHANNEL = "#chan"
+        config.DEBUG_TO_CHANNEL = True
+        config.DEBUG_TO_CONSOLE = False
+
+        self.announce.send_debug("Admin SysOp added a ban", category="BAN")
+
+        self.assertEqual(len(self.announce._debug_queue), 1)
+
+
 class AnOperatorWhoWantsOneStillGetsIt(unittest.TestCase):
     """The control. Blanking the default must not disable the feature."""
 
