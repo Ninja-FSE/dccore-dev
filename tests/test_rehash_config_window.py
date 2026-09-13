@@ -362,6 +362,12 @@ class ARehashDoesNotSpendTheQueuesRetries(DCCoreTestCase):
         self.set_config(dcc_queue={}, frozen_queues={}, channel_users={},
                         MY_IP_OR_DOCK="", MAX_SEND_FAILS=3)
         config.dcc_queue["someuser"] = [{"file": "T.flac", "path": "/m/T.flac"}]
+        # #430: start_dcc_send() dispatches through the LIVE socket
+        # sys.modules['oserve'] reports rather than trusting the `None`
+        # passed below - which stays None deliberately, since these tests
+        # are about the address/missing-file branches that run before any
+        # send is attempted, not about the connection itself.
+        self.oserve.irc_connection = object()
 
     def row(self):
         return config.dcc_queue.get("someuser", [None])[0]

@@ -70,9 +70,19 @@ class AListenerThatCannotBeSetUp(DCCoreTestCase):
 
     def start(self):
         """start_dcc_send runs on a thread in production; a raise there is
-        silent. Called directly so the test sees what the thread would."""
+        silent. Called directly so the test sees what the thread would.
+
+        #430: start_dcc_send() now re-fetches the LIVE socket from
+        sys.modules['oserve'].irc_connection rather than trusting whatever
+        was threaded through as a parameter, and holds the queue instead of
+        dispatching when there isn't one - so the fake here has to be the
+        one oserve reports as live, or every call below bails before
+        reaching any of the behaviour these tests exist to check.
+        """
+        sock = FakeIrcSocket()
+        self.oserve.irc_connection = sock
         try:
-            dcc.start_dcc_send(FakeIrcSocket(), "alice", self.served,
+            dcc.start_dcc_send(sock, "alice", self.served,
                                "track.flac", "#chan", "track.flac")
         except Exception:
             # The defect is the leaked slot, not whether it propagates.
@@ -132,6 +142,7 @@ class AListenerThatCannotBeSetUp(DCCoreTestCase):
         so a peer dialling before listen() gets a refusal. Moving the calls
         down instead of moving the block in would have broken this."""
         sock = FakeIrcSocket()
+        self.oserve.irc_connection = sock
         real_accept = socket.socket.accept
         real_listen = socket.socket.listen
         order = []

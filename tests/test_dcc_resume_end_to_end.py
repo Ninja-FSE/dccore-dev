@@ -122,6 +122,9 @@ class TheWholeExchange(DCCoreTestCase):
         works too.
         """
         irc = RecordingIrcSocket()
+        # #430: start_dcc_send() dispatches through the LIVE socket
+        # sys.modules['oserve'] reports, not the thread argument alone.
+        self.oserve.irc_connection = irc
         sender = threading.Thread(
             target=dcc.start_dcc_send,
             args=(irc, USER, self.served, "Some_Album.zip", "#somechannel",
