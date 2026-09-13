@@ -1070,12 +1070,20 @@ class TheBuildSaysWhenNamesCollide(MasterListCase):
     def test_the_count_comes_from_the_same_predicate_the_view_uses(self):
         """Two answers to one question is how they drift. The dashboard
         resolves headings to real paths on top of this; the question of WHICH
-        names collide is asked in one place."""
+        names collide is asked in list.py, not a second time here.
+
+        The name it looks for changed with #463: the build wants the COUNT and
+        was building a second full copy of the library as dicts to get it.
+        count_duplicate_filenames() answers the same question by the same
+        definition - and the test below is what holds the two to that, since
+        an identifier appearing in a file is not agreement."""
         with io.open(os.path.join(REPO_ROOT, "update_list.py"), encoding="utf-8") as fh:
             code = chr(10).join(line.split("#", 1)[0]
                                 for line in fh.read().splitlines())
 
-        self.assertIn("find_duplicate_filenames(", code)
+        self.assertIn("count_duplicate_filenames(", code)
+        self.assertNotIn("folders_by_name", code,
+                         "the build is answering the question itself again")
 
 
 class TwoListsOverTwoFolderSets(MasterListCase):

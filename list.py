@@ -844,6 +844,55 @@ def find_duplicate_filenames(entries):
             for name, key in first_seen if len(folders_by_name[key]) > 1]
 
 
+# Marks a name already counted, so a third folder holding it does not count
+# it twice. A sentinel object rather than a string, because any string is a
+# folder name somebody could have.
+_ALREADY_COUNTED = object()
+
+
+def count_duplicate_filenames(pairs):
+    """How many filenames appear under more than one folder.
+
+    `pairs` is any iterable of (folder, filename). Exactly the length of what
+    find_duplicate_filenames() returns, for callers that only want the number.
+
+    WHY BOTH EXIST (#463)
+
+    find_duplicate_filenames() answers "which names, and where" and has to
+    hold every folder for every name to do it. update_list.py wants the count
+    alone, for one warning line at the end of a build - and was building a
+    second full copy of the library as dicts to ask for it. At 5.4M files that
+    copy measured 2.2 GiB and took the peak for the whole rebuild to 3.5 GiB;
+    the result was passed to len() and dropped.
+
+    This keeps one entry per distinct name instead of one per row, and holds a
+    single folder against each rather than a growing list.
+
+    The DEFINITION is the other function's, deliberately: same lowercased
+    match, same "two or more DISTINCT folders" rule, and a folderless entry
+    counts as the library root rather than a missing value. A count that
+    disagreed with the view the operator is sent to would be worse than no
+    count at all.
+    """
+    first_folder = {}
+    duplicates = 0
+    for folder, filename in pairs:
+        name = (filename or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        where = folder or ""
+        if key not in first_folder:
+            first_folder[key] = where
+            continue
+        seen = first_folder[key]
+        if seen is _ALREADY_COUNTED or seen == where:
+            continue
+        first_folder[key] = _ALREADY_COUNTED
+        duplicates += 1
+    return duplicates
+
+
 # "!rar <folder>" - what is left of a pack request once the "!<nick> " prefix
 # has been taken off by the same parse every other row goes through.
 _RAR_REQUEST_RE = re.compile(r"^!rar\s+(.+)$", re.IGNORECASE)
