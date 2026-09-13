@@ -635,20 +635,35 @@ def _handle_rehash_request(user, target_chan):
     import sys
     import defaults as config
     import announce
-    import copy
 
     # =====================================================================
     # 1. Back EVERY piece of live state up into local variables
     # =====================================================================
-    # A. The channel user lists (from NAMES)
-    ram_backup_users = {}
-    backed_up_users = False
-    with runtime.channel_users_lock():
-        if hasattr(config, 'channel_users') and isinstance(config.channel_users, dict):
-            ram_backup_users = copy.deepcopy(config.channel_users)
-            backed_up_users = True
-    if backed_up_users:
-        print(f"[REHASH RAM] Backed up the user lists for {len(ram_backup_users)} channel(s).")
+    # channel_users is NOT snapshotted here (#429), for the identical reason
+    # dcc_queue is not (see that removed snapshot's own comment below): it is
+    # a runtime.py-bound container, so importlib.reload() below never empties
+    # or replaces it - the object irc.py sees after reload_modules_in_order()
+    # is the SAME one it saw before, with every JOIN/PART/QUIT the read
+    # thread applied during the reload window already on it.
+    #
+    # A snapshot-and-restore used to run here anyway, capturing channel_users
+    # before the reload and overwriting it with that snapshot afterwards -
+    # deep-copied, so the restore could not even see writes made to the live
+    # dict while the copy was held. dcc.wait_for_transfers_to_finish() blocks
+    # this function for up to REHASH_TRANSFER_WAIT (120s) before the restore
+    # runs, which is a two-minute window for the read thread to apply real
+    # JOINs and PARTs that the restore then silently discarded. A JOIN lost
+    # this way heals itself at the next NAMES resync; a PART or QUIT does
+    # not, because the resync can only ADD names back (irc.py's 353 handler
+    # does config.channel_users[chan].update(names), never a removal) - so a
+    # user who left during the window came back to life as far as this bot
+    # was concerned, for the rest of the connection. dcc.user_is_present_in_
+    # ram() then thaws their frozen queue and the presence gate admits
+    # dispatch to a nick that is not on the network, burning a DCC slot on
+    # every attempt until MAX_SEND_FAILS deletes the row - destroying the
+    # departed user's queue instead of the freezer preserving it, which is
+    # the entire reason the freezer exists. Reachable on every dashboard
+    # Settings save and every password change, not just a manual !rehash.
 
     # B. The active DCC slots
     ram_backup_slots = 0
@@ -851,16 +866,11 @@ def _handle_rehash_request(user, target_chan):
          # =====================================================================
         # 3. RESTORE: write every value back into the newly loaded modules
         # =====================================================================
-        # Restore the users
-        # In place: rebinding would detach config.channel_users from the
-        # object runtime.py holds, and ram_backup_users is a deep COPY, so
-        # the two would diverge from here on (see runtime.py's docstring).
-        with runtime.channel_users_lock():
-            config.channel_users.clear()
-            if ram_backup_users:
-                config.channel_users.update(ram_backup_users)
-            restored_count = len(config.channel_users)
-        print(f"[REHASH RAM] Restored {restored_count} channel list(s) into the new modules.")
+        # No channel_users restore here - see the removed snapshot's comment
+        # above (#429). It is runtime.py-bound and was never actually touched
+        # by the reload, so there is nothing to put back, and the restore
+        # that used to run here was purely destructive: it discarded every
+        # JOIN/PART/QUIT applied during the up-to-120s transfer-wait window.
 
         # Restore the slots
         for mod_name in ['dcc', 'defaults', 'oserve']:
