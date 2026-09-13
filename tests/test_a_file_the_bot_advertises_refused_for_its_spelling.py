@@ -138,32 +138,67 @@ class OnAFilesystemThatTellsCaseApart(ARequestRetypedInAnotherCase):
     replaced with one that checks each component against what the directory
     actually lists, which is what a case-sensitive filesystem does.
 
-    The wrapper has to strip platform_compat.long_path()'s \\\\?\\ prefix before
-    walking the path, or it silently answers about a path that does not parse
-    - which is how a first attempt at this "passed" while testing nothing.
+    Two things the emulation has to get right, and both were learned the hard
+    way:
+
+      * It must strip platform_compat.long_path()'s \\\\?\\ prefix before
+        walking the path, or it answers about a path that does not parse -
+        which is how a first attempt at this "passed" while testing nothing.
+      * It must only case-check the components BELOW the fixture's own tree.
+        Checking the whole path made it a question about the machine: a
+        GitHub Windows runner's temp directory sits under an 8.3 short name
+        (RUNNER~1) which no parent directory lists, so every path in the
+        fixture "did not exist" and the class failed on CI while passing on
+        a developer box. The library is what is being emulated, not the road
+        to it.
     """
 
     def setUp(self):
         super().setUp()
         real_exists = os.path.exists
         self.addCleanup(setattr, os.path, "exists", real_exists)
+        # Both spellings of the fixture's root. os.path.realpath() is NOT
+        # applied to the path being TESTED: on Windows it resolves a path to
+        # its real casing, which would hand back the very answer this is
+        # trying to withhold.
+        roots = [os.path.abspath(self.tree.root),
+                 os.path.realpath(self.tree.root)]
 
-        def case_sensitive_exists(path):
-            text = str(path)
+        def without_long_prefix(text):
             for prefix in ("\\\\?\\UNC\\", "\\\\?\\"):
                 if text.startswith(prefix):
-                    text = text[len(prefix):]
-                    break
+                    return text[len(prefix):]
+            return text
+
+        def fixture_root_of(text):
+            wanted = os.path.normcase(text)
+            for base in roots:
+                marked = os.path.normcase(base)
+                if wanted == marked or wanted.startswith(marked + os.sep):
+                    return base
+            return None
+
+        def case_sensitive_exists(path):
+            text = os.path.abspath(without_long_prefix(str(path)))
             if not real_exists(text):
                 return False
-            head, tail = os.path.split(text)
-            while tail:
+            base = fixture_root_of(text)
+            if base is None:
+                # Outside the library this is emulating - a module file, a
+                # temp directory belonging to something else. Not its
+                # business, and answering for it is what made the whole class
+                # a question about the machine.
+                return True
+            head = base
+            for part in os.path.relpath(text, base).split(os.sep):
+                if part in ("", "."):
+                    continue
                 try:
-                    if tail not in os.listdir(head):
+                    if part not in os.listdir(head):
                         return False
                 except OSError:
                     return False
-                head, tail = os.path.split(head)
+                head = os.path.join(head, part)
             return True
 
         os.path.exists = case_sensitive_exists
@@ -180,6 +215,35 @@ class OnAFilesystemThatTellsCaseApart(ARequestRetypedInAnotherCase):
         self.assertTrue(os.path.exists(platform_compat.long_path(self.served)),
                         "the long_path prefix is not being stripped, so the "
                         "emulation answers about a path that does not parse")
+
+    def test_a_parent_that_does_not_list_the_tree_changes_nothing(self):
+        """The CI failure, reproduced portably.
+
+        A GitHub Windows runner's temp directory sits under an 8.3 short name
+        (RUNNER~1) which its own parent does not list. An emulation that
+        case-checked every component up to the drive root therefore found
+        every path in the fixture "missing", and this whole class failed there
+        while passing on a developer box whose temp path has no short name.
+
+        Making the tree's parent list nothing is the same condition, on any
+        platform. The library is what is being emulated, not the road to it.
+        """
+        real_listdir = os.listdir
+        self.addCleanup(setattr, os, "listdir", real_listdir)
+        parent = os.path.normcase(os.path.dirname(os.path.abspath(self.tree.root)))
+
+        def blind_above_the_tree(path):
+            if os.path.normcase(os.path.abspath(path)) == parent:
+                return []
+            return real_listdir(path)
+
+        os.listdir = blind_above_the_tree
+
+        self.request(RETYPED)
+
+        self.assertEqual(os.path.basename(self.served_path() or ""), NAME,
+                         "the emulation is asking about directories above the "
+                         "fixture, which is a question about the machine")
 
     def test_the_file_is_served_rather_than_refused(self):
         """The fault, on the platform that has it: the bot publicly lists the

@@ -271,6 +271,15 @@ fixture-invariant test that the emulation tells the two names apart, and a
 separate assertion that runs everywhere: whatever the filesystem does, the
 path the daemon settles on must carry the list's spelling.
 
+The first version of the emulation case-checked every component up to the
+drive root, which quietly made it a question about the machine rather than
+about the library. A GitHub Windows runner's temp directory sits under an 8.3
+short name - `RUNNER~1` - which its own parent does not list, so every path
+in the fixture "did not exist" and the whole class failed on CI while passing
+on a developer box. It checks only the components below the fixture's own
+tree now, and there is a test for that: the tree's parent is made to list
+nothing, which is the same condition on any platform.
+
 ### 🟢 The rehash's channel sync takes its turn
 
 Closes #440.
