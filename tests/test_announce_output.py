@@ -365,6 +365,10 @@ class DebugDrainDeliveryTests(QuietTestCase):
         self.addCleanup(self._close_gate)
         # Speed the pump up; the default pause between lines is 0.5s.
         self.config.DEBUG_MSG_DELAY = 0.01
+        # A line only reaches the drain if there is a channel to send it to.
+        original = getattr(self.config, "DEBUG_CHANNEL", "")
+        self.addCleanup(setattr, self.config, "DEBUG_CHANNEL", original)
+        self.config.DEBUG_CHANNEL = "#dccore-debug"
 
     def _close_gate(self):
         self.oserve.irc_connection = None
