@@ -53,6 +53,15 @@ def queue_worker():
                 continue
 
             # ---------------------------------------------------------------------
+            # sendall(), not send() (#456). send() returns how many bytes it
+            # actually took, and both lanes discarded that number - so on
+            # Linux, with the socket's kernel send buffer within a few hundred
+            # bytes of full, a short write truncated an IRC line mid-message
+            # and the server read whatever arrived as a complete command.
+            # announce.py's debug drain has used sendall() for exactly this
+            # reason; these two were the last places that did not. The same
+            # encode arguments too: a filename the socket cannot spell must
+            # drop a character rather than raise on the worker thread.
             # EXPRESS LANE (priority 1): drain one VIP line first, if there is one.
             #
             # #426: this used to `continue` straight back to the top after every
@@ -83,7 +92,7 @@ def queue_worker():
                 runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
                 try:
                     if current_sock:
-                        current_sock.send(msg.encode())
+                        current_sock.sendall(msg.encode("utf-8", errors="ignore"))
                         if getattr(config, 'DEBUG_MODE', False):
                             print(f"[RAW OUT VIP] {msg.strip()}")
                 except socket.error as net_err:
@@ -112,7 +121,7 @@ def queue_worker():
 
                         try:
                            if current_sock:
-                               current_sock.send(msg.encode())
+                               current_sock.sendall(msg.encode("utf-8", errors="ignore"))
                                if getattr(config, 'DEBUG_MODE', False):
                                    print(f"[RAW OUT] {msg.strip()}")
                         except socket.error as net_err:
