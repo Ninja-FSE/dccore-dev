@@ -2265,7 +2265,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             print(f"[DCC CRITICAL ABORT] No usable public address "
                   f"(MY_IP_OR_DOCK={getattr(config, 'MY_IP_OR_DOCK', '')!r}); refused "
                   f"the send for {user} rather than offering one nobody can dial. "
-                  f"Set MY_IP_OR_DOCK in admin_config.py or settings.conf.")
+                  f"Set MY_IP_OR_DOCK in admin_config.py. Not settings.conf "
+                  f"(#465): this address is detected at startup rather than "
+                  f"read from a file, so it is not a setting that file carries.")
         else:
             reason = "file access issue or empty payload. Please try again"
             print(f"[DCC CRITICAL ABORT] Aborted the send for {user}. "

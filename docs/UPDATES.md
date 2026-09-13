@@ -176,6 +176,60 @@ comprehension was ever exposed, and that window is too narrow for a stress
 test to land in reliably. The fix is right by inspection and costs nothing,
 but its guard reads the source rather than claiming a reproduction nobody got.
 
+### 🟢 What the operator types, and what they are told
+
+Closes #486 and #465.
+
+**The slash a client user actually types.** #474 taught `on_connect` that
+`msg <target> <text>` is the client's spelling of `PRIVMSG <target> :<text>`,
+because the dashboard promises these lines can be written "exactly as you
+would type it into a client". But in a client you type `/msg`, and the slash
+never reaches the wire - the client consumes it. The operator who reported
+#474 happened to omit it; the X login instructions they were following tell
+them to include it, one keystroke from the same `421 Unknown command`.
+
+It was never a `msg` problem. EVERY on-connect line had it: `/mode`, `/join`
+and `/nick` were all sent with the slash attached and all rejected.
+
+One leading slash comes off, whatever follows it, before anything else looks
+at the line - which fixes every command at once and makes the `msg` rewrite
+catch `/msg` for nothing. That also settles `//` (an escaped literal slash in
+most clients) by construction: it keeps one rather than losing both.
+
+The case is left exactly as typed. RFC 1459 makes the command word
+case-insensitive on the wire, so `mode` is a MODE, and rewriting it would be
+a second change to a line the operator is entitled to see sent as they wrote
+it.
+
+One new refusal comes with the stripping: `/` on its own is not blank to
+`_clean_command()`, but once the slash is off there is no command left and
+what would reach the server is a bare CRLF it discards - indistinguishable,
+from the operator's side, from a command that ran.
+
+**Two messages naming a route that does not work.** `dcc.py` and `irc.py`
+both told the operator to set `MY_IP_OR_DOCK` "in admin_config.py or
+settings.conf". The second half is false on a fresh install:
+`settings_file.apply_to()` only applies names already in the namespace, and
+nothing declares this one, so the entry is discarded with a message about
+spelling.
+
+Declaring it would be the wrong fix, and `settings_file.py` already says why
+in its own comment - this is the address DETECTED at startup, and a value in
+the file would freeze one session's answer into every session after it, with
+`apply_to()` dutifully applying it and the detection never running again. It
+would also appear on the dashboard's Settings page pre-filled with the
+detected address, where one Save pins it permanently.
+
+So the messages name `admin_config.py` only, and say why the other route is
+not offered. The operator who puts it in settings.conf anyway is no longer
+told to check their spelling of a name they spelled perfectly: both names the
+daemon assigns to itself while it runs - `MY_IP_OR_DOCK` and `ORIGINAL_NICK`
+- now say what they actually are and where to set them instead. That is a
+message, not a gate: neither becomes applicable, and `_check_writable()`
+still refuses to write one.
+
+Six mutation-checked properties, no survivors.
+
 ### 🟢 The rehash's channel sync takes its turn
 
 Closes #440.

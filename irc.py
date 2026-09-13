@@ -1894,7 +1894,9 @@ def resolve_dcc_address(lookup=None, log=print):
         log(f"[WARNING] Could not reach the ipify API ({e}).")
         log("[WARNING] No public address is known, so DCC sends will be refused "
             "rather than offered to nobody. Set MY_IP_OR_DOCK in admin_config.py "
-            "or settings.conf to your public address to serve without this lookup.")
+            "to your public address to serve without this lookup. Not "
+            "settings.conf (#465): this address is detected at startup rather "
+            "than read from a file, so it is not a setting that file carries.")
         return ""
 
 
