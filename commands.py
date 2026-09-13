@@ -528,6 +528,124 @@ def _channels_to_sync(config):
     return chans
 
 
+# One IRC line is 512 bytes including the trailing CRLF, so 510 for the
+# command itself - the same number on_connect.MAX_COMMAND_BYTES uses, for the
+# same reason.
+MAX_SYNC_LINE_BYTES = 510
+
+
+def comma_batched(verb, channels, tail=""):
+    """`verb` lines carrying as many channels each as an IRC line will hold.
+
+    JOIN, PART and NAMES all take a comma-separated channel list. The connect
+    path has always used that (irc.py joins every channel with ONE JOIN); the
+    rehash sync never did, and sent one line per channel per verb (#440).
+
+    A single channel whose line is already over the limit goes out alone and
+    over-length rather than being dropped: RFC 2812 caps a channel name at 50
+    characters so it cannot happen with anything a server would accept, and
+    sending it is the only answer that leaves the operator something to see.
+    """
+    lines = []
+    batch = []
+
+    def rendered(names):
+        return f"{verb} {','.join(names)}{tail}"
+
+    for chan in channels:
+        if batch and len(rendered(batch + [chan]).encode("utf-8")) > MAX_SYNC_LINE_BYTES:
+            lines.append(rendered(batch) + "\r\n")
+            batch = []
+        batch.append(chan)
+    if batch:
+        lines.append(rendered(batch) + "\r\n")
+    return lines
+
+
+def sync_channels(oserve_mod, old_chans, new_chans, log=print):
+    """JOIN what is new, PART what is gone, NAMES the lot - through the pacer.
+
+    Returns the lines queued, which is what the caller reports.
+
+    LIFTED OUT OF _handle_rehash_request() so it can be driven. While it was
+    inline, reaching it meant reloading every module in the daemon, so the only
+    thing a test could do was read the source - and "the word JOIN appears in
+    commands.py" passes with the loop behind `if False:`. Same reason
+    irc.resolve_dcc_address() is a function of its own.
+
+    THE PACER, AND WHY THIS WAS THE ONE PATH WITHOUT IT (#440)
+
+    These three loops wrote JOIN/PART/NAMES straight to the socket with no
+    pacer slot and no gap between them, so the burst scaled with the channel
+    count: 15 channels meant 15 back-to-back lines, and replacing the channel
+    list outright meant JOIN + PART + NAMES for every channel in one go. It
+    was the only outbound path in the daemon that both scaled with the channel
+    count and ignored runtime.outbound_pacer.
+
+    Not remotely reachable - a rehash is refused from anyone who is not an
+    admin, and the dashboard is authenticated - so this is an operator burst
+    rather than a vector. But the dashboard fires a rehash on EVERY settings
+    save, including a theme change, and 15 short lines is a burst an operator
+    did not ask for and cannot see.
+
+    Two things fix it together. The lines are comma-batched, the way the
+    connect path already batches its JOIN, which turns the realistic case into
+    two lines and the full-swap case into three. And they go through
+    oserve.queue_message() like every other line the bot says, so they take a
+    pacer slot instead of racing whatever else is being sent. A NAMES refresh
+    is latency-insensitive; the DCC negotiation lines that deliberately bypass
+    the queue are not.
+    """
+    import defaults as config
+    import announce
+    import runtime
+
+    debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').lower()
+
+    joining = [chan for chan in new_chans if chan not in old_chans]
+    # The debug channel is never parted. config.py declares DEBUG_CHANNEL as
+    # "" (blank) since #193, so a literal channel name here was a second source
+    # of truth that disagreed with the first - and the one place it would have
+    # been consulted is the one place it decides whether to PART a channel.
+    parting = [chan for chan in old_chans
+               if chan not in new_chans and chan != debug_chan]
+
+    # The membership map moves with the decision, not with the send. These
+    # lines are now queued rather than written, so waiting for them to go out
+    # would leave dcc.py reading a stale channel_users for as long as the
+    # queue takes to drain - and it treats that map as proof a user is present.
+    for chan in joining:
+        with runtime.channel_users_lock():
+            if chan.lower() not in config.channel_users:
+                config.channel_users[chan.lower()] = set()
+    for chan in parting:
+        with runtime.channel_users_lock():
+            if chan.lower() in config.channel_users:
+                del config.channel_users[chan.lower()]
+
+    lines = (comma_batched("JOIN", joining)
+             + comma_batched("PART", parting, tail=" :Removed from DCCore")
+             + comma_batched("NAMES", new_chans))
+
+    for line in lines:
+        oserve_mod.queue_message("channel_sync", line)
+
+    # ONE debug line per verb, not one per channel. send_debug() goes to a
+    # CHANNEL through the VIP lane, so a line per channel was a second burst
+    # sitting behind the first - paced, but still 15 lines of the operator's
+    # debug channel saying the same thing 15 times.
+    if joining:
+        announce.send_debug(f"Joining {', '.join(joining)} due to new "
+                            f"configuration layout!", category="JOIN")
+    if parting:
+        announce.send_debug(f"Parting {', '.join(parting)} due to new "
+                            f"configuration layout!", category="PART")
+    if not joining and not parting:
+        log("[REHASH SYNC] No channel changes - refreshing the name lists only.")
+
+    return lines
+
+
 def _restore_advert_worker_token(live_worker_id):
     """Put the advert worker's generation token back after a reload.
 
@@ -959,36 +1077,27 @@ def _handle_rehash_request(user, target_chan):
         irc_sock = getattr(oserve, 'irc_connection', None)
         
         if irc_sock:
-            new_chans = _channels_to_sync(config)
-            
-            for chan in new_chans:
-                if chan not in old_chans:
-                    irc_sock.send(f"JOIN {chan}\r\n".encode())
-                    announce.send_debug(f"Joining channel {chan} due to new configuration layout!", category="JOIN")
-                    with runtime.channel_users_lock():
-                        if chan.lower() not in config.channel_users:
-                            config.channel_users[chan.lower()] = set()
-            
-            for chan in old_chans:
-                if chan not in new_chans:
-                    # Not a channel name. config.py declares DEBUG_CHANNEL as
-                    # "" (blank) since #193, so a literal "#example-debug" here was a second
-                    # source of truth that disagreed with the first - and the
-                    # one place it would have been consulted is the one place it
-                    # decides whether to PART a channel.
-                    debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').lower()
-                    if chan != debug_chan:
-                        irc_sock.send(f"PART {chan} :Removed from DDCore\r\n".encode())
-                        announce.send_debug(f"Parting channel {chan} due to new configuration layout!", category="PART")
-                        with runtime.channel_users_lock():
-                            if chan.lower() in config.channel_users:
-                                del config.channel_users[chan.lower()]
-            
-            print("[REHASH SYNC] Sending a background NAMES to keep the lists fresh...")
-            for chan in new_chans:
-                irc_sock.send(f"NAMES {chan}\r\n".encode())
-                
-            print(f"[REHASH SYNC] Channel sync completed successfully.")
+            # THE SYNC IS TAIL WORK, AND MUST NOT REPORT THE RELOAD AS FAILED.
+            #
+            # Everything this handler exists to do has already happened by
+            # here: the modules are reloaded and the live state is merged
+            # back. The channel sync is bookkeeping on top - so anything it
+            # raises used to reach the handler at the bottom, which prints
+            # "[REHASH CRITICAL ERROR] The files could not be reloaded live"
+            # and tells the operator their rehash failed when it succeeded.
+            # Same reasoning as update_list.py's point of no return (#442):
+            # once the thing is done, the error path has to stop claiming it
+            # is not.
+            try:
+                queued = sync_channels(oserve, old_chans, _channels_to_sync(config))
+                print(f"[REHASH SYNC] Channel sync queued as {len(queued)} paced "
+                      f"line(s); they go out at MSG_DELAY like everything else "
+                      f"the bot says.")
+            except Exception as sync_err:
+                print(f"[REHASH SYNC ERROR] The reload itself completed; the "
+                      f"channel sync did not: {sync_err}. The channels the bot "
+                      f"is in are unchanged until the next rehash or "
+                      f"reconnect.")
         else:
             print("[REHASH WARNING] Could not sync the channels: no raw socket was available.")
         # ---------------------------------------------------------------------
