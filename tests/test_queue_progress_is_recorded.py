@@ -41,7 +41,7 @@ from tests.support import DCCoreTestCase  # noqa: E402
 USER = "someuser"
 PORT_START = 51300
 PORT_END = 51310
-CONTENT = bytes(range(256)) * 4000  # 1,024,000 bytes - large enough to catch mid-flight
+CONTENT = bytes(range(256)) * 100000  # 25,600,000 bytes (~24MB)
 
 
 def loopback_is_usable():
@@ -161,12 +161,17 @@ class TheTransferRowCarriesItsOwnSize(DCCoreTestCase):
         returns for that chunk - and the interpreter can switch threads on
         any bytecode boundary, not only at I/O calls, so a single check
         immediately after one 64KB read can land in the narrow window before
-        that update statement has run, on a fast enough runner. Reading in
-        small 4KB steps and sampling after each of the ~250 of them gives the
-        sender thread many chances to have already applied its own update by
-        the time any one sample runs, and CONTENT (1MB) is large enough that
-        the whole transfer cannot plausibly complete inside one scheduler
-        quantum.
+        that update statement has run. A first attempt at this used a 1MB
+        file, which passed reliably on Linux CI but failed EVERY time on
+        Windows: a coarser thread-scheduling quantum there let the sender
+        run all ~16 chunks of a 1MB file to completion - reaching size and
+        even finishing the transfer - inside one scheduler slice, before
+        this thread's poll loop ever ran a single sample, no matter how
+        small the read step was. CONTENT is now ~24MB, large enough that
+        completing the whole transfer within one scheduler quantum on any
+        platform this suite's CI covers is implausible, so reading in small
+        4KB steps and sampling after each one reliably lands inside the
+        transfer rather than after it.
         """
         received = 0
         deadline = time.time() + 20

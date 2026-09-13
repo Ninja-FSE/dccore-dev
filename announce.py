@@ -554,7 +554,18 @@ def announce_worker():
                         # sentinel; the advert - far more publicly visible - never
                         # had the same treatment. Skipped rather than reworded: an
                         # advert with nothing to announce is not useful chatter.
-                        if list_date == "No List":
+                        #
+                        # #433: "Error" is the SECOND sentinel this same function
+                        # can answer with - an OSError reading any list file
+                        # (a permission change, a vanished path, or another
+                        # process holding one open with no sharing) collapses
+                        # its whole return to (0, "Error", "0B", 0). "Error" !=
+                        # "No List", so this check alone let it straight through:
+                        # every channel got "For My List Of: 0 Files (0B) created
+                        # Error" plus a CTCP SLOTS line claiming 0 files and 0
+                        # bytes, every ANNOUNCE_INTERVAL, into every other bot's
+                        # registry too.
+                        if list_date in ("No List", "Error"):
                             continue
 
                         formatted_count = f"{file_count:,}"
