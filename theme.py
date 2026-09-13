@@ -186,7 +186,17 @@ def palette(settings=None):
     for role in roles:
         override = setting(f"CUSTOM_THEME_{role.upper()}")
         if isinstance(override, str) and override:
-            roles[role] = override
+            # #436: settings_file.py's own writer refuses a newline or a
+            # null byte in a CUSTOM_THEME_* value now, but this reads
+            # whatever config actually holds - a hand-edited settings.conf
+            # or admin_config.py answers to neither that check nor to
+            # coerce(), and this function is the single place every one of
+            # the eight outbound templates gets its colours from. Stripped,
+            # not refused: a preview has nobody to report an error to, and
+            # the raw preset underneath is always a safe fallback.
+            override = override.replace("\r", "").replace("\n", "").replace("\x00", "")
+            if override:
+                roles[role] = override
     return roles
 
 
