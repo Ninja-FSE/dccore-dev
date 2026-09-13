@@ -48,6 +48,29 @@ def _is_export_ignored(relative_path):
     return False
 
 
+def internal_file_or_skip(test_case, relative_path):
+    """The absolute path of an export-ignored file, or skip if this is an
+    export.
+
+    The general form of internal_changelog_or_skip() below, for any file that
+    exists here and deliberately never reaches the public repository -
+    docs/PUBLIC-REPO-WORKFLOW.md as well as docs/UPDATES.md. Same rule: a
+    missing file with an export-ignore line explaining it is an export; a
+    missing file without one is a fault and says so.
+    """
+    full = os.path.join(REPO_ROOT, relative_path)
+    if os.path.exists(full):
+        return full
+    if not _is_export_ignored(relative_path):
+        test_case.fail(
+            f"{relative_path} is missing, and .gitattributes does not "
+            f"export-ignore it - so it has gone missing for some other "
+            f"reason than being left out of the public tree.")
+    test_case.skipTest(
+        f"{relative_path} is export-ignored and absent, so this is an "
+        f"extracted public tree rather than the development repository.")
+
+
 def internal_changelog_or_skip(test_case):
     """The absolute path of docs/UPDATES.md, or skip if this is an export.
 

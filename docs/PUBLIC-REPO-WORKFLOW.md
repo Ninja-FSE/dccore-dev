@@ -126,6 +126,19 @@ the omissions surface, because it is the last point at which they are cheap.
    `scripts/capture_adverts.py`, `scripts/function_coverage.py`,
    `tests/uncovered_functions.txt`. Keep anything a shipped file's tests
    depend on (`scripts/gen_settings_sample.py`, `docs/CONVENTIONS.md`).
+
+   **Also strip the two internal-only lines from `.gitattributes`:**
+
+       docs/UPDATES.md    export-ignore
+       docs/PUBLIC-REPO-WORKFLOW.md    export-ignore
+
+   Both are correct here and actively wrong there. Step 3 renames
+   `UPDATES-PUBLIC.md` onto `docs/UPDATES.md`, so in the public repo that
+   path **is** the changelog — and shipping the line unchanged tells any
+   `git archive` run in the public repo to drop it. Nobody would see that
+   until a release tarball came out without its changelog. The second line
+   names a file that does not exist there at all, which is harmless and
+   sends the next reader looking for it.
 3. Swap the changelog: rename `docs/UPDATES-PUBLIC.md` → `docs/UPDATES.md`
    in the scratch tree. The internal `docs/UPDATES.md` needs no removal
    step — it carries `export-ignore`, so step 1 never extracted it (#246),

@@ -872,6 +872,7 @@ class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
 
     def test_reads_never_observe_a_torn_total_during_concurrent_refetches(self):
         import threading
+        import time
 
         bot = "racebot"
         count_a, count_b = 800, 1400
@@ -906,7 +907,21 @@ class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
         # 300 either. What changes is only the worst case, from about fifty
         # seconds to about seven, which is the difference between a backstop
         # inside the timeout and one above it.
+        #
+        # STILL NOT ENOUGH ON EVERY RUNNER. 300 rounds x ~25ms is ~7s on the
+        # machine that measurement came from - but a re-fetch does real
+        # filesystem work (rmtree, extract, rewrite), and a Windows CI runner
+        # under real-time antivirus scanning can cost several times that per
+        # round. A round count alone bets that EVERY runner is at least as
+        # fast as the one that set it; a wall-clock deadline does not. The
+        # writer now also stops at WRITER_DEADLINE_S regardless of how many
+        # rounds that reached - which additionally guarantees the readers get
+        # some UNCONTENDED tail time to finish their own quota in, rather
+        # than the writer's lock holding contend with them for the entire
+        # join() window on a slow runner.
         MAX_FETCH_ROUNDS = 300
+        WRITER_DEADLINE_S = 45
+        JOIN_TIMEOUT_S = 90
         stop_writer = threading.Event()
         state_lock = threading.Lock()
         errors = []
@@ -916,7 +931,9 @@ class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
 
         def writer():
             i = 0
-            while not stop_writer.is_set() and i < MAX_FETCH_ROUNDS:
+            deadline = time.time() + WRITER_DEADLINE_S
+            while (not stop_writer.is_set() and i < MAX_FETCH_ROUNDS
+                   and time.time() < deadline):
                 zip_path = zip_a if i % 2 == 0 else zip_b
                 ok, reason = list_fetch.process_fetched_list_zip(bot, zip_path)
                 if not ok:
@@ -949,7 +966,7 @@ class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
         for thread in threads:
             thread.start()
         for thread in threads:
-            thread.join(timeout=60)
+            thread.join(timeout=JOIN_TIMEOUT_S)
             self.assertFalse(thread.is_alive(),
                              "a writer/reader thread never finished within the "
                              "timeout - possible deadlock between the read and "
