@@ -212,6 +212,12 @@ class TheListenerIsClosedWhenNoPortIsFree(DCCoreTestCase):
     def send(self):
         import dcc
         sock = RecordingSocket()
+        # #430: start_dcc_send() now dispatches through whatever socket
+        # sys.modules['oserve'].irc_connection reports as live, not the
+        # parameter alone - this has to be that same socket, or the call
+        # bails out as "no live connection" before it can ever refuse a
+        # port.
+        self.oserve.irc_connection = sock
         dcc.start_dcc_send(sock, "dave", self.track, "Song.flac", "#chan",
                            {"file": "Song.flac", "path": self.track})
         return sock.text()
