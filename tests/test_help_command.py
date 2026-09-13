@@ -69,12 +69,14 @@ class ItAnswersThePersonNotTheChannel(HelpCase):
         self.assertTrue(all(line.startswith("NOTICE someoneelse :")
                             for line in self.ask(user="someoneelse")))
 
-    def test_it_goes_out_on_the_vip_lane(self):
-        """Same lane as the other user commands: an answer to a direct
-        question should not queue behind a channel advert."""
+    def test_it_goes_out_on_the_standard_lane(self):
+        """#426: this used to go out on the VIP lane, but that lane is meant
+        for searches and adverts - a single user asking for help repeatedly
+        could inject enough VIP lines to starve everyone else's replies. Per-
+        user command replies now share the standard lane instead."""
         self.ask()
 
-        self.assertTrue(all(vip for _user, _message, vip in self.oserve.queued))
+        self.assertFalse(any(vip for _user, _message, vip in self.oserve.queued))
 
 
 class ItOnlySuggestsWhatTheBotWillDo(HelpCase):

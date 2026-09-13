@@ -53,7 +53,26 @@ def queue_worker():
                 continue
 
             # ---------------------------------------------------------------------
-            # EXPRESS LANE (priority 1): drain the separate VIP list first.
+            # EXPRESS LANE (priority 1): drain one VIP line first, if there is one.
+            #
+            # #426: this used to `continue` straight back to the top after every
+            # VIP send, skipping the standard lane below entirely for as long as
+            # ANYTHING remained in vip_queue - which is strict priority with no
+            # aging, not "priority". oserve.queue_message() put every is_vip=True
+            # reply in this lane, including per-user command replies (-help alone
+            # queues 5 lines per request), and is_flooding() permits 10 commands
+            # per 5s per nick - so ONE user well inside the ordinary flood limit
+            # could inject VIP lines faster than MSG_DELAY drains them, peg
+            # vip_queue at its MAX_VIP_QUEUE cap indefinitely, and starve
+            # config.send_queue completely: @find results, "Preparing full list"
+            # and queue-position notices stopped reaching ANYONE, silently.
+            #
+            # No `continue` now: at most one VIP line is sent here, and the
+            # standard lane below always gets its own turn in the SAME pass
+            # rather than only when VIP happens to run dry. VIP still drains as
+            # fast as before whenever it has a backlog - this does not slow it
+            # down - it just no longer does so at the standard lane's total
+            # exclusion.
             # ---------------------------------------------------------------------
             if hasattr(config, 'vip_queue') and config.vip_queue:
                 msg = config.vip_queue.pop(0)
@@ -78,11 +97,10 @@ def queue_worker():
                     del config.vip_queue[:]
                     time.sleep(1.0)
                     continue
-
-                continue  # Straight back up to check for more VIP data
             # ---------------------------------------------------------------------
 
-            # STANDARD LANE (priority 2): with VIP empty, work the ordinary queue (round-robin)
+            # STANDARD LANE: one round-robin pass over every user with something
+            # queued, every iteration - not only when the express lane is empty.
             if config.send_queue:
                 active_users = builtins.list(config.send_queue.keys())
 

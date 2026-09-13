@@ -104,15 +104,18 @@ class ItAnswersThePersonNotTheChannel(CommandCase):
                 self.assertTrue(line.startswith("NOTICE dave :"), line)
                 self.assertNotIn("#dccore-test", line)
 
-    def test_both_go_out_on_the_vip_lane(self):
-        """Same lane as -help and -que: an answer to a direct question should
-        not queue behind a channel advert."""
+    def test_both_go_out_on_the_standard_lane(self):
+        """#426: this used to go out on the VIP lane, same as -help and -que,
+        but that lane is meant for searches and adverts - one user repeatedly
+        asking for stats could inject enough VIP lines to starve everyone
+        else's replies. Per-user command replies now share the standard lane
+        instead."""
         self.write_counts()
         for handler in (commands.handle_stats_request, commands.handle_top_request):
             with self.subTest(handler=handler.__name__):
                 self.ask(handler)
 
-                self.assertTrue(all(vip for _u, _m, vip in self.oserve.queued))
+                self.assertFalse(any(vip for _u, _m, vip in self.oserve.queued))
 
 
 class WhatStatsReports(CommandCase):
