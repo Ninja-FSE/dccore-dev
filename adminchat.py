@@ -85,7 +85,6 @@ import platform_compat
 # --------------------------------------------------------------------------
 CONNECT_TIMEOUT = 10.0        # dialling the operator's client
 LISTEN_TIMEOUT = 60.0         # waiting for the operator to accept our offer back
-SEND_TIMEOUT = 30.0           # a blocked write gives up rather than hanging forever
 AUTH_TIMEOUT = 60.0           # seconds to supply a password before the socket closes
 IDLE_TIMEOUT = 1800.0         # authenticated session, so a forgotten window expires
 MAX_PASSWORD_ATTEMPTS = 3
@@ -1018,9 +1017,25 @@ def _serve(sock, peer_ip, nick, host, description):
     """Banner, prompt and reader loop. Shared by both transports."""
     global _pending
 
-    # A short recv timeout keeps the reader loop responsive enough to notice its
-    # own auth/idle deadlines; the send timeout stops a stalled peer wedging the
-    # writer thread forever.
+    # ONE TIMEOUT, BOTH DIRECTIONS - which is what settimeout() means (#458).
+    #
+    # This used to be described as two: a short recv timeout, and a separate
+    # send timeout said to be SEND_TIMEOUT (30s). There was no second timeout.
+    # SEND_TIMEOUT was declared, never referenced, and the writer's sendall()
+    # has always run under this same one second.
+    #
+    # A real send deadline is not available cheaply here: the writer runs on
+    # its own thread and shares this socket with the reader loop, and
+    # settimeout() is per SOCKET rather than per direction - raising it around
+    # a send would raise it for a recv another thread is sitting in.
+    # SO_SNDTIMEO is direction-specific but interacts badly with Python's own
+    # timeout handling.
+    #
+    # One second is defensible for this workload rather than merely tolerated:
+    # the console sends short lines, so sendall() only blocks if the kernel
+    # buffer is full, and that means the peer has already stopped reading long
+    # enough to fill it. Tearing the session down then is the right answer.
+    # What was wrong was a constant claiming otherwise.
     sock.settimeout(1.0)
     platform_compat.apply_keepalive(sock, idle=60, interval=15, count=4)
 
