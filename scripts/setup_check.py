@@ -383,10 +383,29 @@ def main(platform):
     # --- admin console -------------------------------------------------------
     print()
     print("Admin console")
+    # ASK THE DAEMON WHAT IT WILL ACTUALLY ACCEPT (#447), rather than counting
+    # the raw list. ADMIN_HOSTMASKS = [""] is a truthy list of one, so
+    # counting it reported "enabled for 1 host pattern(s)" while
+    # adminchat.admin_host_patterns() returned [] and the console was in fact
+    # off - and [""] is exactly what a fresh install can end up with, because
+    # configure.py's password prompt is mandatory while the hostmask is not.
+    #
+    # A pre-flight check that reports a feature as enabled when it is disabled
+    # is worse than one that says nothing: the operator stops looking.
     masks = getattr(config, "ADMIN_HOSTMASKS", []) or []
+    try:
+        import adminchat
+        patterns = adminchat.admin_host_patterns()
+    except Exception:
+        # The check must never be what breaks the check. Fall back to the raw
+        # list, stripped, which is the same question asked less precisely.
+        patterns = [m for m in masks if str(m or "").strip()]
     has_hash = bool(getattr(config, "ADMIN_PASSWORD_HASH", ""))
-    if not masks:
-        ok("disabled (ADMIN_HOSTMASKS is empty) - this is fine")
+    if not patterns:
+        if masks:
+            ok("disabled (ADMIN_HOSTMASKS has no usable pattern) - this is fine")
+        else:
+            ok("disabled (ADMIN_HOSTMASKS is empty) - this is fine")
     elif not has_hash:
         # A warning, not a failure. With no hash the console refuses every
         # connection, so it fails CLOSED - nothing unsafe happens, the feature is
@@ -395,7 +414,7 @@ def main(platform):
         warn(f"ADMIN_HOSTMASKS is set but ADMIN_PASSWORD_HASH is empty - the console "
              f"will refuse every connection until you run: {platform.python} adminchat.py")
     else:
-        ok(f"enabled for {len(masks)} host pattern(s)")
+        ok(f"enabled for {len(patterns)} host pattern(s)")
 
     # --- verdict --------------------------------------------------------------
     print()

@@ -517,7 +517,14 @@ def apply_to(namespace, path=None, log=print):
         return report
 
     try:
-        with io.open(path, encoding="utf-8") as handle:
+        # "utf-8-sig", not "utf-8" (#446). A byte-order mark is three bytes
+        # that decode to U+FEFF and render as nothing at all. Notepad writes
+        # one by default, and read as plain utf-8 it stays attached to the
+        # first line - so the FIRST setting in the file parses as
+        # "\ufeffMSG_DELAY", lands in `unknown`, and is silently ignored while
+        # the operator looks at a file that plainly sets it. utf-8-sig
+        # consumes a BOM when present and is identical to utf-8 when not.
+        with io.open(path, encoding="utf-8-sig") as handle:
             entries = parse(handle.read())
     except (OSError, UnicodeDecodeError, SettingsError) as err:
         report["read_error"] = str(err)
@@ -958,7 +965,7 @@ def save(namespace, changes, path=None, log=print):
         if os.path.exists(path):
             try:
                 with io.open(path, "rb") as handle:
-                    raw = handle.read().decode("utf-8")
+                    raw = handle.read().decode("utf-8-sig")
             except (OSError, UnicodeDecodeError) as err:
                 raise SettingsWriteError(
                     f"could not read the existing {os.path.basename(path)} to edit "
