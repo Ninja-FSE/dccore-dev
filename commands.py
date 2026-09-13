@@ -1643,7 +1643,13 @@ def handle_stats_request(s, user, target):
     # when there is nothing to read, which reads as a date in the sentence it
     # was going into. A bot that has not built its list yet is the state every
     # fresh install is in, and the first thing somebody would ask about.
-    if shared_count or list_date != "No List":
+    #
+    # #433: "Error" is the other sentinel the same function can answer with -
+    # an OSError reading any list file collapses its whole return to
+    # (0, "Error", "0B", 0), and "Error" != "No List" let it straight through
+    # here too: "Sharing 0 files (0B), list built Error." answered a direct
+    # question with exactly the fault, not with "not built yet".
+    if shared_count or list_date not in ("No List", "Error"):
         shared_line = (f"Sharing {figure(f'{shared_count:,}')} files "
                        f"({figure(shared_size)}), list built {figure(list_date, red)}.")
     else:

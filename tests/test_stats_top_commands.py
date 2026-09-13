@@ -160,6 +160,24 @@ class WhatStatsReports(CommandCase):
         self.assertNotIn("built No List", body)
         self.assertIn("No list has been built yet", body)
 
+    def test_an_io_fault_reading_the_list_does_not_print_error_as_a_date(self):
+        """#433: the SECOND sentinel the same function can answer with - an
+        OSError reading any list file collapses its whole return to
+        (0, "Error", "0B", 0). Before this guard covered both, "Sharing 0
+        files (0B), list built Error." answered a direct question with the
+        fault itself rather than with "not built yet"."""
+        import list as list_mod
+        real = list_mod.get_file_count_date_size_and_raw_bytes
+        list_mod.get_file_count_date_size_and_raw_bytes = \
+            lambda *a, **k: (0, "Error", "0B", 0)
+        self.addCleanup(setattr, list_mod,
+                        "get_file_count_date_size_and_raw_bytes", real)
+
+        body = self.plain(self.stats())
+
+        self.assertNotIn("built Error", body)
+        self.assertIn("No list has been built yet", body)
+
 
 class WhatTopReports(CommandCase):
 
