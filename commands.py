@@ -133,9 +133,20 @@ def handle_queue_check(s, user, target):
     if hasattr(config, 'dcc_queue') and user_key in config.dcc_queue:
         file_count = len(config.dcc_queue[user_key])
         
-    # 2. Live statistics, for the fuller empty-queue notice
-    file_count_total, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes()
-    formatted_total_files = f"{file_count_total:,}"
+    # 2. Live statistics - read ONLY where they are used (#457).
+    #
+    # These feed the fuller notice shown when somebody has nothing queued,
+    # and nothing in the other branch touches them. They were fetched for
+    # every -que regardless, and get_file_count_date_size_and_raw_bytes()
+    # reads every published list file end to end - so the person who DOES
+    # have files queued paid a full read of the library index for four
+    # values that were then thrown away, on a command they are likely to
+    # repeat while they wait.
+    formatted_total_files = ""
+    list_date = ""
+    if file_count <= 0:
+        file_count_total, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes()
+        formatted_total_files = f"{file_count_total:,}"
     
     active_dl = oserve.active_downloads if oserve else 0
     free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)

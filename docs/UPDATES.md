@@ -246,6 +246,47 @@ Five mutation-checked properties, no survivors. One of the guards was
 rewritten first: it used `str.index` and died with "substring not found",
 which tells whoever hits it nothing about what broke.
 
+### 🟢 Three small things in the plumbing
+
+Found by the pre-publication audit sweep. Closes #456, #457 and #458.
+
+**Two outbound lines could be cut in half.** `queue_mgr`'s VIP lane and its
+standard lane both called `send()` and discarded the count it returns. On
+Linux, with the socket's kernel send buffer within a few hundred bytes of
+full, that truncates an IRC line mid-message - and the server reads whatever
+arrived as a complete command. `announce.py`'s debug drain has used
+`sendall()` for exactly this reason; these two were the last places that did
+not. They encode the same way now too, so a filename the socket cannot spell
+costs a character rather than raising on the worker thread.
+
+**Every `-que` read the whole library index.** The four values it fetched are
+used only by the layout shown when somebody has nothing queued, and nothing in
+the other branch touches them - so the person who DOES have files queued paid
+a full read of every published list file for numbers that were then thrown
+away, on a command they are likely to repeat while they wait. The read now
+happens only in the branch that shows it.
+
+**A constant that described a behaviour the daemon does not have.**
+`SEND_TIMEOUT = 30.0` sat next to a comment saying a send timeout "stops a
+stalled peer wedging the writer thread forever". There was no second timeout:
+it was never referenced, and the writer's `sendall()` has always run under the
+same `sock.settimeout(1.0)` as the reader.
+
+A real send deadline is not available cheaply here - the writer runs on its own
+thread and shares the socket with the reader, and `settimeout()` is per SOCKET
+rather than per direction, so raising it around a send would raise it for a
+`recv` another thread is sitting in. `SO_SNDTIMEO` is direction-specific but
+interacts badly with Python's own timeout handling.
+
+One second is defensible for this workload rather than merely tolerated: the
+console sends short lines, so `sendall()` only blocks if the buffer is full,
+and that means the peer stopped reading long enough to fill it. Tearing the
+session down then is the right answer. What was wrong was the constant
+claiming otherwise - so it is gone, and the comment now says what happens and
+why, which is what stops somebody adding it back.
+
+Three mutation-checked properties, no survivors.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
