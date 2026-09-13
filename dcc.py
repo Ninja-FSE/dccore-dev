@@ -2149,6 +2149,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     # the receiver close immediately.
     _size_probe = platform_compat.long_path(file_path) if isinstance(file_path, str) else None
     file_size = os.path.getsize(_size_probe) if (_size_probe and os.path.exists(_size_probe)) else 0
+    # The dashboard's queue progress bar needs a total to measure bytes_sent
+    # against - bytes_sent was already kept live on this row (see the send
+    # loop below), but nothing recorded what it was a fraction OF. Matched by
+    # user, the same way the send loop below updates bytes_sent: only one
+    # transfer runs per user at a time, so this is unambiguous.
+    for tx in config.active_transfers:
+        if tx['user'].lower() == user.lower():
+            tx['size'] = file_size
     ip_long = get_public_ip_long()
     start_time = time.time()
     bytes_sent = 0

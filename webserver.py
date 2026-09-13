@@ -579,9 +579,20 @@ def build_queue_payload(user=None):
     """The Queue view's data.
 
     With no `user`, one summary row per queued user (their status, a preview
-    of the next file, and how many are waiting) - what the Queue table shows.
-    With `user`, the full file list queued for that one user instead - what a
-    click-through or `?user=<nick>` on /api/queue returns.
+    of the next file, how many are waiting, the FULL list of what is waiting,
+    and - for whoever is sending - the file in flight and its progress) -
+    what the Queue table shows. With `user`, the full file list queued for
+    that one user instead - what a click-through or `?user=<nick>` on
+    /api/queue returns.
+
+    "preview"/"count"/"files" describe the QUEUE only - what is waiting
+    behind whatever is currently sending, if anything, never included in it.
+    dcc.py never puts the in-flight file into config.dcc_queue; it lives in
+    config.active_transfers instead, which is why a sending user's progress
+    needs its own fields rather than being folded into the queue ones -
+    an operator asked to see the whole queue, not just its head, and a
+    progress bar for the transfer actually running, not for whatever is
+    queued behind it.
 
     No lock is taken, matching adminchat.py's _cmd_queue/_cmd_status idiom: a
     shallow dict()/list() copy of the live containers, read without a lock,
@@ -592,6 +603,23 @@ def build_queue_payload(user=None):
     frozen = dict(getattr(config, "frozen_queues", {}))
     active = list(getattr(config, "active_transfers", []))
     sending_users = {str(tx.get("user", "")).lower() for tx in active}
+
+    active_by_user = {}
+    for tx in active:
+        active_by_user.setdefault(str(tx.get("user", "")).lower(), tx)
+
+    def _progress_fields(user_key):
+        # None, not 0, when there is nothing sending or the size is not
+        # known yet (dcc.start_dcc_send() writes "size" onto the row the
+        # moment it has read the file's real size off disk - a fresh
+        # dispatch's row does not have it for the brief window before that).
+        # The dashboard tells "no bar to draw" apart from "0% so far" by
+        # this, not by a size of 0, which a genuinely empty file would also
+        # report honestly.
+        tx = active_by_user.get(user_key)
+        if tx is None:
+            return None, None, None
+        return tx.get("file"), tx.get("bytes_sent"), tx.get("size")
 
     if user:
         user_key = str(user).strip().lower()
@@ -605,7 +633,9 @@ def build_queue_payload(user=None):
         else:
             status = "empty"
         files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
-        return {"user": user_key, "status": status, "count": len(entries), "files": files}
+        current_file, bytes_sent, size = _progress_fields(user_key)
+        return {"user": user_key, "status": status, "count": len(entries), "files": files,
+                "current_file": current_file, "bytes_sent": bytes_sent, "size": size}
 
     # #220: a user sent with a free slot and nothing already queued never
     # enters dcc_queue at all - dcc.py's admission check appends straight to
@@ -615,10 +645,6 @@ def build_queue_payload(user=None):
     # transfer correctly - the two disagreeing about the same page. The
     # single-user branch above already got this right by checking
     # sending_users regardless of whether entries exist; this does the same.
-    active_by_user = {}
-    for tx in active:
-        active_by_user.setdefault(str(tx.get("user", "")).lower(), tx)
-
     rows = []
     for user_key in dict.fromkeys(list(queue.keys()) + list(sending_users)):
         # sending_users comes from active_transfers, whose rows are built by
@@ -631,6 +657,7 @@ def build_queue_payload(user=None):
             continue
         entries = queue.get(user_key, [])
         status = "sending" if user_key in sending_users else ("frozen" if user_key in frozen else "queued")
+        files = [e.get("file", "?") if isinstance(e, dict) else str(e) for e in entries]
         first = entries[0] if entries else None
         if first is not None:
             preview = first.get("file", "?") if isinstance(first, dict) else str(first)
@@ -638,7 +665,10 @@ def build_queue_payload(user=None):
             preview = active_by_user[user_key].get("file", "?")
         else:
             preview = ""
-        rows.append({"user": user_key, "preview": preview, "count": len(entries), "status": status})
+        current_file, bytes_sent, size = _progress_fields(user_key)
+        rows.append({"user": user_key, "preview": preview, "count": len(entries), "status": status,
+                     "files": files, "current_file": current_file,
+                     "bytes_sent": bytes_sent, "size": size})
     return rows
 
 
