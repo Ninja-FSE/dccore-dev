@@ -91,6 +91,19 @@ try:
     sock = FakeSocket()
     oserve = type(sys)("oserve")
     oserve.irc_connection = sock
+
+    # THE REAL MODULE'S QUEUE ENTRY POINT, because the rehash now uses it.
+    # The channel sync writes its JOIN/PART/NAMES through oserve.queue_message
+    # rather than to the socket (#440), so a stand-in carrying only
+    # irc_connection takes the whole rehash down with an AttributeError -
+    # which is how this fixture met that change, and is the argument for the
+    # fixture existing.
+    oserve.queued = []
+
+    def queue_message(user, message, is_vip=False):
+        oserve.queued.append(message)
+
+    oserve.queue_message = queue_message
     sys.modules["oserve"] = oserve
 
     served = os.path.join(work, "music", "a.flac")
@@ -139,6 +152,8 @@ try:
         worker_id=getattr(sys.modules["announce"], "current_worker_id", None),
         paused_after=bool(getattr(after, "transfers_paused", False)),
         announce_ready=bool(getattr(sys.modules["announce"], "is_ready", False)),
+        sync_queued=list(getattr(oserve, "queued", [])),
+        socket_lines=list(sock.sent),
     )
 except BaseException as err:
     import traceback
@@ -191,6 +206,33 @@ class ARealRehash(unittest.TestCase):
         self.assertTrue(self.result.get("ok"),
                         self.result.get("traceback", self.result.get("error")))
         self.assertEqual(self.result.get("stage"), "collect")
+
+    def test_the_channel_sync_goes_through_the_queue(self):
+        """#440, driven rather than unit-tested: these three lines were the
+        only outbound path in the daemon that both scaled with the channel
+        count and ignored the pacer, and reaching them for real means running
+        the whole seven-hundred-line reload."""
+        queued = self.result.get("sync_queued") or []
+
+        self.assertTrue(any(line.startswith("NAMES ") for line in queued),
+                        queued)
+
+    def test_the_channel_sync_writes_nothing_to_the_socket(self):
+        """A line written straight to the socket has taken no pacer slot."""
+        for line in self.result.get("socket_lines") or []:
+            with self.subTest(line=line[:40]):
+                self.assertFalse(line.startswith(("JOIN ", "PART ", "NAMES ")),
+                                 line)
+
+    def test_both_channels_share_one_names_line(self):
+        """The batching, end to end: two channels, one line, the way irc.py's
+        connect path has always joined them."""
+        names = [line for line in self.result.get("sync_queued") or []
+                 if line.startswith("NAMES ")]
+
+        self.assertEqual(len(names), 1, names)
+        self.assertEqual(sorted(names[0][len("NAMES "):].strip().split(",")),
+                         ["#one", "#two"])
 
     def test_the_changed_setting_takes_effect(self):
         """What an operator rehashes FOR. settings.conf went from 4 slots to 9

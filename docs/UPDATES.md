@@ -230,6 +230,84 @@ still refuses to write one.
 
 Six mutation-checked properties, no survivors.
 
+### 🟢 The rehash's channel sync takes its turn
+
+Closes #440.
+
+A rehash compares the channel list it read before the reload against the one
+after it, and JOINs what is new, PARTs what is gone and NAMESes the rest.
+All three loops wrote straight to the socket: no pacer slot, no gap between
+lines, one line per channel per verb. It was the only outbound path in the
+daemon that both scaled with the channel count and ignored
+`runtime.outbound_pacer`.
+
+The dashboard fires a rehash on EVERY settings save - a theme change and a
+password change included - so an operator with fourteen channels plus a debug
+channel sent fifteen back-to-back lines for changing a colour. Measured at 15
+lines and 222 bytes for that case, and 43 lines and 894 bytes for a full
+channel-list swap.
+
+Two things fix it together, and both were already precedent in this codebase.
+The lines are comma-batched, the way `irc.py`'s connect path has always
+joined every channel with ONE JOIN - which turns the realistic case into two
+lines and the full-swap case into three. And they go through
+`oserve.queue_message()` like every other line the bot says, so they take a
+pacer slot rather than racing whatever else is being sent. A NAMES refresh is
+latency-insensitive; the DCC negotiation lines that deliberately bypass the
+queue are not, and are untouched.
+
+The batching is capped at 510 bytes per line. Without that, comma-batching
+would eventually build a line longer than a server will read - which is a
+worse failure than the burst it replaces, because the tail is then read as a
+command of its own.
+
+Two smaller things came with it. The debug channel gets one line per verb
+rather than one per channel: `send_debug()` goes to a CHANNEL through the VIP
+lane, so a line per channel was a second burst sitting behind the first,
+paced but still saying the same thing fifteen times. And the PART reason said
+"Removed from DDCore" - a typo, in the one string every person left in the
+channel sees.
+
+`sync_channels()` is a function of its own now, for the reason
+`irc.resolve_dcc_address()` is: while it was inline, reaching it meant
+reloading every module in the daemon, so the only thing a test could do was
+look for the word JOIN in `commands.py` - which passes with the loop behind
+`if False:`.
+
+#### The sync no longer reports the reload as failed
+
+Making it a function is what found this. `tests/test_rehash_end_to_end.py`
+runs one real rehash in a booted subprocess, and its `oserve` stand-in
+carried only `irc_connection` - enough for three `send()` calls and not for
+`queue_message()`. The AttributeError took the *whole rehash* down: the
+modules had already reloaded, the live state had already been merged back,
+and the operator was told "[REHASH CRITICAL ERROR] The files could not be
+reloaded live".
+
+The sync is tail work - everything the handler exists to do has happened
+before it runs - so it now has its own handler that says what actually
+failed and what it means (the channels are unchanged until the next rehash or
+reconnect). Same reasoning as `update_list.py`'s point of no return (#442):
+once the thing is done, the error path has to stop claiming it is not.
+
+The fixture's `oserve` is complete now, and asserts through the real rehash
+that the sync lines go to the queue and that both channels share one NAMES
+line.
+
+#### A test that was passing on the wrong occurrence
+
+`test_the_pause_does_not_outlive_a_rehash_that_raised` read the 800
+characters before the `[REHASH CRITICAL ERROR]` message and looked for
+`resume_transfers()` in them. A comment explaining that message moved the
+anchor; stripping comments fixed that and introduced something worse - the
+window then reached far enough back to find the SUCCESS path's resume, and
+passed with the failure path's own call deleted. Mutation-checked, caught,
+and replaced: the window is now everything between entering the handler and
+the message it prints, which is the span the resume actually has to be in. A
+count of characters is not a property.
+
+Nine mutation-checked properties, no survivors.
+
 ### 🟢 Two faults a fresh install meets
 
 Found by the pre-publication audit sweep. Closes #446 and #447.

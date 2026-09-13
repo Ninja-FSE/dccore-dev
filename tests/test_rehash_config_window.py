@@ -719,10 +719,27 @@ class ARehashWaitsForTransfersToFinish(DCCoreTestCase):
 
     def test_the_pause_does_not_outlive_a_rehash_that_raised(self):
         """Otherwise the bot sits refusing every send for ever, with the only
-        clue a notice telling users to try again in a moment."""
+        clue a notice telling users to try again in a moment.
+
+        BOUNDED BY THE HANDLER, not by a character count. This used to read
+        the 800 characters before the message, which is not a property of
+        anything: a comment explaining that message moved the anchor several
+        hundred lines up the file, and widening the window instead reached
+        back far enough to find the SUCCESS path's resume and pass on that -
+        with the failure path's resume deleted. A count is not a property.
+
+        Comments are stripped for the reason the sibling test above gives.
+        The window is now everything between entering the handler and the
+        message it prints, which is exactly the span the resume has to be
+        in."""
         with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
-            code = handle.read()
-        failure_path = code.split("[REHASH CRITICAL ERROR]", 1)[0][-800:]
+            code = chr(10).join(line.split("#", 1)[0]
+                                for line in handle.read().splitlines())
+        body = code.split("def _handle_rehash_request(", 1)[1]
+        handler = body.split("except Exception as e:", 1)
+
+        self.assertEqual(len(handler), 2, "the rehash's outer handler has moved")
+        failure_path = handler[1].split("[REHASH CRITICAL ERROR]", 1)[0]
 
         self.assertIn("resume_transfers()", failure_path)
 
