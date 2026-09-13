@@ -2007,8 +2007,23 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                         with open(one_list, "r", encoding="utf-8",
                                   errors="ignore") as lf:
                             lines.extend(lf.readlines())
+                    # THE LIST'S OWN SPELLING TRAVELS WITH THE FOLDER (#445).
+                    #
+                    # The match below is case-insensitive, deliberately -
+                    # list.find_duplicate_filenames() gives the reason in its
+                    # own docstring: "a requester typing a name back cannot be
+                    # expected to reproduce its case". What was missing is that
+                    # the path was then rebuilt from what the REQUESTER typed,
+                    # which is the one spelling known not to be the one on
+                    # disk. On Linux that names a file that does not exist and
+                    # the request is refused for a file the bot is publicly
+                    # advertising; on Windows it resolves, and the file is
+                    # offered and received under the requester's casing rather
+                    # than the operator's.
                     target_folder = None
+                    target_name = ""
                     fallback_folder = None
+                    fallback_name = ""
                     clean_req = str(requested_file).lower().strip()
 
                     for idx, line in enumerate(lines):
@@ -2078,17 +2093,24 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                                 # where the answer isn't already known.
                                 if fallback_folder is None:
                                     fallback_folder = found_folder
+                                    fallback_name = str(current_file_in_list).strip()
                                     if not requested_size_hint:
                                         break
                                 if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
                                     target_folder = found_folder
+                                    target_name = str(current_file_in_list).strip()
                                     break
 
                     if target_folder is None:
                         target_folder = fallback_folder
+                        target_name = fallback_name
 
                     if target_folder is not None:
-                        test_path = os.path.join(target_folder, requested_file)
+                        # target_name, not requested_file (#445): the list's
+                        # spelling is the one that exists on disk, because the
+                        # list was written from the disk. The row that matched
+                        # is the row that names it.
+                        test_path = os.path.join(target_folder, target_name)
                         if os.path.exists(platform_compat.long_path(test_path)):
                             full_path = test_path
                 except Exception as list_err:

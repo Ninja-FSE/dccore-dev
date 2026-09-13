@@ -230,6 +230,47 @@ still refuses to write one.
 
 Six mutation-checked properties, no survivors.
 
+### 🟢 A file the bot advertises, refused for its spelling
+
+Closes #445.
+
+The list lookup case-folds on purpose. `list.find_duplicate_filenames()` says
+why in its own docstring: "Matching is case-insensitive, because the resolver
+compares lowercased and a requester typing a name back cannot be expected to
+reproduce its case."
+
+Having matched that way, it then rebuilt the path from the REQUESTER's
+spelling - `os.path.join(target_folder, requested_file)` - which is the one
+spelling known not to be the one on disk. The list was written FROM the disk;
+the row that matched is the row that names the file.
+
+On Linux that path does not exist, and the `os.walk` last resort is a
+case-sensitive `if requested_file in files` which misses too, so the
+requester is told "File not found" for a file the bot is publicly listing. On
+Windows it resolves - and the file is then offered and received under the
+requester's casing rather than the operator's, because the resolved path is
+what goes out in the DCC SEND.
+
+Both branches of the lookup carry the name now: the first copy the list names
+(the bare request every existing caller makes) and the copy a size hint picks
+out (a request built from a search result's exact line).
+
+The `os.walk` fallback is deliberately unchanged. It answers for names the
+list never matched at all, and widening it would be a different decision -
+one about whether an unlisted file becomes reachable under any casing.
+
+Four mutation-checked properties, and the tests are the interesting part. The
+refusal only happens on a case-sensitive filesystem, so a test that depended
+on one would cover nothing on Windows or macOS. It is emulated instead:
+`os.path.exists` is replaced with one that checks each component against what
+the directory actually lists, which is what a case-sensitive filesystem does.
+The wrapper has to strip `platform_compat.long_path()`'s prefix before
+walking the path - without that it answers about a path that does not parse,
+which is a test that passes while testing nothing. There is an explicit
+fixture-invariant test that the emulation tells the two names apart, and a
+separate assertion that runs everywhere: whatever the filesystem does, the
+path the daemon settles on must carry the list's spelling.
+
 ### 🟢 The rehash's channel sync takes its turn
 
 Closes #440.
