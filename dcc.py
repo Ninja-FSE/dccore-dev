@@ -2137,7 +2137,44 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     # Only a send loop that ran to completion counts as delivered. A socket timeout, a
     # refused connection or a half-finished stream must not consume the queue row.
     transfer_completed = False
-    
+
+    # #430: `irc_sock` is whatever socket was live when the caller captured
+    # it - which can be several minutes stale by the time this actually
+    # runs. user_queue_timer waits up to 300s for the user to reappear,
+    # inline_rar_packer can spend minutes packing an album, and neither
+    # re-checks whether a reconnect has since torn down that socket and
+    # opened a new one. Every dispatch path converges here, so this is the
+    # one place worth asking what is ACTUALLY live right now, rather than
+    # trusting what was threaded through four different call sites.
+    #
+    # Re-bound rather than only checked: every irc_sock.send() further down
+    # in this function - the handshake, every error NOTICE - should use the
+    # current connection too, not the one this thread was started with.
+    oserve_mod = sys.modules.get('oserve')
+    live_sock = getattr(oserve_mod, 'irc_connection', None)
+
+    if live_sock is None:
+        # No live connection at all right now - not this queue entry's
+        # fault, exactly like "no usable public address" below, and for the
+        # same reason: it affects every queued user identically, nothing
+        # about retrying THIS row fixes it, and there is nothing to send a
+        # NOTICE of the problem over in the first place. Left untouched
+        # rather than charged a retry: the next real trigger (a reconnect's
+        # NAMES thaw, a completion, a JOIN) re-selects it normally.
+        print(f"[DCC HOLD] No live IRC connection right now - holding "
+              f"{user}'s queue rather than dispatching into a dead socket.")
+        if isinstance(next_file, dict) and next_file.get('is_temporary_zip'):
+            config.rar_inprogress = False
+            redispatch_waiting_pack(irc_sock, just_finished=user)
+        if hasattr(config, 'user_processing_lock'):
+            config.user_processing_lock.discard(user.lower())
+        with queue_lock:
+            config.active_transfers[:] = [tx for tx in config.active_transfers
+                                          if tx['user'].lower() != user.lower()]
+        return
+
+    irc_sock = live_sock
+
     # is_offerable_to_strangers() is the address half; ip_long == 0 only catches
     # a blank or malformed value, and a loopback address passes it (127.0.0.1 is
     # 2130706433). See that function for what went wrong without it.
@@ -2349,7 +2386,16 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             irc_sock.send(ctcp_handshake.encode())
             print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
         except Exception as e:
+            # #430: this used to fall straight through into accept() below,
+            # which then blocked for the full 30s listener timeout waiting
+            # for a receiver who was never actually told to connect - the
+            # offer never reached them, so there was never anyone coming.
+            # Three of those and MAX_SEND_FAILS deletes the row with "Could
+            # not send" over the very connection that just failed. Returning
+            # here instead lets the enclosing finally release the slot and
+            # the interlocks immediately rather than half a minute later.
             print(f"[DCC ERROR] Failed to send the handshake: {e}")
+            return
 
         conn, addr = dcc_sock.accept()
         conn.settimeout(60.0)
