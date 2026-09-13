@@ -1,5 +1,6 @@
 # commands.py - User commands, mostly queue handling
 import sys
+import threading
 import defaults as config
 import db
 import runtime
@@ -244,22 +245,67 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
             category="INFO")
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
+# How long before the bot will measure latency again, across EVERYBODY.
+#
+# !ping is dispatched in the ordinary-user branch, so anybody in the channel
+# can ask for one. The per-user flood limiter upstream stops one person asking
+# repeatedly and cannot stop ten people asking once each - and the server does
+# not meter users, it meters this connection. Ten unpaced PINGs leaving at
+# once is a burst this bot has already been disconnected for.
+#
+# A shared cooldown is the right shape rather than a per-user one, because the
+# probe measures the SERVER, not the asker: ten people asking is one question
+# asked ten times, and the answer would be the same to three decimals.
+PING_COOLDOWN_SECONDS = 30
+
 def handle_ping_request(irc_sock, user, target_chan):
-    """Start the timer and send a unique latency PING to the IRC server."""
+    """Start the timer and send a latency PING to the IRC server.
+
+    Returns True if a probe actually went out.
+
+    PACED AND RATE LIMITED, because this is the one user-reachable command
+    that writes to the IRC socket itself instead of queueing a reply. Two
+    separate things were wrong with that:
+
+      * it bypassed runtime.outbound_pacer entirely, so the line never
+        counted against the shared budget every other outbound line respects;
+      * nothing bounded how many probes could be in flight, and a second
+        request overwrote the first one's start time - so two people asking
+        together produced two PINGs and one meaningless measurement.
+    """
     import time
     import defaults as config
-    
-    # Keep the measurement in shared memory so the pong handler can read it later
-    config.ping_start_time = time.time()
-    config.ping_triggered_by = user
-    config.ping_channel_source = target_chan
-    
-    # Send the probe straight to the server's raw socket
+    import runtime
+
+    now = time.monotonic()
+    # runtime's lock and runtime's dict, not this module's: !rehash reloads
+    # commands.py, and a lock constructed here would be a fresh object on the
+    # far side of every reload - see runtime.ping_lock's own comment.
+    with runtime.ping_lock:
+        last = config.ping_state.get("last_sent", 0.0)
+        since = now - last
+        if last and since < PING_COOLDOWN_SECONDS:
+            print(f"[PING COMMAND] {user} asked in {target_chan}, but the last "
+                  f"measurement was {since:.0f}s ago - staying quiet.")
+            return False
+        config.ping_state["last_sent"] = now
+
+        # Under the same lock as the cooldown: the pong handler reads these
+        # three, and a second request must not overwrite a probe in flight.
+        config.ping_start_time = time.time()
+        config.ping_triggered_by = user
+        config.ping_channel_source = target_chan
+
     try:
+        # The shared clock, not a raw write. Everything else the bot says
+        # waits its turn here; a latency probe is not special enough to skip.
+        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
         irc_sock.send(b"PING :OSERVE_LATENCY_CHECK\r\n")
         print(f"[PING COMMAND] Latency measurement started by {user} in {target_chan}.")
+        return True
     except Exception as e:
         print(f"[PING ERROR] Could not send the PING packet: {e}")
+        return False
 
 def handle_pong_response(category="INFO"):
     """Catch the server's reply, work out the latency to three decimals, and report it."""
@@ -345,6 +391,8 @@ PRESERVE_RUNTIME = (
                           # acknowledgement, and losing these would clear the badge
                           # without anybody having looked at what it was for
     'notice_state',       # and the "how much of it have I seen" marker beside them
+    'ping_state',         # the latency probe's shared cooldown. A rehash
+                          # must not be a way to clear it
     'recent_departures',  # #376's alt-nick reconnect window - a PART/QUIT seen
                           # moments before a rehash would otherwise be forgotten,
                           # so the alt-nick's join right after loses the merge it

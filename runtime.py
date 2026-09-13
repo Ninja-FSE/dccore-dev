@@ -304,6 +304,20 @@ def resolve_display_nick(nick):
         primary = nick_aliases.get(key)
     return primary if primary else nick
 
+# The latency probe's shared cooldown, and the lock over it.
+#
+# HERE rather than in commands.py, because commands.py is reloaded by
+# !rehash: a module-level threading.Lock() there is rebound on every reload,
+# so a thread already inside the old one goes on holding an object nobody
+# else can see while the next caller acquires the fresh one. That is #235's
+# bug, and tests/test_no_reloaded_module_owns_a_lock.py exists to stop it
+# coming back a fifth time - it caught this one.
+#
+# A dict rather than a float so the binding in defaults.py tracks by
+# reference, and {} after a reset still reads correctly through .get().
+ping_state = {}
+ping_lock = threading.Lock()
+
 # Live transfer rate ---------------------------------------------------------
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can
