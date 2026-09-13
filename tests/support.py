@@ -169,6 +169,18 @@ _ORPHANED_WRITE_SINK = os.path.join(_ORPHANED_WRITE_DIR, "fetch_history.json")
 # path nobody reads, and the real one is never a target at any point.
 _ORPHANED_QUEUE_SINK = os.path.join(_ORPHANED_WRITE_DIR, "dcc_queue.txt")
 
+# The same outliving start_dcc_send() thread that settles the queue row
+# through db.save_dcc_queue() also settles the TRANSFER's own outcome, on
+# success, through two more writers on the identical path:
+# db.update_stats_on_complete() (dcc.py:2538) writes SPEED_RECORD_FILE, and
+# db.record_download() (dcc.py:2554) writes DOWNLOAD_COUNTS_FILE. Both were
+# still being restored to the real path in tearDown() below when the queue
+# file's hole was found and closed - which means a late tick from the exact
+# same thread could silently overwrite the operator's own speed record or
+# download-count history the same way it emptied the queue.
+_ORPHANED_SPEED_RECORD_SINK = os.path.join(_ORPHANED_WRITE_DIR, "speed_record.txt")
+_ORPHANED_DOWNLOAD_COUNTS_SINK = os.path.join(_ORPHANED_WRITE_DIR, "download_counts.json")
+
 
 def reset_config(**overrides):
     """Return config to a known-clean state, then apply any overrides.
@@ -430,18 +442,25 @@ class DCCoreTestCase(unittest.TestCase):
         # and therefore runs earlier, putting the real paths back; this then
         # takes them away again.
         #
-        # Why it has to exist at all: db.py derives DCC_QUEUE_FILE from
-        # config at IMPORT, and a !rehash reloads db - so a reload re-derives
-        # it from whatever config says at that moment. dcc.py also dispatches
-        # on threads that outlive the test that started them, and every exit
-        # path settles the queue row through db.save_dcc_queue(). Put those
-        # together and a late thread, after a reload, writes the operator's
-        # own data/dcc_queue.txt. It was caught writing two bytes: an EMPTY
-        # queue, i.e. running the suite on a live install silently drops every
-        # transfer anybody had queued.
+        # Why it has to exist at all: db.py derives DCC_QUEUE_FILE,
+        # SPEED_RECORD_FILE and DOWNLOAD_COUNTS_FILE from config at IMPORT,
+        # and a !rehash reloads db - so a reload re-derives all three from
+        # whatever config says at that moment. dcc.py's start_dcc_send() also
+        # dispatches on threads that outlive the test that started them, and
+        # every exit path settles the queue row through db.save_dcc_queue() -
+        # while a SUCCESSFUL one additionally settles the transfer itself
+        # through db.update_stats_on_complete() and db.record_download().
+        # Put those together and a late thread, after a reload, writes the
+        # operator's own data/dcc_queue.txt, data/speed_record.txt or
+        # data/download_counts.json. The queue file was caught writing two
+        # bytes: an EMPTY queue, i.e. running the suite on a live install
+        # silently drops every transfer anybody had queued. The other two
+        # write from the identical thread and were found by inspection
+        # rather than by being caught outright - not yet observed corrupting
+        # anything is not the same claim as safe.
         #
         # #415 gave the fetch history the same treatment for the same reason.
-        self.addCleanup(self._park_queue_file_on_a_dead_path)
+        self.addCleanup(self._park_thread_written_files_on_dead_paths)
         # NO TEST MAY WRITE THE OPERATOR'S OWN settings.conf. Anything that
         # reaches settings_file.save() - the /api/settings route most
         # obviously - writes DEFAULT_PATH unless this variable says otherwise,
@@ -622,26 +641,37 @@ class DCCoreTestCase(unittest.TestCase):
         db.FETCH_HISTORY_FILE = _ORPHANED_WRITE_SINK
         db.NOTICES_FILE = self._real_notices_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
-        db.DOWNLOAD_COUNTS_FILE = self._real_download_counts_file
-        # NOT self._real_dcc_queue_file - see _ORPHANED_QUEUE_SINK above. A
-        # dispatch thread still settling a queue row after this line would
-        # otherwise empty the operator's own queue file.
+        # NOT self._real_download_counts_file / self._real_speed_record_file
+        # / self._real_dcc_queue_file - see the three _ORPHANED_*_SINK
+        # constants above. A start_dcc_send() thread still settling its
+        # queue row, its stats or its speed record after this line would
+        # otherwise write into the operator's own data/ files.
+        db.DOWNLOAD_COUNTS_FILE = _ORPHANED_DOWNLOAD_COUNTS_SINK
         db.DCC_QUEUE_FILE = _ORPHANED_QUEUE_SINK
-        db.SPEED_RECORD_FILE = self._real_speed_record_file
+        db.SPEED_RECORD_FILE = _ORPHANED_SPEED_RECORD_SINK
         db.FETCHED_BOT_LISTS_FILE = self._real_fetched_bot_lists_file
         shutil.rmtree(self._fetch_history_dir, ignore_errors=True)
 
-    def _park_queue_file_on_a_dead_path(self):
-        """Point every name the queue writer can reach at the sink.
+    def _park_thread_written_files_on_dead_paths(self):
+        """Point every name a start_dcc_send() thread can still reach, after
+        this test has already finished, at a sink instead of the real file.
 
-        BOTH names: db.DCC_QUEUE_FILE is what save_dcc_queue() reads, and
-        config.DCC_QUEUE_FILE is what a db reload re-derives it from. Leaving
-        either one on the real path leaves the hole open.
+        BOTH names per file: db.X is what the writer reads, and config.X is
+        what a db reload (a !rehash test causes one) re-derives it from.
+        Leaving either one on the real path leaves the hole open. All three
+        files are settled from the same outliving thread - the queue row
+        unconditionally, the other two only when the transfer succeeded -
+        so all three get the identical treatment.
         """
         import db as _db
 
-        _db.DCC_QUEUE_FILE = _ORPHANED_QUEUE_SINK
-        setattr(self.config, "DCC_QUEUE_FILE", _ORPHANED_QUEUE_SINK)
+        for name, sink in (
+            ("DCC_QUEUE_FILE", _ORPHANED_QUEUE_SINK),
+            ("SPEED_RECORD_FILE", _ORPHANED_SPEED_RECORD_SINK),
+            ("DOWNLOAD_COUNTS_FILE", _ORPHANED_DOWNLOAD_COUNTS_SINK),
+        ):
+            setattr(_db, name, sink)
+            setattr(self.config, name, sink)
 
     def set_config(self, **overrides):
         """Set config attributes for the duration of one test, restoring
