@@ -14,6 +14,7 @@
 # now, and are bound below in section 8. See that module's docstring for why:
 # !rehash reloads THIS file, which reset every one of them.
 import os
+import re
 import runtime
 
 # ---------------------------------------------------------------------
@@ -1140,5 +1141,26 @@ if not BROADCAST_SEARCH_CHANNEL and CHANNEL:
 # one who never touched it at all. Narrow (it only misfires when the
 # explicit choice is the literal word "DCCore") and no worse than shipping
 # with no derivation at all, which is the alternative.
+# #427: NICKNAME is IRC-legal the moment it is a legal nick - RFC 2812's
+# specials are []\`_^{|} - but "|" is an ordinary nick character (Bot|Away is
+# one of the commonest shapes on the network) and both "|" and "\\" are
+# illegal in an NTFS path. Derived straight into LIST_BASE_NAME with no
+# sanitiser, either one made update_list.py's staging open() raise on every
+# scheduled rebuild, forever, on Windows - the identical run succeeds on
+# Linux because both are legal POSIX filenames. Same whitelist charset as
+# list_fetch._sanitize_bot_dir_name() applies to a fetched bot's nick for the
+# same reason (audit found that one first): what is legal in a nick and what
+# is legal in a path are different sets, and only one of them is ours to
+# choose. Not imported from there - list.py and list_fetch.py both `import
+# defaults as config`, and defaults.py loads first.
+_LIST_BASE_NAME_CHARSET_RE = re.compile(r'[^\w\-.\[\]{}^`]')
+
+
+def _sanitize_list_base_name(name):
+    cleaned = _LIST_BASE_NAME_CHARSET_RE.sub('_', str(name or ''))
+    cleaned = cleaned.strip().strip('.').strip()
+    return cleaned or "DCCore"
+
+
 if LIST_BASE_NAME == "DCCore" and NICKNAME:
-    LIST_BASE_NAME = NICKNAME
+    LIST_BASE_NAME = _sanitize_list_base_name(NICKNAME)
