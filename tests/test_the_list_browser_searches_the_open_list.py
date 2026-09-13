@@ -176,7 +176,7 @@ class SearchingAFetchedBotsOpenList(DCCoreTestCase):
         """The lower layer must not do its own splitting - webserver.py
         already did that once, from the raw query string."""
         entry = config.fetched_bot_lists["otherbot"]
-        page, total_folders, total_rows, error = list_fetch.get_fetched_bot_page(
+        page, total_folders, total_rows, _row_capped, error = list_fetch.get_fetched_bot_page(
             entry, 0, 50, search_words=["gamma"])
 
         self.assertIsNone(error)
@@ -187,7 +187,7 @@ class SearchingAFetchedBotsOpenList(DCCoreTestCase):
         "everything" - the default this function had before #399's
         follow-up."""
         entry = config.fetched_bot_lists["otherbot"]
-        page, total_folders, total_rows, error = list_fetch.get_fetched_bot_page(
+        page, total_folders, total_rows, _row_capped, error = list_fetch.get_fetched_bot_page(
             entry, 0, 50)
 
         self.assertIsNone(error)
