@@ -19,6 +19,10 @@
   var DOWNLOADS_POLL_MS = 4000;
   var FILELISTS_BOTS_POLL_MS = 4000;
   var CONSOLE_LOG_POLL_MS = 2000;
+  // Three elements per log line, so this is comfortably more than the
+  // server's own 500-line buffer holds - the cap exists to stop unbounded
+  // growth over hours, not to second-guess how much history is useful.
+  var CONSOLE_LOG_MAX_ELEMENTS = 3000;
   // #439: while disabled, retried at this much slower cadence instead of
   // stopping outright - so ticking WEBUI_CONSOLE_ENABLED on in Settings and
   // saving (no restart needed; the save's own rehash applies it live) is
@@ -4206,7 +4210,7 @@
       '<h2 class="settings-category-title">Served folders</h2>' +
       '<p class="served-folder-summary">' + escapeHtml(summary) + "</p>" +
       offNote +
-      '<div class="served-served-folder-rows">' + rows + "</div>" +
+      '<div class="served-folder-rows">' + rows + "</div>" +
       browsePanel +
       '<div class="served-folder-actions">' +
         '<button type="button" class="btn served-folder-add">Add folder</button>' +
@@ -4416,6 +4420,10 @@
       html += onConnectSectionHtml();
     }
     el.settingsFields.innerHTML = html;
+    // The panel this repaints is where a carried confirmation has to land -
+    // see applySettingsFlash(). Called here rather than in loadSettings()
+    // because this is the point at which the new note element exists.
+    applySettingsFlash();
     if (category.id === SERVED_FOLDERS_CATEGORY) {
       if (state.listsSource === "file") { attachListRows(); } else { attachFolderRows(); }
     }
@@ -4500,6 +4508,20 @@
   // the just-written values become the new baseline, but any OTHER field the
   // operator was mid-edit on (a save sends only the dirty set, not the whole
   // form) must not be reloaded out from under them.
+  // Set just before a reload that repaints the settings panel, and applied
+  // once the new panel exists. Without it a confirmation written before the
+  // reload is painted over by the reload itself.
+  function applySettingsFlash() {
+    var flash = state.settingsFlash;
+    if (!flash) { return; }
+    state.settingsFlash = null;
+    var note = document.querySelector(".settings-password-note")
+            || document.querySelector(".settings-note");
+    if (!note) { return; }
+    note.textContent = flash.text;
+    note.className = flash.className;
+  }
+
   function loadSettings(preserveDirty) {
     if (!preserveDirty) {
       el.settingsFields.innerHTML = '<p class="tool-status">Loading…</p>';
@@ -4652,10 +4674,17 @@
       confirmPasswordInput.value = "";
       note.style.display = "block";
       if (res.ok) {
-        note.textContent = "Password changed. Rehashing…";
-        note.className = "settings-note settings-password-note is-success";
         state.settingsAdminPasswordSet = true;
         form.style.display = "none";
+        // THE RELOAD REPAINTS THE PANEL THIS NOTE LIVES IN, so writing the
+        // note first and reloading second showed it for one frame and then
+        // destroyed it - the operator changed their password and saw nothing
+        // confirm it. Carried across the repaint instead, and applied by
+        // renderSettings() once the new panel exists.
+        state.settingsFlash = {
+          text: "Password changed. Rehashing…",
+          className: "settings-note settings-password-note is-success"
+        };
         loadSettings(true);
       } else {
         note.textContent = (res.data && res.data.error) || "Could not change the password.";
@@ -4884,6 +4913,16 @@
     var atBottom = el.consoleLog.scrollHeight - el.consoleLog.scrollTop
                    - el.consoleLog.clientHeight < 24;
     rows.forEach(function (row) { el.consoleLog.appendChild(row); });
+
+    // THE SERVER CAPS ITS BUFFER; THE BROWSER DID NOT. The poll appends
+    // forever, three elements per line, and nothing removed any - so a
+    // console left open overnight grows without bound in the one place
+    // nobody restarts. Trimmed from the front, which is also the end the
+    // reader has stopped caring about.
+    while (el.consoleLog.childElementCount > CONSOLE_LOG_MAX_ELEMENTS) {
+      el.consoleLog.removeChild(el.consoleLog.firstElementChild);
+    }
+
     if (atBottom) { el.consoleLog.scrollTop = el.consoleLog.scrollHeight; }
   }
 
