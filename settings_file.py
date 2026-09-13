@@ -236,6 +236,29 @@ def settings_path():
 NOT_SETTINGS = frozenset({"SCRIPT_VERSION"})
 
 
+# NAMES THE DAEMON ASSIGNS TO ITSELF WHILE IT RUNS (#465).
+#
+# Neither is declared in config.py, so both land in apply_to()'s `unknown`
+# list and are ignored - correctly. What was wrong is what the operator was
+# then told: "not a setting this version recognises. Check the spelling"
+# sends somebody to check a name that is spelled perfectly and is simply not
+# set from this file. MY_IP_OR_DOCK in particular is named by two runtime
+# messages as something to configure, so an operator reaching this line has
+# usually just been told to set it.
+#
+# A MESSAGE, NOT A GATE. Nothing here makes either name applicable, and
+# _check_writable() still refuses to WRITE one for the reason in its own
+# comment: MY_IP_OR_DOCK is the address DETECTED at startup, and a value in
+# the file would freeze one session's answer into every session after it.
+RUNTIME_ASSIGNED = {
+    "MY_IP_OR_DOCK": ("the daemon detects this address at startup rather than "
+                      "reading it from a file. Set it in admin_config.py if "
+                      "you need to pin it"),
+    "ORIGINAL_NICK": ("the daemon remembers this for itself, from NICKNAME, so "
+                      "it can go back to it after a nick collision"),
+}
+
+
 def is_overridable(name, value):
     """Is `name` something an operator may set in settings.conf?
 
@@ -554,6 +577,10 @@ def _log_summary(report, path, log):
     if report["applied"]:
         log(f"[CONFIG] Applied {len(report['applied'])} setting(s) from {name}.")
     for key in report["unknown"]:
+        assigned = RUNTIME_ASSIGNED.get(key)
+        if assigned:
+            log(f"[CONFIG] {name}: ignoring {key!r} - {assigned}.")
+            continue
         log(f"[CONFIG] {name}: ignoring {key!r} - not a setting this version "
             f"recognises. Check the spelling against settings.conf.sample.")
     for key, why in report["bad"]:
