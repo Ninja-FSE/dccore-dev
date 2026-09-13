@@ -108,6 +108,22 @@ def main(platform):
         sys.path.insert(0, REPO)
     os.chdir(REPO)
 
+    # #428: BEFORE the first print below, not after `import defaults`
+    # succeeds a hundred-odd lines down. start-dccore.bat runs this check
+    # with stdout redirected (`>nul 2>&1`), which makes Python fall back to
+    # the machine's ANSI code page instead of the real console encoding
+    # (PEP 528 only applies to an actual console). A configured path holding
+    # a character that code page cannot spell then raised UnicodeEncodeError
+    # on one of the many prints between here and the old import site - the
+    # launcher printed "Setup check failed - not starting", re-ran the same
+    # check on the real console where PEP 528 makes it succeed, and reported
+    # "Ready to start." The refusal and the diagnosis contradicted each
+    # other, and the daemon never started, for a reason nothing in the
+    # report explained. Same guard oserve.py and update_list.py install at
+    # their own top, before their own first print.
+    import platform_compat
+    platform_compat.install_console_encoding_guard()
+
     problems = []
     warnings = []
 
@@ -200,8 +216,6 @@ def main(platform):
         print()
         print("  Cannot continue without a config.")
         return 1
-
-    import platform_compat  # noqa: E402
 
     ok(f"version {getattr(config, 'SCRIPT_VERSION', '?')}")
     ok(f"nickname {getattr(config, 'NICKNAME', '?')} "

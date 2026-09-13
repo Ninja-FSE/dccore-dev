@@ -99,6 +99,59 @@ class EveryEntryPointGuardsItsConsole(unittest.TestCase):
         self.assertLess(installed, walked)
 
 
+def setup_check_source():
+    with io.open(os.path.join(REPO_ROOT, "scripts", "setup_check.py"),
+                 encoding="utf-8") as handle:
+        return handle.read()
+
+
+class TheSetupCheckGuardsItsConsoleToo(unittest.TestCase):
+    """#428. scripts/setup_check.py is not swept by entry_points() above - it
+    has no `__name__ == "__main__"` of its own, since it is a library the two
+    platform shims (scripts/windows|linux/check-setup.py) import and call
+    main() on - but start-dccore.bat runs that shim with stdout redirected
+    (`>nul 2>&1`), which loses PEP 528's console exemption exactly the way a
+    real entry point's redirection would. A path in a configured setting
+    that the machine's ANSI code page cannot spell then raised
+    UnicodeEncodeError on one of the many prints in main(), which
+    `import platform_compat` at the top of the file - never followed by the
+    call - did nothing to stop.
+
+    Kept as its own targeted class rather than folded into entry_points()
+    above: this file has no __main__, so it is not naturally in that sweep's
+    domain, and the two shims that DO have one are correctly covered
+    TRANSITIVELY by main() installing the guard before its own first print -
+    demanding the literal call in the shims' own source too would fail a
+    correct design instead of catching a wrong one.
+    """
+
+    def test_main_installs_the_guard(self):
+        self.assertIn("install_console_encoding_guard()", setup_check_source())
+
+    def test_before_its_own_first_print(self):
+        """Order matters here and nowhere else, same as update_list.py's own
+        check above: the guard is worthless if a print already ran above it."""
+        text = setup_check_source()
+        installed = text.index("install_console_encoding_guard()")
+        first_print = text.index("    print(")
+
+        self.assertLess(installed, first_print,
+                        "a print() call above the guard can still raise "
+                        "UnicodeEncodeError on a narrow console code page")
+
+    def test_the_shims_reach_it_by_calling_main(self):
+        """The transitive half of the claim above, checked rather than
+        assumed: both platform launchers must actually call setup_check.main()
+        - the only path through which they inherit the guard - not reimplement
+        the report themselves."""
+        for shim in ("windows", "linux"):
+            with io.open(os.path.join(REPO_ROOT, "scripts", shim, "check-setup.py"),
+                        encoding="utf-8") as handle:
+                text = handle.read()
+            with self.subTest(shim=shim):
+                self.assertIn("setup_check.main(", text)
+
+
 class TheGuardSurvivesAPathItCannotSpell(unittest.TestCase):
     """Run for real in a child process with the code page forced, because
     this failure only exists at the boundary between a process and its
