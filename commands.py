@@ -1370,14 +1370,29 @@ def handle_list_update_request(user, target_chan, authorised=False):
     # subprocesses all writing the same .new temp paths. config.update_inprogress is
     # set unconditionally a few lines down and cleared only in async_list_updater's
     # finally, regardless of PAUSE_ON_UPDATE, so it is the right flag to gate on here.
-    if getattr(config, 'update_inprogress', False) is True:
-        announce.send_debug(f"List update request from {user} denied: An update is already running.", category="INFO")
-        return
+    # CHECKED AND SET AS ONE STEP (#444). This used to read the flag here and
+    # set it 178 lines below, with the PAUSE_ON_UPDATE wait for a running
+    # search in between - so two !update requests arriving in that window both
+    # passed the guard and both started a rebuild, two subprocesses writing
+    # the same .new temp paths.
+    #
+    # Every path that returns after this point must put the flag back, or the
+    # bot refuses every future update until it restarts. There is exactly one
+    # such path today - the search-already-running denial below - and it does.
+    with runtime.list_update_gate:
+        if getattr(config, 'update_inprogress', False) is True:
+            announce.send_debug(f"List update request from {user} denied: An update is already running.", category="INFO")
+            return
+        config.update_inprogress = True
 
     # The global maintenance lock is only taken if the switch is True in config
     if getattr(config, 'PAUSE_ON_UPDATE', True) is True:
         if getattr(config, 'search_inprogress', False) is True:
             announce.send_debug(f"List update request from {user} denied: Another system scan is already running.", category="INFO")
+            # The flag was raised by the gate above and this request is not
+            # going to use it. Leaving it set would deny every later update
+            # for the life of the process.
+            config.update_inprogress = False
             return
         config.search_inprogress = True
         print(f"[MAINTENANCE START] {user} ran !update. Searching and sharing are now PAUSED.")
@@ -1547,8 +1562,10 @@ def handle_list_update_request(user, target_chan, authorised=False):
             config.update_inprogress = False
             print("[MAINTENANCE END] Sharing and searching have been restarted automatically.")
 
-    # Raise the maintenance flag, so the whole daemon knows an update is starting
-    config.update_inprogress = True
+    # The maintenance flag was raised by the gate at the top of this function,
+    # as one step with the check that guards it (#444). It is deliberately not
+    # re-raised here: a second assignment would read as though something in
+    # between might have cleared it.
 
     # Start the background thread
     threading.Thread(target=async_list_updater, daemon=True).start()
