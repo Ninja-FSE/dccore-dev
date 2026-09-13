@@ -1146,6 +1146,6 @@ def send_pack_error_notice(irc_sock, user):
         if oserve:
             oserve.queue_message(user, msg, is_vip=True)
         else:
-            irc_sock.send(msg.encode())
+            irc_sock.sendall(msg.encode("utf-8", errors="ignore"))
     except Exception as e:
         print(f"[DCC NOTICE ERROR] Could not send the colour-block error message: {e}")

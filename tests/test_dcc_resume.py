@@ -57,6 +57,14 @@ class FakeIrcSocket:
         self.sent = []
         self.fail = fail
 
+    def sendall(self, payload):
+        # Delegated, not duplicated (#504) - see the note in
+        # tests/test_no_socket_write_is_a_partial_write.py. A fake that
+        # answered only send() would stop recording the moment production
+        # was fixed, and the test would report it as the daemon having gone
+        # quiet.
+        self.send(payload)
+
     def send(self, payload):
         if self.fail:
             raise OSError("socket is gone")
@@ -185,6 +193,8 @@ class AnsweringAResume(DCCoreTestCase):
         seen = {}
 
         class WatchingSocket(FakeIrcSocket):
+            # Overrides send(), and the base class's sendall() delegates to
+            # it - so this still watches whichever one the daemon calls.
             def send(inner, payload):
                 seen["position_at_send_time"] = (
                     runtime.dcc_send_offers[(USER, PORT)]["position"])
@@ -317,7 +327,7 @@ class TheSendPathUsesIt(unittest.TestCase):
         thread. Registering afterwards would miss it."""
         source = self.source()
         register_at = source.index("register_send_offer(user, assigned_port")
-        send_at = source.index("irc_sock.send(ctcp_handshake.encode())")
+        send_at = source.index("irc_sock.sendall(ctcp_handshake.encode(")
 
         self.assertLess(register_at, send_at)
 

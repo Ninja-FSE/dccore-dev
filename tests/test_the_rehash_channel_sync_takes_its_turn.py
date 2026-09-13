@@ -93,7 +93,9 @@ class TheBurstIsGone(ChannelSyncCase):
         body = re.sub(chr(35) + "[^" + chr(10) + "]*", "", body)
 
         self.assertIn("sync_channels(", body)
-        self.assertNotIn("irc_sock.send(", body)
+        # No paren: since #504 a direct write is spelled sendall(), and the
+        # old anchor would pass against one.
+        self.assertNotIn("irc_sock.send", body)
 
     def test_a_failing_sync_does_not_report_the_reload_as_failed(self):
         """Everything the rehash exists to do has already happened by the time

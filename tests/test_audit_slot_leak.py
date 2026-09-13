@@ -182,6 +182,12 @@ class FakeIrcSocket:
         self.sent.append(payload)
         return len(payload)
 
+    def sendall(self, payload):
+        # Delegated, not duplicated (#504). A stand-in that behaves
+        # differently depending on which call production used is a place a
+        # regression can hide.
+        self.send(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

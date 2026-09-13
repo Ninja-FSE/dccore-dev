@@ -1512,7 +1512,7 @@ def handle_resume_request(irc_sock, user, body):
         # reply prompt while still counting it against the same budget every
         # other outbound line respects.
         runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
-        irc_sock.send(reply.encode())
+        irc_sock.sendall(reply.encode("utf-8", errors="ignore"))
     except Exception as err:
         print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
         return False
@@ -2296,7 +2296,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                   f"Path: {file_path} (Size: {file_size})")
         try: 
             msg = f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} {reason}.\r\n"
-            irc_sock.send(msg.encode('utf-8', errors='ignore'))
+            irc_sock.sendall(msg.encode('utf-8', errors='ignore'))
         except: 
             pass
             
@@ -2375,7 +2375,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             continue
 
     if assigned_port is None:
-        try: irc_sock.send(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} No available DCC ports.\r\n".encode())
+        try: irc_sock.sendall(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} No available DCC ports.\r\n".encode("utf-8", errors="ignore"))
         except: pass
         with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
@@ -2483,7 +2483,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                             file_size)
 
         try:
-            irc_sock.send(ctcp_handshake.encode())
+            irc_sock.sendall(ctcp_handshake.encode("utf-8", errors="ignore"))
             print(f"[DCC-LISTEN] Listening on port {assigned_port} for {user} (Handshake sent directly).")
         except Exception as e:
             # #430: this used to fall straight through into accept() below,
