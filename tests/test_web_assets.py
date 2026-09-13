@@ -794,5 +794,73 @@ class AskingAgainForAFetchThatFailed(unittest.TestCase):
         self.assertNotIn("/delete", body)
 
 
+class TheConsoleLogSelfHealsAfterBeingEnabled(unittest.TestCase):
+    """#439: disableConsoleUi() used to clearInterval() and null out
+    consoleLogTimer FOR GOOD on the first 404 - the shipped-default state on
+    any non-loopback install. Ticking WEBUI_CONSOLE_ENABLED on in Settings
+    and saving applies live (the save's own rehash is enough, no restart),
+    but nothing in this file ever re-armed that timer: pollConsoleLog() had
+    exactly one call site (the page's own init) and nothing called it again.
+    Typed commands kept working (POST is unaffected), but the ambient log -
+    which is the only place an async command's result ever appears - stayed
+    on "Nothing logged yet." for the rest of that tab's life, recoverable
+    only with an F5 the page never asked for.
+
+    Nothing here executes JavaScript (see this module's own docstring) -
+    these check that the self-healing PATH exists in the source, the same
+    structural style as the rest of this file.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.js = read("app.js")
+
+    def _function_body(self, name):
+        marker = "function " + name + "("
+        start = self.js.index(marker)
+        # The next top-level (2-space-indented) function declaration ends
+        # this one - the same slicing technique already used elsewhere in
+        # this file for a JS function with no other clean delimiter.
+        rest = self.js[start:]
+        end = rest.index("\n  function ", 1)
+        return rest[:end]
+
+    def test_disable_no_longer_stops_the_poll_for_good(self):
+        body = self._function_body("disableConsoleUi")
+
+        self.assertNotIn("consoleLogTimer = null", body,
+                         "the timer is nulled out with nothing left to ever "
+                         "call pollConsoleLog() again - the log would stay "
+                         "dead until an F5 even after the Console is turned "
+                         "back on")
+
+    def test_disable_swaps_to_the_slow_recheck_cadence_instead(self):
+        body = self._function_body("disableConsoleUi")
+
+        self.assertIn("CONSOLE_LOG_RECHECK_MS", body,
+                     "disableConsoleUi() must keep polling at SOME cadence, "
+                     "or re-enabling the Console is never noticed")
+
+    def test_a_success_response_can_re_enable_the_ui(self):
+        body = self._function_body("pollConsoleLog")
+
+        self.assertIn("enableConsoleUiIfNeeded", body,
+                     "nothing on the success path can undo disableConsoleUi()")
+
+    def test_re_enabling_restores_the_fast_cadence(self):
+        body = self._function_body("enableConsoleUiIfNeeded")
+
+        self.assertIn("CONSOLE_LOG_POLL_MS", body,
+                     "re-enabling must swap back to the fast cadence, not "
+                     "leave the slow recheck running forever")
+
+    def test_re_enabling_unhides_the_nav_button(self):
+        body = self._function_body("enableConsoleUiIfNeeded")
+
+        self.assertIn("hidden = false", body,
+                     "disableConsoleUi() hides the nav button - nothing "
+                     "else in the file ever un-hides it")
+
+
 if __name__ == "__main__":
     unittest.main()
