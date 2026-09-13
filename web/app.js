@@ -922,6 +922,35 @@
       });
   }
 
+  // The bar under a sending row. null/undefined "size" means dcc.py has not
+  // recorded the file's real size yet (a brand-new dispatch, for the brief
+  // window before start_dcc_send() reads it off disk) - not "0% so far",
+  // which a size of 0 would also produce honestly for a genuinely empty
+  // file. No bar at all is the correct rendering of "not known yet".
+  function queueProgressBar(row) {
+    if (!row.size) { return ""; }
+    var pct = Math.max(0, Math.min(100, Math.round(100 * (row.bytes_sent || 0) / row.size)));
+    return "<div class=\"progress-bar queue-progress\">" +
+      "<div class=\"progress-bar-fill\" style=\"width:" + pct + "%\"></div></div>";
+  }
+
+  // What is WAITING - never includes whatever is currently sending, because
+  // dcc.py never puts the in-flight file into dcc_queue (see
+  // build_queue_payload()'s own docstring). A single queued file is shown
+  // plain, like before; more than one collapses behind a <details> so the
+  // row does not grow without bound, but every one of them is there to open
+  // - not just a preview of the first, which is all this used to show.
+  function queueFileList(row) {
+    var files = row.files || [];
+    if (!files.length) { return ""; }
+    if (files.length === 1) { return escapeHtml(files[0]); }
+    return "<details class=\"queue-files\"><summary>" +
+      escapeHtml(files[0]) + " <span class=\"col-dim\">(+" + (files.length - 1) + " more)</span></summary>" +
+      "<ul class=\"queue-file-list\">" +
+      files.map(function (f) { return "<li>" + escapeHtml(f) + "</li>"; }).join("") +
+      "</ul></details>";
+  }
+
   function renderQueueTable(rows) {
     if (!rows.length) {
       el.queueBody.innerHTML = emptyRow(4, "The queue is empty.");
@@ -930,9 +959,21 @@
     el.queueBody.innerHTML = rows.map(function (row) {
       var status = row.status || "queued";
       var label = STATUS_LABELS[status] || status;
+
+      var sendingPart = "";
+      if (status === "sending" && row.current_file) {
+        sendingPart = "<div class=\"queue-current\">Sending: " +
+          escapeHtml(row.current_file) + "</div>" + queueProgressBar(row);
+      }
+      // With nothing queued behind an in-flight send, "preview" already
+      // equals current_file - showing it a second time would be a
+      // duplicate, not new information.
+      var queuedPart = (row.files || []).length ? queueFileList(row)
+        : (sendingPart ? "" : escapeHtml(row.preview));
+
       return "<tr>" +
         "<td class=\"col-mono\">" + escapeHtml(row.user) + "</td>" +
-        "<td class=\"col-dim col-mono\">" + escapeHtml(row.preview) + "</td>" +
+        "<td class=\"col-dim col-mono\">" + sendingPart + queuedPart + "</td>" +
         "<td class=\"col-mono\">" + escapeHtml(row.count) + "</td>" +
         "<td><span class=\"status-pill status-" + escapeHtml(status) + "\">" + escapeHtml(label) + "</span></td>" +
         "</tr>";

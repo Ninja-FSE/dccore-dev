@@ -168,6 +168,101 @@ class QueuePayloadTests(DCCoreTestCase):
         self.assertEqual(result["count"], 1)
 
 
+class QueueRowsShowEveryFileAndSendingProgress(DCCoreTestCase):
+    """An operator asked to see the WHOLE queue, not a preview of its head,
+    and a progress bar for whatever is actually sending right now.
+
+    "preview"/"count"/"files" only ever describe what is WAITING - dcc.py
+    never puts the in-flight file into config.dcc_queue (it lives in
+    config.active_transfers instead) - so a sending user's current file and
+    its progress need their own fields, "current_file"/"bytes_sent"/"size",
+    populated from active_transfers rather than folded into the queue ones.
+    """
+
+    def test_the_full_queue_is_in_the_summary_row_not_just_the_first(self):
+        config.dcc_queue = {
+            "alice": [queue_row(user="alice", filename="One.flac"),
+                      queue_row(user="alice", filename="Two.flac"),
+                      queue_row(user="alice", filename="Three.flac")],
+        }
+
+        rows = {row["user"]: row for row in webserver.build_queue_payload()}
+
+        self.assertEqual(rows["alice"]["files"],
+                         ["One.flac", "Two.flac", "Three.flac"])
+        # Unchanged: "preview" still means "the next one", for whatever
+        # already reads only that.
+        self.assertEqual(rows["alice"]["preview"], "One.flac")
+
+    def test_a_sending_user_carries_the_file_in_flight_and_its_progress(self):
+        config.dcc_queue = {}
+        config.active_transfers = [
+            {"user": "bob", "file": "Playing.flac", "bytes_sent": 4096, "size": 8192},
+        ]
+
+        rows = {row["user"]: row for row in webserver.build_queue_payload()}
+
+        self.assertEqual(rows["bob"]["current_file"], "Playing.flac")
+        self.assertEqual(rows["bob"]["bytes_sent"], 4096)
+        self.assertEqual(rows["bob"]["size"], 8192)
+
+    def test_the_queued_files_behind_a_send_are_still_the_full_list(self):
+        """The exact shape from the report: one user both sending AND with
+        several files waiting behind it - every one of them must still be
+        there, not just the head."""
+        config.dcc_queue = {
+            "carol": [queue_row(user="carol", filename="Next.flac"),
+                      queue_row(user="carol", filename="After.flac")],
+        }
+        config.active_transfers = [
+            {"user": "carol", "file": "Playing.flac", "bytes_sent": 100, "size": 200},
+        ]
+
+        rows = {row["user"]: row for row in webserver.build_queue_payload()}
+        row = rows["carol"]
+
+        self.assertEqual(row["status"], "sending")
+        self.assertEqual(row["current_file"], "Playing.flac")
+        self.assertEqual(row["files"], ["Next.flac", "After.flac"])
+        self.assertEqual(row["count"], 2)
+
+    def test_a_size_not_recorded_yet_is_none_not_zero(self):
+        """dcc.start_dcc_send() writes "size" onto the active_transfers row
+        only once it has read the file's real size off disk - a row from the
+        brief window before that has no "size" key at all. None must mean
+        "not known yet", never be confused with a genuinely empty file's
+        honest 0."""
+        config.dcc_queue = {}
+        config.active_transfers = [{"user": "dave", "file": "JustStarted.flac", "bytes_sent": 0}]
+
+        rows = {row["user"]: row for row in webserver.build_queue_payload()}
+
+        self.assertIsNone(rows["dave"]["size"])
+
+    def test_a_non_sending_row_has_no_current_file(self):
+        config.dcc_queue = {"erin": [queue_row(user="erin", filename="Waiting.flac")]}
+        config.active_transfers = []
+
+        rows = {row["user"]: row for row in webserver.build_queue_payload()}
+
+        self.assertIsNone(rows["erin"]["current_file"])
+        self.assertIsNone(rows["erin"]["bytes_sent"])
+        self.assertIsNone(rows["erin"]["size"])
+
+    def test_the_single_user_endpoint_carries_the_same_progress_fields(self):
+        config.dcc_queue = {"frank": [queue_row(user="frank", filename="Next.flac")]}
+        config.active_transfers = [
+            {"user": "frank", "file": "Playing.flac", "bytes_sent": 50, "size": 100},
+        ]
+
+        result = webserver.build_queue_payload(user="frank")
+
+        self.assertEqual(result["current_file"], "Playing.flac")
+        self.assertEqual(result["bytes_sent"], 50)
+        self.assertEqual(result["size"], 100)
+        self.assertEqual(result["files"], ["Next.flac"])
+
+
 def payload_rows(payload):
     """Flat rows out of a folder-grouped file-list payload.
 

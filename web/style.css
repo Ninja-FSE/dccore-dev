@@ -1605,6 +1605,48 @@ mark.filter-hit {
   .progress-bar-fill { transition: none; }
 }
 
+/* The Queue table: the file actually being sent right now, its progress
+   bar, and the full list of what is waiting behind it - reusing the same
+   bar the list rebuild already draws (.progress-bar/.progress-bar-fill
+   above), just narrower and with no margin of its own since it sits inside
+   a table cell rather than under a heading. */
+.queue-current {
+  color: var(--text);
+}
+
+.queue-progress {
+  margin: 4px 0 0;
+  width: 140px;
+}
+
+.queue-files summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.queue-files summary::-webkit-details-marker {
+  display: none;
+}
+
+.queue-files summary::before {
+  content: "▸ ";
+  color: var(--text-faint);
+}
+
+.queue-files[open] summary::before {
+  content: "▾ ";
+}
+
+.queue-file-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: var(--text-dim);
+}
+
+.queue-file-list li {
+  padding: 1px 0;
+}
+
 .tool-status {
   margin: 14px 0 0;
   font-family: var(--font-mono);
