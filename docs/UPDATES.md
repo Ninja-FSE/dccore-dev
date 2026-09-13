@@ -207,6 +207,45 @@ can never itself be what breaks the check.
 
 Three mutation-checked properties, no survivors.
 
+### 🔴 Two transfers counted wrong
+
+Found by the pre-publication audit sweep. Closes #454 and #455.
+
+**A send that ended short was counted as a completed one.** The check already
+existed - `transfer_completed = bytes_sent >= file_size` - and a truncated
+send already printed `[DCC-FAIL]`. But the `[DCC-SUCCESS] Sent the whole file`
+line, the lifetime totals, the byte total, the speed record that feeds the
+advert and the per-file download counter all ran regardless. So the one place
+that told the truth was a log line, and every number an operator or another
+bot would later read said the opposite.
+
+Counting it also inflated the speed figure, because the elapsed time covers a
+transfer that stopped early.
+
+The skip is one branch rather than a condition repeated around each
+statement, and it has its own exception type so it cannot be swallowed by the
+broad handler that guards the database writes - a deliberate skip reported as
+"Could not increment the sharing statistics" would send the next reader
+hunting a database fault that never happened.
+
+**A row was settled under the nick the send started as.** A transfer takes
+minutes; `irc.note_nick_change()` carries the queue to the new nick the moment
+the server says so. By the time the row was settled it sat under a key
+`release_queue_entry()` had never heard of, so the keyed lookup found nothing,
+the delivered row was never removed, and the same file went out again on the
+next trigger.
+
+This is the other half of #431: that fix is what moves the queue, which is
+what leaves this lookup pointing at a key nobody uses. The row object is the
+identity, not the key it happens to sit under - so the key is tried first,
+and a miss falls back to finding the object itself. Matching on the filename
+instead would take somebody else's row, since two people can queue the same
+file.
+
+Five mutation-checked properties, no survivors. One of the guards was
+rewritten first: it used `str.index` and died with "substring not found",
+which tells whoever hits it nothing about what broke.
+
 ### 🟢 Three small things in the plumbing
 
 Found by the pre-publication audit sweep. Closes #456, #457 and #458.
