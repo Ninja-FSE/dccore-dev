@@ -641,5 +641,90 @@ class TheAdvertNeverPublishesTheNoListSentinel(unittest.TestCase):
                         "publish the sentinel anyway")
 
 
+class TheAdvertRespectsTheIrcLineBudget(unittest.TestCase):
+    """#434: build_advert_line() was the one outbound template with no
+    fit_irc_line() enforcement - announce.py's other four templates
+    (send_transfer_complete, send_dcc_sending_notice,
+    send_search_result_header, send_pack_error_notice) all go through it.
+
+    A large library in a long channel name (or a CUSTOM_THEME_* override,
+    which interpolates each role 8-9 times) can push the advert past
+    IRC_LINE_BUDGET, and a recipient with a long enough hostmask then has the
+    SERVER cut the line - which can land inside a colour code and smear the
+    background to the end of the line, exactly what fit_irc_line() exists to
+    prevent.
+    """
+
+    def test_the_reported_over_budget_channel_now_fits(self):
+        """The shape from the issue's own repro (figures only - the channel
+        and nick there were a live operator's real ones and are not
+        reproduced here): a seven-figure library, a long channel name, and a
+        long-named bot together push an unguarded line past
+        IRC_LINE_BUDGET."""
+        line = announce.fit_irc_line(
+            lambda ts: announce.build_advert_line(
+                "#fake-metal-channel", "DCCoreTestBot",
+                "1,412,908", "26.71 TB",
+                "Sep 13th", "3/3", "0", "2.4MB/s", "24.7MB/s", ts,
+                "DCCore v1.12.0-RC2"),
+            "214,776 Files (41.2 TB)")
+
+        self.assertLessEqual(encoded_len(line), announce.IRC_LINE_BUDGET)
+
+    def test_an_ordinary_advert_is_unaffected(self):
+        """The fix must not trim a line that already fits."""
+        unfitted = announce.build_advert_line(
+            "#example", "DCCoreTest", "100,000", "1.2TB",
+            "Sep 13th", "3/3", "0", "2.4MB/s", "24.7MB/s",
+            "10,000 Files (500GB)", "DCCore v1.12.0-RC2")
+        fitted = announce.fit_irc_line(
+            lambda ts: announce.build_advert_line(
+                "#example", "DCCoreTest", "100,000", "1.2TB",
+                "Sep 13th", "3/3", "0", "2.4MB/s", "24.7MB/s", ts,
+                "DCCore v1.12.0-RC2"),
+            "10,000 Files (500GB)")
+
+        self.assertEqual(fitted, unfitted)
+        self.assertNotIn("...", fitted)
+
+    def _source(self):
+        import io as _io
+        with _io.open(announce.__file__, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_advert_call_site_actually_goes_through_fit_irc_line(self):
+        """The two tests above prove the helper WORKS - this proves
+        announce_worker() actually CALLS it. A fix that only lives in a test
+        fixture would satisfy the tests above and change nothing in
+        production, the same "if False:"-shaped survivor found elsewhere in
+        this file."""
+        source = self._source()
+
+        # The LAST occurrence: the first is the function's own
+        # `def build_advert_line(`, and a docstring elsewhere in the file
+        # references it by name too - only the actual call site, at the end
+        # of announce_worker()'s per-channel loop, comes after it.
+        second_call_at = source.rfind("build_advert_line(")
+        self.assertNotEqual(second_call_at, -1,
+                            "fixture invariant: build_advert_line() call site "
+                            "not found in announce.py")
+        assign_at = source.rfind("announce_msg = ", 0, second_call_at)
+        self.assertNotEqual(assign_at, -1,
+                            "fixture invariant: no announce_msg assignment "
+                            "found before the advert call site")
+
+        # ONLY the span between the assignment and the call - not the whole
+        # file up to that point, which would also match fit_irc_line's own
+        # `def fit_irc_line(` and the four unrelated call sites in the
+        # sibling templates above this one, passing regardless of what this
+        # particular assignment actually does.
+        between = source[assign_at:second_call_at]
+
+        self.assertIn("fit_irc_line(", between,
+                     "announce_msg is assigned straight from "
+                     "build_advert_line(), not routed through "
+                     "fit_irc_line() first")
+
+
 if __name__ == "__main__":
     unittest.main()

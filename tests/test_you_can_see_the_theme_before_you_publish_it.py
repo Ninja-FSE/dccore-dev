@@ -344,7 +344,13 @@ class TheOutboundTextDidNotChange(DCCoreTestCase):
                      encoding="utf-8") as handle:
             source = handle.read()
 
-        self.assertEqual(source.count("announce_msg = build_advert_line("), 1)
+        # #434: the live call site now routes through fit_irc_line() too, so
+        # the literal assignment is "announce_msg = fit_irc_line(" with
+        # build_advert_line( called from inside its lambda - checked as two
+        # separate counts rather than one combined string, so either half
+        # drifting back apart is still caught.
+        self.assertEqual(source.count("announce_msg = fit_irc_line("), 1)
+        self.assertEqual(source.count("lambda ts: build_advert_line("), 1)
         self.assertEqual(source.count("return build_transfer_complete_line("), 1)
         self.assertEqual(len(re.findall(r'f"PRIVMSG \{chan\w*\} :"', source)), 2,
                          "a template was copied rather than called")
