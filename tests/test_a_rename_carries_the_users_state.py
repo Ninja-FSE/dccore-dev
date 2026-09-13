@@ -101,6 +101,86 @@ class ARenameCarriesTheUsersState(DCCoreTestCase):
         self.assertIn("someuser", config.dcc_queue)
 
 
+class TheSlotAdmissionGateFollowsThemToo(DCCoreTestCase):
+    """#431: dcc.handle_download_request()'s admission gate is built from
+    active_transfers, user_processing_lock and dcc_queue together. Moving only
+    the queue left a busy user looking entirely idle under a new nick - no
+    transfer, no lock, no queue - so a nick change bought another slot
+    immediately, no flood gate involved. Three renames, three slots, one
+    person holding the bot's entire serving capacity."""
+
+    def test_the_in_progress_lock_follows_them(self):
+        config.user_processing_lock.add("someuser")
+
+        irc.note_nick_change("someuser", "someuser_")
+
+        self.assertIn("someuser_", config.user_processing_lock)
+        self.assertNotIn("someuser", config.user_processing_lock,
+                         "the old nick still reads as locked, which is "
+                         "harmless on its own but never clears")
+
+    def test_a_running_transfers_row_is_rekeyed(self):
+        config.active_transfers.append(
+            {"user": "someuser", "file": "Track.flac", "bytes_sent": 0})
+
+        irc.note_nick_change("someuser", "someuser_")
+
+        self.assertEqual(config.active_transfers[0]["user"], "someuser_")
+
+    def test_the_gate_no_longer_hands_out_a_free_slot_after_a_rename(self):
+        """The concrete defect, driven through the same three checks
+        handle_download_request() itself uses - not a model of them."""
+        config.user_processing_lock.add("someuser")
+        config.active_transfers.append(
+            {"user": "someuser", "file": "Track.flac", "bytes_sent": 0})
+
+        irc.note_nick_change("someuser", "someuser_")
+
+        user_key = "someuser_"
+        already_transferring = any(
+            str(tx["user"]).lower() == user_key for tx in config.active_transfers)
+        is_processing = user_key in config.user_processing_lock
+        has_queue = len(config.dcc_queue.get(user_key, [])) > 0
+
+        self.assertTrue(already_transferring or is_processing or has_queue,
+                        "the renamed user reads as entirely idle, so the "
+                        "gate would grant them a second, unearned slot")
+
+    def test_it_reports_the_admission_state_it_moved(self):
+        config.user_processing_lock.add("someuser")
+        config.active_transfers.append(
+            {"user": "someuser", "file": "Track.flac", "bytes_sent": 0})
+
+        moved = irc.note_nick_change("someuser", "someuser_")
+
+        self.assertIn("user_processing_lock", moved)
+        self.assertIn("active_transfers", moved)
+
+    def test_a_user_with_none_of_this_state_moves_nothing_extra(self):
+        """Control: the ordinary case, where a rename touches only what the
+        existing tests already cover."""
+        moved = irc.note_nick_change("someuser", "someuser_")
+
+        self.assertNotIn("user_processing_lock", moved)
+        self.assertNotIn("active_transfers", moved)
+
+    def test_someone_elses_transfer_row_is_left_alone(self):
+        config.active_transfers.append(
+            {"user": "somebodyelse", "file": "Other.flac", "bytes_sent": 0})
+
+        irc.note_nick_change("someuser", "someuser_")
+
+        self.assertEqual(config.active_transfers[0]["user"], "somebodyelse")
+
+    def test_someone_elses_processing_lock_is_left_alone(self):
+        config.user_processing_lock.add("somebodyelse")
+
+        irc.note_nick_change("someuser", "someuser_")
+
+        self.assertIn("somebodyelse", config.user_processing_lock)
+        self.assertNotIn("someuser_", config.user_processing_lock)
+
+
 class TheThingsItRefusesToDo(DCCoreTestCase):
 
     def test_it_never_inherits_another_users_queue(self):
