@@ -234,10 +234,21 @@ def get_file_count_date_size_and_raw_bytes(name=None):
         # starts with "!" (update_list.py:156) and no header or separator does, so
         # this is the same filter execute_search already applies to the same file.
         for one_list in all_list_paths(name):
-            with open(one_list, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    if line.strip().startswith("!"):
-                        count += 1
+            # #433: each path gets its OWN try, the same as the two side-file
+            # reads a few lines down and for the identical reason - this used
+            # to sit inside the outer try below, so one unreadable list (an
+            # AV scanner or backup agent holding the VIDEO list open with no
+            # sharing, on Windows; a permission change or a vanished path on
+            # either platform) collapsed the WHOLE tuple to (0, "Error",
+            # "0B", 0), throwing away a master-list count and date that were
+            # perfectly fine.
+            try:
+                with open(one_list, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if line.strip().startswith("!"):
+                            count += 1
+            except OSError as list_err:
+                print(f"[LIST] Could not read {one_list}: {list_err}")
             
         mtime = os.path.getmtime(latest_list)
         dt = datetime.datetime.fromtimestamp(mtime)

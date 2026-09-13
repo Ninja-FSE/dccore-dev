@@ -569,6 +569,23 @@ class TheQueuePositionNoticeReadsTheSetting(QuietTestCase):
         self.assertIn("42", full_text)
 
 
+def _sentinel_constants(test_node):
+    """Every string constant a comparison's right-hand side names, whether
+    written as `x == "A"` or `x in ("A", "B")` - #433 turned this exact
+    check from the first shape into the second, and a scan that only
+    understood `==` would report the guard gone the moment it did."""
+    import ast
+
+    found = []
+    for comparator in test_node.comparators:
+        if isinstance(comparator, ast.Constant):
+            found.append(comparator.value)
+        elif isinstance(comparator, (ast.Tuple, ast.List, ast.Set)):
+            found.extend(elt.value for elt in comparator.elts
+                        if isinstance(elt, ast.Constant))
+    return found
+
+
 class TheAdvertNeverPublishesTheNoListSentinel(unittest.TestCase):
     """#229: list.get_file_count_date_size_and_raw_bytes() answers "No List"
     as the DATE when no master list exists yet - a fresh install before its
@@ -577,6 +594,12 @@ class TheAdvertNeverPublishesTheNoListSentinel(unittest.TestCase):
     channel every ANNOUNCE_INTERVAL until the first list build finished.
     commands.py's -stats reply already guarded the same sentinel; the advert
     - far more publicly visible - never had the matching guard.
+
+    #433 added a second sentinel to the same guard: "Error", which the same
+    function answers with when an OSError interrupts reading any one of its
+    list files (a permission change, a vanished path, or another process
+    holding one open with no sharing). Both are checked here together, since
+    they are now the same `if ... in (...)` guard in the source.
 
     announce_worker() is a `while True:` loop that owns the process (see
     tests/uncovered_functions.txt) and cannot be driven directly the way most
@@ -591,52 +614,57 @@ class TheAdvertNeverPublishesTheNoListSentinel(unittest.TestCase):
         with _io.open(announce.__file__, encoding="utf-8") as handle:
             return handle.read()
 
-    def test_the_sentinel_is_checked_before_the_message_is_built(self):
-        source = self._source()
-
-        guard_at = source.find('list_date == "No List"')
-        # The ASSIGNMENT, not one way of writing the right-hand side. This
-        # matched "announce_msg = (" - the inline f-string - until the
-        # template moved into announce.build_advert_line() so the dashboard
-        # could render the same line as a preview. What has to come after the
-        # sentinel check is the line being BUILT, however it is built.
-        message_at = source.find("announce_msg = ")
-
-        self.assertNotEqual(guard_at, -1,
-                            "no check for the \"No List\" sentinel found in announce.py")
-        self.assertNotEqual(message_at, -1,
-                            "fixture invariant: could not find the advert template "
-                            "build - the scan is broken, not the code")
-        self.assertLess(guard_at, message_at,
-                        "the sentinel check comes AFTER the advert template is "
-                        "already built, which is too late to skip publishing it")
-
-    def test_the_guard_actually_skips_rather_than_falling_through(self):
-        """The old "if False:"-shaped survivor this whole session has been
-        finding elsewhere: a check that exists but is never reached would
-        satisfy the test above while changing nothing. Parsed with ast so a
-        `continue`/`return`/`break` in the same if-body counts, and a check
-        that merely logs and falls through does not."""
+    def _sentinel_if_node(self):
         import ast
 
         tree = ast.parse(self._source())
-        found_skip = False
         for node in ast.walk(tree):
             if not isinstance(node, ast.If):
                 continue
             test = node.test
-            is_sentinel_check = (
-                isinstance(test, ast.Compare)
-                and any(isinstance(comp, ast.Constant) and comp.value == "No List"
-                       for comp in test.comparators))
-            if not is_sentinel_check:
-                continue
-            if any(isinstance(stmt, (ast.Continue, ast.Return, ast.Break))
-                  for stmt in node.body):
-                found_skip = True
+            if isinstance(test, ast.Compare) and "No List" in _sentinel_constants(test):
+                return node
+        return None
+
+    def test_the_sentinel_is_checked_before_the_message_is_built(self):
+        source = self._source()
+        node = self._sentinel_if_node()
+        message_at = source.find("announce_msg = ")
+
+        self.assertIsNotNone(node,
+                             "no check for the \"No List\" sentinel found in announce.py")
+        self.assertNotEqual(message_at, -1,
+                            "fixture invariant: could not find the advert template "
+                            "build - the scan is broken, not the code")
+        self.assertLess(node.lineno, source[:message_at].count("\n") + 1,
+                        "the sentinel check comes AFTER the advert template is "
+                        "already built, which is too late to skip publishing it")
+
+    def test_the_guard_also_covers_the_error_sentinel(self):
+        """#433: an OSError reading any list file collapses the same tuple
+        to (0, "Error", "0B", 0) - a second sentinel a check for only "No
+        List" lets straight through."""
+        node = self._sentinel_if_node()
+        self.assertIsNotNone(node)
+
+        self.assertIn("Error", _sentinel_constants(node.test),
+                     "the guard checks \"No List\" but not \"Error\" - the "
+                     "second sentinel from #433 reaches the advert unchecked")
+
+    def test_the_guard_actually_skips_rather_than_falling_through(self):
+        """The old "if False:"-shaped survivor this whole session has been
+        finding elsewhere: a check that exists but is never reached would
+        satisfy the test above while changing nothing."""
+        import ast
+
+        node = self._sentinel_if_node()
+        self.assertIsNotNone(node)
+
+        found_skip = any(isinstance(stmt, (ast.Continue, ast.Return, ast.Break))
+                        for stmt in node.body)
 
         self.assertTrue(found_skip,
-                        "found a \"No List\" check, but its body does not "
+                        "found the sentinel check, but its body does not "
                         "continue/return/break - it would fall through and "
                         "publish the sentinel anyway")
 
