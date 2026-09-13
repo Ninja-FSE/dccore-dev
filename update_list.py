@@ -244,6 +244,32 @@ def is_packable_file(name, packable=None):
     return _has_extension(name, rar_extensions() if packable is None else packable)
 
 
+def has_backslash_component(relative_path, separator=None):
+    """Does any component of `relative_path` carry a literal backslash?
+
+    The list writes folder headings with backslashes between the components
+    and list.list_heading_parts() reads them back by splitting on both
+    separators, so a backslash INSIDE a name is indistinguishable from the
+    separator between two - and the folder a heading resolves to is then a
+    different one, or none (#464).
+
+    THE ANSWER DEPENDS ON WHAT THE SEPARATOR IS, which is the whole of the
+    platform question here. On Linux the separator is "/" and a backslash is
+    an ordinary filename character, so "Rock\\Metal" is ONE folder with an
+    awkward name. On Windows the backslash IS the separator, so the same text
+    is two folders and no name can contain one - this returns False for every
+    path a Windows install can produce, correctly.
+
+    `separator` is for the tests, the way irc.resolve_dcc_address()'s
+    `lookup` is: the hazard exists on one platform, and a test that could only
+    run there would be a hole on the other. Production passes nothing and gets
+    os.sep, which is what generate_master_list() builds rel_dir with.
+    """
+    sep = os.sep if separator is None else separator
+    flattened = str(relative_path).replace(sep, "/")
+    return any("\\" in part for part in flattened.split("/"))
+
+
 def is_listed_file(name, ignored=None):
     """Does this file go into the list? Everything does, unless it is skipped.
 
@@ -673,11 +699,57 @@ def _write_text_artifact(tmp_path, members):
         for index, (source, _name) in enumerate(members):
             if index:
                 out.write("\n\n")
-            with io.open(source, encoding="utf-8") as handle:
-                text = handle.read()
-            if index and banner_block:
-                text = text.replace(banner_block, "", 1)
-            out.write(text)
+            _copy_removing_first(source, out,
+                                 banner_block if index else "")
+
+
+# A megabyte at a time. Large enough that the read count is irrelevant next to
+# the work of writing, small enough to be noise beside what the scan is
+# already holding.
+_COPY_CHUNK_CHARS = 1 << 20
+
+
+def _copy_removing_first(source, out, strip=""):
+    """Copy `source` into `out`, removing the FIRST occurrence of `strip`.
+
+    In chunks (#463). This was `handle.read()` followed by
+    `text.replace(strip, "", 1)`, and the file it reads is a list - several
+    hundred megabytes on a library big enough for the operator to have chosen
+    the txt format in the first place, held whole in memory on top of
+    everything the rebuild is already holding.
+
+    THE OVERLAP IS WHAT KEEPS IT FAITHFUL. A chunk boundary can fall inside
+    the text being removed, so the last len(strip) - 1 characters of each
+    chunk are held back and carried into the next rather than written out.
+    Without that, a banner straddling a boundary would be written through -
+    and the result would be a list with the operator's banner repeated in the
+    middle of it, which is the exact thing this removal exists to prevent.
+    """
+    pending = ""
+    with io.open(source, encoding="utf-8") as handle:
+        while True:
+            chunk = handle.read(_COPY_CHUNK_CHARS)
+            if not chunk:
+                break
+            if not strip:
+                out.write(chunk)
+                continue
+            pending += chunk
+            at = pending.find(strip)
+            if at >= 0:
+                out.write(pending[:at] + pending[at + len(strip):])
+                pending = ""
+                strip = ""
+                continue
+            carry = len(strip) - 1
+            if carry:
+                out.write(pending[:-carry])
+                pending = pending[-carry:]
+            else:
+                out.write(pending)
+                pending = ""
+    if pending:
+        out.write(pending)
 
 
 def _write_zip_artifact(tmp_path, members):
@@ -1150,6 +1222,9 @@ def generate_master_list(list_name=None):
     # (keeping the previous index) rather than a silent partial one.
     walk_errors = []
     denied_dirs = []
+    # Folders left out because their own name cannot survive the list format
+    # (#464) - see has_backslash_component() at the point it is used.
+    unlistable_dirs = []
 
     def _on_walk_error(err):
         # TWO DIFFERENT FAILURES, AND ONLY ONE OF THEM IS WORTH ABORTING FOR
@@ -1251,11 +1326,65 @@ def generate_master_list(list_name=None):
                            folder_count=len(scan_folders),
                            files=len(all_files_data) + len(video_files_data))
 
+            # ONCE PER DIRECTORY, NOT ONCE PER FILE (#463).
+            #
+            # rel_dir is a property of the directory - it was computed inside
+            # the per-file loop below, so a folder of 20 tracks paid 20
+            # relpath() calls and 20 join() calls for the same answer, and
+            # stored 20 separate equal strings in all_files_data. Hoisted, the
+            # rows share one object: 149.9 B/file against 206.9 B/file
+            # measured, about 0.29 GiB at 5.4M files, and the calls go from
+            # one per file to one per directory.
+            #
+            # The folder's LABEL leads every path (#164). Two folders can hold
+            # the same relative path - the same album in flac and in mp3 is
+            # the ordinary case, not a corner one - and without the label
+            # their headings would be identical text that resolution could not
+            # tell apart.
+            #
+            # Written for a single folder too. Labelling only at two or more
+            # would mean an operator who adds a second folder after weeks of
+            # serving changes every path anyone already saved; doing it once,
+            # at the upgrade, is one break instead of two.
+            rel_dir = os.path.relpath(root, scan_root)
+            if rel_dir == ".":
+                rel_dir = ""
+            rel_dir = (os.path.join(scan_folder.name, rel_dir)
+                       if rel_dir else scan_folder.name)
+
+            # A LITERAL BACKSLASH IN A FOLDER NAME IS NOT A SEPARATOR (#464).
+            #
+            # On the Linux box this daemon runs on, a backslash is an ordinary
+            # filename character, and unzipping a Windows-made archive
+            # produces one routinely. The list writes its headings with
+            # backslashes as separators, and list.list_heading_parts() reads
+            # them back by splitting on both separators - so a directory named
+            # "Rock\Metal" is written as ...\music\Rock\Metal\ and read back as
+            # ["music", "Rock", "Metal"]. If music/Rock/Metal exists, every
+            # file under it - and its !rar row - resolves into that unrelated
+            # folder and the requester silently gets the wrong album. If it
+            # does not, nothing under the real folder can ever be served.
+            #
+            # Excluded rather than escaped. The list format is read by other
+            # bots and by AutoQ, so an escape convention would have to be
+            # understood by readers that already exist and never will be.
+            # library.problems() already refuses a backslash in a folder LABEL
+            # for exactly this reason ("the label travels further than the
+            # machine that made it"); this is the same rule applied to the
+            # components below it. A folder that cannot be named in the list
+            # cannot be served from it, so listing it would advertise
+            # something unreachable.
+            if has_backslash_component(rel_dir):
+                # No dedup needed: the walk visits each directory once, so
+                # rel_dir is new every time it gets here.
+                unlistable_dirs.append(rel_dir)
+                continue
+
             # Keep every track under its exact, complete path on disk
             for file, file_bytes in files:
                 if is_listed_file(file, ignored):
-                    full_file_path = os.path.join(root, file)
                     if file_bytes is None:
+                        full_file_path = os.path.join(root, file)
                         # #228: a bare `except: pass` left file_bytes at 0 and
                         # the entry was published anyway - permission denied, a
                         # dangling symlink, or a file removed mid-scan all read
@@ -1272,23 +1401,6 @@ def generate_master_list(list_name=None):
                               f"its size could not be read.")
                         continue
                     total_bytes += file_bytes
-
-                    # The folder's LABEL leads every path (#164). Two folders
-                    # can hold the same relative path - the same album in flac
-                    # and in mp3 is the ordinary case, not a corner one - and
-                    # without the label their headings would be identical text
-                    # that resolution could not tell apart.
-                    #
-                    # Written for a single folder too. Labelling only at two or
-                    # more would mean an operator who adds a second folder
-                    # after weeks of serving changes every path anyone already
-                    # saved; doing it once, at the upgrade, is one break
-                    # instead of two.
-                    rel_dir = os.path.relpath(root, scan_root)
-                    if rel_dir == ".":
-                        rel_dir = ""
-                    rel_dir = (os.path.join(scan_folder.name, rel_dir)
-                               if rel_dir else scan_folder.name)
 
                     # WHICH folder may be packed, decided per FILE and
                     # remembered per folder. A folder earns its !rar row from
@@ -1321,6 +1433,19 @@ def generate_master_list(list_name=None):
               f"will not be in the next one until their permissions change: "
               f"{', '.join(repr(p) for p in denied_dirs[:5])}"
               f"{' ...' if len(denied_dirs) > 5 else ''}")
+
+    if unlistable_dirs:
+        # Same shape and same reasoning as denied_dirs above: a standing
+        # condition rather than an event, and an operator comparing the file
+        # count against their own expectation deserves to know why it is
+        # short.
+        print(f"[LIST-GEN] {len(unlistable_dirs)} folder(s) were excluded "
+              f"because a literal backslash in the name cannot be told from a "
+              f"path separator once the list is written - anything under them "
+              f"would resolve to a different folder or to nothing. Rename "
+              f"them to list them: "
+              f"{', '.join(repr(p) for p in unlistable_dirs[:5])}"
+              f"{' ...' if len(unlistable_dirs) > 5 else ''}")
 
     # Sort by the real folder and file names
     all_files_data.sort(key=lambda x: (str(x[0]).lower(), str(x[1]).lower()))
@@ -1783,13 +1908,26 @@ def generate_master_list(list_name=None):
         # The COUNT only. The detail belongs to the view that already presents
         # it properly, resolved to paths this machine has; printing folder
         # headings here would be a second presentation to keep in step.
-        duplicate_names = list_mod.find_duplicate_filenames(
-            [{"filename": name, "folder": folder}
-             for folder, name, _size in all_files_data]
-            + [{"filename": name, "folder": folder}
-               for folder, name, _size in video_files_data])
-        if duplicate_names:
-            print(f"[LIST-GEN] WARNING: {len(duplicate_names)} filename(s) appear "
+        # THE COUNT, NOT THE ANSWER (#463). This used to build a second full
+        # copy of the library - one dict per file - and hand it to
+        # find_duplicate_filenames(), whose result was passed to len() and
+        # dropped. At 5.4M files that copy measured 2.2 GiB and took the peak
+        # for the whole rebuild to 3.5 GiB, on top of the sort's own peak.
+        # count_duplicate_filenames() holds one entry per distinct NAME and
+        # answers the same question by the same definition.
+        def _every_listed_row():
+            # A GENERATOR, not a list. count_duplicate_filenames() reads its
+            # input once and keeps one entry per distinct NAME, so handing it
+            # a materialised copy of the library would put back a smaller
+            # version of the very thing this change removes.
+            for folder, name, _size in all_files_data:
+                yield folder, name
+            for folder, name, _size in video_files_data:
+                yield folder, name
+
+        duplicate_count = list_mod.count_duplicate_filenames(_every_listed_row())
+        if duplicate_count:
+            print(f"[LIST-GEN] WARNING: {duplicate_count} filename(s) appear "
                   f"under more than one folder. A request names a file, not a "
                   f"path, so only the first copy of each can ever be sent. "
                   f"Dashboard: Tools > Verify list.")

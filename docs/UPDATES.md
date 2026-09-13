@@ -176,6 +176,76 @@ comprehension was ever exposed, and that window is too narrow for a stress
 test to land in reliably. The fix is right by inspection and costs nothing,
 but its guard reads the source rather than claiming a reproduction nobody got.
 
+### 🟢 What the scan does to every file
+
+Closes #463 and #464.
+
+**Three copies of the library where one is needed.** `generate_master_list()`
+built a second full copy - one dict per file - and handed it to
+`list.find_duplicate_filenames()`, whose answer was passed to `len()` and
+dropped. Re-measured independently rather than taken on trust, and it
+reproduces within ~5%: at 5.4M files, 1.25 GiB live after the scan, 2.32 GiB
+at the sort's peak, and 3.54 GiB once the copy and the answer were both in
+memory.
+
+`count_duplicate_filenames()` answers the same question by the same
+definition, keeping one entry per distinct NAME rather than one per row, and
+the caller hands it a generator over the scan's own tuples - a materialised
+list of pairs would have put back a smaller version of the same mistake.
+
+The definition is the other function's deliberately, and the two are now
+pinned against each other on the cases that could separate them: case,
+repeated folders, a folderless row, a blank name, a third folder holding the
+same name. The test that used to guard this checked that the string
+`find_duplicate_filenames(` appeared in `update_list.py`, which is not
+agreement.
+
+**The same pass recomputed each directory's path once per file.** `rel_dir`
+is a property of the directory; it sat inside the per-file loop, so a folder
+of twenty tracks paid twenty `relpath()` calls and twenty `join()` calls for
+one answer, and stored twenty separate equal strings. Hoisted, the rows share
+one object: 149.9 B/file against 206.9 B/file measured, about 0.29 GiB at
+5.4M files.
+
+**And the txt artifact read each member whole.** `_write_text_artifact()` is
+only reached when `LIST_FORMAT` is `txt` rather than the default `zip` -
+which is exactly the operator most likely to have a list big enough for it to
+matter. It copies in chunks now, carrying an overlap so the operator's banner
+is still removed when it straddles a boundary, and still only the first
+occurrence, which is what `replace(x, "", 1)` meant.
+
+**A backslash in a folder name is not a separator on Linux.** It is an
+ordinary filename character there, and unzipping a Windows-made archive
+produces one routinely. The list writes headings with backslashes BETWEEN the
+components and `list.list_heading_parts()` reads them back by splitting on
+both separators - so a directory named `Rock\Metal` is written as
+`D:\MEDIA\music\Rock\Metal\` and read back as three components. If
+`music/Rock/Metal` exists, every file under the real folder - and its `!rar`
+row - resolves into that unrelated album and the requester silently gets the
+wrong thing. If it does not, nothing under it can ever be served.
+
+Excluded rather than escaped, and the reason is compatibility: the list
+format is read by other bots and by AutoQ, so an escape convention would have
+to be understood by readers that already exist and never will be.
+`library.problems()` already refuses a backslash in a folder LABEL for
+exactly this reason - "the label travels further than the machine that made
+it" - so this is the same rule applied to the components below it. The
+folders are named in one line at the end of the scan, the way unreadable
+folders already are: a file count that looks short deserves an explanation.
+
+Windows cannot reach this bug at all, since the backslash is its separator -
+which made it the kind of test that runs on one platform and leaves a hole on
+the other. `has_backslash_component()` takes the separator as an argument,
+the way `irc.resolve_dcc_address()` takes `lookup`, so both readings are
+driven everywhere; the end-to-end exclusion test probes the filesystem and
+skips where the name cannot exist.
+
+Eight mutation-checked properties, no survivors. Two of them needed the test
+strengthening first: a two-banner case only separates "remove the first" from
+"remove them all" when the copies are in different chunks, and a mutant that
+moved the relative path back into the per-file loop needed an assertion about
+which loop it is in rather than that it happens at all.
+
 ### 🟢 What the operator types, and what they are told
 
 Closes #486 and #465.
