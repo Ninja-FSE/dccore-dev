@@ -30,6 +30,7 @@ import commands  # noqa: E402
 import defaults as config  # noqa: E402
 import irc  # noqa: E402
 import list as list_mod  # noqa: E402
+import runtime  # noqa: E402
 import update_list  # noqa: E402
 
 from tests.support import DCCoreTestCase, RecordingSocket  # noqa: E402
@@ -288,6 +289,19 @@ class TheQueueCheckCommand(DCCoreTestCase):
 class ThePingCommand(DCCoreTestCase):
     """commands.handle_ping_request / handle_pong_response - a matched pair
     that communicate through three module-level names on config."""
+
+    def setUp(self):
+        super().setUp()
+        # #425: handle_ping_request() now reserves a slot from
+        # runtime.outbound_pacer before sending. It is a process-wide
+        # singleton the harness does not reset between tests (see
+        # tests/test_reconnect.py's identical fix for the same reason), so
+        # a reservation left behind by an unrelated earlier test could make
+        # this one block for up to the real MSG_DELAY (5.0s by default)
+        # instead of running instantly.
+        self._real_pacer = runtime.outbound_pacer
+        runtime.outbound_pacer = runtime.OutboundPacer()
+        self.addCleanup(setattr, runtime, "outbound_pacer", self._real_pacer)
 
     def test_the_probe_reaches_the_server_socket(self):
         sock = RecordingSocket()

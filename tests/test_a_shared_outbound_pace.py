@@ -25,6 +25,7 @@ import unittest
 from tests.support import DCCoreTestCase
 
 import announce
+import commands
 import defaults as config
 import queue_mgr
 import runtime
@@ -299,6 +300,86 @@ class TheThirdUnpacedWriterIsFixedToo(unittest.TestCase):
             'if hasattr(config, \'vip_queue\') and config.vip_queue:', 1)[1][:700]
         self.assertIn("runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)",
                       vip_lane)
+
+
+class TheFourthUnpacedWriterIsFixedToo(DCCoreTestCase):
+    """#425: commands.handle_ping_request() wrote straight to the socket too
+    - the ONE responder any nick can trigger without being an admin, so
+    several clone connections calling !ping aggregate into unthrottled
+    traffic the same way the VERSION/RAM-CHECK writers above did.
+
+    Behavioural, unlike the structural checks above: unlike the CTCP VERSION
+    reply and the RAM-CHECK notice, which live inline inside irc_loop() and
+    are not otherwise reachable, handle_ping_request() is a real, directly
+    callable function - so this drives it for real rather than reading its
+    source.
+
+    NOT routed through oserve.queue_message(is_vip=True) like the other two:
+    !ping measures its own round-trip latency from config.ping_start_time,
+    and queueing the PING behind the VIP lane would fold however long it
+    waited there into the number the command exists to report. A direct
+    wait_for_slot() puts the send on the same shared clock without that
+    side effect - see handle_ping_request()'s own docstring.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.real_pacer = runtime.outbound_pacer
+        runtime.outbound_pacer = runtime.OutboundPacer()
+        self.addCleanup(setattr, runtime, "outbound_pacer", self.real_pacer)
+        self.set_config(MSG_DELAY=0.1)
+
+    def test_a_second_ping_waits_out_the_shared_interval(self):
+        sock = TimestampedSocket()
+
+        commands.handle_ping_request(sock, "alice", "#chan")
+        started = time.monotonic()
+        commands.handle_ping_request(sock, "bob", "#chan")
+        elapsed = time.monotonic() - started
+
+        self.assertGreaterEqual(elapsed, 0.08,
+                                "a second !ping was not paced against the "
+                                "first - the shared clock was never asked")
+
+    def test_it_shares_the_clock_with_the_ordinary_queue(self):
+        """The property the whole fix rests on: !ping and an ordinary queued
+        reply must contend for the SAME budget, not two that sum - modelled
+        by reserving the clock from outside and checking !ping still waits
+        for it."""
+        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
+        sock = TimestampedSocket()
+
+        started = time.monotonic()
+        commands.handle_ping_request(sock, "alice", "#chan")
+        elapsed = time.monotonic() - started
+
+        self.assertGreaterEqual(elapsed, 0.08,
+                                "!ping sent immediately even though another "
+                                "lane had just claimed the shared slot")
+
+    def test_the_measurement_starts_after_the_wait_not_before(self):
+        """#425's own honesty requirement: ping_start_time must be stamped
+        once the wait is over, or every reported latency would be inflated
+        by however long the socket happened to be busy - the exact number
+        the command exists to measure would then be lying about the network
+        to hide the pacer instead."""
+        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
+        sock = TimestampedSocket()
+        before_call = time.time()
+
+        commands.handle_ping_request(sock, "alice", "#chan")
+
+        self.assertGreaterEqual(config.ping_start_time, before_call)
+        self.assertLessEqual(config.ping_start_time, time.time())
+
+    def test_the_probe_still_reaches_the_socket(self):
+        """Control: pacing it must not accidentally swallow the send."""
+        sock = TimestampedSocket()
+
+        commands.handle_ping_request(sock, "alice", "#chan")
+
+        self.assertEqual(len(sock.sent), 1)
+        self.assertIn(b"PING :OSERVE_LATENCY_CHECK", sock.sent[0][1])
 
 
 def queue_mgr_source():

@@ -245,15 +245,34 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
 def handle_ping_request(irc_sock, user, target_chan):
-    """Start the timer and send a unique latency PING to the IRC server."""
+    """Start the timer and send a unique latency PING to the IRC server.
+
+    #425: this used to write straight to the socket, the last responder in
+    the dispatch chain that never touched the shared outbound clock #406
+    installed - any nick can trigger it, and several clone connections doing
+    so aggregate into unthrottled traffic the server sees as one burst.
+
+    NOT routed through oserve.queue_message() the way the CTCP VERSION reply
+    and the "!debugnames" RAM-CHECK notice were (see
+    tests/test_a_shared_outbound_pace.py's TheThirdUnpacedWriterIsFixedToo):
+    this command measures its own round-trip latency, and queueing the PING
+    behind the VIP lane would fold however long it waited there into the
+    number the command exists to report. A direct wait_for_slot() still puts
+    the send on the one shared clock without touching the measurement's
+    honesty - the timer starts only once the wait is over and the byte is
+    about to go out, not before.
+    """
     import time
     import defaults as config
-    
+    import runtime
+
+    runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
+
     # Keep the measurement in shared memory so the pong handler can read it later
     config.ping_start_time = time.time()
     config.ping_triggered_by = user
     config.ping_channel_source = target_chan
-    
+
     # Send the probe straight to the server's raw socket
     try:
         irc_sock.send(b"PING :OSERVE_LATENCY_CHECK\r\n")
