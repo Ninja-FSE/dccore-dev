@@ -59,6 +59,55 @@ The `is-error` fix is guarded as a property over every site rather than the
 one that was wrong: any element app.js marks as an error must carry a class
 that can actually show it. Four mutation-checked properties, no survivors.
 
+### 🔴 Four faults in building a list
+
+Found by the pre-publication audit sweep. Closes #441, #442, #443 and #444.
+
+A rebuild over an 80TB library is the most expensive thing the daemon does and
+the least often watched, so a fault here is paid for in hours and noticed
+late.
+
+**One unreadable folder aborted every rebuild, for ever.** Any error during
+the walk kept the previous index rather than publishing a truncated one -
+correct for a subtree that went away mid-scan, and wrong for a folder that
+simply cannot be read. A Windows volume root's System Volume Information, a
+POSIX lost+found, anything whose ACL excludes the account the daemon runs as:
+those fail identically on every future scan, so the list could never be
+rebuilt again on that install. Every `!update` ran the whole scan and threw
+the result away.
+
+The two are now told apart by whether the path is still there. Permission
+denied on a directory that exists is a fact about the ACL; a directory that
+has vanished means the library changed underneath the scan and the snapshot
+is already wrong. The first is excluded and reported once, with the count and
+the reason - an operator whose file count comes up short deserves to know it
+is permissions rather than a broken scanner. The second still aborts.
+
+**A failure after the swap said the opposite of what happened.** Everything
+between `_publish_artifacts()` and the handler is tail work - side files,
+cleanup, bookkeeping - and any of it can raise. The handler then printed "The
+previous list was left untouched and is still in use", which is exactly
+backwards: the swap had already happened, the new list was live and serving,
+and only the tail failed. An operator told nothing changed reasonably
+concludes the rebuild can simply be retried.
+
+**The film and series list was never sorted.** `all_files_data` has been
+sorted since the beginning; `video_files_data` is built by the same walk and
+was only ever appended to, so it came out in whatever order the filesystem
+handed the directories over. Both now sort by the same key - a different key
+would put the same folder in a different place in each list.
+
+**The `!update` guard read its flag 178 lines before setting it**, with the
+`PAUSE_ON_UPDATE` wait for a running search in between. Two requests arriving
+in that window both passed the guard and both started a rebuild: two
+subprocesses writing the same `.new` temp paths. The check and the set are now
+one step under `runtime.list_update_gate` - in `runtime.py`, because
+`commands.py` is reloaded by `!rehash` and a lock built there is a fresh
+object on the far side of every reload (#235). The one path that returns
+between the gate and the work puts the flag back; leaving it raised would deny
+every future update for the life of the process.
+
+Five mutation-checked properties, no survivors.
 ### 🟢 Three documents that were wrong
 
 Found by the pre-publication audit sweep. Closes #448, #449 and #466.
@@ -126,6 +175,37 @@ prune already snapshotted its keys with `list()`, so only the final
 comprehension was ever exposed, and that window is too narrow for a stress
 test to land in reliably. The fix is right by inspection and costs nothing,
 but its guard reads the source rather than claiming a reproduction nobody got.
+
+### 🟢 Two faults a fresh install meets
+
+Found by the pre-publication audit sweep. Closes #446 and #447.
+
+**A byte-order mark ate the first setting.** `settings.conf` was read as plain
+`utf-8`, so a file saved with a BOM - three invisible bytes that Notepad
+writes as a matter of course - kept the mark attached to its first line. The
+first setting therefore parsed as `﻿MSG_DELAY`, landed in the report's
+`unknown` list, and was silently ignored while the default stood. The operator
+is looking at a file that plainly sets it.
+
+Both sides now read `utf-8-sig`, which consumes a mark when present and is
+identical to `utf-8` when not. The save side matters as much as the read one:
+it decodes the same file to edit it in place, so a mark left there would
+reappear inside the first line of the rewritten file and the bug would come
+back on the next save.
+
+**The pre-flight check reported a console that was switched off.**
+`ADMIN_HOSTMASKS = [""]` is a truthy list of one, so counting it produced
+"enabled for 1 host pattern(s)" while `adminchat.admin_host_patterns()`
+returned `[]` and the daemon accepted nothing. `[""]` is exactly what a fresh
+install can end up with, because `configure.py`'s password prompt is mandatory
+while the hostmask is not.
+
+The check now asks the daemon what it will actually accept. A pre-flight that
+reports a feature as enabled when it is disabled is worse than one that says
+nothing, because the operator stops looking - and it is guarded so the check
+can never itself be what breaks the check.
+
+Three mutation-checked properties, no survivors.
 
 ### 🔴 Two transfers counted wrong
 
