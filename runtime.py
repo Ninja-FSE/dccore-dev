@@ -344,6 +344,15 @@ def resolve_display_nick(nick):
         primary = nick_aliases.get(key)
     return primary if primary else nick
 
+# Held across the !update re-entrancy check AND the flag it sets (#444).
+#
+# handle_list_update_request() read config.update_inprogress and did not set
+# it until 178 lines later, with a PAUSE_ON_UPDATE wait for any running search
+# in between - so two requests arriving in that window both passed the guard
+# and both started a rebuild, two subprocesses writing the same .new temp
+# paths. The check and the set have to be one step.
+list_update_gate = threading.Lock()
+
 # Live transfer rate ---------------------------------------------------------
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can

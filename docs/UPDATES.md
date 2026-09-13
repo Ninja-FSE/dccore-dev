@@ -59,6 +59,55 @@ The `is-error` fix is guarded as a property over every site rather than the
 one that was wrong: any element app.js marks as an error must carry a class
 that can actually show it. Four mutation-checked properties, no survivors.
 
+### 🔴 Four faults in building a list
+
+Found by the pre-publication audit sweep. Closes #441, #442, #443 and #444.
+
+A rebuild over an 80TB library is the most expensive thing the daemon does and
+the least often watched, so a fault here is paid for in hours and noticed
+late.
+
+**One unreadable folder aborted every rebuild, for ever.** Any error during
+the walk kept the previous index rather than publishing a truncated one -
+correct for a subtree that went away mid-scan, and wrong for a folder that
+simply cannot be read. A Windows volume root's System Volume Information, a
+POSIX lost+found, anything whose ACL excludes the account the daemon runs as:
+those fail identically on every future scan, so the list could never be
+rebuilt again on that install. Every `!update` ran the whole scan and threw
+the result away.
+
+The two are now told apart by whether the path is still there. Permission
+denied on a directory that exists is a fact about the ACL; a directory that
+has vanished means the library changed underneath the scan and the snapshot
+is already wrong. The first is excluded and reported once, with the count and
+the reason - an operator whose file count comes up short deserves to know it
+is permissions rather than a broken scanner. The second still aborts.
+
+**A failure after the swap said the opposite of what happened.** Everything
+between `_publish_artifacts()` and the handler is tail work - side files,
+cleanup, bookkeeping - and any of it can raise. The handler then printed "The
+previous list was left untouched and is still in use", which is exactly
+backwards: the swap had already happened, the new list was live and serving,
+and only the tail failed. An operator told nothing changed reasonably
+concludes the rebuild can simply be retried.
+
+**The film and series list was never sorted.** `all_files_data` has been
+sorted since the beginning; `video_files_data` is built by the same walk and
+was only ever appended to, so it came out in whatever order the filesystem
+handed the directories over. Both now sort by the same key - a different key
+would put the same folder in a different place in each list.
+
+**The `!update` guard read its flag 178 lines before setting it**, with the
+`PAUSE_ON_UPDATE` wait for a running search in between. Two requests arriving
+in that window both passed the guard and both started a rebuild: two
+subprocesses writing the same `.new` temp paths. The check and the set are now
+one step under `runtime.list_update_gate` - in `runtime.py`, because
+`commands.py` is reloaded by `!rehash` and a lock built there is a fresh
+object on the far side of every reload (#235). The one path that returns
+between the gate and the work puts the flag back; leaving it raised would deny
+every future update for the life of the process.
+
+Five mutation-checked properties, no survivors.
 ### 🟢 Three documents that were wrong
 
 Found by the pre-publication audit sweep. Closes #448, #449 and #466.
@@ -88,6 +137,44 @@ enumeration that followed the sentence was always the accurate part - the
 advert, the "Sent:" notice, `@find` results, the private notices and the debug
 channel are all bold-free. The claim now matches, and names the replies that
 still use bold deliberately.
+
+### 🟢 Three loaders that trusted the file
+
+Found by the pre-publication audit sweep. Closes #450, #451 and #452.
+
+State files are hand-editable by design - the documentation says so - and
+every loader in `db.py` filters row by row for that reason: one bad entry
+costs that entry and not the rest. Two did not.
+
+`load_dcc_queue()` checked that the top level was a dict and then `update()`d
+the file's contents wholesale. A value that was not a list, or a row that was
+not a dict, reached `config.dcc_queue` intact and failed later - on a dispatch
+thread, far from the file that caused it, with nothing naming the file. It now
+filters like its neighbours, says how many entries it dropped, and counts what
+it kept rather than what it read.
+
+`load_notices()` kept any row that merely HAD an `id`, while the `seen_id`
+marker two lines below was already coerced with a guarded `int()`. So a
+hand-edited `"id": "first"` survived the loader and raised wherever ids are
+compared - `unread_notices()`, the mark-read marker - taking the whole panel
+out rather than the one bad row. Ids are now coerced or the row is dropped,
+and `"3"` becomes `3` rather than being thrown away, because hand-edited JSON
+quotes numbers all the time.
+
+`save_dcc_queue()` walked `config.dcc_queue` live while holding only
+`_disk_lock`, which guards the FILE rather than the dict. It now walks one
+copy taken in a single step. `queue_lock` cannot be taken there - five of the
+six callers in `dcc.py` are already inside it and it is not reentrant - which
+is the same conclusion #432 reached for `get_total_queued_count()`.
+
+#### What could not be shown
+
+The #452 race did not reproduce. Sixty concurrent saves against a queue being
+mutated by another thread raised nothing, with the fix and without it: the
+prune already snapshotted its keys with `list()`, so only the final
+comprehension was ever exposed, and that window is too narrow for a stress
+test to land in reliably. The fix is right by inspection and costs nothing,
+but its guard reads the source rather than claiming a reproduction nobody got.
 
 ### 🟢 Two faults a fresh install meets
 
