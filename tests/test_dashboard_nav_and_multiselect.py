@@ -117,7 +117,11 @@ class TheTabsAreNamedForWhatTheyDo(unittest.TestCase):
                          ["search", "download", "filelists", "tools", "stats"],
                          "the daily work belongs at the top and Stats is a "
                          "glance; Settings and Console are occasional")
-        self.assertEqual(order[5:], ["settings", "console"])
+        # Messages sits with the glances rather than with the daily work:
+        # somebody messaging the bot is common enough to want a standing
+        # place, and rare enough that putting it above the List Browser would
+        # push the day's work down for something looked at once a day.
+        self.assertEqual(order[5:], ["messages", "settings", "console"])
 
 
 class ShiftClickExtendsTheSelection(unittest.TestCase):

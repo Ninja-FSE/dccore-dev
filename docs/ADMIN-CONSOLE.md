@@ -345,6 +345,35 @@ channels). Use the per-list button when you want a specific one gone whatever
 its dot: a bot that renamed, a list fetched by mistake, or one of a pair of
 rows left by a bot that reconnected under its alternate nickname.
 
+### Messages people send the bot
+
+The bot answers commands. Anything else sent to it privately - *"are you
+there?"*, *"how do I get X?"* - gets **no reply**, and that is deliberate: a
+bot that answers every stray line is one that can be made to flood itself off
+the network.
+
+It is written down now, which it never used to be. The dashboard's
+**Messages** page lists who wrote and what they said, newest first, with an
+unread count on the tab. **Mark all read** clears it.
+
+What is recorded, and nothing else:
+
+- **private** messages only - a channel line is one you can already see;
+- that are **not** a recognised command;
+- that are **not** a CTCP (a DCC offer or a VERSION reply is a client talking
+  to a client, not a person);
+- from somebody who is **not banned** - a ban silences them here too.
+
+**One message per person every five minutes.** Somebody typing four lines
+because the first got no answer is one person asking one thing, and four rows
+of it buries the next person who writes. `PRIVATE_MESSAGE_COOLDOWN_SECONDS`
+changes it; 0 records everything.
+
+The last 50 are kept, in `data/private_messages.json`, and they survive a
+restart. **You cannot reply from the page** - the bot has no conversation
+path, and a reply box would be a promise it cannot keep. Message them from
+your own client.
+
 ## Retiring the channel commands
 
 `!ban`, `!unban`, `!rehash`, `!update` and `!clearqueue` still work when typed in
