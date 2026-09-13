@@ -407,6 +407,44 @@ class HiddenActuallyHides(unittest.TestCase):
 
         self.assertTrue(needing, "nothing was examined")
 
+    def test_the_console_nav_button_is_covered_too(self):
+        """#438: classes_with_hidden() only harvests `hidden` off elements
+        that carry it literally in index.html's markup - the console nav
+        button never does. disableConsoleUi() sets `navButton.hidden = true`
+        at runtime instead, the first time /api/console/log 404s (the
+        Console's shipped-default state on any non-loopback install), so
+        this class was structurally invisible to the sweep above even
+        though it needed the exact same pair.
+
+        Named directly rather than taught to the general sweep: finding
+        every element hidden from JS rather than markup would mean tracing
+        every `.hidden = ` assignment back to the selector or element
+        reference that produced it, which is a materially bigger scanner
+        than one bug's regression test justifies.
+        """
+        js = read("app.js")
+        css = strip_css_comments(read("style.css"))
+
+        self.assertIn('".nav-item[data-view=\\"console\\"]"', js,
+                     "fixture invariant: disableConsoleUi() no longer "
+                     "selects the nav button this way - the scan below is "
+                     "checking the wrong thing")
+        self.assertIn("navButton.hidden = true", js,
+                     "fixture invariant: disableConsoleUi() no longer hides "
+                     "the button this way - the scan below is checking the "
+                     "wrong thing")
+
+        self.assertTrue(self.sets_display(css, ".nav-item"),
+                        "fixture invariant: .nav-item no longer sets "
+                        "display - the [hidden] pair would no longer be "
+                        "needed")
+        self.assertTrue(
+            self.sets_display(css, ".nav-item[hidden]"),
+            ".nav-item sets display, so `hidden` on the console nav button "
+            "does nothing without a matching .nav-item[hidden] rule - the "
+            "button stays on screen, clickable, opening an empty log pane "
+            "that posts into a 404 route")
+
 
 class RulesThatOverrideActuallyWin(unittest.TestCase):
     """A CSS rule can be present, well-formed, and still do nothing.
