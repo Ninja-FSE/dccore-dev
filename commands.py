@@ -299,7 +299,7 @@ def handle_ping_request(irc_sock, user, target_chan):
 
     # Send the probe straight to the server's raw socket
     try:
-        irc_sock.send(b"PING :OSERVE_LATENCY_CHECK\r\n")
+        irc_sock.sendall(b"PING :OSERVE_LATENCY_CHECK\r\n")
         print(f"[PING COMMAND] Latency measurement started by {user} in {target_chan}.")
     except Exception as e:
         print(f"[PING ERROR] Could not send the PING packet: {e}")
@@ -1005,7 +1005,7 @@ def _handle_rehash_request(user, target_chan):
                 _live_sock_for_nick = getattr(_oserve_for_nick, 'irc_connection', None) if _oserve_for_nick else None
                 if _live_sock_for_nick:
                     try:
-                        _live_sock_for_nick.send(_nick_line.encode())
+                        _live_sock_for_nick.sendall(_nick_line.encode("utf-8", errors="ignore"))
                         print(f"[REHASH NICK] Sent a live NICK change to {_cfg.NICKNAME!r}.")
                     except Exception as _nick_err:
                         print(f"[REHASH NICK ERROR] Could not send the live nick change: {_nick_err}")

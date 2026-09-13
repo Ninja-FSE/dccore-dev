@@ -47,7 +47,7 @@ class TheResumeHandshakeTakesItsTurn(unittest.TestCase):
         block = self.accept_block()
 
         self.assertLess(block.index("wait_for_slot"),
-                        block.index("irc_sock.send(reply.encode())"))
+                        block.index("irc_sock.sendall(reply.encode("))
 
 
 class EveryTestGetsItsOwnClock(DCCoreTestCase):

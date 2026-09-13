@@ -1179,7 +1179,12 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None):
         # request it is waiting on, and silently ignores us.
         suffix = f" {token}" if token else ""
         offer = f"PRIVMSG {nick} :\x01DCC CHAT chat {ip_long} {port}{suffix}\x01\r\n"
-        irc_sock.send(offer.encode())
+        # sendall(), not send() (#504). send() returns how many bytes it
+        # actually took and the caller has to loop on the rest; with the
+        # kernel send buffer nearly full this line would go out truncated
+        # and the server would read the fragment as a complete command.
+        # Guarded by tests/test_no_socket_write_is_a_partial_write.py.
+        irc_sock.sendall(offer.encode("utf-8", errors="ignore"))
         print(f"[ADMINCHAT] Offered DCC CHAT to {nick} on "
               f"{getattr(config, 'MY_IP_OR_DOCK', '?')}:{port}; waiting for the connection.")
         sock, addr = listener.accept()

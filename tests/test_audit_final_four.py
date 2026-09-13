@@ -213,7 +213,10 @@ class ConsideredAndDeliberatelyNotChanged(DCCoreTestCase):
 
         source = inspect.getsource(dcc_fetch._serve_passive_offer)
 
-        self.assertNotIn("irc_sock.send(", source,
+        # "irc_sock.send" without the paren: since #504 the spelling is
+        # sendall(), and a check for the old one would pass against a direct
+        # write that simply used the new name.
+        self.assertNotIn("irc_sock.send", source,
                          "the passive reply now writes to the socket "
                          "directly, bypassing queue_mgr's pacing")
 

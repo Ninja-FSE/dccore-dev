@@ -247,7 +247,11 @@ class AnOperatorWhoWantsOneStillGetsIt(unittest.TestCase):
             if not isinstance(node, ast.Call):
                 continue
             segment = ast.get_source_segment(body, node) or ""
-            if "JOIN {debug_chan}" in segment and ".send(" in segment:
+            # ".send" rather than ".send(": the write is sendall() since
+            # #504, and a check for the exact old spelling would pass only
+            # because "sendall(" happens to contain "send". Matching the
+            # attribute name makes that deliberate rather than lucky.
+            if "JOIN {debug_chan}" in segment and ".send" in segment:
                 live.append(node.lineno)
 
         self.assertTrue(live, "nothing actually sends a JOIN for a configured "
