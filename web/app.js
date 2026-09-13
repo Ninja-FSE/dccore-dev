@@ -19,8 +19,16 @@
   var DOWNLOADS_POLL_MS = 4000;
   var FILELISTS_BOTS_POLL_MS = 4000;
   var CONSOLE_LOG_POLL_MS = 2000;
-  // Held so the poll can stop itself when the Console turns out to be off -
-  // see disableConsoleUi().
+  // #439: while disabled, retried at this much slower cadence instead of
+  // stopping outright - so ticking WEBUI_CONSOLE_ENABLED on in Settings and
+  // saving (no restart needed; the save's own rehash applies it live) is
+  // noticed here within seconds, instead of the log staying dead until an
+  // F5. Slow enough that a dashboard with the Console off - the shipped
+  // default on any non-loopback install - is not hammering a 404 route
+  // every couple of seconds forever.
+  var CONSOLE_LOG_RECHECK_MS = 15000;
+  // Held so the poll can swap its own cadence - see disableConsoleUi() and
+  // enableConsoleUiIfNeeded().
   var consoleLogTimer = null;
   // Matches webserver.py's FILELISTS_DEFAULT_PAGE_SIZE - keep the two in
   // sync if either changes, so a page here always lines up with a page the
@@ -4800,8 +4808,11 @@
   function disableConsoleUi() {
     if (consoleLogTimer !== null) {
       clearInterval(consoleLogTimer);
-      consoleLogTimer = null;
     }
+    // #439: NOT stopped for good - swapped to the slow recheck cadence, so
+    // this tab notices on its own once the Console is turned back on rather
+    // than needing an F5. See enableConsoleUiIfNeeded() for the other half.
+    consoleLogTimer = setInterval(pollConsoleLog, CONSOLE_LOG_RECHECK_MS);
     // HIDDEN, not removed - and #view-console stays in the DOM.
     //
     // activateView() walks every key in `views` and calls
@@ -4819,9 +4830,25 @@
     if (state.active === "console") { activateView("search"); }
   }
 
+  // #439: the other half of disableConsoleUi()'s slow recheck. A 200 here
+  // proves the Console is live right now, whether or not this tab ever saw
+  // it disabled - checked against the nav button's own hidden state rather
+  // than a separate flag, so there is exactly one source of truth for
+  // "currently disabled". Only does anything on the FIRST such response:
+  // re-arming an already-fast timer or un-hiding an already-visible button
+  // on every ordinary 2-second poll would be pure churn.
+  function enableConsoleUiIfNeeded() {
+    var navButton = document.querySelector(".nav-item[data-view=\"console\"]");
+    if (!navButton || !navButton.hidden) { return; }
+    navButton.hidden = false;
+    clearInterval(consoleLogTimer);
+    consoleLogTimer = setInterval(pollConsoleLog, CONSOLE_LOG_POLL_MS);
+  }
+
   function pollConsoleLog() {
     fetchJson("/api/console/log?since=" + state.consoleCursor).then(function (payload) {
       markConnection(true);
+      enableConsoleUiIfNeeded();
       state.consoleCursor = payload.cursor;
       appendConsoleLines((payload.lines || []).map(function (line) {
         return consoleLineNode(line.text, line.category, line.time, false);
