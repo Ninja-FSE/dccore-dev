@@ -30,6 +30,35 @@ which is leaked state like any other, and wall-clock every suite run paid.
 
 Three mutation-checked properties, no survivors.
 
+### 🟢 Four things the dashboard got wrong quietly
+
+Found by the pre-publication audit sweep. Closes #459, #460, #461 and #462.
+
+Three of the four are the same shape: **a CSS class that matches no rule does
+not fail, it does nothing.** The page renders, the operator sees no error, and
+the styling simply never arrives - which is why all three sat unnoticed.
+
+  * `foldersSectionHtml()` emitted `served-served-folder-rows`, a doubled
+    prefix, so the rule written for `served-folder-rows` never applied and the
+    served-folders editor was unstyled.
+  * `#import-status` had **no rule at all** - not even base styling - so
+    marking a rejected `vars.ini` with `is-error` coloured nothing. The
+    operator was told the file was rejected in the same colour as success.
+  * The password confirmation was written onto the note and then painted over
+    by `loadSettings(true)` on the very next line: the operator changed their
+    password and saw nothing confirm it. It is now carried across the repaint
+    and applied once the new panel exists.
+
+The fourth is growth rather than silence. The Console pane appended forever -
+three elements per log line, nothing ever removed - in the one view an
+operator leaves open for hours. The server has capped its own buffer at 500
+lines all along; the browser now trims from the front, above that, so it
+bounds the pane without dropping history the server still holds.
+
+The `is-error` fix is guarded as a property over every site rather than the
+one that was wrong: any element app.js marks as an error must carry a class
+that can actually show it. Four mutation-checked properties, no survivors.
+
 ### 🟢 Three documents that were wrong
 
 Found by the pre-publication audit sweep. Closes #448, #449 and #466.

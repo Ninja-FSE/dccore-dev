@@ -1751,6 +1751,21 @@ mark.filter-hit {
   color: var(--text);
 }
 
+/* #461: showImportStatus() toggles `is-error` on #import-status to mark a
+   rejected vars.ini, and there was no `.import-status` rule of any kind - so
+   the element had no styling at all and the error state was a no-op. Mirrors
+   .tool-status above, which is the same shape of message in the same panel. */
+.import-status {
+  margin: 14px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.import-status.is-error {
+  color: var(--danger);
+}
+
 .tool-status.is-error {
   color: var(--danger);
 }
