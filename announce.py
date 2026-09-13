@@ -470,6 +470,23 @@ def announce_worker():
                 break
                 
             if is_ready:
+                # #435: bound HERE, once per cycle, not 80-odd lines down
+                # inside the per-channel loop. oserve has no `global`
+                # declaration and no module-level binding in this file, which
+                # makes it a plain local to announce_worker() - and a local
+                # that is only ever ASSIGNED inside the per-channel loop is
+                # unbound everywhere ABOVE that loop until some channel
+                # reaches it. The rejoin block a few lines down reads it
+                # before that point on every cycle, raising
+                # UnboundLocalError - caught by its own broad except and
+                # printed as one line, so the rejoin was silently skipped on
+                # cycle 1 of every worker start (every reconnect), and
+                # skipped FOREVER on an install where every channel hits one
+                # of the two `continue`s before the loop ever reaches the old
+                # binding site (no list bound, or "No List"/"Error" - a fresh
+                # install before its first !update).
+                oserve = sys.modules.get('oserve')
+
                 # Through the accessor rather than a fourth hand-rolled split.
                 # config.CHANNEL is None for part of every rehash - defaults.py
                 # re-executes its literals before settings.conf is re-applied -
@@ -559,7 +576,8 @@ def announce_worker():
 
                         formatted_count = f"{file_count:,}"
 
-                        oserve = sys.modules.get('oserve')
+                        # oserve is now bound once, at the top of this cycle
+                        # (see the #435 comment there) - no re-lookup needed.
                         active_dl = oserve.active_downloads if oserve else 0
                         fails_count = oserve.send_fails_count if oserve else 0
 
