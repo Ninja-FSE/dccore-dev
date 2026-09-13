@@ -514,9 +514,27 @@ def release_queue_entry(user, next_file, delivered, reason=""):
 
 
 def get_total_queued_count():
-    """The total number of files sitting in every personal queue right now."""
+    """The total number of files sitting in every personal queue right now.
+
+    #432: iterates a SNAPSHOT of the values, not the live dict. Every writer
+    that adds or removes a key does so under `queue_lock` (dcc.py's own
+    request/transfer path, commands.py, db.py), but this reader took none -
+    a key added or removed at the exact microsecond this loop was mid-scan
+    raised "dictionary changed size during iteration" and escaped all the way
+    up through announce_worker(), aborting the whole advert cycle for every
+    channel not yet reached.
+
+    Taking queue_lock HERE would be worse, not better: dcc.py's own two
+    request-path call sites call this function while already holding that
+    lock, and queue_lock is a plain threading.Lock - not reentrant - so
+    locking inside would deadlock every file and pack request. list() over
+    the dict's values is what makes this reader safe without needing the
+    lock at all: it copies the reference list under the GIL in one step, so
+    a concurrent add or remove during the copy can only leave this total off
+    by the one entry racing it, never raise.
+    """
     total = 0
-    for user_key, files in config.dcc_queue.items():
+    for files in list(config.dcc_queue.values()):
         total += len(files)
     return total
 
