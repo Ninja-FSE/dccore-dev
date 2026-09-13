@@ -420,6 +420,19 @@ def discard_orphaned_temp_archives(user_key):
     return removed
 
 
+class _ShortSend(Exception):
+    """Raised to skip the completion bookkeeping when a send ended early.
+
+    Not an error condition - the caller already printed [DCC-FAIL] and the
+    queue row is settled by release_queue_entry() either way. This exists so
+    the skip is one branch rather than a condition repeated around every
+    statement in the block, and so it cannot be swallowed by the broad
+    `except Exception` that guards the database writes: a deliberate skip
+    reported as "[DB ERROR] Could not increment the sharing statistics" would
+    send the next reader looking for a database fault that never happened.
+    """
+
+
 def release_queue_entry(user, next_file, delivered, reason=""):
     """Settle the queue row for a finished attempt. Returns True if the row was kept.
 
@@ -453,14 +466,43 @@ def release_queue_entry(user, next_file, delivered, reason=""):
     u_key = str(user).lower()
 
     def _remove_by_identity():
+        # THE NICK MAY HAVE MOVED WHILE THE FILE WAS SENDING (#455).
+        #
+        # `user` is whoever the send STARTED as. A transfer takes minutes, and
+        # irc.note_nick_change() carries dcc_queue to the new nick's key the
+        # moment the server says so - so by the time the row is settled, the
+        # queue can be filed under a key this function has never heard of.
+        # The keyed lookup then finds nothing, the delivered row is never
+        # removed, and the same file is handed out again on the next trigger.
+        #
+        # The row object is the identity, not the key it happens to sit under.
+        # Try the key first because it is right almost always and costs one
+        # lookup; fall back to scanning for the object itself, which is what
+        # "remove THIS row" actually means.
         rows = config.dcc_queue.get(u_key)
-        if not rows:
-            return 0
-        kept = [row for row in rows if row is not next_file]
-        removed = len(rows) - len(kept)
-        if removed:
-            config.dcc_queue[u_key] = kept
-        return removed
+        if rows:
+            kept = [row for row in rows if row is not next_file]
+            removed = len(rows) - len(kept)
+            if removed:
+                config.dcc_queue[u_key] = kept
+                return removed
+
+        # dict() first: the scan walks every queue, and another thread
+        # adding or removing a user mid-walk would otherwise raise - the same
+        # reason #432 and #452 take a copy rather than the lock, which cannot
+        # be taken here either.
+        for other_key, other_rows in dict(config.dcc_queue).items():
+            if not other_rows:
+                continue
+            kept = [row for row in other_rows if row is not next_file]
+            removed = len(other_rows) - len(kept)
+            if removed:
+                config.dcc_queue[other_key] = kept
+                if other_key != u_key:
+                    print(f"[DCC QUEUE] Settled {user}'s row under {other_key!r} "
+                          f"- they renamed while it was sending.")
+                return removed
+        return 0
 
     is_row = isinstance(next_file, dict)
     consumed_temp = bool(is_row and next_file.get("is_temporary_zip")
@@ -2524,7 +2566,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # was. It also fed the speed RECORD and the advert, so the figure the
         # channel saw was wrong in the same direction.
         transfer_finished_at = time.time()
-        print(f"[DCC-SUCCESS] Sent the whole file to {user} with no errors.")
+        if transfer_completed:
+            print(f"[DCC-SUCCESS] Sent the whole file to {user} with no errors.")
         # The original pause: gives mIRC 1.5 seconds to close the file calmly
         try: time.sleep(1.5)
         except: pass
@@ -2543,6 +2586,20 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # What went out on the wire, not what the receiver now holds. A
             # resumed send completes a whole file while transferring only the
             # tail of it, and the totals are a record of bytes SENT.
+            # #454: ONLY A COMPLETED TRANSFER COUNTS. transfer_completed was
+            # already being computed a few lines above, and a short send
+            # already printed [DCC-FAIL] - but the totals, the per-file
+            # download counter and the "Sent the whole file" line all ran
+            # regardless. So a truncated send was reported as a failure in
+            # one line and recorded as a success in every place an operator
+            # or another bot would later read: the lifetime file count, the
+            # bytes total, the speed record that feeds the advert, and the
+            # most-downloaded list.
+            #
+            # Counting a partial send also inflates the speed figure, since
+            # the elapsed time covers a transfer that stopped early.
+            if not transfer_completed:
+                raise _ShortSend()
             stats = db.update_stats_on_complete(file_size - resume_offset)
             print(f"[DB COUNTER] Statistics updated on disk. (Files sent: {stats[0]})")
 
@@ -2560,6 +2617,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # collapsing them would credit one track with another's
             # downloads.
             db.record_download(*download_count_identity(file_path, file_name))
+        except _ShortSend:
+            print(f"[DB COUNTER] Not counted: {file_name} for {user} ended "
+                  f"short at {bytes_sent} of {file_size} bytes. A partial send "
+                  f"is not a completed transfer, so it is left out of the "
+                  f"totals, the download counter and the speed record.")
         except Exception as db_err:
             print(f"[DB ERROR] Could not increment the sharing statistics through the db module: {db_err}")
         # ---------------------------------------------------------------------
