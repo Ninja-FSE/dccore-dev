@@ -2658,7 +2658,7 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         import list_fetch
         # Paged by folder now: flatten the groups back to rows, which is all
         # this test ever cared about.
-        folders, _n, _files, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+        folders, _n, _files, _row_capped, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
         self.assertIsNone(error)
         titles = [e["title"] for g in folders for e in g["entries"]]
         self.assertIn("Track One.flac", titles)
@@ -2697,7 +2697,7 @@ class ListFetchEndToEndTests(DCCoreTestCase):
         entry = config.fetched_bot_lists["otherbot"]
         # Paged by folder now: flatten the groups back to rows, which is all
         # this test ever cared about.
-        folders, _n, _files, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
+        folders, _n, _files, _row_capped, error = list_fetch.get_fetched_bot_page(entry, 0, 10**9)
         self.assertIsNone(error)
         titles = [e["title"] for g in folders for e in g["entries"]]
         self.assertNotIn("Stale.flac", titles)

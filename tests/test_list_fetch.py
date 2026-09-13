@@ -58,7 +58,7 @@ def _read_all(entry):
     call list_fetch.get_fetched_bot_page() directly instead."""
     # Paged by FOLDER now, so flatten the groups back to a flat row list -
     # what every caller of this helper is actually asserting about.
-    groups, _folders, _rows, error = list_fetch.get_fetched_bot_page(
+    groups, _folders, _rows, _row_capped, error = list_fetch.get_fetched_bot_page(
         entry, 0, 10**9)
     rows = [row for group in groups for row in group["entries"]]
     assert error is None, f"unexpected read error: {error}"
@@ -394,7 +394,7 @@ class OnDemandReadingTests(DCCoreTestCase):
 
         os.remove(entry["list_path"])
 
-        rows, folders, files, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
+        rows, folders, files, _row_capped, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
         self.assertEqual(rows, [])
         self.assertEqual((folders, files), (0, 0))
         self.assertIsNotNone(error)
@@ -415,7 +415,7 @@ class OnDemandReadingTests(DCCoreTestCase):
         os.chmod(entry["list_path"], 0o000)
         self.addCleanup(os.chmod, entry["list_path"], 0o644)
 
-        rows, folders, files, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
+        rows, folders, files, _row_capped, error = list_fetch.get_fetched_bot_page(entry, 0, 100)
         self.assertEqual(rows, [])
         self.assertEqual((folders, files), (0, 0))
         self.assertIsNotNone(error)
@@ -423,7 +423,7 @@ class OnDemandReadingTests(DCCoreTestCase):
     def test_a_missing_list_path_field_is_handled_gracefully(self):
         """Defense in depth: an entry somehow missing the field entirely
         (a future bug, or hand-edited state) must not raise either."""
-        rows, folders, files, error = list_fetch.get_fetched_bot_page(
+        rows, folders, files, _row_capped, error = list_fetch.get_fetched_bot_page(
             {"bot": "ghostbot"}, 0, 100)
         self.assertEqual(rows, [])
         self.assertEqual((folders, files), (0, 0))
@@ -439,7 +439,7 @@ class OnDemandReadingTests(DCCoreTestCase):
         list_fetch.process_fetched_list_zip("pagebot", self.zip_path)
         entry = config.fetched_bot_lists["pagebot"]
 
-        page, total_folders, total_files, error = list_fetch.get_fetched_bot_page(
+        page, total_folders, total_files, _row_capped, error = list_fetch.get_fetched_bot_page(
             entry, 3, 4)
         self.assertIsNone(error)
         self.assertEqual(total_folders, 10, "offset/limit count folders")
@@ -456,7 +456,7 @@ class OnDemandReadingTests(DCCoreTestCase):
         list_fetch.process_fetched_list_zip("otherbot", self.zip_path)
         entry = config.fetched_bot_lists["otherbot"]
 
-        page, total_folders, total_files, error = list_fetch.get_fetched_bot_page(
+        page, total_folders, total_files, _row_capped, error = list_fetch.get_fetched_bot_page(
             entry, 999, 100)
         self.assertIsNone(error)
         self.assertEqual(page, [])
@@ -932,7 +932,7 @@ class ConcurrentReadDuringSameBotRefetch(DCCoreTestCase):
                 # the same single folder, so only the ROW total can show a
                 # read that landed between the two - which is the torn read
                 # this test exists to catch.
-                _page, _folders, total_files, error = list_fetch.get_fetched_bot_page(
+                _page, _folders, total_files, _row_capped, error = list_fetch.get_fetched_bot_page(
                     entry, 0, 10 ** 9)
                 with state_lock:
                     read_count[0] += 1
@@ -1227,7 +1227,7 @@ class FolderPaging(unittest.TestCase):
                 for i, size in enumerate(sizes)]
 
     def test_a_page_holds_whole_folders_and_reports_both_totals(self):
-        page, folders, rows = list_module.page_folder_groups(
+        page, folders, rows, _row_capped = list_module.page_folder_groups(
             self.groups([3, 4, 5]), 0, 2)
 
         self.assertEqual([g["folder"] for g in page], ["F00", "F01"])
@@ -1235,14 +1235,14 @@ class FolderPaging(unittest.TestCase):
         self.assertEqual(rows, 12, "twelve files across all three, not just this page")
 
     def test_offset_past_the_end_is_empty_with_the_totals_intact(self):
-        page, folders, rows = list_module.page_folder_groups(
+        page, folders, rows, _row_capped = list_module.page_folder_groups(
             self.groups([3, 4]), 99, 10)
 
         self.assertEqual(page, [])
         self.assertEqual((folders, rows), (2, 7))
 
     def test_a_negative_offset_reads_from_the_start(self):
-        page, _folders, _rows = list_module.page_folder_groups(
+        page, _folders, _rows, _row_capped = list_module.page_folder_groups(
             self.groups([3, 4]), -5, 1)
 
         self.assertEqual([g["folder"] for g in page], ["F00"])
@@ -1250,7 +1250,7 @@ class FolderPaging(unittest.TestCase):
     def test_the_row_ceiling_ends_a_page_before_the_folder_limit(self):
         """Folder sizes are uneven, so a folder count alone does not bound the
         response - which is the unbounded payload issue #76 removed."""
-        page, _folders, _rows = list_module.page_folder_groups(
+        page, _folders, _rows, _row_capped = list_module.page_folder_groups(
             self.groups([40, 40, 40]), 0, 10, max_rows=100)
 
         self.assertEqual(len(page), 2, "the third would take it to 120 rows")
@@ -1260,7 +1260,7 @@ class FolderPaging(unittest.TestCase):
         """The one place a folder is split. Returning nothing would leave the
         caller unable to advance past it, so it comes back cut and flagged -
         and `count` keeps reporting the true size."""
-        page, _folders, _rows = list_module.page_folder_groups(
+        page, _folders, _rows, _row_capped = list_module.page_folder_groups(
             self.groups([500]), 0, 10, max_rows=100)
 
         self.assertEqual(len(page), 1)
@@ -1271,7 +1271,7 @@ class FolderPaging(unittest.TestCase):
     def test_an_untruncated_folder_carries_no_truncated_flag(self):
         """Control: the view only marks a folder cut short, so the flag must
         be absent - or falsey - everywhere else."""
-        page, _folders, _rows = list_module.page_folder_groups(
+        page, _folders, _rows, _row_capped = list_module.page_folder_groups(
             self.groups([3]), 0, 10, max_rows=100)
 
         self.assertFalse(page[0].get("truncated"))
@@ -1295,7 +1295,7 @@ class FolderPaging(unittest.TestCase):
         while True:
             guard += 1
             self.assertLess(guard, 1000, "the walk failed to terminate")
-            page, total, _rows = list_module.page_folder_groups(
+            page, total, _rows, _row_capped = list_module.page_folder_groups(
                 groups, offset, limit, max_rows=ceiling)
             seen.extend(g["folder"] for g in page)
             if not page or offset + len(page) >= total:
@@ -1305,6 +1305,52 @@ class FolderPaging(unittest.TestCase):
         self.assertLess(guard, 200, "the ceiling should not reduce pages to one folder")
         self.assertEqual(len(seen), 200, "every folder was reached")
         self.assertEqual(len(set(seen)), 200, "and none was served twice")
+
+
+class RowCappedSaysWhyAPageWasShort(unittest.TestCase):
+    """#477: reported live - a page cut to a single folder by the row
+    ceiling is indistinguishable, from the outside, from a short LAST page,
+    and reads exactly like the pager is broken. row_capped tells the two
+    apart."""
+
+    def groups(self, sizes):
+        return [{"folder": "F%02d" % i, "count": size,
+                 "entries": [{"title": "t%d" % j} for j in range(size)]}
+                for i, size in enumerate(sizes)]
+
+    def test_a_page_that_reached_the_folder_limit_is_not_row_capped(self):
+        _page, _folders, _rows, row_capped = list_module.page_folder_groups(
+            self.groups([3, 4, 5]), 0, 2, max_rows=100)
+
+        self.assertFalse(row_capped)
+
+    def test_the_last_page_running_out_of_folders_is_not_row_capped(self):
+        """The exact confusion this exists to prevent: a genuinely short
+        LAST page must not look the same as one the valve cut short."""
+        _page, _folders, _rows, row_capped = list_module.page_folder_groups(
+            self.groups([3, 4]), 0, 50, max_rows=100)
+
+        self.assertFalse(row_capped)
+
+    def test_a_page_cut_short_by_the_row_ceiling_is_row_capped(self):
+        _page, _folders, _rows, row_capped = list_module.page_folder_groups(
+            self.groups([40, 40, 40]), 0, 10, max_rows=100)
+
+        self.assertTrue(row_capped)
+
+    def test_one_folder_larger_than_the_ceiling_is_row_capped_too(self):
+        """The reported case exactly: a single outsized folder is the whole
+        page, and it is the row ceiling that put it there alone."""
+        _page, _folders, _rows, row_capped = list_module.page_folder_groups(
+            self.groups([500]), 0, 10, max_rows=100)
+
+        self.assertTrue(row_capped)
+
+    def test_no_ceiling_at_all_is_never_row_capped(self):
+        _page, _folders, _rows, row_capped = list_module.page_folder_groups(
+            self.groups([500]), 0, 10, max_rows=None)
+
+        self.assertFalse(row_capped)
 
 
 class APeerRunningDCCoreSendsTwoLists(unittest.TestCase):

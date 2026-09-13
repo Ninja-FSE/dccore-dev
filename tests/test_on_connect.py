@@ -189,6 +189,81 @@ class WhenTheyAreSent(OnConnectCase):
         self.assertEqual(on_connect.expand(X_LOGIN, "DCCore_"), X_LOGIN)
 
 
+class TheMsgShorthandBecomesPrivmsg(unittest.TestCase):
+    """Reported live: the dashboard's own instructions say to write these
+    "exactly as you would type it into a client" - and for the single most
+    common line this file exists for, an X login or a NickServ IDENTIFY,
+    that was only true for MODE and JOIN, never for MSG. mIRC and every
+    other client translate `/msg <target> <text>` into `PRIVMSG <target>
+    :<text>` before the line ever reaches the wire; this project sent the
+    operator's line verbatim, so "msg X@channels.undernet.org LOGIN name
+    pass" - typed exactly as the guidance says to - reached Undernet as a
+    literal, nonexistent "MSG" command and came back `421 Unknown command`.
+    """
+
+    def test_msg_becomes_privmsg(self):
+        self.assertEqual(
+            on_connect.normalize("msg X@channels.undernet.org LOGIN name pass"),
+            "PRIVMSG X@channels.undernet.org :LOGIN name pass")
+
+    def test_it_is_case_insensitive(self):
+        """Operators copy these from a dozen different guides, some of which
+        write it in caps."""
+        self.assertEqual(
+            on_connect.normalize("MSG NickServ IDENTIFY hunter2"),
+            "PRIVMSG NickServ :IDENTIFY hunter2")
+
+    def test_a_raw_privmsg_line_is_untouched(self):
+        """An operator who already wrote the wire form - the dashboard's own
+        placeholder shows this exact line - must see it sent unchanged."""
+        self.assertEqual(on_connect.normalize(X_LOGIN), X_LOGIN)
+
+    def test_other_commands_are_untouched(self):
+        """MODE, JOIN and NOTICE already match their own wire form - MSG is
+        the one mismatch, not a general client-syntax interpreter."""
+        for command in ("MODE %nick% +x", "JOIN #chan", "NOTICE AuthServ :hi"):
+            with self.subTest(command=command):
+                self.assertEqual(on_connect.normalize(command), command)
+
+    def test_a_bare_msg_with_nothing_after_the_target_is_left_alone(self):
+        """No message text to carry, so this is not the shape being fixed -
+        left as the operator wrote it rather than guessed at."""
+        self.assertEqual(on_connect.normalize("msg NickServ"), "msg NickServ")
+
+    def test_something_that_only_starts_with_the_letters_is_not_mistaken_for_it(self):
+        """The match is the whole first word, not a prefix - "msginfo" is
+        somebody's actual (unlikely) command, not "msg" with a typo."""
+        self.assertEqual(on_connect.normalize("msginfo foo bar"), "msginfo foo bar")
+
+    def test_none_and_empty_are_handled(self):
+        self.assertEqual(on_connect.normalize(""), "")
+        self.assertEqual(on_connect.normalize(None), "")
+
+    def test_the_byte_limit_is_checked_against_what_is_actually_sent(self):
+        """normalize() can make a line LONGER - PRIVMSG plus the added colon
+        is five bytes more than msg - so the 510-byte check has to catch
+        growth introduced by the rewrite, not just the length of what the
+        operator actually typed."""
+        raw = "msg X " + ("a" * 502)
+        self.assertLessEqual(len(raw.encode("utf-8")), on_connect.MAX_COMMAND_BYTES)
+        self.assertGreater(
+            len(on_connect.normalize(raw).encode("utf-8")),
+            on_connect.MAX_COMMAND_BYTES)
+
+        found = on_connect.problems([raw], 1)
+
+        self.assertTrue(any("IRC line limit" in f for f in found), found)
+
+    def test_the_connect_path_normalizes_before_expanding_and_sending(self):
+        """Read out of irc.py: normalize() has to actually run in the send
+        loop, not just exist as a function nothing calls."""
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        body = code.split("def delayed_join(", 1)[1].split("JOIN {channels}", 1)[0]
+
+        self.assertIn("on_connect.normalize(command)", body)
+
+
 class TheDashboardEndpoint(OnConnectCase):
 
     def test_a_block_of_text_is_split_into_commands(self):

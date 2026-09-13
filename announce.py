@@ -511,74 +511,90 @@ def announce_worker():
                     if not chan:
                         continue
 
-                    # THIS CHANNEL'S OWN LIST (#26). The loop already read the
-                    # figures once per channel; it just read the same ones every
-                    # time. Now each channel advertises the list it actually
-                    # serves - a count and a size from another channel's library
-                    # is a claim nobody there can act on.
-                    #
-                    # None means no list is bound here and the primary is not
-                    # the catch-all, which is #26's "a channel with no list
-                    # bound gets no advert". The advert is where that rule is
-                    # most visible: a bot silently present in a channel it does
-                    # not serve, rather than one announcing a library it will
-                    # refuse to send from.
-                    import library
-                    wanted = library.list_name_for_request(chan)
-                    if wanted is None:
+                    # #432: one channel's failure must cost that channel, not
+                    # the whole cycle. Before this, an exception anywhere in
+                    # the body below (get_total_queued_count() raising on an
+                    # unlocked dict mutation was the one actually seen, but
+                    # any of them would do it) escaped this for-loop entirely,
+                    # skipped every channel after the one that failed, AND
+                    # skipped the time.sleep(ANNOUNCE_INTERVAL) below - so the
+                    # outer except caught it, slept 10s instead of the
+                    # configured interval, and restarted from the first
+                    # channel: channels before the failure point got a
+                    # duplicate advert 10s early, channels after it got
+                    # nothing that cycle.
+                    try:
+                        # THIS CHANNEL'S OWN LIST (#26). The loop already read the
+                        # figures once per channel; it just read the same ones every
+                        # time. Now each channel advertises the list it actually
+                        # serves - a count and a size from another channel's library
+                        # is a claim nobody there can act on.
+                        #
+                        # None means no list is bound here and the primary is not
+                        # the catch-all, which is #26's "a channel with no list
+                        # bound gets no advert". The advert is where that rule is
+                        # most visible: a bot silently present in a channel it does
+                        # not serve, rather than one announcing a library it will
+                        # refuse to send from.
+                        import library
+                        wanted = library.list_name_for_request(chan)
+                        if wanted is None:
+                            continue
+
+                        # Read the live figures at this exact moment
+                        file_count, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes(wanted)
+
+                        # #229: get_file_count_date_size_and_raw_bytes() answers the
+                        # sentinel "No List" as the DATE when no master list exists
+                        # yet - a fresh install before its first !update. Unguarded,
+                        # that string was interpolated straight into the advert
+                        # ("...created No List"), published into every channel every
+                        # ANNOUNCE_INTERVAL until the first list build finished.
+                        # commands.py's -stats reply already guards the same
+                        # sentinel; the advert - far more publicly visible - never
+                        # had the same treatment. Skipped rather than reworded: an
+                        # advert with nothing to announce is not useful chatter.
+                        if list_date == "No List":
+                            continue
+
+                        formatted_count = f"{file_count:,}"
+
+                        oserve = sys.modules.get('oserve')
+                        active_dl = oserve.active_downloads if oserve else 0
+                        fails_count = oserve.send_fails_count if oserve else 0
+
+
+                        free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)
+                        queue_status = "NOW" if active_dl < config.MAX_DCC_SLOTS else "0"
+                        queued_count = dcc.get_total_queued_count()
+                        queued_str = f"{queued_count}"
+
+                        total_sent_str, yesterday_str, today_str = get_formatted_stats_strings()
+                        slots_str = f"{free_slots}/{config.MAX_DCC_SLOTS}"
+
+                        import db
+                        raw_record = db.get_speed_record()
+                        record_str = stats_mgr.format_speed(raw_record) if raw_record > 0 else "0k/s"
+
+                        announce_msg = build_advert_line(
+                            chan, config.NICKNAME, formatted_count, total_size,
+                            list_date, slots_str, queued_str, speed_str,
+                            record_str, total_sent_str, config.SCRIPT_VERSION)
+
+                        if oserve:
+                            oserve.queue_message("channel_announce", announce_msg)
+
+                        raw_stats_bytes = stats_mgr.get_total_sent_bytes()
+                        sent_mbs = int(raw_stats_bytes / 1024 / 1024)
+
+                        ctcp_payload = f"SLOTS {config.MAX_DCC_SLOTS} {free_slots} {queue_status} {queued_count} 999 {int(speed_bytes_per_sec)} {file_count} {raw_bytes} {fails_count} {sent_mbs} {raw_stats_bytes} {config.SCRIPT_VERSION}"
+                        ctcp_msg = f"PRIVMSG {chan} :\x01{ctcp_payload}\x01\r\n"
+                        if oserve:
+                            oserve.queue_message("channel_announce", ctcp_msg)
+                    except Exception as chan_err:
+                        print(f"[ANNOUNCE ERROR] Could not advertise to {chan}: {chan_err}")
                         continue
 
-                    # Read the live figures at this exact moment
-                    file_count, list_date, total_size, raw_bytes = list.get_file_count_date_size_and_raw_bytes(wanted)
-
-                    # #229: get_file_count_date_size_and_raw_bytes() answers the
-                    # sentinel "No List" as the DATE when no master list exists
-                    # yet - a fresh install before its first !update. Unguarded,
-                    # that string was interpolated straight into the advert
-                    # ("...created No List"), published into every channel every
-                    # ANNOUNCE_INTERVAL until the first list build finished.
-                    # commands.py's -stats reply already guards the same
-                    # sentinel; the advert - far more publicly visible - never
-                    # had the same treatment. Skipped rather than reworded: an
-                    # advert with nothing to announce is not useful chatter.
-                    if list_date == "No List":
-                        continue
-
-                    formatted_count = f"{file_count:,}"
-                    
-                    oserve = sys.modules.get('oserve')
-                    active_dl = oserve.active_downloads if oserve else 0
-                    fails_count = oserve.send_fails_count if oserve else 0
-                    
-
-                    free_slots = max(0, config.MAX_DCC_SLOTS - active_dl)
-                    queue_status = "NOW" if active_dl < config.MAX_DCC_SLOTS else "0"
-                    queued_count = dcc.get_total_queued_count()
-                    queued_str = f"{queued_count}"
-                    
-                    total_sent_str, yesterday_str, today_str = get_formatted_stats_strings()
-                    slots_str = f"{free_slots}/{config.MAX_DCC_SLOTS}"
-                    
-                    import db
-                    raw_record = db.get_speed_record()
-                    record_str = stats_mgr.format_speed(raw_record) if raw_record > 0 else "0k/s"
-
-                    announce_msg = build_advert_line(
-                        chan, config.NICKNAME, formatted_count, total_size,
-                        list_date, slots_str, queued_str, speed_str,
-                        record_str, total_sent_str, config.SCRIPT_VERSION)
-
-                    if oserve:
-                        oserve.queue_message("channel_announce", announce_msg)
-                    
-                    raw_stats_bytes = stats_mgr.get_total_sent_bytes()
-                    sent_mbs = int(raw_stats_bytes / 1024 / 1024)
-                    
-                    ctcp_payload = f"SLOTS {config.MAX_DCC_SLOTS} {free_slots} {queue_status} {queued_count} 999 {int(speed_bytes_per_sec)} {file_count} {raw_bytes} {fails_count} {sent_mbs} {raw_stats_bytes} {config.SCRIPT_VERSION}"
-                    ctcp_msg = f"PRIVMSG {chan} :\x01{ctcp_payload}\x01\r\n"
-                    if oserve:
-                        oserve.queue_message("channel_announce", ctcp_msg)
-                
                 time.sleep(config.ANNOUNCE_INTERVAL)
             else:
                 time.sleep(5)

@@ -382,6 +382,11 @@ class WiringTests(unittest.TestCase):
         config.MY_IP_OR_DOCK = "8.8.8.8"
 
         sock = RecordingSocket()
+        # #430: start_dcc_send() dispatches through the LIVE socket
+        # sys.modules['oserve'] reports, not the parameter alone - this
+        # test does not use DCCoreTestCase, so oserve is stubbed directly.
+        from tests.support import install_fake_oserve
+        install_fake_oserve(irc_connection=sock)
         dcc.start_dcc_send(sock, "dave", track, "Song.flac", "#chan",
                            {"file": "Song.flac", "path": track})
 
