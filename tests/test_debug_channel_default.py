@@ -162,6 +162,20 @@ class ABlankChannelDropsNoLineEither(unittest.TestCase):
         self.real_to_console = getattr(config, "DEBUG_TO_CONSOLE", True)
         self.addCleanup(setattr, config, "DEBUG_CHANNEL", self.real_channel)
         self.addCleanup(setattr, config, "DEBUG_TO_CHANNEL", self.real_to_channel)
+
+        # THE DRAIN THREAD IS NEVER STOPPED ONCE STARTED, and these assertions
+        # are about what gets ENQUEUED rather than about delivery. Any earlier
+        # test in the run that logged to a configured channel leaves the real
+        # drain running, and it then empties this queue before the assertion
+        # below can look at it - so the test passes alone and fails in a full
+        # run, which is the worst way for it to fail.
+        #
+        # Closing the gate is what test_debug_routing.py already does for the
+        # same reason.
+        self._drain_started = self.announce._debug_drain_started
+        self.announce._debug_drain_started = True
+        self.addCleanup(setattr, self.announce, "_debug_drain_started",
+                        self._drain_started)
         self.addCleanup(setattr, config, "DEBUG_TO_CONSOLE", self.real_to_console)
 
         # A thread left over from an earlier test could otherwise drain
