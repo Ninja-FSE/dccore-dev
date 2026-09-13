@@ -517,6 +517,47 @@ def note_nick_change(old_nick, new_nick):
                 store[new_key] = store.pop(old_key)
                 moved.append(name)
 
+    # THE TWO INTERLOCKS THAT DECIDE WHETHER THEY GET A SLOT.
+    #
+    # dcc.handle_download_request()'s admission gate is built from exactly
+    # three things - the queue above, config.user_processing_lock, and the
+    # "user" field of config.active_transfers rows - and all three are keyed
+    # on the CURRENT nick. Moving the queue and leaving the other two behind
+    # meant a rename read as a different person arriving with nothing in
+    # flight, so the same human was handed another immediate slot.
+    #
+    # Three /nick commands and three requests took every slot the bot has,
+    # with no flood-gate involvement at all: the gate allows ten requests in
+    # five seconds, and this needs three. A denial of service against every
+    # other user, and nothing in it looks like abuse from the outside.
+    #
+    # Under dcc.queue_lock with the queues above, because the gate reads all
+    # of them together and a rename must not be visible half-done.
+    with dcc.queue_lock:
+        processing = getattr(config, "user_processing_lock", None)
+        if isinstance(processing, set) and old_key in processing:
+            processing.discard(old_key)
+            processing.add(new_key)
+            moved.append("processing_lock")
+
+        # `or ()` rather than isinstance(..., list): THIS MODULE SHADOWS THE
+        # LIST BUILTIN with its own `import list` (list.py, the file-list
+        # code), so isinstance(x, list) here raises TypeError - the same trap
+        # #418 hit with `list(...)`. Iterating what is there needs neither.
+        transfers = getattr(config, "active_transfers", None)
+        renamed = 0
+        for row in (transfers or ()):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("user", "")).lower() == old_key:
+                # The real case of the new nick, matching how every other
+                # store here keys on lower() but displays what the server
+                # actually said.
+                row["user"] = new_nick
+                renamed += 1
+        if renamed:
+            moved.append("active_transfers")
+
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)
     if isinstance(send_queue, dict) and old_key in send_queue:

@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟦 v1.12.0-RC2 (2026-09-12) - "The Several Lists Release"
 
+### 🔴 A rename that freed a slot
+
+Found by the pre-publication audit sweep. Closes #431.
+
+`dcc.handle_download_request()`'s admission gate is built from exactly three
+things, and all three are keyed on the **current** nick:
+
+  * a row in `config.active_transfers`
+  * membership of `config.user_processing_lock`
+  * a row in `config.dcc_queue`
+
+`irc.note_nick_change()` carried the third and left the other two behind. A
+rename therefore read as a different person arriving with nothing in flight,
+and the same human was handed another immediate slot.
+
+Three `/nick` commands and three requests took every slot the bot has. The
+flood gate allows ten requests in five seconds, so this needs a fraction of
+what it watches for - nothing about it looks like abuse from the outside, and
+there is no crash and no data loss. Just every other user of the bot waiting
+behind one person who typed `/nick` twice.
+
+Reproduced through the real request path before and after: three admitted,
+against one.
+
+The rename now carries both, under the same `dcc.queue_lock` as the queues
+beside them - the gate reads all three together, and a rename must not be
+visible half-done. The transfer row keeps the case the server gave, because
+the dashboard and `!que` both show it.
+
+#### A trap this file sets for anybody editing it
+
+The first version used `isinstance(transfers, list)` and raised `TypeError`.
+`irc.py` shadows the `list` builtin with its own `import list` - `list.py`,
+the file-list module - so that spelling cannot work here. It is the same trap
+#418 hit with `list(...)`, two months and one contributor apart, which is
+what a comment at the site is for.
+
+Five mutation-checked properties, no survivors.
+
 ### 🔴 The search index's WAL log only ever grew
 
 Reported live: an 845MB `list_index.db` next to a 128MB `.db-wal` file that
