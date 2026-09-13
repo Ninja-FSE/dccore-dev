@@ -349,7 +349,12 @@ class TheShippedDocsAreEnglish(unittest.TestCase):
         self.assertEqual(
             offenders, [],
             "Swedish in shipped documentation:\n  " + "\n  ".join(offenders))
-        self.assertIn("UPDATES.md", [os.path.basename(q) for q in scanned],
+        # UPDATES-PUBLIC.md, not UPDATES.md. This assertion exists so an
+        # empty file list cannot make everything above vacuously true, and it
+        # has to hold in BOTH trees - the internal changelog is export-ignored
+        # and is simply not there in an extracted one, which used to fail here
+        # for the one reason that is not a fault.
+        self.assertIn("UPDATES-PUBLIC.md", [os.path.basename(q) for q in scanned],
                       "the changelog was not scanned - an empty file "
                       "list makes every assertion above vacuously true")
 
