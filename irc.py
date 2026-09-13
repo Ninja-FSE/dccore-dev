@@ -2936,16 +2936,24 @@ def irc_loop():
                             # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
                             # once the DCC console is trusted; the console reaches the same
                             # handlers with authorised=True. User commands are unaffected.
+                            #
+                            # #437: !ban/!unban used to be matched on the raw, case-sensitive
+                            # `msg` while !rehash/!update/!clearqueue beside them already used
+                            # msg_lower - so "!Ban" or "!BAN" failed this gate entirely. Admin
+                            # commands are deliberately excluded from is_bot_command's metering,
+                            # so a mistyped ban was not just refused: nothing ran, nothing was
+                            # written to hard_bans.txt, and nothing was logged either - in
+                            # channel it looked identical to an applied ban.
                             elif (getattr(config, 'ADMIN_CHANNEL_COMMANDS', True)
                                   and (msg.lower() in ('!rehash', '!update')
-                                       or msg.startswith('!ban ') or msg.startswith('!unban ')
+                                       or msg_lower.startswith('!ban ') or msg_lower.startswith('!unban ')
                                        or msg_lower == '!clearqueue'
                                        or msg_lower.startswith('!clearqueue '))):
                                 if msg.lower() == "!rehash":
                                     threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), daemon=True).start()
-                                elif msg.startswith("!ban "):
+                                elif msg_lower.startswith("!ban "):
                                     threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), daemon=True).start()
-                                elif msg.startswith("!unban "):
+                                elif msg_lower.startswith("!unban "):
                                     threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
                                 elif msg.lower() == "!update":
                                     threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), daemon=True).start()
