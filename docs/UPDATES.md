@@ -407,6 +407,49 @@ on a developer box. It checks only the components below the fixture's own
 tree now, and there is a test for that: the tree's parent is made to list
 nothing, which is the same condition on any platform.
 
+### 🟢 A setting that came back blank
+
+Closes #511. Found while investigating #510 - different cause, same visible
+symptom, which is why it is a separate fix.
+
+`sync_channels()` protects the debug channel from being PARTed by a rehash.
+It read `DEBUG_CHANNEL` **after** the reload, so the guard worked whenever the
+value survived and did nothing at all in the one case it exists for: the
+reload handing back a blank. The channel is then in the before-list, absent
+from the after-list, and `chan != ""` is true - so the bot PARTed the one
+channel whose whole purpose is telling the operator what it is doing.
+
+The dashboard fires a rehash on **every** settings save, so a `settings.conf`
+that is briefly unreadable, an `admin_config.py` that failed to import, or
+the window `tests/test_audit_high_findings.py` already documents where a
+reload has a value back at its literal default, is enough.
+
+A blank is ambiguous, and the two readings want opposite things: the operator
+may have cleared the setting deliberately, or the reload may simply not have
+brought it back. **Staying is the recoverable answer.** Somebody who meant to
+clear it loses nothing they can see - a blank `DEBUG_CHANNEL` already stops
+`send_debug()` writing there - and the bot leaves on the next reconnect.
+Somebody who did not mean it keeps the channel they are reading. It is said
+out loud either way.
+
+A *deliberate change* still parts, which is the half a blanket "never part
+the debug channel" rule would have quietly broken: moving `DEBUG_CHANNEL`
+from one channel to a different one is an edit nobody makes by accident, so
+the old one is parted and the new one joined exactly as before.
+
+This is deliberately **not** the shape of the REQUIRED-setting restore in
+`reload_modules_in_order()`. That one puts the value BACK, which is only safe
+because a blank `NICKNAME`/`CHANNEL`/`ADMIN_NICK` is never legitimate - its
+own comment says so, and warns against becoming "a ratchet that prevents a
+rehash from unsetting anything". A blank `DEBUG_CHANNEL` is perfectly
+legitimate, so nothing here changes the setting; only whether a PART is sent
+on the strength of it.
+
+Six mutation-checked properties, no survivors. One needed the test
+strengthening: a mutant that left the capture exactly where it is and made it
+`old_debug_chan = ''` survived a check for the name and its position, so the
+guard asserts the statement rather than the token.
+
 ### 🔴 A JOIN nobody checked
 
 Closes #510. Reported live, and the numbers are the whole story: fourteen
