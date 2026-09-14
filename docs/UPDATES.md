@@ -2,6 +2,70 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🗂️ The setup check asked FILE_DIRECTORY; the daemon had stopped asking it
+
+Found on the first upgrade of a real multi-folder install to v1.12.0. The
+operator runs twenty library folders across five drives from
+`data/library_folders.json`, and `start-dccore.bat check` told them:
+
+    WARN   FILE_DIRECTORY is not set yet - the daemon will start, but cannot
+           search or serve anything until it is set ...
+
+which was simply untrue - all twenty were reachable and the daemon served
+from them the moment it started.
+
+`scripts/setup_check.py` read `FILE_DIRECTORY` and nothing else. That setting
+is only the fallback for an install with no folder list, and the daemon's own
+startup check in `oserve.py` had already received exactly this correction -
+its comment above `configured = library.folders()` describes the same
+complaint word for word. The setup check kept the old rule, and it is the
+thing the operator reads first.
+
+The verdict is now `library.folders()`, the daemon's own resolution, with the
+daemon's own three outcomes so the check cannot say "ready" for a library the
+daemon will refuse, or refuse one it will serve: no folders at all is a WARN
+(not chosen yet, not misconfigured); every folder gone is a FAIL (the daemon
+exits on it, and so does the list build); some folders gone is a WARN (a
+scan-time condition the build already skips). A multi-folder install now
+sees each folder listed by name and path with its reachability, and the
+"files that would be listed" count covers every folder rather than the one
+`FILE_DIRECTORY` named.
+
+Also fixed by the same change: a stale `FILE_DIRECTORY` pointing at a drive
+that is no longer there used to make the check FAIL - and the launcher refuse
+to start - while the folders the daemon actually serves from sat there
+readable. The daemon stopped doing that in #26; the check now agrees.
+
+An install with only `FILE_DIRECTORY` set reads exactly as it did before,
+wording included - that path is untouched. The per-folder listing only appears
+when a folder file is in use.
+
+The block moved out of `main()` into
+`library_report(config, ok, warn, fail, detail)` so every branch is exercised
+with a fake config and recording reporters
+(`tests/test_the_setup_check_asks_the_library.py`, 16 tests). Before, the only
+test that ran the check did so in a child process against the developer's own
+checkout, which could reach exactly one branch: whichever that checkout
+happened to be in. `detail` - the indented per-folder sub-line - is a reporter
+passed in like the other three rather than a `print()` in the function, because
+the function sits above `main()`'s console-encoding guard in the file, and
+`tests/test_a_filename_your_code_page_cannot_spell.py` rightly forbids a print
+ahead of that guard; the first draft tripped it.
+
+Nine mutations run, all caught, including the two that matter most: the
+original `FILE_DIRECTORY`-only rule put back, and a stale `FILE_DIRECTORY`
+allowed to veto a working folder list. One earlier candidate - walking every
+configured folder for the count rather than only the reachable ones - turned
+out to be behaviourally equivalent, since `os.walk` on a missing path yields
+nothing; its test was removed rather than kept as a test that cannot fail.
+
+One existing assertion changed: `tests/test_check_setup_numeric_sanity.py`
+looked for the literal `WARN   FILE_DIRECTORY is not set yet`, which was the
+half-truth being fixed. Its sibling - a set-but-missing `FILE_DIRECTORY` is
+still a FAIL - passes unchanged, because that path kept its wording.
+
 ## 🟩 v1.12.0 (2026-09-14) - "The Several Lists Release"
 
 ### 🔴 The resume handshake takes its turn
