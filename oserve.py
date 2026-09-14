@@ -151,11 +151,11 @@ def startup():
               + ", ".join(folder.path for folder in configured))
         sys.exit(1)
 
-    # Before anything reads the side files: carry them across from the old
-    # flac-serv-* names if this install predates the rename. A no-op on every
-    # run after the first, and on any install that never had them.
-    db.migrate_legacy_side_files()
-    # After the side files and before anything serves: the counters are read
+    # The side-file migration that used to run here was removed before the
+    # public release: it renamed two files whose old name was one operator's
+    # own, and every install that could have had them had already run it.
+    #
+    # Before anything serves: the counters are read
     # by the dashboard and -stats, and both would show a half-migrated table.
     db.migrate_download_counts_to_labels()
     # And drop what the master list left in those counters before it stopped

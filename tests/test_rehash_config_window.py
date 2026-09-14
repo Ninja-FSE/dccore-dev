@@ -65,11 +65,15 @@ class TheDebugChannelIsSomewhereTheBotShouldBe(DCCoreTestCase):
         self.assertIn("#bot-debug", commands._channels_to_sync(self.config))
 
     def test_the_reported_case(self):
-        """Verbatim from the install that found it: six channels configured,
-        a debug channel added afterwards from the dashboard."""
+        """The shape of the install that found it, with invented names: six
+        channels configured, a debug channel added afterwards from the
+        dashboard.
+
+        The names were that operator's real ones until the pre-publication
+        sweep - see tests/test_channel_list.py, which carried the same six."""
         self.set_config(
-            CHANNEL="#Music,#servers,#downloads,#best-of,"
-                    "#country,#albums",
+            CHANNEL="#Alpha,#bravo,#charlie,#delta-two,"
+                    "#echo,#foxtrot",
             DEBUG_CHANNEL="#bot-debug")
 
         chans = commands._channels_to_sync(self.config)

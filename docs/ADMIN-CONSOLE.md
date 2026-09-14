@@ -416,7 +416,7 @@ cannot learn whether they guessed the mask correctly. It also means a wrong mask
 looks identical to a broken bot. Check the daemon log:
 
 ```
-[ADMINCHAT] Ignored DCC CHAT from unauthorised host: cpe-91-22-33-44.isp.net
+[ADMINCHAT] Ignored DCC CHAT from unauthorised host: cpe-198-51-100-7.isp.net
 ```
 
 That line tells you the host the server actually saw. Usually it means `+x` is not

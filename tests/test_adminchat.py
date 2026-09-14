@@ -26,7 +26,7 @@ import defaults as config  # noqa: E402
 import irc  # noqa: E402
 
 ADMIN_LINE = ":SysOp!~sysop@SysOp.users.undernet.org PRIVMSG DCCore :\x01DCC CHAT chat 2130706433 55555\x01"
-STRANGER_LINE = ":dave!~d@cpe-91-22-33-44.isp.net PRIVMSG DCCore :\x01DCC CHAT chat 2130706433 55555\x01"
+STRANGER_LINE = ":dave!~d@cpe-198-51-100-7.isp.net PRIVMSG DCCore :\x01DCC CHAT chat 2130706433 55555\x01"
 
 PASSWORD = "correct horse battery staple"
 
@@ -127,7 +127,7 @@ class HostMatching(unittest.TestCase):
 
     def test_taking_the_admin_nick_from_another_host_gets_nothing(self):
         """The exact scenario the console exists to close."""
-        line = ":SysOp!~sysop@cpe-91-22-33-44.isp.net PRIVMSG DCCore :hi"
+        line = ":SysOp!~sysop@cpe-198-51-100-7.isp.net PRIVMSG DCCore :hi"
         self.assertFalse(adminchat.is_admin_host(line))
 
     def test_matching_is_case_insensitive(self):

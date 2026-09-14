@@ -72,9 +72,9 @@ class ParsingAKick(unittest.TestCase):
     def test_a_channel_with_an_ampersand_in_its_name(self):
         """Legal per RFC 2812, and the thing six parsers here used to drop."""
         parsed = irc.parse_kick(
-            ":someop!user@host KICK #rock&metal SomeBot :bye")
+            ":someop!user@host KICK #alpha&beta SomeBot :bye")
 
-        self.assertEqual(parsed[1], "#rock&metal")
+        self.assertEqual(parsed[1], "#alpha&beta")
 
     def test_a_kick_typed_into_a_channel_is_not_a_kick(self):
         """Anchored on the server prefix. Unanchored, anyone could say this in
