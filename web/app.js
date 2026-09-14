@@ -3780,7 +3780,7 @@
         state.onConnect = payload;
         if (state.active === "settings"
             && state.settingsActiveCategory === ON_CONNECT_CATEGORY) {
-          renderSettingsFields();
+          renderSettingsCategory();
         }
       })
       .catch(function () { /* the settings page still works without it */ });
@@ -3813,7 +3813,7 @@
           problems: parts.length > 1 ? parts : []
         };
       }
-      renderSettingsFields();
+      renderSettingsCategory();
     });
   }
 
@@ -4116,7 +4116,7 @@
         }
         if (state.active === "settings"
             && state.settingsActiveCategory === SERVED_FOLDERS_CATEGORY) {
-          renderSettingsFields();
+          renderSettingsCategory();
         }
       })
       .catch(function () { /* the settings page still works without it */ });
@@ -4147,7 +4147,7 @@
           text: parts.length > 1 ? "Could not save:" : message,
           problems: parts.length > 1 ? parts : []
         };
-        renderSettingsFields();
+        renderSettingsCategory();
       });
   }
 
