@@ -569,7 +569,8 @@ def comma_batched(verb, channels, tail=""):
     return lines
 
 
-def sync_channels(oserve_mod, old_chans, new_chans, log=print):
+def sync_channels(oserve_mod, old_chans, new_chans, log=print,
+                  previous_debug_channel=None):
     """JOIN what is new, PART what is gone, NAMES the lot - through the pacer.
 
     Returns the lines queued, which is what the caller reports.
@@ -608,14 +609,56 @@ def sync_channels(oserve_mod, old_chans, new_chans, log=print):
     import runtime
 
     debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').lower()
+    previous_debug = str(previous_debug_channel or '').strip().lower()
 
     joining = [chan for chan in new_chans if chan not in old_chans]
-    # The debug channel is never parted. config.py declares DEBUG_CHANNEL as
-    # "" (blank) since #193, so a literal channel name here was a second source
-    # of truth that disagreed with the first - and the one place it would have
-    # been consulted is the one place it decides whether to PART a channel.
+
+    # The debug channel is never parted by a sync. config.py declares
+    # DEBUG_CHANNEL as "" (blank) since #193, so a literal channel name here
+    # was a second source of truth that disagreed with the first - and the one
+    # place it would have been consulted is the one place it decides whether to
+    # PART a channel.
+    protected = {debug_chan} - {""}
+
+    # AND THE VALUE THE RELOAD MAY HAVE JUST LOST (#511).
+    #
+    # debug_chan is read AFTER the reload, so the guard above worked whenever
+    # DEBUG_CHANNEL survived and did nothing in the one case it exists for:
+    # the reload handing back a blank. Then the channel is in old_chans, absent
+    # from new_chans, and `chan != ""` is true - so the bot PARTed the one
+    # channel whose whole purpose is telling the operator what it is doing.
+    #
+    # A blank is ambiguous and the two readings want opposite things. The
+    # operator may have cleared the setting on purpose; or settings.conf was
+    # briefly unreadable, admin_config.py failed to import, or the reload
+    # caught a value mid-flight - the window tests/test_audit_high_findings.py
+    # already documents. The dashboard fires a rehash on EVERY settings save,
+    # so the second is not rare.
+    #
+    # Staying is the recoverable answer. An operator who meant to clear it
+    # loses nothing they can see - a blank DEBUG_CHANNEL already stops
+    # send_debug() writing there - and the bot leaves on the next reconnect.
+    # An operator who did not mean it keeps the channel they are reading.
+    #
+    # NOT the same shape as the REQUIRED-setting restore in
+    # reload_modules_in_order(), and deliberately not: that one puts the value
+    # BACK, which is only safe because a blank NICKNAME/CHANNEL/ADMIN_NICK is
+    # never legitimate. A blank DEBUG_CHANNEL is perfectly legitimate, so this
+    # changes nothing about the setting - only about whether a PART is sent on
+    # the strength of it.
+    if previous_debug and not debug_chan:
+        protected.add(previous_debug)
+        log(f"[REHASH SYNC] DEBUG_CHANNEL came back blank from the reload. "
+            f"Staying in {previous_debug} rather than parting it - if you did "
+            f"mean to clear it, the bot leaves on the next reconnect.")
+
+    # A DELIBERATE CHANGE still parts. DEBUG_CHANNEL going from one channel to
+    # a different one is an edit nobody makes by accident, so the old one is
+    # not protected and the new one is joined - which is the behaviour this has
+    # always had, and the half a blanket "never part the debug channel" rule
+    # would have quietly broken.
     parting = [chan for chan in old_chans
-               if chan not in new_chans and chan != debug_chan]
+               if chan not in new_chans and chan not in protected]
 
     # The membership map moves with the decision, not with the send. These
     # lines are now queued rather than written, so waiting for them to go out
@@ -882,6 +925,11 @@ def _handle_rehash_request(user, target_chan):
     # changed, so an unchanged debug channel is not re-JOINed with a "due to new
     # configuration layout!" line on every single rehash.
     old_chans = _channels_to_sync(config)
+    # Captured HERE, beside old_chans and for the same reason (#511): both are
+    # what the operator's configuration actually said before the reload, and
+    # the sync needs them together to tell "you cleared this" from "the reload
+    # did not bring it back".
+    old_debug_chan = str(getattr(config, 'DEBUG_CHANNEL', '') or '').strip()
 
     # Pause the advert for the moment
     announce.is_ready = False
@@ -1096,7 +1144,8 @@ def _handle_rehash_request(user, target_chan):
             # once the thing is done, the error path has to stop claiming it
             # is not.
             try:
-                queued = sync_channels(oserve, old_chans, _channels_to_sync(config))
+                queued = sync_channels(oserve, old_chans, _channels_to_sync(config),
+                                       previous_debug_channel=old_debug_chan)
                 print(f"[REHASH SYNC] Channel sync queued as {len(queued)} paced "
                       f"line(s); they go out at MSG_DELAY like everything else "
                       f"the bot says.")

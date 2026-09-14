@@ -220,6 +220,113 @@ class WhatTheSyncDecides(ChannelSyncCase):
             self.assertIn(chan, joins[0])
 
 
+class ASettingThatCameBackBlank(ChannelSyncCase):
+    """#511. The guard that protects the debug channel read the value AFTER
+    the reload, so it worked whenever DEBUG_CHANNEL survived and did nothing
+    in the one case it exists for."""
+
+    def sync_across_reload(self, old_debug, new_debug, channel="#mainchan"):
+        """One rehash, with DEBUG_CHANNEL reading one way before the reload and
+        another way after - which is the whole of what this is about."""
+        self.set_config(CHANNEL=channel, DEBUG_CHANNEL=old_debug)
+        before = commands._channels_to_sync(config)
+        self.set_config(DEBUG_CHANNEL=new_debug)
+        after = commands._channels_to_sync(config)
+
+        self.oserve.queued.clear()
+        self.said = []
+        return commands.sync_channels(self.oserve, before, after,
+                                      log=self.said.append,
+                                      previous_debug_channel=old_debug)
+
+    def test_a_blank_from_the_reload_does_not_part_it(self):
+        """The bug. The dashboard fires a rehash on every settings save, so a
+        settings.conf that is briefly unreadable - or the window where a
+        reload has a value back at its literal default - took the bot out of
+        the one channel whose purpose is telling the operator what it is
+        doing."""
+        lines = self.sync_across_reload("#somedebug", "")
+
+        self.assertEqual([line for line in lines if line.startswith("PART")], [],
+                         "the debug channel was parted because the reload lost "
+                         "the value the guard reads")
+
+    def test_the_operator_is_told_it_stayed(self):
+        """Staying is the recoverable answer, but an operator who DID mean to
+        clear it must not be left wondering why the bot is still there."""
+        self.sync_across_reload("#somedebug", "")
+
+        self.assertTrue(any("came back blank" in line for line in self.said),
+                        self.said)
+
+    def test_the_channel_is_left_in_the_membership_map(self):
+        """dcc.py reads channel_users as proof a user is present. Not parting
+        but forgetting who is there would be the worst of both."""
+        config.channel_users.clear()
+        config.channel_users["#somedebug"] = {"someone"}
+
+        self.sync_across_reload("#somedebug", "")
+
+        self.assertEqual(config.channel_users.get("#somedebug"), {"someone"})
+
+    def test_a_deliberate_change_still_parts_the_old_one(self):
+        """The other half, and the reason this is not a blanket "never part the
+        debug channel" rule: moving DEBUG_CHANNEL from one channel to a
+        different one is an edit nobody makes by accident."""
+        lines = self.sync_across_reload("#somedebug", "#otherdebug")
+
+        self.assertIn("PART #somedebug :Removed from DCCore\r\n", lines)
+        self.assertIn("JOIN #otherdebug\r\n", lines)
+
+    def test_an_install_that_never_had_one_says_nothing(self):
+        """A line on every rehash is a line nobody reads. Asserted on THIS
+        message rather than on the log being empty - sync_channels() already
+        says "no channel changes" on a rehash that moves nothing, and that
+        line is not what this is about."""
+        self.sync_across_reload("", "")
+
+        self.assertEqual([line for line in self.said if "came back blank" in line],
+                         [], self.said)
+
+    def test_the_protection_does_not_spread_to_other_channels(self):
+        """A channel genuinely removed from CHANNEL is still parted while the
+        debug channel is being protected - otherwise this would quietly stop
+        the sync doing its job at all."""
+        self.set_config(CHANNEL="#kept,#gone", DEBUG_CHANNEL="#somedebug")
+        before = commands._channels_to_sync(config)
+        self.set_config(CHANNEL="#kept", DEBUG_CHANNEL="")
+        after = commands._channels_to_sync(config)
+        self.oserve.queued.clear()
+
+        lines = commands.sync_channels(self.oserve, before, after,
+                                       log=lambda *a: None,
+                                       previous_debug_channel="#somedebug")
+
+        self.assertEqual([line for line in lines if line.startswith("PART")],
+                         ["PART #gone :Removed from DCCore\r\n"])
+
+    def test_the_rehash_hands_it_the_value_from_before_the_reload(self):
+        """The fix is only a fix if the caller captures it at the right
+        moment - after the reload it is the same blank the guard already had.
+        Asserted as a SEQUENCE: captured beside old_chans, used after."""
+        with io.open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        body = code.split("def _handle_rehash_request(", 1)[1]
+        body = re.sub(chr(35) + "[^" + chr(10) + "]*", "", body)
+
+        self.assertIn("previous_debug_channel=old_debug_chan", body)
+        # The STATEMENT, not the name. A mutation that left the assignment
+        # exactly where it is and made it `old_debug_chan = ''` survived a
+        # check for the name plus its position - which is the same shape of
+        # hole a bare token always is.
+        self.assertIn("old_debug_chan = str(getattr(config, 'DEBUG_CHANNEL'", body,
+                      "the captured value is not read from the configuration")
+        self.assertLess(body.index("old_debug_chan ="),
+                        body.index("reload_modules_in_order("),
+                        "the value is captured after the reload, which is the "
+                        "blank the guard already could not see past")
+
+
 class TheBatcherItself(unittest.TestCase):
     """comma_batched() on its own - the arithmetic, without the sync around
     it."""
