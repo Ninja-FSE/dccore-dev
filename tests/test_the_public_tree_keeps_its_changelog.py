@@ -42,7 +42,14 @@ class TheExtractionStripsTheLineThatWouldDropTheChangelog(unittest.TestCase):
     def test_the_condition_that_makes_this_necessary_still_holds(self):
         """If .gitattributes ever stops export-ignoring the internal
         changelog, the strip step becomes wrong rather than necessary - and
-        this guard should be the thing that notices."""
+        this guard should be the thing that notices.
+
+        Meaningless in an extracted public tree, where the strip has already
+        happened and this line is gone on purpose - unlike the other two
+        tests in this class, this one reads .gitattributes directly rather
+        than through internal_file_or_skip(), so it needs the same guard by
+        hand."""
+        internal_file_or_skip(self, WORKFLOW)
         with io.open(os.path.join(REPO_ROOT, ".gitattributes"),
                      encoding="utf-8") as handle:
             attributes = handle.read()
