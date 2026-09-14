@@ -112,10 +112,7 @@ class TheFormatIsTheOperators(unittest.TestCase):
         self.assertRegex(lines[0], STAMP)
         self.assertEqual(lines[1], "b")
 
-    def test_an_invalid_format_is_refused_and_the_old_one_kept(self):
-        """A typo must not become a ValueError inside every print() for the
-        life of the process - the encoding guard exists to stop exactly that
-        class of failure."""
+    def _assert_refused(self, bad):
         before = platform_compat.console_timestamp_format()
         try:
             platform_compat.set_console_timestamp_format("%H:%M:%S")
@@ -123,12 +120,59 @@ class TheFormatIsTheOperators(unittest.TestCase):
             real = sys.stdout
             sys.stdout = kept
             try:
-                result = platform_compat.set_console_timestamp_format("%Q %Z %")
+                result = platform_compat.set_console_timestamp_format(bad)
             finally:
                 sys.stdout = real
             self.assertEqual(result, "%H:%M:%S")
             self.assertEqual(platform_compat.console_timestamp_format(), "%H:%M:%S")
             self.assertIn("not a valid", kept.getvalue())
+        finally:
+            platform_compat.set_console_timestamp_format(before)
+
+    def test_a_format_strftime_rejects_is_refused_and_the_old_one_kept(self):
+        """A typo must not become a ValueError inside every print() for the
+        life of the process - the encoding guard exists to stop exactly that
+        class of failure.
+
+        The refusal is "whatever THIS platform's strftime raises on", because
+        that is where the hazard is: Windows' C runtime raises ValueError on
+        an unknown directive, glibc passes it through as literal text, which
+        is harmless and nothing to refuse. So this drives the refusal path
+        with strftime made to raise, and runs everywhere; the probe below
+        checks the same thing against the real strftime where it applies.
+        """
+        real_strftime = platform_compat.time.strftime
+
+        def strict(fmt, *rest):
+            if "%Q" in fmt:
+                raise ValueError("Invalid format string")
+            return real_strftime(fmt, *rest)
+
+        platform_compat.time.strftime = strict
+        try:
+            self._assert_refused("%Q %Z %")
+        finally:
+            platform_compat.time.strftime = real_strftime
+
+    def test_a_format_this_platform_really_rejects_is_refused(self):
+        """The same property against the real strftime, where it has one."""
+        import time
+        try:
+            time.strftime("%Q %Z %")
+        except ValueError:
+            pass
+        else:
+            self.skipTest("this platform's strftime passes unknown directives "
+                          "through as text; there is nothing for it to refuse")
+        self._assert_refused("%Q %Z %")
+
+    def test_a_format_strftime_accepts_is_kept_verbatim(self):
+        """The other half: glibc-style pass-through must not be mistaken for
+        invalid. What strftime accepts, we accept."""
+        before = platform_compat.console_timestamp_format()
+        try:
+            self.assertEqual(platform_compat.set_console_timestamp_format("%Y-%m-%d %H:%M:%S"),
+                             "%Y-%m-%d %H:%M:%S")
         finally:
             platform_compat.set_console_timestamp_format(before)
 

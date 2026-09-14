@@ -47,7 +47,7 @@ report is noise. The dashboard's Console page keeps its own `time` field and
 is unaffected. `update_list.py` as a child of `!update` prints unstamped, and
 the daemon stamps each relayed line once.
 
-26 tests in `tests/test_every_console_line_says_when.py`. Ten mutations run,
+28 tests in `tests/test_every_console_line_says_when.py`. Ten mutations run,
 all caught - never stamping, stamping every write rather than every line,
 stamping only the first line of a multi-line write, dropping the attribute
 delegation, accepting an invalid format, double-wrapping on a second install,

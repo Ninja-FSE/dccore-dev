@@ -278,6 +278,12 @@ def set_console_timestamp_format(fmt):
     ValueError from inside every print() for the life of the process, which is
     exactly the kind of failure the encoding guard exists to prevent. An
     invalid format is refused and the previous one kept.
+
+    "Invalid" means whatever THIS platform's strftime raises on, because that
+    is where the hazard is. Windows' C runtime raises ValueError on an unknown
+    directive; glibc passes it through as literal text, which is harmless and
+    nothing to refuse. Refusing by a directive whitelist instead would reject
+    locale and platform directives that work perfectly well.
     """
     global _console_timestamp_format
     fmt = str(fmt or "")
