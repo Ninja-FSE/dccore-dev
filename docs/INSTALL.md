@@ -265,7 +265,10 @@ This checks the configuration without connecting to IRC, so a mistake surfaces b
 
 The master list is only regenerated when you ask. If a release changes what the list contains, the file you are serving keeps its old content until the next `!update` — which looks like the upgrade did nothing.
 
-### Coming from v1.11.0 or earlier
+### Coming from v1.10.0 or earlier
+
+v1.11.0 was never published as its own release, so this section covers
+everything between the last one you actually ran and this one.
 
 The list build changed what it puts in the list, so three things are worth knowing before you restart.
 
@@ -276,6 +279,8 @@ The list build changed what it puts in the list, so three things are worth knowi
 **Some folders will stop being `!rar`-packable.** A folder used to become packable by containing anything in the list; now it needs a file in `RAR_EXTENSIONS`, which ships as the audio formats. So a folder of video or documents no longer gets a row in the album list — deliberately, since packing has no size cap and a film folder is a request to compress tens of gigabytes. Individual files in those folders are still listed and still requestable by name.
 
 If you keep video, it also gets its own list from now on, travelling in the same archive people already receive. `SEPARATE_VIDEO_LIST = No` puts everything back in one list.
+
+**One thing to know if this install is very old:** a startup step that renamed two side files left over from before the daemon had its current name has been removed. It only ever did anything on an install that had never rebuilt its list since that rename shipped, years ago — if `!update` has run successfully even once since then, this does not apply to you.
 
 **Check your admin password if you ever changed it with `configure.py`.** On any install whose password had also been changed from the dashboard at some point, `configure.py` was writing the new hash to `admin_config.py` — which `settings.conf` overrides, so the change never took effect and the old password kept working. It says so plainly now, but it did not before, so a rotation you believe you did may not have happened. Log in with the password you think you removed; if it still works, set it again from the dashboard.
 

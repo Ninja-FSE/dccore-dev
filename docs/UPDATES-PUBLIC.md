@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.12.0-RC2 — The Several Lists Release
+## v1.12.0 — The Several Lists Release
 
 - **The reply that lets somebody resume a half-finished download ignored the bot's own rate limit.** It wrote straight to the server instead of waiting its turn like everything else the bot says, so a peer that reconnected and resumed repeatedly could make the bot send as fast as it was asked to - the kind of burst that gets a bot disconnected for flooding. It now waits its turn. Resuming is not slowed down in normal use: the wait only happens when the bot has just sent something else.
 - **Four small dashboard faults, three of them invisible rather than broken.** The served-folders editor was unstyled because the code asked for a style name that did not exist; a rejected OmenServe import was shown in the same colour as a successful one, because the error styling matched nothing; and changing your password showed no confirmation at all, because the panel reloaded over the message in the same instant it was written. The Console log pane also grew without limit while left open — it now keeps a generous history and trims the oldest lines beyond it.

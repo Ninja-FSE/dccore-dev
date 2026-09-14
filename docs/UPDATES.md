@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟦 v1.12.0-RC2 (2026-09-12) - "The Several Lists Release"
+## 🟩 v1.12.0 (2026-09-14) - "The Several Lists Release"
 
 ### 🔴 The resume handshake takes its turn
 

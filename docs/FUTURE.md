@@ -47,7 +47,7 @@ What DCCore does today, and what it does not do yet.
 
 ### Quality
 
-- **3276 tests**, on Linux and Windows, Python 3.10 and 3.12, in CI on every push and pull request.
+- **4746 tests**, on Linux and Windows, Python 3.10, 3.12 and 3.14, in CI on every push and pull request.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
 - **No reloaded module owns a lock** — `!rehash` re-executes a module body, so a module-level `threading.Lock()` is rebound while a thread is still inside it. Every lock in a reloaded module is allocated in `runtime.py` and bound by name, and `tests/test_no_reloaded_module_owns_a_lock.py` fails if a new one appears — the class, not the four instances that prompted it.
 - **A cross-list search index** — SQLite FTS5, built as each bot list is fetched, so the dashboard can filter every held list live rather than re-reading them at 2-11 seconds a keystroke.
@@ -104,7 +104,7 @@ The same file closes a larger gap found alongside it. All 37 dashboard rules sit
 
 ### From the audits
 
-**The v1.12.0 audit left the list this section used to ask for.** Six independent lenses — security, concurrency, the transfer path, lists, the IRC surface, and persistence — each adversarially refuted before anything counted. **26 findings confirmed, and all 26 are closed: 24 fixed, 2 recorded in tests as considered and deliberately not changed.** Every one is written up in `docs/UPDATES.md` with its failure scenario, so the next audit starts from a record rather than from "roughly forty".
+**The v1.12.0 audit left the list this section used to ask for.** Six independent lenses — security, concurrency, the transfer path, lists, the IRC surface, and persistence — each adversarially refuted before anything counted, followed by a second, pre-publication sweep of the actual public export itself. **44 findings confirmed, and all 44 are closed: 42 fixed, 2 recorded in tests as considered and deliberately not changed.** Every one is written up in `docs/UPDATES.md` with its failure scenario, so the next audit starts from a record rather than from "roughly forty".
 
 Two of the two-not-changed are worth knowing about before somebody "fixes" them: a bot-alone `list` row may claim an offer that was a near-miss for a `file` row from the same bot (refusing the fall-through would reject legitimate list replies), and the passive DCC reply goes through the outbound pacer while the accept clock runs (sending it unpaced is what `queue_mgr` exists to prevent; raising `PASSIVE_LISTEN_TIMEOUT` is the lever with no such risk).
 
