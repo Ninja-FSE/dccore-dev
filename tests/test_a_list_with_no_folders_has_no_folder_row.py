@@ -206,9 +206,14 @@ class ThePagerStopsCountingFolders(unittest.TestCase):
 
     def test_a_flat_list_is_described_in_files(self):
         """"Folders 1-1 of 1 (11,232 files)" is true and says nothing: the
-        one group is everything, not one folder out of several."""
-        source = code_only()
-        body = source.split("el.filelistsPageInfo.textContent", 1)[1][:600]
+        one group is everything, not one folder out of several.
+
+        WINDOWED ON THE FUNCTION, not on the assignment. This used to slice
+        600 characters forward from `el.filelistsPageInfo.textContent`, which
+        worked only while that assignment was the first thing the caption did.
+        #477 moved it to the END - the caption is built, then explained, then
+        assigned - and the window opened on everything AFTER it instead."""
+        body = function("renderFilelistsPager")
 
         self.assertIn("state.filelistsFlat", body)
         self.assertIn('" file" : " files"', body)
@@ -225,8 +230,8 @@ class ThePagerStopsCountingFolders(unittest.TestCase):
         self.assertEqual(declared.strip(), "false")
 
     def test_a_list_with_folders_still_counts_them(self):
-        source = code_only()
-        body = source.split("el.filelistsPageInfo.textContent", 1)[1][:600]
+        """Windowed on the function - see the note above."""
+        body = function("renderFilelistsPager")
 
         self.assertIn('"Folders "', body)
 
