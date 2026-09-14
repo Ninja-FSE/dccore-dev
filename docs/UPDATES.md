@@ -2,6 +2,66 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 🕒 Every console line says when
+
+Reported live, in the same session as the setup-check fix. Four channels
+failed to confirm at startup and the operator, reading the console window,
+could not tell whether the scheduled retry had fired yet - nothing in the
+window said when anything had happened. A log line with no time on it
+answers "what" and never "when": whether the bot rejoined a channel on its
+own, how long a rebuild took, whether the disconnect came before or after
+that transfer.
+
+Every line the daemon prints to its console - or to the file its output is
+redirected to - now starts with the time it was written:
+
+    [22:38:02] [CONNECT] Attempting to connect to irc.undernet.org:6667 ...
+    [22:53:11] [REJOIN] Asking to rejoin #example.
+
+`platform_compat.install_console_timestamps()` wraps stdout and stderr in a
+proxy that stamps the start of every LINE - not every write. print() hands
+the stream its text and its newline as separate calls, and a traceback or a
+folder listing arrives as one write holding several lines, so the proxy
+tracks whether the last character it saw ended a line and stamps every line
+that begins on the stream however the text was split to reach it. Everything
+else - encoding, isatty(), fileno(), reconfigure() - is delegated to the real
+stream, so the console-encoding guard's reconfigure() still lands where it
+did and code inspecting sys.stdout finds what it always found.
+
+It is installed at the same moment as the encoding guard, before config has
+loaded, so the two config-loading lines are stamped too; the operator's own
+format is applied the line after config exists. The format is read per line
+rather than captured at install for exactly that reason.
+
+`CONSOLE_TIMESTAMP_FORMAT` (Debug & logging on the dashboard; strftime; empty
+= off) defaults to `%H:%M:%S`, the mIRC convention and enough for a window
+watched live. A log kept for days wants `%Y-%m-%d %H:%M:%S`. An invalid
+format is refused with a message and the previous one kept, rather than
+becoming a ValueError inside every print() for the life of the process.
+
+Only the daemon installs it. `scripts/setup_check.py` and `configure.py` print
+a report for a person to read once, not a log, and a stamp on every line of a
+report is noise. The dashboard's Console page keeps its own `time` field and
+is unaffected. `update_list.py` as a child of `!update` prints unstamped, and
+the daemon stamps each relayed line once.
+
+26 tests in `tests/test_every_console_line_says_when.py`. Ten mutations run,
+all caught - never stamping, stamping every write rather than every line,
+stamping only the first line of a multi-line write, dropping the attribute
+delegation, accepting an invalid format, double-wrapping on a second install,
+leaving stderr unstamped, installing after config loads, and never applying
+the operator's setting.
+
+Two existing tests changed. `tests/test_console_encoding.py`'s stderr
+fidelity test imports oserve in a child and compared stderr exactly; it now
+strips the stamp first and compares the rest exactly, rather than weakening
+to a substring check. And `settings.conf.sample` is generated from
+`defaults.py` by `scripts/gen_settings_sample.py` - the first draft hand-wrote
+the entry, and `test_the_committed_sample_matches_what_the_generator_produces`
+caught it, which is what it is for.
+
 ## 🟩 v1.12.1 (2026-09-14) - "The Setup Check Catches Up"
 
 ### 🗂️ The setup check asked FILE_DIRECTORY; the daemon had stopped asking it
