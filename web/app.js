@@ -113,6 +113,9 @@
     // thing should not still be there, unasked, while looking for the next.
     filelistsRevealEmpty: false,
     filelistsOffset: 0, filelistsTotal: 0, filelistsReturned: 0,
+    // Whether the server's row ceiling - not the end of the list - is why
+    // this page has fewer folders on it than were asked for (#477).
+    filelistsRowCapped: false,
     filelistsHistory: [],
     settingsLoaded: false, settingsCategories: [], settingsActiveCategory: null,
     settingsBaseline: {}, settingsDirty: {}, settingsAdminPasswordSet: false,
@@ -1789,11 +1792,31 @@
       // "Folders 1-1 of 1 (11,232 files)" is true and says nothing: a flat
       // list has one group because everything is in it, not because the page
       // is showing one folder out of several.
-      el.filelistsPageInfo.textContent = (total === 1 && state.filelistsFlat)
+      var caption = (total === 1 && state.filelistsFlat)
         ? files.toLocaleString() + (files === 1 ? " file" : " files")
         : "Folders " + start.toLocaleString() + "–" + end.toLocaleString() +
           " of " + total.toLocaleString() +
           " (" + files.toLocaleString() + (files === 1 ? " file)" : " files)");
+      // WHY THIS PAGE IS SHORT (#477).
+      //
+      // Reported live, with screenshots: pages of 31 folders, then 1, then
+      // 148, and an operator reasonably reading it as a broken pager. It is
+      // not - page_folder_groups() stops a page early once the folders on it
+      // would carry more ROWS than the response ceiling allows, and always
+      // returns at least one folder even when that folder alone is over it.
+      // "Folders 32–32 of 3 605" is a correct sentence that looks exactly
+      // like a bug.
+      //
+      // The server has computed and sent `row_capped` all along, precisely so
+      // this could be said; nothing ever read it. A mechanism that works and
+      // cannot explain itself costs more than one that is simply missing,
+      // because the operator goes looking for the fault.
+      if (state.filelistsRowCapped) {
+        caption += " — fewer folders on this page: one or more of them holds " +
+          "enough files to reach the per-page limit on its own. " +
+          "Next shows the rest.";
+      }
+      el.filelistsPageInfo.textContent = caption;
       el.filelistsPrevBtn.disabled = offset <= 0;
       el.filelistsNextBtn.disabled = (offset + shown) >= total;
     }
@@ -2758,6 +2781,11 @@
           state.filelistsTotal = Array.isArray(payload)
             ? groups.length : (payload.total || 0);
           state.filelistsReturned = groups.length;
+          // The server has always sent this and nothing has ever read it
+          // (#477). An array payload is the unpaged shape, which cannot be
+          // capped.
+          state.filelistsRowCapped = Array.isArray(payload)
+            ? false : !!payload.row_capped;
           renderFilelistsPager(Array.isArray(payload)
             ? payload.length : (payload.total_files || 0));
           state.filelistsFilterPayload = filter ? payload : null;
