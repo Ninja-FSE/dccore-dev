@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.12.1 (2026-09-14) - "The Setup Check Catches Up"
 
 ### 🗂️ The setup check asked FILE_DIRECTORY; the daemon had stopped asking it
 
