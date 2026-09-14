@@ -120,16 +120,21 @@ class OfferParsingTests(unittest.TestCase):
 
 class PassiveOfferParsingTests(unittest.TestCase):
     """port 0 plus a trailing token is the standard passive/reverse DCC
-    marker - another bot on the network (ValOgg) answered a cross-bot fetch
-    request with exactly this shape during live testing, and the old code
+    marker - a peer bot answered a cross-bot fetch request with exactly this
+    shape during live testing, and the old code
     rejected it as "Unusable" because it checked `port <= 0`. It must now
     parse as a distinct, valid result - see parse_dcc_send_offer()'s
     docstring and adminchat.parse_offer()'s identical convention for
     passive DCC CHAT."""
 
     def test_the_reported_offer_parses(self):
-        """Reproduction of a real passive offer's shape - the claimed IP is a
-        TEST-NET-3 address (RFC 5737), not the real one originally logged."""
+        """A real passive offer's SHAPE, with invented contents.
+
+        This used to say that only the address had been replaced, which
+        certifies everything beside it as genuine - and a sentence doing that
+        is what kept real names alive through three earlier scrub passes. The
+        claimed IP is a TEST-NET-3 address (RFC 5737); the filename is an
+        example."""
         offer = dcc_fetch.parse_dcc_send_offer(
             "DCC SEND [Metallica]_-_72_Seasons_-_01-72_Seasons.mp3 "
             "3405803818 0 3359600 11124")
@@ -1308,8 +1313,14 @@ class PassiveOfferEndToEndTests(DCCoreTestCase):
         return payload.rstrip("\x01\r\n").split()
 
     def test_the_reported_offer_end_to_end(self):
-        """The exact ValOgg shape from a real capture, all the way through a
-        real accepted connection and a byte-for-byte written file."""
+        """The exact shape from a real capture, all the way through a real
+        accepted connection and a byte-for-byte written file.
+
+        The SHAPE is real; the nick that used to be named here was not, and
+        saying otherwise is what kept three real names alive through three
+        scrub passes - see tests/test_advert_listener.py's own note. A
+        sentence asserting a name is genuine is the thing that stops the next
+        reader replacing it."""
         payload = b"MP3" + (b"\x05\x06\x07\x08" * 2048)
         rid = self._enqueue_and_offer("valogg", "72_Seasons.mp3")
         offer_line = (f"DCC SEND 72_Seasons.mp3 {ip_long('198.51.100.9')} "
@@ -2849,11 +2860,11 @@ class TurningTheSizeCapsOff(DCCoreTestCase):
 
 
 class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
-    """From an operator's own log, requesting from the dashboard:
+    """The shape an operator's own log showed, with the peer renamed:
 
         [FETCH] Requested 'BBCRadio - Under Milk Wood - Richard Burton.mp3
-                ::INFO:: 79.53MB' from RemoteServeDCC (request f96ba6b77dff).
-        [FETCH] Rejected unsolicited DCC SEND from RemoteServeDCC
+                ::INFO:: 79.53MB' from PeerServeDCC (request f96ba6b77dff).
+        [FETCH] Rejected unsolicited DCC SEND from PeerServeDCC
                 ('BBCRadio_-_Under_Milk_Wood_-_Richard_Burton.mp3'):
                 no matching pending request.
 
@@ -2867,7 +2878,7 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
         """The dashboard sends what the operator clicked, which is the whole
         list row. The serving side has stripped this since #234; the fetching
         side never learned to."""
-        row = dcc_fetch.new_fetch_row("RemoteServeDCC", self.LINE)
+        row = dcc_fetch.new_fetch_row("PeerServeDCC", self.LINE)
 
         self.assertEqual(row["filename"],
                          "BBCRadio - Under Milk Wood - Richard Burton.mp3")
@@ -2877,11 +2888,11 @@ class AskingForARowCopiedOutOfAnotherBotsList(DCCoreTestCase):
         """The end-to-end shape of the bug: ask with the suffix, be answered
         without it and with underscores for spaces, and match."""
         self.set_config(fetch_queue={})
-        request_id = dcc_fetch.enqueue_fetch("RemoteServeDCC", self.LINE)
+        request_id = dcc_fetch.enqueue_fetch("PeerServeDCC", self.LINE)
         config.fetch_queue[request_id]["state"] = "offered"
 
         claimed_id, row = dcc_fetch._claim_matching_offer_locked(
-            config.fetch_queue, "RemoteServeDCC", self.SENT_BACK)
+            config.fetch_queue, "PeerServeDCC", self.SENT_BACK)
 
         self.assertEqual(claimed_id, request_id)
         self.assertEqual(row["state"], "receiving")

@@ -541,8 +541,8 @@ def migrate_list_base_name(log=print):
     is filed under a name nothing is looking for any more. It stays that way
     until the next successful !update, which on a weekly rebuild schedule is
     up to a week of a bot that looks healthy and answers every request with
-    "not found". db.migrate_legacy_side_files()'s own docstring describes
-    this exact failure shape for the flac-serv-* rename; this is the same
+    "not found". The side-file migration's own docstring described
+    this exact failure shape for the side-file rename; this is the same
     problem, for a prefix rather than a single filename.
 
     Deliberately narrow, matching that function's safety properties:

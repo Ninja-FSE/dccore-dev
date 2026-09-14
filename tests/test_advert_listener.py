@@ -17,7 +17,7 @@ THE NAMES, HOWEVER, ARE NOT REAL, and this paragraph used to say otherwise.
 
 Every bot nick here is invented. None of those 33 operators agreed to appear
 in a public repository, and this file ships in one. The senders were renamed
-in 992b410; three more names were found later sitting INSIDE the advert text
+in an early pass; three more were found later sitting INSIDE the advert text
 rather than in the sender field - a record holder, a second record holder, and
 a bot's own slogan - and renamed too. Replacements keep the original character
 length, so nothing that depends on where a 512-byte line breaks has moved.
@@ -221,7 +221,7 @@ DCCOREWIN = (
 )
 
 DEEPCOVE = (
-    '\x0308,02 Fios - \x0311,02Type:\x0308,02 @Deepcove \x0311,02For My List '
+    '\x0308,02 Nova - \x0311,02Type:\x0308,02 @Deepcove \x0311,02For My List '
     'Of:\x0308,02 288,090 \x0311,02Files \x0304,02 \x0311,02Slots:\x0308,02 6/6 '
     '\x0304,02 \x0311,02Queued:\x0308,02 0 \x0304,02 \x0311,02Speed:\x0308,02 0cps '
     '\x0304,02 \x0311,02Next: \x0308,02NOW \x0304,02 \x0311,02Served:\x0308,02 '
@@ -305,7 +305,7 @@ TERAVISTA_RAR = (
 )
 
 OAKWOOD = (
-    '\x0312,15\x02\x032,15<<<\x0312,15M\xe8N\xe1Ce\x032,15>>>\x02\x0314,15\x95 \x0302,15Type:\x0312,15 '
+    '\x0312,15\x02\x032,15<<<\x0312,15T\xe8R\xe1Ce\x032,15>>>\x02\x0314,15\x95 \x0302,15Type:\x0312,15 '
     '@Oakwood \x0302,15For My List Of:\x0312,15 34,842 \x0302,15Files \x0314,15\x95 '
     '\x0302,15Slots:\x0312,15 3/3 \x0314,15\x95 \x0302,15Queued:\x0312,15 0 \x0314,15\x95 '
     '\x0302,15Speed:\x0312,15 0cps \x0314,15\x95 \x0302,15Next: \x0312,15NOW \x0314,15\x95 '
@@ -433,13 +433,13 @@ ECHOSONIC_TAIL = (
     '\x0312,07Mode: \x0300,07Normal \x0314,07'
 )
 
-# b0lt was in the very first capture and this file did not have it, because the
+# quietserv was in the very first capture and this file did not have it, because the
 # sample was built by keeping the lines that PARSED - so the one bot whose
 # wording defeated the parser was filtered out by the parser it defeats. It
 # turned up when a second capture, from three channels these fixtures had never
 # seen, was replayed and the senders that registered NOTHING were read by hand.
-B0LT = (
-    ' Type: @b0lt For My List Of 116,828 Files (1.82TB) Date: May 4th '
+QUIETSERV = (
+    ' Type: @quietserv For My List Of 116,828 Files (1.82TB) Date: May 4th '
     '\xa4 Slots: 2/2 Queued: 0 Speed: 0KB/s (Avg: 6.52MB/s) Search: ON '
     'Mode: Normal \xa4 Served: 1,489,107 Since: Sep 2006 '
 )
@@ -486,7 +486,7 @@ ALL_CAPTURED = [
     ('va45tide-', VA45TIDE),
     ('ValOgg', VALOGG),
     ('Echosonic', ECHOSONIC),
-    ('b0lt', B0LT),
+    ('quietserv', QUIETSERV),
 ]
 
 # The five bots whose advert does not fit one line: (nick, first, tail).
@@ -1305,18 +1305,18 @@ class TheExactSizeComesFromTheCtcp(CaptureTestCase):
 
 
 class TheWordingVariesMoreThanOneChannelShows(CaptureTestCase):
-    """b0lt, and how it was found.
+    """quietserv, and how it was found.
 
     These fixtures came from one twenty-minute window in one channel, and the
     sample was assembled by keeping the lines that PARSED. That is a filter
     with an obvious hole in hindsight: a bot whose wording defeats the parser
-    is invisible to a sample the parser selected. b0lt sat in the very first
+    is invisible to a sample the parser selected. quietserv sat in the very first
     capture the whole time.
 
     It turned up when a second capture - three channels these fixtures had
     never seen - was replayed through the real capture path and the senders
     that registered NOTHING were read by hand. Everything else in that capture
-    was a trivia game, a greeter, or people talking. b0lt was a file server
+    was a trivia game, a greeter, or people talking. quietserv was a file server
     with 116,828 files and nobody was listening to it.
 
     Two differences, both small, both fatal on their own:
@@ -1326,25 +1326,25 @@ class TheWordingVariesMoreThanOneChannelShows(CaptureTestCase):
     """
 
     def test_the_count_survives_a_missing_colon(self):
-        advert = irc.parse_channel_advert(B0LT)
+        advert = irc.parse_channel_advert(QUIETSERV)
 
         self.assertIsNotNone(advert, "the whole advert was unreadable")
-        self.assertEqual(advert["nick"], "b0lt")
+        self.assertEqual(advert["nick"], "quietserv")
         self.assertEqual(advert["files"], 116828)
 
     def test_a_third_way_of_writing_the_date(self):
         """"List:", "created", and now "Date:". The date is the entire
         freshness signal, so a label this family uses and the parser does not
         know reads as "never published one"."""
-        self.assertEqual(irc.parse_channel_advert(B0LT)["list_date"], "May 4th")
+        self.assertEqual(irc.parse_channel_advert(QUIETSERV)["list_date"], "May 4th")
 
     def test_it_publishes_a_size_as_well(self):
-        self.assertEqual(irc.parse_channel_advert(B0LT)["list_size"], "1.82TB")
+        self.assertEqual(irc.parse_channel_advert(QUIETSERV)["list_size"], "1.82TB")
 
     def test_it_reaches_the_registry(self):
-        self.capture("b0lt", B0LT)
+        self.capture("quietserv", QUIETSERV)
 
-        entry = self.entry("b0lt")
+        entry = self.entry("quietserv")
         self.assertEqual(entry["files"], 116828)
         self.assertEqual(entry["list_date"], "May 4th")
 
@@ -1392,7 +1392,7 @@ class TheShapesThisDoesNotRead(unittest.TestCase):
         self.assertIsNone(irc.parse_channel_advert(
             "  86.994  Songs in English, Spanish, Dutch, German, French, "
             "Italian, Russian, etc...  Also   3.665  Christmas Songs  &  "
-            "12.902 Instrumentals! Type: !Melodia Matt Monro - No Puedo "
+            "12.902 Instrumentals! Type: !Cadence Matt Monro - No Puedo "
             "Quitar Mis Ojos De Ti.mp3 To Get This  3.17MB 3m28s MP3"))
 
 

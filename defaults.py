@@ -515,14 +515,14 @@ DEBUG_TO_CONSOLE: bool = True
 # update_list.py: that split literal is the same shape as issue #34, where the
 # reader and the writer of speed_record.txt agreed only by coincidence.
 #
-# The "flac-serv" prefix these carried was one operator's server name, and it
-# was kept because renaming alone would orphan the stats on every existing
-# deployment until the next successful !update - the advert would publish "0B"
-# and @<nick>-que would report no size in the meantime.
+# These were once named after an operator's own server rather than after the
+# program. A startup migration carried the old files across so that renaming
+# would not orphan the published stats until the next successful !update - the
+# advert would otherwise publish "0B" and @<nick>-que report no size.
 #
-# So it is not a rename. db.migrate_legacy_side_files() moves the old files to
-# these names at startup, and only when the setting is still at the default
-# below, so an operator who chose their own name is left alone.
+# Both the migration and the old name were removed before the public release:
+# the name was an identifier, and the only installs that could still have held
+# those files had run the migration long before.
 # A DOT and not a dash, which is not cosmetic: find_latest_list() globs
 # LIST_BASE_NAME + "-*.txt", and on a case-insensitive filesystem
 # "dccore-size.txt" matches "DCCore-*.txt" and sorts AFTER the dated list - so
@@ -1101,7 +1101,7 @@ def _migrate_local_config_to_admin_config(directory=None, log=print):
     one of those settings is correctly filled in, one file over.
 
     Must run HERE, at module import time before `from admin_config import *`
-    below - not from oserve.startup() the way db.migrate_legacy_side_files()
+    below - not from oserve.startup() the way the side-file migration
     and update_list.migrate_list_base_name() are, both called well after that
     import has already happened. By the time startup() runs it is too late:
     the override this function exists to redirect would already have been

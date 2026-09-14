@@ -704,8 +704,8 @@ class BroadcastRepliesFromRealBots(DCCoreTestCase):
 
     CHATTER = [
         "Thank You !!! I have now received 1 file(s) 702 Kb from you, for a "
-        "total of 24,024 file(s) 104 GbB leeched since 31st December 2008 "
-        "KeepTrack 6.2 by ^OmeN^",
+        "total of 11,111 file(s) 222 GbB leeched since 1st January 2020 "
+        "KeepTrack 6.2",
         "Matches for *Testament*Souls* Copy and Paste in Channel to Request a "
         "File (Slot:0/) (Que:0/16) in Use",
     ]
@@ -859,8 +859,8 @@ class SearchHeaderStats(DCCoreTestCase):
     def test_unrelated_chatter_is_not_a_header(self):
         self.assertIsNone(irc.parse_search_header(
             "Thank You !!! I have now received 1 file(s) 702 Kb from you, for "
-            "a total of 24,024 file(s) 104 GbB leeched since 31st December "
-            "2008 KeepTrack 6.2 by ^OmeN^"))
+            "a total of 11,111 file(s) 222 GbB leeched since 1st January "
+            "2020 KeepTrack 6.2"))
         self.assertIsNone(irc.parse_search_header(""))
         self.assertIsNone(irc.parse_search_header("just some words"))
 

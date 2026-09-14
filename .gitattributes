@@ -58,3 +58,12 @@ docs/UPDATES.md    export-ignore
 # numbers that resolve to nothing outside it. It exists to be read by the
 # two of us, not shipped.
 docs/PUBLIC-REPO-WORKFLOW.md    export-ignore
+
+# The denylist, NOT the guard. tests/test_no_personal_identifiers_ship.py
+# still ships and still runs every structural check it has; only the list
+# of hashes stops travelling with it. See that file's own docstring: the
+# hashes are a truncated unsalted SHA-256 of a single lowercased word,
+# recoverable from a wordlist, and each one is labelled with what it is -
+# so shipping them publishes exactly what they exist to hide. Two of this
+# operator's channels were recovered from the shipped list by hand.
+tests/forbidden_identifiers.py    export-ignore

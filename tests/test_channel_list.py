@@ -63,16 +63,25 @@ class TheJoinLineNeverContainsASpace(DCCoreTestCase):
         self.set_config(DEBUG_CHANNEL="")
 
     def test_spaces_after_commas_are_tolerated(self):
-        self.set_config(CHANNEL="#Music, #servers, #downloads")
+        self.set_config(CHANNEL="#Alpha, #bravo, #charlie")
 
         self.assertEqual(join_argument(),
-                         "#Music,#servers,#downloads")
+                         "#Alpha,#bravo,#charlie")
         self.assertNotIn(" ", join_argument())
 
     def test_the_real_reported_configuration(self):
-        """Six channels, one joined. Verbatim from the install that found it."""
-        self.set_config(CHANNEL="#Music, #servers, #downloads, "
-                                "#best-of, #country, #albums")
+        """Six channels, one joined - the shape of the install that found it,
+        with invented names.
+
+        The names here used to be that operator's real ones, and the docstring
+        said so. What made it a leak was not the report: it was that a later
+        partial scrub stripped a common prefix off each and left the
+        distinctive tails, in the operator's own configured ORDER, under a
+        sentence telling every reader they were genuine. Six invented names
+        reproduce the case exactly - what this test needs is the count, the
+        spacing and one capital."""
+        self.set_config(CHANNEL="#Alpha, #bravo, #charlie, "
+                                "#delta-two, #echo, #foxtrot")
 
         self.assertEqual(len(irc.configured_channels()), 6)
         self.assertNotIn(" ", join_argument())
@@ -100,9 +109,9 @@ class TheJoinLineNeverContainsASpace(DCCoreTestCase):
     def test_case_is_left_alone(self):
         """Channel names are case-insensitive on the wire, but the operator
         typed what they typed and it appears in the advert."""
-        self.set_config(CHANNEL="#Music, #servers")
+        self.set_config(CHANNEL="#Alpha, #bravo")
 
-        self.assertEqual(irc.configured_channels()[0], "#Music")
+        self.assertEqual(irc.configured_channels()[0], "#Alpha")
 
 
 class TheOrdinaryCasesStillWork(DCCoreTestCase):

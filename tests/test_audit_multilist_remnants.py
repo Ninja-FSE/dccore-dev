@@ -18,7 +18,7 @@ means "the primary list" rather than failing.
     look for it, and those channels advertised a library they no longer had a
     list for.
 
-NOT CHANGED: db.migrate_legacy_side_files()
+NOT CHANGED: the side-file migration (since removed)
 
 It has the same primary-only shape and the critic flagged it alongside these,
 but the consequence does not follow. The legacy side-file names it migrates

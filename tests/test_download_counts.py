@@ -79,17 +79,17 @@ class TwoTracksWithTheSameName(CountsCase):
     popular when two different tracks are."""
 
     def test_they_are_counted_apart(self):
-        db.record_download("Dolch/Nacht/01 - Intro.flac", "01 - Intro.flac", "file")
-        db.record_download("EchO/Devoid/01 - Intro.flac", "01 - Intro.flac", "file")
-        db.record_download("EchO/Devoid/01 - Intro.flac", "01 - Intro.flac", "file")
+        db.record_download("Norvale/Dusk/01 - Intro.flac", "01 - Intro.flac", "file")
+        db.record_download("Calder/Hollow/01 - Intro.flac", "01 - Intro.flac", "file")
+        db.record_download("Calder/Hollow/01 - Intro.flac", "01 - Intro.flac", "file")
 
         counts = self.counts()
-        self.assertEqual(counts["Dolch/Nacht/01 - Intro.flac"]["count"], 1)
-        self.assertEqual(counts["EchO/Devoid/01 - Intro.flac"]["count"], 2)
+        self.assertEqual(counts["Norvale/Dusk/01 - Intro.flac"]["count"], 1)
+        self.assertEqual(counts["Calder/Hollow/01 - Intro.flac"]["count"], 2)
 
     def test_but_a_person_still_reads_the_filename(self):
         """Keyed by path, displayed by basename - the table is for humans."""
-        db.record_download("EchO/Devoid/01 - Intro.flac", "01 - Intro.flac", "file")
+        db.record_download("Calder/Hollow/01 - Intro.flac", "01 - Intro.flac", "file")
 
         self.assertEqual(db.top_downloads()[0]["name"], "01 - Intro.flac")
 
@@ -350,7 +350,7 @@ class WhatEachSendIsCountedAs(DCCoreTestCase):
         a "01 - Intro.flac" (#110), so a basename key would credit one track
         with the other's downloads."""
         first = dcc.download_count_identity(
-            os.path.join(config.FILE_DIRECTORY, "Dolch", "Nacht", "01 - Intro.flac"),
+            os.path.join(config.FILE_DIRECTORY, "Norvale", "Dusk", "01 - Intro.flac"),
             "01 - Intro.flac")
         second = dcc.download_count_identity(
             os.path.join(config.FILE_DIRECTORY, "EchO", "Devoid", "01 - Intro.flac"),
@@ -372,12 +372,12 @@ class WhatEachSendIsCountedAs(DCCoreTestCase):
         whatever that location happens to be called.
         """
         key, _name, _kind = dcc.download_count_identity(
-            os.path.join(config.FILE_DIRECTORY, "Dolch", "Nacht", "01 - Intro.flac"),
+            os.path.join(config.FILE_DIRECTORY, "Norvale", "Dusk", "01 - Intro.flac"),
             "01 - Intro.flac")
 
         self.assertNotIn(config.FILE_DIRECTORY, key)
         self.assertFalse(os.path.isabs(key))
-        self.assertIn("Dolch", key)
+        self.assertIn("Norvale", key)
 
     def test_an_archive_from_the_temp_directory_is_an_album(self):
         key, name, kind = dcc.download_count_identity(
