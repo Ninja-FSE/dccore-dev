@@ -12,6 +12,79 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 
 ---
 
+## The seven steps
+
+The whole install, in order. Each one is covered in detail below - this is
+here because the sequence is one thing an operator does once, and it was split
+across two separately numbered sections.
+
+1. **Install Python.** [Python 3.10.0 (64-bit)](https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe),
+   or any later 3.10+.
+2. **Tick both boxes in the installer:** *Add Python to PATH* and *py launcher*.
+3. **Check it took**, in a NEW Command Prompt:
+   `python --version`, `py --version`, `where python`, `where py`.
+4. **Only if you want the web dashboard:** `py -3 -m pip install -r requirements-web.txt`
+5. **Configure:** `py configure.py`
+6. **Check the setup:** `scripts\windows\start-dccore.bat check`
+7. **Start it, and read the first few lines:** `scripts\windows\start-dccore.bat`
+
+Steps 4 and 7 are the two that catch people out, and step 7 is how you find
+out about step 4 - see below.
+
+---
+
+## Did it actually start?
+
+Step 7 prints a lot. Three lines tell you whether the **web dashboard** came
+up, and they are worth knowing apart because they send you to different
+places.
+
+**It is running:**
+
+```
+[WEBUI] Dashboard starting on http://127.0.0.1:8420/ (login required).
+```
+
+The host and port are your own `WEBUI_HOST`/`WEBUI_PORT`. Open that address.
+
+**It is switched off:**
+
+```
+[WEBUI] Disabled via config.WEBUI_ENABLED = False.
+```
+
+The dashboard is opt-in - it is a network listener, so a missing switch is
+never read as consent to open one. Set `WEBUI_ENABLED = True` in
+`admin_config.py` or `settings.conf`. `py configure.py` asks you this.
+
+**Flask is not installed:**
+
+```
+[WEBUI] Flask not installed; dashboard disabled.
+```
+
+That is step 4. The daemon itself needs nothing beyond the standard library
+and carries on serving files perfectly well - only the dashboard is
+unavailable, which is why a missing Flask is a message rather than a failure.
+
+(A different line, `[WEBUI] Could not import webserver: ...`, means
+`webserver.py` itself failed to import - a damaged file rather than a missing
+package.)
+
+There is a fourth, and it stops the dashboard rather than the daemon:
+
+```
+[WEBUI] ADMIN_PASSWORD_HASH is not set; refusing to start the dashboard
+```
+
+Run `python adminchat.py` to set one.
+
+**The IRC side is separate** and reports itself separately - look for the
+`[JOIN]` line naming how many channels it asked for. A daemon that is serving
+files with no dashboard is a working daemon.
+
+---
+
 ## Before you start
 
 **Python 3.10 or newer.** Nothing else is required — the daemon and its test
@@ -78,8 +151,10 @@ suite are stdlib-only, which is why they run on a bare machine with no
    scripts\windows\start-dccore.bat
    ```
 
-   If you did step 4, look for `[WEB ENABLED]` in the output — that is the
-   dashboard confirming Flask was found and the server is up.
+   If you did step 4, look for `[WEBUI] Dashboard starting on http://...` in
+   the output — that is the dashboard confirming Flask was found and the
+   server is up. See [Did it actually start?](#did-it-actually-start) for what
+   the other three possible lines mean.
 
 **WinRAR is optional.** Without it, single-file transfers work normally and only
 whole-album (`!rar`) packing fails. If you have it, no configuration is needed:
@@ -170,6 +245,10 @@ scripts\windows\start-dccore.bat
 
 Ctrl-C in that window stops it. The launcher runs the setup check first and
 refuses to start if it fails.
+
+Then read the first few lines it prints - see [Did it actually
+start?](#did-it-actually-start) above for the four that tell you whether the
+dashboard came up, and which of them means you skipped step 4.
 
 ---
 
