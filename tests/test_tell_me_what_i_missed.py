@@ -452,8 +452,19 @@ class TheThingsWorthTellingSomebodyAbout(DCCoreTestCase):
 
     @staticmethod
     def source(name):
+        """`name`'s source with comments taken out.
+
+        Every window in this class is anchored on the TEXT OF A MESSAGE, so a
+        comment quoting that message moves the anchor - which is exactly what
+        #510 did: a note explaining why 405 needs different wording quoted
+        "gave up after 3 attempts", the split landed on the comment several
+        hundred lines above the branch, and the window ran to an unrelated
+        `else:` with no notice= in it at all.
+        """
+        import re as _re
+
         with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
-            return handle.read()
+            return _re.sub(chr(35) + "[^" + chr(10) + "]*", "", handle.read())
 
     def calls(self, name):
         import re

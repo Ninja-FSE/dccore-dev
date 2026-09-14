@@ -407,6 +407,84 @@ on a developer box. It checks only the components below the fixture's own
 tree now, and there is a test for that: the tree's parent is made to list
 nothing, which is the same condition on any platform.
 
+### 🔴 A JOIN nobody checked
+
+Closes #510. Reported live, and the numbers are the whole story: fourteen
+configured channels, **eleven joined**. The three missing were the last three
+in configured order, and the debug channel - sent as a separate command after
+them - was missing too.
+
+The connect path sent every channel as ONE `JOIN` line and then a second
+command for the debug channel with no gap at all. The server takes the head
+of an over-long JOIN and drops the tail, so what is lost is whatever is at
+the end. The operator's own client was showing the network throttling joins
+in the same window.
+
+Three separate things then kept it quiet, and each of them is individually
+defensible:
+
+- **A refusal numeric arriving at connect time is deliberately not counted.**
+  `note_join_refused()` only counts for a channel already being retried,
+  because *"inventing a retry schedule for [anything else] would start the
+  bot knocking on doors nobody asked it to."* Sound - and it means a refusal
+  during the initial JOIN went nowhere.
+- **The retry machinery is seeded by the KICK handler alone.**
+  `config.kicked_channels` had exactly one writer, so the daemon had a
+  bounded retry for a channel it was thrown out of and nothing at all for one
+  it never got into.
+- **The warning that did fire went to the debug channel.**
+  `activation_watchdog()` had already computed the answer exactly -
+  `missing = target_channels - channels_confirmed` - and sent it through
+  `send_debug()`, which writes to the debug channel. When a truncated JOIN is
+  the cause, that is routinely one of the channels that went missing. It
+  carried no `notice=`, so it never reached the dashboard either.
+
+So the bot activated, reported itself healthy, served files, and was absent
+from three of the channels it is configured to serve.
+
+#### What changed
+
+**The channels go out a few at a time**, four per `JOIN` with a two-second
+gap. Fourteen channels become four lines over about six seconds, against a
+five-second settle the connect path already waits. The debug channel rides in
+that batching rather than trailing it - it was the most exposed line in the
+burst, and the one whose loss costs the operator the message saying anything
+was lost.
+
+**Whatever never answers is tried again.** The watchdog's `missing` set is
+fed to `note_join_unconfirmed()`, which writes the same entry a kick does -
+so `channels_to_rejoin()`, the attempt limit and the advert-timer retry all
+work with no special case. The reason is recorded alongside, because "gave up
+after 3 attempts" reads very differently for a channel that threw us out and
+one that never let us in.
+
+**The warning reaches the dashboard**, not only a channel that may be gone.
+
+**`405 ERR_TOOMANYCHANNELS` is now a refusal**, with its own wording. It
+belongs with the four permanent ones rather than with a throttle - it keeps
+being true until the operator serves fewer channels - but "gave up after 3
+attempts" would send somebody looking for a fault on the channel's side. It
+says what is actually wrong instead. And a refusal that is *not* counted is
+now printed rather than discarded in silence, which is most of why serving
+eleven of fourteen channels looked like nothing had happened.
+
+**One definition of where the bot belongs.** `irc.channels_we_should_be_in()`
+is the single answer now; `commands._channels_to_sync()` delegates to it.
+There were two hand-written answers to that question, in two modules that
+both get reloaded - and this file already carries a comment about exactly
+that hazard, for exactly this setting (#193), in the one place it decides
+whether to PART a channel.
+
+Eleven mutation-checked properties, no survivors. Six existing tests moved
+with the mechanism: five windows in `test_on_connect.py` were anchored on
+`JOIN {channels}`, which matters more than it sounds - `str.split()` returns
+the WHOLE body when it finds nothing, so a stale marker silently widens a
+window to the entire function and goes on passing. Two source-reading guards
+in other files asserted the shape of the old fix rather than the behaviour
+and are driven now. And one was broken by a COMMENT of mine quoting the
+message it anchors on, which is the third time that has happened in this
+codebase - that file strips comments before searching now.
+
 ### 🟢 The rehash's channel sync takes its turn
 
 Closes #440.
