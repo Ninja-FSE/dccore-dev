@@ -127,18 +127,29 @@ the omissions surface, because it is the last point at which they are cheap.
    `tests/uncovered_functions.txt`. Keep anything a shipped file's tests
    depend on (`scripts/gen_settings_sample.py`, `docs/CONVENTIONS.md`).
 
-   **Also strip the two internal-only lines from `.gitattributes`:**
+   **Also strip the one internal-only line from `.gitattributes` that is
+   wrong in the public repo:**
 
        docs/UPDATES.md    export-ignore
-       docs/PUBLIC-REPO-WORKFLOW.md    export-ignore
 
-   Both are correct here and actively wrong there. Step 3 renames
-   `UPDATES-PUBLIC.md` onto `docs/UPDATES.md`, so in the public repo that
-   path **is** the changelog — and shipping the line unchanged tells any
-   `git archive` run in the public repo to drop it. Nobody would see that
-   until a release tarball came out without its changelog. The second line
-   names a file that does not exist there at all, which is harmless and
-   sends the next reader looking for it.
+   Correct here, actively wrong there. Step 3 renames `UPDATES-PUBLIC.md`
+   onto `docs/UPDATES.md`, so in the public repo that path **is** the
+   changelog — and shipping this line unchanged tells any `git archive` run
+   in the public repo to drop it. Nobody would see that until a release
+   tarball came out without its changelog.
+
+   **Leave the `docs/PUBLIC-REPO-WORKFLOW.md    export-ignore` line in
+   place.** It names a file that does not exist in the public repo at all,
+   which is harmless there either way — and its continued presence in the
+   shipped `.gitattributes` is what lets `tests/exported_tree.py` tell the
+   two repositories apart at all: `docs/UPDATES.md`'s own presence cannot be
+   that signal (this same step makes it exist in *both*, with different
+   content), so every test that needs to know which tree it is in checks for
+   `docs/PUBLIC-REPO-WORKFLOW.md` being absent *with* its export-ignore rule
+   still explaining why, instead. Stripping this line was tried once — it
+   does not corrupt anything a person reads, but it made ten tests in the
+   shipped suite fail on the very first clone of the public repo, for a
+   reason that had nothing to do with their own content.
 3. Swap the changelog: rename `docs/UPDATES-PUBLIC.md` → `docs/UPDATES.md`
    in the scratch tree. The internal `docs/UPDATES.md` needs no removal
    step — it carries `export-ignore`, so step 1 never extracted it (#246),
@@ -148,8 +159,23 @@ the omissions surface, because it is the last point at which they are cheap.
    `UPDATES-PUBLIC.md` current here as work lands, the same way `UPDATES.md`
    is kept current — write the public-facing entry in the same PR as the
    fix, not as an afterthought at release time.
+
+   **Also rewrite the two links to it.** `README.md`'s document table and
+   `docs/INSTALL.md`'s step 5 both link to `docs/UPDATES-PUBLIC.md` /
+   `UPDATES-PUBLIC.md`, correctly, for a reader of *this* repository. Once
+   the rename above has run, that target no longer exists in the scratch
+   tree — rewrite both links to point at `UPDATES.md` (`docs/UPDATES.md` /
+   `UPDATES.md` respectively) before extraction moves on.
+   `tests/test_docs_links.py` fails on the next step if either is missed.
 4. `git init`, push, PR into `dccore`'s `main`. Branch protection there
    requires the CI matrix green before merge.
+
+   **Run the full test suite in the scratch tree itself before pushing**,
+   not only in `dccore-dev`. Nothing in this checklist has run one until a
+   real release needed it, and the first time surfaced ten failures that
+   were invisible from here — every one of them a test whose assumptions
+   only held on this side of the extraction. `dccore-dev`'s own green CI
+   does not prove the tree steps 1-3 produce is green; only running it does.
 
 ## Identity scrubbing — what actually failed before
 

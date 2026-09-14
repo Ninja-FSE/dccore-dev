@@ -2,23 +2,32 @@
 
 `docs/UPDATES.md` is export-ignored in `.gitattributes`. It is the internal
 changelog: it exists in the development repository and, by design, never
-reaches the public one, which gets `docs/UPDATES-PUBLIC.md` instead.
+reaches the public one that way - extraction step 3 renames
+`docs/UPDATES-PUBLIC.md` onto that same path instead, so a released public
+tree has a *different*, legitimate file sitting at `docs/UPDATES.md`.
 
-That leaves any test which READS the internal changelog with two different
-absences to tell apart, and getting it wrong is expensive in both directions:
+That collision is why nothing here may use `docs/UPDATES.md`'s own presence
+to decide which repository this is: checking it would read the post-rename
+public changelog as "we must be in the development repository", which is
+backwards. `docs/PUBLIC-REPO-WORKFLOW.md` has no such collision - nothing
+ever renames a replacement onto its path in either repository, so its
+presence or absence is the one signal this file trusts.
 
-  * Fail whenever the file is missing, and the public repository's very first
-    CI run is red - on the branch its own protection rules require to be
-    green - for a file that was deliberately excluded.
-  * Skip whenever the file is missing, and the day it genuinely disappears
-    from THIS repository, every test that guards its contents quietly stops
-    running and nobody is told.
+Getting the direction wrong is expensive either way:
+
+  * Fail whenever the marker is missing, and the public repository's very
+    first CI run is red - on the branch its own protection rules require to
+    be green - for a file that was deliberately excluded.
+  * Skip whenever the marker is missing, and the day it genuinely disappears
+    from THIS repository, every test that guards internal-only content
+    quietly stops running and nobody is told.
 
 So the absence has to be EXPLAINED rather than assumed. `.gitattributes`
-ships, so an extracted tree still carries the statement that the file was
-export-ignored. If that statement is there, the file is missing for the one
-reason that is allowed. If it is not, something else happened and the test
-should say so loudly.
+ships, so an extracted tree still carries the statement that the marker was
+export-ignored (that line is left in place on purpose - see
+docs/PUBLIC-REPO-WORKFLOW.md's own extraction checklist). If that statement
+is there, the marker is missing for the one reason that is allowed. If it is
+not, something else happened and the test should say so loudly.
 
 Checking for `.git` instead would not work: the public repository is a git
 repository too, so its presence says nothing about which tree this is.
@@ -30,6 +39,10 @@ import os
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 INTERNAL_CHANGELOG = os.path.join("docs", "UPDATES.md")
+
+# The signal for "is this the development repository" - deliberately not
+# INTERNAL_CHANGELOG itself. See this module's docstring.
+WORKFLOW_DOC = os.path.join("docs", "PUBLIC-REPO-WORKFLOW.md")
 
 
 def _is_export_ignored(relative_path):
@@ -48,44 +61,44 @@ def _is_export_ignored(relative_path):
     return False
 
 
-def internal_file_or_skip(test_case, relative_path):
-    """The absolute path of an export-ignored file, or skip if this is an
-    export.
+def _this_is_an_export(test_case):
+    """True if this tree is a legitimately extracted public export rather
+    than the development repository.
 
-    The general form of internal_changelog_or_skip() below, for any file that
-    exists here and deliberately never reaches the public repository -
-    docs/PUBLIC-REPO-WORKFLOW.md as well as docs/UPDATES.md. Same rule: a
-    missing file with an export-ignore line explaining it is an export; a
-    missing file without one is a fault and says so.
+    Fails the test loudly rather than returning True when WORKFLOW_DOC is
+    missing with no export-ignore rule to explain it - that combination is
+    not an export, it is a fault, and the two must never read the same.
     """
-    full = os.path.join(REPO_ROOT, relative_path)
-    if os.path.exists(full):
-        return full
-    if not _is_export_ignored(relative_path):
+    if os.path.exists(os.path.join(REPO_ROOT, WORKFLOW_DOC)):
+        return False
+    if not _is_export_ignored(WORKFLOW_DOC):
         test_case.fail(
-            f"{relative_path} is missing, and .gitattributes does not "
+            f"{WORKFLOW_DOC} is missing, and .gitattributes does not "
             f"export-ignore it - so it has gone missing for some other "
             f"reason than being left out of the public tree.")
-    test_case.skipTest(
-        f"{relative_path} is export-ignored and absent, so this is an "
-        f"extracted public tree rather than the development repository.")
+    return True
+
+
+def internal_file_or_skip(test_case, relative_path):
+    """The absolute path of a file that exists here and deliberately never
+    reaches the public repository, or skip if this is an export.
+
+    Which tree this is gets decided by WORKFLOW_DOC, not by `relative_path`
+    itself - see this module's docstring for why that distinction matters.
+    Once this is confirmed to be the development repository, `relative_path`
+    missing here is a plain fault: nothing explains that one away.
+    """
+    if _this_is_an_export(test_case):
+        test_case.skipTest(
+            f"{WORKFLOW_DOC} is export-ignored and absent, so this is an "
+            f"extracted public tree rather than the development repository.")
+    full = os.path.join(REPO_ROOT, relative_path)
+    if not os.path.exists(full):
+        test_case.fail(
+            f"{relative_path} is missing from the development repository.")
+    return full
 
 
 def internal_changelog_or_skip(test_case):
-    """The absolute path of docs/UPDATES.md, or skip if this is an export.
-
-    Fails rather than skips when the file is missing AND nothing explains
-    why - see this module's own docstring for why those are not the same.
-    """
-    full = os.path.join(REPO_ROOT, INTERNAL_CHANGELOG)
-    if os.path.exists(full):
-        return full
-    if not _is_export_ignored(INTERNAL_CHANGELOG):
-        test_case.fail(
-            f"{INTERNAL_CHANGELOG} is missing, and .gitattributes does not "
-            f"export-ignore it. In an extracted public tree its absence is "
-            f"expected and this test skips; here it means the changelog has "
-            f"gone missing for some other reason.")
-    test_case.skipTest(
-        f"{INTERNAL_CHANGELOG} is export-ignored and absent, so this is an "
-        f"extracted public tree rather than the development repository.")
+    """The absolute path of docs/UPDATES.md, or skip if this is an export."""
+    return internal_file_or_skip(test_case, INTERNAL_CHANGELOG)

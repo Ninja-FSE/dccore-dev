@@ -21,6 +21,16 @@ WHY A TEST RATHER THAN JUST THE RULE
 An export-ignore rule is one line in a file nobody opens, and it fails
 silently: the archive simply contains a bit more than intended, and nothing
 says so. This asks `git archive` itself.
+
+WHY IT SKIPS IN AN EXTRACTED TREE
+
+This asks `git archive HEAD` about the repository IT IS RUNNING IN - and this
+file ships, so it runs again inside every public checkout too, where that
+question is a different one: `docs/UPDATES.md` there is the renamed public
+changelog rather than the internal file INTERNAL names, so checking it
+against the same list would flag the public repo's own real changelog as a
+leak, on every clone, forever. See tests/exported_tree.py for the signal
+used to tell the two repositories apart.
 """
 
 import os
@@ -30,6 +40,11 @@ import tarfile
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from exported_tree import _this_is_an_export  # noqa: E402
 
 # Files that exist to be read by the two of us and must not reach the public
 # tree. Each needs an export-ignore rule in .gitattributes.
@@ -55,6 +70,9 @@ def archive_members():
 class TheExportLeavesInternalFilesBehind(unittest.TestCase):
 
     def setUp(self):
+        if _this_is_an_export(self):
+            self.skipTest("this is an extracted public tree - see "
+                          "tests/exported_tree.py")
         self.members = archive_members()
         if self.members is None:
             self.skipTest("git archive is not available here")
@@ -88,6 +106,10 @@ class TheRulesAreWrittenDown(unittest.TestCase):
 
     def test_every_internal_file_has_a_rule(self):
         import io
+
+        if _this_is_an_export(self):
+            self.skipTest("this is an extracted public tree - see "
+                          "tests/exported_tree.py")
 
         with io.open(os.path.join(REPO_ROOT, ".gitattributes"),
                      encoding="utf-8") as handle:
