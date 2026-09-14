@@ -509,6 +509,21 @@ ADMIN_CHANNEL_COMMANDS: bool = True
 DEBUG_TO_CHANNEL: bool = True
 DEBUG_TO_CONSOLE: bool = True
 
+# Every line the daemon prints to its console window - or to the file its
+# output is redirected to - is prefixed with the time it was written, in this
+# strftime format. Empty string = no prefix.
+#
+# A log line with no time on it answers "what" and never "when": whether the
+# bot rejoined a channel on its own, how long a rebuild took, whether the
+# disconnect came before or after that transfer. Reported live - an operator
+# watching four channels fail to join could not tell from the window whether
+# the retry had fired yet, because nothing in it said when anything happened.
+#
+# %H:%M:%S is the mIRC convention and enough for a window watched live. A log
+# kept for days wants the date: "%Y-%m-%d %H:%M:%S". The dashboard's Console
+# page keeps its own times and is unaffected either way.
+CONSOLE_TIMESTAMP_FORMAT: str = "%H:%M:%S"
+
 # The two side files update_list.py publishes alongside the master list, holding
 # the human-readable total size and the raw byte count that the channel advert and
 # @<nick>-que read back. Named here rather than as a literal in both list.py and
