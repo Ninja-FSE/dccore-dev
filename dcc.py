@@ -2002,11 +2002,39 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             list_paths = list_mod.all_list_paths(wanted_list)
             if list_paths:
                 try:
-                    lines = []
-                    for one_list in list_paths:
-                        with open(one_list, "r", encoding="utf-8",
-                                  errors="ignore") as lf:
-                            lines.extend(lf.readlines())
+                    # STREAMED, NOT LOADED. This used to readlines() every
+                    # published list into one Python list and then, on a match,
+                    # walk BACKWARDS through it to the nearest folder heading.
+                    # The only thing the whole list in memory was for was that
+                    # backward walk. On a 5.4-million-file library that is
+                    # 460 MB of text as ~5.9 GB of str objects, on EVERY file
+                    # request - full_path below is "<first folder>/<name>" and a
+                    # track is never in a folder's root, so the direct check
+                    # fails and this runs each time. Measured live: a 5.9 GB
+                    # peak and 1.5 GB held afterwards, because the allocator
+                    # keeps its arenas. Three busy slots could mean three at
+                    # once.
+                    #
+                    # Headings precede their rows, so "the nearest heading
+                    # above the matching row" is simply the last heading seen
+                    # on the way down. One variable carries it; nothing is kept.
+                    # The heading is still resolved LAZILY, on a match only, so
+                    # a miss costs exactly what it cost before minus the memory.
+                    #
+                    # One generator across every list, in order, so a `break`
+                    # below leaves the whole lookup exactly as it left the old
+                    # single loop over the concatenation - and the heading
+                    # state carries across the file boundary the same way the
+                    # concatenation carried it, which is what the comment above
+                    # ("each list carries its own headings above its own rows")
+                    # relies on.
+                    def _list_lines(paths):
+                        for one_list in paths:
+                            with open(one_list, "r", encoding="utf-8",
+                                      errors="ignore") as lf:
+                                for raw_line in lf:
+                                    yield raw_line
+
                     # THE LIST'S OWN SPELLING TRAVELS WITH THE FOLDER (#445).
                     #
                     # The match below is case-insensitive, deliberately -
@@ -2025,81 +2053,73 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     fallback_folder = None
                     fallback_name = ""
                     clean_req = str(requested_file).lower().strip()
+                    request_prefix = f"!{config.NICKNAME} "
+                    # The most recent heading line, unresolved. ANY known
+                    # prefix, not just the one we write: this is what
+                    # RECOGNISES a heading, and checking only the current
+                    # prefix stops seeing the headings in every list already
+                    # in somebody's hands. Found by the test that counts
+                    # resolutions.
+                    last_heading = None
 
-                    for idx, line in enumerate(lines):
+                    for line in _list_lines(list_paths):
                         line_clean = line.strip()
-                        if line_clean.startswith(f"!{config.NICKNAME} "):
-                            # str.split() puts what came BEFORE the separator in
-                            # [0], and the line starts with the separator - so
-                            # [0] is the empty string on every line here, and
-                            # this comparison never matched anything. The
-                            # filename is in [1]; the whole list lookup was dead
-                            # code without it, leaving the os.walk() below to
-                            # answer every request.
-                            parts_nick = line_clean.split(f"!{config.NICKNAME} ", 1)
-                            rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
+                        if any(line_clean.upper().startswith(p)
+                               for p in list_mod.LIST_FOLDER_PREFIXES):
+                            last_heading = line_clean
+                            continue
+                        if not line_clean.startswith(request_prefix):
+                            continue
+                        # str.split() puts what came BEFORE the separator in
+                        # [0], and the line starts with the separator - so [0]
+                        # is the empty string on every line here. The filename
+                        # is in [1]; the whole list lookup was dead code
+                        # without it, leaving the os.walk() below to answer
+                        # every request.
+                        parts_nick = line_clean.split(request_prefix, 1)
+                        rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
 
-                            current_file_in_list, current_size_in_list = list_mod.strip_info_suffix(rest_in_list)
+                        current_file_in_list, current_size_in_list = list_mod.strip_info_suffix(rest_in_list)
 
-                            if clean_req == str(current_file_in_list).lower().strip():
-                                found_folder = None
-                                for back_idx in range(idx, -1, -1):
-                                    back_line = lines[back_idx].strip()
-                                    # The prefix-stripping itself is
-                                    # list_mod.resolve_list_folder() - this used
-                                    # to be a second, hand-written copy of it
-                                    # (a hardcoded back_line[9:] rather than
-                                    # len(LIST_FOLDER_PREFIX), and its own
-                                    # trailing-backslash/separator handling),
-                                    # which could silently drift from the
-                                    # original if the list format ever changed.
-                                    # ANY known prefix, not just the one
-                                    # we write. This is what RECOGNISES
-                                    # a heading, so checking only the
-                                    # current prefix stops seeing the
-                                    # headings in every list already in
-                                    # somebody's hands - a bare request
-                                    # against one then resolves nothing
-                                    # at all. Found by the test that
-                                    # counts resolutions.
-                                    if any(back_line.upper().startswith(p)
-                                           for p in list_mod.LIST_FOLDER_PREFIXES):
-                                        # No explicit base: the heading itself
-                                        # says which folder it belongs to once
-                                        # there is more than one (#164), and
-                                        # pinning it to base_directory would
-                                        # resolve every heading into the first.
-                                        found_folder = list_mod.resolve_list_folder(
-                                            back_line, name=wanted_list)
-                                        break
-                                if found_folder is None:
-                                    continue
+                        if clean_req != str(current_file_in_list).lower().strip():
+                            continue
+                        if last_heading is None:
+                            continue
+                        # The prefix-stripping itself is
+                        # list_mod.resolve_list_folder() - this used to be a
+                        # second, hand-written copy of it, which could drift
+                        # from the original if the list format ever changed.
+                        # No explicit base: the heading itself says which
+                        # folder it belongs to once there is more than one
+                        # (#164), and pinning it to base_directory would
+                        # resolve every heading into the first.
+                        found_folder = list_mod.resolve_list_folder(
+                            last_heading, name=wanted_list)
+                        if found_folder is None:
+                            continue
 
-                                # Two or more copies can share this exact name
-                                # and differ only in size. Without a size hint,
-                                # or if it matches nothing, the first copy the
-                                # list names wins - same as before this change,
-                                # and pinned by
-                                # test_no_error_is_reported_for_a_duplicate.
-                                # With one, a copy whose own ::INFO:: size
-                                # matches it wins instead, so a request built
-                                # from a search result's exact line reaches the
-                                # copy that result actually named. A bare
-                                # request (no hint - AutoQ.mrc and every
-                                # existing caller) still stops at this first
-                                # match exactly as before; only a hinted
-                                # request that has not matched yet pays for
-                                # scanning on, since that is the one case
-                                # where the answer isn't already known.
-                                if fallback_folder is None:
-                                    fallback_folder = found_folder
-                                    fallback_name = str(current_file_in_list).strip()
-                                    if not requested_size_hint:
-                                        break
-                                if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
-                                    target_folder = found_folder
-                                    target_name = str(current_file_in_list).strip()
-                                    break
+                        # Two or more copies can share this exact name and
+                        # differ only in size. Without a size hint, or if it
+                        # matches nothing, the first copy the list names wins -
+                        # same as before this change, and pinned by
+                        # test_no_error_is_reported_for_a_duplicate. With one,
+                        # a copy whose own ::INFO:: size matches it wins
+                        # instead, so a request built from a search result's
+                        # exact line reaches the copy that result actually
+                        # named. A bare request (no hint - AutoQ.mrc and every
+                        # existing caller) still stops at this first match
+                        # exactly as before; only a hinted request that has
+                        # not matched yet pays for scanning on, since that is
+                        # the one case where the answer isn't already known.
+                        if fallback_folder is None:
+                            fallback_folder = found_folder
+                            fallback_name = str(current_file_in_list).strip()
+                            if not requested_size_hint:
+                                break
+                        if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
+                            target_folder = found_folder
+                            target_name = str(current_file_in_list).strip()
+                            break
 
                     if target_folder is None:
                         target_folder = fallback_folder
