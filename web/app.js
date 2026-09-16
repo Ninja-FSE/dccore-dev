@@ -44,23 +44,29 @@
   // a fast typist should not queue one per character.
   var FILELISTS_FILTER_DEBOUNCE_MS = 120;
 
+  // Titles and subs are translation KEYS, not English text - see the
+  // Language section near the bottom of this file. t() resolves them.
   var views = {
-    search:    { title: "Search",     sub: "Find a file across the current master list." },
-    download:  { title: "Downloads",  sub: "What you have asked other bots for, and how it is going." },
-    filelists: { title: "List Browser", sub: "Every file this bot - or a fetched bot's list - is currently offering." },
-    tools:     { title: "Tools",      sub: "Checks you run on demand against the current master list." },
+    search:    { title: "view.search.title",     sub: "view.search.sub" },
+    download:  { title: "view.download.title",   sub: "view.download.sub" },
+    filelists: { title: "view.filelists.title",  sub: "view.filelists.sub" },
+    tools:     { title: "view.tools.title",      sub: "view.tools.sub" },
     // Reached from the badge in the status panel, not from the nav rail:
     // it is somewhere you are SENT when something happened, not somewhere
     // you go looking. A permanent nav entry for a page that is empty almost
     // always is a permanent reminder of nothing.
-    notices:   { title: "What happened", sub: "Kicks, bans and rebuilds that need looking at." },
-    messages:  { title: "Messages",   sub: "People who spoke to the bot privately and got no answer." },
-    settings:  { title: "Settings",   sub: "Every editable setting, grouped. Saving writes settings.conf and starts a rehash." },
-    stats:     { title: "Stats",      sub: "Everything this bot knows about itself, including who is waiting." },
-    console:   { title: "Console",    sub: "The DCC CHAT admin console's commands and live log, in the browser." }
+    notices:   { title: "view.notices.title",    sub: "view.notices.sub" },
+    messages:  { title: "view.messages.title",   sub: "view.messages.sub" },
+    settings:  { title: "view.settings.title",   sub: "view.settings.sub" },
+    stats:     { title: "view.stats.title",      sub: "view.stats.sub" },
+    console:   { title: "view.console.title",    sub: "view.console.sub" }
   };
 
   var state = {
+    // The dashboard's own dictionary (empty for English, since English is
+    // also langFallback) and the English dictionary every language falls
+    // back to for a key it does not have yet. See the Language section.
+    lang: {}, langFallback: {},
     // What the previewed OmenServe import would write, held between the
     // preview and the confirm so the button sends exactly what was shown -
     // not a second parse that could have moved on from it.
@@ -219,6 +225,7 @@
     stTopAlbumsOff:        document.getElementById("st-top-albums-off"),
     themeDark:    document.getElementById("theme-dark"),
     themeLight:   document.getElementById("theme-light"),
+    langSelect:   document.getElementById("lang-select"),
     updateListRunBtn:     document.getElementById("update-list-run-btn"),
     updateListStatus:     document.getElementById("update-list-status"),
     updateListBar:        document.getElementById("update-list-bar"),
@@ -318,8 +325,8 @@
     el.navItems.forEach(function (btn) {
       btn.classList.toggle("is-active", btn.dataset.view === name);
     });
-    el.pageTitle.textContent = views[name].title;
-    el.pageSub.textContent = views[name].sub;
+    el.pageTitle.textContent = t(views[name].title);
+    el.pageSub.textContent = t(views[name].sub);
 
     if (name === "download") { loadDownloads(); }
     if (name === "filelists") {
@@ -5134,5 +5141,108 @@
 
   markThemeButtons();
 
-  activateView("search");
+  // ------------------------------------------------------------ Language
+  //
+  // Client-only, the same way the dark/light theme is: which language suits
+  // an operator is a fact about the person looking at the dashboard, not
+  // about the bot, so nothing about it goes to the server or into
+  // settings.conf.
+  //
+  // Deliberately NOT covering the Console or the debug channel: both show
+  // the same lines the daemon's own log does, and translating those means
+  // touching every print() call site across the daemon rather than this
+  // one static page - a separate, later piece of work.
+  //
+  // English is fetched alongside every language, not only for itself: it is
+  // the dictionary every other language falls back to for a key it does not
+  // have yet, so t() always has somewhere to land. A key in neither
+  // dictionary renders as the literal key, which is loud on purpose - a
+  // silently blank label would be a harder miss to notice than an ugly one.
+
+  var LANG_KEY = "dccore-language";
+  var SUPPORTED_LANGUAGES = ["en", "fr", "es"];
+
+  function storedLanguage() {
+    try {
+      var saved = localStorage.getItem(LANG_KEY);
+      return SUPPORTED_LANGUAGES.indexOf(saved) !== -1 ? saved : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function browserLanguage() {
+    // navigator.language is a full tag ("fr-CA", "es-419") - only the
+    // primary subtag decides which dictionary to offer, since none of the
+    // three ship a regional variant of their own.
+    var raw = navigator.language || navigator.userLanguage || "";
+    var tag = raw.split("-")[0].toLowerCase();
+    return SUPPORTED_LANGUAGES.indexOf(tag) !== -1 ? tag : "en";
+  }
+
+  function currentLanguage() {
+    return storedLanguage() || browserLanguage();
+  }
+
+  function t(key) {
+    var here = state.lang[key];
+    if (here !== undefined) { return here; }
+    var fallback = state.langFallback[key];
+    return fallback !== undefined ? fallback : key;
+  }
+
+  function applyTranslations() {
+    document.querySelectorAll("[data-i18n]").forEach(function (node) {
+      node.textContent = t(node.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(function (node) {
+      node.placeholder = t(node.getAttribute("data-i18n-placeholder"));
+    });
+    // The active view's header is set as text in activateView() rather
+    // than through data-i18n, since which view is current decides it -
+    // redone here so a language change updates it without a re-navigation.
+    if (state.active && views[state.active]) {
+      el.pageTitle.textContent = t(views[state.active].title);
+      el.pageSub.textContent = t(views[state.active].sub);
+    }
+    if (el.langSelect) { el.langSelect.value = currentLanguage(); }
+  }
+
+  function loadLanguage(code) {
+    var fetches = [fetchJson("/lang/en.json").then(function (dict) {
+      state.langFallback = dict;
+    }).catch(function () {
+      state.langFallback = {};
+    })];
+    if (code === "en") {
+      state.lang = {};
+    } else {
+      fetches.push(fetchJson("/lang/" + code + ".json").then(function (dict) {
+        state.lang = dict;
+      }).catch(function () {
+        state.lang = {};
+      }));
+    }
+    return Promise.all(fetches).then(applyTranslations);
+  }
+
+  function chooseLanguage(code) {
+    if (SUPPORTED_LANGUAGES.indexOf(code) === -1) { return; }
+    try {
+      localStorage.setItem(LANG_KEY, code);
+    } catch (err) {
+      // A private window cannot remember it - the page still changes now.
+    }
+    loadLanguage(code);
+  }
+
+  if (el.langSelect) {
+    el.langSelect.addEventListener("change", function () {
+      chooseLanguage(el.langSelect.value);
+    });
+  }
+
+  loadLanguage(currentLanguage()).then(function () {
+    activateView("search");
+  });
 })();

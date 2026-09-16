@@ -40,47 +40,52 @@
          glance, and Settings and Console are admin surfaces reached
          occasionally. Queue is gone as a tab - it lives in Stats now. -->
     <nav class="nav">
+      <!-- Each data-i18n key here is the SAME key views{} in app.js uses for
+           that page's heading - one identifier, not two coincidentally-equal
+           strings, so the two can never drift the way plain text once could
+           (see TheTabsAreNamedForWhatTheyDo in
+           tests/test_dashboard_nav_and_multiselect.py). -->
       <button class="nav-item is-active" data-view="search">
-        <span class="nav-icon">&#9906;</span> Search
+        <span class="nav-icon">&#9906;</span> <span data-i18n="view.search.title">Search</span>
       </button>
       <button class="nav-item" data-view="download">
-        <span class="nav-icon">&#8595;</span> Downloads
+        <span class="nav-icon">&#8595;</span> <span data-i18n="view.download.title">Downloads</span>
       </button>
       <button class="nav-item" data-view="filelists">
-        <span class="nav-icon">&#9776;</span> List Browser
+        <span class="nav-icon">&#9776;</span> <span data-i18n="view.filelists.title">List Browser</span>
       </button>
       <button class="nav-item" data-view="tools">
-        <span class="nav-icon">&#9881;</span> Tools
+        <span class="nav-icon">&#9881;</span> <span data-i18n="view.tools.title">Tools</span>
       </button>
       <button class="nav-item" data-view="stats">
-        <span class="nav-icon">&#9673;</span> Stats
+        <span class="nav-icon">&#9673;</span> <span data-i18n="view.stats.title">Stats</span>
       </button>
       <button class="nav-item" data-view="messages">
-        <span class="nav-icon">&#9993;</span> Messages
+        <span class="nav-icon">&#9993;</span> <span data-i18n="view.messages.title">Messages</span>
         <span class="nav-count" id="messages-nav-count" hidden></span>
       </button>
       <button class="nav-item" data-view="settings">
-        <span class="nav-icon">&#9998;</span> Settings
+        <span class="nav-icon">&#9998;</span> <span data-i18n="view.settings.title">Settings</span>
       </button>
       <button class="nav-item" data-view="console">
-        <span class="nav-icon">&#10095;</span> Console
+        <span class="nav-icon">&#10095;</span> <span data-i18n="view.console.title">Console</span>
       </button>
     </nav>
 
     <div class="status-card">
       <div class="status-row">
-        <span class="status-label">Status</span>
+        <span class="status-label" data-i18n="sidebar.status">Status</span>
         <span class="status-value">
           <span class="status-dot" id="conn-dot"></span>
           <span id="conn-text">connecting&hellip;</span>
         </span>
       </div>
       <div class="status-row">
-        <span class="status-label">Slots</span>
+        <span class="status-label" data-i18n="sidebar.slots">Slots</span>
         <span class="status-value" id="status-slots">&mdash;</span>
       </div>
       <div class="status-row">
-        <span class="status-label">Queued</span>
+        <span class="status-label" data-i18n="sidebar.queued">Queued</span>
         <span class="status-value" id="status-queued">&mdash;</span>
       </div>
       <!-- Nothing at all when there is nothing unread, so it means something
@@ -91,17 +96,25 @@
     </div>
 
     <div class="sidebar-foot">
-      Logged in &middot; LAN only
+      <span data-i18n="sidebar.loggedIn">Logged in &middot; LAN only</span>
       <div class="theme-switch" role="group" aria-label="Colour theme">
         <button type="button" class="theme-btn" id="theme-dark" data-theme-choice="dark">
-          &#9790; Dark
+          &#9790; <span data-i18n="theme.dark">Dark</span>
         </button>
         <button type="button" class="theme-btn" id="theme-light" data-theme-choice="light">
-          &#9788; Light
+          &#9788; <span data-i18n="theme.light">Light</span>
         </button>
       </div>
+      <div class="lang-switch">
+        <label for="lang-select" data-i18n="language.label">Language</label>
+        <select id="lang-select" aria-label="Language">
+          <option value="en">English</option>
+          <option value="fr">Fran&ccedil;ais</option>
+          <option value="es">Espa&ntilde;ol</option>
+        </select>
+      </div>
       <form method="post" action="/logout">
-        <button type="submit" class="logout-btn">Log out</button>
+        <button type="submit" class="logout-btn" data-i18n="sidebar.logout">Log out</button>
       </form>
     </div>
   </aside>
@@ -116,9 +129,10 @@
     <section class="view is-active" id="view-search">
       <form class="search-bar" id="search-form">
         <input type="text" id="search-input" class="search-input"
+               data-i18n-placeholder="search.placeholder"
                placeholder="Search by filename&hellip; (min 1 word)" autocomplete="off">
-        <button type="submit" class="btn btn-accent">Search</button>
-        <button type="button" id="broadcast-btn" class="btn">Search all bots</button>
+        <button type="submit" class="btn btn-accent" data-i18n="search.button">Search</button>
+        <button type="button" id="broadcast-btn" class="btn" data-i18n="search.broadcastButton">Search all bots</button>
       </form>
 
       <p class="broadcast-note">

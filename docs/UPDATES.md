@@ -4,6 +4,53 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🟢 The dashboard speaks English, French or Spanish - a first slice, not the whole page
+
+Scope decided on issue #69: the dashboard translates, the Console and the
+debug channel deliberately do not - both show the same lines the daemon's
+own log does, and translating those means touching every `print()` call
+site across the daemon rather than this one static page. Private replies to
+a user (`-help`, `-que`, `-stats`) and everything the bot says in a channel
+stay English unconditionally too, for the reason already recorded there:
+other bots parse those lines as a de facto protocol.
+
+**Client-only, like the dark/light theme.** Which language suits an
+operator is a fact about the person looking at the dashboard, not about the
+bot, so the choice lives in `localStorage` and nothing about it reaches
+`settings.conf` or the server. A first visit reads the browser's own
+language and falls back to English for anything the three dictionaries do
+not cover.
+
+**Three flat JSON dictionaries** - `web/lang/en.json`, `fr.json`, `es.json`
+- fetched at load through Flask's existing static-file serving
+(`create_app()`'s `static_folder="web"`), so no new route was needed and
+the files sit behind the same login gate as everything else (verified: an
+unauthenticated request 302s to `/login`, same as any other page).
+
+**A key a language is missing falls back to English rather than showing
+nothing** - the only failure mode a viewer in that language should ever
+see. A key neither dictionary defines renders as the literal key string,
+which is loud on purpose: `tests/test_dashboard_translations_stay_complete.py`
+exists so that never has to happen silently. It checks, both directions:
+every key the page actually references (`index.html`'s `data-i18n`
+attributes, `app.js`'s `views{}` object) exists in `en.json`; every key
+`en.json` defines is referenced by something; and all three languages
+define exactly the same set of keys, so nothing quietly stays English for
+one language and not the others.
+
+**The nav label and the page heading share one translation key per view**,
+not two coincidentally-equal strings - `tests/test_dashboard_nav_and_multiselect.py`'s
+existing guard against the two drifting apart (written when both were still
+literal English) is adapted rather than dropped, and now checks the
+identifier match instead.
+
+**This first slice covers the navigation rail, every page's heading, the
+sidebar chrome and the Search view's own controls** - 29 keys, in all
+three languages. Everything else the dashboard says - the Settings page's
+own fields, Downloads, List Browser, Tools, Stats, Messages - stays English
+for now. Migrating the rest of the dashboard's text is follow-on work, not
+part of this change.
+
 ### 🔴 The console timestamp proxy took the dashboard down on the live server
 
 Found live, immediately after updating: the daemon connected to IRC and
