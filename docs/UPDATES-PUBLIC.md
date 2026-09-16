@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Every line in the bot's console window now starts with the time.** Reading the window during a live problem — did the bot retry that channel yet? how long did that rebuild take? did it disconnect before or after the transfer? — meant working the answer out from your own memory of when you looked, because nothing in it said when anything happened. Lines now read `[22:53:11] [REJOIN] Asking to rejoin #example.` The same prefix goes into a file if you redirect the bot's output to one. The format is **Settings → Debug & logging → `CONSOLE_TIMESTAMP_FORMAT`** — it ships as `%H:%M:%S`, the mIRC style; set `%Y-%m-%d %H:%M:%S` for a log you keep across days, or leave it blank for no prefix at all. The dashboard's Console page already had times and is unchanged.
+
 ## v1.12.1 — The Setup Check Catches Up
 
 - **Fixed: the setup check warned that no music folder was configured when your folders were set up from the dashboard.** If you added your library folders on the dashboard's Library page and never filled in `FILE_DIRECTORY`, `start-dccore check` said the bot "cannot search or serve anything until it is set" — while the bot, once started, served from every one of them. The check only ever looked at `FILE_DIRECTORY`, which is just the fallback for an install with no folder list. It now asks the same question the bot itself asks at startup, and answers the same way: a multi-folder install sees each folder listed with whether it can be reached right now, one unreachable drive is a warning rather than a refusal (the bot starts and skips it, as before), and only a library with **no** reachable folder at all stops the start. A leftover `FILE_DIRECTORY` pointing at a drive you no longer have also no longer blocks the check, since the bot does not read it when folders are configured.

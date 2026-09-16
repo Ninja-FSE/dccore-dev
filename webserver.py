@@ -2302,7 +2302,8 @@ SETTINGS_CATEGORIES = (
                                                 "WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
                                                 "WEBUI_FOLDER_BROWSER_ENABLED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL",
-                                                "DEBUG_TO_CONSOLE", "PROJECT_URL"]),
+                                                "DEBUG_TO_CONSOLE",
+                                                "CONSOLE_TIMESTAMP_FORMAT", "PROJECT_URL"]),
     # LAST, and named so nobody opens it by accident. Set once at install, and
     # a wrong value here loses a queue or a statistics file rather than
     # mis-tuning something. They were interleaved with the settings changed
@@ -2448,6 +2449,7 @@ SETTINGS_LABELS = {
     "DEBUG_MODE": "Debug mode",
     "DEBUG_TO_CHANNEL": "Send debug lines to channel",
     "DEBUG_TO_CONSOLE": "Send debug lines to admin console",
+    "CONSOLE_TIMESTAMP_FORMAT": "Time prefix on every console line (strftime; blank = none)",
     "PROJECT_URL": "Project URL",
 }
 
