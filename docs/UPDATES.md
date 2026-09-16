@@ -4,6 +4,41 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧠 Resolving a request streams the list; it no longer loads it
+
+Found on the same 5.4-million-file install as the count fix above, by looking
+at the daemon's memory rather than its log: **1.5 GB resident, 5.9 GB peak**.
+
+`dcc.handle_download_request()` turns a bare `!<nick> Some Track.flac` into a
+path on disk by finding the row in the published list and reading the folder
+heading above it. It did that by `readlines()`-ing every published list into
+one Python list of strings and then, on a match, walking BACKWARDS through it
+to the nearest heading. The whole list in memory existed for that backward
+walk and nothing else. On this install that is 460 MB of text as ~5.9 GB of
+`str` objects - and it ran on EVERY file request, because the direct check
+before it is `<first folder>/<name>` and a track is never in a folder's root.
+Freed afterwards, but the allocator keeps its arenas: 1.5 GB held for
+nothing. Three busy slots could mean three of those at once.
+
+Headings precede their rows, so "the nearest heading above the matching row"
+is simply the last heading seen on the way down. The lookup now carries that
+in one variable and holds nothing: one generator across every list in order,
+so a `break` leaves the lookup exactly as it left the old single loop over
+the concatenation, and the heading state carries across the file boundary the
+way the concatenation carried it. The heading is still resolved lazily, on a
+match only, so a miss costs what it cost before minus the memory. Which
+folder, which spelling (#445), which copy under a size hint - all unchanged,
+and `tests/test_download_resolution.py` pins every one of them already.
+
+`tests/test_a_request_does_not_load_the_whole_list.py` pins the memory with
+`tracemalloc`: a request against a 4 MB list with the wanted row LAST must
+allocate less than a fifth of the file's size - generous for a stream, and
+impossible for a copy, whose `str` overhead alone exceeds the file. Six
+mutations run, all caught, including materialising the generator back into a
+list (the old profile, and the tracemalloc test is what catches it), never
+remembering a heading, the first heading winning instead of the nearest, a
+bare request scanning on past its first match, and a size hint never winning.
+
 ### 📊 The file count is computed once per build, not once per caller
 
 Found on a live install with 5.4 million files - a 460 MB list. The operator
