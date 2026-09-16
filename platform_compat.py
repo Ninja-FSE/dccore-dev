@@ -228,6 +228,18 @@ class _TimestampedStream:
         self._lock = threading.Lock()
 
     def write(self, text):
+        if not isinstance(text, str):
+            # A real text-mode stream raises here too - even for b"", which
+            # is exactly the input click.utils._is_binary_writer() probes
+            # with to decide whether a stream takes bytes or str. Returning
+            # 0 for b"" (its old behaviour under `if not text: return 0`,
+            # true for b"" as much as for "") answered that probe wrong:
+            # click concluded this proxy was a binary stream, wrapped it in
+            # its own encoder, and fed every real write here as encoded
+            # bytes instead of text - which is what took the dashboard down
+            # the moment Flask's CLI banner used click.echo() to print it.
+            raise TypeError(
+                f"write() argument must be str, not {type(text).__name__}")
         if not text:
             return 0
         fmt = self._formatter()
