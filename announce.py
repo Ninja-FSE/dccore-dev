@@ -1027,6 +1027,15 @@ def send_debug(msg_text, category="INFO", notice=None):
     # 2. The tag block, colour-coded by event
     if category.upper() == "SENT":
         tag_str = f"{V}[SENT]{R}{BG_TEXT_BOX}"
+    elif category.upper() == "FAIL":
+        # A transfer that did NOT complete. Until #526 every one of these was
+        # a plain print() to the console window and nothing else, while a
+        # completed one went to the debug channel and the admin console as
+        # [SENT] - so an operator watching either saw successes and never
+        # failures, and a cut-off transfer that the old code miscounted as a
+        # success was reported as one. The alert colour, like [PART]: it is
+        # the line an operator needs to see.
+        tag_str = f"{A}[FAIL]{R}{BG_TEXT_BOX}"
     elif category.upper() == "PART":
         tag_str = f"{A}[PART]{R}{BG_TEXT_BOX}"
     elif category.upper() == "QUIT":

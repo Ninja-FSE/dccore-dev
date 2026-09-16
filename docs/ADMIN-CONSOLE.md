@@ -247,7 +247,11 @@ for instance.
 ## Where the runtime reports go
 
 `send_debug` is the daemon's running commentary — transfers, joins, bans, pack
-failures. It has two destinations, both on by default:
+failures. A transfer that completes arrives as `Sent: "file" to nick [speed]`;
+one that does not arrives as `Failed: "file" to nick - <reason>`, where the
+reason says what the receiver acknowledged before it stopped. (Failures used to
+reach only the bot's own window, so a console showed every success and no
+failure.) It has two destinations, both on by default:
 
 | | |
 |---|---|

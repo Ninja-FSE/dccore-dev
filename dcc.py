@@ -1,7 +1,9 @@
 # =====================================================================
 # DCC.PY - THE TRANSFER ENGINE
 # =====================================================================
+import select
 import socket
+import struct
 import threading
 import time
 import os
@@ -418,6 +420,39 @@ def discard_orphaned_temp_archives(user_key):
             print(f"[TEMP CLEANUP] Could not remove {temp_path}: {rm_err}")
 
     return removed
+
+
+def _report_transfer_failure(user, file_name, reason):
+    """Say a transfer failed everywhere a completed one is said to succeed.
+
+    The console log line, AND the debug channel / admin console through
+    send_debug() with the FAIL category - the same route
+    announce.send_transfer_complete() takes for "Sent:". Before #526 the
+    failures were print() only, so the two places an operator actually
+    watches showed every success and no failure.
+    """
+    print(f"[DCC-FAIL] {file_name} for {user}: {reason}")
+    try:
+        announce.send_debug(f"Failed: \"{file_name}\" to {user} - {reason}",
+                            category="FAIL")
+    except Exception as debug_err:
+        print(f"[DEBUG-FAIL ERROR] Could not report the failed transfer: {debug_err}")
+
+
+class _ReceiverGone(Exception):
+    """The peer closed the data connection with bytes still unacknowledged."""
+
+    def __init__(self, acked):
+        super().__init__(acked)
+        self.acked = acked
+
+
+class _ReceiverStalled(Exception):
+    """No ack progress for ACK_STALL_SECONDS with bytes still outstanding."""
+
+    def __init__(self, acked):
+        super().__init__(acked)
+        self.acked = acked
 
 
 class _ShortSend(Exception):
@@ -2216,6 +2251,117 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
 
+# ------------------------------------------------------------- DCC ACKs
+#
+# THE RECEIVER SAYS WHAT IT HAS. After every packet a DCC receiver sends back
+# a 4-byte big-endian running total of the bytes it holds, and that total is
+# the ONLY signal of what arrived. sendall() says nothing about it: it returns
+# the moment the kernel's send buffer accepts the bytes - 4 MB of them on
+# Windows by default - which for most files is the whole file, instantly.
+#
+# Nothing here read those acknowledgements. "Complete" meant "written to the
+# kernel", so the bot declared success at t~0, reported a speed measured
+# against a memcpy ("Speed: n/a (<1s)"), counted the file, slept 1.5 seconds
+# and CLOSED - with megabytes still queued behind a link doing 50 KB/s. The
+# receiver was cut off at whatever the wire had managed and reported the
+# transfer incomplete; the channel had already been told it was sent. Found
+# by a second operator, reproduced with mIRC (#526). The operator's own
+# workaround - DCC_SEND_BUFFER = 4096 - "worked" because a tiny buffer makes
+# sendall() block on the actual wire, so the loop tracked delivery by
+# accident. The bigger the buffer, the earlier the bot hung up.
+#
+# The counter is 32 bits and a file may not be, so it is tracked unwrapped:
+# a new value below the low 32 bits of what we already hold means it wrapped.
+# Acks are cumulative and never go backwards, so the tracker only advances.
+
+ACK_STALL_SECONDS = 60.0     # no ack progress for this long = the link is dead
+
+
+class _AckTracker:
+    """The receiver's acknowledged byte count, parsed from whatever arrives."""
+
+    def __init__(self, start=0):
+        self.acked = int(start)
+        self.received_any = False
+        self.eof = False
+        self.last_advance_at = time.time()
+        self._pending = b""
+
+    def feed(self, data):
+        """Absorb raw bytes from the data socket; b"" means the peer closed."""
+        if not data:
+            self.eof = True
+            return
+        self.received_any = True
+        self._pending += data
+        while len(self._pending) >= 4:
+            (word,) = struct.unpack("!I", self._pending[:4])
+            self._pending = self._pending[4:]
+            self._advance(word)
+
+    def _advance(self, word):
+        base = self.acked & ~0xFFFFFFFF
+        candidate = base | word
+        if candidate < self.acked:
+            # Below what we hold. Two things look like that and only the SIZE
+            # of the drop tells them apart: a receiver past 4 GB whose 32-bit
+            # counter wrapped (a drop of nearly 2**32), or a stale/duplicated
+            # word (a small one). Serial-number arithmetic: more than half the
+            # counter's range is a wrap; anything less is noise and is ignored,
+            # because a cumulative total never genuinely goes backwards.
+            if self.acked - candidate > (1 << 31):
+                candidate += 1 << 32
+            else:
+                return
+        if candidate > self.acked:
+            self.acked = candidate
+            self.last_advance_at = time.time()
+
+    def stalled(self, now=None):
+        return ((now if now is not None else time.time())
+                - self.last_advance_at) > ACK_STALL_SECONDS
+
+
+def _drain_acks(conn, tracker, wait=0.0):
+    """Read whatever acknowledgements are waiting, without blocking the send.
+
+    `wait` is how long to sit for one if none is there yet - 0 inside the send
+    loop, a short pause while waiting for the final one. Never blocks longer.
+    """
+    try:
+        readable, _, _ = select.select([conn], [], [], wait)
+    except (OSError, ValueError):
+        tracker.eof = True
+        return
+    if not readable:
+        return
+    try:
+        data = conn.recv(4096)
+    except socket.timeout:
+        return
+    except OSError:
+        tracker.eof = True
+        return
+    tracker.feed(data)
+
+
+def _wait_for_final_ack(conn, tracker, file_size):
+    """Sit until the receiver has acknowledged the whole file, or has clearly
+    stopped. Returns the moment the final ack arrived, or None.
+
+    Bounded by PROGRESS, not by a fixed clock: a slow link that is still
+    advancing is allowed to finish, and a link that has not advanced for
+    ACK_STALL_SECONDS is dead whether or not bytes are still queued in the
+    kernel. The old fixed sleep(1.5) was the wrong shape entirely - it gave a
+    50 KB/s link 75 KB of the 2.7 MB it still had to deliver.
+    """
+    while tracker.acked < file_size:
+        if tracker.eof or tracker.stalled():
+            return None
+        _drain_acks(conn, tracker, wait=0.25)
+    return tracker.last_advance_at
+
+
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing."""
     # No `global active_transfers` here: there is no module-level name of that
@@ -2541,6 +2687,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # for every path that never got this far.
         resume_offset = int((clear_send_offer(user, assigned_port)
                              or {}).get("position") or 0)
+        # The receiver acknowledges ABSOLUTE positions, so a resume starts the
+        # tracker at the offset it already holds and the completeness check
+        # below compares against the whole file, exactly as bytes_sent does.
+        acks = _AckTracker(start=resume_offset)
         if resume_offset:
             # bytes_sent counts what the RECEIVER ends up holding, so the
             # completeness check below still compares against the whole file.
@@ -2572,6 +2722,16 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                     bytes_sent += len(chunk)
                 except socket.error as e:
                     raise e
+                # Read whatever the receiver has acknowledged so far, without
+                # waiting for it - the sends must not sit behind the acks any
+                # more than the acks should be ignored. A receiver that has gone
+                # quiet for ACK_STALL_SECONDS while bytes are outstanding is
+                # dead, and this is the first place that can tell.
+                _drain_acks(conn, acks)
+                if acks.eof and acks.acked < bytes_sent:
+                    raise _ReceiverGone(acks.acked)
+                if acks.stalled() and acks.acked < bytes_sent:
+                    raise _ReceiverStalled(acks.acked)
                 for tx in config.active_transfers:
                     if tx['user'].lower() == user.lower():
                         tx['bytes_sent'] += len(chunk)
@@ -2591,11 +2751,38 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # NFS guards. Before this, the short send was recorded as a COMPLETED
         # transfer: counted in the totals, credited to the download counter,
         # and the queue row deleted, so nothing would ever retry it.
-        transfer_completed = bytes_sent >= file_size
-        if not transfer_completed:
-            print(f"[DCC-FAIL] {file_name} for {user}: sent {bytes_sent} of "
-                  f"{file_size} bytes before the file ended. Recorded as a "
-                  f"failure rather than a completed transfer.")
+        # The loop above ends on LOCAL EOF, which says the file stopped giving
+        # bytes and that the kernel accepted them - not that the receiver has
+        # them. Completion is the receiver's final acknowledgement equalling
+        # the file size, and it is waited for here, bounded by progress. The
+        # clock stops when THAT arrives: that is the transfer, and it is what
+        # the speed record, the advert and the counters are a record of.
+        short_read = bytes_sent < file_size
+        if short_read:
+            _report_transfer_failure(user, file_name,
+                f"sent {bytes_sent:,} of {file_size:,} bytes before the file ended. "
+                f"Recorded as a failure rather than a completed transfer.")
+            final_ack_at = None
+        else:
+            final_ack_at = _wait_for_final_ack(conn, acks, file_size)
+        transfer_completed = final_ack_at is not None
+        if not transfer_completed and not short_read:
+            if not acks.received_any:
+                _report_transfer_failure(user, file_name,
+                    "the receiver never acknowledged a single byte, so there "
+                    "is no evidence any of it arrived. Not counted. (A DCC "
+                    "receiver acknowledges every packet; one that sends none "
+                    "cannot be told apart from one that got nothing.)")
+            elif acks.eof:
+                _report_transfer_failure(user, file_name,
+                    f"the receiver closed the connection having acknowledged "
+                    f"{acks.acked:,} of {file_size:,} bytes. Not counted.")
+            else:
+                _report_transfer_failure(user, file_name,
+                    f"the receiver stopped acknowledging at {acks.acked:,} of "
+                    f"{file_size:,} bytes and made no progress for "
+                    f"{int(ACK_STALL_SECONDS)}s. The link is dead; whatever the "
+                    f"kernel still held will not arrive. Not counted.")
         # THE CLOCK STOPS WHEN THE BYTES DO. Everything below this line is
         # settling: 1.5 seconds for the receiver to close its file calmly,
         # another half-second further down, and the statistics write. None of
@@ -2609,12 +2796,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # mIRC" turned out to mean. The transfer was never slow; the number
         # was. It also fed the speed RECORD and the advert, so the figure the
         # channel saw was wrong in the same direction.
-        transfer_finished_at = time.time()
+        transfer_finished_at = final_ack_at if transfer_completed else time.time()
         if transfer_completed:
-            print(f"[DCC-SUCCESS] Sent the whole file to {user} with no errors.")
-        # The original pause: gives mIRC 1.5 seconds to close the file calmly
-        try: time.sleep(1.5)
-        except: pass
+            print(f"[DCC-SUCCESS] Sent the whole file to {user}; the receiver "
+                  f"acknowledged all {file_size} bytes.")
+        # The 1.5-second "let mIRC close its file calmly" pause is gone: the
+        # receiver's final ack IS it telling us it has everything, and the
+        # wait above already returned on that. Sleeping after it only held a
+        # DCC slot for nothing.
  
         # ---------------------------------------------------------------------
         # Update the statistics on disk
@@ -2673,12 +2862,28 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try: conn.close()
         except: pass
 
+    except _ReceiverGone as gone:
+        _report_transfer_failure(user, file_name,
+            f"closed the connection mid-transfer, having acknowledged "
+            f"{gone.acked:,} of {file_size:,} bytes.")
+        oserve = sys.modules.get('oserve')
+        if oserve: oserve.send_fails_count += 1
+    except _ReceiverStalled as stalled:
+        _report_transfer_failure(user, file_name,
+            f"stopped acknowledging at {stalled.acked:,} of {file_size:,} bytes "
+            f"and made no progress for {int(ACK_STALL_SECONDS)}s; giving up on "
+            f"a dead link.")
+        oserve = sys.modules.get('oserve')
+        if oserve: oserve.send_fails_count += 1
     except socket.timeout:
-        # FIXED (issue #30): previously silent. A handshake can succeed and the client can
-        # connect, but if they never acknowledge fast enough the send loop times out here
-        # with no log line at all - the only trace was a gap in the log between DCC-CONNECT
-        # and the finally block's cleanup lines.
-        print(f"[DCC-FAIL] Timeout sending to {user}: no data acknowledged within the socket timeout.")
+        # FIXED (issue #30): previously silent. This is the SEND side blocking:
+        # the kernel buffer is full and the peer has not drained it within the
+        # socket timeout. The old message said "no data acknowledged", which
+        # was never what it measured - nothing read acknowledgements then. The
+        # ack-based stall above is that check; this one is the write stalling.
+        _report_transfer_failure(user, file_name,
+            "the send blocked for the whole socket timeout with the receiver "
+            "not draining it.")
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except Exception as e:
@@ -2686,7 +2891,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # pipe, or any other mid-transfer failure produced the exact same silence - no way
         # to tell which one happened after the fact, especially once the temp archive is
         # already deleted and the queue row already gone.
-        print(f"[DCC-FAIL] Transfer to {user} failed: {type(e).__name__}: {e}")
+        _report_transfer_failure(user, file_name, f"{type(e).__name__}: {e}")
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     finally:
@@ -2702,12 +2907,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except Exception:
             pass
 
-        # Give the network buffer 0.5s to flush the final acknowledgement
-        try:
-            import time
-            time.sleep(0.5)
-        except:
-            pass
+        # There used to be a 0.5 s sleep here "to give the network buffer time
+        # to flush the final acknowledgement" - a pause standing in for the ack
+        # that nothing read. The ack is read now, and a completed transfer
+        # only reaches this point once it has arrived; a failed one has
+        # nothing to wait for. Sleeping here only held the DCC slot half a
+        # second longer on every exit path.
 
         # The real-time speed counter
         # transfer_finished_at is set the instant the last byte went out; it
