@@ -42,8 +42,17 @@ WEB = os.path.join(REPO_ROOT, "web")
 LANG_DIR = os.path.join(WEB, "lang")
 LANGUAGES = ("en", "fr", "es")
 
-DATA_I18N = re.compile(r'data-i18n(?:-placeholder)?="([^"]+)"')
-VIEW_TITLE_OR_SUB = re.compile(r'(?:title|sub):\s*"([^"]+)"')
+DATA_I18N = re.compile(r'data-i18n(?:-html|-placeholder|-title)?="([^"]+)"')
+# A translation key looks like "namespace.name" or "namespace.sub.name" -
+# lowercase-led dotted segments. app.js uses these three ways that a single
+# fixed regex cannot all catch at once: literal t("key") calls, an object
+# literal's values (DOWNLOAD_STATE_LABELS, STATUS_LABELS - looked up
+# dynamically by state, then passed to t()), and a key assigned to a local
+# variable through a ternary before being passed to t(theVariable) (the
+# broadcast view's soFarKey/doneKey). Matching the shape directly, anywhere
+# in the file, covers all three without three separate regexes to keep in
+# sync with how app.js happens to phrase each one today.
+JS_KEY_SHAPED_STRING = re.compile(r'"([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+)"')
 
 
 def read(name):
@@ -58,15 +67,16 @@ def load_dict(code):
 
 def keys_referenced_in_source():
     """Every translation key the dashboard's own source actually asks for -
-    index.html's data-i18n(-placeholder) attributes, plus the views{}
-    object in app.js, whose title/sub fields are keys rather than literal
-    text (see the comment above that object)."""
+    index.html's data-i18n, data-i18n-html, data-i18n-placeholder and
+    data-i18n-title attributes, plus every key-shaped string literal in
+    app.js (see JS_KEY_SHAPED_STRING above for why a shape match, not a
+    narrower t(...)-call match, is what covers all of app.js's ways of
+    naming a key)."""
     html = read("index.html")
     found = set(DATA_I18N.findall(html))
 
     js = read("app.js")
-    block = js.split("var views = {", 1)[1].split("\n  };", 1)[0]
-    found.update(VIEW_TITLE_OR_SUB.findall(block))
+    found.update(JS_KEY_SHAPED_STRING.findall(js))
 
     return found
 

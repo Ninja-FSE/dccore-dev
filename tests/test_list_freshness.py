@@ -236,9 +236,11 @@ class ThePageRendersItHonestly(unittest.TestCase):
         self.assertIn("banner.hidden = true;", block)
 
     def test_an_advert_with_nothing_readable_says_so(self):
+        """The wording is a translation key, not literal text - see
+        web/lang/en.json's filelists.advertNothing."""
         block = self.js().split("function describeAdvert(", 1)[1][:400]
 
-        self.assertIn("nothing we could read", block)
+        self.assertIn('t("filelists.advertNothing")', block)
 
 
 class AskingAgainWithoutBeingAsked(DCCoreTestCase):
