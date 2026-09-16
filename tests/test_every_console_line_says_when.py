@@ -211,6 +211,71 @@ class TheRealStreamIsStillThere(unittest.TestCase):
         self.assertEqual(raw.encoding, "utf-8")
 
 
+class ItRejectsBytesLikeARealTextStreamWould(unittest.TestCase):
+    """Took the live dashboard down within seconds of shipping.
+
+    Flask's CLI banner prints through click.echo(), and click decides
+    whether a stream takes str or bytes by probing it: stream.write(b"").
+    The proxy's write() answered `if not text: return 0` for ANY falsy
+    argument, string or not - so the probe "succeeded" without ever
+    reaching code that would notice b"" is not a str. click concluded this
+    was a binary stream, wrapped it in its own encoder, and started feeding
+    every later write here as encoded bytes - which then failed inside
+    write()'s own line-splitting on the first real line printed after the
+    dashboard started, taking it down immediately (`[WEBUI] Dashboard
+    stopped: a bytes-like object is required, not 'str'`).
+
+    A real text-mode stream raises TypeError for stream.write(b"") too, so
+    matching that contract exactly is both the fix and the property to
+    pin - not "handle bytes gracefully", which would have made the proxy
+    correct in a way click's probe still cannot see.
+    """
+
+    def test_empty_bytes_is_refused_not_silently_accepted(self):
+        """The exact probe click.utils._is_binary_writer() makes. Answering
+        it with success (the old `if not text: return 0`, true for b"" as
+        much as for "") is the entire bug."""
+        _, out = wrapped()
+
+        with self.assertRaises(TypeError):
+            out.write(b"")
+
+    def test_non_empty_bytes_is_refused_too(self):
+        _, out = wrapped()
+
+        with self.assertRaises(TypeError):
+            out.write(b"hello\n")
+
+    def test_a_real_text_stream_agrees(self):
+        """Control: the proxy's behaviour matches what it is standing in
+        for, not a rule invented for this fix."""
+        real = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+
+        with self.assertRaises(TypeError):
+            real.write(b"")
+
+    def test_an_empty_string_is_still_accepted(self):
+        """The other half - the fix must not turn every no-op write into an
+        error along with the bytes case it was meant to catch."""
+        _, out = wrapped()
+
+        self.assertEqual(out.write(""), 0)
+
+    def test_clicks_own_probe_now_says_text(self):
+        """Not a reimplementation of the contract above - the actual
+        function that misjudged this proxy live, run against it directly.
+        Skips where click is not installed (Flask is optional); this is
+        exactly the dependency whose CLI banner triggered the incident."""
+        try:
+            from click._compat import _is_binary_writer
+        except ImportError:
+            self.skipTest("click is not installed")
+
+        _, out = wrapped()
+
+        self.assertFalse(_is_binary_writer(out, False))
+
+
 class InstallingIt(unittest.TestCase):
 
     def setUp(self):

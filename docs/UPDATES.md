@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔴 The console timestamp proxy took the dashboard down on the live server
+
+Found live, immediately after updating: the daemon connected to IRC and
+served files normally, but the web dashboard printed one line and stopped -
+`[WEBUI] Dashboard stopped: a bytes-like object is required, not 'str'`.
+
+The new console-timestamp proxy's `write()` answered `if not text: return 0`
+for any falsy argument - a string OR bytes - before anything checked what
+`text` actually was. Flask's CLI banner prints through `click.echo()`, and
+click decides whether a stream takes `str` or `bytes` by probing it with
+`stream.write(b"")`. Against this proxy that probe "succeeded" - it never
+reached the code that would have noticed `b""` is not a string - so click
+concluded the stream was binary, wrapped it in its own encoder, and fed
+every later write here as encoded bytes instead of text. The first real
+line printed after that (the Flask banner itself) failed inside the
+proxy's own line-splitting.
+
+A real text-mode stream raises `TypeError` for `stream.write(b"")` too, so
+matching that exactly is both the fix and the property worth pinning -
+"handle bytes gracefully" would have made the proxy correct in a way
+click's probe still cannot see. `write()` now rejects anything that is not
+a `str` before the empty-input check, the same way `io.TextIOWrapper`
+would. Four new tests, including one that drives click's actual probe
+function against the proxy directly, and a control that checks a real
+`TextIOWrapper` agrees.
+
 ### 🧠 Resolving a request streams the list; it no longer loads it
 
 Found on the same 5.4-million-file install as the count fix above, by looking
