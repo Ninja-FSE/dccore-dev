@@ -4,6 +4,51 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📊 The file count is computed once per build, not once per caller
+
+Found on a live install with 5.4 million files - a 460 MB list. The operator
+opened the Stats page, saw every card sitting on a dash, and assumed it was
+broken. It was counting.
+
+`list.get_file_count_date_size_and_raw_bytes()` answers "how many files do I
+share" by reading every published list end to end and counting the lines that
+start with `!`. On that install: 2.4 seconds warm, considerably more cold
+after a restart. And it is asked constantly - every advert cycle, every Stats
+page load, every `-que` from somebody with nothing queued, the admin console's
+`status` - each caller paying the full read again, for a number that cannot
+change between one `!update` and the next. commands.py:140 had already noticed
+the cost and dodged it in one branch rather than fixing it.
+
+The counting loop is now `count_request_lines(paths)`, cached on each list
+file's `(path, mtime_ns, size)`. `update_list.py` publishes with
+`os.replace()`, which gives the new list a new mtime and (almost always) a new
+size, so the first call after a rebuild misses, recounts once, and every call
+until the next rebuild is free. Measured on the same install: first call
+2.41s, second 0.04ms. Nothing is invalidated by hand - the file on disk is the
+truth and the key is the file on disk - so `!rehash` needs no special case and
+neither does a list that vanishes. A lock makes concurrent callers share one
+read rather than each walking 460 MB.
+
+Only a COMPLETE count is kept. The #433 case is a list that `stat()`s fine but
+will not open - an AV scanner holding the VIDEO list on Windows - and that
+leaves the signature unchanged when the scanner lets go. Caching the short
+count under it would have served that number until the next `!update`; the
+uncached code retried on the next call, and so does this.
+
+The lock is `runtime.list_count_lock`, not constructed in list.py -
+`tests/test_no_reloaded_module_owns_a_lock.py` caught the first draft doing
+exactly that: list.py is reloaded by `!rehash`, and a `Lock()` built there is
+a new object after every reload while a caller mid-count still holds the old
+one. The cache dict itself stays in list.py on purpose; rebinding it on reload
+costs one recount, which is harmless.
+
+15 tests in `tests/test_the_list_is_counted_once_per_build.py`. Eight
+mutations run, all caught, including keying on the path alone, on mtime
+alone, and on size alone (a same-size rebuild with a different count - one
+long filename gone, two short ones added - is what the mtime half of the key
+is for, and it took a test that builds exactly that file to pin it), and
+caching a short count.
+
 ### 🕒 Every console line says when
 
 Reported live, in the same session as the setup-check fix. Four channels

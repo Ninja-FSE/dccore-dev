@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The Stats page, the advert and `-que` no longer re-read your whole list every time they need the file count.** On a very large library the count of files you share was found by reading the entire published list from start to finish — several seconds on a list of a few million files — and it was done again for every advert, every Stats page load and every `-que` from someone with an empty queue. The Stats page sat on dashes while it counted, which looked like a fault. The count is now worked out once after each `!update` and reused until the next one; on a 5.4-million-file library the second request went from 2.4 seconds to under a millisecond. The number itself is unchanged.
 - **Every line in the bot's console window now starts with the time.** Reading the window during a live problem — did the bot retry that channel yet? how long did that rebuild take? did it disconnect before or after the transfer? — meant working the answer out from your own memory of when you looked, because nothing in it said when anything happened. Lines now read `[22:53:11] [REJOIN] Asking to rejoin #example.` The same prefix goes into a file if you redirect the bot's output to one. The format is **Settings → Debug & logging → `CONSOLE_TIMESTAMP_FORMAT`** — it ships as `%H:%M:%S`, the mIRC style; set `%Y-%m-%d %H:%M:%S` for a log you keep across days, or leave it blank for no prefix at all. The dashboard's Console page already had times and is unchanged.
 
 ## v1.12.1 — The Setup Check Catches Up
