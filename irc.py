@@ -2249,6 +2249,11 @@ def irc_loop():
             # with it empty, every frozen user looks absent and their queue gets reaped.
             if getattr(config, 'channel_users', None):
                 config.bot_joined_channel = True
+                # #530: queues restored from disk have no trigger of their
+                # own - a JOIN wakes only FROZEN users, and the global sweep
+                # otherwise runs when some other transfer completes. Look
+                # once, now that channel_users can be trusted.
+                threading.Thread(target=dcc.wake_restored_queues, args=(sock,), daemon=True).start()
             else:
                 print("[ACTIVATE] No channel members known yet; advertising without claiming channel sync.")
 

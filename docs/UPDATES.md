@@ -4,6 +4,76 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧊 The queue sweep could not see a PM requester, and never let one go
+
+Found on the user's bot (#530): one nick with 65 files QUEUED, 0 of 3 slots
+busy, for days - across a restart, while 38 files went to other people. The
+head row had `send_fails: 2` and `"channel": "<the bot's own nick>"`.
+
+That channel value is the whole story. A request made by private message
+records the PRIVMSG target as the row's channel, and for a PM that is the bot.
+`check_queue_and_send()` has two ways of deciding whether a waiting user is
+present. The specific-user branch - a fresh request, a completion for that
+user, a JOIN thaw - asks every channel the bot is in. The global sweep
+(section B, the path every OTHER completion and every `!rehash` take) built
+`channels_to_check` from the row and looked only there. `channel_users` has
+no key for a nick, so a PM-originated head row was invisible to the sweep
+whichever channel the user was sitting in.
+
+On its own that would have meant "PM requests are only served by their own
+trigger". Two more things made it permanent. The sweep answered "not
+present" with a silent `continue`, where the specific-user branch freezes the
+user and starts the five-minute countdown - so no freeze, no timer, no expiry,
+no log line. And the JOIN handler wakes only users who are FROZEN
+(`frozen_queues` is in-memory), so after the restart even a user who came and
+went was never looked at again. Nothing was ever going to touch that queue.
+
+- **The sweep asks every channel we are in**, via the same
+  `user_is_present_in_ram()` the specific-user branch and the stale-freeze
+  sweep already use. The row's channel is where to *announce*
+  (`announce_channel_for()`), not where to *look*; the two questions had
+  been separated once already (#272) and this is the half that was still
+  conflated.
+- **The sweep freezes an absent user** instead of skipping them. The
+  countdown moved out of the specific-user branch into
+  `freeze_absent_user()` so both paths apply one policy: not while the bot
+  is unsynced, one countdown per user, announced to the debug channel as
+  `QUIT`. Absent users are collected under `queue_lock` and frozen after it
+  is released, because the freeze announces and `send_debug()` paces.
+- **One sweep on activation.** `wake_restored_queues()` runs the global
+  sweep once per slot when `delayed_activate` claims channel sync, so a
+  queue restored from `dcc_queue.txt` is evaluated - served if present,
+  frozen if not - without waiting for unrelated traffic. Once per slot
+  because a single pass dispatches one user and breaks.
+- **A nick is not a place to announce.** `announce_channel_for()` handed
+  back whatever string the row carried, so the `Sent:` line for a PM request
+  went out as `PRIVMSG <our nick> :Sent ...` - the bot telling itself. A
+  value with no channel prefix (`is_channel_name()`, RFC 2812's four) now
+  falls back to the default channel like a missing one does.
+
+Tests in `tests/test_the_sweep_could_not_see_a_pm_requester.py` (23): a PM
+row for a present user is dispatched by the sweep with the announce target a
+channel; an absent user is frozen by it, the queue kept, no second countdown,
+gone after five minutes via the existing reaper, nothing frozen while
+unsynced, the freeze announced outside `queue_lock` (probed with a
+non-blocking acquire); activation serves up to the slot count and respects
+the quiesce gate; the specific-user branch still calls the shared helper.
+Six mutants checked - each fix reverted in turn fails its tests, and moving
+the freeze back under the lock deadlocks, which is the point of the probe.
+`test_announce_target_is_one_channel.py`'s membership anchor is updated
+with its intent kept: it guarded against narrowing presence to one channel,
+and now guards that the row's channel is not consulted at all.
+
+Also: the comment above `_ended` in `start_dcc_send()` still said
+`transfer_finished_at` was "set the instant the last byte went out" - Neo's
+review note on #529. It is the final ack now, and the comment says so.
+
+Not in this change, filed on the issue: `MAX_SEND_FAILS` is per ROW. A user
+whose client cannot accept DCC at all - as this one's evidently could not,
+two accept timeouts on the head - would, now that the sweep can reach them,
+burn three attempts per row on each of 65 rows, holding a slot for hours. A
+per-user consecutive-failure limit would end that in minutes.
+
 ### 🟢 The dashboard speaks English, French or Spanish
 
 Scope decided on issue #69: the dashboard translates, the Console and the
