@@ -74,6 +74,73 @@ two accept timeouts on the head - would, now that the sweep can reach them,
 burn three attempts per row on each of 65 rows, holding a slot for hours. A
 per-user consecutive-failure limit would end that in minutes.
 
+### 🟢 The dashboard speaks English, French or Spanish
+
+Scope decided on issue #69: the dashboard translates, the Console and the
+debug channel deliberately do not - both show the same lines the daemon's
+own log does, and translating those means touching every `print()` call
+site across the daemon rather than this one static page. Private replies to
+a user (`-help`, `-que`, `-stats`) and everything the bot says in a channel
+stay English unconditionally too, for the reason already recorded there:
+other bots parse those lines as a de facto protocol.
+
+**Client-only, like the dark/light theme.** Which language suits an
+operator is a fact about the person looking at the dashboard, not about the
+bot, so the choice lives in `localStorage` and nothing about it reaches
+`settings.conf` or the server. A first visit reads the browser's own
+language and falls back to English for anything the three dictionaries do
+not cover.
+
+**Three flat JSON dictionaries** - `web/lang/en.json`, `fr.json`, `es.json`
+- fetched at load through Flask's existing static-file serving
+(`create_app()`'s `static_folder="web"`), so no new route was needed and
+the files sit behind the same login gate as everything else (verified: an
+unauthenticated request 302s to `/login`, same as any other page).
+
+**A key a language is missing falls back to English rather than showing
+nothing** - the only failure mode a viewer in that language should ever
+see. A key neither dictionary defines renders as the literal key string,
+which is loud on purpose: `tests/test_dashboard_translations_stay_complete.py`
+exists so that never has to happen silently. It checks, both directions:
+every key the page actually references - `index.html`'s `data-i18n`,
+`data-i18n-html`, `data-i18n-placeholder` and `data-i18n-title`
+attributes, and every key-shaped string literal in `app.js` (a literal
+`t("...")` call, an object literal's values looked up dynamically such as
+`DOWNLOAD_STATE_LABELS`/`STATUS_LABELS`, or a key assigned to a local
+variable through a ternary before being passed to `t(theVariable)`) -
+exists in `en.json`; every key `en.json` defines is referenced by
+something; and all three languages define exactly the same set of keys, so
+nothing quietly stays English for one language and not the others.
+
+**The nav label and the page heading share one translation key per view**,
+not two coincidentally-equal strings - `tests/test_dashboard_nav_and_multiselect.py`'s
+existing guard against the two drifting apart (written when both were still
+literal English) is adapted rather than dropped, and now checks the
+identifier match instead.
+
+**Landed in two passes.** The first covered the navigation rail, every
+page's heading, the sidebar chrome and the Search view's own controls - 29
+keys. The second covers everything else the dashboard says: Downloads, List
+Browser, Tools, Settings and Stats - 321 more keys, 350 in total, in all
+three languages. The Console, private replies and channel output remain
+English throughout, by design rather than by omission.
+
+Two low-severity findings from review are fixed in the second pass:
+`loadLanguage()` now guards every callback with a generation counter, so two
+overlapping language changes - or a change back to English while another
+language's fetch is still in flight - can no longer let a stale reply
+overwrite a newer one; and `document.documentElement.lang` now follows the
+picker, so a screen reader and the browser's own "translate this page"
+prompt agree with what is actually on screen.
+
+**Known seam, left for a follow-up:** content a `render*()` function builds
+through `t()` - rather than walked by `applyTranslations()` via a
+`data-i18n*` attribute - keeps its old language until the view that built
+it reloads. Most of the dashboard self-heals within a few seconds because
+it polls; the Settings pane and the List Browser cache once behind a
+`*Loaded` flag and do not, so a language changed while looking at either
+stays partly English until you navigate away and back.
+
 ### 📬 Complete means the receiver acknowledged it
 
 Found by a second operator running DCCore on Windows, reproduced by the user

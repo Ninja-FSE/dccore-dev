@@ -158,6 +158,35 @@
   outline-offset: 1px;
 }
 
+/* Language picker, right below the theme switch it visually pairs with. A
+   <select> rather than a button row: three options fits either way, but a
+   row of buttons stops scaling the moment a fourth language ships. */
+
+.lang-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.lang-switch select {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.lang-switch select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 * { box-sizing: border-box; }
 
 html, body {
