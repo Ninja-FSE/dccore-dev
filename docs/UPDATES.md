@@ -4,6 +4,48 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚦 The VIP lane gets one slot per pass, not one in N+1
+
+Reported by Neo, live (#527): "when you get spammed with requests, the
+`Sent:` doesn't send to the channels before the queue is empty - while
+channel announce works and debug messages."
+
+`queue_mgr.queue_worker()` drained one VIP line per pass and then one line
+for EVERY user with a backlog in `send_queue`. Each line costs a `MSG_DELAY`
+slot on the shared pacer - five seconds by default - so with N users
+spamming, a pass was 1 VIP line + N standard lines and the VIP lane, where
+`Sent:`, the advert and `Sending:` live, got one slot in N+1: with ten
+spammers, one line every 55 seconds. The debug drain has its own thread
+and takes pacer slots independently, which is why debug lines kept coming.
+This was #426 over-corrected - that fix removed the `continue` that let
+VIP starve the standard lane completely, and what replaced it turned the
+starvation round the other way under load.
+
+Now strict alternation: **one VIP line, one standard line, per pass**. The
+standard lane rotates through users across passes with a cursor
+(`next_standard_line()`, a pure function: the user after the one served
+last, wrapping round) instead of serving every user within one pass. VIP is
+never more than two slots away whatever the load; per-user fairness in the
+standard lane is kept over time. Total throughput is the pacer's either
+way - only the share changes, and only while VIP has a backlog.
+
+One thing the first draft got wrong, caught by its own rotation test: a
+user whose last line went out was deleted on the spot, and the cursor -
+their name - then had nowhere to stand, so the next pass started from the
+top and served the first users twice before the last was served once. An
+emptied user now keeps their (empty) entry until the cursor next passes
+it, one rotation later, and is tidied away then.
+
+Tests in `tests/test_the_vip_lane_gets_one_slot_per_pass.py` (17): the
+cursor's rotation, wrap, gone-user and tidy rules; against the real worker
+thread - a `Sent:` line arriving with ten users' backlogs in flight leaves
+within two slots, the standard lane still runs under a 500-line VIP
+backlog (#426's property, kept), every window of five sends reaches five
+different users, and a user added mid-run takes the next turn. Three
+mutants - the old every-user loop restored, the cursor never advancing, the
+cursor always starting at the top - each fail. `test_a_shared_outbound_pace`
+unchanged and green.
+
 ### 🧊 The queue sweep could not see a PM requester, and never let one go
 
 Found on the user's bot (#530): one nick with 65 files QUEUED, 0 of 3 slots
