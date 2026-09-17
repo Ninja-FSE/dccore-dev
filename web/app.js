@@ -3579,6 +3579,7 @@
     "private-messages": "settings.category.privateMessages",
     "admin-console": "settings.category.adminConsole",
     "web-dashboard": "settings.category.webDashboard",
+    "console-feed": "settings.category.consoleFeed",
     "debug": "settings.category.debug",
     "advanced": "settings.category.advanced"
   };
@@ -3688,6 +3689,12 @@
     DEBUG_MODE: "settings.field.DEBUG_MODE",
     DEBUG_TO_CHANNEL: "settings.field.DEBUG_TO_CHANNEL",
     DEBUG_TO_CONSOLE: "settings.field.DEBUG_TO_CONSOLE",
+    CONSOLE_SHOW_REQUESTS: "settings.field.CONSOLE_SHOW_REQUESTS",
+    CONSOLE_SHOW_QUEUE: "settings.field.CONSOLE_SHOW_QUEUE",
+    CONSOLE_SHOW_SENDS: "settings.field.CONSOLE_SHOW_SENDS",
+    CONSOLE_SHOW_FAILURES: "settings.field.CONSOLE_SHOW_FAILURES",
+    CONSOLE_SHOW_SEARCHES: "settings.field.CONSOLE_SHOW_SEARCHES",
+    DEBUG_CHANNEL_FEED: "settings.field.DEBUG_CHANNEL_FEED",
     CONSOLE_TIMESTAMP_FORMAT: "settings.field.CONSOLE_TIMESTAMP_FORMAT",
     PROJECT_URL: "settings.field.PROJECT_URL"
   };

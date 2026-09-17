@@ -524,6 +524,28 @@ DEBUG_TO_CONSOLE: bool = True
 # page keeps its own times and is unaffected either way.
 CONSOLE_TIMESTAMP_FORMAT: str = "%H:%M:%S"
 
+# THE CONSOLE FEED (#528). An OmenServe operator sees every request, send and
+# served search live inside mIRC; a DCCore operator saw completions and
+# failures in the admin console and nothing else - "it sends but I can't
+# know until I look at the stats in the browser". The console now carries
+# one line per event, and these switches say which kinds it shows. They
+# govern the admin DCC console and the dashboard's Console page only; the
+# IRC debug channel has its own switch below.
+CONSOLE_SHOW_REQUESTS: bool = True    # REQUEST - somebody asked for a file or a folder
+CONSOLE_SHOW_QUEUE: bool = True       # QUEUED - a request went into somebody's queue, and at what position
+CONSOLE_SHOW_SENDS: bool = True       # SENDING, RESUMED and SENT - a transfer starting, resuming and completing
+CONSOLE_SHOW_FAILURES: bool = True    # FAILED - a transfer that did not complete, and why
+CONSOLE_SHOW_SEARCHES: bool = True    # SEARCH - somebody searched, and how many results they got
+
+# The feed's new events - requests, queue positions, transfer starts, resumes
+# and searches - go to the IRC debug channel only if this is on. Off by
+# default on purpose: every line to a channel takes a MSG_DELAY slot on the
+# same pacer as the adverts, the resume replies and the queue notices, so on a
+# busy bot a chatty feed there delays the things people are waiting for. The
+# console has no such cost. Completed and failed transfers still reach the
+# channel under DEBUG_TO_CHANNEL, as they always have.
+DEBUG_CHANNEL_FEED: bool = False
+
 # The two side files update_list.py publishes alongside the master list, holding
 # the human-readable total size and the raw byte count that the channel advert and
 # @<nick>-que read back. Named here rather than as a literal in both list.py and

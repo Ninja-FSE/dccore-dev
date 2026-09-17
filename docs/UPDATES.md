@@ -4,6 +4,87 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📺 The console feed: requests, queue, starts, resumes, searches - with tickboxes
+
+Part one of #528. "dccore sends but I can't know until I look at the stats
+in the browser" - an OmenServe operator sees every request, send and served
+search live in mIRC, and the admin console here carried only the end of the
+story: `Sent:` and, since #526, `Failed:`. A request, a slot being taken, a
+resume and a served search were `print()` to the bot's own window and
+nothing else.
+
+**One line per event now**, through `send_debug()` with a category of its
+own, so the two sinks render `[CATEGORY] text` exactly as they already do:
+
+- `REQUEST` - `dave asked for "Song.flac"`, from `handle_download_request()`
+  once the file is found and before the send-or-queue decision, so every
+  accepted request reports once whichever way it goes; the `!rar` path's
+  existing INFO line is re-tagged REQUEST.
+- `QUEUED` - `Queued "file" for dave at #2 (3/3 slots busy)`, from
+  `send_dcc_queue_notice()`, which both request paths already call.
+- `SENDING` - `Sending "file" to dave (slot 2/3)`, from
+  `send_dcc_sending_notice()`, which every dispatch path already calls the
+  moment a slot is taken - one site, no copy per path.
+- `RESUMED` - `Resumed "file" for dave at 1.0GB of 1.5GB`, after the accept
+  in `handle_resume_request()`.
+- `SEARCH` - `dave searched "metal" - 12 results`, from `execute_search()`,
+  hits or none; `total_matches`, not the `MAX_SEARCH_RESULTS`-capped count.
+- `SENT` and `FAIL` as before.
+
+**Settings → Console feed** (new category `console-feed`): five `bool`
+tickboxes - `CONSOLE_SHOW_REQUESTS`, `_QUEUE`, `_SENDS` (starting, resuming
+and completing), `_FAILURES`, `_SEARCHES` - all on by default, plus
+`DEBUG_CHANNEL_FEED`. The policy is two pure functions in `announce.py`:
+`console_wants(category)` (that category's tickbox, or True for any
+category the table does not name) and `channel_wants(category)` (the feed's
+own five categories only under `DEBUG_CHANNEL_FEED`; everything else as
+before). `send_debug()` applies both on top of `DEBUG_TO_CHANNEL` /
+`DEBUG_TO_CONSOLE`.
+
+Two decisions worth stating:
+
+- **An unticked kind is declined, not undelivered.** The stdout floor ("no
+  line is ever lost") fires only for a line the operator wanted and nobody
+  took - an unticked feed line falls nowhere. Without that, unticking
+  requests would have moved them from the console to the bot's window.
+- **The issue's `_PRESENCE` and `_BANS` boxes are not here.** `PART`, `JOIN`
+  and `QUIT` are used across dcc.py and irc.py as "bad news / good news"
+  tags for config errors, pack failures and rejoins as much as for
+  presence, so a presence tickbox over them would silence errors. Those
+  categories, and the ban ones, are never muted. A clean-up of the category
+  vocabulary would have to come first; separate.
+
+The IRC debug channel: `Sent:`/`Failed:` keep going there under
+`DEBUG_TO_CHANNEL`; the five new categories only with `DEBUG_CHANNEL_FEED`,
+which ships off - a channel line costs a `MSG_DELAY` slot on the pacer the
+adverts and resume replies share (the #527 lesson), and the console costs
+nothing. On the channel the five render `[REQUEST]` etc. in the `[SENT]`
+block colour.
+
+Registered everywhere a setting has to be: `defaults.py` (with the
+explanations the "?" of #537 will show), `webserver.SETTINGS_CATEGORIES`
+and `SETTINGS_LABELS`, the `SETTINGS_CATEGORY_LABEL_KEYS` /
+`SETTINGS_FIELD_LABEL_KEYS` tables from #533, en/fr/es dictionaries (7 keys
+each), `settings.conf.sample` regenerated, `docs/ADMIN-CONSOLE.md` gains
+"The transfer feed".
+
+Tests in `tests/test_the_console_feed.py` (26): the policy on a bare config
+(every feed category has a switch, the switches are real settings shipping
+on, ticked/unticked, SENDS covers three categories, case, a category outside
+the feed is never muted, a missing switch means on - a pre-#528
+settings.conf must not go dark, new events off the channel by default and
+on with the switch, SENT/FAIL/others unaffected); `send_debug()` end to end
+with a sink, the channel queue and stdout all watched (console-not-channel
+by default, both with the switch, unticked = nowhere and silent, unticked
+SENT still on the channel, the floor still fires for a wanted line nobody
+took, non-feed untouched, channel tag present); the SENDING and QUEUED lines
+with slot figures; source-anchored placement of REQUEST (after the file is
+found, before the decision), the folder request, RESUMED (after the accept)
+and SEARCH (total not capped, before the hits check); and the Settings
+payload's `console-feed` category with six `bool` fields. Five mutants of
+the routing - tickbox ignored, channel switch ignored, declined line
+floored, SENT treated as feed-only, missing switch meaning off - each fail.
+
 ### 🔁 Auto re-fetch called its own validator with the wrong shape
 
 Seen live, with `AUTO_REFETCH_LISTS` on: `[LIST-FETCH] Did not re-ask

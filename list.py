@@ -1226,6 +1226,14 @@ def execute_search(irc_sock, user, search_term, channel):
         # The row is kept exactly as it is on disk - matches go to IRC raw.
         matches = [entry["line"] for entry in found_entries]
 
+        # The console feed (#528): one line per served search, hits or none.
+        # total_matches, not len(matches): the reply is capped at
+        # MAX_SEARCH_RESULTS, and the operator wants to know what the list
+        # had, not what the cap let through.
+        announce.send_debug(
+            f'{user} searched "{search_term}" - {total_matches} result'
+            f'{"" if total_matches == 1 else "s"}', category="SEARCH")
+
         if matches:
             # Send the search header privately to the requester
             announce.send_search_result_header(user, search_term, total_matches, channel)
