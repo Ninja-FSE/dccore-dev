@@ -46,13 +46,21 @@ DATA_I18N = re.compile(r'data-i18n(?:-html|-placeholder|-title)?="([^"]+)"')
 # A translation key looks like "namespace.name" or "namespace.sub.name" -
 # lowercase-led dotted segments. app.js uses these three ways that a single
 # fixed regex cannot all catch at once: literal t("key") calls, an object
-# literal's values (DOWNLOAD_STATE_LABELS, STATUS_LABELS - looked up
-# dynamically by state, then passed to t()), and a key assigned to a local
-# variable through a ternary before being passed to t(theVariable) (the
-# broadcast view's soFarKey/doneKey). Matching the shape directly, anywhere
-# in the file, covers all three without three separate regexes to keep in
-# sync with how app.js happens to phrase each one today.
-JS_KEY_SHAPED_STRING = re.compile(r'"([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+)"')
+# literal's values (DOWNLOAD_STATE_LABELS, STATUS_LABELS, and the settings
+# category/field label overrides - all looked up dynamically by an id the
+# server sent, then passed to t()), and a key assigned to a local variable
+# through a ternary before being passed to t(theVariable) (the broadcast
+# view's soFarKey/doneKey). Matching the shape directly, anywhere in the
+# file, covers all three without three separate regexes to keep in sync
+# with how app.js happens to phrase each one today.
+#
+# Segments allow an underscore as well as letters/digits: the settings
+# lookups above end each key in the exact SCREAMING_SNAKE_CASE name the
+# server uses (SETTINGS_LABELS in webserver.py - "settings.field.MAX_DCC_SLOTS"),
+# on purpose, so the two stay directly cross-referenceable. A narrower
+# class here would silently stop matching those keys, the same way it once
+# stopped one character short of "settings.field.SERVER"'s neighbours.
+JS_KEY_SHAPED_STRING = re.compile(r'"([a-z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)+)"')
 
 
 def read(name):
