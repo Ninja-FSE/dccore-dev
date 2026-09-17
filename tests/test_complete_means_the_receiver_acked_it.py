@@ -214,7 +214,17 @@ class ARealReceiver(DCCoreTestCase):
         self.assertEqual(got, CONTENT, "the bytes went out; that was never the question")
         self.assertEqual(self.sent_lines(), [], "announced as sent with no evidence it arrived")
         self.assertEqual(len(self.failed_lines()), 1, self.debug_lines)
-        self.assertIn("never acknowledged", self.failed_lines()[0])
+        # Two wordings, one verdict. On a fast loopback the sender has pushed
+        # every chunk into the kernel before the receiver closes, reaches
+        # _wait_for_final_ack() and reports "never acknowledged a single
+        # byte". On a loaded runner (ubuntu/3.12 in CI, once) the sender is
+        # descheduled mid-loop, the close lands first, _ReceiverGone fires
+        # inside the loop and it reports "closed the connection mid-transfer,
+        # having acknowledged 0 of N bytes". Both say zero bytes were ever
+        # acknowledged, which is the property; which one runs is scheduling.
+        reason = self.failed_lines()[0]
+        self.assertTrue("never acknowledged" in reason or "acknowledged 0 of" in reason,
+                        reason)
 
     def test_a_receiver_that_stops_acking_mid_file_is_a_failure(self):
         """The reported case: 1.2 MB acked of 2.7 MB, then nothing."""
