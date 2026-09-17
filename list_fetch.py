@@ -813,7 +813,14 @@ def refetch_due_lists(log=print, now=None):
 
     started = []
     for bot in due:
-        status, result = webserver.build_list_fetch_enqueue_result({"bot": bot})
+        # build_list_fetch_enqueue_result(bot_raw) wants the nick ITSELF -
+        # see its own docstring and the real HTTP route's call
+        # (build_list_fetch_enqueue_result(body.get("bot", ""))) - not a
+        # dict wrapping it. A dict here failed reject_if_unsafe_for_irc_line()'s
+        # isinstance(value, str) check on every single call, so this feature
+        # rejected every bot with "'bot' must be a string." and never
+        # actually re-fetched a list (#535).
+        status, result = webserver.build_list_fetch_enqueue_result(bot)
         if status == 200:
             started.append(bot)
             log(f"[LIST-FETCH] {bot}'s list has changed since we took our copy "

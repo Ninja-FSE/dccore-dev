@@ -415,12 +415,37 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
 
         started = list_fetch.refetch_due_lists(log=lambda *_a: None, now=10 ** 9)
 
-        self.assertEqual(calls, [{"bot": "ReelBot"}])
-        # `started` is what the enqueue ACCEPTED, and in this fixture it
-        # refuses - there is no live connection to ask over. That is the right
-        # answer and worth pinning: a sweep reports what was actually queued,
-        # not what it decided to try.
-        self.assertEqual(started, [])
+        # The bot nick ITSELF, not a dict wrapping it (#535) -
+        # build_list_fetch_enqueue_result(bot_raw) wants bot_raw to BE the
+        # nick, exactly as the real HTTP route already calls it
+        # (build_list_fetch_enqueue_result(body.get("bot", ""))). A dict here
+        # failed that function's own isinstance(value, str) check on every
+        # single call, silently disabling this feature entirely - this test
+        # asserted the broken shape and so never caught it.
+        self.assertEqual(calls, ["ReelBot"])
+        # `started` is what the enqueue ACCEPTED. This fixture never
+        # populates channel_users at all, which reads as "presence unknown"
+        # rather than "bot absent" (see
+        # tests/test_we_do_not_ask_a_bot_that_is_not_there.py's own docstring
+        # on that distinction) - an unknown presence never refuses, so the
+        # fetch goes through the same way an operator's own click would.
+        self.assertEqual(started, ["ReelBot"])
+
+    def test_a_reachable_bot_is_actually_re_fetched(self):
+        """#535, end to end: the sibling test above only pinned the CALL
+        SHAPE, and its fixture's bot was never reachable either way - so
+        `started == []` there was true for two different reasons at once and
+        could not tell them apart. Give the sweep a bot channel_users can
+        actually see, and the fix means the fetch is now ACCEPTED rather
+        than refused before it even reaches that check."""
+        self.set_config(CHANNEL="#somechannel", MAX_FETCH_SLOTS=3)
+        config.channel_users["#somechannel"] = {"reelbot"}
+        self.hold("ReelBot", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("ReelBot", {"files": 250, "list_date": "Sep 6th"})
+
+        started = list_fetch.refetch_due_lists(log=lambda *_a: None, now=10 ** 9)
+
+        self.assertEqual(started, ["ReelBot"])
 
     def test_a_run_is_capped_even_when_more_are_due(self):
         self.set_config(AUTO_REFETCH_MAX_PER_RUN=1)
@@ -445,8 +470,10 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
         list_fetch.refetch_due_lists(log=lambda *_a: None, now=10 ** 9)
 
         # The cap bounds how many are ASKED FOR - which is the burst it exists
-        # to prevent, whether or not the enqueue then accepts them.
-        self.assertEqual(calls, [{"bot": "Oldest"}])
+        # to prevent, whether or not the enqueue then accepts them. The bot
+        # nick itself, not a dict wrapping it - see the sibling test above
+        # and #535.
+        self.assertEqual(calls, ["Oldest"])
 
 
 if __name__ == "__main__":

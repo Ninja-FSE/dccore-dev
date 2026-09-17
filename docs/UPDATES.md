@@ -58,6 +58,37 @@ without help, translation before server text, keyboard reachable, the key
 in all three dictionaries, CSS on both `:hover` and `:focus`. Exercised
 through the real Flask app behind the login: 106 of 106 fields carry help.
 
+### 🔁 Auto re-fetch called its own validator with the wrong shape
+
+Seen live, with `AUTO_REFETCH_LISTS` on: `[LIST-FETCH] Did not re-ask
+SomeBot: 'bot' must be a string.` - for every single bot the sweep ever
+tried, regardless of which one.
+
+`list_fetch.refetch_due_lists()` called
+`webserver.build_list_fetch_enqueue_result({"bot": bot})` - a dict - where
+the function's own signature and docstring, and the real HTTP route that
+calls it correctly (`build_list_fetch_enqueue_result(body.get("bot", ""))`),
+both want the bot nick **itself**. `reject_if_unsafe_for_irc_line()`'s
+`isinstance(value, str)` check failed on that dict every time, so the
+feature never got past its own input validation - `bot_not_here_error()`,
+the outstanding-request check and the actual enqueue were all unreachable.
+Harmless (nothing crashed, nothing corrupted) but `AUTO_REFETCH_LISTS` has
+likely never actually re-fetched a single list since this call site was
+written.
+
+Fixed by passing the nick directly. Two existing tests in
+`tests/test_list_freshness.py` had asserted the broken `[{"bot": ...}]`
+call shape as if it were correct, so neither ever caught this; both are
+corrected to the real shape, and their `started` assertions (what the sweep
+actually got the shared enqueue to accept) are corrected too - one had
+`started == []` for the wrong reason (validation failure) rather than the
+right one that fixture actually represents (presence unknown, which never
+refuses - see `test_we_do_not_ask_a_bot_that_is_not_there.py`). A new test,
+`test_a_reachable_bot_is_actually_re_fetched`, gives the sweep a bot
+`channel_users` can actually see and asserts the fetch is accepted
+end-to-end, which neither existing test's fixture could ever have shown
+either way. Verified by hand: reverting the fix fails all three.
+
 ### 🚦 The VIP lane gets one slot per pass, not one in N+1
 
 Reported by Neo, live (#527): "when you get spammed with requests, the
