@@ -27,6 +27,76 @@ and a week is not expired; the constant is gone (`hasattr` guard, so it
 cannot come back quietly). Two comments and one test that cited the 1800 s
 lifetime are reworded. `docs/ADMIN-CONSOLE.md`'s limits table updated.
 
+### 🧊 The queue sweep could not see a PM requester, and never let one go
+
+Found on the user's bot (#530): one nick with 65 files QUEUED, 0 of 3 slots
+busy, for days - across a restart, while 38 files went to other people. The
+head row had `send_fails: 2` and `"channel": "<the bot's own nick>"`.
+
+That channel value is the whole story. A request made by private message
+records the PRIVMSG target as the row's channel, and for a PM that is the bot.
+`check_queue_and_send()` has two ways of deciding whether a waiting user is
+present. The specific-user branch - a fresh request, a completion for that
+user, a JOIN thaw - asks every channel the bot is in. The global sweep
+(section B, the path every OTHER completion and every `!rehash` take) built
+`channels_to_check` from the row and looked only there. `channel_users` has
+no key for a nick, so a PM-originated head row was invisible to the sweep
+whichever channel the user was sitting in.
+
+On its own that would have meant "PM requests are only served by their own
+trigger". Two more things made it permanent. The sweep answered "not
+present" with a silent `continue`, where the specific-user branch freezes the
+user and starts the five-minute countdown - so no freeze, no timer, no expiry,
+no log line. And the JOIN handler wakes only users who are FROZEN
+(`frozen_queues` is in-memory), so after the restart even a user who came and
+went was never looked at again. Nothing was ever going to touch that queue.
+
+- **The sweep asks every channel we are in**, via the same
+  `user_is_present_in_ram()` the specific-user branch and the stale-freeze
+  sweep already use. The row's channel is where to *announce*
+  (`announce_channel_for()`), not where to *look*; the two questions had
+  been separated once already (#272) and this is the half that was still
+  conflated.
+- **The sweep freezes an absent user** instead of skipping them. The
+  countdown moved out of the specific-user branch into
+  `freeze_absent_user()` so both paths apply one policy: not while the bot
+  is unsynced, one countdown per user, announced to the debug channel as
+  `QUIT`. Absent users are collected under `queue_lock` and frozen after it
+  is released, because the freeze announces and `send_debug()` paces.
+- **One sweep on activation.** `wake_restored_queues()` runs the global
+  sweep once per slot when `delayed_activate` claims channel sync, so a
+  queue restored from `dcc_queue.txt` is evaluated - served if present,
+  frozen if not - without waiting for unrelated traffic. Once per slot
+  because a single pass dispatches one user and breaks.
+- **A nick is not a place to announce.** `announce_channel_for()` handed
+  back whatever string the row carried, so the `Sent:` line for a PM request
+  went out as `PRIVMSG <our nick> :Sent ...` - the bot telling itself. A
+  value with no channel prefix (`is_channel_name()`, RFC 2812's four) now
+  falls back to the default channel like a missing one does.
+
+Tests in `tests/test_the_sweep_could_not_see_a_pm_requester.py` (23): a PM
+row for a present user is dispatched by the sweep with the announce target a
+channel; an absent user is frozen by it, the queue kept, no second countdown,
+gone after five minutes via the existing reaper, nothing frozen while
+unsynced, the freeze announced outside `queue_lock` (probed with a
+non-blocking acquire); activation serves up to the slot count and respects
+the quiesce gate; the specific-user branch still calls the shared helper.
+Six mutants checked - each fix reverted in turn fails its tests, and moving
+the freeze back under the lock deadlocks, which is the point of the probe.
+`test_announce_target_is_one_channel.py`'s membership anchor is updated
+with its intent kept: it guarded against narrowing presence to one channel,
+and now guards that the row's channel is not consulted at all.
+
+Also: the comment above `_ended` in `start_dcc_send()` still said
+`transfer_finished_at` was "set the instant the last byte went out" - Neo's
+review note on #529. It is the final ack now, and the comment says so.
+
+Not in this change, filed on the issue: `MAX_SEND_FAILS` is per ROW. A user
+whose client cannot accept DCC at all - as this one's evidently could not,
+two accept timeouts on the head - would, now that the sweep can reach them,
+burn three attempts per row on each of 65 rows, holding a slot for hours. A
+per-user consecutive-failure limit would end that in minutes.
+
 ### 🟢 The dashboard speaks English, French or Spanish
 
 Scope decided on issue #69: the dashboard translates, the Console and the
@@ -93,6 +163,48 @@ it reloads. Most of the dashboard self-heals within a few seconds because
 it polls; the Settings pane and the List Browser cache once behind a
 `*Loaded` flag and do not, so a language changed while looking at either
 stays partly English until you navigate away and back.
+
+### 🌐 The dashboard's translation had real gaps - Settings and Downloads
+
+Found by testing the live French/Spanish dashboard: Settings showed nothing
+but English - every category in the sidebar, every field label on the right
+- and Downloads had two literal English strings the original sweep should
+have caught.
+
+**Two genuine misses.** "Redownload" and "Browse it in List Browser" in the
+Downloads table were never wired to `t()` at all - plain oversights in the
+first pass.
+
+**Settings is a different case.** `category.label` and `field.label` arrive
+from the server (`SETTINGS_CATEGORIES`/`SETTINGS_LABELS` in `webserver.py`),
+because the setting schema lives there, not in this page - so unlike
+everything else the dashboard translates, there was no `data-i18n` attribute
+or `t()` call already sitting on this text at its source, and the "rest of
+the page" pass never gave it one. That was a deliberate, documented scope
+decision at the time; testing the actual page showed it left the single
+largest visible area of the dashboard entirely English.
+
+Two client-side lookup tables translate it anyway, on the same
+resilient-fallback shape every other lookup on this page already uses:
+`SETTINGS_CATEGORY_LABEL_KEYS` (13 entries, keyed by category id) and
+`SETTINGS_FIELD_LABEL_KEYS` (106 entries, keyed by the exact setting NAME
+the server uses - `SERVER`, `MAX_DCC_SLOTS`, and so on - copied verbatim
+from `SETTINGS_LABELS` so the two stay directly cross-referenceable). A
+category or setting this page does not recognise - one just added to
+`config.py`, before a translator has caught up - simply keeps showing the
+server's own English text. The one dynamic note (`WEBUI_CONSOLE_ENABLED`'s
+"Currently ON/OFF") is recognised by its exact suffix and rebuilt from a
+template, falling back to the server's literal text if that suffix ever
+changes.
+
+127 new keys per language (125 settings + the two Downloads strings), 432
+total, still identical across en/fr/es and still passing the existing
+coverage guard in both directions - which needed a fix of its own:
+`JS_KEY_SHAPED_STRING` never allowed an underscore in a key segment, so it
+silently stopped matching after the first dotted component containing one -
+true of every field key with more than one word in its name
+(`settings.field.MAX_DCC_SLOTS` and 100 of its 106 neighbours). Verified the
+widened shape against the whole file on both sides before and after.
 
 ### 📬 Complete means the receiver acknowledged it
 
