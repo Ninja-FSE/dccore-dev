@@ -4,6 +4,96 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📬 Complete means the receiver acknowledged it
+
+Found by a second operator running DCCore on Windows, reproduced by the user
+with mIRC against that bot (#526). The channel announced a 2.7 MB list zip
+as sent - counted, credited, `Speed: n/a (<1s)` - eleven seconds after the
+receiver had reported it incomplete at 1.2 MB after 24 seconds. A resume of
+the remaining 1.5 MB then counted as a second whole file. The same operator
+reported transfers that start fast and stall, and that a 64 KB
+`DCC_SEND_BUFFER` was "very unstable" while 4096 was better.
+
+One cause. The DCC SEND protocol has the receiver send back a 4-byte
+big-endian running total after every packet, and that total is the ONLY
+signal of what arrived. `start_dcc_send()` never read it - not one `recv()`
+on the data socket in the whole send path. "Complete" was
+`bytes_sent >= file_size`, where `bytes_sent` counted what `sendall()` had
+handed to the kernel, and `sendall()` returns the moment the kernel's send
+buffer accepts the bytes. That buffer is 4 MB on Windows by default, bigger
+than most files. So the bot declared success at t~0, stopped its clock
+there (a memcpy's speed, hence `n/a (<1s)`), counted the file, slept 1.5
+seconds and closed the socket - with megabytes still queued behind a link
+doing 50 KB/s. The receiver was cut off at whatever the wire had managed.
+
+And the operator's workaround explained: `DCC_SEND_BUFFER = 4096` "worked"
+because a tiny buffer makes `sendall()` block on the actual wire, so the loop
+tracked delivery by accident. The bigger the buffer, the earlier the bot hung
+up.
+
+Now:
+
+- The receiver's acks are read throughout the transfer (`_AckTracker`, fed
+  by a non-blocking `select()` drain after every write) and **completion is
+  the final ack equalling the file size**. After the last write the bot
+  waits for that ack, bounded by progress rather than a fixed clock: a slow
+  link that is still advancing is allowed to finish; one that has not
+  advanced for `ACK_STALL_SECONDS` (60) is dead whether or not the kernel
+  still holds bytes. The 1.5-second "let mIRC close its file" sleep is gone,
+  and so is the 0.5-second one in the finally "to let the final acknowledgement
+  flush" - both were pauses standing in for the ack nothing read, and both
+  only held a DCC slot.
+- The clock stops at the final ack. That is the transfer, and it is what the
+  speed record, the advert and the counters are a record of.
+- `[DCC-SUCCESS]`, the totals, the download counter, the speed record and
+  the channel announce all wait for it. A transfer whose final ack never
+  comes is a `[DCC-FAIL]` and is not counted (#454's rule, on the signal
+  that actually means delivery).
+- Draining INSIDE the loop, not only after it, is load-bearing: acks are 4
+  bytes per packet, and left unread a 4 GB file's worth fills the bot's
+  receive buffer and then the receiver's send buffer, at which point mIRC
+  blocks writing an ack, stops reading, and the transfer deadlocks about a
+  gigabyte in. Pinned by a test that counts one drain per block.
+- The 32-bit counter is tracked unwrapped with serial-number arithmetic: a
+  drop of more than 2**31 is the receiver past 4 GB wrapping; a smaller one
+  is a stale or duplicated word and is ignored, because a cumulative total
+  never goes backwards. The first draft treated every drop as a wrap and
+  would have added 4 GB to a duplicate ack - a mutation caught it.
+- A resumed transfer completes on absolute acks, which is what mIRC sends
+  after a resume, so the same comparison against `file_size` holds.
+
+**Failures are now reported where successes are.** Every `[DCC-FAIL]` was a
+plain `print()` - the console window and nothing else - while a completed
+transfer went to the debug channel and the admin console as `Sent:`. An
+operator watching either saw every success and no failure, and a cut-off
+transfer the old code miscounted as a success was reported as one. One
+reporter, `_report_transfer_failure()`, now prints the log line AND sends a
+`FAIL`-category debug line (`Failed: "file" to nick - <reason>`), rendered in
+the alert colour beside `[SENT]`. Every failure site goes through it,
+including the two new ones (receiver hung up mid-transfer; receiver stopped
+acknowledging) and the old socket timeout, whose message said "no data
+acknowledged" for a check that never read acknowledgements - it now says
+what it measures, the send blocking.
+
+The end-to-end fixture in `tests/test_dcc_resume_end_to_end.py` read until
+EOF and never acked - the same blind spot as the sender, which is how the
+bug survived its own tests. It acks now, as a real client does, and its six
+cases pass in 3 seconds instead of 103: completion is the ack rather than a
+receiver timeout plus a sleep.
+
+19 tests in `tests/test_complete_means_the_receiver_acked_it.py`: the tracker
+in isolation (split words, backwards words, the 4 GB wrap, resume seeding,
+stall clock), and the bot against a real loopback receiver that acks
+normally, slowly, not at all, stops mid-file, hangs up early, and resumes.
+Eleven mutations run, all caught: completion ignoring acks again, the final
+wait returning at once, the settling sleep restored, in-loop draining
+removed, stall detection removed, every drop treated as a wrap, wrap removed,
+`received_any` never set, a partial word dropped between reads, failures
+reported as INFO, and the FAIL tag unrendered.
+
+Needs a real mIRC download against a real bot before release - this is the
+transfer loop.
+
 ### 🔴 The console timestamp proxy took the dashboard down on the live server
 
 Found live, immediately after updating: the daemon connected to IRC and
