@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔓 The admin console stays open until the operator closes it
+
+Reported by the user from early versions: the DCC CHAT console dropped after
+a while with nothing wrong - `IDLE_TIMEOUT` closed any authenticated session
+that had been quiet for thirty minutes. But quiet is the console's normal
+state: an operator opens it to *watch* - the `Sent:` and `Failed:` feed, the
+joins and parts - and types something only when there is a reason to.
+Thirty minutes of nothing to do meant a closed window and a fresh login.
+
+`IDLE_TIMEOUT` is removed, not raised - a constant that exists gets tuned
+back in. `Session.expired()` now only ever fires for a session that has
+not authenticated within `AUTH_TIMEOUT` (60 s), which is the clock that
+matters for security. An authenticated console ends when the operator
+closes it, when a second login takes it over (`_promote()`), or when the
+connection itself dies - `apply_keepalive(idle=60, interval=15, count=4)`
+on the socket notices a dead peer within about two minutes, so nothing
+lingers.
+
+Tests: an authenticated session quiet for zero seconds, thirty-one minutes
+and a week is not expired; the constant is gone (`hasattr` guard, so it
+cannot come back quietly). Two comments and one test that cited the 1800 s
+lifetime are reworded. `docs/ADMIN-CONSOLE.md`'s limits table updated.
+
 ### 🧊 The queue sweep could not see a PM requester, and never let one go
 
 Found on the user's bot (#530): one nick with 65 files QUEUED, 0 of 3 slots
@@ -140,6 +163,48 @@ it reloads. Most of the dashboard self-heals within a few seconds because
 it polls; the Settings pane and the List Browser cache once behind a
 `*Loaded` flag and do not, so a language changed while looking at either
 stays partly English until you navigate away and back.
+
+### 🌐 The dashboard's translation had real gaps - Settings and Downloads
+
+Found by testing the live French/Spanish dashboard: Settings showed nothing
+but English - every category in the sidebar, every field label on the right
+- and Downloads had two literal English strings the original sweep should
+have caught.
+
+**Two genuine misses.** "Redownload" and "Browse it in List Browser" in the
+Downloads table were never wired to `t()` at all - plain oversights in the
+first pass.
+
+**Settings is a different case.** `category.label` and `field.label` arrive
+from the server (`SETTINGS_CATEGORIES`/`SETTINGS_LABELS` in `webserver.py`),
+because the setting schema lives there, not in this page - so unlike
+everything else the dashboard translates, there was no `data-i18n` attribute
+or `t()` call already sitting on this text at its source, and the "rest of
+the page" pass never gave it one. That was a deliberate, documented scope
+decision at the time; testing the actual page showed it left the single
+largest visible area of the dashboard entirely English.
+
+Two client-side lookup tables translate it anyway, on the same
+resilient-fallback shape every other lookup on this page already uses:
+`SETTINGS_CATEGORY_LABEL_KEYS` (13 entries, keyed by category id) and
+`SETTINGS_FIELD_LABEL_KEYS` (106 entries, keyed by the exact setting NAME
+the server uses - `SERVER`, `MAX_DCC_SLOTS`, and so on - copied verbatim
+from `SETTINGS_LABELS` so the two stay directly cross-referenceable). A
+category or setting this page does not recognise - one just added to
+`config.py`, before a translator has caught up - simply keeps showing the
+server's own English text. The one dynamic note (`WEBUI_CONSOLE_ENABLED`'s
+"Currently ON/OFF") is recognised by its exact suffix and rebuilt from a
+template, falling back to the server's literal text if that suffix ever
+changes.
+
+127 new keys per language (125 settings + the two Downloads strings), 432
+total, still identical across en/fr/es and still passing the existing
+coverage guard in both directions - which needed a fix of its own:
+`JS_KEY_SHAPED_STRING` never allowed an underscore in a key segment, so it
+silently stopped matching after the first dotted component containing one -
+true of every field key with more than one word in its name
+(`settings.field.MAX_DCC_SLOTS` and 100 of its 106 neighbours). Verified the
+widened shape against the whole file on both sides before and after.
 
 ### 📬 Complete means the receiver acknowledged it
 
