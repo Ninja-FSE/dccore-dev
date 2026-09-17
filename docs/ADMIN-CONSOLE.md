@@ -401,7 +401,7 @@ no longer on a nick. The user commands — `!list`, `!ping`, `!debugnames`,
 | Time to enter the password | 60 seconds, then the socket closes |
 | Password attempts | 3, then the socket closes and your IP is blocked |
 | IP block after failed attempts | 15 minutes |
-| Idle timeout once logged in | 30 minutes |
+| Idle timeout once logged in | none — the console stays open until you close it, log in again from elsewhere, or the connection drops |
 | Sessions at once | 1 |
 
 **A second login replaces the first.** If you left a session open on another

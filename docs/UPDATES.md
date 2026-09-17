@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔓 The admin console stays open until the operator closes it
+
+Reported by the user from early versions: the DCC CHAT console dropped after
+a while with nothing wrong - `IDLE_TIMEOUT` closed any authenticated session
+that had been quiet for thirty minutes. But quiet is the console's normal
+state: an operator opens it to *watch* - the `Sent:` and `Failed:` feed, the
+joins and parts - and types something only when there is a reason to.
+Thirty minutes of nothing to do meant a closed window and a fresh login.
+
+`IDLE_TIMEOUT` is removed, not raised - a constant that exists gets tuned
+back in. `Session.expired()` now only ever fires for a session that has
+not authenticated within `AUTH_TIMEOUT` (60 s), which is the clock that
+matters for security. An authenticated console ends when the operator
+closes it, when a second login takes it over (`_promote()`), or when the
+connection itself dies - `apply_keepalive(idle=60, interval=15, count=4)`
+on the socket notices a dead peer within about two minutes, so nothing
+lingers.
+
+Tests: an authenticated session quiet for zero seconds, thirty-one minutes
+and a week is not expired; the constant is gone (`hasattr` guard, so it
+cannot come back quietly). Two comments and one test that cited the 1800 s
+lifetime are reworded. `docs/ADMIN-CONSOLE.md`'s limits table updated.
+
 ### 🟢 The dashboard speaks English, French or Spanish
 
 Scope decided on issue #69: the dashboard translates, the Console and the
