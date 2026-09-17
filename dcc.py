@@ -120,9 +120,24 @@ def announce_channel_for(next_file):
         # straight through. A queue entry whose channel is a list is malformed
         # either way; falling back to the configured channel is predictable,
         # where picking one of its entries would be a guess.
-        if isinstance(named, str) and named.strip():
+        if isinstance(named, str) and named.strip() and is_channel_name(named):
             return named.strip()
     return default_announce_channel()
+
+
+def is_channel_name(target):
+    """Does this PRIVMSG target name a channel rather than a nick?
+
+    RFC 2812 gives channels four prefixes; a nick can start with none of them.
+    A request made by PRIVATE MESSAGE records the bot's OWN NICK as the row's
+    channel (it is the wire target of that message - see
+    handle_download_request), and until #530 announce_channel_for() handed it
+    straight back, so the "Sent:" line for a PM request went out as
+    `PRIVMSG <our nick> :Sent ...` - the bot telling itself. A nick is not a
+    place to announce; the default channel is.
+    """
+    text = str(target or "").strip()
+    return bool(text) and text[0] in "#&+!"
 
 
 def download_count_identity(file_path, file_name):
@@ -731,6 +746,106 @@ def redispatch_waiting_pack(irc_sock, just_finished=None):
                      daemon=True).start()
     return owner
 
+def freeze_absent_user(irc_sock, user, target_chan):
+    """Start the five-minute countdown for a queued user who is not in any
+    of our channels. Idempotent: a user already counting down is left alone,
+    and nothing is frozen while the bot itself is not channel-synced.
+
+    Lifted out of check_queue_and_send()'s specific-user branch so the global
+    sweep (section B) can apply the SAME policy. Until #530 the sweep could
+    not: it `continue`d past an absent user without a word, so a queue that
+    only the sweep ever looked at was never frozen, never expired, and was
+    never retried - 65 rows sat QUEUED for days on a live bot while other
+    users were served around them.
+    """
+    import announce as announce_mod
+    import threading
+    import time
+    import defaults as config
+    import db
+
+    user_key = str(user).lower()
+
+    # NEVER freeze a queue while the bot itself is off the network.
+    # On a netsplit or reconnect channel_users is empty or half-synced, so we do
+    # not KNOW whether the user left. Leave the queue alone until NAMES has synced.
+    if not getattr(config, 'bot_joined_channel', False) or not getattr(config, 'channel_users', None):
+        print(f"[DCC FREEZE-SKIP] The bot is not channel-synced yet. Leaving {user}'s queue untouched.")
+        return
+
+    # A user may have exactly ONE countdown running at a time.
+    with queue_lock:
+        if user_key in getattr(config, 'frozen_queues', {}):
+            print(f"[DCC FREEZE-HOLD] {user} already has a countdown running. Not starting another.")
+            return
+        config.frozen_queues[user_key] = time.time()
+    print(f"[DCC REACTIVE FREEZE] {user} really has left {target_chan}. Starting the timer...")
+    announce_mod.send_debug(f"DCC reactive freeze triggered for {user} in {target_chan}. Initiating 5-minute cooldown timer.", category="QUIT")
+
+    def user_queue_timer(sock, target_user, original_chan):
+        """A verifying countdown, replacing the old blind 300-second sleep.
+        The clock pauses entirely while the bot is disconnected - the bot's own
+        downtime must NEVER count against a user's queue - and the countdown
+        aborts as soon as the user reappears via JOIN or a NAMES sync."""
+        t_key = target_user.lower()
+        elapsed = 0
+
+        while elapsed < 300:
+            time.sleep(10)
+
+            # A) Something else already thawed the queue (JOIN / NAMES / !rehash)
+            if t_key not in getattr(config, 'frozen_queues', {}):
+                print(f"[DCC FREEZE-ABORT] {target_user} is already thawed. The countdown stops; the queue is safe.")
+                return
+
+            # B) The bot itself is offline - freeze the clock, do NOT advance elapsed
+            if not getattr(config, 'bot_joined_channel', False):
+                print(f"[DCC FREEZE-PAUSE] The bot is off the network. Pausing {target_user}'s countdown at {elapsed}s.")
+                continue
+
+            # C) The bot is back online - check against the fresh channel list
+            if user_is_present_in_ram(t_key):
+                with queue_lock:
+                    config.frozen_queues.pop(t_key, None)
+                print(f"[DCC FREEZE-ABORT] {target_user} was found in the channel list. The queue is kept and woken.")
+                announce_mod.send_debug(f"Queue for {config.C_BOLD}{target_user}{config.C_RESET} preserved - user verified back in channel before timeout.", category="JOIN")
+                threading.Thread(target=check_queue_and_send, args=(sock, target_user), daemon=True).start()
+                return
+
+            elapsed += 10
+
+        if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
+            with queue_lock:
+                if t_key in config.dcc_queue:
+                    for f_obj in config.dcc_queue[t_key]:
+                        if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
+                            try: os.remove(f_obj['path'])
+                            except: pass
+                    del config.dcc_queue[t_key]
+                    db.save_dcc_queue()
+                del config.frozen_queues[t_key]
+            announce_mod.send_debug(f"Timer expired for {target_user} in {original_chan}. Personal queue has been erased.", category="PART")
+
+    threading.Thread(target=user_queue_timer, args=(irc_sock, user, target_chan), daemon=True).start()
+
+
+def wake_restored_queues(irc_sock):
+    """One look at every queue once the bot is channel-synced.
+
+    A queue restored from dcc_queue.txt at start-up has no trigger of its own:
+    the request that created it fired years ago in process terms, a JOIN only
+    wakes users who are FROZEN (frozen_queues is in-memory and empty after a
+    restart), and the global sweep otherwise runs only when some OTHER
+    transfer completes. On a quiet bot that is never. So the sweep is run
+    once here, on activation - once per slot, because a single pass dispatches
+    at most one user and then breaks.
+    """
+    import defaults as config
+    slots = max(1, int(config.MAX_DCC_SLOTS or 1))
+    for _ in range(slots):
+        check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+
+
 def check_queue_and_send(irc_sock, completed_user):
     """Check the queues and run RAR packing one at a time, without flooding the server."""
     import announce as announce_mod
@@ -1150,70 +1265,10 @@ def check_queue_and_send(irc_sock, completed_user):
                 threading.Thread(target=start_dcc_send, args=(irc_sock, completed_user, f_path, f_name, target_chan, next_file), daemon=True).start()
                 return
         else:
-            # -----------------------------------------------------------------
-            # NEVER freeze a queue while the bot itself is off the network.
-            # On a netsplit or reconnect channel_users is empty or half-synced, so we do
-            # not KNOW whether the user left. Leave the queue alone until NAMES has synced.
-            # -----------------------------------------------------------------
-            if not getattr(config, 'bot_joined_channel', False) or not getattr(config, 'channel_users', None):
-                print(f"[DCC FREEZE-SKIP] The bot is not channel-synced yet. Leaving {completed_user}'s queue untouched.")
-                return
-
-            # A user may have exactly ONE countdown running at a time.
-            if user_key in getattr(config, 'frozen_queues', {}):
-                print(f"[DCC FREEZE-HOLD] {completed_user} already has a countdown running. Not starting another.")
-                return
-
-            with queue_lock:
-                config.frozen_queues[user_key] = time.time()
-            print(f"[DCC REACTIVE FREEZE] {completed_user} really has left {target_chan}. Starting the timer...")
-            announce_mod.send_debug(f"DCC reactive freeze triggered for {completed_user} in {target_chan}. Initiating 5-minute cooldown timer.", category="QUIT")
-            
-            def user_queue_timer(sock, target_user, original_chan):
-                """A verifying countdown, replacing the old blind 300-second sleep.
-                The clock pauses entirely while the bot is disconnected - the bot's own
-                downtime must NEVER count against a user's queue - and the countdown
-                aborts as soon as the user reappears via JOIN or a NAMES sync."""
-                t_key = target_user.lower()
-                elapsed = 0
-                
-                while elapsed < 300:
-                    time.sleep(10)
-                    
-                    # A) Something else already thawed the queue (JOIN / NAMES / !rehash)
-                    if t_key not in getattr(config, 'frozen_queues', {}):
-                        print(f"[DCC FREEZE-ABORT] {target_user} is already thawed. The countdown stops; the queue is safe.")
-                        return
-                        
-                    # B) The bot itself is offline - freeze the clock, do NOT advance elapsed
-                    if not getattr(config, 'bot_joined_channel', False):
-                        print(f"[DCC FREEZE-PAUSE] The bot is off the network. Pausing {target_user}'s countdown at {elapsed}s.")
-                        continue
-                        
-                    # C) The bot is back online - check against the fresh channel list
-                    if user_is_present_in_ram(t_key):
-                        with queue_lock:
-                            config.frozen_queues.pop(t_key, None)
-                        print(f"[DCC FREEZE-ABORT] {target_user} was found in the channel list. The queue is kept and woken.")
-                        announce_mod.send_debug(f"Queue for {config.C_BOLD}{target_user}{config.C_RESET} preserved - user verified back in channel before timeout.", category="JOIN")
-                        threading.Thread(target=check_queue_and_send, args=(sock, target_user), daemon=True).start()
-                        return
-                        
-                    elapsed += 10
-                
-                if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
-                    with queue_lock:
-                        if t_key in config.dcc_queue:
-                            for f_obj in config.dcc_queue[t_key]:
-                                if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
-                                    try: os.remove(f_obj['path'])
-                                    except: pass
-                            del config.dcc_queue[t_key]
-                            db.save_dcc_queue()
-                        del config.frozen_queues[t_key]
-                    announce_mod.send_debug(f"Timer expired for {target_user} in {original_chan}. Personal queue has been erased.", category="PART")
-                    
-            threading.Thread(target=user_queue_timer, args=(irc_sock, completed_user, target_chan), daemon=True).start()
+            # Not in any of our channels: freeze and start the countdown. The
+            # policy lives in freeze_absent_user() so the global sweep below
+            # applies exactly the same one (#530).
+            freeze_absent_user(irc_sock, completed_user, target_chan)
             return
 
     # =====================================================================
@@ -1222,6 +1277,7 @@ def check_queue_and_send(irc_sock, completed_user):
     if oserve:
         oserve.active_downloads = len(config.active_transfers)
         
+    absent_users = []
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         with queue_lock:
             # FIXED: re-check the slot count INSIDE the lock. The test above is already
@@ -1291,24 +1347,27 @@ def check_queue_and_send(irc_sock, completed_user):
                 g_name = g_next.get('file', '')
                 g_path = g_next.get('path', '')
 
-                raw_chan = g_next.get('channel')
-                user_is_globally_active = False
-                if isinstance(raw_chan, str) and raw_chan.strip():
-                    channels_to_check = [raw_chan]
-                elif isinstance(raw_chan, list) and raw_chan:
-                    channels_to_check = raw_chan
-                else:
-                    channels_to_check = config.CHANNEL.split(',')
+                # PRESENCE IS ASKED OF EVERY CHANNEL WE ARE IN, NOT OF THE
+                # ROW (#530). This used to build a list from g_next['channel']
+                # and look for the user only there. A request made by PRIVATE
+                # MESSAGE records the wire target as its channel - which is
+                # the bot's own nick, and no such key ever exists in
+                # channel_users - so a PM-originated head row was invisible
+                # to this sweep however many channels the user was sitting
+                # in. The specific-user branch above has always asked every
+                # channel; this is the same question and now the same answer.
+                # The row's channel is where to ANNOUNCE (g_chan, above), not
+                # where to LOOK.
+                user_is_globally_active = user_is_present_in_ram(queue_key)
 
-                with runtime.channel_users_lock():
-                    if hasattr(config, 'channel_users'):
-                        for single_chan in channels_to_check:
-                            n_chan = str(single_chan).strip().lower()
-                            if n_chan in config.channel_users:
-                                lowered_glob_users = [u.lower() for u in config.channel_users[n_chan]]
-                                if queue_key in lowered_glob_users:
-                                    user_is_globally_active = True
-                                    break
+                if not user_is_globally_active:
+                    # Not here. Until #530 this was a silent `continue`, and
+                    # a queue only the sweep ever looked at could sit
+                    # forever. Freeze them exactly as the specific-user
+                    # branch does - after the lock is released, because the
+                    # freeze announces to the debug channel.
+                    absent_users.append((real_username, g_chan))
+                    continue
 
                 if user_is_globally_active is True:
                     if g_next.get('is_unpacked_rar_folder') is True:
@@ -1332,6 +1391,9 @@ def check_queue_and_send(irc_sock, completed_user):
                     announce_mod.send_dcc_sending_notice(real_username, g_name)
                     threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
                     break
+
+    for absent_user, absent_chan in absent_users:
+        freeze_absent_user(irc_sock, absent_user, absent_chan)
 
 
 MIN_DCC_BLOCK_SIZE = 4096
@@ -2915,9 +2977,11 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # second longer on every exit path.
 
         # The real-time speed counter
-        # transfer_finished_at is set the instant the last byte went out; it
-        # only exists on the path that actually completed a transfer, so the
-        # fallbacks below cover the abort paths that reach here without one.
+        # transfer_finished_at is the moment of the receiver's final
+        # acknowledgement (#526) - or, for a send that fell short, the moment
+        # the wait for it gave up. It only exists on the path that reached
+        # the completion check, so the fallbacks below cover the abort paths
+        # that arrive here without one.
         _ended = (transfer_finished_at if 'transfer_finished_at' in locals()
                   else time.time())
         acute_duration = _ended - (start_time if 'start_time' in locals() else _ended)
