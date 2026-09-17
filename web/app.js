@@ -892,7 +892,7 @@
       // (it is ours, and hex) and the handler looks the rest up from state.
       var retryBtn = (rejected || state === "failed")
         ? "<button type=\"button\" class=\"btn btn-small fetch-retry-btn\" data-request-id=\"" +
-          encodeURIComponent(row.id) + "\">Redownload</button> "
+          encodeURIComponent(row.id) + "\">" + t("download.redownload") + "</button> "
         : "";
       var action;
       if (rejected) {
@@ -901,7 +901,7 @@
         action = "<a class=\"btn btn-small\" href=\"/api/fetch/" + encodeURIComponent(row.id) + "/download\">Download</a> " + deleteBtn;
       } else if (state === "complete") {
         // A fetched list, extracted - dcc_fetch.py already removed its zip.
-        action = "<span class=\"col-dim\">Browse it in List Browser</span> " + deleteBtn;
+        action = "<span class=\"col-dim\">" + t("download.browseInListBrowser") + "</span> " + deleteBtn;
       } else if (state === "failed") {
         action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + retryBtn + deleteBtn;
       } else if (state === "pending") {
@@ -3555,6 +3555,172 @@
   var SERVED_FOLDERS_CATEGORY = "your-list";   // where Music directory lives
   var ON_CONNECT_CATEGORY = "identity";        // registration, before the JOIN
 
+  // CLIENT-SIDE OVERRIDES FOR SERVER-SUPPLIED TEXT. category.label and
+  // field.label arrive from the server (SETTINGS_CATEGORIES/SETTINGS_LABELS
+  // in webserver.py) because the setting SCHEMA lives there, not in this
+  // page - so unlike everything else this dashboard translates, there is no
+  // data-i18n attribute or t() call already sitting on this text at its
+  // source. These two lookups translate it anyway, keyed on the exact
+  // category id or setting NAME the server uses (never on the English text
+  // itself, which the server is still free to reword): a category or
+  // setting this page does not recognise - one just added to config.py,
+  // before a translator has caught up - simply keeps showing the server's
+  // own English, the same silent-fallback shape every other lookup table on
+  // this page already uses.
+  var SETTINGS_CATEGORY_LABEL_KEYS = {
+    "identity": "settings.category.identity",
+    "sharing": "settings.category.sharing",
+    "transfers": "settings.category.transfers",
+    "your-list": "settings.category.yourList",
+    "fetching": "settings.category.fetching",
+    "advertising": "settings.category.advertising",
+    "appearance": "settings.category.appearance",
+    "anti-flood": "settings.category.antiFlood",
+    "private-messages": "settings.category.privateMessages",
+    "admin-console": "settings.category.adminConsole",
+    "web-dashboard": "settings.category.webDashboard",
+    "debug": "settings.category.debug",
+    "advanced": "settings.category.advanced"
+  };
+
+  var SETTINGS_FIELD_LABEL_KEYS = {
+    SERVER: "settings.field.SERVER",
+    PORT: "settings.field.PORT",
+    NICKNAME: "settings.field.NICKNAME",
+    ALT_NICKNAME: "settings.field.ALT_NICKNAME",
+    ADMIN_NICK: "settings.field.ADMIN_NICK",
+    CHANNEL: "settings.field.CHANNEL",
+    DEBUG_CHANNEL: "settings.field.DEBUG_CHANNEL",
+    MAX_DCC_SLOTS: "settings.field.MAX_DCC_SLOTS",
+    MAX_USER_QUEUE: "settings.field.MAX_USER_QUEUE",
+    MAX_GLOBAL_QUEUE: "settings.field.MAX_GLOBAL_QUEUE",
+    MAX_SEARCH_RESULTS: "settings.field.MAX_SEARCH_RESULTS",
+    MSG_DELAY: "settings.field.MSG_DELAY",
+    DEBUG_MSG_DELAY: "settings.field.DEBUG_MSG_DELAY",
+    DCC_PORT_START: "settings.field.DCC_PORT_START",
+    DCC_PORT_END: "settings.field.DCC_PORT_END",
+    MAX_FETCH_SLOTS: "settings.field.MAX_FETCH_SLOTS",
+    FETCH_HISTORY_DAYS: "settings.field.FETCH_HISTORY_DAYS",
+    FETCH_HISTORY_MAX_ROWS: "settings.field.FETCH_HISTORY_MAX_ROWS",
+    MAX_FETCH_FILE_SIZE: "settings.field.MAX_FETCH_FILE_SIZE",
+    MAX_LIST_TEXT_SIZE: "settings.field.MAX_LIST_TEXT_SIZE",
+    DCC_BLOCK_SIZE: "settings.field.DCC_BLOCK_SIZE",
+    DCC_SEND_BUFFER: "settings.field.DCC_SEND_BUFFER",
+    REHASH_TRANSFER_WAIT: "settings.field.REHASH_TRANSFER_WAIT",
+    AUTO_REFETCH_LISTS: "settings.field.AUTO_REFETCH_LISTS",
+    AUTO_REFETCH_INTERVAL_HOURS: "settings.field.AUTO_REFETCH_INTERVAL_HOURS",
+    AUTO_REFETCH_MAX_PER_RUN: "settings.field.AUTO_REFETCH_MAX_PER_RUN",
+    FETCH_TRANSFER_TIMEOUT: "settings.field.FETCH_TRANSFER_TIMEOUT",
+    FETCH_OFFER_TIMEOUT: "settings.field.FETCH_OFFER_TIMEOUT",
+    FETCH_FOLDER_OFFER_TIMEOUT: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT",
+    FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
+    MAX_FETCH_FOLDER_FILE_SIZE: "settings.field.MAX_FETCH_FOLDER_FILE_SIZE",
+    MAX_FETCH_LIST_FILE_SIZE: "settings.field.MAX_FETCH_LIST_FILE_SIZE",
+    FETCH_FOLDER_TRANSFER_TIMEOUT: "settings.field.FETCH_FOLDER_TRANSFER_TIMEOUT",
+    LIST_BASE_NAME: "settings.field.LIST_BASE_NAME",
+    PAUSE_ON_UPDATE: "settings.field.PAUSE_ON_UPDATE",
+    FILE_DIRECTORY: "settings.field.FILE_DIRECTORY",
+    LIST_FORMAT: "settings.field.LIST_FORMAT",
+    LIST_IGNORED_EXTENSIONS: "settings.field.LIST_IGNORED_EXTENSIONS",
+    SEPARATE_VIDEO_LIST: "settings.field.SEPARATE_VIDEO_LIST",
+    LIST_VIDEO_EXTENSIONS: "settings.field.LIST_VIDEO_EXTENSIONS",
+    RAR_EXTENSIONS: "settings.field.RAR_EXTENSIONS",
+    RAR_ENABLED: "settings.field.RAR_ENABLED",
+    RAR_BINARY: "settings.field.RAR_BINARY",
+    TMP_ZIP_DIR: "settings.field.TMP_ZIP_DIR",
+    MAX_RAR_FOLDER_SIZE: "settings.field.MAX_RAR_FOLDER_SIZE",
+    LOCAL_LIST_DIR: "settings.field.LOCAL_LIST_DIR",
+    FETCHED_FILES_DIR: "settings.field.FETCHED_FILES_DIR",
+    BANS_FILE: "settings.field.BANS_FILE",
+    STATS_FILE: "settings.field.STATS_FILE",
+    HARD_BANS_FILE: "settings.field.HARD_BANS_FILE",
+    KNOWN_BOTS_FILE: "settings.field.KNOWN_BOTS_FILE",
+    LIST_INDEX_FILE: "settings.field.LIST_INDEX_FILE",
+    DOWNLOAD_COUNTS_FILE: "settings.field.DOWNLOAD_COUNTS_FILE",
+    FETCHED_BOT_LISTS_FILE: "settings.field.FETCHED_BOT_LISTS_FILE",
+    FETCH_HISTORY_FILE: "settings.field.FETCH_HISTORY_FILE",
+    NOTICES_FILE: "settings.field.NOTICES_FILE",
+    PRIVATE_MESSAGES_FILE: "settings.field.PRIVATE_MESSAGES_FILE",
+    PRIVATE_MESSAGE_COOLDOWN_SECONDS: "settings.field.PRIVATE_MESSAGE_COOLDOWN_SECONDS",
+    PRIVATE_MESSAGES_ENABLED: "settings.field.PRIVATE_MESSAGES_ENABLED",
+    PRIVATE_MESSAGE_DECLINE_TEXT: "settings.field.PRIVATE_MESSAGE_DECLINE_TEXT",
+    PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS: "settings.field.PRIVATE_MESSAGE_DECLINE_INTERVAL_SECONDS",
+    PRIVATE_MESSAGE_DECLINE_BURST: "settings.field.PRIVATE_MESSAGE_DECLINE_BURST",
+    PRIVATE_MESSAGE_DECLINE_BURST_SECONDS: "settings.field.PRIVATE_MESSAGE_DECLINE_BURST_SECONDS",
+    LIST_SIZE_FILE: "settings.field.LIST_SIZE_FILE",
+    LIST_PROGRESS_FILE: "settings.field.LIST_PROGRESS_FILE",
+    LIST_RAWBYTES_FILE: "settings.field.LIST_RAWBYTES_FILE",
+    LIST_HEADER_FILE: "settings.field.LIST_HEADER_FILE",
+    LIST_HEADER_MAX_BYTES: "settings.field.LIST_HEADER_MAX_BYTES",
+    LIBRARY_FOLDERS_FILE: "settings.field.LIBRARY_FOLDERS_FILE",
+    LISTS_FILE: "settings.field.LISTS_FILE",
+    ON_CONNECT_FILE: "settings.field.ON_CONNECT_FILE",
+    THEME: "settings.field.THEME",
+    CUSTOM_THEME_BORDER: "settings.field.CUSTOM_THEME_BORDER",
+    CUSTOM_THEME_SEPARATOR: "settings.field.CUSTOM_THEME_SEPARATOR",
+    CUSTOM_THEME_TEXTBOX: "settings.field.CUSTOM_THEME_TEXTBOX",
+    CUSTOM_THEME_VALUE: "settings.field.CUSTOM_THEME_VALUE",
+    CUSTOM_THEME_ALERT: "settings.field.CUSTOM_THEME_ALERT",
+    CUSTOM_THEME_ACCENT: "settings.field.CUSTOM_THEME_ACCENT",
+    ANNOUNCE_TRANSFERS: "settings.field.ANNOUNCE_TRANSFERS",
+    REJOIN_ATTEMPTS: "settings.field.REJOIN_ATTEMPTS",
+    ANNOUNCE_INTERVAL: "settings.field.ANNOUNCE_INTERVAL",
+    BROADCAST_SEARCH_CHANNEL: "settings.field.BROADCAST_SEARCH_CHANNEL",
+    BROADCAST_SEARCH_COOLDOWN: "settings.field.BROADCAST_SEARCH_COOLDOWN",
+    CTCP_VERSION_REPLY: "settings.field.CTCP_VERSION_REPLY",
+    MAX_REQUESTS: "settings.field.MAX_REQUESTS",
+    REQUEST_WINDOW: "settings.field.REQUEST_WINDOW",
+    MUTE_TIME: "settings.field.MUTE_TIME",
+    FLOOD_BAN_SECONDS: "settings.field.FLOOD_BAN_SECONDS",
+    MAX_SEND_FAILS: "settings.field.MAX_SEND_FAILS",
+    RAR_TIMEOUT: "settings.field.RAR_TIMEOUT",
+    LIST_UPDATE_TIMEOUT: "settings.field.LIST_UPDATE_TIMEOUT",
+    LIST_UPDATE_STALL_SECONDS: "settings.field.LIST_UPDATE_STALL_SECONDS",
+    ADMIN_HOSTMASKS: "settings.field.ADMIN_HOSTMASKS",
+    ADMIN_CHAT_MODE: "settings.field.ADMIN_CHAT_MODE",
+    ADMIN_CHANNEL_COMMANDS: "settings.field.ADMIN_CHANNEL_COMMANDS",
+    WEBUI_ENABLED: "settings.field.WEBUI_ENABLED",
+    WEBUI_HOST: "settings.field.WEBUI_HOST",
+    WEBUI_PORT: "settings.field.WEBUI_PORT",
+    WEBUI_FOLDER_BROWSER_ENABLED: "settings.field.WEBUI_FOLDER_BROWSER_ENABLED",
+    WEBUI_CONSOLE_ENABLED: "settings.field.WEBUI_CONSOLE_ENABLED",
+    WEBUI_OPEN_BROWSER: "settings.field.WEBUI_OPEN_BROWSER",
+    DEBUG_MODE: "settings.field.DEBUG_MODE",
+    DEBUG_TO_CHANNEL: "settings.field.DEBUG_TO_CHANNEL",
+    DEBUG_TO_CONSOLE: "settings.field.DEBUG_TO_CONSOLE",
+    CONSOLE_TIMESTAMP_FORMAT: "settings.field.CONSOLE_TIMESTAMP_FORMAT",
+    PROJECT_URL: "settings.field.PROJECT_URL"
+  };
+
+  function categoryLabel(category) {
+    var key = SETTINGS_CATEGORY_LABEL_KEYS[category.id];
+    return key ? t(key) : category.label;
+  }
+
+  function fieldLabel(field) {
+    var key = SETTINGS_FIELD_LABEL_KEYS[field.name];
+    return key ? t(key) : (field.label || field.name);
+  }
+
+  // The one field whose note is built at request time rather than fixed
+  // (WEBUI_CONSOLE_ENABLED's "unset" state - see _settings_field() in
+  // webserver.py): the server appends "Currently ON." or "Currently OFF."
+  // to its own English sentence. Recognised by that exact suffix and
+  // rebuilt from a template so the whole note can be in the chosen
+  // language; a note that does not end that way (a future server change,
+  // say) is shown exactly as the server sent it rather than guessed at.
+  function fieldNote(field) {
+    if (field.name === "WEBUI_CONSOLE_ENABLED" && field.note) {
+      if (/ON\.$/.test(field.note)) {
+        return t("settings.field.WEBUI_CONSOLE_ENABLED.note").replace("{state}", t("settings.onWord"));
+      }
+      if (/OFF\.$/.test(field.note)) {
+        return t("settings.field.WEBUI_CONSOLE_ENABLED.note").replace("{state}", t("settings.offWord"));
+      }
+    }
+    return field.note;
+  }
+
   function settingsFieldHtml(field) {
     var isDirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
     var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
@@ -3643,11 +3809,11 @@
     // escapeHtml() into TEXT content, which is what it encodes correctly. It
     // does not encode quotes, so this must never become an attribute.
     var note = field.note
-      ? '<span class="settings-field-note">' + escapeHtml(field.note) + "</span>"
+      ? '<span class="settings-field-note">' + escapeHtml(fieldNote(field)) + "</span>"
       : "";
 
     return '<div class="settings-field-row">' +
-      '<span class="' + nameClass + '">' + escapeHtml(field.label || field.name) +
+      '<span class="' + nameClass + '">' + escapeHtml(fieldLabel(field)) +
       note + '</span>' +
       '<span class="settings-field-control">' + control + '</span>' +
       "</div>";
@@ -4408,7 +4574,7 @@
       return;
     }
 
-    var html = '<h2 class="settings-category-title">' + escapeHtml(category.label) + "</h2>" +
+    var html = '<h2 class="settings-category-title">' + escapeHtml(categoryLabel(category)) + "</h2>" +
       category.fields.map(settingsFieldHtml).join("");
     if (category.id === "admin-console") {
       html += settingsPasswordSectionHtml();
@@ -4505,13 +4671,13 @@
   function renderSettingsRail() {
     var categories = state.settingsCategories || [];
     if (!categories.length) {
-      el.settingsRail.innerHTML = '<div class="settings-rail-empty">No settings available.</div>';
+      el.settingsRail.innerHTML = '<div class="settings-rail-empty">' + t("settings.noSettingsAvailable") + '</div>';
       return;
     }
     el.settingsRail.innerHTML = categories.map(function (category) {
       var active = category.id === state.settingsActiveCategory;
       return '<button type="button" class="settings-rail-item' + (active ? " is-active" : "") +
-        '" data-category="' + escapeHtml(category.id) + '">' + escapeHtml(category.label) + "</button>";
+        '" data-category="' + escapeHtml(category.id) + '">' + escapeHtml(categoryLabel(category)) + "</button>";
     }).join("");
 
     el.settingsRail.querySelectorAll("[data-category]").forEach(function (btn) {
