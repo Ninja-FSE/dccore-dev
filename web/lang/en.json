@@ -206,6 +206,7 @@
   "settings.oneUnsavedChange": "{count} unsaved change",
   "settings.manyUnsavedChanges": "{count} unsaved changes",
   "settings.setByHandNote": "Set by hand to something the menus cannot offer, so it is left as text.",
+  "settings.whatThisDoes": "What this setting does",
   "settings.onConnectHeading": "On connect",
   "settings.onConnectSummary": "Sent once the server has registered you and <strong>before</strong> joining - one command per line, exactly as you would type it into a client. On Undernet that ordering matters: logging in to X takes <code>+x</code>, and joining first shows your real host to everyone already in the channel. Use <code>%nick%</code> for the nickname the server actually gave you.",
   "settings.onConnectCommandsAriaLabel": "Commands to send on connect",

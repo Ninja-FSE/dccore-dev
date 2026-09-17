@@ -2523,6 +2523,18 @@ def _settings_field(name, declared, value):
     if unit:
         field["unit"], field["unit_factor"] = unit
 
+    # WHAT THE SETTING MEANS (#528). "A lot of settings are not easy to
+    # understand" - and the explanation for every one of them already
+    # existed, as the comment block beside it in defaults.py, which
+    # settings.conf.sample is generated from. settings_help reads the same
+    # block, so the code, the sample and the page can never disagree. The
+    # page draws a "?" beside the label that shows this on hover; a setting
+    # with nothing to say gets no "?" rather than an empty box.
+    import settings_help
+    help_text = settings_help.help_text(name)
+    if help_text:
+        field["help"] = help_text
+
     # A TRI-STATE NEEDS A THIRD ANSWER. WEBUI_CONSOLE_ENABLED is declared
     # `bool = None`, and None does not mean False: console_is_enabled() reads
     # it as "yes if nobody else can reach it", so a stock loopback install has

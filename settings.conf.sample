@@ -26,6 +26,7 @@
 #     raw protocol bytes rather than preferences.
 
 [system and global engine settings]
+# Print every raw line the bot sends to the server in its own window; noisy, for chasing a protocol problem
 #DEBUG_MODE = false
 
 # Where this bot came from. Defined once because two things say it: the CTCP
@@ -57,6 +58,7 @@
 # exactly that reason - see REQUIRED's own comment.
 #SERVER = irc.undernet.org
 
+# The server's port; 6667 is plain IRC, and this bot speaks no TLS
 #PORT = 6667
 
 # NICKNAME, ADMIN_NICK and CHANNEL are None - not a real value - because
@@ -69,11 +71,14 @@
 # REQUIRED - the daemon refuses to start until this is set.
 #NICKNAME = 
 
+# Used when NICKNAME is taken; the bot keeps trying to reclaim the main nick afterwards
 #ALT_NICKNAME = DCCore_
 
+# Who may use the admin commands (!ban, !rehash, !update...), comma-separated for more than one; the DCC console checks ADMIN_HOSTMASKS as well
 # REQUIRED - the daemon refuses to start until this is set.
 #ADMIN_NICK = 
 
+# The channel(s) to serve in, comma-separated; the first one is where announcements go by default
 # REQUIRED - the daemon refuses to start until this is set.
 #CHANNEL = 
 
@@ -128,8 +133,10 @@
 # None = look for rar/rar.exe on PATH (and WinRAR's install dir)
 #RAR_BINARY = 
 
+# Where !rar archives and list zips are built before sending; cleaned up after each transfer
 #TMP_ZIP_DIR = ./data/tmp_zips
 
+# Where the bot's own published list files live; extra lists get a subfolder each
 #LOCAL_LIST_DIR = ./lists
 
 # How the master list is handed to somebody who types "@<nick>": as the plain
@@ -265,8 +272,10 @@
 # Safe, normalised paths into the data/ subdirectory
 #BANS_FILE = ./data/bans.txt
 
+# Lifetime totals, the speed record and the daily figures the advert and Stats page show
 #STATS_FILE = ./data/stats.txt
 
+# Permanent hostmask patterns added with !ban; timed bans live in BANS_FILE
 #HARD_BANS_FILE = ./data/hard_bans.txt
 
 # The ordered set of folders served, once there is more than one of them
@@ -415,6 +424,7 @@
 # moves on. Nobody is owed an explanation of why they did not get one.
 #PRIVATE_MESSAGE_DECLINE_BURST = 20
 
+# The window the burst ceiling above is counted over
 #PRIVATE_MESSAGE_DECLINE_BURST_SECONDS = 600
 
 # How many times to try rejoining a channel that has thrown us out, before
@@ -527,6 +537,7 @@
 # watching - is the one worth protecting.
 #DEBUG_TO_CHANNEL = true
 
+# Debug lines also reach the admin DCC console and the dashboard's Console page
 #DEBUG_TO_CONSOLE = true
 
 # Every line the daemon prints to its console window - or to the file its
@@ -565,6 +576,7 @@
 # tests/test_long_paths.py, which read "15.59KB" where a track should have been.
 #LIST_SIZE_FILE = dccore.size.txt
 
+# The exact byte total of the shared files, written beside the list at each rebuild
 #LIST_RAWBYTES_FILE = dccore.rawbytes.txt
 
 # Where a running rebuild reports what it is doing, for the dashboard to read.
@@ -618,8 +630,10 @@
 # 0 = per-platform default (4MB on Windows, OS auto-tuning on Linux)
 #DCC_SEND_BUFFER = 0
 
+# First port the bot listens on for outgoing DCC sends; forward this range if you are behind NAT
 #DCC_PORT_START = 55000
 
+# Last port of that range; each simultaneous transfer needs one free port, so keep at least MAX_DCC_SLOTS
 #DCC_PORT_END = 55010
 
 # Deliberately separate from MAX_DCC_SLOTS above: that governs OUR outbound
@@ -866,16 +880,22 @@
 # still needs a new key here, a generator update and a theme.py change - the
 # old dict form could have accepted an unknown role name for free. That loss
 # is accepted; concrete uniformity now outweighs a hypothetical future role.
+# The outer block that frames a section
 #CUSTOM_THEME_BORDER = 
 
+# The block between fields
 #CUSTOM_THEME_SEPARATOR = 
 
+# The plate the text sits on
 #CUSTOM_THEME_TEXTBOX = 
 
+# A live figure - a count, a speed, a nickname
 #CUSTOM_THEME_VALUE = 
 
+# A figure meant to catch the eye
 #CUSTOM_THEME_ALERT = 
 
+# Timestamps and secondary text
 #CUSTOM_THEME_ACCENT = 
 
 # OFF by default, same pattern as ADMIN_HOSTMASKS below: a feature that opens
@@ -980,4 +1000,5 @@
 # on any network you do not trust.
 #WEBUI_HOST = 127.0.0.1
 
+# The dashboard's port; open http://WEBUI_HOST:WEBUI_PORT in a browser
 #WEBUI_PORT = 8420
