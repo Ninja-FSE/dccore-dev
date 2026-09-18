@@ -85,6 +85,106 @@ payload's `console-feed` category with six `bool` fields. Five mutants of
 the routing - tickbox ignored, channel switch ignored, declined line
 floored, SENT treated as feed-only, missing switch meaning off - each fail.
 
+### ❓ A "?" beside every setting
+
+Part two of #528: "a lot of settings are not easy to understand". The
+explanation for every one of them already existed - the comment block beside
+it in `defaults.py`, which `scripts/gen_settings_sample.py` has parsed into
+`settings.conf.sample` since the sample was first generated. It was one file
+away from the page that needed it.
+
+- The parser moved out of the generator into **`settings_help.py`**
+  (`assignment_parts()`, `doc_lines()`, `parse_help()`, `help_lines()`,
+  `help_text()`); the generator imports it, so the sample is byte-identical
+  and there is exactly one copy of the rule. `help_lines()` caches on the
+  file's mtime and size, so a rehash after editing `defaults.py` shows the
+  new text and every other call is a dict lookup; an unreadable
+  `defaults.py` means no "?" rather than a page that fails to load.
+- **`/api/settings` sends `help` per field** - the comment lines joined into
+  paragraphs (a blank comment line is a paragraph break). A setting with
+  nothing to say gets no key rather than an empty string.
+- **The page draws a "?" after the label** (`settingsHelpHtml()`), shown on
+  hover and on keyboard focus (`tabindex="0"`, a visually-hidden "What this
+  setting does" label in all three languages). The text is rendered as an
+  element's text content, never a `title=`: `escapeHtml()` encodes text,
+  not attributes, and a comment with a quote in it would otherwise close
+  one. Capped at 420 px wide and 60 vh tall - the longest explanation
+  (`LIST_IGNORED_EXTENSIONS`) is 2.2 KB.
+- A dictionary may translate a setting's help under its label key plus
+  `.help` (`settings.field.MAX_DCC_SLOTS.help`), resolved through Neo's
+  `SETTINGS_FIELD_LABEL_KEYS` from #533 and looked up directly, since `t()`
+  answers a missing key with the key; a missing translation shows the
+  server's English, the same fallback `fieldLabel()` uses. No dictionary
+  entries are added for it here - one source, until somebody translates.
+- **Twenty settings had no comment at all** - `PORT`, `CHANNEL`,
+  `ADMIN_NICK`, `ALT_NICKNAME`, `DEBUG_MODE`, `DEBUG_TO_CONSOLE`, the DCC
+  port range, four data-file paths, `LIST_RAWBYTES_FILE`,
+  `PRIVATE_MESSAGE_DECLINE_BURST_SECONDS`, `WEBUI_PORT` and all six
+  `CUSTOM_THEME_*` roles. Each has an inline comment now, written from what
+  the code does with it (`ADMIN_NICK` is the nick list `is_admin()` checks
+  for `!ban`/`!rehash`/`!update`; the DCC console additionally checks
+  `ADMIN_HOSTMASKS`), and `settings.conf.sample` is regenerated with them.
+
+Tests in `tests/test_every_setting_explains_itself.py` (26): the parser's
+rules on small sources (block, inline, both, a `#` inside a string value,
+a section rule ending the block, annotated and plain assignments, a
+multi-line value taking no inline comment); paragraph joining; against the
+real file - **every overridable setting has an explanation** (the guard
+that keeps the twenty from growing back), the cache follows the file, an
+unreadable file is empty not fatal; the generator imports the shared
+parser and has no copy; every field in `build_settings_payload()` carries
+help matching `settings_help`; and the page's source - the mark follows the
+label, the text is text content with no `title=`/`data-help=`, no mark
+without help, translation before server text, keyboard reachable, the key
+in all three dictionaries, CSS on both `:hover` and `:focus`. Exercised
+through the real Flask app behind the login: 106 of 106 fields carry help.
+
+### ⏱️ Auto re-fetch fired before the bot had joined anything
+
+Follow-up to the previous entry, surfaced by fixing it: once the sweep
+could actually get past its own input validation, it turned out to run far
+too early.
+
+`list_fetch.auto_refetch_worker()` is started from `oserve.startup()` and
+calls `refetch_due_lists()` as its very first action, synchronously, with
+no gate on connection or channel-join state at all. Seen live: the fetch
+request was queued and dispatched (via `oserve.queue_message()` into
+`queue_mgr.config.send_queue`, drained as soon as a raw socket exists)
+several seconds before the server confirmed registration, and roughly 20+
+seconds before any channel was actually joined.
+
+`webserver.build_list_fetch_enqueue_result()`'s own presence check,
+`bot_not_here_error()`, treats an empty `channel_users` as "unknown" rather
+than "absent" - correct in general, since a bot mid-JOIN should not be
+judged gone (see `test_we_do_not_ask_a_bot_that_is_not_there.py`'s own
+docstring on that distinction) - so it never refused at cold startup, when
+`channel_users` is *always* empty. The dispatcher then built its `PRIVMSG`
+using `dcc.channel_containing_user(bot) or default_channel`, and since we
+were not in any channel yet, fell back to whatever channel is first in
+`config.CHANNEL` - one we had not joined either. The message most likely
+never reached the target bot - dropped pre-registration by the server, or
+landed in a channel we were not yet a member of - and the request just
+timed out as "no response", indistinguishable in the log from the target
+bot genuinely being unreachable.
+
+Now: `refetch_due_lists()` refuses outright (returns `[]`) while
+`config.bot_joined_channel` is not yet `True` - the same gate `dcc.py`'s
+own presence decisions already use, and for the identical reason.
+`irc.delayed_activate()` runs the sweep once, in its own thread, right
+after that flag is claimed - mirroring `dcc.wake_restored_queues()`'s
+activation hook from #531 - so a fresh start does not otherwise wait up to
+an hour (the worker's own sweep interval) for its first real attempt.
+
+A new test, `test_nothing_is_asked_before_the_bot_has_joined_anything`,
+pins the guard; `AskingAgainWithoutBeingAsked`'s existing tests now set
+`bot_joined_channel=True` in `setUp()` as the steady state they were always
+meant to represent. Three source-inspection tests in a new
+`ActivationWakesTheSweepToo` class check the activation hook the same way
+the equivalent `dcc.wake_restored_queues` hook is already checked: it runs
+after channel sync is claimed, only when the feature is switched on, and in
+its own thread rather than blocking activation. Verified by hand: reverting
+either the guard or the hook fails exactly the tests meant to catch it.
+
 ### 🔁 Auto re-fetch called its own validator with the wrong shape
 
 Seen live, with `AUTO_REFETCH_LISTS` on: `[LIST-FETCH] Did not re-ask

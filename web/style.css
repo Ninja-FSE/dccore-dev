@@ -2202,6 +2202,82 @@ mark.filter-hit {
   opacity: 0.85;
 }
 
+/* The "?" beside a setting (#528): what it means, on hover or keyboard focus.
+   The text is the comment block from defaults.py, so it is a sentence or a
+   paragraph - rendered as a real element rather than a title= tooltip, which
+   would truncate it, delay it, and take a quoted attribute escapeHtml() does
+   not encode. Positioned off the mark, under it, and capped in width so a long
+   explanation wraps instead of running across the row; the row's label column
+   is narrow, so it may overhang the control column - that is the point. */
+.settings-help {
+  position: relative;
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: baseline;
+  cursor: help;
+  outline: none;
+}
+
+.settings-help-mark {
+  display: inline-block;
+  min-width: 15px;
+  height: 15px;
+  line-height: 15px;
+  text-align: center;
+  border-radius: 50%;
+  border: 1px solid var(--text-faint);
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.settings-help:hover .settings-help-mark,
+.settings-help:focus .settings-help-mark {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.settings-help-text {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  width: max-content;
+  max-width: min(420px, 70vw);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-line;
+  word-break: normal;
+  box-shadow: 0 8px 24px var(--accent-dim);
+}
+
+.settings-help:hover .settings-help-text,
+.settings-help:focus .settings-help-text {
+  display: block;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* The unit a size is typed in. Beside the box rather than in the label,
    because it belongs to the number being entered - an operator reading
    "Max fetch file size ... 200 MB" should not have to look in two places to

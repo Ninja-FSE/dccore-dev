@@ -41,7 +41,7 @@ Safe to run again later: every prompt shows what is already configured as its de
 
 `configure.py` is a convenience, not a requirement. There are two mechanisms and you can use either or both.
 
-**`settings.conf`** — plain text, no Python syntax. Copy `settings.conf.sample` and edit. This is what the dashboard's Settings page and the admin console both write to.
+**`settings.conf`** — plain text, no Python syntax. Copy `settings.conf.sample` and edit. This is what the dashboard's Settings page and the admin console both write to. The explanation above each setting in the sample is the same text the Settings page shows when you hover the **?** beside a setting — both come from the comment in `defaults.py`.
 
 **`admin_config.py`** — Python. Copy `admin_config.py.sample` and edit. Better for values you would rather keep out of a file other tools rewrite, such as `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH`.
 
