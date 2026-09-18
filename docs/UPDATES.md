@@ -4,6 +4,58 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎬 A release travels whole: subtitles, .nfo and .sfv follow their film
+
+Neo's #411, with numbers from a real install: a video-only list published a
+"master" file of 3,638 rows - 3,637 `.srt` and one `.nfo` - beside a video
+file holding the 3,494 films. `SEPARATE_VIDEO_LIST` decided per file by
+extension, so only the `.mkv` was video and everything a release ships
+beside it fell into the music list. `defaults.py` had called this "the one
+rough edge of deciding per file rather than per folder" since the split was
+written.
+
+The rule the user proposed, built: **a scene release is the video plus its
+companions**, and they go together. New `LIST_VIDEO_COMPANION_EXTENSIONS`
+(`.srt .sub .idx .ass .ssa .vtt .smi .nfo .sfv`) names the companions;
+`update_list.belongs_in_video_list(name, folder_has_video, ...)` routes a
+companion to the video list **only when its folder holds a video**, so an
+album's `.nfo` and `.sfv` stay with its tracks exactly as before.
+`folder_has_video` is decided once per folder from the folder's own files
+before the per-file loop - not derived as the walk goes, so the answer for
+a companion cannot depend on which file came first, and not from
+subfolders, so a series folder's own `.nfo` beside season subfolders stays
+put and each release folder decides for itself. A companion in a folder
+with no video - a stray `.srt` beside an album - stays with the music: the
+rule is the folder's, not the extension's.
+
+Chosen over the issue's other two shapes on purpose. Adding subtitles to
+`LIST_VIDEO_EXTENSIONS` alone would have left `.nfo`/`.sfv` behind and
+put a music release's `.nfo` in the film list. A third `-MISC-` bucket
+would change the list-naming convention that other bots' fetchers already
+key on (`_pick_list_file()` excludes known markers and takes what is
+left) - a cross-bot protocol change for a problem the folder rule solves
+without one. The video-only operator's "master" now holds whatever is not
+part of a release, which for that install is nothing worth publishing;
+whether an empty master should be skipped is #411's remaining question
+and is unchanged here.
+
+Registered like its sibling: `webserver.SETTINGS_CATEGORIES` (Your list,
+beside `LIST_VIDEO_EXTENSIONS`), `SETTINGS_LABELS`, the
+`SETTINGS_FIELD_LABEL_KEYS` table, en/fr/es, `settings.conf.sample`
+regenerated, `docs/INSTALL.md`, and `test_commands`'s NOT_PRESERVED list
+(a setting, re-read on a rehash, like the other extension sets).
+
+Tests in `tests/test_master_list_generation.py`, `AReleaseTravelsWhole`
+(9): a release's `.srt`/`.nfo`/`.sfv` follow its `.mkv`; an album's `.nfo`
+and `.sfv` stay with the album; a stray subtitle with no video stays with
+the music; only the folder's own files count (a season subfolder's video
+does not pull the parent's `.nfo`); a mixed album-and-video folder sends
+its companions with the video - stated so the choice is visible; with the
+split off nothing moves; the operator can change the companion set; the
+film list's header count includes the companions; and the predicate in
+isolation, including case. The old "a film's subtitles land in the music
+list" docstring is updated.
+
 ### 📺 The console feed: requests, queue, starts, resumes, searches - with tickboxes
 
 Part one of #528. "dccore sends but I can't know until I look at the stats

@@ -404,6 +404,7 @@
   "settings.field.LIST_IGNORED_EXTENSIONS": "File types to leave out of the list",
   "settings.field.SEPARATE_VIDEO_LIST": "Publish film and series as a separate list",
   "settings.field.LIST_VIDEO_EXTENSIONS": "File types that go in the film list",
+  "settings.field.LIST_VIDEO_COMPANION_EXTENSIONS": "File types that follow a film into its list (subtitles, .nfo, .sfv)",
   "settings.field.RAR_EXTENSIONS": "File types a folder needs to be !rar-packable",
   "settings.field.RAR_ENABLED": "Enable !rar folder packing",
   "settings.field.RAR_BINARY": "RAR binary path",

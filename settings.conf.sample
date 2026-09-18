@@ -229,14 +229,23 @@
 # 
 # Anything that is NOT one of these goes into the music list, including a
 # file with no extension at all. That is the rule for artwork, cue sheets and
-# notes, which sit beside the tracks they belong to; a film's subtitles land
-# there too, which is the one rough edge of deciding per file rather than per
-# folder. Per file is deliberate: a folder holding both an album and a video
-# should not have to pick.
+# notes, which sit beside the tracks they belong to. Per file is deliberate:
+# a folder holding both an album and a video should not have to pick.
 # 
 # The video list is only published when there is video to put in it, so a
 # music-only library never gains an empty file it has no use for.
 #LIST_VIDEO_EXTENSIONS = .mkv, .mp4, .avi, .m4v, .mov, .wmv, .mpg, .mpeg, .flv, .webm, .ts, .m2ts, .vob, .divx, .ogv, .3gp
+
+# A release's COMPANION files follow its video (#411). Deciding per file has
+# one rough edge: a scene release is a video plus its subtitles, its .nfo and
+# its .sfv, and by extension alone only the video is video - the rest fell
+# into the music list, where a video-only library ended up publishing a
+# "master" list that was 99.97% .srt files. These extensions are routed to
+# the video list WHEN THEIR FOLDER HOLDS A VIDEO, and stay with the music
+# otherwise - an album's .nfo and .sfv sit beside its tracks exactly as
+# before. Only a folder's own files count, not its subfolders', so a
+# release folder decides for itself.
+#LIST_VIDEO_COMPANION_EXTENSIONS = .srt, .sub, .idx, .ass, .ssa, .vtt, .smi, .nfo, .sfv
 
 # WHICH FOLDERS may be packed on demand with "!rar <folder>".
 # 

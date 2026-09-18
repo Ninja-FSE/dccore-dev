@@ -404,6 +404,7 @@
   "settings.field.LIST_IGNORED_EXTENSIONS": "Types de fichiers à exclure de la liste",
   "settings.field.SEPARATE_VIDEO_LIST": "Publier films et séries dans une liste séparée",
   "settings.field.LIST_VIDEO_EXTENSIONS": "Types de fichiers inclus dans la liste vidéo",
+  "settings.field.LIST_VIDEO_COMPANION_EXTENSIONS": "Types de fichiers qui suivent un film dans sa liste (sous-titres, .nfo, .sfv)",
   "settings.field.RAR_EXTENSIONS": "Types de fichiers requis pour qu'un dossier soit empaquetable en !rar",
   "settings.field.RAR_ENABLED": "Activer l'empaquetage de dossiers !rar",
   "settings.field.RAR_BINARY": "Chemin de l'exécutable RAR",
