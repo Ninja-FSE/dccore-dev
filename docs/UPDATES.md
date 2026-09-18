@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
+## 🟨 Unreleased
 
 ### 🎨 The admin console in the bot's own colours
 
@@ -41,6 +41,8 @@ updated with intent kept: `test_mirc_formatting_is_stripped_for_the_console`
 now says "when colours are off" and has a coloured-by-default twin;
 `test_announce_renders_the_fail_category` asserts FAIL's tag is an alert
 through the table rather than grepping the chain it replaced.
+
+## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
 
 ### ✍️ A bot that never advertises can be added by hand
 
