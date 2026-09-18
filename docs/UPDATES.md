@@ -143,6 +143,115 @@ now says "when colours are off" and has a coloured-by-default twin;
 `test_announce_renders_the_fail_category` asserts FAIL's tag is an alert
 through the table rather than grepping the chain it replaced.
 
+### 🔒 `!ping` and `!debugnames` answer only the bot's own admin
+
+Seen live by the user: another operator typed `!ping` in a shared channel to
+check their own bot, and every DCCore in the channel ran a latency check -
+each spending a paced server line (the slot the adverts share) and each
+reporting into its own admin console, so a stranger's ping appeared in the
+user's console as `[INFO] Latency Check triggered by <them>` as if the user
+had asked. Both commands are in `irc.py`'s *unaddressed* user-command set
+(`msg_lower in ("!list", "!debugnames", "!ping")`), so every bot present
+handled them, and neither even answers the person who typed it: `!ping`
+reports only through `send_debug()`, `!debugnames` is a `[RAM-CHECK]`
+notice about the bot's own membership mirror. They are the operator's
+tools.
+
+- `commands.diagnostics_are_for_the_admin(user)` - one gate, `is_admin()`,
+  the same rule the admin commands use, so it cannot drift from it.
+- Both dispatch branches in `irc.py` check it first and `continue`
+  silently - an answer or a log line per stranger is the noise this
+  removes. The `elif` lines are untouched, since three source-anchored
+  tests key on them.
+- `handle_ping_request()` checks it too, so no other caller can make the
+  bot ping on a stranger's behalf.
+- **`!list` stays public on purpose**: it is the discovery command every
+  serving bot answers with its trigger - that is how people find bots.
+
+Tests in `tests/test_diagnostics_answer_only_the_admin.py` (9): the gate's
+truth table (admin, case-insensitive, every listed admin, strangers, and
+equal to `is_admin()` for both answers); a stranger's `!ping` sends
+nothing to the server and starts no measurement while the admin's still
+goes out; and, read from the source, both branches gate before doing
+anything (before the thread for `!ping`, before the lock for
+`!debugnames`) while `!list` does not. Three pacing tests in
+`test_a_shared_outbound_pace.py` that pinged as `alice`/`bob` now list
+them in `ADMIN_NICK` - what they measure is the pacing of a ping that IS
+sent - and its `debugnames_block()` slice is bounded by the next branch
+rather than 1500 characters, which the gate had pushed the `queue_message`
+line past. `docs/ADMIN-CONSOLE.md` says which commands are whose.
+
+### 🚀 The launcher is the install
+
+#547, Proposal 1. A first-timer's install was eight steps, three of them in
+a terminal, and the dashboard's one dependency was discovered at step 7
+from a log line saying step 4 had been needed. Now: install Python,
+extract, run the launcher for your system.
+
+- **No config → `configure.py` runs right there.** Both launchers used to
+  refuse an unconfigured tree with "copy the sample and fill it in"; they
+  now run the setup questions themselves, then continue to the check and
+  the start. A tree with no `configure.py` (a broken extract) is still
+  refused - the one thing the branch must never do is start on the
+  defaults - and a setup that does not finish stops the launcher rather
+  than starting a half-configured bot. The legacy `local_config.py` branch
+  keeps its place *before* this one: `configure.py` would otherwise
+  happily write a fresh `settings.conf` beside the stranded file.
+- **`configure.py --flask`**, run by both launchers just before the start:
+  silent when the dashboard is off or Flask is present, otherwise the same
+  `pip install -r requirements-web.txt` offer setup makes
+  (`offer_flask_if_the_dashboard_is_on()`). Never a reason not to start.
+  Runs after the setup check, so nothing is offered for a bot that is not
+  going to start.
+- **Windows finds Python when the PATH box was missed**: after `py` and
+  `python`, the launcher probes `%LOCALAPPDATA%\Programs\Python\Python3*`
+  and `%ProgramFiles%\Python3*`, where the python.org installer puts it.
+  The "not found" message now names both installer boxes and the download
+  page.
+- **The Linux launcher takes the first Python that actually runs**, not the
+  first that exists: macOS's `/usr/bin/python3` is an Xcode-installer stub
+  and Windows (under Git Bash) has a Microsoft Store one; both pass
+  `command -v`. Each candidate is asked to `import sys`. The not-found
+  message names the package-manager command for the system it detects.
+  `readlink -f` is gone (macOS before 12.3 had none) in favour of
+  `cd "$(dirname "$0")" && pwd -P`.
+- **`scripts/macos/start-dccore.command`** - new, executable, a wrapper
+  that `exec`s the Linux launcher. Finder runs a `.command` in Terminal on
+  a double-click, which is the whole reason it exists; Gatekeeper needs
+  one right-click → Open the first time, and the docs say so.
+- **One line in the banner**: closing the window stops the bot.
+- `docs/WINDOWS.md`'s seven steps are three; `docs/INSTALL.md` gains "The
+  short way" with the launcher for each platform; the README's intro says
+  the same in one sentence.
+
+Tests in `tests/test_the_launcher_is_the_install.py` (22): both launchers
+**executed** in throwaway trees beside stub scripts that print a marker,
+through six states each - fresh tree (configure → `--flask` → oserve, in
+that order, with the welcome), setup that does not finish (no start), a
+tree without `configure.py` (refused, no start), a configured tree (no
+questions asked), a failing setup check (no offer, no start), check mode
+(only checks) - plus the closing-window line; the macOS wrapper (exists,
+execs the Linux launcher with `"$@"`, is `100755` in git, the Linux
+launcher uses no `readlink -f` in a code line and probes candidates by
+running them); and the `--flask` hook (silent off / silent with Flask /
+the offer with Flask hidden, returning 0 on decline; wired in
+`configure.py`'s main). `tests/test_legacy_config_upgrade.py`'s three
+"fresh install gets the sample instruction" tests are updated with their
+intent kept: legacy branch before the first-run branch; a fresh install is
+configured, never started on the defaults.
+
+### 🧪 The quiet-window test without a sleep
+
+`test_a_late_channel_restarts_the_quiet_window` slept 60% of the debounce
+window and asserted nothing had flushed yet - a bet on the scheduler that
+macOS's GitHub runners lost at 0.05 s (#546), and again after it was
+widened to 0.3 s (#548; the failure that reddened #556). The property is
+that the second arrival cancels the timer the first armed and arms a new
+one; the test now checks that on the timer objects (`finished.is_set()`,
+identity), which cannot be late, then waits for the one flush and counts
+both channels. A mutant that stops cancelling fails on the first
+assertion. No sleep left in it.
+
 ## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
 
 ### ✍️ A bot that never advertises can be added by hand
