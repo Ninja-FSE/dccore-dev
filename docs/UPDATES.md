@@ -19,7 +19,8 @@ on every one of them.
 So it is **its own line, under the closing rule**, indented:
 
 ```
-==========================
+===================
+
 D:\MEDIA\Artist\Album\
 ==========================
     14 files, 1.20GB
@@ -46,6 +47,39 @@ unchanged, and our parser reads a list carrying the line the same way
 (which is what an older peer's identical parser does too). Three mutants:
 line dropped, line un-indented, and the size put on the heading - the last
 also fails the existing resolver tests, which is the point.
+=======
+### 🌐 The settings "?" tooltips speak French and Spanish now
+
+#537 shipped the tooltip mechanism but no translations for it on purpose:
+`fieldHelp()` looks up `settings.field.NAME.help` directly in the loaded
+dictionary rather than through `t()`, specifically so a language missing
+one falls back to the server's own English explanation rather than to a
+raw key string - "no dictionary entries are added for it here... until
+somebody translates" was always the plan.
+
+All 113 overridable settings now have a French and a Spanish translation,
+pulled from the exact text `settings_help.help_text()` currently sends so
+nothing drifts from what the English tooltip says. Setting names, file
+paths, backtick code spans, protocol keywords (DCC, IRC, CTCP...), product
+names and file extensions are left untranslated throughout, matching how
+every other settings string on this page already handles them.
+
+`tests/test_dashboard_translations_stay_complete.py`'s cross-language
+completeness check now treats a `.help` key as optional per language by
+design - that is the whole point of the fallback, so requiring one in
+`en.json` (which never needs it) or in every language at once would fight
+the mechanism rather than guard it. A new `SettingsHelpKeysAreHonest` check
+takes its place for what still has to hold: a `.help` key's stem must name
+a real, referenced `settings.field` key, so a typo in a translated key
+cannot silently just never match rather than being caught.
+
+One translation needed rewording along the way: `test_no_personal_identifiers_ship.py`'s
+scrub flagged "un rejoin instantáneo" in the Spanish text, because its
+ASCII-only word-splitting cuts at the accented "á" and the leftover
+fragment happened to match a real forbidden identifier's hash - a
+coincidence, not a leak (the English source has no name in that sentence
+at all), confirmed by checking `settings_help.help_text("REJOIN_ATTEMPTS")`
+directly. Reworded to "un rejoin inmediato", same meaning, no collision.
 
 ### 🎬 A release travels whole: subtitles, .nfo and .sfv follow their film
 
