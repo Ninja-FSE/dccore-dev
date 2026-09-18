@@ -14,7 +14,7 @@ It sits in a channel, advertises a catalogue, and serves files over DCC to whoev
 - **Remembers people** — a user who disconnects keeps their queue for five minutes and resumes on rejoin
 - **Defends itself** — rolling flood windows, escalating mutes, hostmask bans, and every other bot treated as untrusted
 - **Is operable** — an authenticated DCC CHAT console, an optional web dashboard, live `!rehash`, and statistics that survive a restart
-- **Runs where you run it** — long paths, non-ASCII filenames, and both platforms in CI on every commit
+- **Runs where you run it** — long paths, non-ASCII filenames, and Linux, Windows and macOS all in CI on every commit
 
 See [docs/FUTURE.md](docs/FUTURE.md) for the full picture, including what is *not* built yet.
 
