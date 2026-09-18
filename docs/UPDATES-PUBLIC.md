@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.12.2 — The Dashboard Speaks For Itself
 
 - **Installing is now: install Python, extract, run the launcher.** On the first run the launcher asks the setup questions itself (nick, server, channels, admin nick, music folder, dashboard, password), offers to install the dashboard's dependency if you turned the dashboard on, checks the setup and starts the bot - no Command Prompt or terminal needed. Windows: double-click `scripts\windows\start-dccore.bat`; Linux: `scripts/linux/start-dccore.sh`; macOS: double-click the new `scripts/macos/start-dccore.command`. On Windows the launcher also finds Python even if you missed the "Add to PATH" box in the installer. Nothing changes for an install that is already set up.
 - **You can add a bot to the List Browser by nick.** The sidebar only ever showed bots the program had seen advertising in your channels, so a bot that answers requests but never advertises could not be fetched from the dashboard at all. There is now an **Add a bot that does not advertise** box under the bot list: type its nick, press Add, and it appears as a row marked "by hand" that you can download the list from like any other. It stays until you press Forget with the same nick; a bot that advertises on its own cannot be forgotten this way, because it would simply come back.
