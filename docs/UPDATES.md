@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
+## 🟨 Unreleased
 
 ### 🔒 `!ping` and `!debugnames` answer only the bot's own admin
 
@@ -41,6 +41,8 @@ them in `ADMIN_NICK` - what they measure is the pacing of a ping that IS
 sent - and its `debugnames_block()` slice is bounded by the next branch
 rather than 1500 characters, which the gate had pushed the `queue_message`
 line past. `docs/ADMIN-CONSOLE.md` says which commands are whose.
+
+## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
 
 ### ✍️ A bot that never advertises can be added by hand
 
