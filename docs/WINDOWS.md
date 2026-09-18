@@ -12,18 +12,37 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 
 ---
 
-## The three steps
+## The two steps
 
-1. **Install Python.** [Python 3.10.0 (64-bit)](https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe),
-   or any later 3.10+. **Tick both boxes in the installer:** *Add Python to PATH*
-   and *py launcher*. (Missed the first box? The launcher looks where the
-   installer puts Python anyway.)
-2. **Download and extract DCCore.**
-3. **Double-click `scripts\windows\start-dccore.bat`.** On the first run it
+1. **Download and extract DCCore.**
+2. **Double-click `scripts\windows\start-dccore.bat`.** If there is no
+   Python on the machine it offers to install it (below). On the first run it
    asks the setup questions itself - nick, server, channels, admin nick, music
    folder, dashboard, password - then checks the setup and starts the bot. If
    you turned the dashboard on, it offers to install Flask before starting.
    Every answer can be changed later on the dashboard's Settings page.
+
+**No Python yet?** The launcher says so and asks:
+
+```
+  Python was not found.
+
+  DCCore can download Python 3.14.7 from python.org and install it
+  for you: about 32 MB, for your user only (no administrator prompt),
+  with "Add python.exe to PATH" and "py launcher" both ticked. The
+  download is checked against a fingerprint before it is run.
+
+  Download and install Python now? [Y/N]
+```
+
+`Y` fetches python.org's own installer, checks its SHA-256 against the one
+written in the launcher, runs it with a progress bar and no questions, and
+carries on to the setup questions. A file that does not match the
+fingerprint is deleted and not run. `N` - or a 32-bit Windows, or a machine
+without `curl` - opens the python.org download page instead; install from
+there with **both boxes ticked**, then double-click the launcher again.
+(Missed the PATH box? The launcher looks where the installer puts Python
+anyway.)
 
 No Command Prompt needed. The window that opens **is** the bot: closing it
 stops the bot, so leave it open or minimise it. `Ctrl-C` in it stops the bot
@@ -96,6 +115,7 @@ suite are stdlib-only, which is why they run on a bare machine with no
 
 1. **Download Python.** [Python 3.10.0 (64-bit)](https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe),
    or any later 3.10+ from [python.org](https://www.python.org/downloads/windows/).
+   (Or let the launcher do it - see *The two steps* above.)
 
 2. **Tick both boxes in the installer:** *Add Python to PATH* and *py launcher*.
    They are what make steps 3 onwards work from any directory — see the note on
@@ -265,6 +285,17 @@ no list.
 
 `start-dccore.bat` does `cd /d "%~dp0..\.."` before anything else, so it is
 correct from a double-click, a shortcut, or any other directory.
+
+**How the launcher installs Python, when it has to.** The version and the
+installer's SHA-256 (one per processor, amd64 and arm64) are written at the
+top of `start-dccore.bat`, copied from the release page on python.org. The
+launcher downloads with the `curl` that ships with Windows 10 1803 and later,
+hashes the file with `certutil`, refuses it on any mismatch, and runs it with
+python.org's documented unattended options (`/passive InstallAllUsers=0
+PrependPath=1 Include_launcher=1 Include_test=0`) - per user, so no
+administrator prompt. The launcher then looks for Python where the installer
+puts it, since its own window's PATH predates the install. Moving the pin to a
+newer Python is three lines: the version and the two hashes.
 
 **This is also why there is no Windows service yet.** A service starts in
 `C:\Windows\System32`, and no launcher is involved to correct it. Making that
