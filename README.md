@@ -44,7 +44,7 @@ Full guide, including configuring it by hand and upgrading from an older install
 |---|---|
 | [INSTALL.md](docs/INSTALL.md) | requirements, setup, configuration, upgrading |
 | [FUTURE.md](docs/FUTURE.md) | what is implemented, what is planned |
-| [ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) | the authenticated DCC CHAT console |
+| [ADMIN-CONSOLE.md](docs/ADMIN-CONSOLE.md) | the authenticated DCC CHAT console, and the mIRC window script that sits on it |
 | [WINDOWS.md](docs/WINDOWS.md) | the Windows guide |
 | [CONVENTIONS.md](docs/CONVENTIONS.md) | how this codebase is written, if you want to contribute |
 | [UPDATES-PUBLIC.md](docs/UPDATES-PUBLIC.md) | the changelog |
