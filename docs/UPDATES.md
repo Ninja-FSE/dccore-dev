@@ -4,6 +4,57 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 The bot's window in mIRC
+
+#550, step 4 of 4 - `scripts/mirc/dccore.mrc`, the client the structured
+feed was designed for. One file, `/load -rs dccore.mrc`, written for
+**mIRC 6.10 and later** (every construct dates from 6.x: `/window -el`,
+`/aline -l`, `/titlebar`, `on ^CHAT`, `on CHATCLOSE`, hash tables with
+`/hsave`, `/timer -m`, dialog tables, `$bytes().suffix`, `$regex`; the
+file is pure ASCII and CRLF - `.gitattributes` now says so for `*.mrc`).
+
+- **`/dccore pair <bot>`** opens `@DCCore`, offers the chat, hides the
+  chat window on the first line, asks for the password once by hand,
+  sends `hello dccore.mrc 1.0` then `pair dccore.mrc 1.0`, and keeps the
+  `DCCORE TOKEN` in `dccore.ini` beside the script. From then on it logs
+  in with the token: on `/dccore connect`, on IRC connect, on the bot's
+  JOIN; retries 5/15/60/120 s; a 90 s silence (no STATUS heartbeat)
+  reopens the chat; a refused token drops to hand-typed password; a
+  `Session taken over` does **not** auto-reconnect (two clients would
+  trade the session for ever). `raw 401` on the bot's nick is caught.
+- **Drawing**: every `DCCORE` line is parsed by `$N` position exactly as
+  `structured_line()` renders it; the tag is bold in the group's colour,
+  padded with `$chr(160)` (a `$1-` collapses spaces), the name in its own
+  colour; `STATUS` sets the title bar and the panel is redrawn 250 ms
+  after the last `SLOT`/`QUEUE` line of a burst (there is no end marker);
+  `OUT` lines are `[CONSOLE]` or go to `@DCCore-console`; `DROPPED` is
+  shown; an unknown type on the same major is shown as-is; `HELLO` with
+  another major, or `Unknown command: hello`, or six seconds of no
+  `HELLO`, means plain mode: the chat as it comes, no panel.
+- **Options dialog** (`dialog dccore.opt`): show/colour per group
+  (request, queued, sends, fail, search, joins, bans, info), name and
+  console colours, status-line minutes, panel, title bar, separate
+  console window, beep, font, bot nick, auto-reconnect, pair again,
+  forget token. Panel toggling recreates the window and carries the text
+  over line by line, guarded so `on CLOSE` does not read it as a
+  disconnect.
+- **Menus**: window (commands, the selected panel user's queue / clear,
+  options, panel, connect/disconnect), nick list (queue / clear the queue
+  of the nick), status and channel windows.
+- Gotchas recorded in the header for whoever edits it next: timers run
+  outside script scope, so every alias is global (namespaced `dccore.*`);
+  `[ ]` are evaluation brackets; newer-mIRC features go behind
+  `if ($version >= 7)` rather than raising the floor (7.x already decodes
+  the chat as UTF-8, so non-ASCII names show correctly there).
+- `tests/test_the_bots_window_in_mirc.py` - the file ships (ASCII, no
+  tabs, braces balance, every block a header), the requirements header
+  says 6.10, every line type the bot can send is handled by name, no
+  `alias -l` (timers), the four timer targets are defined, the field
+  positions the script reads match `structured_line()` and
+  `status_lines()` for every kind, the docs reference it, `.gitattributes`
+  carries the CRLF rule. Not run in mIRC by CI; the user verifies in
+  mIRC 6.10 and 7.x by hand.
+
 ### 📊 STATUS, SLOT, QUEUE and pairing
 
 #550, step 3 - the live picture a window is drawn from, and a credential

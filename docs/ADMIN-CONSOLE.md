@@ -136,6 +136,12 @@ changes too, but a restart is the sure thing while you are setting this up.
 
 ## Using it
 
+**Using mIRC?** `scripts/mirc/dccore.mrc` turns the console into one
+window - the feed coloured per kind, a side panel with what is sending and
+who is waiting, the slots and today's totals in the title bar - and logs in
+by itself. See [The window, in mIRC](#the-window-in-mirc) below; the rest
+of this section is what happens underneath it.
+
 **Would rather not open a second IRC client at all?** The web dashboard's
 Console page runs the exact same command set and shows the exact same live
 log, in the browser, behind the same password — see the Console entry in
@@ -529,7 +535,104 @@ unpair dccore.mrc      revoke one; its next login is a wrong password
 the password or with a token - to mint or revoke one. The file lives where
 **Settings → Advanced → Paired console scripts file** points.
 
-(Step 3 of #550; the script itself is step 4.)
+## The window, in mIRC
+
+`scripts/mirc/dccore.mrc` is the client the feed above was designed for:
+the bot's whole life in one mIRC window, so that running DCCore feels no
+different from running a script inside mIRC. It needs **mIRC 6.10 or
+later** - everything it uses dates from mIRC 6.x - and a bot of 1.13 or
+later. On an older bot it still works as a plain console, without the
+panel.
+
+### First time
+
+Save the file anywhere (your mIRC folder is fine) and, in mIRC:
+
+```
+/load -rs dccore.mrc
+/dccore pair MusicBot
+```
+
+with your bot's nick in place of `MusicBot`. The `@DCCore` window opens,
+the chat is offered exactly as `/dcc chat` would (path 1 or 2 above, as
+the bot decides), and when the bot asks for the password you **type it in
+the window, once**. The script then sends `pair dccore.mrc 1.0`, keeps the
+token the bot answers with in `dccore.ini` beside the script, and from
+then on connects and logs in without you: on `/dccore connect`, when mIRC
+connects to IRC, and whenever the bot's nick joins a channel you share.
+The token opens the console and nothing else; the password never touches
+the disk.
+
+If your client cannot be dialled and the bot offers the chat back (path
+2), mIRC shows its usual incoming-chat dialog the first time - accept it,
+or add the bot with `/dcc trust <botnick>` and set **Options → DCC → On
+Chat request** to auto-accept so it never asks again.
+
+### What you see
+
+| where | what |
+|---|---|
+| the text | one line per event, mIRC's own timestamp, a bold coloured tag - `[REQUEST]`, `[SENDING]`, `[SENT]`, `[FAILED]`, `[QUEUED]`, `[SEARCH]`, `[JOIN]`, `[BAN]`... - then the event in plain words, the file name in its own colour |
+| the side panel | **Sending n/m**: each running transfer with its size, percentage and speed; **Queue n**: who is waiting, in order, with `frozen m:ss` on a queue that is counting down; **Today**: files and bytes sent, the speed record; and what this window has seen since it opened |
+| the title bar | `MusicBot on Undernet · slots 2/3 · queue 14 · today 38 files / 12.4GB · 1.5MB/s`, updated with every status burst |
+| the editbox | anything you type is a console command - `status`, `queue helen`, `clearqueue ivan`, `ban *!*@bad.host` - and the reply comes back as `[CONSOLE]` lines, or into a second `@DCCore-console` window if you prefer |
+| right-click | the common commands; on a panel line, that user's queue or clearing it; in any channel's nick list, **DCCore → Queue of / Clear the queue of** that nick |
+| a beep | on a failed transfer, if you leave that on |
+
+Every five minutes a `[STATUS]` line summarises the numbers in the text
+too, so scrolling back shows how the day went. A bot that goes quiet for
+90 seconds is treated as gone and the chat is reopened; a chat that
+cannot be opened is retried after 5 s, 15 s, 60 s and then every two
+minutes. Closing the window closes the chat and stops the retries;
+`/dccore connect` starts them again.
+
+### Options
+
+`/dccore options` (or right-click → Options...):
+
+- a tickbox and a colour for each kind of event - requests, queue
+  positions, sends, failures, searches, joins/parts/quits, bans, other log
+  lines - plus the colour of file names and of console replies, and how
+  often the `[STATUS]` line is written (0 = never);
+- the side panel, the title bar figures, console replies in a separate
+  window, the beep, the fixed-width font;
+- the bot's nick, whether the script reconnects by itself, the pairing
+  state with **Pair again...** and **Forget token**.
+
+These are the script's own filters, kept by mIRC in `dccore.ini`. The
+bot's **Settings → Console feed** tickboxes remain the ceiling on what is
+sent at all: what is off there never reaches the script.
+
+### Commands
+
+```
+/dccore pair <botnick>       first time: connect, log in once by hand, keep a token
+/dccore connect [botnick]    open the window and the chat (logs in with the token)
+/dccore disconnect           close the chat and stop reconnecting
+/dccore unpair               forget the token here and revoke it on the bot
+/dccore options              what to show, colours, panel, title bar, beep
+/dccore window               open or focus @DCCore
+/dccore status               ask the bot for its status
+/dccore raw <command>        send any console command
+/dccore panel on|off         the side panel
+```
+
+### If something is off
+
+- **Non-ASCII file names look garbled** - mIRC 6 shows text in your
+  Windows code page and the bot sends UTF-8. mIRC 7 decodes the chat as
+  UTF-8 and shows them correctly; the script is the same file on both.
+- **"Plain mode" in the window** - the bot is older than 1.13 and does
+  not answer `hello`; the window shows the chat as it comes, with no
+  panel. Or the bot speaks a newer protocol than the script: update the
+  script.
+- **The stored token is refused** - it was revoked on the bot (`unpair`),
+  or the token file was moved; `/dccore pair` again, typing the password
+  once.
+- **Two people with the script** - the console is one session, and a
+  login replaces the one before it. The client that was replaced says so
+  and does not reconnect by itself, so the two of you take turns rather
+  than trading it every few seconds.
 
 ## Limits and timeouts
 
