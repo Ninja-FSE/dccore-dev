@@ -339,8 +339,13 @@ class TheServer(DCCoreTestCase):
         self.assertFalse(thread.is_alive(), "the server returns once the form is saved")
         self.assertEqual(result["changes"]["NICKNAME"], "MusicBot")
         self.assertTrue(any("Settings written" in line for line in logs))
-        # and the port is free for the real dashboard
+        # and the port is free for the real dashboard - which binds with
+        # SO_REUSEADDR (werkzeug's BaseWSGIServer.allow_reuse_address), so
+        # the probe does too: on Linux a just-closed listener still has this
+        # test's own connections in TIME_WAIT, and a plain bind refuses that
+        # for a minute while a reusing one, the real one, does not.
         probe = socket.socket()
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.settimeout(2)
         deadline = time.time() + 5
         while time.time() < deadline:
