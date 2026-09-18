@@ -3,6 +3,8 @@
 ## Unreleased
 
 - **The admin DCC chat is in colour.** The tag on each line - `[SENT]`, `[FAIL]`, `[REQUEST]` and the rest - is now coloured the same way it is in the debug channel, in the theme your bot uses, so the feed is readable at a glance. A new switch, **Colour the tags in the admin DCC chat** (Settings → Admin console), turns it off for a client that shows the colour codes as junk. The dashboard's Console page is unchanged.
+- **`!ping` and `!debugnames` now answer only you.** They used to be answered by every DCCore bot in the channel whoever typed them, so another operator checking their own bot made yours run a latency check too and report it in your admin console as if you had asked - and neither command ever answered the person who typed it. Both are diagnostics for the operator, so they now respond only to a nick in `ADMIN_NICK`. `!list` is unchanged: it is how people discover bots, and every bot keeps answering it.
+- **Installing is now: install Python, extract, run the launcher.** On the first run the launcher asks the setup questions itself (nick, server, channels, admin nick, music folder, dashboard, password), offers to install the dashboard's dependency if you turned the dashboard on, checks the setup and starts the bot - no Command Prompt or terminal needed. Windows: double-click `scripts\windows\start-dccore.bat`; Linux: `scripts/linux/start-dccore.sh`; macOS: double-click the new `scripts/macos/start-dccore.command`. On Windows the launcher also finds Python even if you missed the "Add to PATH" box in the installer. Nothing changes for an install that is already set up.
 
 ## v1.12.2 — The Dashboard Speaks For Itself
 
