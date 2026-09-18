@@ -4233,6 +4233,443 @@ if HAVE_FLASK:
         return app
 
 
+# ---------------------------------------------------------------------------
+# SET IT UP IN THE BROWSER (#547, Proposal 4)
+#
+# configure.py's questions are right; the terminal is the wrong place for a
+# first-timer to answer them, on any OS. With no configuration at all -
+# settings_file.REQUIRED still blank - oserve.startup() used to exit 1 with a
+# message about admin_config.py.sample. Now, when Flask is present (Proposal
+# 1's launchers make sure of that before the daemon starts), it serves ONE
+# page on 127.0.0.1 until the form below has written settings.conf and
+# admin_config.py exactly as configure.py writes them, then carries on down
+# the same straight line it always ran. Same process, same port, freed and
+# re-bound by the real dashboard a moment later; no launcher involvement.
+#
+# What makes it safe to run with no password yet:
+#   - loopback only, never WEBUI_HOST (nothing is configured to read);
+#   - it exists only while there is no configuration - the moment the form
+#     has written one, the server stops, and the real app's login gate is
+#     what answers on that port from then on;
+#   - a ONE-TIME TOKEN. Loopback alone is not "only the person at the
+#     machine": any website open in the same browser can POST to
+#     127.0.0.1:8420, and with no password yet that POST would set ITS
+#     password. So the token is printed in the terminal, put in the URL the
+#     launcher opens, required on every request, and never in a form action
+#     a page from another origin could guess; the Host header is checked
+#     too, against DNS rebinding.
+#
+# The form is the Settings page's own field machinery (_settings_field), so
+# the plain-language help from #545 and the fr/es strings from the lang
+# files appear here without a second copy of either.
+# ---------------------------------------------------------------------------
+
+SETUP_FIELDS = ("NICKNAME", "SERVER", "CHANNEL", "ADMIN_NICK", "FILE_DIRECTORY",
+                "WEBUI_ENABLED", "WEBUI_HOST")
+SETUP_LANGS = ("en", "fr", "es")
+_SETUP_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
+
+
+def setup_page_is_possible():
+    """Can the daemon offer /setup instead of exiting on a blank config?
+    Flask, and nothing else: the page is loopback and one-shot by design,
+    so there is no setting that turns it off."""
+    return HAVE_FLASK
+
+
+def _setup_strings(lang):
+    """The lang file's strings for the setup page, or {} for English -
+    English is what SETTINGS_LABELS and settings_help carry already."""
+    lang = lang if lang in SETUP_LANGS else "en"
+    if lang == "en":
+        return {}
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "lang", f"{lang}.json")
+    try:
+        import json
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def build_setup_fields(lang="en", values=None):
+    """The form's fields, from the same _settings_field() the Settings page
+    uses, with the lang file's label and help laid over for fr/es. `values`
+    are what the operator typed, redisplayed after an error."""
+    import settings_file
+    strings = _setup_strings(lang)
+    types = settings_file.declared_types(vars(config))
+    values = values or {}
+    fields = []
+    for name in SETUP_FIELDS:
+        current = values.get(name, getattr(config, name, None))
+        field = _settings_field(name, types.get(name, str), current)
+        label = strings.get(f"settings.field.{name}")
+        if label:
+            field["label"] = label
+        help_text = strings.get(f"settings.field.{name}.help")
+        if help_text:
+            field["help"] = help_text
+        fields.append(field)
+    return fields
+
+
+def validate_setup_form(form):
+    """The form's answers -> (changes, password_hash, errors). `changes` is
+    the same {NAME: value} dict configure.collect_answers() builds - what
+    was answered is written, what was left blank is not - so the files the
+    page writes are the files the terminal writes."""
+    errors = []
+    changes = {}
+
+    def text(name):
+        return str(form.get(name, "") or "").strip()
+
+    nickname = text("NICKNAME")
+    if not nickname:
+        errors.append(("NICKNAME", "A nickname is needed."))
+    elif " " in nickname or nickname[0] in "#&:0123456789":
+        errors.append(("NICKNAME", "An IRC nickname has no spaces and does not "
+                                   "start with a digit or a #."))
+    else:
+        changes["NICKNAME"] = nickname
+
+    server = text("SERVER")
+    if not server:
+        errors.append(("SERVER", "An IRC server is needed (irc.undernet.org is "
+                                 "the usual one)."))
+    elif " " in server:
+        errors.append(("SERVER", "A server name has no spaces."))
+    else:
+        changes["SERVER"] = server
+
+    channel = text("CHANNEL")
+    channels = [c.strip() for c in channel.split(",") if c.strip()]
+    if not channels:
+        errors.append(("CHANNEL", "At least one channel is needed, like #mychannel."))
+    elif any(not c.startswith("#") or " " in c for c in channels):
+        errors.append(("CHANNEL", "Each channel starts with # and has no spaces; "
+                                  "separate several with commas."))
+    else:
+        changes["CHANNEL"] = ",".join(channels)
+
+    admin_nick = text("ADMIN_NICK")
+    if not admin_nick:
+        errors.append(("ADMIN_NICK", "Your own nick is needed - the person who may "
+                                     "run the admin commands."))
+    elif " " in admin_nick:
+        errors.append(("ADMIN_NICK", "A nick has no spaces."))
+    else:
+        changes["ADMIN_NICK"] = admin_nick
+
+    password = str(form.get("password", "") or "")
+    confirm = str(form.get("password_confirm", "") or "")
+    password_hash = None
+    if not password:
+        errors.append(("password", "A password is needed - it opens the admin "
+                                   "console and this dashboard."))
+    elif password != confirm:
+        errors.append(("password", "The two passwords do not match."))
+    else:
+        password_hash = adminchat.make_password_hash(password)
+
+    file_directory = text("FILE_DIRECTORY")
+    if file_directory:
+        if os.path.isdir(file_directory):
+            changes["FILE_DIRECTORY"] = file_directory
+        else:
+            errors.append(("FILE_DIRECTORY", "That folder does not exist. Leave it "
+                                             "blank to choose it later on the "
+                                             "dashboard's Settings page."))
+
+    enable_webui = str(form.get("WEBUI_ENABLED", "") or "").lower() in ("1", "on", "true", "yes")
+    changes["WEBUI_ENABLED"] = enable_webui
+    if enable_webui:
+        lan = str(form.get("WEBUI_LAN", "") or "").lower() in ("1", "on", "true", "yes")
+        changes["WEBUI_HOST"] = "0.0.0.0" if lan else "127.0.0.1"
+
+    return changes, password_hash, errors
+
+
+def apply_setup(changes, password_hash, log=print, settings_path=None, admin_path=None):
+    """Write both files as configure.py does, then make the running process
+    see them: settings.conf through settings_file.apply_to(), the password
+    by hand - admin_config.py was imported (or not) long before this and
+    is not re-imported. The two paths are for tests; a real run writes
+    where configure.py writes."""
+    import configure
+    import settings_file
+    configure.write_settings_conf(changes, path=settings_path)
+    configure.write_admin_config_password(password_hash, path=admin_path)
+    settings_file.apply_to(vars(config), path=settings_path, log=log)
+    config.ADMIN_PASSWORD_HASH = password_hash
+    return {"written": sorted(changes)}
+
+
+def _setup_host_ok(host_header):
+    host = (host_header or "").strip().lower()
+    if host.startswith("["):
+        host = host.split("]", 1)[0] + "]"
+    else:
+        host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return host in _SETUP_HOSTS
+
+
+def _html(text):
+    import html
+    return html.escape(str(text if text is not None else ""), quote=True)
+
+
+def render_setup_page(fields, token, lang="en", errors=(), values=None, port=8420):
+    """The one page. Server-rendered - the real dashboard's app.js is behind
+    the login and is not loaded here; the page has no script but the
+    language switch, which is a link."""
+    strings = _setup_strings(lang)
+    errors = dict(errors)
+    values = values or {}
+    rows = []
+    for field in fields:
+        name = field["name"]
+        label = _html(field["label"])
+        help_text = field.get("help") or ""
+        help_html = (f' <span class="help" title="{_html(help_text)}">?</span>'
+                     if help_text else "")
+        error_html = (f'<div class="error">{_html(errors[name])}</div>'
+                      if name in errors else "")
+        value = values.get(name, field.get("value"))
+        if name == "WEBUI_ENABLED":
+            checked = " checked" if (value is None or value in (True, "on", "1", "true")) else ""
+            rows.append(f'<label class="check"><input type="checkbox" name="WEBUI_ENABLED" value="1"{checked}> '
+                        f'{label}{help_html}</label>')
+            continue
+        if name == "WEBUI_HOST":
+            lan = str(value or "") == "0.0.0.0" or values.get("WEBUI_LAN") in ("1", "on")
+            checked = " checked" if lan else ""
+            rows.append(f'<label class="check sub"><input type="checkbox" name="WEBUI_LAN" value="1"{checked}> '
+                        f'{_html(strings.get("setup.lan", "Reachable from other devices on my network (phone, laptop), not only this machine"))}'
+                        f'{help_html}</label>')
+            continue
+        placeholder = ""
+        if name == "SERVER" and not value:
+            value = "irc.undernet.org"
+        if name == "CHANNEL":
+            placeholder = ' placeholder="#mychannel, #another"'
+        if name == "FILE_DIRECTORY":
+            placeholder = ' placeholder="' + _html(strings.get("setup.folder_placeholder", "optional - can be chosen later on the Settings page")) + '"'
+        rows.append(f'<label>{label}{help_html}<input type="text" name="{name}" '
+                    f'value="{_html(value or "")}"{placeholder} autocomplete="off"></label>{error_html}')
+    password_error = f'<div class="error">{_html(errors["password"])}</div>' if "password" in errors else ""
+    rows.append(f'<label>{_html(strings.get("setup.password", "Admin password"))}'
+                f' <span class="help" title="{_html(strings.get("setup.password.help", "Opens the admin console and this dashboard. Kept as a hash, never in clear."))}">?</span>'
+                f'<input type="password" name="password" autocomplete="new-password"></label>')
+    rows.append(f'<label>{_html(strings.get("setup.password_again", "The same password again"))}'
+                f'<input type="password" name="password_confirm" autocomplete="new-password"></label>{password_error}')
+    switch = " ".join(
+        f'<a href="/setup?token={_html(token)}&amp;lang={code}"{" class=on" if code == lang else ""}>{code.upper()}</a>'
+        for code in SETUP_LANGS)
+    from string import Template
+    return Template(SETUP_PAGE).substitute(
+        title=_html(strings.get("setup.title", "Set up DCCore")),
+        intro=_html(strings.get("setup.intro", "A few questions and the bot can start. Everything else is on the dashboard's Settings page afterwards, behind the password you choose here.")),
+        rows="\n".join(rows), token=_html(token), lang=_html(lang), switch=switch,
+        submit=_html(strings.get("setup.submit", "Save and start the bot")),
+        note=_html(strings.get("setup.note", "Only this machine can reach this page, and only until the settings are saved.")))
+
+
+def render_setup_saved_page(changes, lang="en", port=8420):
+    strings = _setup_strings(lang)
+    dashboard = bool(changes.get("WEBUI_ENABLED"))
+    from string import Template
+    return Template(SETUP_SAVED_PAGE).substitute(
+        title=_html(strings.get("setup.saved.title", "Saved - starting the bot")),
+        body=_html(strings.get("setup.saved.dashboard" if dashboard else "setup.saved.no_dashboard",
+                               "The bot is starting. This page opens the dashboard's login as soon as it answers - log in with the password you just chose."
+                               if dashboard else
+                               "The bot is starting. You chose no dashboard, so this page has nothing more to show: the bot's window is where it reports from now on. Close this tab.")),
+        poll="true" if dashboard else "false", port=str(port))
+
+
+SETUP_PAGE = """<!doctype html>
+<html lang="$lang"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #0b0f12; color: #e6edf0; margin: 0; padding: 2rem 1rem; }
+  form { background: #131a1f; padding: 1.75rem 2rem 1.5rem; border-radius: 10px; max-width: 34rem; margin: 0 auto; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+  h1 { font-size: 1.15rem; margin: 0 0 0.5rem; font-weight: 600; }
+  p.intro { color: #9fb0ba; font-size: 0.9rem; margin: 0 0 1.25rem; line-height: 1.45; }
+  label { display: block; font-size: 0.85rem; margin-bottom: 0.9rem; color: #c9d4da; }
+  label.check { display: flex; align-items: center; gap: 0.5rem; }
+  label.check.sub { margin-left: 1.6rem; }
+  input[type=text], input[type=password] { display: block; width: 100%; padding: 0.55rem 0.6rem; margin-top: 0.3rem; box-sizing: border-box;
+    background: #0b0f12; border: 1px solid #2a343b; border-radius: 6px; color: #e6edf0; font-size: 0.95rem; }
+  input[type=checkbox] { accent-color: #2dd4c8; }
+  .help { display: inline-block; width: 1.1rem; height: 1.1rem; line-height: 1.1rem; text-align: center; border-radius: 50%; background: #23303a; color: #9fd8d3; font-size: 0.75rem; margin-left: 0.35rem; cursor: help; }
+  .error { color: #f87171; font-size: 0.82rem; margin: -0.5rem 0 0.9rem; }
+  button { width: 100%; padding: 0.65rem; background: #2dd4c8; color: #06231f; border: 0; border-radius: 6px; font-weight: 600; font-size: 0.95rem; cursor: pointer; margin-top: 0.5rem; }
+  .langs { text-align: right; font-size: 0.75rem; margin-bottom: 0.5rem; }
+  .langs a { color: #9fb0ba; text-decoration: none; margin-left: 0.6rem; }
+  .langs a.on { color: #2dd4c8; font-weight: 600; }
+  p.note { color: #6b7c86; font-size: 0.75rem; margin: 1rem 0 0; }
+</style></head>
+<body>
+  <form method="post" action="/setup">
+    <div class="langs">$switch</div>
+    <h1>$title</h1>
+    <p class="intro">$intro</p>
+    <input type="hidden" name="token" value="$token">
+    <input type="hidden" name="lang" value="$lang">
+$rows
+    <button type="submit">$submit</button>
+    <p class="note">$note</p>
+  </form>
+</body></html>"""
+
+SETUP_SAVED_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>$title</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #0b0f12; color: #e6edf0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+  div { background: #131a1f; padding: 2rem 2.25rem; border-radius: 10px; max-width: 30rem; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+  h1 { font-size: 1.05rem; margin: 0 0 0.75rem; font-weight: 600; }
+  p { color: #9fb0ba; font-size: 0.9rem; line-height: 1.5; margin: 0; }
+</style></head>
+<body><div><h1>$title</h1><p>$body</p></div>
+<script>
+  if ($poll) {
+    setInterval(function () {
+      fetch("/login", {cache: "no-store"}).then(function (r) {
+        if (r.ok) { window.location.href = "/login"; }
+      }).catch(function () {});
+    }, 2000);
+  }
+</script>
+</body></html>"""
+
+
+if HAVE_FLASK:
+
+    def create_setup_app(token, on_done, port=8420):
+        """The setup-only app: /setup, and nothing the real app has."""
+        app = Flask("dccore-setup", static_folder=None)
+        app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+        state = {"done": False, "changes": None}
+
+        def refused(why):
+            return (f"<!doctype html><meta charset='utf-8'><p style='font-family:sans-serif'>"
+                    f"{_html(why)}</p>"), 403
+
+        @app.before_request
+        def gate():
+            if not _setup_host_ok(request.headers.get("Host", "")):
+                return refused("This page answers only to 127.0.0.1.")
+            if state["done"]:
+                return None
+            supplied = request.args.get("token") or request.form.get("token") or ""
+            if supplied != token:
+                return refused("Open the exact link printed in DCCore's window - it "
+                               "carries a one-time code, so that only the person at "
+                               "this machine can set the bot up.")
+            return None
+
+        @app.route("/")
+        def root():
+            return redirect(f"/setup?token={token}")
+
+        @app.route("/setup", methods=["GET", "POST"])
+        def setup():
+            lang = (request.values.get("lang") or "en").lower()
+            lang = lang if lang in SETUP_LANGS else "en"
+            if state["done"]:
+                return render_setup_saved_page(state["changes"] or {}, lang, port)
+            if request.method == "GET":
+                return render_setup_page(build_setup_fields(lang), token, lang, port=port)
+            changes, password_hash, errors = validate_setup_form(request.form)
+            if errors:
+                values = {k: v for k, v in request.form.items() if k not in ("password", "password_confirm", "token")}
+                return render_setup_page(build_setup_fields(lang, values), token, lang,
+                                         errors=errors, values=values, port=port), 400
+            try:
+                apply_setup(changes, password_hash)
+            except Exception as err:  # a full disk, a read-only folder
+                return render_setup_page(build_setup_fields(lang, dict(request.form)), token, lang,
+                                         errors=[("NICKNAME", f"Could not write the settings: {err}")],
+                                         values=dict(request.form), port=port), 500
+            state["done"] = True
+            state["changes"] = changes
+            on_done(changes)
+            return render_setup_saved_page(changes, lang, port)
+
+        @app.route("/login")
+        def not_yet():
+            # The saved page polls this; while the setup server still holds
+            # the port the answer is "not yet", and once the real app has
+            # it, its own login page answers with 200 and the poll redirects.
+            return "", 503
+
+        return app
+
+    def run_setup_until_configured(host="127.0.0.1", port=None, log=print, opener=None,
+                                   wait=None, token=None):
+        """Serve /setup until the form has written the configuration; then
+        stop and return what was written, so oserve.startup() can carry on.
+        Returns None when the page could not be served at all (the port is
+        taken), in which case the caller falls back to its old refusal."""
+        import secrets
+        from werkzeug.serving import make_server
+        port = port or getattr(config, "WEBUI_PORT", 8420)
+        token = token or secrets.token_urlsafe(24)
+        done = threading.Event()
+        result = {}
+
+        def on_done(changes):
+            result["changes"] = changes
+            done.set()
+
+        app = create_setup_app(token, on_done, port=port)
+        try:
+            server = make_server(host, port, app, threaded=True)
+        except (OSError, SystemExit) as err:
+            # SystemExit too: werkzeug's server calls sys.exit(1) on a bind
+            # failure ("port in use", printed by it), and a taken port must
+            # not take the daemon down - the caller falls back to its old
+            # refusal, which says what to do.
+            log(f"[SETUP] Could not open the setup page on {host}:{port} ({err}).")
+            return None
+        thread = threading.Thread(target=server.serve_forever, name="dccore-setup", daemon=True)
+        thread.start()
+        url = f"http://{host}:{port}/setup?token={token}"
+        log("[SETUP] No configuration yet. Set DCCore up in your browser:")
+        log(f"[SETUP]     {url}")
+        log("[SETUP] (The code in the link is what lets only you use this page. "
+            "The bot starts as soon as the form is saved.)")
+        _quiet_the_request_log()
+        if getattr(config, "WEBUI_OPEN_BROWSER", True):
+            try:
+                import webbrowser
+                (opener or webbrowser.open)(url)
+            except Exception as err:
+                log(f"[SETUP] Could not open a browser ({err}); open the link above yourself.")
+        try:
+            # A loop rather than one wait(): a Windows console cannot deliver
+            # Ctrl-C into an indefinite Event.wait(). `wait`, for tests, is
+            # asked between waits whether to give up.
+            give_up = wait or (lambda: False)
+            while not done.wait(0.5):
+                if give_up():
+                    break
+        finally:
+            # A moment for the "Saved" page to reach the browser before the
+            # socket goes away; then the port is free for the real dashboard.
+            if done.is_set():
+                time.sleep(0.5)
+            server.shutdown()
+            server.server_close()
+        if not done.is_set():
+            return None
+        log(f"[SETUP] Settings written: {', '.join(result['changes'])}. Starting.")
+        return result["changes"]
+
+
 def start():
     """Run the dashboard. Called on its own daemon thread from oserve.startup().
 

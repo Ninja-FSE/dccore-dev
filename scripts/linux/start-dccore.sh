@@ -113,7 +113,17 @@ if [ ! -f "admin_config.py" ] && [ ! -f "settings.conf" ]; then
     echo "  and it will be set up. You can change every answer later on the"
     echo "  dashboard's Settings page."
     echo
-    if ! "$PY" configure.py; then
+    # SET IT UP IN THE BROWSER (#547, Proposal 4). With Flask - installed
+    # here on a yes if it is missing - the daemon is started straight away
+    # and serves its own setup page on 127.0.0.1; it carries on into the
+    # real bot once the form is saved. The setup check below is skipped on
+    # that path, since it would refuse the blank tree the page exists to
+    # fill in; the daemon runs its own checks after the form. A no, no pip,
+    # or nobody at the keyboard means the questions are asked here, as
+    # before.
+    if "$PY" configure.py --setup-in-browser; then
+        BROWSER_SETUP=1
+    elif ! "$PY" configure.py; then
         echo
         echo "  Setup did not finish, so DCCore was not started. Run this file"
         echo "  again to pick it up where it stopped."
@@ -128,7 +138,7 @@ fi
 # pointing at the production bot's nick or channels. That second one is worth
 # blocking: it would put a near-identical second bot into live trading
 # channels, which can get the other operator banned too.
-if ! "$PY" scripts/linux/check-setup.py >/dev/null 2>&1; then
+if [ -z "$BROWSER_SETUP" ] && ! "$PY" scripts/linux/check-setup.py >/dev/null 2>&1; then
     echo
     echo "  Setup check failed - not starting. Details:"
     echo
@@ -140,7 +150,7 @@ fi
 # --- the dashboard's one dependency, offered before it is missed -------------
 # Silent when the dashboard is off or Flask is already there; otherwise the
 # same offer configure.py makes during setup. Never stops the start.
-"$PY" configure.py --flask
+[ -z "$BROWSER_SETUP" ] && "$PY" configure.py --flask
 
 # --- go ---------------------------------------------------------------------
 echo

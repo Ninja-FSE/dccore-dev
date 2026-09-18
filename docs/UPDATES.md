@@ -4,6 +4,83 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🌐 Set it up in the browser
+
+#547, Proposal 4. With `settings_file.REQUIRED` still blank and Flask
+present, `oserve.startup()` no longer exits 1: it serves one page on
+127.0.0.1 until the form has written `settings.conf` and `admin_config.py`,
+then carries on down the same line it always ran.
+
+- **`oserve.startup(setup_page=None)`** - one `if`, not two phases: when
+  unconfigured and `setup_page is not False`, resolve the page (the
+  argument, else `webserver.run_setup_until_configured` when
+  `webserver.setup_page_is_possible()`, else None), call it, re-ask
+  `unconfigured_required()`. `False` is the old refusal (the three
+  `test_startup` refusals pass it); a callable is a stand-in for tests.
+- **`webserver.run_setup_until_configured(host, port, log, opener, wait,
+  token)`** - `secrets.token_urlsafe(24)`, `werkzeug.serving.make_server`
+  (stoppable, unlike `app.run`; **`except (OSError, SystemExit)`** because
+  werkzeug calls `sys.exit(1)` on a bind failure and a taken port must not
+  take the daemon down - it returns None and the old refusal follows),
+  serve on a thread, print and open `http://127.0.0.1:<port>/setup?token=`,
+  wait in a 0.5 s loop (a Windows console cannot deliver Ctrl-C into an
+  indefinite `Event.wait()`), then half a second for the Saved page to
+  land, `shutdown()`, `server_close()`, return the changes.
+- **`create_setup_app(token, on_done, port)`** - its own small Flask app,
+  no static folder, 64 KB body cap. `before_request`: the Host header must
+  be a loopback spelling (DNS rebinding), and until the form is saved
+  every request must carry the token (CSRF: any site open in the same
+  browser can POST to 127.0.0.1, and with no password yet that POST would
+  set its own). `GET /setup` renders; `POST /setup` validates, writes
+  through `apply_setup()`, marks done, renders the Saved page; `/` →
+  `/setup?token=`; `/login` answers 503 so the Saved page's poll gets a
+  200 only once the real app holds the port.
+- **`build_setup_fields(lang, values)`** - `SETUP_FIELDS` through the
+  Settings page's `_settings_field()`, with `settings.field.<NAME>` and
+  `.help` from `web/lang/<lang>.json` laid over for fr/es. So #545's
+  plain help and the translations appear with no second copy.
+  **`validate_setup_form(form)`** builds the same `{NAME: value}` dict
+  `configure.collect_answers()` builds (blank folder absent, dashboard
+  off writes no host, LAN → `0.0.0.0`) and hashes the password with
+  `adminchat.make_password_hash`. **`apply_setup(changes, hash)`** writes
+  through `configure.write_settings_conf()` and
+  `write_admin_config_password()` - the terminal path's own writers, so
+  the files are identical - then `settings_file.apply_to(vars(config))`
+  and `config.ADMIN_PASSWORD_HASH = hash`, since `admin_config.py` was
+  imported (or not) long before and is not re-imported.
+- **`render_setup_page()` / `render_setup_saved_page()`** -
+  server-rendered, `string.Template`, no script on the form (the Saved
+  page has the poll), dark palette of the login page, EN/FR/ES links.
+- **`configure.offer_setup_in_browser(ask, log)`** (`--setup-in-browser`):
+  0 = Flask importable (installed just now on a yes; `pip` checked first),
+  start the daemon; 2 = declined, no pip, EOF (nobody at the keyboard):
+  ask in the terminal. **Both launchers** call it on a fresh tree; on 0
+  they skip the setup check (it would refuse the blank tree the page
+  exists to fill in) and the `--flask` offer, and start `oserve.py`.
+  Proposal 1's stub now answers 2 so its tests keep their path; two new
+  ones cover the 0 path.
+- `tests/test_set_it_up_in_the_browser.py` - 41: the fields are the
+  Settings page's own with #545's help (not the developer's), fr/es from
+  the lang files, unknown lang → en, typed values redisplayed; the
+  validator's dict equals configure's, blank folder absent, dashboard off
+  → no host, LAN, eleven refusals, an existing folder taken, errors named
+  per field; apply writes both files as configure does (the admin text
+  byte-equal to the terminal writer's) and the process sees them; the
+  Host check both ways; the app via Flask's test client - token on GET
+  and POST, root redirect, foreign Host refused, every field/help/token in
+  the page and no script, French, the CSRF POST refused with nothing
+  written, a bad form 400 with its errors and values but never the
+  password, a good form writes and polls, dashboard off does not poll,
+  after saving the page is the Saved page and the poll gets 503, a second
+  POST does not write again; **end to end over a real socket**: the URL
+  printed and handed to the browser opener, GET, a token-less POST 403,
+  the real POST Saved, the function returns with the changes and the port
+  is free again; giving up returns None; a taken port is reported, not
+  fatal, and never exits the process; `startup()` with a stand-in page
+  serves then carries on, a page that returns without configuring still
+  refuses, `setup_page=False` is the old refusal, the default is the real
+  page; the launcher hook's three answers and its wiring; the docs.
+
 ### 🪟 The bot's window in mIRC
 
 #550, step 4 of 4 - `scripts/mirc/dccore.mrc`, the client the structured

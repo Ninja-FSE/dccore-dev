@@ -594,7 +594,59 @@ def offer_flask_if_the_dashboard_is_on():
     return 0
 
 
+def offer_setup_in_browser(ask=input, log=print):
+    """`configure.py --setup-in-browser`: the launchers' first-run hook (#547,
+    Proposal 4). Returns 0 when the daemon can be started straight away to
+    serve its setup page - Flask is importable, installed just now if the
+    operator said yes - and 2 when the questions should be asked here in
+    the terminal instead: Flask declined, not installable, or no one at the
+    keyboard to ask. Never raises for any of those; the terminal path is
+    what it was.
+    """
+    try:
+        import flask  # noqa: F401
+        log("  Setup opens in your browser.")
+        return 0
+    except ImportError:
+        pass
+    log("  DCCore can be set up in your browser instead of here - the same")
+    log("  questions, with an explanation beside each. That needs one package,")
+    log("  Flask (pip install -r requirements-web.txt), which the dashboard")
+    log("  uses afterwards too.")
+    try:
+        yes = ask("  Install it and set up in the browser? [Y/n]: ").strip().lower() in ("", "y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        return 2
+    if not yes:
+        log("  Fine - the questions follow here.")
+        return 2
+    try:
+        import pip  # noqa: F401
+    except ImportError:
+        log("  pip is not installed for this Python, so Flask cannot be installed")
+        log("  from here - the questions follow instead. (docs/INSTALL.md says how")
+        log("  to get pip.)")
+        return 2
+    log("  Installing...")
+    result = subprocess.run([sys.executable, "-m", "pip", "install", "-r",
+                             os.path.join(REPO_ROOT, "requirements-web.txt")])
+    if result.returncode != 0:
+        log("  The install did not finish - the questions follow here instead.")
+        return 2
+    try:
+        import importlib
+        importlib.invalidate_caches()
+        importlib.import_module("flask")
+    except ImportError:
+        log("  Flask still cannot be imported - the questions follow here instead.")
+        return 2
+    log("  Setup opens in your browser.")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--setup-in-browser" in sys.argv[1:]:
+        sys.exit(offer_setup_in_browser())
     if "--flask" in sys.argv[1:]:
         try:
             sys.exit(offer_flask_if_the_dashboard_is_on())

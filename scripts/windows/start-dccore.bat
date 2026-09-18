@@ -139,6 +139,18 @@ echo   Welcome to DCCore. This looks like the first run - a few questions
 echo   and it will be set up. You can change every answer later on the
 echo   dashboard's Settings page.
 echo.
+rem  SET IT UP IN THE BROWSER (#547, Proposal 4). With Flask - installed
+rem  here on a yes if it is missing - the daemon is started straight away
+rem  and serves its own setup page on 127.0.0.1; it carries on into the
+rem  real bot once the form is saved. The setup check is skipped on that
+rem  path, since it would refuse the blank tree the page exists to fill in;
+rem  the daemon runs its own checks after the form. A no, no pip, or nobody
+rem  at the keyboard means the questions are asked here, as before.
+%PY% configure.py --setup-in-browser
+if not errorlevel 1 (
+    set "BROWSER_SETUP=1"
+    goto :go
+)
 %PY% configure.py
 if errorlevel 1 (
     echo.
@@ -174,6 +186,7 @@ rem  the same offer configure.py makes during setup. Never stops the start.
 %PY% configure.py --flask
 
 rem --- go ----------------------------------------------------------------
+:go
 echo.
 echo   Starting DCCore.  Press Ctrl-C in this window to stop it.
 echo   Closing this window stops the bot too - leave it open, or minimise it.
