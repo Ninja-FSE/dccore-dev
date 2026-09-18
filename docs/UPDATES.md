@@ -4,15 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
-### 🔤 The mIRC window in the operator's own size
+### 🔤 The mIRC window in the operator's own size, and no `/echo` errors
 
-`dccore.mrc` set its window to a fixed 9 pt Lucida Console, which on a
-high-resolution screen was unreadable beside the rest of mIRC (seen on the
-first real run). `$dccore.fontsize` now takes the Status window's
-`$window().fontsize` - 12 when that is empty or absurd - so `@DCCore` reads
-like every other window; the fixed-width face stays, since the panel's
-columns need it. Also: the title bar is refreshed on the first line of the
-banner, so it no longer says "opening" while the bot is already talking.
+Two things from the first real run of `dccore.mrc` (mIRC on a
+high-resolution screen; the pairing itself worked end to end):
+
+- **The font.** A fixed 9 pt Lucida Console was unreadable. `/dccore font
+  <size>` (and a size field beside the font tickbox in the options) sets
+  it and remembers it; until set, `$dccore.fontsize` takes the Status
+  window's `$window().fontsize`, else 12. The fixed-width face stays,
+  since the panel's columns need it.
+- **`* /echo: insufficient parameters`** on every empty line the bot
+  sends - the banner has two, `help` ends with one. `/echo` refuses an
+  empty text; `dccore.echo`, `dccore.sys` and `dccore.out` now draw an
+  empty line as `$chr(160)`.
+- The title bar is refreshed on the first banner line, so it no longer
+  says "opening" while the bot is already talking.
 
 ### 🪟 The bot's window in mIRC
 
