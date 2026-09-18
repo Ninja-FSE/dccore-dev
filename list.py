@@ -1230,9 +1230,11 @@ def execute_search(irc_sock, user, search_term, channel):
         # total_matches, not len(matches): the reply is capped at
         # MAX_SEARCH_RESULTS, and the operator wants to know what the list
         # had, not what the cap let through.
-        announce.send_debug(
+        announce.feed_event(
+            "SEARCH",
             f'{user} searched "{search_term}" - {total_matches} result'
-            f'{"" if total_matches == 1 else "s"}', category="SEARCH")
+            f'{"" if total_matches == 1 else "s"}',
+            nick=user, results=total_matches, term=search_term)
 
         if matches:
             # Send the search header privately to the requester

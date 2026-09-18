@@ -4,6 +4,68 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📡 A structured feed for the admin chat
+
+#550, step 2 - the protocol under `dccore.mrc`, usable by any client. A
+console session that says `hello <client> <version>` after logging in gets
+every feed event as one line, `DCCORE <TYPE> <fixed fields...> <free
+text>`; one that never says it is byte-for-byte the console it was.
+
+- **`announce.feed_event(kind, text, **fields)`** - the feed told twice:
+  the prose to `send_debug()` under `kind`, exactly as before, and the
+  fields to a second sink registry (`add_event_sink()`), so the `(text,
+  category)` contract every existing sink relies on is untouched. The
+  console tickboxes gate the fields as they gate the prose. All seven
+  emitters go through it: SENDING and QUEUED in `announce.py` (the sending
+  notice now takes an optional `path` and reports the size; its three
+  dispatch callers pass the path they have), SENT in
+  `send_transfer_complete()` (now takes `duration`), FAIL in
+  `dcc._report_transfer_failure()` (now takes `acked`/`total`, which the
+  five sites that know them pass), REQUEST at both request sites, RESUMED
+  after the accept, SEARCH in `execute_search()`.
+- **Found on the way**: `Sent:` went out as `category="INFO"` from the day
+  it was written. The `[SENT]` tag the channel line has rendered since
+  #526 never fired for the one line it was for, and #528's "sends" tickbox
+  never governed it. It is `SENT` now; `test_announce_output` had pinned
+  INFO and is corrected.
+- **`adminchat.structured_line(kind, fields)`**, pure: the line shapes
+  in `docs/ADMIN-CONSOLE.md`'s new table. Space-separated positional
+  tokens, the one free-text field last (mIRC's `$N-`); numbers raw;
+  control characters and tabs in any field become spaces; a token field
+  (nick, kind, category) has its spaces replaced so it stays one `$N`; a
+  ` :: ` inside a filename is broken so it cannot split a FAIL line. Every
+  kind outside the seven is `DCCORE LOG <CATEGORY> <prose>` - nothing is
+  lost by the typing.
+- **The session**: `Session.structured`, set only by the `hello` command,
+  which lives in `COMMANDS` and so is reachable only once authenticated
+  (an unauthenticated `hello` is a wrong password). `debug_sink()` in
+  structured mode skips the feed kinds (their fields arrive through the
+  new `event_sink()`) and sends everything else as LOG; `send()` wraps a
+  command reply as `DCCORE OUT <text>` unless it already is a DCCORE line,
+  so the fourteen handlers need no change; the writer sends `DCCORE
+  DROPPED <n>` ahead of the next line through when the bounded outbox had
+  to drop for a slow client. Both sinks attach at authentication and
+  detach at close.
+- `docs/ADMIN-CONSOLE.md` gains "The structured feed, for a script" with
+  the handshake, the rules and the line table.
+
+Tests in `tests/test_a_structured_feed_for_the_admin_chat.py` (33): the
+line format per kind, free text last with spaces, raw numbers, missing
+numbers as zero, control characters and tabs to spaces, token fields with
+no spaces, the FAIL marker unsplittable, HELLO's fields; `feed_event()`
+tells both halves, the tickbox gates the fields, a raising sink is dropped
+not fatal, every emitter goes through it and no `category="<kind>"` prose-
+only send remains, SENT is finally SENT with its fields, SENDING reports
+the size from a path and zero without one; the session - hello switches
+and answers, an unauthenticated hello is a password guess, a plain session
+unchanged, a structured one gets fields not prose for feed kinds and LOG
+for the rest, OUT wrapping, no double wrapping, hello in the table; a slow
+client is told `DROPPED n` before the next line, over a socketpair; and
+login → hello → a SEARCH event over a real loopback DCC chat. Six mutants
+- OUT wrapping gone, feed kinds sent as prose too, DROPPED never
+reported, tickbox not applied to fields, token spaces kept, Sent still
+INFO - each fail. Four #538 anchors re-pointed at `feed_event`.
+
 ### 🎨 The admin console in the bot's own colours
 
 #550, step 1 - the one piece of the mIRC-window design that stands alone.

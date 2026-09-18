@@ -437,7 +437,7 @@ def discard_orphaned_temp_archives(user_key):
     return removed
 
 
-def _report_transfer_failure(user, file_name, reason):
+def _report_transfer_failure(user, file_name, reason, acked=None, total=None):
     """Say a transfer failed everywhere a completed one is said to succeed.
 
     The console log line, AND the debug channel / admin console through
@@ -448,8 +448,10 @@ def _report_transfer_failure(user, file_name, reason):
     """
     print(f"[DCC-FAIL] {file_name} for {user}: {reason}")
     try:
-        announce.send_debug(f"Failed: \"{file_name}\" to {user} - {reason}",
-                            category="FAIL")
+        # acked/total feed the structured FAIL event (#550) when the caller
+        # knows them; the prose carries them in words either way.
+        announce.feed_event("FAIL", f"Failed: \"{file_name}\" to {user} - {reason}",
+                            nick=user, acked=acked, total=total, name=file_name, reason=reason)
     except Exception as debug_err:
         print(f"[DEBUG-FAIL ERROR] Could not report the failed transfer: {debug_err}")
 
@@ -1261,7 +1263,7 @@ def check_queue_and_send(irc_sock, completed_user):
                 print(f"[DCC QUEUE] Verified live in RAM for {target_chan}! Next file for {completed_user}: {f_name}")
                 if oserve: oserve.active_downloads = len(config.active_transfers)
 
-                announce_mod.send_dcc_sending_notice(completed_user, f_name)
+                announce_mod.send_dcc_sending_notice(completed_user, f_name, path=f_path)
                 threading.Thread(target=start_dcc_send, args=(irc_sock, completed_user, f_path, f_name, target_chan, next_file), daemon=True).start()
                 return
         else:
@@ -1388,7 +1390,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     config.active_transfers.append({"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name})
                     if oserve: oserve.active_downloads = len(config.active_transfers)
 
-                    announce_mod.send_dcc_sending_notice(real_username, g_name)
+                    announce_mod.send_dcc_sending_notice(real_username, g_name, path=g_path)
                     threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
                     break
 
@@ -1616,10 +1618,11 @@ def handle_resume_request(irc_sock, user, body):
     print(f"[DCC-RESUME] {user} already has {position} of {size} bytes of "
           f"{offered_name}; accepted and will send from there.")
     import stats_mgr
-    announce.send_debug(
+    announce.feed_event(
+        "RESUMED",
         f'Resumed "{offered_name}" for {user} at '
         f'{stats_mgr.format_size_human(position)} of {stats_mgr.format_size_human(size)}',
-        category="RESUMED")
+        nick=user, at_bytes=position, total_bytes=size, name=offered_name)
     return True
 
 
@@ -2028,7 +2031,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
                 
                 # One single clean line to the debug channel, nothing more
-                announce_mod.send_debug(f"{user} asked for the folder \"{clean_folder_name}\" - packing it, sending when done.", category="REQUEST")
+                announce_mod.feed_event("REQUEST", f"{user} asked for the folder \"{clean_folder_name}\" - packing it, sending when done.",
+                                        nick=user, kind="folder", name=clean_folder_name)
                 
                 announce_mod.send_dcc_queue_notice(user, folder_name, user_pos)
                 threading.Thread(target=check_queue_and_send, args=(irc_sock, user), daemon=True).start()
@@ -2269,7 +2273,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # whether it sends now or queues is decided under the lock below, and
         # each of those reports itself (SENDING / QUEUED). A refused request
         # is reported by its refusal.
-        announce.send_debug(f'{user} asked for "{file_name}"', category="REQUEST")
+        announce.feed_event("REQUEST", f'{user} asked for "{file_name}"',
+                            nick=user, kind="file", name=file_name)
 
         with queue_lock:
             total_global_queued = get_total_queued_count()
@@ -2302,7 +2307,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False}
                 config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name})
                 if oserve: oserve.active_downloads = len(config.active_transfers)
-                announce.send_dcc_sending_notice(user, file_name)
+                announce.send_dcc_sending_notice(user, file_name, path=full_path)
                 threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, target_chan, next_file_fake), daemon=True).start()
                 return
             else:
@@ -2834,7 +2839,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         if short_read:
             _report_transfer_failure(user, file_name,
                 f"sent {bytes_sent:,} of {file_size:,} bytes before the file ended. "
-                f"Recorded as a failure rather than a completed transfer.")
+                f"Recorded as a failure rather than a completed transfer.",
+                acked=acks.acked, total=file_size)
             final_ack_at = None
         else:
             final_ack_at = _wait_for_final_ack(conn, acks, file_size)
@@ -2845,17 +2851,20 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                     "the receiver never acknowledged a single byte, so there "
                     "is no evidence any of it arrived. Not counted. (A DCC "
                     "receiver acknowledges every packet; one that sends none "
-                    "cannot be told apart from one that got nothing.)")
+                    "cannot be told apart from one that got nothing.)",
+                    acked=0, total=file_size)
             elif acks.eof:
                 _report_transfer_failure(user, file_name,
                     f"the receiver closed the connection having acknowledged "
-                    f"{acks.acked:,} of {file_size:,} bytes. Not counted.")
+                    f"{acks.acked:,} of {file_size:,} bytes. Not counted.",
+                    acked=acks.acked, total=file_size)
             else:
                 _report_transfer_failure(user, file_name,
                     f"the receiver stopped acknowledging at {acks.acked:,} of "
                     f"{file_size:,} bytes and made no progress for "
                     f"{int(ACK_STALL_SECONDS)}s. The link is dead; whatever the "
-                    f"kernel still held will not arrive. Not counted.")
+                    f"kernel still held will not arrive. Not counted.",
+                    acked=acks.acked, total=file_size)
         # THE CLOCK STOPS WHEN THE BYTES DO. Everything below this line is
         # settling: 1.5 seconds for the receiver to close its file calmly,
         # another half-second further down, and the statistics write. None of
@@ -2938,14 +2947,16 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     except _ReceiverGone as gone:
         _report_transfer_failure(user, file_name,
             f"closed the connection mid-transfer, having acknowledged "
-            f"{gone.acked:,} of {file_size:,} bytes.")
+            f"{gone.acked:,} of {file_size:,} bytes.",
+            acked=gone.acked, total=file_size)
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except _ReceiverStalled as stalled:
         _report_transfer_failure(user, file_name,
             f"stopped acknowledging at {stalled.acked:,} of {file_size:,} bytes "
             f"and made no progress for {int(ACK_STALL_SECONDS)}s; giving up on "
-            f"a dead link.")
+            f"a dead link.",
+            acked=stalled.acked, total=file_size)
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except socket.timeout:
@@ -3057,7 +3068,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # its queue row for retry, so announcing here would tell the channel "Sent" and
             # re-offer the same file on every attempt.
             if transfer_completed:
-                announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, reported_speed)
+                announce_mod.send_transfer_complete(channel, user, file_name, file_size, start_time, reported_speed,
+                                                    duration=acute_duration)
         except Exception as ann_chan_err:
             print(f"[ANNOUNCE CHANNEL ERROR] Could not send the channel notice: {ann_chan_err}")
 
