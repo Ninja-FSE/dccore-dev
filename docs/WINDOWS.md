@@ -12,24 +12,27 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 
 ---
 
-## The seven steps
-
-The whole install, in order. Each one is covered in detail below - this is
-here because the sequence is one thing an operator does once, and it was split
-across two separately numbered sections.
+## The three steps
 
 1. **Install Python.** [Python 3.10.0 (64-bit)](https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe),
-   or any later 3.10+.
-2. **Tick both boxes in the installer:** *Add Python to PATH* and *py launcher*.
-3. **Check it took**, in a NEW Command Prompt:
-   `python --version`, `py --version`, `where python`, `where py`.
-4. **Only if you want the web dashboard:** `py -3 -m pip install -r requirements-web.txt`
-5. **Configure:** `py configure.py`
-6. **Check the setup:** `scripts\windows\start-dccore.bat check`
-7. **Start it, and read the first few lines:** `scripts\windows\start-dccore.bat`
+   or any later 3.10+. **Tick both boxes in the installer:** *Add Python to PATH*
+   and *py launcher*. (Missed the first box? The launcher looks where the
+   installer puts Python anyway.)
+2. **Download and extract DCCore.**
+3. **Double-click `scripts\windows\start-dccore.bat`.** On the first run it
+   asks the setup questions itself - nick, server, channels, admin nick, music
+   folder, dashboard, password - then checks the setup and starts the bot. If
+   you turned the dashboard on, it offers to install Flask before starting.
+   Every answer can be changed later on the dashboard's Settings page.
 
-Steps 4 and 7 are the two that catch people out, and step 7 is how you find
-out about step 4 - see below.
+No Command Prompt needed. The window that opens **is** the bot: closing it
+stops the bot, so leave it open or minimise it. `Ctrl-C` in it stops the bot
+on purpose.
+
+If you would rather do the steps by hand - or need to re-run one - they are
+still there: `py configure.py` asks the questions, `py -3 -m pip install -r
+requirements-web.txt` installs the dashboard's one dependency,
+`scripts\windows\start-dccore.bat check` checks the setup and stops.
 
 ---
 
