@@ -4,6 +4,44 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎨 The admin console in the bot's own colours
+
+#550, step 1 - the one piece of the mIRC-window design that stands alone.
+A DCC CHAT window is an IRC client and renders mIRC colour codes the way a
+channel does; the chat sink stripped every code with the note "a console
+is read as a log, not rendered by an IRC client" - true of the dashboard's
+Console page, false of this one.
+
+- **`announce.category_tag(category)`** - one table, `(label, colour)`,
+  replacing the `elif` chain inside `send_debug()`. Both the channel
+  line's tag block and the console now read it, so a `[SECURITY]` in the
+  channel is a `[SECURITY]` in the console, in the same alert colour, in
+  the operator's `THEME`. The labels that differ from the category are
+  kept and their reasons recorded on the table: BAN → `[HARDBAN]` (an
+  admin's `!ban`) and HARDBAN → `[SECURITY]` (a blocked path traversal)
+  must not look alike; MUTE → `[MUTED]`, TBAN → `[TEMPBAN]`; the feed's
+  own categories take the `[SENT]` colour.
+- **`adminchat.console_line(text, category)`**, which the chat sink now
+  calls: with `ADMIN_CHAT_COLOURS` on (default) it is
+  `<colour>[LABEL]<reset> text`, and a caller's own bold round a nick is
+  kept; off, it is the pre-#550 `[CATEGORY] text` with every code
+  stripped - verbatim category, so a log parser on the old form sees
+  nothing new. The dashboard's `_console_debug_sink()` keeps stripping.
+- `ADMIN_CHAT_COLOURS: bool = True`, in Settings → Admin console, with its
+  plain explanation and fr/es.
+
+Tests in `tests/test_the_console_in_the_bots_own_colours.py` (20): the
+table (feed categories take the value colour, the alerts, the two bans
+distinct, mute/tempban labels, join/quit, unknown → grey INFO, case,
+follows the theme); the channel line's tag is the table's for ten
+categories and the old chain is gone; the console line on and off, the
+label from the table, bold kept, the sink goes through it, the dashboard
+sink still strips; the setting ships on as a bool with help. Two tests
+updated with intent kept: `test_mirc_formatting_is_stripped_for_the_console`
+now says "when colours are off" and has a coloured-by-default twin;
+`test_announce_renders_the_fail_category` asserts FAIL's tag is an alert
+through the table rather than grepping the chain it replaced.
+
 ### 🔒 `!ping` and `!debugnames` answer only the bot's own admin
 
 Seen live by the user: another operator typed `!ping` in a shared channel to

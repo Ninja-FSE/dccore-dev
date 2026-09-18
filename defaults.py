@@ -502,6 +502,13 @@ ADMIN_CHAT_MODE: str = "auto"
 # not affected by this.
 ADMIN_CHANNEL_COMMANDS: bool = True
 
+# The admin DCC chat is an IRC client window, and it renders colour codes the
+# way a channel does. On, every feed line's tag ([SENT], [FAIL], [REQUEST]...)
+# is coloured as it is in the debug channel, in the chosen THEME. Off gives
+# plain "[TAG] text" for a client that shows the codes as junk. The
+# dashboard's Console page is never coloured either way. (#550, step 1)
+ADMIN_CHAT_COLOURS: bool = True    # Colour the tags in the admin DCC chat the way the debug channel is coloured
+
 # ---------------------------------------------------------------------
 # WHERE RUNTIME REPORTS GO
 # ---------------------------------------------------------------------

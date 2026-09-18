@@ -308,6 +308,27 @@ def strip_irc_formatting(text):
     return _IRC_FORMATTING.sub("", str(text))
 
 
+def console_line(msg_text, category="INFO"):
+    """One feed line as the DCC chat shows it.
+
+    A DCC CHAT window IS an IRC client, and it renders mIRC colour codes the
+    way a channel does - so with ADMIN_CHAT_COLOURS on (the default) the tag
+    carries the same label and colour the debug channel's block does
+    (announce.category_tag(), one table for both), in the operator's own
+    theme, and the text keeps whatever bold a caller put round a nick. The
+    old "a console is read as a log, not rendered by an IRC client" was true
+    of the dashboard's Console page - whose sink keeps stripping - and false
+    of this one. Off gives the plain `[TAG] text` a client that does not
+    render codes wants. #550, step 1.
+    """
+    import announce
+    import theme
+    if not bool(getattr(config, "ADMIN_CHAT_COLOURS", True)):
+        return f"[{category}] {strip_irc_formatting(msg_text)}"
+    label, colour = announce.category_tag(category, theme.blocks())
+    return f"{colour}[{label}]{config.C_RESET} {msg_text}"
+
+
 class Session:
     """One DCC CHAT connection. The socket IS the session.
 
@@ -380,7 +401,7 @@ class Session:
         """
         if self.closed or not self.authenticated:
             return
-        self.send(f"[{category}] {strip_irc_formatting(msg_text)}")
+        self.send(console_line(msg_text, category))
 
     # -- lifecycle ---------------------------------------------------------
 

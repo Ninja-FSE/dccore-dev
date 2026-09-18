@@ -360,9 +360,16 @@ class FailuresAreReportedWhereSuccessesAre(unittest.TestCase):
         self.assertIn('category="FAIL"', body)
 
     def test_announce_renders_the_fail_category(self):
-        with io.open(os.path.join(REPO_ROOT, "announce.py"), encoding="utf-8") as handle:
-            source = handle.read()
-        self.assertIn('category.upper() == "FAIL"', source)
+        """FAIL has a tag of its own in the alert colour, like PART - not
+        the grey [INFO] a category the table does not know falls to. The
+        table replaced an elif chain (#550); the property is the same."""
+        import announce
+        import theme
+        label, colour = announce.category_tag("FAIL", theme.blocks())
+        _alert_label, alert = announce.category_tag("PART", theme.blocks())
+        self.assertEqual(label, "FAIL")
+        self.assertEqual(colour, alert)
+        self.assertNotEqual(colour, announce.category_tag("INFO", theme.blocks())[1])
 
 
 if __name__ == "__main__":

@@ -473,6 +473,7 @@
   "settings.field.ADMIN_HOSTMASKS": "Admin hostmasks",
   "settings.field.ADMIN_CHAT_MODE": "DCC chat connection mode",
   "settings.field.ADMIN_CHANNEL_COMMANDS": "Allow admin commands in channel",
+  "settings.field.ADMIN_CHAT_COLOURS": "Colour the tags in the admin DCC chat",
   "settings.field.WEBUI_ENABLED": "Enable web dashboard",
   "settings.field.WEBUI_HOST": "Host",
   "settings.field.WEBUI_PORT": "Port",

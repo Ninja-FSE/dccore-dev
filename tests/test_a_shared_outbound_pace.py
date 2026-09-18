@@ -320,7 +320,13 @@ class TheStandardLaneIsNoLongerStarvedByVip(DCCoreTestCase):
 
         self.start_queue_worker()
 
-        deadline = time.time() + 2.0
+        # A CEILING, not a delay: the loop returns the moment the twentieth
+        # line lands, which on a quiet machine is well under a second. It
+        # was 2.0 s, and macOS's hosted runners delivered 17 and 19 of 20 in
+        # that - the same scheduler jitter #548 met - so the test failed on
+        # timing while the property it asserts held. Ten seconds costs a
+        # healthy run nothing and a loaded one the slack it needs.
+        deadline = time.time() + 10.0
         while time.time() < deadline and len(self.sock.sent) < 20:
             time.sleep(0.01)
 
