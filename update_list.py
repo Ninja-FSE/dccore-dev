@@ -236,6 +236,34 @@ def _has_extension(name, extensions):
     return bool(extensions) and str(name).lower().endswith(tuple(extensions))
 
 
+def folder_totals(rows):
+    """{folder: (file count, bytes)} over (folder, name, bytes) rows."""
+    totals = {}
+    for folder, _name, size in rows:
+        count, total = totals.get(folder, (0, 0))
+        totals[folder] = (count + 1, total + (size or 0))
+    return totals
+
+
+def folder_summary_line(count, total_bytes, human):
+    """The line under a folder heading that says what the folder holds (#69):
+
+        14 files, 1.20GB
+
+    ITS OWN LINE, AFTER THE CLOSING RULE, and never on the heading itself.
+    The heading is not decoration: list.py's reader and dcc.py's request
+    resolver both take the whole heading line as the folder path, and so
+    does every older DCCore fetching this list - a size appended there would
+    resolve to a folder that does not exist on every one of them. A line
+    that is neither a rule nor a "!" request row is skipped by all of those
+    readers (list.py's state machine drops it in its resting state; dcc.py
+    only looks at prefix lines and "!" lines; AutoQ imports "!" rows), so
+    this can say anything. Indented so it reads as belonging to the heading
+    above rather than as a heading of its own.
+    """
+    return f"    {count:,} file{'' if count == 1 else 's'}, {human(total_bytes)}"
+
+
 def is_video_file(name, video=None):
     """Is this file a video, by extension?"""
     return _has_extension(name, video_extensions() if video is None else video)
@@ -1612,6 +1640,10 @@ def generate_master_list(list_name=None):
 
             current_folder = None
             written_rar_folders = set()  # Keeps the !rar list free of duplicate rows
+            # Per-folder count and size, for the line under each heading
+            # (#69). One pass over rows already in memory; the heading is
+            # written before its rows, so the total has to be known first.
+            music_totals = folder_totals(all_files_data)
 
             for folder, filename, bytes_size in all_files_data:
                 if folder != current_folder:
@@ -1636,6 +1668,7 @@ def generate_master_list(list_name=None):
                     f.write(f"\n{folder_rule}\n")
                     f.write(f"{folder_line}\n")
                     f.write(f"{folder_rule}\n")
+                    f.write(folder_summary_line(*music_totals[folder], format_size_human) + "\n")
                     
                     # Strip multi-disc suffixes, for the !rar album list ONLY.
                     #
@@ -1733,12 +1766,13 @@ def generate_master_list(list_name=None):
                         # constrained this line, so the objection had to be
                         # rediscovered.
                         #
-                        # The size belongs on the MAIN list's per-folder heading
-                        # instead - see the folder_line write below. That heading
-                        # is framed decoration, not a row AutoQ imports, so it can
-                        # carry anything; and putting it there leaves this file at
-                        # exactly one line per album, which a second ::INFO:: line
-                        # per row would not. Tracked in #69.
+                        # The size belongs in the MAIN list instead, and it is
+                        # there now (#69): a summary line under each folder
+                        # heading - see folder_summary_line() for why it is its
+                        # own line and NOT on the heading, which every reader
+                        # takes as the folder path. Putting it there leaves
+                        # this file at exactly one line per album, which a
+                        # second ::INFO:: line per row would not.
                         #
                         # THE REASON, corrected against AutoQ.mrc itself rather
                         # than the second-hand version this comment used to give.
@@ -1793,6 +1827,7 @@ def generate_master_list(list_name=None):
                 f_video.write("\n")
 
                 video_folder = None
+                video_totals = folder_totals(video_files_data)
                 for folder, filename, bytes_size in video_files_data:
                     if folder != video_folder:
                         video_folder = folder
@@ -1801,6 +1836,7 @@ def generate_master_list(list_name=None):
                         line = _one_line(raw.replace("/", "\\"))
                         rule = "=" * len(line)
                         f_video.write(f"\n{rule}\n{line}\n{rule}\n")
+                        f_video.write(folder_summary_line(*video_totals[folder], format_size_human) + "\n")
                     f_video.write(
                         f"!{config.NICKNAME} {_one_line(filename)}"
                         f"  ::INFO:: {format_size_human(bytes_size)}\n")

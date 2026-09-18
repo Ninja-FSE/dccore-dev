@@ -4,6 +4,49 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Each folder heading says how many files and how big
+
+The size on each album from #69, wanted from the start and deferred twice.
+The first time because a `!rar` row must stay verbatim - AutoQ copies it -
+so that list gains nothing. The second time the plan became "put it on the
+main list's folder heading, which is framed decoration". It is not: `list.py`'s
+reader takes the whole heading line as the folder (`current_folder =
+line_strip`), `dcc.py`'s request resolver does the same (`last_heading`),
+and so does every older DCCore that fetches this list. A size appended to
+the heading would resolve every request into a folder that does not exist,
+on every one of them.
+
+So it is **its own line, under the closing rule**, indented:
+
+```
+==========================
+D:\MEDIA\Artist\Album\
+==========================
+    14 files, 1.20GB
+!Bot 01 - Track.flac  ::INFO:: 87.61MB
+```
+
+A line that is neither a rule nor a `!` row is dropped by every reader in
+its resting state - `list.py`'s state machine skips it, `dcc.py` looks only
+at prefix lines and `!` lines, AutoQ imports `!` rows, and `count_request_lines()`
+counts `!` rows - which is what makes this safe to add to a format other
+software already parses. `folder_summary_line()` carries that reasoning;
+`folder_totals()` is one pass over the rows already in memory, taken before
+the write loop because a heading is written before its rows. Both the music
+and the film list get the line; the album list stays one line per album.
+The stale "framed decoration" note beside the `!rar` writer is corrected.
+
+Tests in `tests/test_each_folder_says_what_it_holds.py` (12): the line's
+shape (count, singular, thousands, indented, not a rule, not a request, not
+a prefix line); written under every heading in the music and film lists
+with the rows following; the album list unchanged; and the claim checked
+reader by reader - search still attributes rows to the right folder, the
+heading still resolves to the real folder on disk, the request count is
+unchanged, and our parser reads a list carrying the line the same way
+(which is what an older peer's identical parser does too). Three mutants:
+line dropped, line un-indented, and the size put on the heading - the last
+also fails the existing resolver tests, which is the point.
+
 ### 🎬 A release travels whole: subtitles, .nfo and .sfv follow their film
 
 Neo's #411, with numbers from a real install: a video-only list published a
