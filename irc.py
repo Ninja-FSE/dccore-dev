@@ -2254,6 +2254,19 @@ def irc_loop():
                 # otherwise runs when some other transfer completes. Look
                 # once, now that channel_users can be trusted.
                 threading.Thread(target=dcc.wake_restored_queues, args=(sock,), daemon=True).start()
+                # Same reasoning, for the auto-refetch sweep: it refuses
+                # outright until this same flag is set (see
+                # list_fetch.refetch_due_lists()'s own comment), and its
+                # background worker would otherwise wait up to an hour for
+                # its next scheduled pass before trying again - on a fresh
+                # start, exactly when a stale list is most likely to be
+                # sitting there due. Cheap to call on every reconnect too:
+                # lists_worth_refetching() already respects
+                # AUTO_REFETCH_INTERVAL_HOURS, so this is a no-op whenever
+                # nothing is actually due.
+                if getattr(config, 'AUTO_REFETCH_LISTS', False):
+                    import list_fetch
+                    threading.Thread(target=list_fetch.refetch_due_lists, daemon=True).start()
             else:
                 print("[ACTIVATE] No channel members known yet; advertising without claiming channel sync.")
 
