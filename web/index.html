@@ -296,6 +296,30 @@
             <span data-i18n="filelists.purgeOfflineLists">Purge offline bots' lists</span>
           </button>
           <p class="broadcast-status" id="filelists-purge-status" hidden></p>
+
+          <!-- A bot that never advertises has no row (#376): the sidebar is
+               built from adverts seen. Name one here and it becomes a row
+               like any other - fetchable, marked "by hand", kept until you
+               forget it. Forget takes the same nick back out; a bot that
+               advertises cannot be forgotten this way, it would be back at
+               its next advert. -->
+          <form class="filelists-add-source" id="filelists-add-source-form">
+            <label class="filelists-add-source-label" for="filelists-add-source-input"
+                   data-i18n="filelists.addSourceLabel">Add a bot that does not advertise</label>
+            <div class="filelists-add-source-row">
+              <input type="text" id="filelists-add-source-input" autocomplete="off"
+                     maxlength="64" spellcheck="false"
+                     data-i18n-placeholder="filelists.addSourcePlaceholder"
+                     placeholder="Nick">
+              <button type="submit" class="btn btn-small" id="filelists-add-source-btn"
+                      data-i18n="filelists.addSource">Add</button>
+              <button type="button" class="btn btn-small" id="filelists-forget-source-btn"
+                      data-i18n-title="filelists.forgetSourceTitle"
+                      title="Forget a bot you added by hand. One that advertises cannot be forgotten - it would be back at its next advert."
+                      data-i18n="filelists.forgetSource">Forget</button>
+            </div>
+          </form>
+          <p class="broadcast-status" id="filelists-source-status" hidden></p>
         </div>
 
         <div class="filelists-files">

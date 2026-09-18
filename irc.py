@@ -1518,7 +1518,10 @@ def _prune_known_bots(now):
         del registry[key]
 
     if len(registry) > KNOWN_BOTS_MAX:
-        by_age = sorted(registry.items(),
+        # Hand-entered entries are not candidates: with last_seen 0 they
+        # would sort as the oldest of all and be the first to go.
+        by_age = sorted(((k, e) for k, e in registry.items()
+                         if not (e or {}).get("hand_entered")),
                         key=lambda kv: float((kv[1] or {}).get("last_seen") or 0))
         for key, _entry in by_age[:len(registry) - KNOWN_BOTS_MAX]:
             del registry[key]
@@ -1531,6 +1534,11 @@ def _known_bot_is_stale(key, entry, now):
     advert()'s own `key = user.lower()` - so it compares directly against
     the lower-cased nicks _bot_confirmed_absent() reads from channel_users.
     """
+    # Named by the operator, not seen advertising (#376): it has no adverts
+    # to age on, so age says nothing about it. It stays until the operator
+    # forgets it (webserver.build_remove_source_result).
+    if (entry or {}).get("hand_entered"):
+        return False
     age = now - float((entry or {}).get("last_seen") or 0)
     if age > KNOWN_BOTS_TTL_SECONDS:
         return True

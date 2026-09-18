@@ -4,6 +4,62 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ✍️ A bot that never advertises can be added by hand
+
+#376, part 2. The List Browser's sidebar is built from adverts we have seen
+(`runtime.known_bots`), so a bot that answers `@nick` perfectly well but
+does not advertise on a channel we are in had no row, and there was no way
+to fetch its list from the dashboard. Confirmed absent before this:
+`webserver.py` had `/api/filelists`, `/fetch`, `/fetch-folder-rar`,
+`/bots`, `/search` and `/bot/<nick>`, and nothing that adds a source.
+
+- **`POST /api/filelists/sources`** (`build_add_source_result()`): the nick
+  goes into the **same registry**, flagged `hand_entered`, rather than a
+  second list - so every reader of the sidebar (rows, freshness, presence,
+  the fetch button, the alt-nick display) works on it unchanged, and if the
+  bot ever does advertise, `irc._record_bot()` merges the advert into the
+  same entry and the flag survives. Validated as a nick (`_looks_like_a_nick`:
+  RFC 2812's shape, no channel prefix, no whitespace, ≤ 64) on top of the
+  IRC-line safety check; our own nick refused; a bot already seen is kept,
+  not duplicated. Persisted at once (`_flush_known_bots(force=True)`) - the
+  30 s flush timer is for adverts, not for an operator's own action.
+- **`POST /api/filelists/sources/<nick>/remove`**
+  (`build_remove_source_result()`): forgets a hand-entered bot. 409 for a
+  bot that advertises (it would be back at its next advert), 409 for one
+  with a held list (the purge routes know about requests in flight), 404
+  for a stranger.
+- **Pruning**: `irc._known_bot_is_stale()` never drops a hand-entered entry
+  - it has no adverts to age on - and the size cap's eviction skips them
+  (with `last_seen` 0 they would sort as the oldest of all). They stay until
+  the operator forgets them.
+- **The row** carries `hand_entered`; the page tags it "by hand" (tooltip:
+  added by nick, not seen advertising), shows the grey "cannot tell"
+  presence and `not_held` freshness like any advert-only row, and the
+  count stays an em dash - no advert, no claim. A fetch from it goes through
+  `bot_not_here_error()` like every other.
+- **The sidebar** gains a small form under the purge button: a nick box,
+  **Add** and **Forget**, with its own status line. Both refresh the list at
+  once. Eleven dictionary keys in en/fr/es.
+
+Not done, deliberately: presence for a hand-entered bot is not probed (no
+WHOIS) - the row says "cannot tell" until NAMES or a JOIN says otherwise,
+the same rule as everywhere else. Part 1 of #376 (alt-nick identity) is
+untouched.
+
+Tests in `tests/test_a_bot_named_by_hand.py` (26): adding (entry shape,
+persisted at once, an advertising bot kept not duplicated with the
+advertised spelling winning, trimming, blank/non-nick/own-nick refused,
+nick punctuation allowed); the row (tagged, not-held, count None,
+presence None, an advert later fills it in and the flag survives);
+pruning (the week TTL, the confirmed-absent TTL and the size cap all leave
+it alone while still applying to others); forgetting (removed and
+persisted, 404 unknown, 409 advertising, 409 held, unsafe input refused
+first); over HTTP behind the login (add → in `/api/filelists/bots` →
+forget; a non-object body is 400 not 500 - `json_object()`, the guard
+`test_no_post_route_still_coerces_with_or` insisted on); and the page
+(form, the two routes, the tag only when hand-entered and not held, every
+key in all three dictionaries). `docs/INSTALL.md` mentions the form.
+
 ### 🍎 macOS joins the CI matrix
 
 From #69's macOS discussion: "the cheapest first step, by a distance" is to
