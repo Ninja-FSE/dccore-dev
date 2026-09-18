@@ -566,7 +566,41 @@ def main():
     print("Then start the daemon the same way, without \"check\".")
 
 
+def offer_flask_if_the_dashboard_is_on():
+    """`configure.py --flask`: the launchers' pre-start hook (#547, Proposal 1).
+
+    An operator who turned the dashboard on - here, in the dashboard, or by
+    hand in settings.conf - and has no Flask found out at step 7 of the old
+    install, from a log line, that step 4 had been needed. The launchers
+    now ask this just before starting the daemon, every time: it is silent
+    when the dashboard is off or Flask is present, so an install that is
+    already right never sees it, and it is the same offer
+    offer_to_install_web_requirements() makes during setup, so there is one
+    wording and one pip invocation. Returns 0 whatever happens - a declined
+    or failed install is not a reason to stop the daemon starting, exactly
+    as during setup.
+    """
+    if not bool(getattr(config, "WEBUI_ENABLED", False)):
+        return 0
+    try:
+        import flask  # noqa: F401
+        return 0
+    except ImportError:
+        pass
+    print()
+    print("The web dashboard is enabled in your settings.")
+    offer_to_install_web_requirements()
+    print()
+    return 0
+
+
 if __name__ == "__main__":
+    if "--flask" in sys.argv[1:]:
+        try:
+            sys.exit(offer_flask_if_the_dashboard_is_on())
+        except (KeyboardInterrupt, EOFError):
+            print("\n  Skipped.")
+            sys.exit(0)
     try:
         main()
     except (KeyboardInterrupt, EOFError):

@@ -23,6 +23,22 @@ Two optional extras:
 
 Developed on Linux (Debian/Ubuntu, including Proxmox LXC) and runs on Windows — the platform differences live in `platform_compat.py`, and CI covers both. Windows operators should also read [WINDOWS.md](WINDOWS.md).
 
+## The short way
+
+Install Python 3.10 or newer, extract DCCore, and run the launcher for your
+system - on the first run it asks the setup questions itself, offers to
+install the dashboard's dependency if you turned the dashboard on, checks the
+setup and starts the bot:
+
+| | |
+|---|---|
+| Windows | double-click `scripts\windows\start-dccore.bat` |
+| Linux | `./scripts/linux/start-dccore.sh` |
+| macOS | double-click `scripts/macos/start-dccore.command` (the first time, right-click → Open, because it came from the internet) |
+
+The terminal that opens is the bot: closing it stops the bot. Everything
+below is the same setup done by hand, for when you want a step on its own.
+
 ## Guided setup
 
 ```bash
