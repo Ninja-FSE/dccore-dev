@@ -3721,6 +3721,37 @@
     return field.note;
   }
 
+  // WHAT A SETTING MEANS, for the "?" beside its label (#528). The text is
+  // the comment block beside the setting in defaults.py, sent by the server
+  // as field.help - the same source settings.conf.sample is generated from.
+  // A dictionary may carry a translation under the label key + ".help"
+  // (settings.field.MAX_DCC_SLOTS.help, say); looked up directly rather
+  // than through t(), because t() answers a missing key with the key
+  // itself, and here a missing translation means "show the server's own
+  // English", exactly as fieldLabel() falls back to field.label.
+  function fieldHelp(field) {
+    var key = SETTINGS_FIELD_LABEL_KEYS[field.name];
+    if (key) {
+      var translated = state.lang[key + ".help"];
+      if (translated !== undefined) { return translated; }
+    }
+    return field.help || "";
+  }
+
+  // Rendered as real text inside the row, shown on hover or keyboard focus
+  // by CSS, rather than as a title= attribute: escapeHtml() encodes text
+  // content, not attributes, and the help is a paragraph or two that a
+  // native tooltip would truncate and delay anyway.
+  function settingsHelpHtml(field) {
+    var help = fieldHelp(field);
+    if (!help) { return ""; }
+    return '<span class="settings-help" tabindex="0">' +
+      '<span class="settings-help-mark" aria-hidden="true">?</span>' +
+      '<span class="visually-hidden">' + escapeHtml(t("settings.whatThisDoes")) + "</span>" +
+      '<span class="settings-help-text" role="tooltip">' + escapeHtml(help) + "</span>" +
+      "</span>";
+  }
+
   function settingsFieldHtml(field) {
     var isDirty = Object.prototype.hasOwnProperty.call(state.settingsDirty, field.name);
     var nameClass = "settings-field-name" + (isDirty ? " is-dirty" : "");
@@ -3814,7 +3845,7 @@
 
     return '<div class="settings-field-row">' +
       '<span class="' + nameClass + '">' + escapeHtml(fieldLabel(field)) +
-      note + '</span>' +
+      settingsHelpHtml(field) + note + '</span>' +
       '<span class="settings-field-control">' + control + '</span>' +
       "</div>";
   }
