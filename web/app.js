@@ -3754,6 +3754,7 @@
     ADMIN_HOSTMASKS: "settings.field.ADMIN_HOSTMASKS",
     ADMIN_CHAT_MODE: "settings.field.ADMIN_CHAT_MODE",
     ADMIN_CHANNEL_COMMANDS: "settings.field.ADMIN_CHANNEL_COMMANDS",
+    ADMIN_CHAT_COLOURS: "settings.field.ADMIN_CHAT_COLOURS",
     WEBUI_ENABLED: "settings.field.WEBUI_ENABLED",
     WEBUI_HOST: "settings.field.WEBUI_HOST",
     WEBUI_PORT: "settings.field.WEBUI_PORT",

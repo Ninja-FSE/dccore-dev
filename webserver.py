@@ -2399,7 +2399,7 @@ SETTINGS_CATEGORIES = (
                                                 "PRIVATE_MESSAGE_DECLINE_BURST",
                                                 "PRIVATE_MESSAGE_DECLINE_BURST_SECONDS"]),
     ("admin-console", "Admin console",         ["ADMIN_HOSTMASKS", "ADMIN_CHAT_MODE",
-                                                "ADMIN_CHANNEL_COMMANDS"]),
+                                                "ADMIN_CHANNEL_COMMANDS", "ADMIN_CHAT_COLOURS"]),
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
                                                 "WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
                                                 "WEBUI_FOLDER_BROWSER_ENABLED"]),
@@ -2544,6 +2544,7 @@ SETTINGS_LABELS = {
     "ADMIN_HOSTMASKS": "Admin hostmasks",
     "ADMIN_CHAT_MODE": "DCC chat connection mode",
     "ADMIN_CHANNEL_COMMANDS": "Allow admin commands in channel",
+    "ADMIN_CHAT_COLOURS": "Colour the tags in the admin DCC chat",
 
     "WEBUI_ENABLED": "Enable web dashboard",
     "WEBUI_HOST": "Host",

@@ -1052,6 +1052,50 @@ def channel_wants(category, config=None):
     return True
 
 
+def category_tag(category, palette=None):
+    """(label, colour code) for one debug category - what the channel line's
+    tag block and the admin console's `[TAG]` are both drawn from.
+
+    `palette` is theme.blocks()'s tuple. send_debug() passes the one it has
+    already unpacked, so this adds no second palette read to announce.py -
+    tests/test_theme.py counts those against its golden fixture. A caller
+    outside this module (adminchat) passes theme.blocks() itself.
+
+    One table, read by both, because until #550 the console had no colours
+    at all and the channel had this as an elif chain nobody else could
+    reach. The label is not always the category: BAN renders [HARDBAN]
+    (an admin confirming a !ban), and HARDBAN renders [SECURITY] (dcc.py's
+    blocked path traversal or poisoned queue entry) - the two must not look
+    alike, since one is routine administration and the other is someone
+    probing the filesystem. MUTE is [MUTED] and TBAN [TEMPBAN] for the same
+    reason: the 30-second mute and the escalation ban used to share a tag.
+    The feed's own categories (#528) take the [SENT] block colour: they are
+    the same story told from the start rather than the end.
+    """
+    import defaults as config
+    if palette is None:
+        raise TypeError("category_tag() needs the theme palette - pass theme.blocks()")
+    _border, _sep, _box, _reset, _bold, value, alert, _accent = palette
+    cat = str(category or "INFO").upper()
+    table = {
+        "SENT":    ("SENT", value),
+        "REQUEST": ("REQUEST", value),
+        "QUEUED":  ("QUEUED", value),
+        "SENDING": ("SENDING", value),
+        "RESUMED": ("RESUMED", value),
+        "SEARCH":  ("SEARCH", value),
+        "FAIL":    ("FAIL", alert),
+        "PART":    ("PART", alert),
+        "QUIT":    ("QUIT", config.C_PURPLE),
+        "JOIN":    ("JOIN", config.C_CYAN),
+        "BAN":     ("HARDBAN", alert),
+        "HARDBAN": ("SECURITY", alert),
+        "MUTE":    ("MUTED", config.C_PURPLE),
+        "TBAN":    ("TEMPBAN", config.C_PURPLE),
+    }
+    return table.get(cat, ("INFO", config.C_GREY))
+
+
 def send_debug(msg_text, category="INFO", notice=None):
     """Send a colour-block log line to the debug channel over a raw socket, undelayed.
 
@@ -1082,53 +1126,12 @@ def send_debug(msg_text, category="INFO", notice=None):
     # 1. The opening block: the timestamp, framed in white
     msg = f"PRIVMSG {config.DEBUG_CHANNEL} :{BG_RED_BLOCK} {BG_CYAN_BLOCK} {BG_TEXT_BOX} [{current_time}] DEBUG "
     
-    # 2. The tag block, colour-coded by event
-    if category.upper() == "SENT":
-        tag_str = f"{V}[SENT]{R}{BG_TEXT_BOX}"
-    elif category.upper() in ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SEARCH"):
-        # The console feed's own events (#528). Same block as [SENT] - they
-        # are the same story told from the start rather than the end - and
-        # only ever on the channel under DEBUG_CHANNEL_FEED.
-        tag_str = f"{V}[{category.upper()}]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "FAIL":
-        # A transfer that did NOT complete. Until #526 every one of these was
-        # a plain print() to the console window and nothing else, while a
-        # completed one went to the debug channel and the admin console as
-        # [SENT] - so an operator watching either saw successes and never
-        # failures, and a cut-off transfer that the old code miscounted as a
-        # success was reported as one. The alert colour, like [PART]: it is
-        # the line an operator needs to see.
-        tag_str = f"{A}[FAIL]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "PART":
-        tag_str = f"{A}[PART]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "QUIT":
-        tag_str = f"{config.C_PURPLE}[QUIT]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "JOIN":
-        tag_str = f"{config.C_CYAN}[JOIN]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "BAN":
-        # A red block label for PERMANENT bans
-        tag_str = f"{A}[HARDBAN]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "HARDBAN":
-        # dcc.py raises this for a blocked path traversal and for a poisoned queue entry -
-        # the two most serious alerts the daemon can produce. Without this branch they fell
-        # through to the grey [INFO] tag, visually identical to routine chatter, so a
-        # filesystem probing campaign looked like ordinary traffic in the debug channel.
-        #
-        # Labelled [SECURITY], not [HARDBAN]: the "BAN" category above already renders
-        # [HARDBAN], and that one is an admin confirming a !ban. These two must not look
-        # alike - one is routine administration, the other is someone probing the filesystem.
-        tag_str = f"{A}[SECURITY]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "MUTE":
-        # Its own tag. A 30-second mute and the escalation ban both used
-        # TBAN, so both rendered [TEMPBAN] and an operator watching the
-        # console could not tell a slap from a sentence (#234).
-        tag_str = f"{config.C_PURPLE}[MUTED]{R}{BG_TEXT_BOX}"
-    elif category.upper() == "TBAN":
-        # A purple block label for TEMPORARY day-bans
-        tag_str = f"{config.C_PURPLE}[TEMPBAN]{R}{BG_TEXT_BOX}"
-    else:
-        tag_str = f"{config.C_GREY}[INFO]{R}{BG_TEXT_BOX}"
-  
+    # 2. The tag block, colour-coded by event - the same label and colour the
+    # admin console shows (category_tag(), below), so the two can never
+    # disagree about what a category looks like.
+    label, colour = category_tag(category, (BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X))
+    tag_str = f"{colour}[{label}]{R}{BG_TEXT_BOX}"
+
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Category: {tag_str} "
     
     # 3. The text block, stripped of any colour codes that would clash

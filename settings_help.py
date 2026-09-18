@@ -245,6 +245,7 @@ PLAIN_HELP = {
     'ADMIN_HOSTMASKS': 'Who may open the admin console over DCC chat, by host. On Undernet, log in to X with mode +x and use your yourname.users.undernet.org host - only you can have it. Empty means the console is off. Keep this in admin_config.py rather than here.',
     'ADMIN_CHAT_MODE': "How the admin console's DCC chat is connected. Auto is right for most people. Choose Listen if you are behind a VPN or a router that does not forward ports, so the bot waits for you instead of trying to reach you.",
     'ADMIN_CHANNEL_COMMANDS': 'Let the admin commands (!ban, !rehash, !update...) also work when you type them in the channel or a private message, not only in the console. Turn off once you use the console, so a stolen nick cannot run them.',
+    'ADMIN_CHAT_COLOURS': "Colour the [SENT], [FAIL], [REQUEST] tags in the admin DCC chat the same way they are coloured in the debug channel, using your theme. Turn off if your client shows the colour codes as junk.",
     'WEBUI_ENABLED': 'Turn the web dashboard on. Off by default so nothing opens a web page just because the bot was updated. Needs the Flask package installed.',
     'WEBUI_HOST': 'Which addresses the dashboard listens on. 127.0.0.1 means only this computer can open it. 0.0.0.0 makes it reachable from other devices on your home network - never forward it to the internet, the connection is not encrypted.',
     'WEBUI_PORT': "The dashboard's port. Open http://127.0.0.1:8420 (or whatever you set) in your browser.",

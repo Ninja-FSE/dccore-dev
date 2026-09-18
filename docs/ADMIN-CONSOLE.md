@@ -269,6 +269,15 @@ journal always have it. That case, something going wrong while nobody is
 watching, is the one worth protecting. It is a floor, not a third destination:
 when the channel or a console did take the line, nothing extra is printed.
 
+### In colour
+
+The chat window is an IRC client, so the tag on each line - `[SENT]`,
+`[FAIL]`, `[REQUEST]`, `[SECURITY]` - is coloured the same way it is in the
+debug channel, in whatever theme the bot uses. `ADMIN_CHAT_COLOURS`
+(**Settings → Admin console**) turns that off for a client that shows the
+codes as junk; off gives plain `[TAG] text`. The dashboard's Console page is
+never coloured.
+
 ### The transfer feed
 
 The console tells the whole story of a transfer, one line per event, the way
