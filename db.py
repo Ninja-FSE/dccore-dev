@@ -856,6 +856,33 @@ def load_known_bots():
         return {}
 
 
+ADMIN_TOKENS_FILE = getattr(config, "ADMIN_TOKENS_FILE", os.path.join("data", "adminchat_tokens.json"))
+
+
+def load_admin_tokens():
+    """{name: {"hash": ..., "created": ...}} for every paired console client
+    (#550, step 3), or {} - a file that will not parse costs the paired
+    clients a fresh `pair`, nothing else."""
+    if not os.path.exists(ADMIN_TOKENS_FILE):
+        return {}
+    try:
+        with io.open(ADMIN_TOKENS_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception as err:
+        print(f"[DB ERROR] Could not read the console token store: {err}")
+        return {}
+
+
+def save_admin_tokens(tokens):
+    try:
+        with _disk_lock:
+            _atomic_write(ADMIN_TOKENS_FILE,
+                          json.dumps(tokens, indent=1, sort_keys=True, ensure_ascii=False))
+    except Exception as err:
+        print(f"[DB ERROR] Could not save the console token store: {err}")
+
+
 def save_known_bots(registry):
     """Write the bot registry, atomically, through the same lock and the same
     temp-file-then-replace the other state files use."""

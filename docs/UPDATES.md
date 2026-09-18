@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📊 STATUS, SLOT, QUEUE and pairing
+
+#550, step 3 - the live picture a window is drawn from, and a credential
+for a script that is not the admin password.
+
+- **`adminchat.status_lines(now=None)`** - one burst: `DCCORE STATUS <used>
+  <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>`,
+  then `DCCORE SLOT <nick> <sent> <total> <bps> <name>` per active transfer
+  and `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` per queued user
+  (the first 20, sorted). Today's figures are the rolled ones
+  (`db.load_advanced_stats_rolled`); the record is `db.get_speed_record()`;
+  `bps_now` is `stats_mgr.live_speed()`. A figure that fails to load reads 0
+  and the log says why - a wrong number beats no title bar.
+- **`Session.send_status()`** - after `hello`, after any `SENDING`, `SENT`,
+  `FAIL`, `QUEUED` or `RESUMED` event, and every `STATUS_INTERVAL` (30 s)
+  on the writer thread's own half-second wake - the heartbeat. The timer
+  fills silence only: it speaks when the outbox is empty, never on top of a
+  backlog it would only push lines off.
+- **`dcc.start_dcc_send()` stamps `size` and `started_at`** on the
+  `active_transfers` row once the file is open, so `SLOT` has a total and a
+  clock of its own; a row without them reads 0.
+- **`pair <client> <version>`** mints `secrets.token_urlsafe(32)`, stores
+  `{"hash": make_password_hash(token), "created", "by"}` under the client's
+  name in `ADMIN_TOKENS_FILE` (`db.load_admin_tokens` / `save_admin_tokens`,
+  through `_disk_lock` and `_atomic_write`), and sends it back once as
+  `DCCORE TOKEN <name> <token>` or a plain line. **`_check_password()`**
+  accepts a token or the password (`_token_matches()` over the store with
+  `verify_password`); everything around it - hostmask check, three attempts,
+  IP block - is unchanged. **`webserver` never reads the store**: a token
+  opens a chat, never the dashboard (pinned by a test). `unpair` lists;
+  `unpair <name>` revokes. Both live in `COMMANDS`, so authenticated only.
+- **`ADMIN_TOKENS_FILE`** (advanced; `./data/adminchat_tokens.json`) with
+  label, plain help and fr/es.
+- `tests/test_status_slot_queue_and_pairing.py` - 25: the burst's shapes
+  and edge cases, when it is sent and when it is not, the silence-only
+  timer over a socketpair, pairing end to end including the dashboard
+  refusing a token, and password → `pair` → token login over a real
+  loopback chat. Two step-2 tests widened for the burst.
+
 ### 📡 A structured feed for the admin chat
 
 #550, step 2 - the protocol under `dccore.mrc`, usable by any client. A

@@ -283,6 +283,7 @@ LIBRARY_FOLDERS_FILE: str = "./data/library_folders.json"
 # which resolves to one implicit list over LIBRARY_FOLDERS_FILE/FILE_DIRECTORY
 # - so nothing changes until an operator defines more than one.
 LISTS_FILE: str = "./data/lists.json"
+ADMIN_TOKENS_FILE: str = "./data/adminchat_tokens.json"   # Hashed login tokens of scripts paired with the admin console (pair / unpair)
 # Commands sent to the server once registered and BEFORE joining - X
 # login, usermodes, whatever the network wants. See on_connect.py for why
 # the ordering matters and why the file is never logged.

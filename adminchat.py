@@ -384,6 +384,62 @@ def hello_line():
             f"{_clean(getattr(config, 'SCRIPT_VERSION', ''))}")
 
 
+STATUS_INTERVAL = 30.0        # seconds between STATUS bursts to a structured session
+QUEUE_LINES_MAX = 20          # QUEUE rows per burst: the head of the queue, not all of it
+FREEZE_TIMEOUT = 300.0        # dcc.py's five-minute countdown, for the QUEUE row's seconds-left
+
+
+def status_lines(now=None):
+    """The STATUS burst (#550, step 3): what the client's title bar and side
+    panel are drawn from, read from what the daemon already holds.
+
+        DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>
+        DCCORE SLOT <nick> <sent> <total> <bps> <name>          one per active transfer
+        DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>    one per queued user, first 20
+
+    Today's figures are the ROLLED ones (db.load_advanced_stats_rolled), for
+    the reason announce.py gives: the daemon rotates the day only when a
+    transfer completes, so the raw row still shows yesterday under Today
+    on a quiet morning. Every figure failing to load reads 0 rather than
+    taking the burst down: a title bar with a wrong number beats no title
+    bar, and the log line says what could not be read.
+    """
+    import time as _time
+    now = _time.time() if now is None else now
+    transfers = [tx for tx in list(getattr(config, "active_transfers", []) or []) if isinstance(tx, dict)]
+    queue = {k: v for k, v in dict(getattr(config, "dcc_queue", {}) or {}).items() if v}
+    frozen = dict(getattr(config, "frozen_queues", {}) or {})
+    slots = getattr(config, "MAX_DCC_SLOTS", 0)
+
+    sent_today = bytes_today = record = bps_now = 0
+    try:
+        import db
+        import stats_mgr
+        stats = db.load_advanced_stats_rolled()
+        if isinstance(stats, list) and len(stats) > 6:
+            sent_today, bytes_today = int(stats[4] or 0), int(stats[5] or 0)
+        record = int(db.get_speed_record() or 0)
+        bps_now = int(stats_mgr.live_speed() or 0)
+    except Exception as err:
+        print(f"[ADMINCHAT] Status figures unavailable: {err}")
+
+    lines = [f"DCCORE STATUS {len(transfers)} {_num(slots)} "
+             f"{sum(len(rows) for rows in queue.values())} {len(queue)} "
+             f"{sent_today} {bytes_today} {bps_now} {record}"]
+    for tx in transfers:
+        sent = int(tx.get("bytes_sent") or 0)
+        started = float(tx.get("started_at") or 0)
+        bps = int(sent / (now - started)) if started and now > started + 0.5 else 0
+        lines.append(f"DCCORE SLOT {_clean(tx.get('user'), token=True)} {sent} "
+                     f"{_num(tx.get('size'))} {bps} {_clean(tx.get('file'))}")
+    for pos, user in enumerate(sorted(queue, key=str.lower)[:QUEUE_LINES_MAX], start=1):
+        left = 0
+        if user.lower() in frozen:    # both dicts key on the lowercased nick; be sure
+            left = max(0, int(FREEZE_TIMEOUT - (now - float(frozen[user.lower()] or 0))))
+        lines.append(f"DCCORE QUEUE {pos} {_clean(user, token=True)} {len(queue[user])} {left}")
+    return lines
+
+
 def console_line(msg_text, category="INFO"):
     """One feed line as the DCC chat shows it.
 
@@ -432,6 +488,7 @@ class Session:
         self.structured = False
         self.client = ""
         self._reported_dropped = 0
+        self._status_sent_at = 0.0
         self._outbox = collections.deque(maxlen=OUTBOX_MAX)
         self._wake = threading.Event()
         self._lock = threading.Lock()
@@ -462,9 +519,29 @@ class Session:
         self._writer = threading.Thread(target=self._writer_loop, daemon=True)
         self._writer.start()
 
+    def send_status(self):
+        """One STATUS burst, now. Called on the timer below and after any
+        event that moved the slots or the queue."""
+        if self.closed or not self.authenticated or not self.structured:
+            return
+        self._status_sent_at = time.time()
+        for line in status_lines():
+            self.send(line)
+
     def _writer_loop(self):
         while not self.closed:
             if not self._outbox:
+                # The STATUS timer rides on the writer's own half-second
+                # wake rather than a thread of its own: one thread per
+                # session was the design, and a burst every STATUS_INTERVAL
+                # is also the heartbeat a client uses to tell a quiet link
+                # from a dead one. It fills silence only - a client that is
+                # behind is receiving lines already, and a burst on top of a
+                # backlog would only push more of them off the outbox.
+                if (self.structured and self.authenticated
+                        and time.time() - self._status_sent_at >= STATUS_INTERVAL):
+                    self.send_status()
+                    continue
                 self._wake.wait(0.5)
                 self._wake.clear()
                 continue
@@ -517,6 +594,10 @@ class Session:
         if self.closed or not self.authenticated or not self.structured:
             return
         self.send(structured_line(kind, fields))
+        # A slot or a queue just changed; the title bar should not wait for
+        # the timer to say so.
+        if str(kind).upper() in ("SENDING", "SENT", "FAIL", "QUEUED", "RESUMED"):
+            self.send_status()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -832,8 +913,61 @@ def _cmd_hello(session, args):
     session.client = parts[0] if parts else "unknown"
     session.structured = True
     session.send(hello_line())
+    session.send_status()
     print(f"[ADMINCHAT] {session.nick}'s session switched to the structured feed "
           f"({session.client} {' '.join(parts[1:]) or '?'}).")
+
+
+def _cmd_pair(session, args):
+    """`pair <client> [version]`: mint a token this client can log in with.
+
+    Printed ONCE, here; only its hash is kept. Pairing the same name again
+    replaces the old token, which is also how a lost one is rotated. For
+    the script this is the first-run flow: the admin types the password by
+    hand once, the script sends `pair dccore.mrc 1.0`, keeps the token, and
+    logs in with it from then on. See docs/ADMIN-CONSOLE.md.
+    """
+    import datetime
+    import secrets
+    import db
+    name = (args.split() or ["client"])[0]
+    token = secrets.token_urlsafe(32)
+    tokens = db.load_admin_tokens()
+    tokens[name] = {"hash": make_password_hash(token),
+                    "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "by": session.nick}
+    db.save_admin_tokens(tokens)
+    print(f"[ADMINCHAT] {session.nick} paired a console client as {name!r}.")
+    if session.structured:
+        session.send(f"DCCORE TOKEN {name} {token}")
+    else:
+        session.send(f"Paired {name}. Its token, shown once - it opens this chat and nothing else:")
+        session.send(f"  {token}")
+        session.send(f"Revoke it with: unpair {name}")
+
+
+def _cmd_unpair(session, args):
+    """`unpair [name]`: list the paired clients, or revoke one."""
+    import db
+    tokens = db.load_admin_tokens()
+    name = (args.split() or [""])[0]
+    if not name:
+        if not tokens:
+            session.send("No paired clients.")
+            return
+        session.send(f"{len(tokens)} paired client(s):")
+        for key in sorted(tokens):
+            entry = tokens[key] if isinstance(tokens[key], dict) else {}
+            session.send(f"  {key:<20} paired {entry.get('created', '?')} by {entry.get('by', '?')}")
+        session.send("Revoke one with: unpair <name>")
+        return
+    if name not in tokens:
+        session.send(f"No paired client called {name}.")
+        return
+    del tokens[name]
+    db.save_admin_tokens(tokens)
+    print(f"[ADMINCHAT] {session.nick} revoked the console token {name!r}.")
+    session.send(f"Revoked {name}. A client still logged in with it stays until it disconnects.")
 
 
 def _cmd_help(session, args):
@@ -867,6 +1001,8 @@ COMMANDS = {
     "update":     (_cmd_update,     "rebuild the MasterList",            "update"),
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
+    "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
+    "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
     "help":       (_cmd_help,       "this list",                         "help"),
     "quit":       (_cmd_quit,       "close this session",                "quit"),
 }
@@ -981,11 +1117,29 @@ def _reader_loop(session):
         _forget(session)
 
 
+def _token_matches(supplied):
+    """Which paired client's token `supplied` is, or None. Tokens are PBKDF2
+    hashes in the same scheme as the password, so a stolen store is as
+    useless as a stolen password hash; a handful of them per attempt is
+    the cost, and attempts are already rate-limited."""
+    import db
+    for name, entry in db.load_admin_tokens().items():
+        if isinstance(entry, dict) and verify_password(entry.get("hash", ""), supplied):
+            return name
+    return None
+
+
 def _check_password(session, line):
     supplied = line.strip()
     if not supplied:
         return
-    if verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
+    # The password, or a paired client's token (#550, step 3). A token opens
+    # a chat and nothing else: the dashboard's login checks
+    # ADMIN_PASSWORD_HASH alone and never sees the token store.
+    paired = _token_matches(supplied)
+    if paired:
+        print(f"[ADMINCHAT] {session.nick} logged in with the token paired as {paired!r}.")
+    if paired or verify_password(getattr(config, "ADMIN_PASSWORD_HASH", ""), supplied):
         session.authenticated = True
         session.last_activity = time.time()
         clear_bad_ip(session.peer_ip)

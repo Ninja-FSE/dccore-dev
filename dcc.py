@@ -2769,6 +2769,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # tracker at the offset it already holds and the completeness check
         # below compares against the whole file, exactly as bytes_sent does.
         acks = _AckTracker(start=resume_offset)
+        # The row the dispatcher appended carries user/file/bytes_sent; the
+        # console's SLOT line (#550, step 3) wants the total and a speed, so
+        # the size and the start moment go on the same row here, where both
+        # are known. Read-only for everything else.
+        for tx in config.active_transfers:
+            if tx['user'].lower() == user.lower():
+                tx['size'] = file_size
+                tx['started_at'] = time.time()
         if resume_offset:
             # bytes_sent counts what the RECEIVER ends up holding, so the
             # completeness check below still compares against the whole file.

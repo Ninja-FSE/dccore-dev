@@ -279,6 +279,7 @@ PLAIN_HELP = {
     'LIST_PROGRESS_FILE': 'Where a running list rebuild reports its progress for the dashboard.',
     'LIBRARY_FOLDERS_FILE': 'Where the folders you added on the Library page are saved.',
     'LISTS_FILE': 'Where your list definitions are saved, if you serve more than one list.',
+    'ADMIN_TOKENS_FILE': "Where the login tokens of scripts paired with the admin console are kept (hashed, like the password). Made by the console's pair command; remove one with unpair.",
     'ON_CONNECT_FILE': 'Where the commands sent on connect (such as your X login) are saved.',
     'NOTICES_FILE': 'Where the notices shown on the dashboard - kicks, failed rebuilds, disconnects - are saved.',
     'PRIVATE_MESSAGES_FILE': 'Where private messages to the bot are saved.',
