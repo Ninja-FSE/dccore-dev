@@ -110,6 +110,53 @@ To start the daemon directly instead:
 python3 oserve.py
 ```
 
+### Reaching it from outside: the firewall and the router
+
+Two things stand between the bot's ports and the people downloading, and
+neither is DCCore's to fix - only to name. The setup check prints both with
+your actual port range.
+
+**The host firewall.** If the machine runs one, allow the DCC range (and the
+dashboard's port, if you want it reachable from other machines):
+
+```bash
+sudo ufw allow 55000:55010/tcp                                        # Ubuntu
+sudo firewall-cmd --permanent --add-port=55000-55010/tcp && sudo firewall-cmd --reload   # Fedora
+```
+
+On Windows, `scripts\windows\allow-firewall.bat` adds the rule (it asks for an
+administrator's yes; `remove-firewall.bat` takes it out). On macOS the
+firewall asks per application the first time, like Windows does.
+
+**Port forwarding.** Behind a home router, connections from the internet
+reach the router, not this machine, until the router is told where to send
+them. In the router's admin page (usually `http://192.168.1.1` or
+`http://192.168.0.1`, "Port forwarding" or "Virtual server"), forward **TCP
+55000–55010** - `DCC_PORT_START`–`DCC_PORT_END` in your settings - to this
+machine's LAN address. Nothing in DCCore can do this for you: there is no
+UPnP in the standard library, and the bot does not know your router's
+password. Test from a second machine or a phone, not from the same network
+(see WINDOWS.md for why that fails even when everything is right).
+
+### Starting with the system
+
+Once the bot runs by hand, it can start by itself. Each script has a twin
+that undoes it, and both run the launcher - not `oserve.py` directly - so
+the working directory is right.
+
+| | install | remove |
+|---|---|---|
+| Linux (systemd user unit; no root) | `./scripts/linux/install-autostart.sh` | `./scripts/linux/remove-autostart.sh` |
+| macOS (launchd agent) | `scripts/macos/install-autostart.command` | `scripts/macos/remove-autostart.command` |
+| Windows (Task Scheduler, at logon) | `scripts\windows\install-autostart.bat` | `scripts\windows\remove-autostart.bat` |
+
+They refuse a tree that has not been set up yet - run the launcher once
+first, since the setup questions cannot be answered by a service. On Linux
+the unit starts at login; to have it start at boot without anyone logging
+in, once: `loginctl enable-linger $USER`. Its output is in `journalctl
+--user -u dccore -f`; on macOS in `~/Library/Logs/dccore.log`; on Windows the
+bot's own window opens at logon, as it does from a double-click.
+
 ## Build the first list
 
 The bot has nothing to serve until its library has been scanned:
