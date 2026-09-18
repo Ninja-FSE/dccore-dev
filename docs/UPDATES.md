@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
+## 🟨 Unreleased
 
 ### 🚀 The launcher is the install
 
@@ -62,6 +62,8 @@ the offer with Flask hidden, returning 0 on decline; wired in
 "fresh install gets the sample instruction" tests are updated with their
 intent kept: legacy branch before the first-run branch; a fresh install is
 configured, never started on the defaults.
+
+## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
 
 ### ✍️ A bot that never advertises can be added by hand
 
