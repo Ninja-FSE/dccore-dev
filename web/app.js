@@ -5416,6 +5416,23 @@
       el.pageTitle.textContent = t(views[state.active].title);
       el.pageSub.textContent = t(views[state.active].sub);
     }
+    // Same reasoning, for the one view whose body is built once from data
+    // already in hand rather than redrawn by a poll: Settings loads its
+    // categories and fields a single time (state.settingsLoaded) and never
+    // refreshes itself in the background, unlike Downloads, Stats and the
+    // notice/message lists, which all repaint from the next scheduled poll
+    // regardless of language - so without this, an operator sitting on the
+    // Settings page during a language change would see the sidebar switch
+    // and the panel underneath stay in the old language until they clicked
+    // a category or reloaded the page. Both calls re-read from
+    // state.settingsCategories - no request, no risk to an edit in
+    // progress: renderSettingsCategory() already restores a dirty field's
+    // typed value from state.settingsDirty rather than field.value, the
+    // same way it does on every ordinary category switch.
+    if (state.active === "settings" && state.settingsLoaded) {
+      renderSettingsRail();
+      renderSettingsCategory();
+    }
     document.documentElement.lang = currentLanguage();
     if (el.langSelect) { el.langSelect.value = currentLanguage(); }
   }
