@@ -358,7 +358,11 @@ class TheThirdUnpacedWriterIsFixedToo(unittest.TestCase):
             "continue", 1)[0]
 
     def debugnames_block(self):
-        return self.source().split('elif msg.lower() == "!debugnames":', 1)[1][:1500]
+        # Up to the next branch of the same chain, not a fixed number of
+        # characters: the admin gate in front of the notice pushed the
+        # queue_message() line past the 1500 this used to take.
+        rest = self.source().split('elif msg.lower() == "!debugnames":', 1)[1]
+        return rest[:rest.index('elif msg.lower() == "!ping":')]
 
     def test_the_version_reply_no_longer_writes_the_socket_directly(self):
         self.assertNotIn("s.send(version_reply", self.version_reply_block())
@@ -412,7 +416,10 @@ class TheFourthUnpacedWriterIsFixedToo(DCCoreTestCase):
         self.real_pacer = runtime.outbound_pacer
         runtime.outbound_pacer = runtime.OutboundPacer()
         self.addCleanup(setattr, runtime, "outbound_pacer", self.real_pacer)
-        self.set_config(MSG_DELAY=0.1)
+        # The pingers below are admins: !ping answers only the bot's own
+        # admin now (tests/test_diagnostics_answer_only_the_admin.py), and
+        # what this class measures is the pacing of a ping that IS sent.
+        self.set_config(MSG_DELAY=0.1, ADMIN_NICK="alice, bob")
 
     def test_a_second_ping_waits_out_the_shared_interval(self):
         sock = TimestampedSocket()

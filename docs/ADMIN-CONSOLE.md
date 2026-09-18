@@ -418,8 +418,10 @@ ADMIN_CHANNEL_COMMANDS = False
 ```
 
 Admin authority then rests entirely on the services host plus the password, and
-no longer on a nick. The user commands — `!list`, `!ping`, `!debugnames`,
-`@find`, the queue triggers — are not affected either way.
+no longer on a nick. The user commands — `!list`, `@find`, the queue triggers —
+are not affected either way. `!ping` and `!debugnames` are the operator's
+diagnostics rather than user commands: they answer only a nick in `ADMIN_NICK`
+(and, being channel commands, keep doing so with `ADMIN_CHANNEL_COMMANDS` off).
 
 ## Limits and timeouts
 

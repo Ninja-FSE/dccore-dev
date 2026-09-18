@@ -268,8 +268,31 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
             category="INFO")
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
+def diagnostics_are_for_the_admin(user):
+    """Whether `user` may run the bot's diagnostics - !ping and !debugnames.
+
+    They used to answer ANYONE in the channel. Seen live by the user: another
+    operator typed !ping to check their own bot, and every DCCore in the
+    channel ran a latency check, each spending a paced server line (the slot
+    the adverts share) and each reporting into its own admin console - so
+    one person's ping showed up in a stranger's console as if the stranger
+    had asked. Neither command even answers the person who typed it: !ping
+    reports only to the operator, !debugnames is a RAM-CHECK notice about the
+    bot's own membership mirror. They are the operator's tools, so they
+    answer the operator - the same is_admin() the admin commands use.
+
+    Not !list: that is the discovery command every serving bot answers with
+    its trigger, on purpose, and it stays public.
+    """
+    return is_admin(user)
+
+
 def handle_ping_request(irc_sock, user, target_chan):
     """Start the timer and send a unique latency PING to the IRC server.
+
+    Answers only the admin - see diagnostics_are_for_the_admin(). Checked
+    here as well as at the dispatch in irc.py so that no other caller can
+    make the bot ping on a stranger's behalf.
 
     #425: this used to write straight to the socket, the last responder in
     the dispatch chain that never touched the shared outbound clock #406
@@ -289,6 +312,9 @@ def handle_ping_request(irc_sock, user, target_chan):
     import time
     import defaults as config
     import runtime
+
+    if not diagnostics_are_for_the_admin(user):
+        return
 
     runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
 
