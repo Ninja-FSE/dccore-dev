@@ -1443,6 +1443,9 @@ def build_fetched_bot_list_summaries():
             "list": "",
             "label": bot,
             "held": False,
+            # Named by the operator rather than seen advertising (#376):
+            # the page marks it, and offers to forget it.
+            "hand_entered": bool(entry.get("hand_entered")),
             "online": (bot.lower() in present) if present else None,
             "fetched_at": 0,
             "count": now.get("files"),
@@ -1482,6 +1485,104 @@ def _display_nick(bot, present):
     if primary.lower() in present and bot.lower() in present:
         return bot
     return primary
+
+
+def build_add_source_result(bot_raw):
+    """POST /api/filelists/sources payload: (http_status, payload_dict).
+
+    A BOT THAT NEVER ADVERTISES IS INVISIBLE (#376, part 2). The List
+    Browser's sidebar is built from adverts we have seen - runtime.known_bots
+    - so a bot that answers "@nick" perfectly well but does not advertise on
+    a channel we are in has no row, and there was no way to fetch its list
+    from the dashboard at all. This lets the operator name one.
+
+    It goes into the SAME registry, flagged "hand_entered", rather than a
+    second list: every reader of the sidebar (rows, freshness, presence, the
+    fetch button, the alt-nick display) then works on it unchanged, and if
+    the bot ever does advertise, irc._record_bot() merges the advert into
+    the same entry and the flag survives. What the flag changes is only
+    irc._prune_known_bots(): an advert-only entry is forgotten a week after
+    its last advert, and a hand-entered one has no adverts to age on, so it
+    stays until the operator forgets it (build_remove_source_result).
+
+    Presence and freshness are not claimed here: the row shows the grey
+    "cannot tell" until an advert or a fetch says otherwise, exactly as an
+    advert-only row does, and the fetch itself still goes through
+    bot_not_here_error() like every other.
+    """
+    import irc
+
+    err = reject_if_unsafe_for_irc_line(bot_raw, "bot")
+    if err:
+        return 400, {"error": err}
+    bot = str(bot_raw).strip()
+    if not bot:
+        return 400, {"error": "'bot' is required."}
+    if not _looks_like_a_nick(bot):
+        return 400, {"error": "'bot' must be a nick: letters, digits and "
+                              "the usual nick punctuation, no spaces, not "
+                              "starting with a channel prefix."}
+    if bot.lower() == str(getattr(config, "NICKNAME", "") or "").lower():
+        return 400, {"error": "That is this bot's own nick."}
+
+    # No lock, the same as irc._record_bot(): a copy-merge-rebind, where the
+    # rebind is one dict store under the GIL, and every reader takes its own
+    # dict() snapshot first.
+    key = bot.lower()
+    entry = dict(runtime.known_bots.get(key) or {})
+    already = bool(entry)
+    entry.setdefault("nick", bot)
+    entry.setdefault("last_seen", 0)
+    entry["hand_entered"] = True
+    runtime.known_bots[key] = entry
+    irc._flush_known_bots(force=True)
+    return 200, {"added": entry["nick"], "already_known": already}
+
+
+def build_remove_source_result(bot_raw):
+    """POST /api/filelists/sources/<nick>/remove payload.
+
+    Only a HAND-ENTERED row can be forgotten here, and only while no list is
+    held for it. A bot that advertises is not the operator's to forget - it
+    would be back at its next advert, and pretending otherwise is a row that
+    reappears - and a held list is forgotten by the purge routes, which know
+    about requests in flight. So this answers 409 for both, and says which.
+    """
+    import irc
+
+    err = reject_if_unsafe_for_irc_line(bot_raw, "bot")
+    if err:
+        return 400, {"error": err}
+    bot = str(bot_raw).strip()
+    key = bot.lower()
+    if not key:
+        return 400, {"error": "'bot' is required."}
+    if key in (getattr(config, "fetched_bot_lists", {}) or {}):
+        return 409, {"error": f"A list is held for {bot}; purge that first."}
+    entry = runtime.known_bots.get(key)
+    if not isinstance(entry, dict):
+        return 404, {"error": f"{bot} is not a known source."}
+    if not entry.get("hand_entered"):
+        return 409, {"error": f"{bot} is here because it advertises; it "
+                              "would be back at its next advert."}
+    runtime.known_bots.pop(key, None)
+    irc._flush_known_bots(force=True)
+    return 200, {"removed": bot}
+
+
+_NICK_RE = None
+
+
+def _looks_like_a_nick(text):
+    """RFC 2812's nick shape, loosely: a letter or one of the special
+    characters first, then letters, digits, specials and '-'. Refuses a
+    channel prefix and anything with whitespace - the value becomes a
+    registry key and a PRIVMSG target."""
+    global _NICK_RE
+    import re
+    if _NICK_RE is None:
+        _NICK_RE = re.compile(r"^[A-Za-z\[\]\\`_^{|}][A-Za-z0-9\[\]\\`_^{|}\-]{0,63}$")
+    return bool(_NICK_RE.match(str(text)))
 
 
 def build_purge_offline_fetched_lists_result():
@@ -3900,6 +4001,19 @@ if HAVE_FLASK:
             # neither should start answering the other's.
             return jsonify(build_own_list_summaries()
                            + build_fetched_bot_list_summaries())
+
+        @app.route("/api/filelists/sources", methods=["POST"])
+        def api_filelists_add_source():
+            body = json_object(request.get_json(silent=True))
+            status, result = build_add_source_result(body.get("bot", ""))
+            return jsonify(result), status
+
+        @app.route("/api/filelists/sources/<nick>/remove", methods=["POST"])
+        def api_filelists_remove_source(nick):
+            # POST .../remove rather than DELETE, the shape /api/fetch/<id>/
+            # delete already uses: one verb everywhere the page mutates.
+            status, result = build_remove_source_result(nick)
+            return jsonify(result), status
 
         @app.route("/api/filelists/purge-offline", methods=["POST"])
         def api_filelists_purge_offline():

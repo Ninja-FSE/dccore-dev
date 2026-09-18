@@ -182,6 +182,11 @@
     filelistsBotList: document.getElementById("filelists-bot-list"),
     filelistsPurgeBtn:    document.getElementById("filelists-purge-offline-btn"),
     filelistsPurgeStatus: document.getElementById("filelists-purge-status"),
+    filelistsAddSourceForm:  document.getElementById("filelists-add-source-form"),
+    filelistsAddSourceInput: document.getElementById("filelists-add-source-input"),
+    filelistsAddSourceBtn:   document.getElementById("filelists-add-source-btn"),
+    filelistsForgetSourceBtn: document.getElementById("filelists-forget-source-btn"),
+    filelistsSourceStatus:   document.getElementById("filelists-source-status"),
     filelistsPrevBtn:     document.getElementById("filelists-prev-btn"),
     filelistsNextBtn:     document.getElementById("filelists-next-btn"),
     filelistsPageInfo:    document.getElementById("filelists-page-info"),
@@ -1242,6 +1247,63 @@
     el.filelistsPurgeStatus.hidden = false;
   }
 
+  // A BOT NAMED BY HAND (#376). The sidebar is built from adverts we have
+  // seen, so a bot that answers "@nick" but never advertises on a channel we
+  // are in had no row and no way to be fetched from here. The nick goes to
+  // POST /api/filelists/sources and comes back as an ordinary not-held row,
+  // tagged "by hand"; Forget sends the same nick to .../remove. Both refresh
+  // the list straight away rather than waiting for the next poll.
+  function showFilelistsSourceStatus(text, isError) {
+    el.filelistsSourceStatus.textContent = text;
+    el.filelistsSourceStatus.classList.toggle("is-error", !!isError);
+    el.filelistsSourceStatus.hidden = false;
+  }
+
+  function sourceNickTyped() {
+    return String(el.filelistsAddSourceInput.value || "").trim();
+  }
+
+  el.filelistsAddSourceForm.addEventListener("submit", function (evt) {
+    evt.preventDefault();
+    var nick = sourceNickTyped();
+    if (!nick) { return; }
+    el.filelistsAddSourceBtn.disabled = true;
+    postJson("/api/filelists/sources", { bot: nick }).then(function (res) {
+      if (!res.ok) {
+        showFilelistsSourceStatus(
+          t("filelists.couldNotAddSource").replace("{error}", (res.data && res.data.error) || ("HTTP " + res.status)), true);
+        return;
+      }
+      var key = res.data.already_known ? "filelists.sourceAlreadyKnown" : "filelists.sourceAdded";
+      showFilelistsSourceStatus(t(key).replace("{nick}", res.data.added), false);
+      el.filelistsAddSourceInput.value = "";
+      pollFilelistsBots();
+    }).finally(function () {
+      el.filelistsAddSourceBtn.disabled = false;
+    });
+  });
+
+  el.filelistsForgetSourceBtn.addEventListener("click", function () {
+    var nick = sourceNickTyped();
+    if (!nick) {
+      showFilelistsSourceStatus(t("filelists.typeANickToForget"), true);
+      return;
+    }
+    el.filelistsForgetSourceBtn.disabled = true;
+    postJson("/api/filelists/sources/" + encodeURIComponent(nick) + "/remove", {}).then(function (res) {
+      if (!res.ok) {
+        showFilelistsSourceStatus(
+          t("filelists.couldNotForgetSource").replace("{error}", (res.data && res.data.error) || ("HTTP " + res.status)), true);
+        return;
+      }
+      showFilelistsSourceStatus(t("filelists.sourceForgotten").replace("{nick}", res.data.removed), false);
+      el.filelistsAddSourceInput.value = "";
+      pollFilelistsBots();
+    }).finally(function () {
+      el.filelistsForgetSourceBtn.disabled = false;
+    });
+  });
+
   // Switching which bot's list is shown ------------------------------------
 
   // Delegated, because the rows are rebuilt on every poll - a listener per
@@ -1558,6 +1620,17 @@
     // list", or the list's own name).
     name.textContent = grouped ? group.nick : (primary.label || primary.bot);
     button.appendChild(name);
+
+    // Named by the operator rather than seen advertising (#376): say so on
+    // the row, since the grey "cannot tell" it shows until an advert or a
+    // fetch arrives would otherwise look like a bot we know nothing about.
+    if (primary.hand_entered && !primary.held) {
+      var hand = document.createElement("span");
+      hand.className = "bot-row-hand";
+      hand.textContent = t("filelists.handEnteredTag");
+      hand.title = t("filelists.handEnteredTitle");
+      button.appendChild(hand);
+    }
 
     if (grouped) {
       var badge = document.createElement("span");
