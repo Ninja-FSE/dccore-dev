@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.12.2 — The Dashboard Speaks For Itself
 
 - **`!ping` and `!debugnames` now answer only you.** They used to be answered by every DCCore bot in the channel whoever typed them, so another operator checking their own bot made yours run a latency check too and report it in your admin console as if you had asked - and neither command ever answered the person who typed it. Both are diagnostics for the operator, so they now respond only to a nick in `ADMIN_NICK`. `!list` is unchanged: it is how people discover bots, and every bot keeps answering it.
 - **You can add a bot to the List Browser by nick.** The sidebar only ever showed bots the program had seen advertising in your channels, so a bot that answers requests but never advertises could not be fetched from the dashboard at all. There is now an **Add a bot that does not advertise** box under the bot list: type its nick, press Add, and it appears as a row marked "by hand" that you can download the list from like any other. It stays until you press Forget with the same nick; a bot that advertises on its own cannot be forgotten this way, because it would simply come back.
