@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🍎 macOS joins the CI matrix
+
+From #69's macOS discussion: "the cheapest first step, by a distance" is to
+add `macos-latest` to CI and let the answer be a fact rather than a guess.
+`platform_compat.py`'s `IS_WINDOWS` switch already treats "not Windows" as
+POSIX-like, so macOS was never expected to need its own branch - this
+either confirms that cheaply or turns up the first real failure to fix.
+README's platform line updated to name all three.
+
 ### 💬 The "?" beside every setting now speaks the operator's language
 
 The user, on #537's tooltips: "some things are too technical. Check for
