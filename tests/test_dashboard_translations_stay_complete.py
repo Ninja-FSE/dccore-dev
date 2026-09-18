@@ -25,6 +25,19 @@ construction. Four ways that drifts, each silent until an operator notices:
 Deliberately not covering the Console or the debug channel: neither is
 translated (see docs/UPDATES.md and issue #69) - both show the same lines
 the daemon's own log does, which is a separate, larger piece of work.
+
+ONE DELIBERATE EXCEPTION: a "settings.field.NAME.help" key (#528's "?"
+tooltip text). fieldHelp() in app.js looks these up directly in the loaded
+dictionary rather than through t(), specifically so a language missing one
+falls back to the server's own English explanation rather than to a raw
+key string - see the comment above fieldHelp() itself. That makes a
+".help" key optional by design: en.json is never expected to carry one (the
+server's text already is the English version), and fr.json/es.json filling
+them in gradually, one setting at a time, is the intended, expected state -
+not drift. The cross-language completeness check below excludes them for
+that reason; SettingsHelpKeysAreHonest below checks the one thing that
+still matters for them - that a ".help" key actually names a real setting,
+so a typo in a translated key does not just silently never match.
 """
 
 import io
@@ -61,6 +74,14 @@ DATA_I18N = re.compile(r'data-i18n(?:-html|-placeholder|-title)?="([^"]+)"')
 # class here would silently stop matching those keys, the same way it once
 # stopped one character short of "settings.field.SERVER"'s neighbours.
 JS_KEY_SHAPED_STRING = re.compile(r'"([a-z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)+)"')
+
+HELP_KEY_SUFFIX = ".help"
+
+
+def is_settings_help_key(key):
+    """A "?" tooltip translation (see the module docstring) - optional in
+    every language, including English, by design."""
+    return key.endswith(HELP_KEY_SUFFIX)
 
 
 def read(name):
@@ -103,7 +124,9 @@ class TheDictionariesAgreeWithEachOther(unittest.TestCase):
     silent drop back to English for one language and not the others."""
 
     def test_no_language_is_missing_a_key_another_one_has(self):
-        key_sets = {code: set(load_dict(code).keys()) for code in LANGUAGES}
+        key_sets = {code: set(k for k in load_dict(code).keys()
+                              if not is_settings_help_key(k))
+                    for code in LANGUAGES}
         union = set().union(*key_sets.values())
 
         for code, keys in key_sets.items():
@@ -160,6 +183,30 @@ class NothingInEnglishGoesUnused(unittest.TestCase):
                          "defined in web/lang/en.json but not referenced by "
                          "index.html's data-i18n attributes or app.js's "
                          "views{} object: " + ", ".join(orphaned))
+
+
+class SettingsHelpKeysAreHonest(unittest.TestCase):
+    """The one thing that still has to hold for the optional ".help" keys
+    (see the module docstring): each one's stem - the part before ".help" -
+    must be a real "settings.field.NAME" key, i.e. one en.json defines and
+    the page actually references. Without this, a typo in a translated key
+    (a wrong NAME, a doubled suffix) would just never match in fieldHelp()
+    and silently fall back to English, exactly like a key nobody defined at
+    all - the one failure mode this file otherwise always catches."""
+
+    def test_every_help_key_names_a_real_settings_field(self):
+        english = set(load_dict("en").keys())
+        referenced = keys_referenced_in_source()
+
+        for code in LANGUAGES:
+            help_keys = [k for k in load_dict(code).keys() if is_settings_help_key(k)]
+            with self.subTest(language=code):
+                bad = sorted(k for k in help_keys
+                             if k[:-len(HELP_KEY_SUFFIX)] not in english
+                             or k[:-len(HELP_KEY_SUFFIX)] not in referenced)
+                self.assertEqual(bad, [],
+                                 f"{code}.json has \".help\" keys that do not "
+                                 f"name a real, referenced settings field: {bad}")
 
 
 if __name__ == "__main__":
