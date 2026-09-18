@@ -58,6 +58,52 @@ without help, translation before server text, keyboard reachable, the key
 in all three dictionaries, CSS on both `:hover` and `:focus`. Exercised
 through the real Flask app behind the login: 106 of 106 fields carry help.
 
+### ⏱️ Auto re-fetch fired before the bot had joined anything
+
+Follow-up to the previous entry, surfaced by fixing it: once the sweep
+could actually get past its own input validation, it turned out to run far
+too early.
+
+`list_fetch.auto_refetch_worker()` is started from `oserve.startup()` and
+calls `refetch_due_lists()` as its very first action, synchronously, with
+no gate on connection or channel-join state at all. Seen live: the fetch
+request was queued and dispatched (via `oserve.queue_message()` into
+`queue_mgr.config.send_queue`, drained as soon as a raw socket exists)
+several seconds before the server confirmed registration, and roughly 20+
+seconds before any channel was actually joined.
+
+`webserver.build_list_fetch_enqueue_result()`'s own presence check,
+`bot_not_here_error()`, treats an empty `channel_users` as "unknown" rather
+than "absent" - correct in general, since a bot mid-JOIN should not be
+judged gone (see `test_we_do_not_ask_a_bot_that_is_not_there.py`'s own
+docstring on that distinction) - so it never refused at cold startup, when
+`channel_users` is *always* empty. The dispatcher then built its `PRIVMSG`
+using `dcc.channel_containing_user(bot) or default_channel`, and since we
+were not in any channel yet, fell back to whatever channel is first in
+`config.CHANNEL` - one we had not joined either. The message most likely
+never reached the target bot - dropped pre-registration by the server, or
+landed in a channel we were not yet a member of - and the request just
+timed out as "no response", indistinguishable in the log from the target
+bot genuinely being unreachable.
+
+Now: `refetch_due_lists()` refuses outright (returns `[]`) while
+`config.bot_joined_channel` is not yet `True` - the same gate `dcc.py`'s
+own presence decisions already use, and for the identical reason.
+`irc.delayed_activate()` runs the sweep once, in its own thread, right
+after that flag is claimed - mirroring `dcc.wake_restored_queues()`'s
+activation hook from #531 - so a fresh start does not otherwise wait up to
+an hour (the worker's own sweep interval) for its first real attempt.
+
+A new test, `test_nothing_is_asked_before_the_bot_has_joined_anything`,
+pins the guard; `AskingAgainWithoutBeingAsked`'s existing tests now set
+`bot_joined_channel=True` in `setUp()` as the steady state they were always
+meant to represent. Three source-inspection tests in a new
+`ActivationWakesTheSweepToo` class check the activation hook the same way
+the equivalent `dcc.wake_restored_queues` hook is already checked: it runs
+after channel sync is claimed, only when the feature is switched on, and in
+its own thread rather than blocking activation. Verified by hand: reverting
+either the guard or the hook fails exactly the tests meant to catch it.
+
 ### 🔁 Auto re-fetch called its own validator with the wrong shape
 
 Seen live, with `AUTO_REFETCH_LISTS` on: `[LIST-FETCH] Did not re-ask

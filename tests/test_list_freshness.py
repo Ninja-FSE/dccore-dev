@@ -261,7 +261,13 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
                                  runtime.known_bots.update(original)))
         self.set_config(AUTO_REFETCH_LISTS=True,
                         AUTO_REFETCH_INTERVAL_HOURS=0,
-                        AUTO_REFETCH_MAX_PER_RUN=3)
+                        AUTO_REFETCH_MAX_PER_RUN=3,
+                        # The steady state every test below means to
+                        # represent: already settled into its channels. The
+                        # one test for the OTHER state
+                        # (test_nothing_is_asked_before_the_bot_has_joined_anything)
+                        # overrides this for itself.
+                        bot_joined_channel=True)
 
     def hold(self, bot, then, fetched_at=1.0):
         store = dict(getattr(config, "fetched_bot_lists", {}) or {})
@@ -397,6 +403,24 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
 
         self.assertEqual(due, ["Oldest", "Middle", "Newest"])
 
+    def test_nothing_is_asked_before_the_bot_has_joined_anything(self):
+        """Reported live: the very first sweep ran from oserve.startup()
+        before the IRC socket had even finished registering, let alone
+        joined a channel - so the PRIVMSG it queued went out mid-handshake,
+        into whatever channel happened to be first in config.CHANNEL rather
+        than one the bot was actually in, and the target bot never saw it.
+        Refusing outright while unsettled - the same gate dcc.py's own
+        presence decisions already use - means the sweep simply waits for
+        the activation hook (irc.delayed_activate()) instead of firing into
+        a connection that is not ready for it."""
+        self.set_config(bot_joined_channel=False)
+        self.hold("ReelBot", {"files": 100, "list_date": "Aug 1st"})
+        self.advertise("ReelBot", {"files": 250, "list_date": "Sep 6th"})
+
+        started = list_fetch.refetch_due_lists(log=lambda *_a: None, now=10 ** 9)
+
+        self.assertEqual(started, [])
+
     def test_a_sweep_asks_through_the_same_enqueue_the_dashboard_uses(self):
         """So the slot limits, the duplicate guard and the queue ceiling all
         apply exactly as they do to a fetch started by hand."""
@@ -474,6 +498,50 @@ class AskingAgainWithoutBeingAsked(DCCoreTestCase):
         # nick itself, not a dict wrapping it - see the sibling test above
         # and #535.
         self.assertEqual(calls, ["Oldest"])
+
+
+class ActivationWakesTheSweepToo(unittest.TestCase):
+    """Read from the source, the same way
+    test_the_sweep_could_not_see_a_pm_requester.py's
+    test_activation_runs_it_once_channel_users_is_trusted checks
+    dcc.wake_restored_queues: delayed_activate is a closure inside irc_loop,
+    and the call has to sit in the branch that just claimed channel sync,
+    after the claim - the auto-refetch sweep refuses outright before that
+    point (see refetch_due_lists()'s own guard), for the identical reason
+    dcc.py's presence decisions do."""
+
+    def body(self):
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        block = source[source.index("def delayed_activate("):]
+        return block[:block.index("def background_nick_monitor(")]
+
+    def test_it_runs_after_channel_sync_is_claimed(self):
+        body = self.body()
+
+        claimed = body.index("config.bot_joined_channel = True")
+        woken = body.index("threading.Thread(target=list_fetch.refetch_due_lists")
+        unsynced = body.index("No channel members known yet")
+
+        self.assertLess(claimed, woken, "the sweep runs before channel sync is claimed")
+        self.assertLess(woken, unsynced, "the sweep is not inside the synced branch")
+
+    def test_it_only_runs_when_the_feature_is_on(self):
+        """A thread started unconditionally would import list_fetch and spin
+        up a sweep even for an operator who never turned this on."""
+        block = self.body()
+        woken = block.index("dcc.wake_restored_queues")
+        block = block[woken:block.index("threading.Thread(target=list_fetch.refetch_due_lists")]
+
+        self.assertIn("AUTO_REFETCH_LISTS", block)
+
+    def test_it_does_not_block_activation(self):
+        """The same reasoning wake_restored_queues gets its own thread for:
+        a slow read over every held list must not hold up the connection
+        settling."""
+        block = self.body()
+
+        self.assertIn("threading.Thread(target=list_fetch.refetch_due_lists", block)
 
 
 if __name__ == "__main__":
