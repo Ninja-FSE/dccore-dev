@@ -78,8 +78,8 @@ class TheParser(unittest.TestCase):
 
 
 class TheTextForThePage(unittest.TestCase):
-    """help_text() joins lines into paragraphs: a blank comment line is a
-    paragraph break, everything else runs on."""
+    """developer_text() joins the comment lines into paragraphs: a blank
+    comment line is a paragraph break, everything else runs on."""
 
     def setUp(self):
         self._real = settings_help.help_lines
@@ -90,20 +90,20 @@ class TheTextForThePage(unittest.TestCase):
 
     def test_lines_join_with_spaces(self):
         self.fake(["one", "two"])
-        self.assertEqual(settings_help.help_text("X"), "one two")
+        self.assertEqual(settings_help.developer_text("X"), "one two")
 
     def test_a_blank_line_is_a_paragraph_break(self):
         self.fake(["one", "", "two"])
-        self.assertEqual(settings_help.help_text("X"), "one\n\ntwo")
+        self.assertEqual(settings_help.developer_text("X"), "one\n\ntwo")
 
     def test_leading_and_trailing_blanks_do_not_make_empty_paragraphs(self):
         self.fake(["", "one", ""])
-        self.assertEqual(settings_help.help_text("X"), "one")
+        self.assertEqual(settings_help.developer_text("X"), "one")
 
     def test_nothing_is_the_empty_string(self):
         self.fake([])
-        self.assertEqual(settings_help.help_text("X"), "")
-        self.assertEqual(settings_help.help_text("NOT_THERE"), "")
+        self.assertEqual(settings_help.developer_text("X"), "")
+        self.assertEqual(settings_help.developer_text("NOT_THERE"), "")
 
 
 class TheRealFile(unittest.TestCase):
@@ -165,7 +165,87 @@ class TheRealFile(unittest.TestCase):
         os.rmdir(gone)
         settings_help.DEFAULTS_PATH = os.path.join(gone, "defaults.py")
 
-        self.assertEqual(settings_help.help_text("MAX_DCC_SLOTS"), "")
+        self.assertEqual(settings_help.developer_text("MAX_DCC_SLOTS"), "")
+        # The plain explanation does not come from that file, so the page
+        # still has something to show.
+        self.assertTrue(settings_help.help_text("MAX_DCC_SLOTS"))
+
+
+class ItIsWrittenForTheOperator(unittest.TestCase):
+    """The first "?" showed the developer's comment block, and NICKNAME's
+    talks about settings_file.REQUIRED and oserve.startup() - right for the
+    code, meaningless for an operator. "How is a simple user going to
+    understand it?" So every setting the page shows has an explanation
+    written for the operator, and the developer's block stays where
+    developers read it.
+    """
+
+    def page_settings(self):
+        import webserver
+        return [n for _id, _label, names in webserver.SETTINGS_CATEGORIES for n in names]
+
+    def test_every_setting_on_the_page_has_a_plain_explanation(self):
+        missing = [n for n in self.page_settings() if not settings_help.plain_text(n)]
+        self.assertEqual(missing, [], "write a PLAIN_HELP entry in settings_help.py for: " + ", ".join(missing))
+
+    def test_no_plain_explanation_is_for_a_setting_that_does_not_exist(self):
+        stray = sorted(set(settings_help.PLAIN_HELP) - set(self.page_settings()))
+        self.assertEqual(stray, [], "PLAIN_HELP entries for settings the page does not show: " + ", ".join(stray))
+
+    def test_the_plain_text_wins_over_the_developer_block(self):
+        self.assertEqual(settings_help.help_text("NICKNAME"), settings_help.plain_text("NICKNAME"))
+        self.assertNotIn("settings_file", settings_help.help_text("NICKNAME"))
+        self.assertNotIn("oserve", settings_help.help_text("NICKNAME"))
+
+    def test_it_speaks_no_code(self):
+        """The rule that makes it plain: no module or file names, no
+        function calls, no issue numbers, no ALL_CAPS settings other than
+        the ones an operator has to type. A few settings must be named
+        because the operator sees them on the same page."""
+        import re
+        jargon = re.compile(r"\.py\b|\w+\(\)|#\d{2,}|settings_file|oserve\b|webserver\b|announce\b|dcc\.|list\.py")
+        # admin_config.py is a file the operator edits by hand; naming it
+        # is instruction, not jargon.
+        offenders = {n: t for n, t in settings_help.PLAIN_HELP.items()
+                     if jargon.search(t.replace("admin_config.py", ""))}
+        self.assertEqual(offenders, {})
+
+    def test_it_is_short(self):
+        """A tooltip, not an essay: three sentences at most in practice."""
+        long = {n: len(t) for n, t in settings_help.PLAIN_HELP.items() if len(t) > 320}
+        self.assertEqual(long, {})
+
+    def test_the_sample_shows_the_plain_text_first(self):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        self.addCleanup(lambda: sys.path.remove(os.path.join(REPO_ROOT, "scripts")))
+        import gen_settings_sample
+        sample = gen_settings_sample.build()
+        plain = settings_help.plain_text("NICKNAME")
+        first_words = " ".join(plain.split()[:6])
+        at = sample.index(first_words)
+        self.assertLess(at, sample.index("#NICKNAME = "))
+        # and the developer's block still follows it, for whoever wants it
+        self.assertIn("settings_file.REQUIRED", sample[at:sample.index("#NICKNAME = ")])
+
+    def test_french_and_spanish_carry_a_translation_of_every_one(self):
+        """The tooltip follows the language picker: fieldHelp() looks up
+        settings.field.<NAME>.help before falling back to this English."""
+        for lang in ("fr", "es"):
+            with io.open(os.path.join(REPO_ROOT, "web", "lang", lang + ".json"),
+                         encoding="utf-8") as handle:
+                d = json.load(handle)
+            for name, english in settings_help.PLAIN_HELP.items():
+                key = "settings.field." + name + ".help"
+                with self.subTest(lang=lang, setting=name):
+                    self.assertIn(key, d)
+                    self.assertNotEqual(d[key], english, "not translated")
+
+    def test_english_is_not_duplicated_in_the_dictionary(self):
+        """One source. en.json carries no .help: the page falls back to the
+        server's text, which is PLAIN_HELP - so there is nothing to drift."""
+        with io.open(os.path.join(REPO_ROOT, "web", "lang", "en.json"), encoding="utf-8") as handle:
+            d = json.load(handle)
+        self.assertEqual([k for k in d if k.endswith(".help")], [])
 
 
 class TheGeneratorUsesTheSameParser(unittest.TestCase):
@@ -195,11 +275,11 @@ class ThePayloadCarriesIt(unittest.TestCase):
         without = sorted(name for name, f in fields.items() if not f.get("help"))
         self.assertEqual(without, [], "fields sent to the page with no help: " + ", ".join(without))
 
-    def test_the_help_is_the_comment_from_defaults(self):
+    def test_the_help_is_the_plain_explanation(self):
         fields = self.fields()
         self.assertEqual(fields["MAX_DCC_SLOTS"]["help"],
-                         settings_help.help_text("MAX_DCC_SLOTS"))
-        self.assertIn("simultaneous", fields["MAX_DCC_SLOTS"]["help"])
+                         settings_help.plain_text("MAX_DCC_SLOTS"))
+        self.assertIn("at the same time", fields["MAX_DCC_SLOTS"]["help"])
 
 
 class ThePageDrawsIt(unittest.TestCase):

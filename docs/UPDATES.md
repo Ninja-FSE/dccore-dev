@@ -4,6 +4,51 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 💬 The "?" beside every setting now speaks the operator's language
+
+The user, on #537's tooltips: "some things are too technical. Check for
+example the nickname explanation. How is a simple user going to understand
+it?" Fair - `NICKNAME`'s "?" read: *"NICKNAME, ADMIN_NICK and CHANNEL are
+None - not a real value - because they ARE in settings_file.REQUIRED:
+oserve.startup() refuses to boot while any of them is still blank..."*
+That is the developer's record of why, which is exactly what belongs in
+`defaults.py` and exactly what does not belong in a tooltip. The two
+readers want different texts, and #537 gave both the same one.
+
+- **`settings_help.PLAIN_HELP`** - one explanation per setting the page
+  shows (113), written for the person running the bot: what it does, when
+  they would change it, what a sensible value is. `NICKNAME` now reads
+  *"The bot's name on IRC. People request files with it (for example
+  @YourBot for the list), so pick something short and easy to type.
+  Required - the bot will not start without it."*
+- `help_text()` returns the plain text when there is one and the developer
+  block otherwise (`developer_text()`, the old behaviour under its real
+  name). The comment blocks in `defaults.py` are untouched.
+- **`settings.conf.sample`** shows the plain text first, wrapped, then a
+  blank comment line, then the developer's block - the order a reader
+  wants them in. Regenerated.
+- **French and Spanish**, all 113, under `settings.field.<NAME>.help` in
+  `fr.json`/`es.json`. These **replace** the entries Neo added in #542 an
+  hour earlier: those were faithful translations of the technical text this
+  change retires, and a tooltip that is plain in English and technical in
+  French would be worse than either. `en.json` carries none, as #542's
+  design says - the page falls back to the server's text, which is the
+  source, so there is nothing to drift.
+
+Guards in `tests/test_every_setting_explains_itself.py`
+(`ItIsWrittenForTheOperator`, 8): every setting on the page has a plain
+explanation and no explanation is for a setting the page does not show;
+plain wins over the developer block; **it speaks no code** - no `.py`
+names (except `admin_config.py`, which the operator edits by hand), no
+`function()` calls, no issue numbers, no module names - the rule that keeps
+the next entry plain too; it is short (≤ 320 characters); the sample shows
+the plain text first with the developer block after; fr and es carry a
+translation of every one, and none is identical to the English; `en.json`
+carries no `.help`. The three earlier paragraph-joining tests now name
+`developer_text()`, which is what they were testing. The identifier sweep
+(`test_no_personal_identifiers_ship`) passes on all three languages - it
+caught a fragment in #542's Spanish once, so it was run on purpose.
+
 ### 🌐 The settings "?" tooltips speak French and Spanish now
 
 #537 shipped the tooltip mechanism but no translations for it on purpose:
