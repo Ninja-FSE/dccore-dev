@@ -1615,6 +1615,11 @@ def handle_resume_request(irc_sock, user, body):
         return False
     print(f"[DCC-RESUME] {user} already has {position} of {size} bytes of "
           f"{offered_name}; accepted and will send from there.")
+    import stats_mgr
+    announce.send_debug(
+        f'Resumed "{offered_name}" for {user} at '
+        f'{stats_mgr.format_size_human(position)} of {stats_mgr.format_size_human(size)}',
+        category="RESUMED")
     return True
 
 
@@ -2023,7 +2028,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
                 
                 # One single clean line to the debug channel, nothing more
-                announce_mod.send_debug(f"{user} requested \"{clean_folder_name}\". Starting rar and sending when done.", category="INFO")
+                announce_mod.send_debug(f"{user} asked for the folder \"{clean_folder_name}\" - packing it, sending when done.", category="REQUEST")
                 
                 announce_mod.send_dcc_queue_notice(user, folder_name, user_pos)
                 threading.Thread(target=check_queue_and_send, args=(irc_sock, user), daemon=True).start()
@@ -2259,6 +2264,12 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             return
 
         file_name = os.path.basename(full_path)
+
+        # The console feed (#528): the request is real and the file exists -
+        # whether it sends now or queues is decided under the lock below, and
+        # each of those reports itself (SENDING / QUEUED). A refused request
+        # is reported by its refusal.
+        announce.send_debug(f'{user} asked for "{file_name}"', category="REQUEST")
 
         with queue_lock:
             total_global_queued = get_total_queued_count()

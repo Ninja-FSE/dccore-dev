@@ -2302,6 +2302,9 @@ SETTINGS_CATEGORIES = (
     ("web-dashboard", "Web dashboard",         ["WEBUI_ENABLED", "WEBUI_HOST", "WEBUI_PORT",
                                                 "WEBUI_CONSOLE_ENABLED", "WEBUI_OPEN_BROWSER",
                                                 "WEBUI_FOLDER_BROWSER_ENABLED"]),
+    ("console-feed",  "Console feed",          ["CONSOLE_SHOW_REQUESTS", "CONSOLE_SHOW_QUEUE",
+                                                "CONSOLE_SHOW_SENDS", "CONSOLE_SHOW_FAILURES",
+                                                "CONSOLE_SHOW_SEARCHES", "DEBUG_CHANNEL_FEED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL",
                                                 "DEBUG_TO_CONSOLE",
                                                 "CONSOLE_TIMESTAMP_FORMAT", "PROJECT_URL"]),
@@ -2451,6 +2454,12 @@ SETTINGS_LABELS = {
     "DEBUG_MODE": "Debug mode",
     "DEBUG_TO_CHANNEL": "Send debug lines to channel",
     "DEBUG_TO_CONSOLE": "Send debug lines to admin console",
+    "CONSOLE_SHOW_REQUESTS": "Show requests (who asked for what)",
+    "CONSOLE_SHOW_QUEUE": "Show queue positions",
+    "CONSOLE_SHOW_SENDS": "Show transfers starting, resuming and completing",
+    "CONSOLE_SHOW_FAILURES": "Show failed transfers",
+    "CONSOLE_SHOW_SEARCHES": "Show searches and their result counts",
+    "DEBUG_CHANNEL_FEED": "Also send requests, queue positions, starts and searches to the IRC debug channel",
     "CONSOLE_TIMESTAMP_FORMAT": "Time prefix on every console line (strftime; blank = none)",
     "PROJECT_URL": "Project URL",
 }
@@ -2524,6 +2533,18 @@ def _settings_field(name, declared, value):
     unit = SETTINGS_UNITS.get(name)
     if unit:
         field["unit"], field["unit_factor"] = unit
+
+    # WHAT THE SETTING MEANS (#528). "A lot of settings are not easy to
+    # understand" - and the explanation for every one of them already
+    # existed, as the comment block beside it in defaults.py, which
+    # settings.conf.sample is generated from. settings_help reads the same
+    # block, so the code, the sample and the page can never disagree. The
+    # page draws a "?" beside the label that shows this on hover; a setting
+    # with nothing to say gets no "?" rather than an empty box.
+    import settings_help
+    help_text = settings_help.help_text(name)
+    if help_text:
+        field["help"] = help_text
 
     # A TRI-STATE NEEDS A THIRD ANSWER. WEBUI_CONSOLE_ENABLED is declared
     # `bool = None`, and None does not mean False: console_is_enabled() reads
