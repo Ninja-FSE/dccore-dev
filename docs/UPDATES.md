@@ -49,6 +49,40 @@ carries no `.help`. The three earlier paragraph-joining tests now name
 (`test_no_personal_identifiers_ship`) passes on all three languages - it
 caught a fragment in #542's Spanish once, so it was run on purpose.
 
+### 🌍 Switching language while on the Settings page left the panel stuck in the old one
+
+Found live, right after the settings-help translations shipped: switching
+the dashboard's language while looking at Settings changed the sidebar nav
+and the page header, and left the category rail and every field's label
+and help text sitting in whatever language they were drawn in the moment
+Settings was first opened.
+
+`applyTranslations()` redoes every `data-i18n`-tagged element and the
+active view's header on a language change - enough for content that is
+either static markup or already gets rebuilt every change. It was not
+enough for Settings: its rail and fields are built once from
+`state.settingsCategories` (`state.settingsLoaded`) and never repainted on
+a timer, unlike Downloads, Stats and the notice/message lists, which all
+redraw from their own poll loop within a few seconds regardless of
+language - so those self-heal almost immediately, and Settings, visited
+once, never did on its own. Clicking a category "fixed" it by coincidence:
+that handler calls the same two render functions the language change
+should have called too.
+
+Fixed by having `applyTranslations()` call `renderSettingsRail()` and
+`renderSettingsCategory()` again, guarded on Settings being the current,
+already-loaded view. Both read only from state already in hand - no
+server request, so nothing here can race an edit in progress the way a
+reload would; `renderSettingsCategory()` already restores a dirty field's
+typed value from `state.settingsDirty` rather than `field.value`, the same
+repaint an ordinary category switch already performs safely.
+
+`tests/test_language_switch_repaints_the_active_view.py` (4, source
+inspection like the rest of this page's tests): the repaint calls are
+present, guarded on both the active view and `settingsLoaded`, and never
+re-fetch from the server. Verified by hand: reverting the fix fails 3 of
+the 4 tests.
+
 ### 🌐 The settings "?" tooltips speak French and Spanish now
 
 #537 shipped the tooltip mechanism but no translations for it on purpose:
