@@ -275,6 +275,7 @@ on ^*:CHAT:*: {
     hadd dccore.live state banner
     hadd dccore.live tries 0
     if ($window($+(=,$nick))) { window -h $+(=,$nick) }
+    dccore.title
   }
   ; the heartbeat is the STATUS burst, which only a structured session
   ; gets; a plain session can be quiet for an hour and be perfectly well
@@ -484,9 +485,19 @@ alias dccore.window {
   if ($window($dccore.win)) { return }
   if ($dccore.opt(panel)) { window -el30 $dccore.win }
   else { window -e $dccore.win }
-  if ($dccore.opt(font)) { font $dccore.win 9 Lucida Console }
+  if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
   dccore.title
   dccore.panel
+}
+
+; The size of the Status window's font, so the window reads like the rest
+; of this mIRC - a fixed 9pt was unreadable on a high-resolution screen.
+; $window().fontsize is empty on a very old mIRC; 12 then.
+alias dccore.fontsize {
+  var %size = $window(Status Window).fontsize
+  if (%size !isnum) { return 12 }
+  if (%size < 6) { return 12 }
+  return %size
 }
 
 ; The panel is a listbox the window is created with or without, so a

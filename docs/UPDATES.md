@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔤 The mIRC window in the operator's own size
+
+`dccore.mrc` set its window to a fixed 9 pt Lucida Console, which on a
+high-resolution screen was unreadable beside the rest of mIRC (seen on the
+first real run). `$dccore.fontsize` now takes the Status window's
+`$window().fontsize` - 12 when that is empty or absurd - so `@DCCore` reads
+like every other window; the fixed-width face stays, since the panel's
+columns need it. Also: the title bar is refreshed on the first line of the
+banner, so it no longer says "opening" while the bot is already talking.
+
 ### 🪟 The bot's window in mIRC
 
 #550, step 4 of 4 - `scripts/mirc/dccore.mrc`, the client the structured
