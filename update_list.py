@@ -93,6 +93,12 @@ def rar_extensions():
     return _extension_set("RAR_EXTENSIONS")
 
 
+def video_companion_extensions():
+    """Extensions that follow a video into its list when they share its
+    folder - subtitles, .nfo, .sfv. See LIST_VIDEO_COMPANION_EXTENSIONS."""
+    return _extension_set("LIST_VIDEO_COMPANION_EXTENSIONS")
+
+
 def pack_size_over(path, cap):
     """Is packing `path` going to exceed `cap` bytes? Returns (over, measured).
 
@@ -231,8 +237,28 @@ def _has_extension(name, extensions):
 
 
 def is_video_file(name, video=None):
-    """Does this file belong in the video list rather than the music one?"""
+    """Is this file a video, by extension?"""
     return _has_extension(name, video_extensions() if video is None else video)
+
+
+def is_video_companion_file(name, companions=None):
+    """Is this a file that belongs beside a video - a subtitle, .nfo, .sfv?"""
+    return _has_extension(name, video_companion_extensions() if companions is None else companions)
+
+
+def belongs_in_video_list(name, folder_has_video, video=None, companions=None):
+    """Does this file go in the video list rather than the music one?
+
+    A video does, wherever it is. A companion file does only when its folder
+    holds a video (#411): a scene release then travels whole - the .mkv, its
+    .srt, its .nfo and its .sfv - while an album's .nfo stays with the album.
+    `folder_has_video` is the caller's, decided once per folder from the
+    folder's own files, so the answer for a companion cannot depend on the
+    order the files were met in.
+    """
+    if is_video_file(name, video):
+        return True
+    return bool(folder_has_video) and is_video_companion_file(name, companions)
 
 
 def is_packable_file(name, packable=None):
@@ -1267,6 +1293,7 @@ def generate_master_list(list_name=None):
     # library would have rebuilt each tuple 719,000 times.
     ignored = ignored_extensions()
     video_exts = video_extensions()
+    companion_exts = video_companion_extensions()
     packable_exts = rar_extensions()
     split_video = bool(getattr(config, "SEPARATE_VIDEO_LIST", True))
 
@@ -1380,6 +1407,15 @@ def generate_master_list(list_name=None):
                 unlistable_dirs.append(rel_dir)
                 continue
 
+            # Decided once per folder, before the per-file loop: a companion
+            # file's list depends on whether a video sits beside it (#411),
+            # and that must not depend on which file the walk handed over
+            # first. is_listed_file() is not consulted here on purpose - a
+            # video the operator has ignored still says what kind of folder
+            # this is.
+            folder_has_video = split_video and any(
+                is_video_file(name, video_exts) for name, _bytes in files)
+
             # Keep every track under its exact, complete path on disk
             for file, file_bytes in files:
                 if is_listed_file(file, ignored):
@@ -1412,7 +1448,7 @@ def generate_master_list(list_name=None):
                     # WHICH list the row goes in. With the split off, video
                     # lands in the same list as everything else, which is the
                     # behaviour this had before the setting existed.
-                    if split_video and is_video_file(file, video_exts):
+                    if split_video and belongs_in_video_list(file, folder_has_video, video_exts, companion_exts):
                         video_files_data.append((rel_dir, file, file_bytes))
                     else:
                         all_files_data.append((rel_dir, file, file_bytes))
