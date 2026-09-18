@@ -63,6 +63,18 @@ the offer with Flask hidden, returning 0 on decline; wired in
 intent kept: legacy branch before the first-run branch; a fresh install is
 configured, never started on the defaults.
 
+### 🧪 The quiet-window test without a sleep
+
+`test_a_late_channel_restarts_the_quiet_window` slept 60% of the debounce
+window and asserted nothing had flushed yet - a bet on the scheduler that
+macOS's GitHub runners lost at 0.05 s (#546), and again after it was
+widened to 0.3 s (#548; the failure that reddened #556). The property is
+that the second arrival cancels the timer the first armed and arms a new
+one; the test now checks that on the timer objects (`finished.is_set()`,
+identity), which cannot be late, then waits for the one flush and counts
+both channels. A mutant that stops cancelling fails on the first
+assertion. No sleep left in it.
+
 ## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
 
 ### ✍️ A bot that never advertises can be added by hand
