@@ -6,6 +6,8 @@ An IRC DCC file-sharing daemon — a modern reimplementation of OmenServe, the m
 
 It sits in a channel, advertises a catalogue, and serves files over DCC to whoever asks. It can also fetch files *from* other bots, which OmenServe never could. No third-party packages: everything it needs to talk to IRC, move files, pack albums and run its admin console is in the standard library.
 
+**Getting started:** install Python 3.10+, extract, and run the launcher for your system - `scripts\windows\start-dccore.bat` (double-click), `scripts/linux/start-dccore.sh`, or `scripts/macos/start-dccore.command`. The first run asks the setup questions itself. Details in [docs/INSTALL.md](docs/INSTALL.md) and [docs/WINDOWS.md](docs/WINDOWS.md).
+
 ## What it does
 
 - **Serves files over DCC** — per-user and global queues, configurable slots, `!rar` album packing on demand, and DCC RESUME so an interrupted download continues instead of starting over
