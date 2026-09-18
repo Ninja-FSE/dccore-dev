@@ -448,6 +448,7 @@
   "settings.field.LIST_HEADER_MAX_BYTES": "List banner size limit",
   "settings.field.LIBRARY_FOLDERS_FILE": "Served folders file",
   "settings.field.LISTS_FILE": "Served lists file",
+  "settings.field.ADMIN_TOKENS_FILE": "Paired console scripts file",
   "settings.field.ON_CONNECT_FILE": "On-connect commands file",
   "settings.field.THEME": "Colour theme",
   "settings.field.CUSTOM_THEME_BORDER": "Custom theme: border colour",

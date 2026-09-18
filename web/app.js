@@ -3729,6 +3729,7 @@
     LIST_HEADER_MAX_BYTES: "settings.field.LIST_HEADER_MAX_BYTES",
     LIBRARY_FOLDERS_FILE: "settings.field.LIBRARY_FOLDERS_FILE",
     LISTS_FILE: "settings.field.LISTS_FILE",
+    ADMIN_TOKENS_FILE: "settings.field.ADMIN_TOKENS_FILE",
     ON_CONNECT_FILE: "settings.field.ON_CONNECT_FILE",
     THEME: "settings.field.THEME",
     CUSTOM_THEME_BORDER: "settings.field.CUSTOM_THEME_BORDER",

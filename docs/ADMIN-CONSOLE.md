@@ -226,6 +226,9 @@ prefix.
 | `rehash` | reload modules in place |
 | `update` | rebuild the MasterList |
 | `help` | the command list |
+| `hello <client> <version>` | switch this session to the structured feed (below) |
+| `pair <client> <version>` | mint a login token for a script (below) |
+| `unpair [<client>]` | list the paired scripts, or revoke one |
 | `quit` | close the session |
 
 `rehash` and `update` run in the background — `update` walks the whole library
@@ -464,11 +467,69 @@ have been replaced with spaces.
 | `DCCORE LOG <CATEGORY>` | JOIN, PART, QUIT, BAN, HARDBAN, MUTE, TBAN, INFO | the prose, as the plain console shows it |
 | `DCCORE OUT` | | one line of a console command's reply |
 | `DCCORE DROPPED <n>` | lines the bot had to drop for a slow client | |
+| `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record | |
+| `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
+| `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
+| `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
 
 Whatever you did not tick in **Settings → Console feed** is not sent in either
 mode. A session that never says `hello` is the console described above,
-unchanged. (Step 2 of #550; `STATUS`, `SLOT` and `QUEUE` lines and pairing
-tokens are step 3, the script itself step 4.)
+unchanged.
+
+### The live picture
+
+`STATUS`, then a `SLOT` line per transfer, then a `QUEUE` line per waiting
+user, is one **burst**, and it is what a client's title bar and side panel are
+drawn from. It arrives:
+
+- right after `HELLO`, so the window is filled before the first event;
+- after any event that moved a slot or the queue (`SENDING`, `SENT`, `FAIL`,
+  `QUEUED`, `RESUMED`), so the picture never waits for the timer;
+- every 30 seconds while the session is quiet. That is also the heartbeat: a
+  client that has heard nothing for a minute or so knows the link is dead,
+  not merely idle.
+
+The timer fills silence only. A client that is behind is already receiving
+lines, and a burst on top of a backlog would only push more of them off the
+500-line outbox, so the writer drains what is queued before the timer speaks.
+`bps_now` is the daemon's own live speed; a `SLOT` line's `bps` is that
+transfer's bytes over its own elapsed time, and reads `0` for the first half
+second. Today's figures are the rolled ones, the same the advert shows.
+
+### Pairing: a credential that is not the password
+
+A script has to log in without a person typing, which means a credential
+stored on disk. That should not be the admin password: the same string opens
+the dashboard, and a `.mrc` file is not where it belongs. So a script is
+**paired** instead:
+
+```
+pair dccore.mrc 1.0
+```
+
+The bot mints a random token (43 characters), stores only its PBKDF2 hash in
+`data/adminchat_tokens.json` under the client's name, and sends the token back
+once - as `DCCORE TOKEN dccore.mrc <token>` on a structured session, as a
+plain line otherwise. Paste it into the script's settings; it is not shown
+again. From then on the script answers `Enter Your Password:` with the token
+and is logged in exactly as with the password: the same hostmask check
+first, the same three attempts, the same IP block.
+
+What a token does **not** do is open the dashboard. The web login checks the
+admin password hash and nothing else - the token store is never read there -
+so a stolen `.mrc` costs you a console session and nothing more, and one
+`unpair` ends even that. Pairing the same name again replaces the old token.
+
+```
+unpair                 list the paired clients and when they were paired
+unpair dccore.mrc      revoke one; its next login is a wrong password
+```
+
+`pair` and `unpair` are console commands: you have to be logged in - with
+the password or with a token - to mint or revoke one. The file lives where
+**Settings → Advanced → Paired console scripts file** points.
+
+(Step 3 of #550; the script itself is step 4.)
 
 ## Limits and timeouts
 
@@ -480,6 +541,7 @@ tokens are step 3, the script itself step 4.)
 | Idle timeout once logged in | none — the console stays open until you close it, log in again from elsewhere, or the connection drops |
 | Sessions at once | 1 |
 | Lines queued for a slow client | 500, then the oldest are dropped (a structured session is told how many) |
+| Structured status burst | every 30 seconds while quiet, and after any slot or queue change |
 
 **A second login replaces the first.** If you left a session open on another
 machine, or your client froze and the server has not timed the nick out yet, just

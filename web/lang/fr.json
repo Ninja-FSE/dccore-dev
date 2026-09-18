@@ -567,6 +567,8 @@
   "settings.field.LIST_HEADER_MAX_BYTES.help": "La partie maximale de ce fichier qui sera utilisée, en octets, pour qu'un mauvais fichier ne gonfle pas chaque liste.",
   "settings.field.LIBRARY_FOLDERS_FILE.help": "Où sont enregistrés les dossiers ajoutés sur la page Bibliothèque.",
   "settings.field.LISTS_FILE.help": "Où sont enregistrées vos définitions de listes, si vous en servez plusieurs.",
+  "settings.field.ADMIN_TOKENS_FILE": "Fichier des scripts appairés à la console",
+  "settings.field.ADMIN_TOKENS_FILE.help": "Où sont conservés les jetons de connexion des scripts appairés à la console d'administration (hachés, comme le mot de passe). Créés par la commande pair de la console ; supprimez-en un avec unpair.",
   "settings.field.ON_CONNECT_FILE.help": "Où sont enregistrées les commandes envoyées à la connexion (comme votre login X).",
   "settings.field.THEME.help": "Le jeu de couleurs de tout ce que le bot dit dans le salon : l'annonce, les notices, les résultats de recherche. Choisissez celui qui vous plaît ; c'est ainsi que les gens distinguent votre bot des autres.",
   "settings.field.CUSTOM_THEME_BORDER.help": "Remplacer une couleur du thème choisi : le bloc qui encadre chaque message. Laissez vide pour garder la couleur du thème.",

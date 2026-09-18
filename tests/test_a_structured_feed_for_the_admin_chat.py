@@ -218,7 +218,10 @@ class ASessionThatSaysHello(DCCoreTestCase):
             adminchat.handle_command(s, "hello dccore.mrc 1.0")
         self.assertTrue(s.structured)
         self.assertEqual(s.client, "dccore.mrc")
-        self.assertTrue(list(s._outbox)[-1].startswith("DCCORE HELLO 1 MusicBot "))
+        # Since step 3 a first STATUS burst follows the greeting; HELLO is
+        # still the first structured line the client sees.
+        first = [l for l in s._outbox if l.startswith("DCCORE ")][0]
+        self.assertTrue(first.startswith("DCCORE HELLO 1 MusicBot "))
 
     def test_before_authentication_hello_is_just_a_wrong_password(self):
         """handle_command() is only reached once authenticated; a line on an
@@ -244,7 +247,9 @@ class ASessionThatSaysHello(DCCoreTestCase):
         s = self.session(); s.structured = True
         s.debug_sink('Sent: "x" to dave [1k/s]', "SENT")            # the prose half
         s.event_sink("SENT", {"nick": "dave", "bytes": 1, "seconds": 1, "bytes_per_s": 1, "name": "x"}, "Sent")
-        self.assertEqual(list(s._outbox), ["DCCORE SENT dave 1 1.0 1 x"], "the prose must not arrive twice")
+        # (step 3 follows a SENT with a STATUS burst; that is not the prose)
+        lines = [l for l in s._outbox if not l.startswith(("DCCORE STATUS ", "DCCORE SLOT ", "DCCORE QUEUE "))]
+        self.assertEqual(lines, ["DCCORE SENT dave 1 1.0 1 x"], "the prose must not arrive twice")
 
     def test_a_structured_session_gets_every_other_category_as_log(self):
         s = self.session(); s.structured = True

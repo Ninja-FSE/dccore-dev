@@ -2421,7 +2421,7 @@ SETTINGS_CATEGORIES = (
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_PROGRESS_FILE", "LIBRARY_FOLDERS_FILE",
-                                                "LISTS_FILE", "ON_CONNECT_FILE",
+                                                "LISTS_FILE", "ADMIN_TOKENS_FILE", "ON_CONNECT_FILE",
                                                 "NOTICES_FILE",
                                                 "PRIVATE_MESSAGES_FILE"]),
 )
@@ -2516,6 +2516,7 @@ SETTINGS_LABELS = {
     "LIST_HEADER_MAX_BYTES": "List banner size limit",
     "LIBRARY_FOLDERS_FILE": "Served folders file",
     "LISTS_FILE": "Served lists file",
+    "ADMIN_TOKENS_FILE": "Paired console scripts file",
     "ON_CONNECT_FILE": "On-connect commands file",
 
     "THEME": "Colour theme",

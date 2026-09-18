@@ -567,6 +567,8 @@
   "settings.field.LIST_HEADER_MAX_BYTES.help": "Lo máximo de ese archivo que se usará, en bytes, para que un archivo equivocado no infle cada lista.",
   "settings.field.LIBRARY_FOLDERS_FILE.help": "Dónde se guardan las carpetas que añadiste en la página Biblioteca.",
   "settings.field.LISTS_FILE.help": "Dónde se guardan tus definiciones de listas, si sirves más de una.",
+  "settings.field.ADMIN_TOKENS_FILE": "Archivo de scripts emparejados con la consola",
+  "settings.field.ADMIN_TOKENS_FILE.help": "Dónde se guardan los tokens de acceso de los scripts emparejados con la consola de administración (cifrados, como la contraseña). Los crea el comando pair de la consola; elimina uno con unpair.",
   "settings.field.ON_CONNECT_FILE.help": "Dónde se guardan los comandos enviados al conectar (como tu login de X).",
   "settings.field.THEME.help": "El esquema de colores de todo lo que el bot dice en el canal: el anuncio, los avisos, los resultados de búsqueda. Elige el que te guste; así distingue la gente tu bot de los demás.",
   "settings.field.CUSTOM_THEME_BORDER.help": "Sustituir un color del tema elegido: el bloque que enmarca cada mensaje. Déjalo vacío para conservar el color del tema.",
