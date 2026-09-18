@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.12.2 — The Dashboard Speaks For Itself
 
 - **The admin DCC chat is in colour.** The tag on each line - `[SENT]`, `[FAIL]`, `[REQUEST]` and the rest - is now coloured the same way it is in the debug channel, in the theme your bot uses, so the feed is readable at a glance. A new switch, **Colour the tags in the admin DCC chat** (Settings → Admin console), turns it off for a client that shows the colour codes as junk. The dashboard's Console page is unchanged.
 - **You can add a bot to the List Browser by nick.** The sidebar only ever showed bots the program had seen advertising in your channels, so a bot that answers requests but never advertises could not be fetched from the dashboard at all. There is now an **Add a bot that does not advertise** box under the bot list: type its nick, press Add, and it appears as a row marked "by hand" that you can download the list from like any other. It stays until you press Forget with the same nick; a bot that advertises on its own cannot be forgotten this way, because it would simply come back.

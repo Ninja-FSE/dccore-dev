@@ -2,7 +2,7 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.12.2 (2026-09-18) - "The Dashboard Speaks For Itself"
 
 ### 🎨 The admin console in the bot's own colours
 
