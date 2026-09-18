@@ -357,7 +357,8 @@ class FailuresAreReportedWhereSuccessesAre(unittest.TestCase):
             source = handle.read()
         body = source[source.index("def _report_transfer_failure("):]
         body = body[:body.index("\nclass ", 10)]
-        self.assertIn('category="FAIL"', body)
+        # feed_event("FAIL", ...) since #550: the first argument IS the category.
+        self.assertIn('announce.feed_event("FAIL"', body)
 
     def test_announce_renders_the_fail_category(self):
         """FAIL has a tag of its own in the alert colour, like PART - not

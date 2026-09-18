@@ -210,7 +210,10 @@ class TransferCompleteLineTests(QuietTestCase):
         )
         self.assertTrue(self.debug_lines, "transfer completion produced no debug line")
         category, text = self.debug_lines[-1]
-        self.assertEqual(category, "INFO")
+        # SENT, not INFO. This pinned INFO from the day the line was written,
+        # which is how the [SENT] tag never fired for the one line it was
+        # for, and #528's "sends" tickbox never governed it (found by #550).
+        self.assertEqual(category, "SENT")
         self.assertIn(CLASSICAL_TRACK, text)
 
 

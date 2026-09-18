@@ -308,6 +308,82 @@ def strip_irc_formatting(text):
     return _IRC_FORMATTING.sub("", str(text))
 
 
+# ==========================================================================
+# The structured feed (#550, step 2)
+#
+# A client that draws a window - dccore.mrc is the one this is for - wants
+# fields, not prose. After `hello <client> <version>` a session gets every
+# feed event as one line:
+#
+#     DCCORE <TYPE> <fixed fields...> <free text>
+#
+# Space-separated positional tokens, the ONE free-text field last, so a
+# mIRC script reads it as $N-. mIRC's whole toolkit is $1 $2 $N-, nicks never
+# contain spaces, and every reserved separator (\x1f \x03 \x02 \x01) is a
+# formatting or CTCP code already. Numbers are raw bytes and seconds; the
+# client formats. Tabs and control characters in any field become spaces.
+# ==========================================================================
+PROTOCOL_MAJOR = 1
+FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH")
+
+
+def _clean(value, token=False):
+    """A field as it may appear on a structured line: control characters
+    (tabs, CR, LF, colour codes) become spaces; a TOKEN field additionally
+    has its spaces replaced, since it must stay one $N."""
+    text = "".join(" " if ord(ch) < 32 else ch for ch in str("" if value is None else value))
+    if token:
+        text = text.strip().replace(" ", "_") or "?"
+    return text.strip()
+
+
+def _num(value):
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _secs(value):
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return "0.0"
+
+
+def structured_line(kind, fields):
+    """Render one feed event as its DCCORE line. Every kind FEED_KINDS names
+    has a shape below; anything else is a LOG line carrying the category
+    and the prose, so no category is ever lost by the typing."""
+    f = fields or {}
+    nick = _clean(f.get("nick"), token=True)
+    name = _clean(f.get("name")).replace(" :: ", " : : ")
+    kind = str(kind or "").upper()
+    if kind == "REQUEST":
+        return f"DCCORE REQUEST {nick} {_clean(f.get('kind') or 'file', token=True)} {name}"
+    if kind == "QUEUED":
+        return f"DCCORE QUEUED {nick} {_num(f.get('pos'))} {_num(f.get('busy'))} {_num(f.get('slots'))} {name}"
+    if kind == "SENDING":
+        return f"DCCORE SENDING {nick} {_num(f.get('slot'))} {_num(f.get('slots'))} {_num(f.get('bytes'))} {name}"
+    if kind == "RESUMED":
+        return f"DCCORE RESUMED {nick} {_num(f.get('at_bytes'))} {_num(f.get('total_bytes'))} {name}"
+    if kind == "SENT":
+        return (f"DCCORE SENT {nick} {_num(f.get('bytes'))} {_secs(f.get('seconds'))} "
+                f"{_num(f.get('bytes_per_s'))} {name}")
+    if kind == "FAIL":
+        return (f"DCCORE FAIL {nick} {_num(f.get('acked'))} {_num(f.get('total'))} {name} :: "
+                f"{_clean(f.get('reason'))}")
+    if kind == "SEARCH":
+        return f"DCCORE SEARCH {nick} {_num(f.get('results'))} {_clean(f.get('term'))}"
+    return f"DCCORE LOG {_clean(f.get('category') or kind or 'INFO', token=True)} {_clean(f.get('text'))}"
+
+
+def hello_line():
+    import defaults as config
+    return (f"DCCORE HELLO {PROTOCOL_MAJOR} {_clean(getattr(config, 'NICKNAME', ''), token=True)} "
+            f"{_clean(getattr(config, 'SCRIPT_VERSION', ''))}")
+
+
 def console_line(msg_text, category="INFO"):
     """One feed line as the DCC chat shows it.
 
@@ -351,6 +427,11 @@ class Session:
         self.attempts = 0
         self.closed = False
         self.dropped = 0
+        # Structured mode (#550): set by the `hello` command, never before
+        # authentication. `client` is what the script called itself.
+        self.structured = False
+        self.client = ""
+        self._reported_dropped = 0
         self._outbox = collections.deque(maxlen=OUTBOX_MAX)
         self._wake = threading.Event()
         self._lock = threading.Lock()
@@ -359,12 +440,22 @@ class Session:
     # -- output ------------------------------------------------------------
 
     def send(self, text=""):
-        """Queue one line. Never blocks, never raises, never touches the socket."""
+        """Queue one line. Never blocks, never raises, never touches the socket.
+
+        In structured mode every line the bot sends starts with DCCORE, so a
+        command reply - the fourteen handlers call this directly - is wrapped
+        as `DCCORE OUT <text>`; a line that already is a DCCORE line goes as
+        it is. The client routes OUT lines to wherever it shows replies and
+        can never mistake one for an event.
+        """
         if self.closed:
             return
+        text = str(text)
+        if self.structured and not text.startswith("DCCORE "):
+            text = "DCCORE OUT " + text
         if len(self._outbox) == self._outbox.maxlen:
             self.dropped += 1
-        self._outbox.append(str(text))
+        self._outbox.append(text)
         self._wake.set()
 
     def start_writer(self):
@@ -381,6 +472,14 @@ class Session:
                 line = self._outbox.popleft()
             except IndexError:
                 continue
+            # A slow client loses lines rather than stalling the daemon; in
+            # structured mode it is told how many, on the next line that does
+            # get through, so the window can say so instead of silently
+            # missing them.
+            if self.structured and self.dropped > self._reported_dropped:
+                lost = self.dropped - self._reported_dropped
+                self._reported_dropped = self.dropped
+                line = f"DCCORE DROPPED {lost}\n" + line
             # DCC CHAT is line-oriented and terminated with \n. mIRC accepts \r\n
             # too, but a bare \n is what every other client expects.
             payload = (line + "\n").encode("utf-8", "replace")
@@ -401,7 +500,23 @@ class Session:
         """
         if self.closed or not self.authenticated:
             return
+        if self.structured:
+            # The feed kinds arrive with their fields through event_sink;
+            # sending the prose too would show every event twice.
+            if str(category).upper() in FEED_KINDS:
+                return
+            self.send(structured_line("LOG", {"category": category,
+                                              "text": strip_irc_formatting(msg_text)}))
+            return
         self.send(console_line(msg_text, category))
+
+    def event_sink(self, kind, fields, text):
+        """Target for announce.feed_event's fan-out: the fields of one feed
+        event. Only a structured session draws on it; a plain one has the
+        prose from debug_sink already."""
+        if self.closed or not self.authenticated or not self.structured:
+            return
+        self.send(structured_line(kind, fields))
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -411,6 +526,7 @@ class Session:
         try:
             import announce
             announce.remove_debug_sink(self.debug_sink)
+            announce.remove_event_sink(self.event_sink)
         except Exception:
             pass
         if announce_text:
@@ -703,6 +819,23 @@ def _cmd_verify(session, args):
                      f"not shown. The dashboard's Tools view lists them all.")
 
 
+def _cmd_hello(session, args):
+    """`hello <client> <version>`: switch this session to the structured feed.
+
+    Only reachable once authenticated - handle_command() is - so an
+    unauthenticated socket cannot switch anything. A client on a bot without
+    this command gets the dispatcher's "Unknown command: hello" and stays in
+    prose mode, which is the whole reason the switch is opt-in rather than
+    the default: an old bot with a new script still works.
+    """
+    parts = args.split()
+    session.client = parts[0] if parts else "unknown"
+    session.structured = True
+    session.send(hello_line())
+    print(f"[ADMINCHAT] {session.nick}'s session switched to the structured feed "
+          f"({session.client} {' '.join(parts[1:]) or '?'}).")
+
+
 def _cmd_help(session, args):
     session.send("Available commands:")
     for name in sorted(COMMANDS):
@@ -733,6 +866,7 @@ COMMANDS = {
     "rehash":     (_cmd_rehash,     "reload modules in place",           "rehash"),
     "update":     (_cmd_update,     "rebuild the MasterList",            "update"),
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
+    "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "help":       (_cmd_help,       "this list",                         "help"),
     "quit":       (_cmd_quit,       "close this session",                "quit"),
 }
@@ -800,6 +934,7 @@ def _promote(session):
     try:
         import announce
         announce.add_debug_sink(session.debug_sink)
+        announce.add_event_sink(session.event_sink)
     except Exception as sink_err:
         print(f"[ADMINCHAT] Could not attach the debug sink: {sink_err}")
 

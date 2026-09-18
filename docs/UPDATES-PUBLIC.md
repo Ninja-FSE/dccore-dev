@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The admin DCC chat can now speak to a script.** A client that logs in and sends `hello <name> <version>` gets every event as one tagged line with the facts in fixed places - who, what file, how many bytes, how long - instead of prose, which is the foundation for the mIRC window script that follows. Nothing changes for you unless your client says hello; the ordinary chat is exactly as it was. The line format is documented in `docs/ADMIN-CONSOLE.md`. Also fixed on the way: the `Sent:` line is now tagged `[SENT]` rather than `[INFO]`, so the "sends" tickbox in Settings → Console feed finally governs it.
 - **The admin DCC chat is in colour.** The tag on each line - `[SENT]`, `[FAIL]`, `[REQUEST]` and the rest - is now coloured the same way it is in the debug channel, in the theme your bot uses, so the feed is readable at a glance. A new switch, **Colour the tags in the admin DCC chat** (Settings → Admin console), turns it off for a client that shows the colour codes as junk. The dashboard's Console page is unchanged.
 
 ## v1.12.2 — The Dashboard Speaks For Itself

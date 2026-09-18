@@ -430,6 +430,44 @@ Admin authority then rests entirely on the services host plus the password, and
 no longer on a nick. The user commands — `!list`, `!ping`, `!debugnames`,
 `@find`, the queue triggers — are not affected either way.
 
+## The structured feed, for a script
+
+A client that draws a window - `dccore.mrc` is the one this exists for - wants
+fields, not prose. After logging in, send one console command:
+
+```
+hello dccore.mrc 1.0
+```
+
+The bot answers `DCCORE HELLO 1 <botnick> <version>` and, from then on, every
+line it sends on this session starts with `DCCORE`. A bot without this feature
+answers `Unknown command: hello` instead - stay in prose mode. The number in
+`HELLO` is the protocol major: refuse one you do not know.
+
+Every line is **space-separated positional tokens, with the one free-text
+field last** - so in mIRC it is `$1`, `$2`, ... and `$N-`. Numbers are raw
+bytes and seconds; you format them. Tabs and control characters in any field
+have been replaced with spaces.
+
+| line | fixed fields | free text (last) |
+|---|---|---|
+| `DCCORE HELLO 1 <botnick>` | protocol major, nick | the version string |
+| `DCCORE REQUEST <nick> <file\|folder>` | | the name |
+| `DCCORE QUEUED <nick> <pos> <busy> <slots>` | position, slots busy / total | the name |
+| `DCCORE SENDING <nick> <slot> <slots> <bytes>` | slot n / m, size | the name |
+| `DCCORE RESUMED <nick> <at_bytes> <total_bytes>` | | the name |
+| `DCCORE SENT <nick> <bytes> <seconds> <bytes_per_s>` | | the name |
+| `DCCORE FAIL <nick> <acked_bytes> <total_bytes>` | what arrived, of what | the name, then ` :: `, then the reason |
+| `DCCORE SEARCH <nick> <results>` | count (the total, not the capped reply) | the term |
+| `DCCORE LOG <CATEGORY>` | JOIN, PART, QUIT, BAN, HARDBAN, MUTE, TBAN, INFO | the prose, as the plain console shows it |
+| `DCCORE OUT` | | one line of a console command's reply |
+| `DCCORE DROPPED <n>` | lines the bot had to drop for a slow client | |
+
+Whatever you did not tick in **Settings → Console feed** is not sent in either
+mode. A session that never says `hello` is the console described above,
+unchanged. (Step 2 of #550; `STATUS`, `SLOT` and `QUEUE` lines and pairing
+tokens are step 3, the script itself step 4.)
+
 ## Limits and timeouts
 
 | | |
@@ -439,6 +477,7 @@ no longer on a nick. The user commands — `!list`, `!ping`, `!debugnames`,
 | IP block after failed attempts | 15 minutes |
 | Idle timeout once logged in | none — the console stays open until you close it, log in again from elsewhere, or the connection drops |
 | Sessions at once | 1 |
+| Lines queued for a slow client | 500, then the oldest are dropped (a structured session is told how many) |
 
 **A second login replaces the first.** If you left a session open on another
 machine, or your client froze and the server has not timed the nick out yet, just

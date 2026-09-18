@@ -12,6 +12,7 @@ import db
 import runtime
 import stats_mgr
 import theme
+import platform_compat
 
 is_ready = False
 
@@ -197,6 +198,51 @@ def remove_debug_sink(sink):
             _debug_sinks.remove(sink)
 
 
+# THE FEED AS FIELDS (#550, step 2). send_debug() carries prose; a client
+# that wants to draw a window wants the nick, the size, the count. Every
+# feed emitter calls feed_event(kind, text, **fields), which sends the prose
+# through send_debug() exactly as before AND hands the fields to these
+# sinks - a second registry so the (text, category) contract every existing
+# sink relies on is untouched. adminchat's structured session is the first
+# taker; the shape is client-agnostic on purpose.
+_event_sinks = []
+
+
+def add_event_sink(sink):
+    with _debug_sinks_lock:
+        if sink not in _event_sinks:
+            _event_sinks.append(sink)
+
+
+def remove_event_sink(sink):
+    with _debug_sinks_lock:
+        if sink in _event_sinks:
+            _event_sinks.remove(sink)
+
+
+def feed_event(_kind, _text, **fields):
+    """One feed event, told twice: the prose to send_debug() under the kind
+    as its category, and the fields to every event sink. The console
+    tickboxes (console_wants) gate the fields exactly as they gate the
+    prose, so a kind the operator unticked reaches no client either way.
+
+    The two positionals are underscored so no field can collide with them:
+    REQUEST carries a field called `kind` ("file" or "folder"), and a plain
+    `kind` parameter made that call a TypeError - caught by a test that
+    expected a dispatch and saw none.
+    """
+    send_debug(_text, category=_kind)
+    if not console_wants(_kind):
+        return
+    with _debug_sinks_lock:
+        sinks = _event_sinks[:]
+    for sink in sinks:
+        try:
+            sink(_kind, dict(fields), _text)
+        except Exception as sink_err:
+            print(f"[ANNOUNCE] Event sink raised and was dropped: {sink_err}")
+
+
 def _fan_out_to_sinks(msg_text, category):
     """Hand the line to every registered sink. Returns how many took it.
 
@@ -308,8 +354,12 @@ def build_transfer_complete_line(channel, user, shown_name, total_sent,
     )
 
 
-def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed):
-    """Send the block-styled transfer notice once a file has finished."""
+def send_transfer_complete(channel, user, file_name, file_size, start_time, actual_speed, duration=None):
+    """Send the block-styled transfer notice once a file has finished.
+
+    `duration` (seconds) is optional and only feeds the structured SENT
+    event (#550); the notice's own speed figure comes from `actual_speed`.
+    """
     import sys
     import db
     import stats_mgr
@@ -384,12 +434,23 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
     # The closing line, using the live 'speed_str' safely
     try:
         safe_file = str(file_name)
-        send_debug(f"Sent: \"{safe_file}\" to {user} [{speed_str}]", category="INFO")
+        # category SENT, not INFO. It was INFO from the start, so the [SENT]
+        # tag the channel line has rendered since #526 never fired for the
+        # one line it was for, and #528's "sends" tickbox never governed it.
+        feed_event("SENT", f"Sent: \"{safe_file}\" to {user} [{speed_str}]",
+                   nick=user, bytes=file_size, seconds=duration,
+                   bytes_per_s=actual_speed, name=file_name)
     except Exception as debug_err:
         print(f"[DEBUG-SENT ERROR] Could not send the closing notice to the debug channel: {debug_err}")
 
-def send_dcc_sending_notice(user, file_name):
-    """Send the user a matching private NOTICE when a transfer starts or is queued."""
+def send_dcc_sending_notice(user, file_name, path=None):
+    """Send the user a matching private NOTICE when a transfer starts or is queued.
+
+    `path` is optional and only feeds the structured SENDING event's size
+    (#550): the notice itself never needed it, and a caller without it in
+    hand reports 0 rather than guessing.
+    """
+    import os
     import sys
     import defaults as config
     oserve = sys.modules.get('oserve')
@@ -400,7 +461,14 @@ def send_dcc_sending_notice(user, file_name):
     # dispatcher just made it - this transfer is already counted.
     busy = len(getattr(config, "active_transfers", []) or [])
     slots = getattr(config, "MAX_DCC_SLOTS", 0)
-    send_debug(f'Sending "{file_name}" to {user} (slot {busy}/{slots})', category="SENDING")
+    size = 0
+    if path:
+        try:
+            size = os.path.getsize(platform_compat.long_path(path))
+        except OSError:
+            size = 0
+    feed_event("SENDING", f'Sending "{file_name}" to {user} (slot {busy}/{slots})',
+               nick=user, slot=busy, slots=slots, bytes=size, name=file_name)
     
     # ---------------------------------------------------------------------
     # Private notice block, framed exactly like the channel one
@@ -719,7 +787,8 @@ def send_dcc_queue_notice(user, file_name, position):
     # come through here when the request queues rather than sends.
     busy = len(getattr(config, "active_transfers", []) or [])
     slots = getattr(config, "MAX_DCC_SLOTS", 0)
-    send_debug(f'Queued "{file_name}" for {user} at #{position} ({busy}/{slots} slots busy)', category="QUEUED")
+    feed_event("QUEUED", f'Queued "{file_name}" for {user} at #{position} ({busy}/{slots} slots busy)',
+               nick=user, pos=position, busy=busy, slots=slots, name=file_name)
     if oserve:
         # The mIRC colour blocks and separators
         BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
