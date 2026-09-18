@@ -17,6 +17,7 @@ import ast
 import io
 import os
 import sys
+import textwrap
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -111,7 +112,18 @@ def build():
                 out.append(f"\n[{section}]\n")
                 current = section
 
-            for line in _doc_lines(lines, node):
+            # The operator's explanation first - what the "?" on the
+            # dashboard shows - then the developer's comment block from
+            # defaults.py, separated by a blank comment line, for whoever
+            # wants the reasoning. Same order a reader wants them in.
+            plain = settings_help.plain_text(name)
+            doc = _doc_lines(lines, node)
+            if plain:
+                for wrapped in textwrap.wrap(plain, width=76):
+                    out.append(f"# {wrapped}\n")
+                if doc:
+                    out.append("#\n")
+            for line in doc:
                 out.append(f"# {line}\n")
             # settings_file.REQUIRED (issue #170's RFC): shipping a real value
             # here is exactly the defect this exists to close - a copy-paste
