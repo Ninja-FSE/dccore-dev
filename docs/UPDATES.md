@@ -4,6 +4,32 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🍎 macOS joins the CI matrix
+
+From #69's macOS discussion: "the cheapest first step, by a distance" is to
+add `macos-latest` to CI and let the answer be a fact rather than a guess.
+`platform_compat.py`'s `IS_WINDOWS` switch already treats "not Windows" as
+POSIX-like, so macOS was never expected to need its own branch - this
+either confirms that cheaply or turns up the first real failure to fix.
+README's platform line updated to name all three.
+
+It turned up one, and it was CI's own timing, not the daemon (#548).
+`tests.test_reconnect.ReconnectThawSummaryTests.test_a_late_channel_restarts_the_quiet_window`
+failed on macOS 3 of 6 job-runs across two full CI runs, and never once on
+Linux or Windows (0 of 12) - which Python version failed was different each
+time, ruling out a version-specific cause and pointing at macOS's
+GitHub-hosted runner scheduling specifically. The test's own `setUp()`
+shrinks `irc._RECONNECT_THAW_QUIET_SECONDS` to 0.05s for speed, and this one
+test additionally slept for 60% of that window before asserting nothing had
+flushed yet - leaving only ~20ms of slack before the real
+`threading.Timer(0.05, ...)` fired on its own, not enough headroom against
+macOS's scheduling jitter. Widened to 0.3s for this one test only (same 60%
+checkpoint, ~120ms of slack now), rather than touching the 0.05s every
+other test in the class relies on for speed. Not a bug in the debounce
+logic itself - every other test in the class, which polls via
+`wait_for_flush()` rather than sleeping a fixed amount, passed reliably
+throughout both runs.
+
 ### 💬 The "?" beside every setting now speaks the operator's language
 
 The user, on #537's tooltips: "some things are too technical. Check for
