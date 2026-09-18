@@ -4,6 +4,44 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 `!ping` and `!debugnames` answer only the bot's own admin
+
+Seen live by the user: another operator typed `!ping` in a shared channel to
+check their own bot, and every DCCore in the channel ran a latency check -
+each spending a paced server line (the slot the adverts share) and each
+reporting into its own admin console, so a stranger's ping appeared in the
+user's console as `[INFO] Latency Check triggered by <them>` as if the user
+had asked. Both commands are in `irc.py`'s *unaddressed* user-command set
+(`msg_lower in ("!list", "!debugnames", "!ping")`), so every bot present
+handled them, and neither even answers the person who typed it: `!ping`
+reports only through `send_debug()`, `!debugnames` is a `[RAM-CHECK]`
+notice about the bot's own membership mirror. They are the operator's
+tools.
+
+- `commands.diagnostics_are_for_the_admin(user)` - one gate, `is_admin()`,
+  the same rule the admin commands use, so it cannot drift from it.
+- Both dispatch branches in `irc.py` check it first and `continue`
+  silently - an answer or a log line per stranger is the noise this
+  removes. The `elif` lines are untouched, since three source-anchored
+  tests key on them.
+- `handle_ping_request()` checks it too, so no other caller can make the
+  bot ping on a stranger's behalf.
+- **`!list` stays public on purpose**: it is the discovery command every
+  serving bot answers with its trigger - that is how people find bots.
+
+Tests in `tests/test_diagnostics_answer_only_the_admin.py` (9): the gate's
+truth table (admin, case-insensitive, every listed admin, strangers, and
+equal to `is_admin()` for both answers); a stranger's `!ping` sends
+nothing to the server and starts no measurement while the admin's still
+goes out; and, read from the source, both branches gate before doing
+anything (before the thread for `!ping`, before the lock for
+`!debugnames`) while `!list` does not. Three pacing tests in
+`test_a_shared_outbound_pace.py` that pinged as `alice`/`bob` now list
+them in `ADMIN_NICK` - what they measure is the pacing of a ping that IS
+sent - and its `debugnames_block()` slice is bounded by the next branch
+rather than 1500 characters, which the gate had pushed the `queue_message`
+line past. `docs/ADMIN-CONSOLE.md` says which commands are whose.
+
 ### ✍️ A bot that never advertises can be added by hand
 
 #376, part 2. The List Browser's sidebar is built from adverts we have seen

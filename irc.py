@@ -3158,6 +3158,12 @@ def irc_loop():
                             elif msg_lower == "!list":
                                 list.send_list_trigger_info(s, user)
                             elif msg.lower() == "!debugnames":
+                                # The operator's diagnostic, not a public command
+                                # - see commands.diagnostics_are_for_the_admin().
+                                # Silently: an answer or a log line per stranger
+                                # is the noise this removes.
+                                if not commands.diagnostics_are_for_the_admin(user):
+                                    continue
                                 with runtime.channel_users_lock():
                                     have_count = hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users
                                     if have_count:
@@ -3177,6 +3183,11 @@ def irc_loop():
                                 if oserve:
                                     oserve.queue_message(user, ram_check, is_vip=True)
                             elif msg.lower() == "!ping":
+                                # Same rule as !debugnames above: a stranger's
+                                # !ping used to make every DCCore in the channel
+                                # spend a paced line and report to its own admin.
+                                if not commands.diagnostics_are_for_the_admin(user):
+                                    continue
                                 threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
                             # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
                             # once the DCC console is trusted; the console reaches the same
