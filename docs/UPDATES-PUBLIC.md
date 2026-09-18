@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.12.2 — The Dashboard Speaks For Itself
 
 - **You can add a bot to the List Browser by nick.** The sidebar only ever showed bots the program had seen advertising in your channels, so a bot that answers requests but never advertises could not be fetched from the dashboard at all. There is now an **Add a bot that does not advertise** box under the bot list: type its nick, press Add, and it appears as a row marked "by hand" that you can download the list from like any other. It stays until you press Forget with the same nick; a bot that advertises on its own cannot be forgotten this way, because it would simply come back.
 - **The "?" beside every setting now explains it in plain words.** The first version showed the developer's notes from the code, which for a setting like the nickname talked about internal names nobody outside the project needs to know. Every one of the 113 settings now has an explanation written for the person running the bot - what it does, when you would change it, what a sensible value is - in English, French and Spanish, following the language you picked. The same text sits above each setting in `settings.conf.sample`, with the developer's longer note underneath for anyone curious about the reasoning.
