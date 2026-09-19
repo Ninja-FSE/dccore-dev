@@ -4565,7 +4565,8 @@ if HAVE_FLASK:
             if state["done"]:
                 return None
             supplied = request.args.get("token") or request.form.get("token") or ""
-            if supplied != token:
+            import hmac
+            if not hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")):
                 return refused("Open the exact link printed in DCCore's window - it "
                                "carries a one-time code, so that only the person at "
                                "this machine can set the bot up.")

@@ -12,20 +12,39 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 
 ---
 
-## The three steps
+## The two steps
 
-1. **Install Python.** [Python 3.10.0 (64-bit)](https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe),
-   or any later 3.10+. **Tick both boxes in the installer:** *Add Python to PATH*
-   and *py launcher*. (Missed the first box? The launcher looks where the
-   installer puts Python anyway.)
-2. **Download and extract DCCore.**
-3. **Double-click `scripts\windows\start-dccore.bat`.** On the first run it
-   opens the setup page in your browser - nick, server, channels, your nick,
-   the password, the music folder, the dashboard - with an explanation beside
-   each, and starts the bot the moment you save. It offers to install Flask
-   first (the page and the dashboard need it); say no and the same questions
-   are asked in the black window instead. Every answer can be changed later
-   on the dashboard's Settings page.
+1. **Download and extract DCCore.**
+2. **Double-click `scripts\windows\start-dccore.bat`.** If there is no Python on
+   the machine it offers to install it (below). On the first run it opens the
+   setup page in your browser - nick, server, channels, your nick, the
+   password, the music folder, the dashboard - with an explanation beside each,
+   and starts the bot the moment you save. It offers to install Flask first
+   (the page and the dashboard need it); say no and the same questions are
+   asked in the black window instead. Every answer can be changed later on the
+   dashboard's Settings page.
+
+**No Python yet?** The launcher says so and asks:
+
+```
+  Python was not found.
+
+  DCCore can download Python 3.14.7 from python.org and install it
+  for you: about 32 MB, for your user only (no administrator prompt),
+  with "Add python.exe to PATH" and "py launcher" both ticked. The
+  download is checked against a fingerprint before it is run.
+
+  Download and install Python now? [Y/N]
+```
+
+`Y` fetches python.org's own installer, checks its SHA-256 against the one
+written in the launcher, runs it with a progress bar and no questions, and
+carries on to the setup questions. A file that does not match the
+fingerprint is deleted and not run. `N` - or a 32-bit Windows, or a machine
+without `curl` - opens the python.org download page instead; install from
+there with **both boxes ticked**, then double-click the launcher again.
+(Missed the PATH box? The launcher looks where the installer puts Python
+anyway.)
 
 No Command Prompt needed. The window that opens **is** the bot: closing it
 stops the bot, so leave it open or minimise it. `Ctrl-C` in it stops the bot
@@ -104,6 +123,7 @@ suite are stdlib-only, which is why they run on a bare machine with no
 
 1. **Download Python.** [Python 3.10.0 (64-bit)](https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe),
    or any later 3.10+ from [python.org](https://www.python.org/downloads/windows/).
+   (Or let the launcher do it - see *The two steps* above.)
 
 2. **Tick both boxes in the installer:** *Add Python to PATH* and *py launcher*.
    They are what make steps 3 onwards work from any directory — see the note on
@@ -274,8 +294,21 @@ no list.
 `start-dccore.bat` does `cd /d "%~dp0..\.."` before anything else, so it is
 correct from a double-click, a shortcut, or any other directory.
 
-**This is also why there is no Windows service yet.** A service starts in
-`C:\Windows\System32`, and no launcher is involved to correct it. Making that
+**How the launcher installs Python, when it has to.** The version and the
+installer's SHA-256 (one per processor, amd64 and arm64) are written at the
+top of `start-dccore.bat`, copied from the release page on python.org. The
+launcher downloads with the `curl` that ships with Windows 10 1803 and later,
+hashes the file with `certutil`, refuses it on any mismatch, and runs it with
+python.org's documented unattended options (`/passive InstallAllUsers=0
+PrependPath=1 Include_launcher=1 Include_test=0`) - per user, so no
+administrator prompt. The launcher then looks for Python where the installer
+puts it, since its own window's PATH predates the install. Moving the pin to a
+newer Python is three lines: the version and the two hashes.
+
+**This is also why there is no Windows service yet** - and why
+`install-autostart.bat` schedules the launcher rather than `oserve.py`. A
+service starts in `C:\Windows\System32`, and no launcher is involved to
+correct it. Making that
 work means anchoring the paths to the code's own location rather than the
 working directory — a change worth doing deliberately, not as a side effect of
 adding a service wrapper.
@@ -284,9 +317,39 @@ adding a service wrapper.
 
 ## Networking
 
+Two things stand between the bot's ports and the people downloading, and
+neither is DCCore's to fix - only to name. `start-dccore.bat check` prints
+both with your actual port range.
+
+### The Windows firewall
+
+The first time the bot listens for a DCC send, Windows Defender Firewall
+asks whether to allow it. **Cancel there means every send from then on times
+out with no hint why.** If that happened, or to settle it up front:
+
+```bat
+scripts\windows\allow-firewall.bat
+```
+
+It adds one inbound rule for TCP `DCC_PORT_START`–`DCC_PORT_END` (55000–55010
+unless you changed them) and, if the dashboard is on, one for its port; both
+read from your settings, not typed in. Adding a firewall rule needs an
+administrator's yes, so the script re-opens itself elevated - the usual
+prompt. `remove-firewall.bat` takes both rules out again.
+
+### Port forwarding
+
 **Forward TCP 55000–55010** to this machine for anyone to download from you.
-That range is `DCC_PORT_START`–`DCC_PORT_END` in `defaults.py`, and the admin
+That range is `DCC_PORT_START`–`DCC_PORT_END` in your settings, and the admin
 console borrows a port from it too when it has to listen.
+
+What that means: behind a home router, a connection from the internet reaches
+the router, not this PC, until the router is told where to send it. In the
+router's admin page (usually `http://192.168.1.1` or `http://192.168.0.1`,
+under "Port forwarding" or "Virtual server"), forward that TCP range to this
+PC's LAN address (`ipconfig` shows it as *IPv4 Address*). DCCore cannot do
+this for you - there is no UPnP in Python's standard library, and the bot
+does not know your router's password.
 
 ### Testing a download from your own machine will probably fail
 
@@ -302,6 +365,21 @@ than failing to connect. The symptom is the daemon declining to send at all,
 which looks like a different fault entirely.
 
 ---
+
+## Starting with Windows
+
+Once the bot runs from a double-click, it can start by itself at logon:
+
+```bat
+scripts\windows\install-autostart.bat
+```
+
+That creates a Task Scheduler entry, "DCCore", that runs `start-dccore.bat`
+when you log on - the launcher, so the working directory is right, and so the
+bot's window opens as usual (closing it still stops the bot). For your user
+only: no administrator, no stored password. `remove-autostart.bat` deletes
+the entry. It refuses a tree that has never been set up, since the setup
+questions need someone at the keyboard - run the launcher once first.
 
 ## The admin console
 

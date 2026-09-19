@@ -81,6 +81,149 @@ then carries on down the same line it always ran.
   refuses, `setup_page=False` is the old refusal, the default is the real
   page; the launcher hook's three answers and its wiring; the docs.
 
+### 🧰 The small things that are the OS, not DCCore
+
+#547, Proposal 6 - four of them, each small.
+
+- **The firewall.** `Platform.firewall_hint` in `scripts/setup_check.py`
+  (a wording difference, so it belongs in the seam): printed after the
+  port check with the range filled in - Windows names
+  `allow-firewall.bat`, Linux names `ufw allow` and `firewall-cmd`.
+  **`scripts/windows/allow-firewall.bat`** re-opens itself elevated when
+  `net session` fails (`powershell Start-Process -Verb RunAs`), reads the
+  ports through **`scripts/ports.py`** → `setup_check.ports_line(config)`
+  (one place knows the ports; `test_the_checks_live_in_exactly_one_place`
+  counts the copies and caught the first draft) into a temp file (for /f's
+  command form and a quoted `%PY%` do not mix), deletes then adds `DCCore
+  DCC sends` for the range and `DCCore dashboard` for `WEBUI_PORT` when
+  `WEBUI_ENABLED`, no parenthesised block around an echo with a `)` in
+  it. `remove-firewall.bat` deletes both.
+- **Starting with the system**, each with a twin, each running the
+  launcher rather than `oserve.py` (the launcher is what puts the working
+  directory right), each refusing a tree with neither `settings.conf` nor
+  `admin_config.py` (a service cannot answer the setup questions):
+  `install-autostart.bat` → `schtasks /create /tn DCCore /sc onlogon /tr
+  "<launcher>" /f`, no `/ru`, so no account or password stored and the
+  bot's window opens at logon; `install-autostart.sh` → a systemd **user**
+  unit in `$XDG_CONFIG_HOME/systemd/user/dccore.service`
+  (`WorkingDirectory`, `ExecStart`, `Restart=on-failure`,
+  `WantedBy=default.target`), `daemon-reload`, `enable --now`, and the
+  `loginctl enable-linger` line for boot without login;
+  `install-autostart.command` → `~/Library/LaunchAgents/com.dccore.bot.plist`
+  (`RunAtLoad`, `KeepAlive.SuccessfulExit=false`, stdout/err to
+  `~/Library/Logs/dccore.log`, the path XML-escaped), `launchctl unload
+  -w` then `load -w`. All four POSIX files mode 100755.
+- **The console window** - both launchers already say closing it stops
+  the bot (#551); pinned here as the third thing.
+- **Port forwarding** - what it means, where in the router, which range,
+  why DCCore cannot do it (no UPnP in the stdlib), in `docs/WINDOWS.md`
+  and `docs/INSTALL.md`, with the firewall and autostart sections.
+- `tests/test_the_small_things_that_are_the_os.py` - 33, executed with
+  the OS commands faked on PATH ahead of the real ones (`schtasks`,
+  `net`, `netsh`, `powershell`, `systemctl`, `launchctl`, each appending
+  its arguments to a file), so nothing real is created on the machine
+  running the tests: the Windows helpers under cmd.exe (elevated adds the
+  range and, with the dashboard on, its port; deletes before adding; not
+  elevated asks Windows and never touches netsh; ports from the settings
+  not the script; no Python says run the launcher; remove deletes both;
+  install creates the on-logon task running the launcher with no `/ru`,
+  refuses an unconfigured tree, reports a refusal; remove deletes, and
+  nothing-to-remove is not an error); the Linux and macOS ones under the
+  POSIX shell on PATH - Git Bash on the Windows runners, so all three
+  families run on all three runners - with the unit parsed back by
+  configparser and the plist by plistlib, including a folder named `Tom
+  & Jerry`; plus `ports_line`, the hints, exec bits from `git ls-files
+  -s`, CRLF and `call` on every bat, launcher-not-oserve, and the docs.
+
+### 🔎 A search's header comes first, not last
+
+Seen live: `Search Result: ON  Found: 3 Match(es) For ...` arrived at
+07:22:47, under the three result rows from 07:22:07, 07:22:17 and 07:22:27,
+with ten seconds between rows instead of five.
+
+`announce.send_search_result_header()` queued the header as
+`"channel_announce"` - the VIP lane the channel advert lines share - while
+the rows that follow it are queued in the requester's own lane by `list.py`.
+Since v1.12.2 `queue_mgr` takes strict turns between the two lanes (one VIP
+line, one standard line, so `Sent:` is never more than two slots away), which
+is right for what it was built for and wrong for a header that has to lead its
+own rows: with an advert cycle's thirteen lines waiting in the VIP lane, the
+header sat behind them while the rows went out on every other slot. The ten
+seconds are the same alternation - an advert line takes each slot between two
+rows.
+
+The header is a private message to one user, so it now goes in that user's own
+lane, ahead of the rows the caller queues next; FIFO within the lane does the
+rest. The rows still share slots with an advert in progress, which is the
+fairness the alternation exists for.
+
+`tests/test_the_search_header_goes_first.py` (3), against the real
+`oserve.queue_message()` and `queue_mgr.next_standard_line()`: the header is not
+in the VIP lane; it is first in the requester's lane, before its rows; and
+served the way `queue_mgr` serves - one VIP line, one standard line, in turn -
+with thirteen advert lines already waiting, the requester's first line is the
+header. Verified by hand: with the fix reverted all three fail.
+
+### 🐍 Python missing: help, do not fail
+
+#547, Proposal 2. The one wall left after Proposal 1: a Windows machine
+with no Python got "Python was not found" and a URL. `start-dccore.bat`
+now offers to install it.
+
+- **The offer, then the download.** `choice /c YN` - a piped or closed
+  stdin reads as no (`errorlevel` 255 ≥ 2), so an unattended run never
+  downloads. `PROCESSOR_ARCHITECTURE`/`ARCHITEW6432` pick `amd64` or
+  `arm64`; a 32-bit Windows gets the page. `call curl -L --fail
+  --progress-bar` (curl ships with Windows 10 1803+; `call`, so a wrapper
+  script returns instead of taking over - the fake in the tests found
+  that). A failed download is reported and never hashed.
+- **The pin.** `PY_VERSION=3.14.7`, `PY_SHA256_AMD64`, `PY_SHA256_ARM64` at
+  the top of the file, copied from python.org's release page (which prints
+  the SHA-256 in four groups of sixteen) and verified against the downloaded
+  installers when pinned. `certutil -hashfile ... SHA256`, spaces removed
+  for older certutils, compared case-insensitively; a mismatch prints
+  expected/got, deletes the file and does not run it.
+- **The run.** `start /wait "" installer /passive InstallAllUsers=0
+  PrependPath=1 Include_launcher=1 Include_test=0` - python.org's documented
+  unattended options; 0 and 3010 (reboot required) count as installed. Then
+  `goto :find_python`: this window's PATH predates the install, so
+  Proposal 1's `%LOCALAPPDATA%\Programs\Python` search is what finds it;
+  `PY_INSTALL_TRIED` guards the loop to one pass. Any other outcome lands
+  on the by-hand text with the download page, opened in the browser unless
+  `DCCORE_NO_BROWSER` is set (the tests set it).
+- Linux/macOS unchanged: they name `apt`/`dnf`/`brew` and stop, which is
+  the whole of the proposal there; pinned by a test.
+- `tests/test_python_missing_help_do_not_fail.py` - 20: the pin's shape,
+  the URL from version and processor, the pinned minor is in the CI
+  matrix, an opt-in network test that downloads both installers and
+  checks the hashes (`DCCORE_VERIFY_PYTHON_PIN=1`; run once here, both
+  match); the order of ask → download → hash → run on the source; and,
+  executed on Windows with a PATH that has no Python, empty
+  LOCALAPPDATA/ProgramFiles and a fake `curl.bat`: declining, no answer at
+  all, a junk download refused by the real certutil and deleted, a failed
+  download reported, a matching hash (fake certutil) leading to the run and
+  the honest exit-code message when what was written is not a program, a
+  space-separated hash still matching, and nothing of this appearing when
+  Python is present. `docs/WINDOWS.md` is two steps now; `docs/INSTALL.md`
+  says which platform does what.
+
+### 🔤 The mIRC window in the operator's own size, and no `/echo` errors
+
+Two things from the first real run of `dccore.mrc` (mIRC on a
+high-resolution screen; the pairing itself worked end to end):
+
+- **The font.** A fixed 9 pt Lucida Console was unreadable. `/dccore font
+  <size>` (and a size field beside the font tickbox in the options) sets
+  it and remembers it; until set, `$dccore.fontsize` takes the Status
+  window's `$window().fontsize`, else 12. The fixed-width face stays,
+  since the panel's columns need it.
+- **`* /echo: insufficient parameters`** on every empty line the bot
+  sends - the banner has two, `help` ends with one. `/echo` refuses an
+  empty text; `dccore.echo`, `dccore.sys` and `dccore.out` now draw an
+  empty line as `$chr(160)`.
+- The title bar is refreshed on the first banner line, so it no longer
+  says "opening" while the bot is already talking.
+
 ### 🪟 The bot's window in mIRC
 
 #550, step 4 of 4 - `scripts/mirc/dccore.mrc`, the client the structured
