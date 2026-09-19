@@ -218,6 +218,12 @@ class TheApp(DCCoreTestCase):
         self.assertEqual(self.get("/setup?token=wrong").status_code, 403)
         self.assertEqual(self.get("/setup?token=the-token").status_code, 200)
 
+    def test_a_non_ascii_token_is_refused_not_a_crash(self):
+        """The token is compared in constant time, on bytes: a value that is
+        not ASCII in the URL must be one more wrong token, not a 500."""
+        self.assertEqual(self.get("/setup?token=t%C3%B6ken").status_code, 403)
+        self.assertEqual(self.post({**GOOD, "token": "t\u00f6ken"}).status_code, 403)
+
     def test_root_redirects_to_the_page_with_the_token(self):
         response = self.get("/?token=the-token")
         self.assertEqual(response.status_code, 302)
