@@ -58,6 +58,35 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
   & Jerry`; plus `ports_line`, the hints, exec bits from `git ls-files
   -s`, CRLF and `call` on every bat, launcher-not-oserve, and the docs.
 
+### 🔎 A search's header comes first, not last
+
+Seen live: `Search Result: ON  Found: 3 Match(es) For ...` arrived at
+07:22:47, under the three result rows from 07:22:07, 07:22:17 and 07:22:27,
+with ten seconds between rows instead of five.
+
+`announce.send_search_result_header()` queued the header as
+`"channel_announce"` - the VIP lane the channel advert lines share - while
+the rows that follow it are queued in the requester's own lane by `list.py`.
+Since v1.12.2 `queue_mgr` takes strict turns between the two lanes (one VIP
+line, one standard line, so `Sent:` is never more than two slots away), which
+is right for what it was built for and wrong for a header that has to lead its
+own rows: with an advert cycle's thirteen lines waiting in the VIP lane, the
+header sat behind them while the rows went out on every other slot. The ten
+seconds are the same alternation - an advert line takes each slot between two
+rows.
+
+The header is a private message to one user, so it now goes in that user's own
+lane, ahead of the rows the caller queues next; FIFO within the lane does the
+rest. The rows still share slots with an advert in progress, which is the
+fairness the alternation exists for.
+
+`tests/test_the_search_header_goes_first.py` (3), against the real
+`oserve.queue_message()` and `queue_mgr.next_standard_line()`: the header is not
+in the VIP lane; it is first in the requester's lane, before its rows; and
+served the way `queue_mgr` serves - one VIP line, one standard line, in turn -
+with thirteen advert lines already waiting, the requester's first line is the
+header. Verified by hand: with the fix reverted all three fail.
+
 ### 🐍 Python missing: help, do not fail
 
 #547, Proposal 2. The one wall left after Proposal 1: a Windows machine

@@ -758,7 +758,13 @@ def send_search_result_header(user, search_term, match_count, channel):
     # mid-colour-code.
     msg = fit_irc_line(_build, search_term)
     if oserve:
-        oserve.queue_message("channel_announce", msg)
+        # The requester's OWN lane, in front of the rows that follow it - not
+        # the shared VIP lane. This is a private message to one user, and its
+        # rows are queued in that user's lane by the caller; the two lanes take
+        # strict turns (queue_mgr), so a header sitting in the VIP lane behind
+        # the channel advert's lines came out AFTER its own results: seen live
+        # while an advert cycle was running, "Found: 3 Match(es)" arrived last.
+        oserve.queue_message(user, msg)
     print(f"[SEARCH RESULTS] Found {match_count} sending {sending_count} to {user} in {channel} for '{search_term}'")
 
 def send_dcc_error(user, error_type):
