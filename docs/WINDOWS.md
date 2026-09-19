@@ -286,12 +286,6 @@ no list.
 `start-dccore.bat` does `cd /d "%~dp0..\.."` before anything else, so it is
 correct from a double-click, a shortcut, or any other directory.
 
-<<<<<<< HEAD
-**This is also why there is no Windows service yet** - and why
-`install-autostart.bat` schedules the launcher rather than `oserve.py`. A
-service starts in `C:\Windows\System32`, and no launcher is involved to
-correct it. Making that
-=======
 **How the launcher installs Python, when it has to.** The version and the
 installer's SHA-256 (one per processor, amd64 and arm64) are written at the
 top of `start-dccore.bat`, copied from the release page on python.org. The
@@ -303,9 +297,10 @@ administrator prompt. The launcher then looks for Python where the installer
 puts it, since its own window's PATH predates the install. Moving the pin to a
 newer Python is three lines: the version and the two hashes.
 
-**This is also why there is no Windows service yet.** A service starts in
-`C:\Windows\System32`, and no launcher is involved to correct it. Making that
->>>>>>> origin/main
+**This is also why there is no Windows service yet** - and why
+`install-autostart.bat` schedules the launcher rather than `oserve.py`. A
+service starts in `C:\Windows\System32`, and no launcher is involved to
+correct it. Making that
 work means anchoring the paths to the code's own location rather than the
 working directory — a change worth doing deliberately, not as a side effect of
 adding a service wrapper.
