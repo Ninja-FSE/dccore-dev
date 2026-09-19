@@ -1,0 +1,111 @@
+@echo off
+setlocal
+
+rem ---------------------------------------------------------------------
+rem  Let DCCore through Windows Defender Firewall (#547, Proposal 6).
+rem
+rem  The first time the bot listens for a DCC send, Windows asks whether
+rem  to allow it. "Cancel" there means every send from then on times out
+rem  with no hint why. This file adds the rule that dialog would have
+rem  added - inbound TCP on the DCC port range from settings.conf, and the
+rem  dashboard's port if the dashboard is on - and can be run any time.
+rem  remove-firewall.bat takes both rules out again.
+rem
+rem  Adding a firewall rule needs an administrator's yes, so this file
+rem  re-opens itself elevated (the usual Windows prompt) when it was not.
+rem  Nothing else it does needs that.
+rem
+rem  The ports are read by scripts\ports.py from the same settings the
+rem  daemon uses, never typed here, so a changed DCC_PORT_START is honoured.
+rem ---------------------------------------------------------------------
+
+cd /d "%~dp0..\.."
+
+rem --- administrator? ----------------------------------------------------
+rem  `net session` only succeeds elevated. `call`, so a wrapper on PATH (the
+rem  tests use one) returns here instead of taking over.
+call net session >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo   Adding a firewall rule needs an administrator's yes - Windows will
+    echo   ask now. The rule is only ever for DCCore's own ports.
+    echo.
+    call powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
+)
+
+rem --- find an interpreter, as start-dccore.bat does ---------------------
+set "PY="
+where py >nul 2>&1 && set "PY=py -3"
+if not defined PY where python >nul 2>&1 && set "PY=python"
+if not defined PY for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
+    if exist "%%~D\python.exe" set "PY="%%~D\python.exe""
+)
+if not defined PY for /d %%D in ("%ProgramFiles%\Python3*") do (
+    if exist "%%~D\python.exe" set "PY="%%~D\python.exe""
+)
+if not defined PY (
+    echo.
+    echo   Python was not found - run start-dccore.bat first, it installs it.
+    echo.
+    pause
+    exit /b 1
+)
+
+rem --- the ports, from the settings ---------------------------------------
+rem  Through a file rather than for /f's own command form: %PY% may carry
+rem  quotes, and cmd /c's quote stripping makes that form unreliable.
+set "PORTS_FILE=%TEMP%\dccore-ports.txt"
+%PY% scripts\ports.py > "%PORTS_FILE%"
+if errorlevel 1 (
+    echo.
+    echo   Could not read the ports from the settings. Run
+    echo   start-dccore.bat check to see what is wrong.
+    echo.
+    pause
+    exit /b 1
+)
+set "DCC_START=" & set "DCC_END=" & set "WEB_PORT=" & set "WEB_ON="
+for /f "usebackq tokens=1-4" %%A in ("%PORTS_FILE%") do (
+    set "DCC_START=%%A"
+    set "DCC_END=%%B"
+    set "WEB_PORT=%%C"
+    set "WEB_ON=%%D"
+)
+del /q "%PORTS_FILE%" >nul 2>&1
+
+rem --- the rules ---------------------------------------------------------
+rem  Deleted first so running this twice leaves one rule, not two.
+echo.
+echo   Allowing inbound TCP %DCC_START%-%DCC_END% (DCC sends, and the admin console
+echo   when it has to listen) ...
+call netsh advfirewall firewall delete rule name="DCCore DCC sends" >nul 2>&1
+call netsh advfirewall firewall add rule name="DCCore DCC sends" dir=in action=allow protocol=TCP localport=%DCC_START%-%DCC_END%
+if errorlevel 1 goto :failed
+
+rem  No parenthesised block here: a ")" inside an echo would end it.
+call netsh advfirewall firewall delete rule name="DCCore dashboard" >nul 2>&1
+if not "%WEB_ON%"=="1" goto :no_dashboard
+echo   Allowing inbound TCP %WEB_PORT% (the dashboard - reachable from other
+echo   machines only if WEBUI_HOST is not 127.0.0.1) ...
+call netsh advfirewall firewall add rule name="DCCore dashboard" dir=in action=allow protocol=TCP localport=%WEB_PORT%
+if errorlevel 1 goto :failed
+goto :done
+:no_dashboard
+echo   The dashboard is off, so no rule for it.
+
+:done
+echo.
+echo   Done. Remember the same ports must also be forwarded on your router
+echo   for anyone outside your network to download from you.
+echo.
+pause
+exit /b 0
+
+:failed
+echo.
+echo   netsh could not add the rule. Windows Defender Firewall may be managed
+echo   by another product or by policy; add the rule in that product instead.
+echo.
+pause
+exit /b 1

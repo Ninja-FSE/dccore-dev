@@ -297,8 +297,10 @@ administrator prompt. The launcher then looks for Python where the installer
 puts it, since its own window's PATH predates the install. Moving the pin to a
 newer Python is three lines: the version and the two hashes.
 
-**This is also why there is no Windows service yet.** A service starts in
-`C:\Windows\System32`, and no launcher is involved to correct it. Making that
+**This is also why there is no Windows service yet** - and why
+`install-autostart.bat` schedules the launcher rather than `oserve.py`. A
+service starts in `C:\Windows\System32`, and no launcher is involved to
+correct it. Making that
 work means anchoring the paths to the code's own location rather than the
 working directory — a change worth doing deliberately, not as a side effect of
 adding a service wrapper.
@@ -307,9 +309,39 @@ adding a service wrapper.
 
 ## Networking
 
+Two things stand between the bot's ports and the people downloading, and
+neither is DCCore's to fix - only to name. `start-dccore.bat check` prints
+both with your actual port range.
+
+### The Windows firewall
+
+The first time the bot listens for a DCC send, Windows Defender Firewall
+asks whether to allow it. **Cancel there means every send from then on times
+out with no hint why.** If that happened, or to settle it up front:
+
+```bat
+scripts\windows\allow-firewall.bat
+```
+
+It adds one inbound rule for TCP `DCC_PORT_START`–`DCC_PORT_END` (55000–55010
+unless you changed them) and, if the dashboard is on, one for its port; both
+read from your settings, not typed in. Adding a firewall rule needs an
+administrator's yes, so the script re-opens itself elevated - the usual
+prompt. `remove-firewall.bat` takes both rules out again.
+
+### Port forwarding
+
 **Forward TCP 55000–55010** to this machine for anyone to download from you.
-That range is `DCC_PORT_START`–`DCC_PORT_END` in `defaults.py`, and the admin
+That range is `DCC_PORT_START`–`DCC_PORT_END` in your settings, and the admin
 console borrows a port from it too when it has to listen.
+
+What that means: behind a home router, a connection from the internet reaches
+the router, not this PC, until the router is told where to send it. In the
+router's admin page (usually `http://192.168.1.1` or `http://192.168.0.1`,
+under "Port forwarding" or "Virtual server"), forward that TCP range to this
+PC's LAN address (`ipconfig` shows it as *IPv4 Address*). DCCore cannot do
+this for you - there is no UPnP in Python's standard library, and the bot
+does not know your router's password.
 
 ### Testing a download from your own machine will probably fail
 
@@ -325,6 +357,21 @@ than failing to connect. The symptom is the daemon declining to send at all,
 which looks like a different fault entirely.
 
 ---
+
+## Starting with Windows
+
+Once the bot runs from a double-click, it can start by itself at logon:
+
+```bat
+scripts\windows\install-autostart.bat
+```
+
+That creates a Task Scheduler entry, "DCCore", that runs `start-dccore.bat`
+when you log on - the launcher, so the working directory is right, and so the
+bot's window opens as usual (closing it still stops the bot). For your user
+only: no administrator, no stored password. `remove-autostart.bat` deletes
+the entry. It refuses a tree that has never been set up, since the setup
+questions need someone at the keyboard - run the launcher once first.
 
 ## The admin console
 

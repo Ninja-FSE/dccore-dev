@@ -4,6 +4,60 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧰 The small things that are the OS, not DCCore
+
+#547, Proposal 6 - four of them, each small.
+
+- **The firewall.** `Platform.firewall_hint` in `scripts/setup_check.py`
+  (a wording difference, so it belongs in the seam): printed after the
+  port check with the range filled in - Windows names
+  `allow-firewall.bat`, Linux names `ufw allow` and `firewall-cmd`.
+  **`scripts/windows/allow-firewall.bat`** re-opens itself elevated when
+  `net session` fails (`powershell Start-Process -Verb RunAs`), reads the
+  ports through **`scripts/ports.py`** → `setup_check.ports_line(config)`
+  (one place knows the ports; `test_the_checks_live_in_exactly_one_place`
+  counts the copies and caught the first draft) into a temp file (for /f's
+  command form and a quoted `%PY%` do not mix), deletes then adds `DCCore
+  DCC sends` for the range and `DCCore dashboard` for `WEBUI_PORT` when
+  `WEBUI_ENABLED`, no parenthesised block around an echo with a `)` in
+  it. `remove-firewall.bat` deletes both.
+- **Starting with the system**, each with a twin, each running the
+  launcher rather than `oserve.py` (the launcher is what puts the working
+  directory right), each refusing a tree with neither `settings.conf` nor
+  `admin_config.py` (a service cannot answer the setup questions):
+  `install-autostart.bat` → `schtasks /create /tn DCCore /sc onlogon /tr
+  "<launcher>" /f`, no `/ru`, so no account or password stored and the
+  bot's window opens at logon; `install-autostart.sh` → a systemd **user**
+  unit in `$XDG_CONFIG_HOME/systemd/user/dccore.service`
+  (`WorkingDirectory`, `ExecStart`, `Restart=on-failure`,
+  `WantedBy=default.target`), `daemon-reload`, `enable --now`, and the
+  `loginctl enable-linger` line for boot without login;
+  `install-autostart.command` → `~/Library/LaunchAgents/com.dccore.bot.plist`
+  (`RunAtLoad`, `KeepAlive.SuccessfulExit=false`, stdout/err to
+  `~/Library/Logs/dccore.log`, the path XML-escaped), `launchctl unload
+  -w` then `load -w`. All four POSIX files mode 100755.
+- **The console window** - both launchers already say closing it stops
+  the bot (#551); pinned here as the third thing.
+- **Port forwarding** - what it means, where in the router, which range,
+  why DCCore cannot do it (no UPnP in the stdlib), in `docs/WINDOWS.md`
+  and `docs/INSTALL.md`, with the firewall and autostart sections.
+- `tests/test_the_small_things_that_are_the_os.py` - 33, executed with
+  the OS commands faked on PATH ahead of the real ones (`schtasks`,
+  `net`, `netsh`, `powershell`, `systemctl`, `launchctl`, each appending
+  its arguments to a file), so nothing real is created on the machine
+  running the tests: the Windows helpers under cmd.exe (elevated adds the
+  range and, with the dashboard on, its port; deletes before adding; not
+  elevated asks Windows and never touches netsh; ports from the settings
+  not the script; no Python says run the launcher; remove deletes both;
+  install creates the on-logon task running the launcher with no `/ru`,
+  refuses an unconfigured tree, reports a refusal; remove deletes, and
+  nothing-to-remove is not an error); the Linux and macOS ones under the
+  POSIX shell on PATH - Git Bash on the Windows runners, so all three
+  families run on all three runners - with the unit parsed back by
+  configparser and the plist by plistlib, including a folder named `Tom
+  & Jerry`; plus `ports_line`, the hints, exec bits from `git ls-files
+  -s`, CRLF and `call` on every bat, launcher-not-oserve, and the docs.
+
 ### 🔎 A search's header comes first, not last
 
 Seen live: `Search Result: ON  Found: 3 Match(es) For ...` arrived at

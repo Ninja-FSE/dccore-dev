@@ -54,7 +54,7 @@ class Platform:
     """
 
     def __init__(self, display, os_name, wrong_os, rar_hint, python,
-                 start_cmd, stop_where, pip_hint):
+                 start_cmd, stop_where, pip_hint, firewall_hint):
         self.display = display          # "Linux" / "Windows"
         self.os_name = os_name          # what os.name reads as
         self.wrong_os = wrong_os        # said when run on the other one
@@ -67,6 +67,11 @@ class Platform:
         # which on a machine with more than one is not necessarily the one
         # that will run the daemon - see the Flask check further down.
         self.pip_hint = pip_hint
+        # What stands between the bound ports and the outside on THIS OS,
+        # and what to do about it. Printed after the port check, with the
+        # range filled in (#547, Proposal 6). Wording only: both hosts have
+        # a host firewall, they just ask about it differently.
+        self.firewall_hint = firewall_hint
 
 
 LINUX = Platform(
@@ -79,6 +84,10 @@ LINUX = Platform(
     start_cmd="./scripts/linux/start-dccore.sh",
     stop_where="terminal",
     pip_hint="python3 -m pip install -r requirements-web.txt",
+    firewall_hint="if this machine runs a firewall, allow them: "
+                  "sudo ufw allow {start}:{end}/tcp (Ubuntu), or "
+                  "sudo firewall-cmd --permanent --add-port={start}-{end}/tcp "
+                  "&& sudo firewall-cmd --reload (Fedora)",
 )
 
 WINDOWS = Platform(
@@ -94,7 +103,27 @@ WINDOWS = Platform(
     # only falls back to `python`, so on a machine with both this is the one
     # that puts the package where the daemon will actually look for it.
     pip_hint="py -3 -m pip install -r requirements-web.txt",
+    firewall_hint="Windows Defender Firewall asks the first time the bot "
+                  "listens on {start}-{end}; if that was cancelled, every "
+                  "send times out - scripts\\windows\\allow-firewall.bat "
+                  "adds the rule (asks for an administrator's yes)",
 )
+
+
+def ports_line(config):
+    """The ports the daemon listens on, one line, for the firewall and
+    autostart helpers beside this file (#547, Proposal 6):
+
+        DCC_PORT_START DCC_PORT_END WEBUI_PORT 1|0(WEBUI_ENABLED)
+
+    Here rather than in scripts/ports.py itself because this module is the
+    one place that knows the port settings - a test counts the copies."""
+    return "%d %d %d %d" % (
+        int(getattr(config, "DCC_PORT_START", 55000)),
+        int(getattr(config, "DCC_PORT_END", 55010)),
+        int(getattr(config, "WEBUI_PORT", 8420)),
+        1 if bool(getattr(config, "WEBUI_ENABLED", False)) else 0,
+    )
 
 
 def library_report(config, ok, warn, fail, detail):
@@ -456,6 +485,7 @@ def main(platform):
             ok(f"all {free} ports free in {start}-{end}")
         print("         (these must also be forwarded to this machine for "
               "anyone to download from you)")
+        print("         " + platform.firewall_hint.format(start=start, end=end))
 
     # --- admin console -------------------------------------------------------
     print()
