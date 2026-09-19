@@ -43,6 +43,73 @@ wrapper. The script's `$N` positions are checked against the bot's own lines
 for every kind, channel included. Verified by hand: dropping the channel from
 one SENDING call site, and from SENT, each fail.
 
+### 🔁 An automatic re-fetch remembers that it asked
+
+Found while answering "how often are updated lists fetched": the log from the
+night the bot froze showed one bot asked at 00:34, 01:34, 02:34 ... 06:34, in
+spite of `AUTO_REFETCH_INTERVAL_HOURS = 24`.
+
+`lists_worth_refetching()` measured that floor from `fetched_at` - the last
+fetch that COMPLETED. A bot whose list never arrives (it is not answering, or
+the daemon was offline or wedged when it did) keeps its old `fetched_at` for
+ever, so it stayed permanently "stale enough": every hourly sweep asked it
+again, and so did every restart, since the sweep after a restart runs at once.
+
+The sweep now writes `last_attempt` on the entry when it actually asks (a 200
+from the same enqueue the dashboard uses; a refusal is not an ask), through
+`db.save_fetched_bot_lists()` so a restart keeps it, and the floor runs from
+the later of `fetched_at` and `last_attempt`. A bot that never answers is asked
+once per interval, not once per hour. Only an automatic ask is counted: the
+operator's own Re-download list click is theirs, not the sweep's. A completed
+fetch replaces the entry, so the mark goes with it. `AUTO_REFETCH_INTERVAL_HOURS
+= 0` still means no floor. The setting's comment, plain help (en/fr/es) and
+`settings.conf.sample` say what the interval is counted from.
+
+`tests/test_an_auto_refetch_remembers_that_it_asked.py` (8): the reproduction (a
+failed ask is not repeated at the next sweep, nor 23 hours on; it is asked again
+at 24); written to disk with the entry; kept through a restart (the saved
+registry loaded into an empty store, then the sweep the restart runs); a
+refused ask is not counted; a newer completed fetch still sets the floor; a
+damaged mark is ignored; and 0 means no floor. Verified by hand: measuring
+from `fetched_at` alone fails two, never writing the mark fails three.
+
+### 🎨 `dccore.mrc`: a background colour in the options
+
+From the operator's first real session with the window (#550): the options
+had a colour for every kind of event and none for the window itself.
+
+mIRC has no per-window colour setting - `/color background` changes every
+window at once, the operator's channels and queries included - only a
+per-window PICTURE (`/background -t @window file`, `-x` to remove it). So the
+option is a colour, and the script turns it into a one-pixel 24-bit `.bmp`
+beside itself (`dccore-bg-<n>.bmp`, written the first time a colour is used,
+one file per colour), tiled behind the window; "none" (the default) removes
+the picture and leaves the window as mIRC has it. The combo in the Window
+box lists none and mIRC's sixteen colours; the line selected is the colour
+plus two, and the save stores line minus two, so a round trip cannot move it.
+Applied when the window opens and when the options are saved.
+
+`tests/test_the_mirc_window_has_a_background_colour.py` (13): the header the
+script writes parses as a valid 1x1 24-bit bitmap (file size, data offset,
+image size, one pixel as blue-green-red-pad right after it); the palette has
+sixteen entries lined up with the names in the dialog; the combo is inside
+the Window box and no dialog id is used twice; the line-to-colour mapping
+agrees between fill and save; it defaults to none; `-x` and `-t` are what
+`dccore.background` calls and `/color background` is never used. Mutants: a
+wrong pixel order and an off-by-one in the save both fail.
+
+The side panel's headings (Sending, Queue, Today, Since) are drawn in
+`col.head`, which defaulted to navy and had no control in the dialog: on a
+black window they could not be read and could not be changed (reported with a
+screenshot). The Show box now has **Panel headings** beside the file-name and
+console colours, filled and saved the same way, and the panel is redrawn when
+the options are saved. The default is left alone - navy is right on mIRC's
+own white background - and a saved choice is never overwritten.
+
+**Not run in mIRC.** Written from mIRC's documentation (`/background`,
+`/bset`, `/bwrite`); nothing here can execute the script, so the first
+colour chosen is the real test.
+
 ### 📏 The mIRC window says MB
 
 Seen on the first real send with `dccore.mrc` connected: `"…flac" to

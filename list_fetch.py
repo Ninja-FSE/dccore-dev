@@ -772,7 +772,17 @@ def lists_worth_refetching(now=None):
         # NOT MORE OFTEN THAN THE INTERVAL, whatever the advert says. A bot
         # rebuilding its list hourly would otherwise be re-fetched hourly.
         fetched_at = entry.get("fetched_at") or 0
-        if interval and (now - float(fetched_at or 0)) < interval:
+        # The floor runs from the LATER of the last completed fetch and the
+        # last time we automatically asked. Measured from the fetch alone, a
+        # bot whose list never arrives (it is not answering, or we were
+        # offline when it did) keeps its old fetched_at for ever, so every
+        # hourly sweep - and every restart - asked it again.
+        last_asked = entry.get("last_attempt") or 0
+        try:
+            last_asked = float(last_asked)
+        except (TypeError, ValueError):
+            last_asked = 0.0
+        if interval and (now - max(float(fetched_at or 0), last_asked)) < interval:
             continue
 
         rows = [row for row in webserver.build_fetched_bot_list_summaries()
@@ -783,6 +793,26 @@ def lists_worth_refetching(now=None):
 
     due.sort()
     return [bot for _when, bot in due]
+
+
+def _note_auto_attempt(bot, when):
+    """Remember that a sweep just asked `bot` for its list, on disk.
+
+    Only an AUTOMATIC ask is recorded: what limits the sweep is how often it
+    has bothered a bot, and a click on Re-download list is the operator's own
+    decision and is not the sweep's to count. A completed fetch replaces the
+    entry, so the mark goes with it - by then fetched_at is newer anyway.
+    Persisted, because a restart is exactly when a failing bot used to be
+    asked again at once."""
+    key = str(bot).strip().lower()
+    with _lock():
+        store = _ensure_fetched_bot_lists()
+        entry = store.get(key)
+        if not isinstance(entry, dict):
+            return
+        entry["last_attempt"] = when
+        snapshot = dict(store)
+    db.save_fetched_bot_lists(snapshot)
 
 
 def refetch_due_lists(log=print, now=None):
@@ -839,6 +869,7 @@ def refetch_due_lists(log=print, now=None):
         status, result = webserver.build_list_fetch_enqueue_result(bot)
         if status == 200:
             started.append(bot)
+            _note_auto_attempt(bot, time.time() if now is None else now)
             log(f"[LIST-FETCH] {bot}'s list has changed since we took our copy "
                 f"- asking again automatically.")
         else:
