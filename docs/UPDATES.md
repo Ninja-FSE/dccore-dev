@@ -4,6 +4,36 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 An automatic re-fetch remembers that it asked
+
+Found while answering "how often are updated lists fetched": the log from the
+night the bot froze showed one bot asked at 00:34, 01:34, 02:34 ... 06:34, in
+spite of `AUTO_REFETCH_INTERVAL_HOURS = 24`.
+
+`lists_worth_refetching()` measured that floor from `fetched_at` - the last
+fetch that COMPLETED. A bot whose list never arrives (it is not answering, or
+the daemon was offline or wedged when it did) keeps its old `fetched_at` for
+ever, so it stayed permanently "stale enough": every hourly sweep asked it
+again, and so did every restart, since the sweep after a restart runs at once.
+
+The sweep now writes `last_attempt` on the entry when it actually asks (a 200
+from the same enqueue the dashboard uses; a refusal is not an ask), through
+`db.save_fetched_bot_lists()` so a restart keeps it, and the floor runs from
+the later of `fetched_at` and `last_attempt`. A bot that never answers is asked
+once per interval, not once per hour. Only an automatic ask is counted: the
+operator's own Re-download list click is theirs, not the sweep's. A completed
+fetch replaces the entry, so the mark goes with it. `AUTO_REFETCH_INTERVAL_HOURS
+= 0` still means no floor. The setting's comment, plain help (en/fr/es) and
+`settings.conf.sample` say what the interval is counted from.
+
+`tests/test_an_auto_refetch_remembers_that_it_asked.py` (8): the reproduction (a
+failed ask is not repeated at the next sweep, nor 23 hours on; it is asked again
+at 24); written to disk with the entry; kept through a restart (the saved
+registry loaded into an empty store, then the sweep the restart runs); a
+refused ask is not counted; a newer completed fetch still sets the floor; a
+damaged mark is ignored; and 0 means no floor. Verified by hand: measuring
+from `fetched_at` alone fails two, never writing the mark fails three.
+
 ### 🧹 One suffix list for both sweeps
 
 `tests/test_no_conflict_marker_is_left_behind.py` (#565) carried its own

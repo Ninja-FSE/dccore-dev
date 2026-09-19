@@ -662,7 +662,10 @@ MAX_FETCH_SLOTS: int        = 3        # Max simultaneous in-flight/offered fetc
 AUTO_REFETCH_LISTS: bool = False
 # How stale a held list may get before it is re-asked for, in hours. Not how
 # often the check runs (that is hourly); this is the floor on how often any one
-# bot is asked, so a bot rebuilding hourly is not re-fetched hourly.
+# bot is asked, so a bot rebuilding hourly is not re-fetched hourly. Counted
+# from the later of the last list that ARRIVED and the last time the sweep
+# ASKED (kept on disk, so a restart does not forget it): a bot that never
+# answers is asked once per interval, not once per hour.
 AUTO_REFETCH_INTERVAL_HOURS: int = 24
 # Most lists to ask for in one sweep. A bot back after a month offline has a
 # lot of stale lists, and asking for all of them at once is a burst of
