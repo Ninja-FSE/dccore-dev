@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The mIRC window can have a background colour.** `/dccore options` now has a **Background** choice in the Window box: one of mIRC's sixteen colours, or "none" to leave the window as mIRC has it. It changes only this window, not your channels and queries.
 - **The mIRC window now says 27.5MB and 1.06MB/s** rather than `27.5` and `1.06/s` - it formats the units itself instead of relying on a mIRC function that, in some versions, leaves them off.
 - **A "Re-download list" button in the List Browser.** If automatic re-fetching is off or is not working, open a bot's list and press **Re-download list** beside Purge to ask that bot for its list again - no need to type its nick into the fetch box. Progress is on the Downloads tab.
 - **Fixed: the bot could freeze, and drop off IRC, while the mIRC window script was connected.** When a send started, the status update sent to the script was worked out on the wrong thread and stalled on a lock that thread already held; twenty minutes later the connection to the server stopped being answered and the bot timed out. The status update is now sent by the console session's own thread. Only a bot with `dccore.mrc` (or another structured client) connected was affected.

@@ -597,7 +597,10 @@ minutes. Closing the window closes the chat and stops the retries;
 - the side panel, the title bar figures, console replies in a separate
   window, the beep, the fixed-width font and its size (the Status window's
   size until you set one - on a high-resolution screen you may want a
-  bigger number);
+  bigger number), and the window's background colour (one of mIRC's sixteen,
+  or "none" to leave the window as mIRC has it). mIRC has no per-window
+  colour setting, so the script writes a one-pixel picture of the colour
+  beside itself (`dccore-bg-<n>.bmp`) and tiles it behind the text;
 - the bot's nick, whether the script reconnects by itself, the pairing
   state with **Pair again...** and **Forget token**.
 
