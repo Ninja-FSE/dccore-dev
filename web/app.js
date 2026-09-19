@@ -179,6 +179,7 @@
     // cleanly in git and then silently keep the last one, so one of the two
     // buttons would stop working with no error anywhere.
     filelistsPurgeListBtn: document.getElementById("filelists-purge-btn"),
+    filelistsRedownloadBtn: document.getElementById("filelists-redownload-btn"),
     filelistsBotList: document.getElementById("filelists-bot-list"),
     filelistsPurgeBtn:    document.getElementById("filelists-purge-offline-btn"),
     filelistsPurgeStatus: document.getElementById("filelists-purge-status"),
@@ -2408,6 +2409,9 @@
       });
     }
 
+    if (el.filelistsRedownloadBtn) {
+      el.filelistsRedownloadBtn.addEventListener("click", redownloadCurrentList);
+    }
     if (el.filelistsPurgeListBtn) {
       el.filelistsPurgeListBtn.addEventListener("click", purgeCurrentList);
     }
@@ -2749,6 +2753,39 @@
 
     button.hidden = isOwnSource(source) || !row || !row.held;
     button.disabled = false;
+
+    // The same rule for the re-download button beside it.
+    var again = el.filelistsRedownloadBtn;
+    if (again) {
+      again.hidden = button.hidden;
+      again.disabled = false;
+    }
+  }
+
+  // Fetch the open bot's list again, by hand. AUTO_REFETCH_LISTS does this on
+  // a timer and is off by default; when it is off or not working the only way
+  // was to type the nick into the fetch box. The BOT, not row.label: the tab
+  // open now may be its RAR or VIDEO list, and the request is for the bot's
+  // list archive, exactly as the fetch box's is.
+  function redownloadCurrentList() {
+    var source = state.filelistsSource;
+    var row = state.filelistsBots[source];
+    if (!source || isOwnSource(source) || !row || !row.held) { return; }
+
+    var bot = row.nick || row.bot || row.label || source;
+    el.filelistsRedownloadBtn.disabled = true;
+    postJson("/api/filelists/fetch", { bot: bot }).then(function (res) {
+      if (!res.ok) {
+        showFilelistsFetchStatus(res.data.error || ("HTTP " + res.status), true);
+        return;
+      }
+      showFilelistsFetchStatus(t("filelists.redownloadRequested").replace("{bot}", bot));
+      pollFilelistsBots();
+    }).catch(function (err) {
+      showFilelistsFetchStatus(t("common.requestFailed").replace("{error}", err.message), true);
+    }).finally(function () {
+      el.filelistsRedownloadBtn.disabled = false;
+    });
   }
 
   function purgeCurrentList() {

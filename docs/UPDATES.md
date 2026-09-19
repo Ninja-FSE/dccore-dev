@@ -12,6 +12,31 @@ added to that tuple or nobody scans it - `.mrc` and `.command` each
 shipped unscanned once for that reason - and two copies were two places
 to forget. The marker test now imports the sweep's tuple. Tests only.
 
+### 🔄 A Re-download list button in the List Browser
+
+#302's last open item, read wrongly the first time (as a button inside an
+update notification, which does not exist) and corrected by the reporter: when
+automatic re-fetching does not work, a button that fetches a bot's list again.
+
+`AUTO_REFETCH_LISTS` re-asks a bot on a timer and ships off; with it off, or
+not working, the only way was to type the nick into the fetch box. The List
+Browser toolbar now has **Re-download list** beside Purge, for whichever bot's
+list is open. Same visibility rule as Purge (`renderFilelistsPurge()` decides
+both): only a list held from another bot - your own is the library, and a bot
+only seen advertising is started from the fetch box as before. It asks for the
+bot (`row.nick`), not the tab: the open one may be the bot's RAR or VIDEO list,
+and the request is for the bot's list archive, exactly as the fetch box's is.
+`POST /api/filelists/fetch` is unchanged and already answers 409 when a fetch
+of that bot is running or the bot is not here; the button shows that sentence.
+Three strings in en/fr/es.
+
+`tests/test_redownload_a_bots_list_from_the_list_browser.py` (7), read from the
+page source like the rest: the button is in the page and hidden, follows the
+purge rule, asks for the bot rather than the tab, shows the server's refusal,
+is wired, is never left disabled, and every language has all three strings.
+Verified by hand: with the click handler removed the wiring test fails. Not
+looked at in a browser.
+
 ### 🪧 A merge that leaves its markers behind now fails the suite
 
 The changelogs take an entry from nearly every pull request, so branches
