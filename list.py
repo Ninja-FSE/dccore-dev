@@ -1234,7 +1234,7 @@ def execute_search(irc_sock, user, search_term, channel):
             "SEARCH",
             f'{user} searched "{search_term}" - {total_matches} result'
             f'{"" if total_matches == 1 else "s"}',
-            nick=user, results=total_matches, term=search_term)
+            nick=user, channel=channel, results=total_matches, term=search_term)
 
         if matches:
             # Send the search header privately to the requester

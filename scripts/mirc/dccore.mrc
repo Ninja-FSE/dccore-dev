@@ -76,6 +76,10 @@ alias dccore.opt { return $hget(dccore,$1) }
 alias dccore.st { return $hget(dccore.live,$1) }
 alias dccore.nbsp { return $chr(160) }
 alias dccore.dot { return $chr(183) }
+; " in #channel" after a nick, or nothing when the bot sent "-" (a request by
+; private message, or one whose channel is no longer known). Written to be
+; joined to the nick with $+ so an empty answer leaves no stray space.
+alias dccore.in { if ($1 == $null) || ($1 == -) { return } | return $+($chr(32),in,$chr(32),$1) }
 
 alias dccore.init {
   if (!$hget(dccore)) { hmake dccore 32 }
@@ -407,33 +411,33 @@ alias dccore.structured {
   }
   if (%type == REQUEST) {
     if (!$dccore.opt(show.request)) { return }
-    dccore.echo $dccore.tag(REQUEST,request) $2 asked for $iif($3 == folder,the folder) $dccore.name($4-)
+    dccore.echo $dccore.tag(REQUEST,request) $2 $+ $dccore.in($3) asked for $iif($4 == folder,the folder) $dccore.name($5-)
     return
   }
   if (%type == QUEUED) {
     if (!$dccore.opt(show.queued)) { return }
-    dccore.echo $dccore.tag(QUEUED,queued) $dccore.name($6-) for $2 at # $+ $3 ( $+ $4 $+ / $+ $5 slots busy)
+    dccore.echo $dccore.tag(QUEUED,queued) $dccore.name($7-) for $2 $+ $dccore.in($3) at # $+ $4 ( $+ $5 $+ / $+ $6 slots busy)
     return
   }
   if (%type == SENDING) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(SENDING,sends) $dccore.name($6-) to $2 (slot $3 $+ / $+ $4 $+ , $dccore.bytes($5) $+ )
+    dccore.echo $dccore.tag(SENDING,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) (slot $4 $+ / $+ $5 $+ , $dccore.bytes($6) $+ )
     return
   }
   if (%type == RESUMED) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(RESUMED,sends) $dccore.name($5-) for $2 at $dccore.bytes($3) of $dccore.bytes($4)
+    dccore.echo $dccore.tag(RESUMED,sends) $dccore.name($6-) for $2 $+ $dccore.in($3) at $dccore.bytes($4) of $dccore.bytes($5)
     return
   }
   if (%type == SENT) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(SENT,sends) $dccore.name($6-) to $2 $+ : $dccore.bytes($3) in $dccore.dur($4) at $dccore.speed($5)
+    dccore.echo $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) at $dccore.speed($6)
     return
   }
   if (%type == FAIL) {
     hinc dccore.live failed
     if (!$dccore.opt(show.fail)) { return }
-    var %rest = $5-
+    var %rest = $6-
     var %name = %rest
     var %why = failed
     var %p = $pos(%rest,$+($chr(32),::,$chr(32)),1)
@@ -441,14 +445,14 @@ alias dccore.structured {
       %name = $left(%rest,$calc(%p - 1))
       %why = $mid(%rest,$calc(%p + 4))
     }
-    dccore.echo $dccore.tag(FAILED,fail) $dccore.name(%name) to $2 - %why ( $+ $dccore.bytes($3) of $dccore.bytes($4) arrived)
+    dccore.echo $dccore.tag(FAILED,fail) $dccore.name(%name) to $2 $+ $dccore.in($3) - %why ( $+ $dccore.bytes($4) of $dccore.bytes($5) arrived)
     if ($dccore.opt(beep)) { beep 2 200 }
     return
   }
   if (%type == SEARCH) {
     hinc dccore.live searches
     if (!$dccore.opt(show.search)) { return }
-    dccore.echo $dccore.tag(SEARCH,search) $2 searched $dccore.name($4-) -> $3 result(s)
+    dccore.echo $dccore.tag(SEARCH,search) $2 $+ $dccore.in($3) searched $dccore.name($5-) -> $4 result(s)
     return
   }
   if (%type == LOG) {
