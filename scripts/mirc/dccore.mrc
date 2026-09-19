@@ -173,6 +173,14 @@ alias dccore {
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
   if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1, for DCCore 1.13 and later. | return }
+  if (%cmd == font) {
+    if ($2 !isnum) || ($2 < 6) { dccore.sys Give a size, like /dccore font 14 (now: $dccore.fontsize $+ ). | return }
+    dccore.set fontsize $2
+    dccore.set font 1
+    if ($window($dccore.win)) { font $dccore.win $2 Lucida Console }
+    dccore.sys Font size $2 $+ .
+    return
+  }
   echo 14 -a DCCore window script $dccore.ver - commands:
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore pair <botnick> $+ $str($dccore.nbsp,7) first time: connect, log in once by hand, keep a token
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore connect [botnick] $+ $str($dccore.nbsp,4) open the window and the chat (logs in with the token)
@@ -183,6 +191,7 @@ alias dccore {
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore status $+ $str($dccore.nbsp,15) ask the bot for its status
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore raw <command> $+ $str($dccore.nbsp,8) send any console command (or just type it in the window)
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore panel on|off $+ $str($dccore.nbsp,8) the side panel
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore font <size> $+ $str($dccore.nbsp,10) the window's font size (now $dccore.fontsize $+ )
   echo 14 -a Bot: $iif($dccore.bot,$dccore.bot,not set) $+ . Paired: $iif($dccore.opt(token),yes ( $+ $dccore.opt(paired) $+ ),no) $+ . Chat: $iif($dccore.st(state),$dccore.st(state),closed) $+ .
 }
 
@@ -275,6 +284,7 @@ on ^*:CHAT:*: {
     hadd dccore.live state banner
     hadd dccore.live tries 0
     if ($window($+(=,$nick))) { window -h $+(=,$nick) }
+    dccore.title
   }
   ; the heartbeat is the STATUS burst, which only a structured session
   ; gets; a plain session can be quiet for an hour and be perfectly well
@@ -484,9 +494,21 @@ alias dccore.window {
   if ($window($dccore.win)) { return }
   if ($dccore.opt(panel)) { window -el30 $dccore.win }
   else { window -e $dccore.win }
-  if ($dccore.opt(font)) { font $dccore.win 9 Lucida Console }
+  if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
   dccore.title
   dccore.panel
+}
+
+; The font size: what the operator set with /dccore font <size> (or in the
+; options), else the Status window's, else 12. A fixed 9pt was unreadable
+; on a high-resolution screen on the first real run, and what a window
+; "should" be is the operator's to say.
+alias dccore.fontsize {
+  var %size = $dccore.opt(fontsize)
+  if (%size isnum) && (%size >= 6) { return %size }
+  %size = $window(Status Window).fontsize
+  if (%size isnum) && (%size >= 6) { return %size }
+  return 12
 }
 
 ; The panel is a listbox the window is created with or without, so a
@@ -521,20 +543,22 @@ alias dccore.dur {
 alias dccore.fit { return $left($+($1,$str($dccore.nbsp,$2)),$2) }
 alias dccore.rfit { return $right($+($str($dccore.nbsp,$2),$1),$2) }
 
+; /echo refuses an empty text, and the bot's banner and `help` both have
+; blank lines - so an empty line is drawn as a non-breaking space.
 alias dccore.echo {
   dccore.window
-  echo -ti2 $dccore.win $1-
+  echo -ti2 $dccore.win $iif($1- == $null,$dccore.nbsp,$1-)
 }
 ; the script's own remarks, in grey
 alias dccore.sys {
   dccore.window
-  echo 14 -ti2 $dccore.win $1-
+  echo 14 -ti2 $dccore.win $iif($1- == $null,$dccore.nbsp,$1-)
 }
 ; a console command's reply
 alias dccore.out {
   if ($dccore.opt(separate)) {
     if (!$window(@DCCore-console)) { window -e @DCCore-console }
-    echo -ti2 @DCCore-console $1-
+    echo -ti2 @DCCore-console $iif($1- == $null,$dccore.nbsp,$1-)
     return
   }
   dccore.echo $dccore.tag(CONSOLE,console) $1-
@@ -720,7 +744,8 @@ dialog dccore.opt {
   check "Slots, queue and speed in the title bar", 302, 10 129 118 10
   check "Console replies in a separate window", 303, 10 140 118 10
   check "Beep on a failed transfer", 304, 132 118 118 10
-  check "Fixed-width font (Lucida Console)", 305, 132 129 118 10
+  check "Fixed-width font (Lucida Console)", 305, 132 129 100 10
+  edit "", 306, 234 128 18 11, autohs
   box "Connection", 400, 5 161 252 52
   text "Bot nick", 401, 10 173 26 8
   edit "", 402, 38 171 60 11, autohs
@@ -752,6 +777,7 @@ on *:dialog:dccore.opt:init:0: {
   if ($dccore.opt(separate)) { did -c dccore.opt 303 }
   if ($dccore.opt(beep)) { did -c dccore.opt 304 }
   if ($dccore.opt(font)) { did -c dccore.opt 305 }
+  did -ra dccore.opt 306 $dccore.fontsize
   if ($dccore.bot) { did -ra dccore.opt 402 $dccore.bot }
   did -ra dccore.opt 403 $iif($dccore.opt(token),Paired $dccore.opt(paired) (token in dccore.ini),Not paired: the bot will ask for the password)
   if ($dccore.opt(auto)) { did -c dccore.opt 404 }
@@ -778,11 +804,13 @@ on *:dialog:dccore.opt:sclick:1: {
   hadd dccore separate $did(dccore.opt,303).state
   hadd dccore beep $did(dccore.opt,304).state
   hadd dccore font $did(dccore.opt,305).state
+  if ($did(dccore.opt,306).text isnum) && ($did(dccore.opt,306).text >= 6) { hadd dccore fontsize $did(dccore.opt,306).text }
   hadd dccore auto $did(dccore.opt,404).state
   if ($did(dccore.opt,402).text != $null) { hadd dccore bot $did(dccore.opt,402).text }
   dccore.save
   if ($window($dccore.win)) {
     if (%panel != $dccore.opt(panel)) { dccore.rebuild }
+    if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
     dccore.title
     dccore.panel
   }

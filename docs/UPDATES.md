@@ -58,6 +58,66 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
   & Jerry`; plus `ports_line`, the hints, exec bits from `git ls-files
   -s`, CRLF and `call` on every bat, launcher-not-oserve, and the docs.
 
+### 🐍 Python missing: help, do not fail
+
+#547, Proposal 2. The one wall left after Proposal 1: a Windows machine
+with no Python got "Python was not found" and a URL. `start-dccore.bat`
+now offers to install it.
+
+- **The offer, then the download.** `choice /c YN` - a piped or closed
+  stdin reads as no (`errorlevel` 255 ≥ 2), so an unattended run never
+  downloads. `PROCESSOR_ARCHITECTURE`/`ARCHITEW6432` pick `amd64` or
+  `arm64`; a 32-bit Windows gets the page. `call curl -L --fail
+  --progress-bar` (curl ships with Windows 10 1803+; `call`, so a wrapper
+  script returns instead of taking over - the fake in the tests found
+  that). A failed download is reported and never hashed.
+- **The pin.** `PY_VERSION=3.14.7`, `PY_SHA256_AMD64`, `PY_SHA256_ARM64` at
+  the top of the file, copied from python.org's release page (which prints
+  the SHA-256 in four groups of sixteen) and verified against the downloaded
+  installers when pinned. `certutil -hashfile ... SHA256`, spaces removed
+  for older certutils, compared case-insensitively; a mismatch prints
+  expected/got, deletes the file and does not run it.
+- **The run.** `start /wait "" installer /passive InstallAllUsers=0
+  PrependPath=1 Include_launcher=1 Include_test=0` - python.org's documented
+  unattended options; 0 and 3010 (reboot required) count as installed. Then
+  `goto :find_python`: this window's PATH predates the install, so
+  Proposal 1's `%LOCALAPPDATA%\Programs\Python` search is what finds it;
+  `PY_INSTALL_TRIED` guards the loop to one pass. Any other outcome lands
+  on the by-hand text with the download page, opened in the browser unless
+  `DCCORE_NO_BROWSER` is set (the tests set it).
+- Linux/macOS unchanged: they name `apt`/`dnf`/`brew` and stop, which is
+  the whole of the proposal there; pinned by a test.
+- `tests/test_python_missing_help_do_not_fail.py` - 20: the pin's shape,
+  the URL from version and processor, the pinned minor is in the CI
+  matrix, an opt-in network test that downloads both installers and
+  checks the hashes (`DCCORE_VERIFY_PYTHON_PIN=1`; run once here, both
+  match); the order of ask → download → hash → run on the source; and,
+  executed on Windows with a PATH that has no Python, empty
+  LOCALAPPDATA/ProgramFiles and a fake `curl.bat`: declining, no answer at
+  all, a junk download refused by the real certutil and deleted, a failed
+  download reported, a matching hash (fake certutil) leading to the run and
+  the honest exit-code message when what was written is not a program, a
+  space-separated hash still matching, and nothing of this appearing when
+  Python is present. `docs/WINDOWS.md` is two steps now; `docs/INSTALL.md`
+  says which platform does what.
+
+### 🔤 The mIRC window in the operator's own size, and no `/echo` errors
+
+Two things from the first real run of `dccore.mrc` (mIRC on a
+high-resolution screen; the pairing itself worked end to end):
+
+- **The font.** A fixed 9 pt Lucida Console was unreadable. `/dccore font
+  <size>` (and a size field beside the font tickbox in the options) sets
+  it and remembers it; until set, `$dccore.fontsize` takes the Status
+  window's `$window().fontsize`, else 12. The fixed-width face stays,
+  since the panel's columns need it.
+- **`* /echo: insufficient parameters`** on every empty line the bot
+  sends - the banner has two, `help` ends with one. `/echo` refuses an
+  empty text; `dccore.echo`, `dccore.sys` and `dccore.out` now draw an
+  empty line as `$chr(160)`.
+- The title bar is refreshed on the first banner line, so it no longer
+  says "opening" while the bot is already talking.
+
 ### 🪟 The bot's window in mIRC
 
 #550, step 4 of 4 - `scripts/mirc/dccore.mrc`, the client the structured
