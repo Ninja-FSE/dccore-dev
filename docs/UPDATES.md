@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗺️ The roadmap catches up
+
+`docs/FUTURE.md`'s own rule is that a feature moves under *Implemented* in
+the commit that builds it. Ten of them did not: the console in colour and
+admin-only diagnostics (#553, #552), the structured feed, pairing and
+`dccore.mrc` (#554–#556), the launchers, the browser setup, the Python
+download and the OS small things (#551, #558, #559, #561), album sizes and
+companion files (#543, #539), plain-language help and the translations
+(#545). All under *Implemented* now, and the test count reads 5237 rather
+than 4994. Docs only.
+
 ### 🧊 The STATUS burst never runs on the emitting thread
 
 Seen live, 2026-09-19, the first night with `dccore.mrc` connected: at a
