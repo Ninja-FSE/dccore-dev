@@ -595,7 +595,9 @@ minutes. Closing the window closes the chat and stops the retries;
   lines - plus the colour of file names and of console replies, and how
   often the `[STATUS]` line is written (0 = never);
 - the side panel, the title bar figures, console replies in a separate
-  window, the beep, the fixed-width font;
+  window, the beep, the fixed-width font and its size (the Status window's
+  size until you set one - on a high-resolution screen you may want a
+  bigger number);
 - the bot's nick, whether the script reconnects by itself, the pairing
   state with **Pair again...** and **Forget token**.
 
@@ -615,6 +617,7 @@ sent at all: what is off there never reaches the script.
 /dccore status               ask the bot for its status
 /dccore raw <command>        send any console command
 /dccore panel on|off         the side panel
+/dccore font <size>          the window's font size, e.g. /dccore font 14
 ```
 
 ### If something is off

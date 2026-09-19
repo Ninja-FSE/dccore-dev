@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔤 The mIRC window in the operator's own size, and no `/echo` errors
+
+Two things from the first real run of `dccore.mrc` (mIRC on a
+high-resolution screen; the pairing itself worked end to end):
+
+- **The font.** A fixed 9 pt Lucida Console was unreadable. `/dccore font
+  <size>` (and a size field beside the font tickbox in the options) sets
+  it and remembers it; until set, `$dccore.fontsize` takes the Status
+  window's `$window().fontsize`, else 12. The fixed-width face stays,
+  since the panel's columns need it.
+- **`* /echo: insufficient parameters`** on every empty line the bot
+  sends - the banner has two, `help` ends with one. `/echo` refuses an
+  empty text; `dccore.echo`, `dccore.sys` and `dccore.out` now draw an
+  empty line as `$chr(160)`.
+- The title bar is refreshed on the first banner line, so it no longer
+  says "opening" while the bot is already talking.
+
 ### 🪟 The bot's window in mIRC
 
 #550, step 4 of 4 - `scripts/mirc/dccore.mrc`, the client the structured
