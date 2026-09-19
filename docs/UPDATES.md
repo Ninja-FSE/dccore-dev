@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📏 The mIRC window says MB
+
+Seen on the first real send with `dccore.mrc` connected: `"…flac" to
+mantaur98 (slot 1/3, 27.5)` and `27.5 in 0:25 at 1.06/s` - the size and
+the speed with no unit. `$bytes(N,3).suffix`, which the script used, gives
+no suffix in this operator's mIRC. `dccore.bytes` formats the unit itself
+now (B/KB/MB/GB, two decimals under 10, one under 100, none above, so the
+panel's columns stay columns) and `dccore.speed` is that plus `/s`; no
+`$bytes()` left in the file. The same send also proved #563: `[SENDING]`
+with the window connected, `[SENT]` 25 s later, the bot still there.
+
 ### 🧹 One suffix list for both sweeps
 
 `tests/test_no_conflict_marker_is_left_behind.py` (#565) carried its own
