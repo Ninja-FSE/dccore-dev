@@ -33,7 +33,7 @@
 ;    (/window -el), /aline -l, /titlebar, on CHAT with ^ to halt the
 ;    default text, on CHATCLOSE, hash tables with /hsave and /hload,
 ;    /hinc and /hdel -w, /timer -m, dialog tables with combo, check and
-;    edit, $bytes().suffix, $regex, $duration, $qt, $base. Nothing from
+;    edit, $round, $regex, $duration, $qt, $base. Nothing from
 ;    mIRC 7 (no $json, no UTF-8 switches): the wire is plain ASCII, the
 ;    bot has already turned control characters into spaces, and the only
 ;    characters above 127 this script draws are the middle dot and the
@@ -531,8 +531,24 @@ alias dccore.tag {
 }
 alias dccore.col { return $base($dccore.opt(col. $+ $1),10,10,2) }
 alias dccore.name { return $+($chr(3),$dccore.col(name),",$1-,",$chr(15)) }
-alias dccore.bytes { return $bytes($1,3).suffix }
-alias dccore.speed { return $+($bytes($1,3).suffix,/s) }
+; Bytes as people read them - 27.5MB, 1.06MB/s - formatted here rather
+; than by $bytes().suffix, which on the first real run gave "27.5" and
+; "1.06/s" with no unit at all. Two decimals up to 10, one up to 100,
+; none above, so a column stays a column.
+alias dccore.bytes {
+  var %n = $1
+  if (%n !isnum) { %n = 0 }
+  if (%n >= 1073741824) { return $+($dccore.round($calc(%n / 1073741824)),GB) }
+  if (%n >= 1048576) { return $+($dccore.round($calc(%n / 1048576)),MB) }
+  if (%n >= 1024) { return $+($dccore.round($calc(%n / 1024)),KB) }
+  return $+($int(%n),B)
+}
+alias dccore.round {
+  if ($1 < 10) { return $round($1,2) }
+  if ($1 < 100) { return $round($1,1) }
+  return $round($1,0)
+}
+alias dccore.speed { return $+($dccore.bytes($1),/s) }
 alias dccore.pad2 { return $iif($1 < 10,$+(0,$1),$1) }
 alias dccore.dur {
   var %s = $int($1)
