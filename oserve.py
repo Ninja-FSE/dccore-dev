@@ -90,8 +90,17 @@ def queue_message(user, message, is_vip=False):
 
 
 
-def startup():
+def startup(setup_page=None):
     """Everything the daemon does before it touches the network.
+
+    `setup_page`: what to do when nothing is configured yet (#547, Proposal
+    4). None means the default - webserver.run_setup_until_configured when
+    Flask is there, which serves one page on 127.0.0.1 until the operator
+    has filled the form, then returns here to carry on; False means never
+    serve it, exit 1 as before (the tests of that refusal pass this; a
+    machine without Flask gets the same). A callable is a stand-in for the
+    page. Either way this function stays one straight line: the page is
+    a blocking call at the top, not a second phase.
 
     Split out of __main__ so a test can execute it. This was the one path CI
     could never run: every module was imported and every unit tested, but the
@@ -112,6 +121,25 @@ def startup():
     # regardless of how it was started.
     import settings_file
     unconfigured = settings_file.unconfigured_required(vars(config), config.SHIPPED_DEFAULTS)
+    if unconfigured and setup_page is not False:
+        # SET IT UP IN THE BROWSER (#547, Proposal 4). A blank config on a
+        # machine with Flask is a first run, not a mistake: serve the setup
+        # page until the form has written settings.conf and admin_config.py,
+        # then re-ask the same question with the settings it wrote applied.
+        serve = setup_page
+        if serve is None:
+            try:
+                import webserver
+                serve = (webserver.run_setup_until_configured
+                         if webserver.setup_page_is_possible() else None)
+            except Exception as web_err:  # a broken Flask install is not fatal
+                print(f"[SETUP] The setup page is not available ({web_err}).")
+                serve = None
+        if serve is not None:
+            print("[SETUP] Nothing is configured yet - "
+                  + ", ".join(sorted(unconfigured)) + " - opening the setup page.")
+            serve()
+            unconfigured = settings_file.unconfigured_required(vars(config), config.SHIPPED_DEFAULTS)
     if unconfigured:
         print("[CRITICAL] The following required setting(s) are still unconfigured "
               "(blank, or still the shipped default):")

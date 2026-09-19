@@ -34,11 +34,21 @@ LINUX = os.path.join(REPO_ROOT, "scripts", "linux", "start-dccore.sh")
 WINDOWS = os.path.join(REPO_ROOT, "scripts", "windows", "start-dccore.bat")
 MACOS = os.path.join(REPO_ROOT, "scripts", "macos", "start-dccore.command")
 
+# The stub declines the browser (#547, Proposal 4: `--setup-in-browser`
+# answers 2, "ask here"), so these tests keep exercising the terminal path
+# they were written for; the two browser tests below use the stub that
+# answers 0.
 CONFIGURE = ("import sys\n"
              "print('CONFIGURE-RAN', sys.argv[1:])\n"
+             "if '--setup-in-browser' in sys.argv:\n"
+             "    sys.exit(2)\n"
              "if '--flask' not in sys.argv:\n"
              "    open('settings.conf', 'w').write('NICKNAME = X\\n')\n")
-CONFIGURE_FAILS = "import sys\nprint('CONFIGURE-RAN')\nsys.exit(1)\n"
+CONFIGURE_FAILS = ("import sys\nprint('CONFIGURE-RAN')\n"
+                   "sys.exit(2 if '--setup-in-browser' in sys.argv else 1)\n")
+CONFIGURE_BROWSER = ("import sys\n"
+                     "print('CONFIGURE-RAN', sys.argv[1:])\n"
+                     "sys.exit(0 if '--setup-in-browser' in sys.argv else 1)\n")
 CHECK = "print('CHECK-RAN')\n"
 CHECK_FAILS = "print('CHECK-RAN')\nraise SystemExit(1)\n"
 OSERVE = "print('OSERVE-RAN')\n"
@@ -79,7 +89,20 @@ class _LauncherBehaviour:
         rc, out = self.run_in(self.tree({"configure.py": CONFIGURE, self.check_path: CHECK, "oserve.py": OSERVE}))
 
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.markers(out), ["CONFIGURE-RAN []", "CONFIGURE-RAN ['--flask']", "OSERVE-RAN"])
+        self.assertEqual(self.markers(out), ["CONFIGURE-RAN ['--setup-in-browser']", "CONFIGURE-RAN []",
+                                             "CONFIGURE-RAN ['--flask']", "OSERVE-RAN"])
+        self.assertIn("Welcome to DCCore", out)
+
+    def test_a_fresh_tree_offers_the_browser_first(self):
+        """#547, Proposal 4: the first thing a fresh tree does is ask
+        configure.py whether setup can happen in the browser; a 0 means the
+        daemon is started at once to serve its own setup page, with neither
+        the terminal questions nor the setup check in between - the check
+        would refuse the blank tree the page exists to fill in."""
+        rc, out = self.run_in(self.tree({"configure.py": CONFIGURE_BROWSER, self.check_path: CHECK, "oserve.py": OSERVE}))
+
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.markers(out), ["CONFIGURE-RAN ['--setup-in-browser']", "OSERVE-RAN"])
         self.assertIn("Welcome to DCCore", out)
 
     def test_setup_that_does_not_finish_does_not_start_the_bot(self):

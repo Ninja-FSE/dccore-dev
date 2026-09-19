@@ -25,12 +25,14 @@ Developed on Linux (Debian/Ubuntu, including Proxmox LXC) and runs on Windows â€
 
 ## The short way
 
-Extract DCCore and run the launcher for your system - on the first run it
-asks the setup questions itself, offers to install the dashboard's
-dependency if you turned the dashboard on, checks the setup and starts the
-bot. It needs Python 3.10 or newer: on Windows the launcher offers to
-download and install it if there is none (see [WINDOWS.md](WINDOWS.md)); on
-Linux and macOS it names the package to install and stops.
+Extract DCCore and run the launcher for your system. It needs Python 3.10 or
+newer: on Windows the launcher offers to download and install it if there is
+none (see [WINDOWS.md](WINDOWS.md)); on Linux and macOS it names the package to
+install and stops. On the first run it opens the setup page in your browser -
+nickname, server, channels, your nick, the password, the music folder, each
+with an explanation beside it - and starts the bot the moment you save. (No
+browser, or you said no to installing Flask? The same questions are asked in
+the terminal instead.) Every run after that checks the setup and starts the bot:
 
 | | |
 |---|---|
@@ -42,6 +44,25 @@ The terminal that opens is the bot: closing it stops the bot. Everything
 below is the same setup done by hand, for when you want a step on its own.
 
 ## Guided setup
+
+### In the browser
+
+The launcher's first run does this by itself: with nothing configured yet,
+the daemon serves one page, `http://127.0.0.1:8420/setup`, and waits. The
+link it prints - and opens in your browser - carries a one-time code, so
+that only the person at this machine can use the page: it is loopback-only,
+it exists only until the form is saved, and any website open in the same
+browser would otherwise be able to submit a password of its own. Save, and
+the bot starts in the same window; if you left the dashboard on, the page
+takes you to its login with the password you just chose. The page needs
+Flask, which the launcher offers to install first; without it, the terminal
+questions below are asked instead.
+
+`/setup` is the same form as the dashboard's Settings page cut down to what a
+first start needs, with the same **?** explanations, in English, French or
+Spanish. Everything else is on the Settings page afterwards.
+
+### In the terminal
 
 ```bash
 python3 configure.py

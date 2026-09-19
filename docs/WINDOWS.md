@@ -15,12 +15,14 @@ round-tripped, DCC listener bound, WinRAR found at its install path.
 ## The two steps
 
 1. **Download and extract DCCore.**
-2. **Double-click `scripts\windows\start-dccore.bat`.** If there is no
-   Python on the machine it offers to install it (below). On the first run it
-   asks the setup questions itself - nick, server, channels, admin nick, music
-   folder, dashboard, password - then checks the setup and starts the bot. If
-   you turned the dashboard on, it offers to install Flask before starting.
-   Every answer can be changed later on the dashboard's Settings page.
+2. **Double-click `scripts\windows\start-dccore.bat`.** If there is no Python on
+   the machine it offers to install it (below). On the first run it opens the
+   setup page in your browser - nick, server, channels, your nick, the
+   password, the music folder, the dashboard - with an explanation beside each,
+   and starts the bot the moment you save. It offers to install Flask first
+   (the page and the dashboard need it); say no and the same questions are
+   asked in the black window instead. Every answer can be changed later on the
+   dashboard's Settings page.
 
 **No Python yet?** The launcher says so and asks:
 
@@ -47,6 +49,12 @@ anyway.)
 No Command Prompt needed. The window that opens **is** the bot: closing it
 stops the bot, so leave it open or minimise it. `Ctrl-C` in it stops the bot
 on purpose.
+
+The setup page is `http://127.0.0.1:8420/setup` and answers only to this
+PC, only until the form is saved, and only with the one-time code in the
+link the window prints and opens - so nothing else on your PC or in your
+browser can fill it in for you. If the browser did not open, copy the link
+from the window.
 
 If you would rather do the steps by hand - or need to re-run one - they are
 still there: `py configure.py` asks the questions, `py -3 -m pip install -r

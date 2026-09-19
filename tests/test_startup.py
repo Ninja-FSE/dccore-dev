@@ -76,11 +76,11 @@ class BootCase(DCCoreTestCase):
         queue_mgr.queue_worker = lambda: self.workers.append(1)
         self.addCleanup(lambda: setattr(queue_mgr, "queue_worker", self._real_worker))
 
-    def boot(self):
+    def boot(self, **kwargs):
         """Run startup(), capturing its console output."""
         buffer = io.StringIO()
         with redirect_stdout(buffer):
-            self.oserve.startup()
+            self.oserve.startup(**kwargs)
         return buffer.getvalue()
 
 
@@ -134,7 +134,7 @@ class StartupRunsOnThisPlatform(BootCase):
         never got configured at all looks like, minus the other five."""
         self.set_config(NICKNAME=config.SHIPPED_DEFAULTS["NICKNAME"])
         with self.assertRaises(SystemExit) as caught:
-            self.boot()
+            self.boot(setup_page=False)
         self.assertEqual(caught.exception.code, 1)
 
     def test_the_refusal_names_which_settings_are_still_unconfigured(self):
@@ -145,7 +145,7 @@ class StartupRunsOnThisPlatform(BootCase):
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             with self.assertRaises(SystemExit):
-                self.oserve.startup()
+                self.oserve.startup(setup_page=False)
         output = buffer.getvalue()
         self.assertIn("NICKNAME", output)
         self.assertIn("CHANNEL", output)
@@ -159,7 +159,7 @@ class StartupRunsOnThisPlatform(BootCase):
         than one that never touched it at all."""
         self.set_config(CHANNEL="")
         with self.assertRaises(SystemExit) as caught:
-            self.boot()
+            self.boot(setup_page=False)
         self.assertEqual(caught.exception.code, 1)
 
     def test_a_value_that_merely_resembles_the_upstream_brand_is_not_flagged(self):
