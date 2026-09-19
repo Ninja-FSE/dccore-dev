@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧹 One suffix list for both sweeps
+
+`tests/test_no_conflict_marker_is_left_behind.py` (#565) carried its own
+copy of the identifier sweep's `TEXT_SUFFIXES`. A new file type has to be
+added to that tuple or nobody scans it - `.mrc` and `.command` each
+shipped unscanned once for that reason - and two copies were two places
+to forget. The marker test now imports the sweep's tuple. Tests only.
+
 ### 🪧 A merge that leaves its markers behind now fails the suite
 
 The changelogs take an entry from nearly every pull request, so branches
