@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The structured feed says which channel
+
+From the operator's first real session with `dccore.mrc` (#550): the SEARCH
+line said who searched and what, but not where; SENDING and SENT the same.
+
+The structured lines carried no channel at all, so the script had nothing to
+show. Every event line now has a `<channel>` token straight after the nick -
+REQUEST, QUEUED, SENDING, RESUMED, SENT, FAIL and SEARCH - and it is always
+exactly one token, `-` when the event has none (a request by private message,
+a resume, a transfer that no longer knows where it was asked for), because it
+sits among the fixed fields ahead of the free text and must not move what
+follows. Anything that is not a channel name is `-`. Shown by the script as
+`nick in #channel`, and nothing for `-`.
+
+The protocol has not shipped in a release yet (it is for v1.13), so major 1
+takes the extra field rather than a new number; the script and the bot have to
+be updated together - an old script against a new bot would read the channel as
+the next field.
+
+Where the channel comes from: SEARCH from the channel the search was typed in
+(`list.py`); REQUEST and QUEUED from the request's channel; SENDING from the
+channel the send is started for, which is the point - a send picked up from the
+queue later (three sites in `dcc.py`) hands on the same channel it passes to
+`start_dcc_send`, so it still says where it was asked for; SENT from
+`send_transfer_complete()`'s channel; FAIL through one wrapper inside
+`start_dcc_send`, so all eight of its failure reports carry it. RESUMED has none
+at hand and says `-`.
+
+`tests/test_the_feed_says_which_channel.py` (10) and additions to
+`test_a_structured_feed_for_the_admin_chat.py` and
+`test_the_bots_window_in_mirc.py`: the token is one token and `-` for none,
+every channel prefix counts and an odd spelling stays one token; each emitter
+hands the channel on (read from a real event sink where the function can be
+called, from the source where it cannot); the four SENDING notices and the two
+QUEUED notices name a channel; `start_dcc_send` reports failures through one
+wrapper. The script's `$N` positions are checked against the bot's own lines
+for every kind, channel included. Verified by hand: dropping the channel from
+one SENDING call site, and from SENT, each fail.
+
 ### 📏 The mIRC window says MB
 
 Seen on the first real send with `dccore.mrc` connected: `"…flac" to

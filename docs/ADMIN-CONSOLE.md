@@ -463,13 +463,13 @@ have been replaced with spaces.
 | line | fixed fields | free text (last) |
 |---|---|---|
 | `DCCORE HELLO 1 <botnick>` | protocol major, nick | the version string |
-| `DCCORE REQUEST <nick> <file\|folder>` | | the name |
-| `DCCORE QUEUED <nick> <pos> <busy> <slots>` | position, slots busy / total | the name |
-| `DCCORE SENDING <nick> <slot> <slots> <bytes>` | slot n / m, size | the name |
-| `DCCORE RESUMED <nick> <at_bytes> <total_bytes>` | | the name |
-| `DCCORE SENT <nick> <bytes> <seconds> <bytes_per_s>` | | the name |
-| `DCCORE FAIL <nick> <acked_bytes> <total_bytes>` | what arrived, of what | the name, then ` :: `, then the reason |
-| `DCCORE SEARCH <nick> <results>` | count (the total, not the capped reply) | the term |
+| `DCCORE REQUEST <nick> <channel> <file\|folder>` | | the name |
+| `DCCORE QUEUED <nick> <channel> <pos> <busy> <slots>` | position, slots busy / total | the name |
+| `DCCORE SENDING <nick> <channel> <slot> <slots> <bytes>` | slot n / m, size | the name |
+| `DCCORE RESUMED <nick> <channel> <at_bytes> <total_bytes>` | | the name |
+| `DCCORE SENT <nick> <channel> <bytes> <seconds> <bytes_per_s>` | | the name |
+| `DCCORE FAIL <nick> <channel> <acked_bytes> <total_bytes>` | what arrived, of what | the name, then ` :: `, then the reason |
+| `DCCORE SEARCH <nick> <channel> <results>` | count (the total, not the capped reply) | the term |
 | `DCCORE LOG <CATEGORY>` | JOIN, PART, QUIT, BAN, HARDBAN, MUTE, TBAN, INFO | the prose, as the plain console shows it |
 | `DCCORE OUT` | | one line of a console command's reply |
 | `DCCORE DROPPED <n>` | lines the bot had to drop for a slow client | |
@@ -477,6 +477,12 @@ have been replaced with spaces.
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
+
+`<channel>` is always exactly one token, straight after the nick: the channel
+the request or search was made in, or `-` when there is none (a request by
+private message, a resume, or a transfer that no longer knows where it was
+asked for) - so a client can count on the position of everything after it and
+print nothing for `-`.
 
 Whatever you did not tick in **Settings → Console feed** is not sent in either
 mode. A session that never says `hello` is the console described above,
