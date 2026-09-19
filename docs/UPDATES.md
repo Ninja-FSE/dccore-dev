@@ -29,6 +29,14 @@ agrees between fill and save; it defaults to none; `-x` and `-t` are what
 `dccore.background` calls and `/color background` is never used. Mutants: a
 wrong pixel order and an off-by-one in the save both fail.
 
+The side panel's headings (Sending, Queue, Today, Since) are drawn in
+`col.head`, which defaulted to navy and had no control in the dialog: on a
+black window they could not be read and could not be changed (reported with a
+screenshot). The Show box now has **Panel headings** beside the file-name and
+console colours, filled and saved the same way, and the panel is redrawn when
+the options are saved. The default is left alone - navy is right on mIRC's
+own white background - and a saved choice is never overwritten.
+
 **Not run in mIRC.** Written from mIRC's documentation (`/background`,
 `/bset`, `/bwrite`); nothing here can execute the script, so the first
 colour chosen is the real test.

@@ -592,7 +592,8 @@ minutes. Closing the window closes the chat and stops the retries;
 
 - a tickbox and a colour for each kind of event - requests, queue
   positions, sends, failures, searches, joins/parts/quits, bans, other log
-  lines - plus the colour of file names and of console replies, and how
+  lines - plus the colour of file names, of console replies and of the side
+  panel's headings, and how
   often the `[STATUS]` line is written (0 = never);
 - the side panel, the title bar figures, console replies in a separate
   window, the beep, the fixed-width font and its size (the Status window's

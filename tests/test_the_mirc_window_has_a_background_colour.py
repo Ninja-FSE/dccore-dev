@@ -162,5 +162,42 @@ class TheAlias(unittest.TestCase):
         self.assertNotRegex(script(), r"(?m)^\s*/?color\s+background")
 
 
+class ThePanelHeadingColour(unittest.TestCase):
+    """The side panel's headings (Sending, Queue, Today, Since) are drawn in
+    col.head, which defaulted to navy and had no control: on a black window
+    they could not be read and could not be changed. Same combo, fill and
+    save as the other colours."""
+
+    def test_the_headings_are_drawn_in_the_saved_colour(self):
+        panel = alias_body(script(), "dccore.panel")
+        self.assertIn("var %head = $dccore.opt(col.head)", panel)
+        self.assertGreaterEqual(panel.count("aline -l %head"), 4)
+
+    def test_the_combo_is_filled_and_saved_like_the_others(self):
+        source = script()
+        self.assertIn("dccore.fillcombo 218 $dccore.opt(col.head)", source)
+        self.assertIn("hadd dccore col.head $calc($did(dccore.opt,218).sel - 1)", source)
+
+    def test_it_sits_in_the_show_box_and_collides_with_nothing(self):
+        source = script()
+        dialog = source[source.index("dialog dccore.opt {"):]
+        dialog = dialog[:dialog.index("\n}\n")]
+        box = re.search(r'box "Show in @DCCore", 100, (\d+) (\d+) (\d+) (\d+)', dialog)
+        bx, by, bw, bh = map(int, box.groups())
+        combo = re.search(r"combo 218, (\d+) (\d+) (\d+) \d+", dialog)
+        label = re.search(r'text "Panel headings", 217, (\d+) (\d+) (\d+) \d+', dialog)
+        for x, y, w in (map(int, combo.groups()), map(int, label.groups())):
+            self.assertTrue(bx <= x and x + w <= bx + bw)
+            self.assertTrue(by <= y + 10 <= by + bh, "runs out of the box")
+        # not over the status-line controls above it (edit 215 ends at y 80)
+        self.assertGreater(int(label.group(2)), 69 + 11)
+
+    def test_the_panel_is_redrawn_when_the_options_are_saved(self):
+        source = script()
+        save = source[source.index("on *:dialog:dccore.opt:sclick:1:"):]
+        save = save[:save.index("on *:dialog:dccore.opt:sclick:501:")]
+        self.assertIn("dccore.panel", save)
+
+
 if __name__ == "__main__":
     unittest.main()

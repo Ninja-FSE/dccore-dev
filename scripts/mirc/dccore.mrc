@@ -784,6 +784,8 @@ dialog dccore.opt {
   text "Status line every", 214, 190 60 50 8
   edit "", 215, 190 69 20 11, autohs
   text "min (0 = never)", 216, 212 71 44 8
+  text "Panel headings", 217, 190 83 50 8
+  combo 218, 190 91 52 70, drop
   box "Window", 300, 5 108 252 50
   check "Side panel with slots, queue and today's totals", 301, 10 118 118 10
   check "Slots, queue and speed in the title bar", 302, 10 129 118 10
@@ -818,6 +820,7 @@ on *:dialog:dccore.opt:init:0: {
   }
   dccore.fillcombo 211 $dccore.opt(col.name)
   dccore.fillcombo 213 $dccore.opt(col.console)
+  dccore.fillcombo 218 $dccore.opt(col.head)
   did -ra dccore.opt 215 $dccore.opt(statusmin)
   if ($dccore.opt(panel)) { did -c dccore.opt 301 }
   if ($dccore.opt(titlebar)) { did -c dccore.opt 302 }
@@ -853,6 +856,7 @@ on *:dialog:dccore.opt:sclick:1: {
   }
   hadd dccore col.name $calc($did(dccore.opt,211).sel - 1)
   hadd dccore col.console $calc($did(dccore.opt,213).sel - 1)
+  hadd dccore col.head $calc($did(dccore.opt,218).sel - 1)
   hadd dccore statusmin $iif($did(dccore.opt,215).text isnum,$int($did(dccore.opt,215).text),5)
   hadd dccore panel $did(dccore.opt,301).state
   hadd dccore titlebar $did(dccore.opt,302).state
