@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪧 A merge that leaves its markers behind now fails the suite
+
+The changelogs take an entry from nearly every pull request, so branches
+merged in turn conflict in `docs/UPDATES.md` and `docs/UPDATES-PUBLIC.md`
+routinely, and each is resolved by hand. Twice in one day that went wrong
+unnoticed: #543's merge left a bare separator line in the changelog with no
+start or end marker beside it (found by reading the diff), and a resolution
+script that handled the two changelogs left start, separator and end markers
+in `docs/WINDOWS.md`, committed, with everything green.
+
+`tests/test_no_conflict_marker_is_left_behind.py` (5) reads every tracked text
+file - the changelogs included, since they are where it happens - for a line
+that is exactly a start marker, an end marker or the separator. The separator
+is checked on its own because that is what the first case left. The detector
+is tested against all three, and against the ordinary rules and mid-line
+uses of those characters, which it must not flag. Verified by hand: a bare
+separator appended to `docs/WINDOWS.md` fails it; the tree as it is passes.
+
 ### 🗺️ The roadmap catches up
 
 `docs/FUTURE.md`'s own rule is that a feature moves under *Implemented* in
