@@ -25,10 +25,12 @@ Developed on Linux (Debian/Ubuntu, including Proxmox LXC) and runs on Windows â€
 
 ## The short way
 
-Install Python 3.10 or newer, extract DCCore, and run the launcher for your
-system - on the first run it asks the setup questions itself, offers to
-install the dashboard's dependency if you turned the dashboard on, checks the
-setup and starts the bot:
+Extract DCCore and run the launcher for your system - on the first run it
+asks the setup questions itself, offers to install the dashboard's
+dependency if you turned the dashboard on, checks the setup and starts the
+bot. It needs Python 3.10 or newer: on Windows the launcher offers to
+download and install it if there is none (see [WINDOWS.md](WINDOWS.md)); on
+Linux and macOS it names the package to install and stops.
 
 | | |
 |---|---|
