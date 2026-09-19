@@ -592,12 +592,16 @@ minutes. Closing the window closes the chat and stops the retries;
 
 - a tickbox and a colour for each kind of event - requests, queue
   positions, sends, failures, searches, joins/parts/quits, bans, other log
-  lines - plus the colour of file names and of console replies, and how
+  lines - plus the colour of file names, of console replies and of the side
+  panel's headings, and how
   often the `[STATUS]` line is written (0 = never);
 - the side panel, the title bar figures, console replies in a separate
   window, the beep, the fixed-width font and its size (the Status window's
   size until you set one - on a high-resolution screen you may want a
-  bigger number);
+  bigger number), and the window's background colour (one of mIRC's sixteen,
+  or "none" to leave the window as mIRC has it). mIRC has no per-window
+  colour setting, so the script writes a one-pixel picture of the colour
+  beside itself (`dccore-bg-<n>.bmp`) and tiles it behind the text;
 - the bot's nick, whether the script reconnects by itself, the pairing
   state with **Pair again...** and **Forget token**.
 

@@ -4,6 +4,43 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎨 `dccore.mrc`: a background colour in the options
+
+From the operator's first real session with the window (#550): the options
+had a colour for every kind of event and none for the window itself.
+
+mIRC has no per-window colour setting - `/color background` changes every
+window at once, the operator's channels and queries included - only a
+per-window PICTURE (`/background -t @window file`, `-x` to remove it). So the
+option is a colour, and the script turns it into a one-pixel 24-bit `.bmp`
+beside itself (`dccore-bg-<n>.bmp`, written the first time a colour is used,
+one file per colour), tiled behind the window; "none" (the default) removes
+the picture and leaves the window as mIRC has it. The combo in the Window
+box lists none and mIRC's sixteen colours; the line selected is the colour
+plus two, and the save stores line minus two, so a round trip cannot move it.
+Applied when the window opens and when the options are saved.
+
+`tests/test_the_mirc_window_has_a_background_colour.py` (13): the header the
+script writes parses as a valid 1x1 24-bit bitmap (file size, data offset,
+image size, one pixel as blue-green-red-pad right after it); the palette has
+sixteen entries lined up with the names in the dialog; the combo is inside
+the Window box and no dialog id is used twice; the line-to-colour mapping
+agrees between fill and save; it defaults to none; `-x` and `-t` are what
+`dccore.background` calls and `/color background` is never used. Mutants: a
+wrong pixel order and an off-by-one in the save both fail.
+
+The side panel's headings (Sending, Queue, Today, Since) are drawn in
+`col.head`, which defaulted to navy and had no control in the dialog: on a
+black window they could not be read and could not be changed (reported with a
+screenshot). The Show box now has **Panel headings** beside the file-name and
+console colours, filled and saved the same way, and the panel is redrawn when
+the options are saved. The default is left alone - navy is right on mIRC's
+own white background - and a saved choice is never overwritten.
+
+**Not run in mIRC.** Written from mIRC's documentation (`/background`,
+`/bset`, `/bwrite`); nothing here can execute the script, so the first
+colour chosen is the real test.
+
 ### 📏 The mIRC window says MB
 
 Seen on the first real send with `dccore.mrc` connected: `"…flac" to

@@ -33,7 +33,10 @@
 ;    (/window -el), /aline -l, /titlebar, on CHAT with ^ to halt the
 ;    default text, on CHATCLOSE, hash tables with /hsave and /hload,
 ;    /hinc and /hdel -w, /timer -m, dialog tables with combo, check and
-;    edit, $round, $regex, $duration, $qt, $base. Nothing from
+;    edit, $round, $regex, $duration, $qt, $base, and for the window
+;    background /background, /bset and /bwrite (a one-pixel .bmp of the
+;    chosen colour: mIRC has no per-window background colour, only a
+;    per-window picture). Nothing from
 ;    mIRC 7 (no $json, no UTF-8 switches): the wire is plain ASCII, the
 ;    bot has already turned control characters into spaces, and the only
 ;    characters above 127 this script draws are the middle dot and the
@@ -88,6 +91,7 @@ alias dccore.init {
   dccore.default separate 0
   dccore.default beep 1
   dccore.default font 1
+  dccore.default bg -1
   dccore.default statusmin 5
   dccore.default wantopen 0
   dccore.default show.request 1
@@ -495,9 +499,34 @@ alias dccore.window {
   if ($dccore.opt(panel)) { window -el30 $dccore.win }
   else { window -e $dccore.win }
   if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
+  dccore.background
   dccore.title
   dccore.panel
 }
+
+; The window's background colour. mIRC has no per-window colour setting
+; (/color background is for every window at once), only a per-window
+; PICTURE, so the colour is a one-pixel .bmp beside the script, tiled. -1 is
+; "leave it as mIRC has it": the picture is removed. Written on first use
+; and kept, one file per colour.
+alias dccore.background {
+  if (!$window($dccore.win)) { return }
+  var %c = $dccore.opt(bg)
+  if (%c !isnum) || (%c < 0) || (%c > 15) { background -x $dccore.win | return }
+  var %f = $dccore.bgfile(%c)
+  if (%f) { background -t $dccore.win $qt(%f) }
+}
+alias dccore.bgfile {
+  var %f = $+($scriptdir,dccore-bg-,$1,.bmp)
+  if ($isfile(%f)) { return %f }
+  var %rgb = $dccore.rgb($1)
+  bset &dccorebg 1 66 77 58 0 0 0 0 0 0 0 54 0 0 0 40 0 0 0 1 0 0 0 1 0 0 0 1 0 24 0 0 0 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  bset &dccorebg 55 $gettok(%rgb,3,46) $gettok(%rgb,2,46) $gettok(%rgb,1,46) 0
+  bwrite $qt(%f) 0 -1 &dccorebg
+  if ($isfile(%f)) { return %f }
+}
+; mIRC's default palette, by colour number, as red.green.blue
+alias dccore.rgb { return $gettok(255.255.255 0.0.0 0.0.127 0.147.0 255.0.0 127.0.0 156.0.156 252.127.0 255.255.0 0.252.0 0.147.147 0.255.255 0.0.252 255.0.255 127.127.127 210.210.210,$calc($1 + 1),32) }
 
 ; The font size: what the operator set with /dccore font <size> (or in the
 ; options), else the Status window's, else 12. A fixed 9pt was unreadable
@@ -755,6 +784,8 @@ dialog dccore.opt {
   text "Status line every", 214, 190 60 50 8
   edit "", 215, 190 69 20 11, autohs
   text "min (0 = never)", 216, 212 71 44 8
+  text "Panel headings", 217, 190 83 50 8
+  combo 218, 190 91 52 70, drop
   box "Window", 300, 5 108 252 50
   check "Side panel with slots, queue and today's totals", 301, 10 118 118 10
   check "Slots, queue and speed in the title bar", 302, 10 129 118 10
@@ -762,6 +793,8 @@ dialog dccore.opt {
   check "Beep on a failed transfer", 304, 132 118 118 10
   check "Fixed-width font (Lucida Console)", 305, 132 129 100 10
   edit "", 306, 234 128 18 11, autohs
+  text "Background", 307, 132 142 36 8
+  combo 308, 170 140 60 70, drop
   box "Connection", 400, 5 161 252 52
   text "Bot nick", 401, 10 173 26 8
   edit "", 402, 38 171 60 11, autohs
@@ -787,6 +820,7 @@ on *:dialog:dccore.opt:init:0: {
   }
   dccore.fillcombo 211 $dccore.opt(col.name)
   dccore.fillcombo 213 $dccore.opt(col.console)
+  dccore.fillcombo 218 $dccore.opt(col.head)
   did -ra dccore.opt 215 $dccore.opt(statusmin)
   if ($dccore.opt(panel)) { did -c dccore.opt 301 }
   if ($dccore.opt(titlebar)) { did -c dccore.opt 302 }
@@ -794,9 +828,17 @@ on *:dialog:dccore.opt:init:0: {
   if ($dccore.opt(beep)) { did -c dccore.opt 304 }
   if ($dccore.opt(font)) { did -c dccore.opt 305 }
   did -ra dccore.opt 306 $dccore.fontsize
+  dccore.fillbg
   if ($dccore.bot) { did -ra dccore.opt 402 $dccore.bot }
   did -ra dccore.opt 403 $iif($dccore.opt(token),Paired $dccore.opt(paired) (token in dccore.ini),Not paired: the bot will ask for the password)
   if ($dccore.opt(auto)) { did -c dccore.opt 404 }
+}
+; "none" first, then the sixteen colours: the selected line is the colour + 2
+alias dccore.fillbg {
+  var %i = 1
+  did -a dccore.opt 308 none (mIRC's)
+  while (%i <= 16) { did -a dccore.opt 308 $gettok($dccore.colours,%i,44) | inc %i }
+  did -c dccore.opt 308 $calc($dccore.opt(bg) + 2)
 }
 alias dccore.fillcombo {
   var %i = 1
@@ -814,6 +856,7 @@ on *:dialog:dccore.opt:sclick:1: {
   }
   hadd dccore col.name $calc($did(dccore.opt,211).sel - 1)
   hadd dccore col.console $calc($did(dccore.opt,213).sel - 1)
+  hadd dccore col.head $calc($did(dccore.opt,218).sel - 1)
   hadd dccore statusmin $iif($did(dccore.opt,215).text isnum,$int($did(dccore.opt,215).text),5)
   hadd dccore panel $did(dccore.opt,301).state
   hadd dccore titlebar $did(dccore.opt,302).state
@@ -821,12 +864,14 @@ on *:dialog:dccore.opt:sclick:1: {
   hadd dccore beep $did(dccore.opt,304).state
   hadd dccore font $did(dccore.opt,305).state
   if ($did(dccore.opt,306).text isnum) && ($did(dccore.opt,306).text >= 6) { hadd dccore fontsize $did(dccore.opt,306).text }
+  hadd dccore bg $calc($did(dccore.opt,308).sel - 2)
   hadd dccore auto $did(dccore.opt,404).state
   if ($did(dccore.opt,402).text != $null) { hadd dccore bot $did(dccore.opt,402).text }
   dccore.save
   if ($window($dccore.win)) {
     if (%panel != $dccore.opt(panel)) { dccore.rebuild }
     if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
+    dccore.background
     dccore.title
     dccore.panel
   }
