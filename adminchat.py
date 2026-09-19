@@ -489,6 +489,7 @@ class Session:
         self.client = ""
         self._reported_dropped = 0
         self._status_sent_at = 0.0
+        self._status_due = False      # set by event_sink, acted on by the writer
         self._outbox = collections.deque(maxlen=OUTBOX_MAX)
         self._wake = threading.Event()
         self._lock = threading.Lock()
@@ -520,16 +521,40 @@ class Session:
         self._writer.start()
 
     def send_status(self):
-        """One STATUS burst, now. Called on the timer below and after any
-        event that moved the slots or the queue."""
+        """One STATUS burst, now - ON THE WRITER THREAD ONLY.
+
+        status_lines() reads the live figures, and one of them
+        (stats_mgr.live_speed) takes dcc.queue_lock, a plain Lock. The
+        events that ask for a burst - SENDING above all - are emitted from
+        inside `with queue_lock:` in dcc.check_queue_and_send(), so computing
+        the burst on the emitting thread was that thread taking a lock it
+        already held: it froze holding queue_lock, every later request froze
+        behind it, the IRC loop stopped answering PING and the bot dropped
+        off the network (seen live, 2026-09-19, the first night with the
+        mIRC script connected). So event_sink only flags that a burst is
+        due, and the writer, which holds nothing, computes and sends it.
+        """
         if self.closed or not self.authenticated or not self.structured:
             return
         self._status_sent_at = time.time()
+        self._status_due = False
         for line in status_lines():
             self.send(line)
 
+    def request_status(self):
+        """Ask the writer for a burst on its next pass. Safe from any thread,
+        under any lock: it touches no figure and takes no lock."""
+        self._status_due = True
+        self._wake.set()
+
     def _writer_loop(self):
         while not self.closed:
+            # A burst an event asked for goes out ahead of whatever is queued
+            # behind it: the title bar should not wait for the backlog, and
+            # a burst is a few lines. The timer's own burst, below, still
+            # fills silence only.
+            if self._status_due and self.structured and self.authenticated:
+                self.send_status()
             if not self._outbox:
                 # The STATUS timer rides on the writer's own half-second
                 # wake rather than a thread of its own: one thread per
@@ -595,9 +620,10 @@ class Session:
             return
         self.send(structured_line(kind, fields))
         # A slot or a queue just changed; the title bar should not wait for
-        # the timer to say so.
+        # the timer to say so. Flagged, not computed: this runs on the
+        # emitting thread, which may hold queue_lock - see send_status().
         if str(kind).upper() in ("SENDING", "SENT", "FAIL", "QUEUED", "RESUMED"):
-            self.send_status()
+            self.request_status()
 
     # -- lifecycle ---------------------------------------------------------
 
