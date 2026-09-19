@@ -4,6 +4,34 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧊 The STATUS burst never runs on the emitting thread
+
+Seen live, 2026-09-19, the first night with `dccore.mrc` connected: at a
+`SENDING` event the bot froze, the mIRC script saw no heartbeat and
+declared the link dead 90 s later, and 24 minutes on the server ping-timed
+the bot out. `stats_mgr.live_speed()` takes `dcc.queue_lock`, a plain
+`Lock`; `status_lines()` calls it; and `SENDING` is emitted from inside
+`with queue_lock:` in `dcc.check_queue_and_send()`. #555's `event_sink`
+computed the burst on the emitting thread - taking a lock it already
+held. That thread froze holding `queue_lock`; the writer's timer burst
+blocked behind it (no heartbeat); the next request's `with queue_lock:`
+in the IRC loop blocked too (no PONG).
+
+- `Session.event_sink()` now only flags `_status_due` and wakes the
+  writer (`request_status()`: no figure read, no lock taken); the writer
+  thread, which holds nothing, computes and sends the burst on its next
+  pass, ahead of the backlog. `hello`'s first burst stays synchronous - it
+  runs on the reader thread, which holds no lock.
+- Only a structured session was affected; a plain console or none at all
+  never computed a burst on an event.
+- `tests/test_status_slot_queue_and_pairing.py`: the five moving kinds
+  set the flag and compute nothing on the caller's thread; the writer
+  sends the burst after the event line (socketpair); and the regression
+  itself - `event_sink("SENDING")` called while holding `dcc.queue_lock`
+  returns at once (the old code hangs, the test's 3 s wait catches it) -
+  with a source pin that `status_lines()` still calls `live_speed()` and
+  `live_speed()` still takes the lock, so the test stays meaningful.
+
 ### 🌐 Set it up in the browser
 
 #547, Proposal 4. With `settings_file.REQUIRED` still blank and Flask
