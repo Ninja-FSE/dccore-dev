@@ -15,6 +15,7 @@ import io
 import os
 import socket
 import sys
+import threading
 import time
 import unittest
 
@@ -121,25 +122,90 @@ class WhenTheBurstIsSent(DCCoreTestCase):
             adminchat.handle_command(s, "hello dccore.mrc 1.0")
         self.assertEqual(len(self.statuses(s)), 1)
 
-    def test_an_event_that_moves_a_slot_or_the_queue_sends_one(self):
+    def test_an_event_that_moves_a_slot_or_the_queue_asks_for_one(self):
+        """Asks - the writer sends it. Computing it here, on the emitting
+        thread, deadlocked the bot (see the class below)."""
         for kind in ("SENDING", "SENT", "FAIL", "QUEUED", "RESUMED"):
             with self.subTest(kind=kind):
                 s = self.session()
                 s.event_sink(kind, {"nick": "d", "name": "x"}, "t")
-                self.assertEqual(len(self.statuses(s)), 1)
+                self.assertTrue(s._status_due)
+                self.assertEqual(self.statuses(s), [], "nothing computed on this thread")
 
     def test_a_search_or_request_does_not(self):
         for kind in ("SEARCH", "REQUEST"):
             with self.subTest(kind=kind):
                 s = self.session()
                 s.event_sink(kind, {"nick": "d", "name": "x", "term": "t"}, "t")
+                self.assertFalse(s._status_due)
                 self.assertEqual(self.statuses(s), [])
+
+    def test_the_writer_sends_the_burst_an_event_asked_for(self):
+        a, b = socket.socketpair()
+        self.addCleanup(a.close); self.addCleanup(b.close)
+        s = adminchat.Session(a, "127.0.0.1", "SysOp", "h")
+        s.authenticated = True; s.structured = True
+        s._status_sent_at = time.time()          # the timer is not due
+        s.start_writer()
+        s.event_sink("SENT", {"nick": "d", "name": "x"}, "t")
+        b.settimeout(3.0)
+        buffer = b""
+        deadline = time.time() + 3.0
+        while time.time() < deadline and b"DCCORE STATUS " not in buffer:
+            try:
+                buffer += b.recv(65536)
+            except socket.timeout:
+                break
+        s.close(None)
+        self.assertIn(b"DCCORE STATUS ", buffer)
+        self.assertLess(buffer.index(b"DCCORE SENT "), buffer.index(b"DCCORE STATUS "), "the event, then its burst")
 
     def test_a_plain_session_never_gets_one(self):
         s = self.session(structured=False)
         s.send_status()
         s.event_sink("SENT", {"nick": "d", "name": "x"}, "t")
         self.assertEqual(self.statuses(s), [])
+
+
+class TheBurstNeverRunsOnTheEmittingThread(DCCoreTestCase):
+    """2026-09-19, the first night with the mIRC script connected: the bot
+    froze at a SENDING event and dropped off the network 24 minutes later.
+
+    stats_mgr.live_speed() takes dcc.queue_lock, a plain Lock; status_lines()
+    calls it; and SENDING is emitted from inside `with queue_lock:` in
+    dcc.check_queue_and_send(). Computing the burst on the emitting thread
+    was that thread taking a lock it already held. This is that thread."""
+
+    def test_an_event_under_queue_lock_returns_at_once(self):
+        import dcc
+        s = adminchat.Session(socket.socket(), "127.0.0.1", "SysOp", "h")
+        self.addCleanup(s.close, None)
+        s.authenticated = True; s.structured = True
+        returned = threading.Event()
+
+        def emit_under_the_lock():
+            with dcc.queue_lock:
+                s.event_sink("SENDING", {"nick": "d", "slot": 1, "slots": 3, "bytes": 1, "name": "x"}, "t")
+            returned.set()
+
+        thread = threading.Thread(target=emit_under_the_lock, daemon=True)
+        thread.start()
+        self.assertTrue(returned.wait(3.0), "event_sink deadlocked on queue_lock")
+        self.assertTrue(s._status_due)
+
+    def test_status_lines_does_take_queue_lock_which_is_why(self):
+        """The hazard is real, not hypothetical: pinned so that a future
+        status_lines() that drops live_speed() does not quietly make the
+        test above meaningless."""
+        with io.open(os.path.join(REPO_ROOT, "stats_mgr.py"), encoding="utf-8") as handle:
+            self.assertIn("with dcc.queue_lock:", handle.read())
+        with io.open(os.path.join(REPO_ROOT, "adminchat.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        body = source.split("def status_lines(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("stats_mgr.live_speed()", body)
+        sink = source.split("    def event_sink(", 1)[1].split("\n    def ", 1)[0]
+        self.assertNotIn("self.send_status()", sink)
+        self.assertIn("self.request_status()", sink)
 
     def test_the_timer_fills_silence_only(self):
         """A client that is behind is receiving lines already; a burst on
