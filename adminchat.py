@@ -351,30 +351,40 @@ def _secs(value):
         return "0.0"
 
 
+def _channel_token(value):
+    """The channel field of an event line: the channel name, or "-" when the
+    event has none (a request by private message, a transfer whose request
+    no longer says where it came from). Always ONE token, since it sits
+    among the fixed fields, ahead of the free text."""
+    text = _clean(value, token=True)
+    return text if text[:1] in ("#", "&", "+", "!") else "-"
+
+
 def structured_line(kind, fields):
     """Render one feed event as its DCCORE line. Every kind FEED_KINDS names
     has a shape below; anything else is a LOG line carrying the category
     and the prose, so no category is ever lost by the typing."""
     f = fields or {}
     nick = _clean(f.get("nick"), token=True)
+    chan = _channel_token(f.get("channel"))
     name = _clean(f.get("name")).replace(" :: ", " : : ")
     kind = str(kind or "").upper()
     if kind == "REQUEST":
-        return f"DCCORE REQUEST {nick} {_clean(f.get('kind') or 'file', token=True)} {name}"
+        return f"DCCORE REQUEST {nick} {chan} {_clean(f.get('kind') or 'file', token=True)} {name}"
     if kind == "QUEUED":
-        return f"DCCORE QUEUED {nick} {_num(f.get('pos'))} {_num(f.get('busy'))} {_num(f.get('slots'))} {name}"
+        return f"DCCORE QUEUED {nick} {chan} {_num(f.get('pos'))} {_num(f.get('busy'))} {_num(f.get('slots'))} {name}"
     if kind == "SENDING":
-        return f"DCCORE SENDING {nick} {_num(f.get('slot'))} {_num(f.get('slots'))} {_num(f.get('bytes'))} {name}"
+        return f"DCCORE SENDING {nick} {chan} {_num(f.get('slot'))} {_num(f.get('slots'))} {_num(f.get('bytes'))} {name}"
     if kind == "RESUMED":
-        return f"DCCORE RESUMED {nick} {_num(f.get('at_bytes'))} {_num(f.get('total_bytes'))} {name}"
+        return f"DCCORE RESUMED {nick} {chan} {_num(f.get('at_bytes'))} {_num(f.get('total_bytes'))} {name}"
     if kind == "SENT":
-        return (f"DCCORE SENT {nick} {_num(f.get('bytes'))} {_secs(f.get('seconds'))} "
+        return (f"DCCORE SENT {nick} {chan} {_num(f.get('bytes'))} {_secs(f.get('seconds'))} "
                 f"{_num(f.get('bytes_per_s'))} {name}")
     if kind == "FAIL":
-        return (f"DCCORE FAIL {nick} {_num(f.get('acked'))} {_num(f.get('total'))} {name} :: "
+        return (f"DCCORE FAIL {nick} {chan} {_num(f.get('acked'))} {_num(f.get('total'))} {name} :: "
                 f"{_clean(f.get('reason'))}")
     if kind == "SEARCH":
-        return f"DCCORE SEARCH {nick} {_num(f.get('results'))} {_clean(f.get('term'))}"
+        return f"DCCORE SEARCH {nick} {chan} {_num(f.get('results'))} {_clean(f.get('term'))}"
     return f"DCCORE LOG {_clean(f.get('category') or kind or 'INFO', token=True)} {_clean(f.get('text'))}"
 
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The mIRC window shows which channel a search, request or send was in.** Lines now read `steppers in #channel searched ...` and `"file" to dave in #channel (slot 1/3 ...)`; a request made by private message shows no channel. This needs the newest `dccore.mrc` together with the newest bot.
 - **Fixed: a bot that never answered was asked for its list again every hour.** With automatic re-fetching on, the once-a-day limit per bot was counted from the last list that *arrived*, so a bot whose list never came kept being asked at every hourly check and at every restart. It is now counted from the last time it was *asked* as well - saved to disk, so a restart does not forget it - and a bot that does not answer is asked once per interval (24 hours by default), not once an hour.
 - **The mIRC window can have a background colour.** `/dccore options` now has a **Background** choice in the Window box: one of mIRC's sixteen colours, or "none" to leave the window as mIRC has it. It changes only this window, not your channels and queries. The side panel's headings, which were a fixed dark blue that vanished on a black window, now have a colour choice of their own.
 - **The mIRC window now says 27.5MB and 1.06MB/s** rather than `27.5` and `1.06/s` - it formats the units itself instead of relying on a mIRC function that, in some versions, leaves them off.

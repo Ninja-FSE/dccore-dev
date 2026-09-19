@@ -41,32 +41,53 @@ class TheLineFormat(DCCoreTestCase):
     """structured_line() - pure, and the whole contract with a client."""
 
     def test_request(self):
-        self.assertEqual(adminchat.structured_line("REQUEST", {"nick": "dave", "kind": "file", "name": "A B.flac"}),
-                         "DCCORE REQUEST dave file A B.flac")
+        self.assertEqual(adminchat.structured_line("REQUEST", {"nick": "dave", "channel": "#chan", "kind": "file", "name": "A B.flac"}),
+                         "DCCORE REQUEST dave #chan file A B.flac")
 
     def test_queued(self):
-        self.assertEqual(adminchat.structured_line("QUEUED", {"nick": "erin", "pos": 2, "busy": 3, "slots": 3, "name": "X.rar"}),
-                         "DCCORE QUEUED erin 2 3 3 X.rar")
+        self.assertEqual(adminchat.structured_line("QUEUED", {"nick": "erin", "channel": "#chan", "pos": 2, "busy": 3, "slots": 3, "name": "X.rar"}),
+                         "DCCORE QUEUED erin #chan 2 3 3 X.rar")
 
     def test_sending(self):
-        self.assertEqual(adminchat.structured_line("SENDING", {"nick": "dave", "slot": 2, "slots": 3, "bytes": 31200000, "name": "A.flac"}),
-                         "DCCORE SENDING dave 2 3 31200000 A.flac")
+        self.assertEqual(adminchat.structured_line("SENDING", {"nick": "dave", "channel": "#chan", "slot": 2, "slots": 3, "bytes": 31200000, "name": "A.flac"}),
+                         "DCCORE SENDING dave #chan 2 3 31200000 A.flac")
 
     def test_resumed(self):
-        self.assertEqual(adminchat.structured_line("RESUMED", {"nick": "f", "at_bytes": 10, "total_bytes": 20, "name": "S.mkv"}),
-                         "DCCORE RESUMED f 10 20 S.mkv")
+        self.assertEqual(adminchat.structured_line("RESUMED", {"nick": "f", "channel": "#chan", "at_bytes": 10, "total_bytes": 20, "name": "S.mkv"}),
+                         "DCCORE RESUMED f #chan 10 20 S.mkv")
 
     def test_sent(self):
-        line = adminchat.structured_line("SENT", {"nick": "dave", "bytes": 32712345, "seconds": 23.44, "bytes_per_s": 1398000.7, "name": "A.flac"})
-        self.assertEqual(line, "DCCORE SENT dave 32712345 23.4 1398000 A.flac")
+        line = adminchat.structured_line("SENT", {"nick": "dave", "channel": "#chan", "bytes": 32712345, "seconds": 23.44, "bytes_per_s": 1398000.7, "name": "A.flac"})
+        self.assertEqual(line, "DCCORE SENT dave #chan 32712345 23.4 1398000 A.flac")
 
     def test_fail_carries_the_reason_after_the_marker(self):
-        line = adminchat.structured_line("FAIL", {"nick": "gary", "acked": 1200000, "total": 2700000, "name": "T.flac", "reason": "stopped"})
-        self.assertEqual(line, "DCCORE FAIL gary 1200000 2700000 T.flac :: stopped")
+        line = adminchat.structured_line("FAIL", {"nick": "gary", "channel": "#chan", "acked": 1200000, "total": 2700000, "name": "T.flac", "reason": "stopped"})
+        self.assertEqual(line, "DCCORE FAIL gary #chan 1200000 2700000 T.flac :: stopped")
 
     def test_search(self):
-        self.assertEqual(adminchat.structured_line("SEARCH", {"nick": "dave", "results": 12, "term": "iron maiden"}),
-                         "DCCORE SEARCH dave 12 iron maiden")
+        self.assertEqual(adminchat.structured_line("SEARCH", {"nick": "dave", "channel": "#chan", "results": 12, "term": "iron maiden"}),
+                         "DCCORE SEARCH dave #chan 12 iron maiden")
+
+    def test_the_channel_is_one_token_and_dash_when_there_is_none(self):
+        """It sits among the fixed fields, ahead of the free text, so it must
+        always be exactly one token: "-" for a private-message request or a
+        transfer that no longer knows where it was asked for, and for
+        anything that is not a channel name (a nick is not a channel)."""
+        for value in (None, "", "dave", "  "):
+            with self.subTest(channel=value):
+                self.assertEqual(adminchat.structured_line("SEARCH", {"nick": "d", "channel": value, "results": 1, "term": "x"}),
+                                 "DCCORE SEARCH d - 1 x")
+        self.assertEqual(adminchat.structured_line("SEARCH", {"nick": "d", "results": 1, "term": "x"}),
+                         "DCCORE SEARCH d - 1 x")
+
+    def test_every_channel_prefix_counts_and_odd_spellings_stay_one_token(self):
+        for name in ("#a", "&b", "+c", "!d"):
+            with self.subTest(channel=name):
+                self.assertEqual(adminchat.structured_line("SEARCH", {"nick": "d", "channel": name, "results": 1, "term": "x"}),
+                                 f"DCCORE SEARCH d {name} 1 x")
+        line = adminchat.structured_line("SEARCH", {"nick": "d", "channel": "#a b\tc", "results": 1, "term": "x"})
+        self.assertEqual(line.split(" ")[3], "#a_b_c")
+        self.assertEqual(len(line.split(" ")), 6, "one token more than before, never more")
 
     def test_anything_else_is_a_log_line(self):
         """No category is lost by the typing."""
@@ -75,9 +96,9 @@ class TheLineFormat(DCCoreTestCase):
         self.assertEqual(adminchat.structured_line("WEIRD", {"text": "x"}), "DCCORE LOG WEIRD x")
 
     def test_the_free_text_is_always_last_and_may_hold_spaces(self):
-        line = adminchat.structured_line("REQUEST", {"nick": "d", "kind": "file", "name": "Artist - Title (Live) [2020].flac"})
+        line = adminchat.structured_line("REQUEST", {"nick": "d", "channel": "#c", "kind": "file", "name": "Artist - Title (Live) [2020].flac"})
         self.assertTrue(line.endswith(" Artist - Title (Live) [2020].flac"))
-        self.assertEqual(len(line.split(" ", 4)), 5)
+        self.assertEqual(len(line.split(" ", 5)), 6)
 
     def test_numbers_are_raw_never_formatted(self):
         line = adminchat.structured_line("SENT", {"nick": "d", "bytes": 1288490188, "seconds": 0, "bytes_per_s": 0, "name": "x"})
@@ -85,19 +106,19 @@ class TheLineFormat(DCCoreTestCase):
         self.assertNotIn("GB", line)
 
     def test_missing_numbers_are_zero_not_none(self):
-        self.assertEqual(adminchat.structured_line("SENT", {"nick": "d", "name": "x"}), "DCCORE SENT d 0 0.0 0 x")
+        self.assertEqual(adminchat.structured_line("SENT", {"nick": "d", "name": "x"}), "DCCORE SENT d - 0 0.0 0 x")
 
     def test_control_characters_become_spaces(self):
         """A tab, a newline or a colour code in a field would break the
         line or the client's display; reject_if_unsafe_for_irc_line()
         refuses them in requests, and this is the belt to that brace."""
         line = adminchat.structured_line("SEARCH", {"nick": "d", "results": 1, "term": "a\tb\r\nc\x0304d"})
-        self.assertEqual(line, "DCCORE SEARCH d 1 a b  c 04d")
+        self.assertEqual(line, "DCCORE SEARCH d - 1 a b  c 04d")
         self.assertEqual(len(line.splitlines()), 1)
 
     def test_a_token_field_never_contains_a_space(self):
         line = adminchat.structured_line("REQUEST", {"nick": "two words", "kind": "a b", "name": "n"})
-        self.assertEqual(line, "DCCORE REQUEST two_words a_b n")
+        self.assertEqual(line, "DCCORE REQUEST two_words - a_b n")
 
     def test_a_marker_inside_a_filename_cannot_split_a_fail_line(self):
         line = adminchat.structured_line("FAIL", {"nick": "g", "acked": 0, "total": 1, "name": "A :: B", "reason": "r"})
@@ -249,7 +270,7 @@ class ASessionThatSaysHello(DCCoreTestCase):
         s.event_sink("SENT", {"nick": "dave", "bytes": 1, "seconds": 1, "bytes_per_s": 1, "name": "x"}, "Sent")
         # (step 3 follows a SENT with a STATUS burst; that is not the prose)
         lines = [l for l in s._outbox if not l.startswith(("DCCORE STATUS ", "DCCORE SLOT ", "DCCORE QUEUE "))]
-        self.assertEqual(lines, ["DCCORE SENT dave 1 1.0 1 x"], "the prose must not arrive twice")
+        self.assertEqual(lines, ["DCCORE SENT dave - 1 1.0 1 x"], "the prose must not arrive twice")
 
     def test_a_structured_session_gets_every_other_category_as_log(self):
         s = self.session(); s.structured = True
@@ -350,7 +371,7 @@ class OverARealChat(unittest.TestCase):
 
             announce.feed_event("SEARCH", 'dave searched "x" - 3 results', nick="dave", results=3, term="x")
             text = self.read_until("DCCORE SEARCH")
-        self.assertIn("DCCORE SEARCH dave 3 x\n", text)
+        self.assertIn("DCCORE SEARCH dave - 3 x\n", text)
         self.assertNotIn('dave searched "x"', text, "the prose must not arrive as well")
 
 

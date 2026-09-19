@@ -438,12 +438,12 @@ def send_transfer_complete(channel, user, file_name, file_size, start_time, actu
         # tag the channel line has rendered since #526 never fired for the
         # one line it was for, and #528's "sends" tickbox never governed it.
         feed_event("SENT", f"Sent: \"{safe_file}\" to {user} [{speed_str}]",
-                   nick=user, bytes=file_size, seconds=duration,
+                   nick=user, channel=channel, bytes=file_size, seconds=duration,
                    bytes_per_s=actual_speed, name=file_name)
     except Exception as debug_err:
         print(f"[DEBUG-SENT ERROR] Could not send the closing notice to the debug channel: {debug_err}")
 
-def send_dcc_sending_notice(user, file_name, path=None):
+def send_dcc_sending_notice(user, file_name, path=None, channel=None):
     """Send the user a matching private NOTICE when a transfer starts or is queued.
 
     `path` is optional and only feeds the structured SENDING event's size
@@ -468,7 +468,7 @@ def send_dcc_sending_notice(user, file_name, path=None):
         except OSError:
             size = 0
     feed_event("SENDING", f'Sending "{file_name}" to {user} (slot {busy}/{slots})',
-               nick=user, slot=busy, slots=slots, bytes=size, name=file_name)
+               nick=user, channel=channel, slot=busy, slots=slots, bytes=size, name=file_name)
     
     # ---------------------------------------------------------------------
     # Private notice block, framed exactly like the channel one
@@ -783,7 +783,7 @@ def send_dcc_error(user, error_type):
     if oserve:
         oserve.queue_message(user, msg)
 
-def send_dcc_queue_notice(user, file_name, position):
+def send_dcc_queue_notice(user, file_name, position, channel=None):
     """Send the user their queue position privately, in the same colour theme."""
     import sys
     import defaults as config
@@ -794,7 +794,7 @@ def send_dcc_queue_notice(user, file_name, position):
     busy = len(getattr(config, "active_transfers", []) or [])
     slots = getattr(config, "MAX_DCC_SLOTS", 0)
     feed_event("QUEUED", f'Queued "{file_name}" for {user} at #{position} ({busy}/{slots} slots busy)',
-               nick=user, pos=position, busy=busy, slots=slots, name=file_name)
+               nick=user, channel=channel, pos=position, busy=busy, slots=slots, name=file_name)
     if oserve:
         # The mIRC colour blocks and separators
         BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()
