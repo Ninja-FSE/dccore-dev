@@ -956,12 +956,17 @@
 # means. A timer alone would re-ask every bot for a list we already have.
 #AUTO_REFETCH_LISTS = false
 
-# The least time between two automatic fetches of the same bot's list, in
-# hours, so a bot that rebuilds hourly is not fetched hourly.
+# The least time between two automatic asks for the same bot's list, in hours.
+# Counted from the last list that arrived or the last time the bot was asked,
+# so a bot that rebuilds hourly - or does not answer - is not asked every
+# hour.
 #
 # How stale a held list may get before it is re-asked for, in hours. Not how
 # often the check runs (that is hourly); this is the floor on how often any one
-# bot is asked, so a bot rebuilding hourly is not re-fetched hourly.
+# bot is asked, so a bot rebuilding hourly is not re-fetched hourly. Counted
+# from the later of the last list that ARRIVED and the last time the sweep
+# ASKED (kept on disk, so a restart does not forget it): a bot that never
+# answers is asked once per interval, not once per hour.
 #AUTO_REFETCH_INTERVAL_HOURS = 24
 
 # The most lists to re-fetch in one go. If many are out of date at once, the
