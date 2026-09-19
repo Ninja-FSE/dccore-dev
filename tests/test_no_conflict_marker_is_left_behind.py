@@ -26,13 +26,17 @@ import io
 import os
 import re
 import subprocess
+import sys
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
-TEXT_SUFFIXES = (".py", ".js", ".md", ".css", ".html", ".txt", ".sample",
-                 ".conf", ".bat", ".sh", ".yml", ".yaml", ".json", ".mrc",
-                 ".command")
+# The identifier sweep's list, not a copy: a suffix missing from it is a
+# file nobody scans, and .mrc and .command each shipped unscanned once
+# because that list had to be told. One list, one place to tell.
+from tests.test_no_personal_identifiers_ship import TEXT_SUFFIXES  # noqa: E402
 
 # Built from parts so this file does not contain a marker itself.
 START = "<" * 7
