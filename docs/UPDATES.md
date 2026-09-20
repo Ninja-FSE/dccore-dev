@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪪 The bot's own nick follows the server, not the NICK it sent (#635)
+
+Audit M33. The three paths that rename a registered bot - the reclaim of the main nick when its holder quits, the
+background monitor that does the same on a timer, and a rehash that found NICKNAME changed in the file - all
+assigned `config.NICKNAME` the moment they wrote the NICK command, and nothing reconciled it afterwards: the NICK
+event handler had no branch for the bot itself, and 438 ("nick change too fast", Undernet's 30 s window) was
+matched nowhere. A refused reclaim, a refused rehash rename or a rename services forced on the bot left the
+server knowing it by one name and config saying another until the next reconnect - and every "is this for me"
+test (DCC CHAT/SEND/RESUME offers, private messages, the self-message filter, a KICK of the bot) compared
+against a nick the bot did not hold.
+
+The senders no longer assign. `note_own_nick_change()` - called from the NICK event handler, matched on the old
+nick against the name the bot holds - is now the one thing that renames a registered bot; a refused NICK
+(433/437/438) after registration keeps the name and re-sends nothing (the old branch re-sent the alternate to a
+server that already called us that). The rehash keeps `config.NICKNAME` at the live name and puts the file's
+new name in ORIGINAL_NICK as the target, so the reclaim path and the next connect chase it and a refusal cannot
+leave config wrong. Registration is unchanged: the ladder (#633) assigns while unregistered because the 001
+settles it. `tests/test_the_bots_own_nick_follows_the_server.py` drives the real read loop past 001 with the
+threads it would start stubbed: a forced rename is followed, a reclaim is not the bot's name until the server
+says so, a reclaim refused as too fast or as taken leaves the name alone.
+
 ### 🤝 NICK and USER go out back to back; nothing is read before registration is sent (#634)
 
 Audit M32. After NICK, the handshake waited for a line containing 001, 002, PING or NOTICE before it sent USER.

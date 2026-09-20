@@ -253,7 +253,12 @@ def resolve_alt_nick(main_nick):
 # networks apply to a name that was just split or killed off - the same
 # situation as a ghost holding it, answered with a different number, and
 # never matched anywhere before #633.
-NICK_REFUSED_NUMERICS = {"432", "433", "437"}
+NICK_REFUSED_NUMERICS = {"432", "433", "437", "438"}
+# 438 is ERR_NICKTOOFAST - Undernet's "Nick change too fast. Please wait 30
+# seconds" - and can only follow a NICK sent AFTER registration. It joined
+# in #635, with the rule that a refusal of a registered bot's NICK means
+# "you still have the name you had": nothing to fall back to, nothing to
+# resend, and config.NICKNAME must not have moved.
 
 # How many names to try on one connection before waiting for the server:
 # the alternate, then nine derived from it. Past that the ghosts are not
@@ -283,6 +288,39 @@ def parse_nick_refusal(line):
     if refused[0] in "#&+!":
         return None
     return refused
+
+
+def note_own_nick_change(old_nick, new_nick):
+    """The server says the client called `old_nick` is now `new_nick`. If
+    that client is us, follow it. Returns True if it was.
+
+    THE SERVER'S NICK EVENT IS THE ONLY THING THAT RENAMES A REGISTERED BOT
+    (#635, audit M33). Every self-NICK sender used to assign config.NICKNAME
+    the moment it wrote the command, before the server had answered - and
+    nothing ever reconciled it. A 438 ("nick change too fast") to a reclaim,
+    a rename services forced on us, a rehash rename refused within
+    Undernet's 30 s window: the server knew the bot by one name and
+    config.NICKNAME said another until the next reconnect, and every
+    "is this addressed to me" test - DCC CHAT, SEND and RESUME offers,
+    private messages, the self-message filter, a KICK of the bot - compared
+    against a nick the bot did not hold.
+
+    So the senders no longer assign, and this is the one place that does
+    once registered (registration itself is settled by the 001, see
+    adopt_registered_nick()). Matched on the OLD nick against the name we
+    currently hold, which after the change above is exactly what the server
+    thinks it is - never on the alias list, which carries names anybody may
+    have picked up since.
+    """
+    held = str(getattr(config, "NICKNAME", "") or "")
+    if not held or str(old_nick or "").lower() != held.lower():
+        return False
+    new = str(new_nick or "").strip()
+    if not new or new == held:
+        return False
+    print(f"[NICK] The server now calls the bot {new} (was {held}).")
+    config.NICKNAME = new
+    return True
 
 
 def fallback_nick(main_nick, attempt):
@@ -2568,8 +2606,9 @@ def irc_loop():
                     if not main_nick_active:
                         print(f"\n[NICK RECOVERY] The ghost nick {main_nick} timed out. Changing nick...")
                         try:
+                            # Asked for, not yet held: config.NICKNAME
+                            # follows the server's NICK event (#635).
                             sock_inst.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
-                            config.NICKNAME = main_nick
                             break
                         except:
                             break
@@ -2804,13 +2843,17 @@ def irc_loop():
                                 print(f"[NICK LADDER] The server refused {refused_nick}. Trying: {next_nick}")
                                 s.sendall(f"NICK {next_nick}\r\n".encode("utf-8", errors="ignore"))
                                 config.NICKNAME = next_nick
-                        elif str(config.NICKNAME).lower() == main_nick.lower():
-                            # Registered, and the reclaim of the main nick
-                            # was refused: back to the alternate, as before.
-                            alt_nick = resolve_alt_nick(main_nick)
-                            print(f"[LIVE NICK COLLISION] The server reported a genuine collision for {main_nick}. Fallback nick: {alt_nick}")
-                            s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
-                            config.NICKNAME = alt_nick
+                        else:
+                            # Registered, and a NICK the bot sent - the
+                            # reclaim of its main nick, a rehash rename - was
+                            # refused: taken (433), too soon (438), held
+                            # back after a split (437). The bot still has the
+                            # name it had, and config.NICKNAME still says so
+                            # because nothing assigned it at the send (#635).
+                            # Nothing to resend: the old reply here re-sent
+                            # NICK <alt> to a server that already called us
+                            # that.
+                            print(f"[LIVE NICK COLLISION] The server refused {refused_nick}; the bot keeps {config.NICKNAME}.")
 
                     # Reclaim the main nick the moment the other client releases it
                     # Anchored twice over. The old test matched " QUIT "/" PART " anywhere,
@@ -2824,8 +2867,9 @@ def irc_loop():
                             if event_source_nick(line) == main_nick.lower():
                                 print(f"[NICK RECOVERY] The main nick {main_nick} logged out. Reclaiming it now...")
                                 try:
+                                    # Asked for, not yet held: config.NICKNAME
+                                    # follows the server's NICK event (#635).
                                     s.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
-                                    config.NICKNAME = main_nick
                                 except Exception as recovery_err:
                                     print(f"[NICK RECOVERY ERROR] Could not reclaim the nick: {recovery_err}")
 
@@ -2992,6 +3036,10 @@ def irc_loop():
                     if is_user_event(line, "NICK"):
                         nick_match = re.match(r"^:([^!\s]+)!\S*\s+NICK\s+:?(\S+)", line)
                         if nick_match:
+                            # Ours? Then this is the moment the bot's name
+                            # changes - not when the NICK was sent (#635).
+                            note_own_nick_change(nick_match.group(1),
+                                                 nick_match.group(2).strip())
                             # Everything this user owns, not just their
                             # outbound messages - see note_nick_change().
                             note_nick_change(nick_match.group(1),

@@ -1125,6 +1125,15 @@ def _handle_rehash_request(user, target_chan):
             _cfg.ORIGINAL_NICK = _cfg.NICKNAME
             print(f"[REHASH RAM] config.py changed the nickname to {_cfg.NICKNAME!r}; "
                   f"re-baselined, still answering to {baseline_nick!r}.")
+            # The new name is the TARGET, not yet the bot's name on the wire
+            # (#635): config.NICKNAME stays what the server calls us until
+            # its NICK event says otherwise - a rename refused with 438
+            # ("too fast") or 433 used to leave config saying a name the
+            # server never gave. ORIGINAL_NICK carries the target, so a
+            # reconnect asks for it and the reclaim path chases it.
+            _wanted_nick = _cfg.NICKNAME
+            if live_nick:
+                _cfg.NICKNAME = live_nick
 
             # Also change it LIVE, right now, over the connection that is
             # already open - the same live-sync treatment a CHANNEL edit
@@ -1136,14 +1145,14 @@ def _handle_rehash_request(user, target_chan):
             # watching the change happen in the dashboard has every reason to
             # expect the bot to answer to the new name immediately, the way
             # a channel add/remove already does.
-            _nick_line = rehash_nick_change_line(baseline_nick, _cfg.NICKNAME)
+            _nick_line = rehash_nick_change_line(baseline_nick, _wanted_nick)
             if _nick_line:
                 _oserve_for_nick = sys.modules.get('oserve')
                 _live_sock_for_nick = getattr(_oserve_for_nick, 'irc_connection', None) if _oserve_for_nick else None
                 if _live_sock_for_nick:
                     try:
                         _live_sock_for_nick.sendall(_nick_line.encode("utf-8", errors="ignore"))
-                        print(f"[REHASH NICK] Sent a live NICK change to {_cfg.NICKNAME!r}.")
+                        print(f"[REHASH NICK] Sent a live NICK change to {_wanted_nick!r}.")
                     except Exception as _nick_err:
                         print(f"[REHASH NICK ERROR] Could not send the live nick change: {_nick_err}")
                 else:

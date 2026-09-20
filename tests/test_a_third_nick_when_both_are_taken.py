@@ -12,10 +12,10 @@ ghosts lived. On an EFnet-style server the same happened with 437 for the
 whole nick-delay window even when the alternate was free.
 
 Now every refusal during registration moves on to the next name: the
-alternate first, then the alternate with a digit. Once registered the old
-rule stands - a refused reclaim of the main nick goes back to the alternate
-and nothing else - because a server that answers 433 to a NICK for the name
-we already hold must not walk us down the ladder.
+alternate first, then the alternate with a digit. Once registered the ladder
+is not climbed - a refused NICK means the bot keeps the name it has (#635) -
+because a server that answers 433 to a NICK for the name we already hold
+must not walk us down the ladder.
 
 The registration itself is driven for real below: irc.irc_loop() against a
 scripted socket, no network, stopped on the reconnect path.
@@ -24,6 +24,7 @@ scripted socket, no network, stopped on the reconnect path.
 import contextlib
 import io
 import os
+import re
 import socket
 import sys
 import threading
@@ -169,7 +170,7 @@ class DrivesOneRegistration(DCCoreTestCase):
                         CHANNEL="#somechannel", DEBUG_CHANNEL="",
                         MY_IP_OR_DOCK="203.0.113.5")
         config.ORIGINAL_NICK = "SomeBot"
-        self.addCleanup(delattr, config, "ORIGINAL_NICK")
+        self.addCleanup(setattr, config, "ORIGINAL_NICK", "DCCore")
         silence_debug(announce)
         self._real_socket = irc.socket.socket
         self._real_sleep = irc.time.sleep
@@ -262,9 +263,11 @@ class RegistrationWalksTheLadder(DrivesOneRegistration):
 
 
 class OnceRegisteredTheOldRuleStands(unittest.TestCase):
-    """A registered bot that is refused a reclaim of its main nick goes back
-    to the alternate and nowhere else - the ladder is for registration only.
-    The branch lives in irc_loop(), so this reads the text."""
+    """A registered bot that is refused a NICK keeps the name it has - the
+    ladder is for registration only. (Until #635 the refused branch re-sent
+    the alternate; it now sends nothing, since the server still calls the
+    bot by the name it had.) The branch lives in irc_loop(), so this reads
+    the text."""
 
     def handler(self):
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
@@ -277,12 +280,17 @@ class OnceRegisteredTheOldRuleStands(unittest.TestCase):
 
         self.assertIn("fallback_nick(main_nick, nick_refusals)", ladder)
 
-    def test_and_a_registered_bot_only_falls_back_to_the_alternate(self):
+    def test_and_a_registered_bot_does_not_climb_it(self):
         block = self.handler()
-        registered = block.split("elif str(config.NICKNAME).lower() == main_nick.lower():", 1)[1][:600]
+        after_ladder = block.index("[NICK LADDER] The server refused")
+        start = block.index(" " * 24 + "else:", after_ladder)
+        # Up to the first line back at the handler's own indent (20 spaces).
+        dedent = re.search(r"\n {20}\S", block[start:])
+        registered = block[start:start + dedent.start()]
+        self.assertIn("keeps {config.NICKNAME}", registered, "not the branch this expects")
 
-        self.assertIn("resolve_alt_nick(main_nick)", registered)
         self.assertNotIn("fallback_nick(", registered)
+        self.assertNotIn("sendall(", registered, "a refused NICK must not be answered with another NICK")
 
 
 if __name__ == "__main__":
