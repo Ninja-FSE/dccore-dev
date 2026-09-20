@@ -63,7 +63,7 @@ PORT: int          = 6667          # The server's port; 6667 is plain IRC, and t
 # this already used before REQUIRED existed.
 NICKNAME: str      = None
 ALT_NICKNAME: str  = "DCCore_"     # Used when NICKNAME is taken; the bot keeps trying to reclaim the main nick afterwards
-ADMIN_NICK: str    = None          # Who may use the admin commands (!ban, !rehash, !update...), comma-separated for more than one; the DCC console checks ADMIN_HOSTMASKS as well
+ADMIN_NICK: str    = None          # Who may use the admin commands (!ban, !rehash, !update...), comma-separated for more than one; with ADMIN_HOSTMASKS set, they must come from that host as well
 CHANNEL: str       = None          # The channel(s) to serve in, comma-separated; the first one is where announcements go by default
 # Ships BLANK, and that is a deliberate reversal of #171's "#dccore-debug".
 #
@@ -492,6 +492,11 @@ ADMIN_CHAT_MODE: str = "auto"
 
 # Whether !ban, !unban, !rehash, !update and !clearqueue still work when typed in
 # a channel or a private message.
+#
+# With ADMIN_HOSTMASKS set they need the right nick AND the right host, so a
+# stolen nick alone is not enough. With it empty they are checked on the nick
+# only, which anyone on Undernet can take while you are offline - set the
+# hostmask, or turn this off.
 #
 # Left ON. The console is new, and locking yourself out of every admin command
 # because a hostmask has a typo in it is a bad first experience. Turn it off once

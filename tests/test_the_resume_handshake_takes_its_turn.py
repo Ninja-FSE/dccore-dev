@@ -34,8 +34,10 @@ class TheResumeHandshakeTakesItsTurn(unittest.TestCase):
     def accept_block():
         with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as f:
             body = f.read()
-        block = body.split("DCC ACCEPT ", 1)[1]
-        return block.split("[DCC-RESUME] Could not answer", 1)[0]
+        # The paced half of the reply lives in _send_resume_accept (#577): the
+        # read thread does the lookup, and this is what sends.
+        block = body.split("def _send_resume_accept(", 1)[1]
+        return block.split("def offered_name_from_handshake(", 1)[0]
 
     def test_the_accept_waits_for_a_slot(self):
         self.assertIn("runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)",

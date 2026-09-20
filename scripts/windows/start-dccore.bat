@@ -48,9 +48,16 @@ set "PY_INSTALL_TRIED="
 
 rem --- find an interpreter ----------------------------------------------
 :find_python
+rem  Found is not the same as works (#586). On a stock Windows 10/11 with no
+rem  Python, `where python` finds the Microsoft Store's stub in WindowsApps -
+rem  which is on PATH by default, opens the Store and exits 9009 - and `py`
+rem  can exist with no Python behind it. So each candidate is RUN once: only
+rem  one that answers becomes %PY%, and a machine that has only a stub falls
+rem  through to the install offer below. `call`, because a shim (pyenv-win's
+rem  python.bat) is a batch file, and running one without it never comes back.
 set "PY="
-where py >nul 2>&1 && set "PY=py -3"
-if not defined PY where python >nul 2>&1 && set "PY=python"
+where py >nul 2>&1 && call py -3 -c "import sys" >nul 2>&1 && set "PY=py -3"
+if not defined PY where python >nul 2>&1 && call python -c "import sys" >nul 2>&1 && set "PY=python"
 
 rem  Neither on PATH. The python.org installer puts a per-user install under
 rem  %LOCALAPPDATA%\Programs\Python and an all-users one under %ProgramFiles%,

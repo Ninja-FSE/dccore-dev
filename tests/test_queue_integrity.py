@@ -317,10 +317,12 @@ class ReleaseQueueEntryTests(DCCoreTestCase):
         orphan = queue_row(user="ghost", filename="Nothing.flac")
 
         self.assertFalse(self.settle("ghost", orphan, delivered=True))
-        # A failure still charges the retry budget - the row simply is not in any
-        # queue, so nothing is removed. What matters is that it does not raise.
-        self.assertTrue(self.settle("ghost", orphan, delivered=False))
-        self.assertEqual(orphan["send_fails"], 1)
+        # A failure of a row that is in no queue (the direct-send fast path's
+        # synthetic one) is settled on the spot, not "kept for retry": nothing
+        # could ever retry it, and the user is told (#599). What matters here
+        # is that it does not raise.
+        self.assertFalse(self.settle("ghost", orphan, delivered=False))
+        self.assertNotIn("send_fails", orphan)
         # No queue was created as a side effect of settling.
         self.assertEqual(self.config.dcc_queue.get("ghost", []), [])
         self.assertNotIn("ghost", self.config.dcc_queue)

@@ -141,6 +141,10 @@ SETTINGS_DEFAULTS = {
     "PRIVATE_MESSAGE_DECLINE_BURST": 20,
     "PRIVATE_MESSAGE_DECLINE_BURST_SECONDS": 600,
     "ADMIN_NICK": None,
+    # The channel admin commands check the host once this is set (#579), so a
+    # test that set it and did not put it back - two do - changed the answer of
+    # every is_admin() call after it.
+    "ADMIN_HOSTMASKS": [],
 }
 
 RUNTIME_FLAGS = {
