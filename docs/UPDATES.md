@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚦 The outbound pump waits for the JOINs to land, and the stale VIP backlog is really cleared (#630)
+
+Audit M28. `irc.py` publishes `oserve.irc_connection` straight after `connect()`, before NICK/USER go out and
+seconds before the JOINs land, and `queue_mgr.queue_worker()`'s only gate was "is there a socket" - so whatever
+the previous connection left queued (a "Sent:" notice, queue positions, a rejoin) drained into a window the server
+answers with 451 and 404, and the lines vanished with no log line. The disconnect epilogue meant to drop stale
+adverts emptied `send_queue["channel_announce"]`, a key `oserve.queue_message()` never writes (adverts go to
+`vip_queue`), so it cleared nothing.
+
+The pump now has the same second gate as the debug drain: it holds until `config.activation_triggered` - set once
+every target channel has answered its JOIN or the watchdog gave up waiting, cleared by the epilogue. Deliberately
+NOT `bot_joined_channel`: that stays False on a connection that never got into a channel, and the rejoin JOIN goes
+through this very pump. The epilogue now empties `vip_queue` (and says how many lines it dropped), the same
+decision the pump already takes on a failed send. `tests/test_the_pump_waits_for_the_joins_to_land.py`; the
+three existing pump tests set the flag in their setUp.
+
 ### 👢 A kick of another user is a departure, and the rejoin's NAMES rebuilds the member list (#629)
 
 Audit M27. The KICK handler only acted on a kick of the bot itself; anyone else kicked stayed in

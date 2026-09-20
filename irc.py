@@ -3430,7 +3430,16 @@ def irc_loop():
             oserve_mod.bot_joined_channel = False
         _release_socket()
         announce.is_ready = False
-        import queue_mgr
-        if "channel_announce" in queue_mgr.config.send_queue:
-            queue_mgr.config.send_queue["channel_announce"] = []
+        # The VIP lane is where adverts and rejoins live, and everything in
+        # it was written for the connection that just died: an advert's
+        # figures are stale, a rejoin is for channels the new connection
+        # joins by itself, and a command reply is to someone who asked a
+        # link ago. This used to empty send_queue["channel_announce"], a key
+        # oserve.queue_message() never writes - adverts go to vip_queue -
+        # so it cleared nothing (#630). queue_worker does the same on a
+        # failed send; this is the same decision at the other exit.
+        stale_vip = len(getattr(config, 'vip_queue', ()) or ())
+        if stale_vip:
+            del config.vip_queue[:]
+            print(f"[CONNECT] Dropped {stale_vip} queued VIP line(s) from the dead connection.")
         time.sleep(10)

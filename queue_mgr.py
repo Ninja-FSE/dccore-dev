@@ -84,7 +84,20 @@ def queue_worker():
             # notices and adverts alike, with no error anywhere. Waiting here keeps the
             # queues intact until a live socket exists; the caps above stop them growing
             # without bound during a long outage.
-            if not current_sock:
+            #
+            # TWO GATES, like the debug drain in announce.py (#630). irc.py
+            # publishes oserve.irc_connection straight after connect(), before
+            # NICK/USER have gone out and seconds before the JOINs land - so
+            # the socket alone let whatever the last connection left behind
+            # (a "Sent:" notice, queue positions, a rejoin) drain into a
+            # window the server answers with 451 and 404, and the lines were
+            # gone without a word. activation_triggered is set once every
+            # target channel has answered its JOIN - or the watchdog gave up
+            # waiting - and cleared by the disconnect epilogue; it is not the
+            # channel-sync flag, which stays False on a connection that never
+            # got into a channel and would then hold the very JOIN that asks
+            # to be let back in.
+            if not current_sock or not getattr(config, 'activation_triggered', False):
                 time.sleep(0.5)
                 continue
 
