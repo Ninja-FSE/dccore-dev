@@ -446,6 +446,39 @@ def _report_recent_lines(recent_lines):
         pass
 
 
+# The day's statistics roll over on the first message after midnight, and that
+# write can fail (a full disk, a read-only data/, a stats.txt another program
+# holds). db.check_and_rotate_day() raises on purpose - a caller must never be
+# handed un-rotated counters as if they were current - but its caller here is
+# the top of the per-message block: an exception there dropped EVERY command,
+# admin commands and !rehash included, until the write worked (#592). The
+# bookkeeping failing must not take the bot with it, so it is caught here, said
+# once a minute rather than once a message, and retried on that same cadence
+# (each failed attempt on Windows also costs the read thread a replace retry).
+DAY_ROTATION_RETRY_SECONDS = 60.0
+_day_rotation_failed_at = globals().get("_day_rotation_failed_at")
+
+
+def rotate_the_day_without_stopping_the_bot():
+    """db.check_and_rotate_day(), except that a failure is reported and the
+    message goes on being handled. Returns True if the rotation check ran."""
+    global _day_rotation_failed_at
+    now = time.monotonic()
+    if (_day_rotation_failed_at is not None
+            and now - _day_rotation_failed_at < DAY_ROTATION_RETRY_SECONDS):
+        return False
+    import db
+    try:
+        db.check_and_rotate_day()
+    except Exception as rotate_err:
+        _day_rotation_failed_at = now
+        print(f"[DB ROTATE ERROR] Could not roll the day's statistics over: {rotate_err}. "
+              f"Commands carry on; trying again in {int(DAY_ROTATION_RETRY_SECONDS)} s.")
+        return False
+    _day_rotation_failed_at = None
+    return True
+
+
 def parse_privmsg(line):
     """(nick, ident_host, target, message) for a well-formed PRIVMSG line,
     or None.
@@ -3040,7 +3073,7 @@ def irc_loop():
                         try:
                             import commands
                             import db
-                            db.check_and_rotate_day()
+                            rotate_the_day_without_stopping_the_bot()
                             
                             if msg.startswith("\x01") and msg.endswith("\x01"):
                                 ctcp_cmd = msg.strip("\x01").strip().upper()
