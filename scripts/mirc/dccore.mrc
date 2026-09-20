@@ -983,51 +983,51 @@ alias dccore.options {
 
 dialog dccore.opt {
   title "DCCore window - options"
-  size -1 -1 262 236
+  size -1 -1 322 236
   option dbu
-  box "Show in @DCCore", 100, 5 3 252 102
-  check "Requests (who asked for what)", 101, 10 13 118 10
-  check "Queue positions", 102, 10 24 118 10
-  check "Sends: starting, resuming, done", 103, 10 35 118 10
-  check "Failed transfers", 104, 10 46 118 10
-  check "Searches and result counts", 105, 10 57 118 10
-  check "Joins, parts, quits of queued users", 106, 10 68 118 10
-  check "Bans, mutes, floods", 107, 10 79 118 10
-  check "Other log lines", 108, 10 90 118 10
-  combo 201, 132 12 52 70, drop
-  combo 202, 132 23 52 70, drop
-  combo 203, 132 34 52 70, drop
-  combo 204, 132 45 52 70, drop
-  combo 205, 132 56 52 70, drop
-  combo 206, 132 67 52 70, drop
-  combo 207, 132 78 52 70, drop
-  combo 208, 132 89 52 70, drop
-  text "File names", 210, 190 14 40 8
-  combo 211, 190 23 52 70, drop
-  text "Console replies", 212, 190 36 45 8
-  combo 213, 190 45 52 70, drop
-  text "Status line every", 214, 190 60 50 8
-  edit "", 215, 190 69 20 11, autohs
-  text "min (0 = never)", 216, 212 71 44 8
-  text "Panel headings", 217, 190 83 50 8
-  combo 218, 190 91 52 70, drop
-  box "Window", 300, 5 108 252 50
-  check "Side panel with slots, queue and today's totals", 301, 10 118 118 10
-  check "Slots, queue and speed in the title bar", 302, 10 129 118 10
-  check "Console replies in a separate window", 303, 10 140 118 10
-  check "Beep on a failed transfer", 304, 132 118 118 10
-  check "Fixed-width font (Lucida Console)", 305, 132 129 100 10
-  edit "", 306, 234 128 18 11, autohs
-  text "Background", 307, 132 142 36 8
-  combo 308, 170 140 60 70, drop
-  box "Connection", 400, 5 161 252 52
-  text "Bot nick", 401, 10 173 26 8
+  box "Show in @DCCore", 100, 5 3 312 102
+  check "Requests (who asked for what)", 101, 10 13 178 10
+  check "Queue positions", 102, 10 24 178 10
+  check "Sends: starting, resuming, done", 103, 10 35 178 10
+  check "Failed transfers", 104, 10 46 178 10
+  check "Searches and result counts", 105, 10 57 178 10
+  check "Joins, parts, quits of queued users", 106, 10 68 178 10
+  check "Bans, mutes, floods", 107, 10 79 178 10
+  check "Other log lines", 108, 10 90 178 10
+  combo 201, 192 12 52 70, drop
+  combo 202, 192 23 52 70, drop
+  combo 203, 192 34 52 70, drop
+  combo 204, 192 45 52 70, drop
+  combo 205, 192 56 52 70, drop
+  combo 206, 192 67 52 70, drop
+  combo 207, 192 78 52 70, drop
+  combo 208, 192 89 52 70, drop
+  text "File names", 210, 248 14 66 8
+  combo 211, 248 23 52 70, drop
+  text "Console replies", 212, 248 36 66 8
+  combo 213, 248 45 52 70, drop
+  text "Status line every", 214, 248 60 66 8
+  edit "", 215, 248 69 18 11, autohs
+  text "min, 0 = never", 216, 268 71 49 8
+  text "Panel headings", 217, 248 83 66 8
+  combo 218, 248 91 52 70, drop
+  box "Window", 300, 5 108 312 50
+  check "Side panel with slots, queue and today's totals", 301, 10 118 178 10
+  check "Slots, queue and speed in the title bar", 302, 10 129 178 10
+  check "Console replies in a separate window", 303, 10 140 178 10
+  check "Beep on a failed transfer", 304, 192 118 118 10
+  check "Fixed-width font, size", 305, 192 129 86 10
+  edit "", 306, 280 128 18 11, autohs
+  text "Background", 307, 192 142 42 8
+  combo 308, 234 140 60 70, drop
+  box "Connection", 400, 5 161 312 52
+  text "Bot nick", 401, 10 173 28 8
   edit "", 402, 38 171 60 11, autohs
-  text "", 403, 104 173 150 8
-  check "Reconnect and log in by itself when the bot comes back", 404, 10 186 220 10
-  text "The bot's own Settings > Console feed is the ceiling on what is sent at all.", 405, 10 198 240 8
-  button "OK", 1, 172 218 40 12, ok default
-  button "Cancel", 2, 216 218 40 12, cancel
+  text "", 403, 104 173 210 8
+  check "Reconnect and log in by itself when the bot comes back", 404, 10 186 300 10
+  text "The bot's own Settings > Console feed is the ceiling on what is sent at all.", 405, 10 198 300 8
+  button "OK", 1, 232 218 40 12, ok default
+  button "Cancel", 2, 276 218 40 12, cancel
   button "Pair again...", 501, 5 218 46 12
   button "Forget token", 502, 54 218 46 12
 }

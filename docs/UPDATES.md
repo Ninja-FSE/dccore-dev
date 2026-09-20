@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The options dialog's labels fit their controls (#616)
+
+`dialog dccore.opt` uses `option dbu`: a horizontal unit is a quarter of the dialog font's average character width
+(Tahoma 8pt, 1.5px at 96 DPI), and a check control spends ~17px on its box. A 118 dbu check therefore holds ~160px of
+label, and "Side panel with slots, queue and today's totals" needs 223 - five checks and three small texts were cut off
+("Side panel with slots, queue and"). The dialog is now 322 dbu wide (was 262): the left checks are 178 wide, the
+whole right column moved 60 to the right, the small texts got the room they need, 403/404/405 the full width. Two
+labels that still could not fit beside their edit box or the box edge were shortened: "Fixed-width font (Lucida
+Console)" is "Fixed-width font, size" and "min (0 = never)" is "min, 0 = never".
+`tests/test_the_options_dialog_labels_fit_their_controls.py` measures every label against its control from the source,
+with a Tahoma width table on every platform and the real GDI font on Windows, and checks nothing runs out of its box.
+Not verified in mIRC itself.
+
 ### 📍 A chat the bot never answers is closed and retried (#615)
 
 `dccore.connect` issued `dcc chat` and waited for either a 401 or a CHATCLOSE; a bot that gets the offer and says
