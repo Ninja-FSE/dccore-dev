@@ -272,6 +272,34 @@ def numeric_target(line):
     return None if target == "*" else target
 
 
+def adopt_registered_nick(line):
+    """Take the server's own name for us from the 001 it addressed to us.
+
+    A nickname longer than the server's NICKLEN is not refused - it is silently
+    SHORTENED. Undernet allows 12, so "DCCore-Server" registers as
+    "DCCore-Serve" while the daemon goes on believing the longer name: it
+    advertises "@DCCore-Server", a nick nobody can PM or DCC, private messages
+    and DCC offers addressed to the real nick fail every `target == NICKNAME`
+    test, and a KICK of the bot is not recognised. 433 was handled; this was
+    not, because nothing fails.
+
+    Assigned to NICKNAME only. ORIGINAL_NICK keeps the configured value and
+    get_bot_aliases() answers to both - it was written for the same divergence
+    after a 433 - and the master list is stamped by a subprocess with the
+    configured name either way, so a pasted "!<nick> <file>" keeps matching.
+
+    Returns the nick adopted, or None if the server called us what we thought.
+    """
+    given = numeric_target(line)
+    if given and given != config.NICKNAME:
+        print(f"[SERVER] Registered as {given}, not {config.NICKNAME} - the "
+              f"server changed it. The advert and every reply will use {given}.")
+        config.PREVIOUS_NICK = config.NICKNAME
+        config.NICKNAME = given
+        return given
+    return None
+
+
 def isupport_nicklen(line):
     """The NICKLEN a 005 RPL_ISUPPORT line advertises, or None.
 
@@ -446,6 +474,39 @@ def _report_recent_lines(recent_lines):
         pass
 
 
+# The day's statistics roll over on the first message after midnight, and that
+# write can fail (a full disk, a read-only data/, a stats.txt another program
+# holds). db.check_and_rotate_day() raises on purpose - a caller must never be
+# handed un-rotated counters as if they were current - but its caller here is
+# the top of the per-message block: an exception there dropped EVERY command,
+# admin commands and !rehash included, until the write worked (#592). The
+# bookkeeping failing must not take the bot with it, so it is caught here, said
+# once a minute rather than once a message, and retried on that same cadence
+# (each failed attempt on Windows also costs the read thread a replace retry).
+DAY_ROTATION_RETRY_SECONDS = 60.0
+_day_rotation_failed_at = globals().get("_day_rotation_failed_at")
+
+
+def rotate_the_day_without_stopping_the_bot():
+    """db.check_and_rotate_day(), except that a failure is reported and the
+    message goes on being handled. Returns True if the rotation check ran."""
+    global _day_rotation_failed_at
+    now = time.monotonic()
+    if (_day_rotation_failed_at is not None
+            and now - _day_rotation_failed_at < DAY_ROTATION_RETRY_SECONDS):
+        return False
+    import db
+    try:
+        db.check_and_rotate_day()
+    except Exception as rotate_err:
+        _day_rotation_failed_at = now
+        print(f"[DB ROTATE ERROR] Could not roll the day's statistics over: {rotate_err}. "
+              f"Commands carry on; trying again in {int(DAY_ROTATION_RETRY_SECONDS)} s.")
+        return False
+    _day_rotation_failed_at = None
+    return True
+
+
 def parse_privmsg(line):
     """(nick, ident_host, target, message) for a well-formed PRIVMSG line,
     or None.
@@ -605,6 +666,15 @@ def note_nick_change(old_nick, new_nick):
                           f"{name} entry alone, the new nick already has one.")
                     continue
                 store[new_key] = store.pop(old_key)
+                # #601: user_raw is what the dispatcher addresses the DCC
+                # offer to (dcc.py's section B). Left as the old nick, the
+                # next dispatch after a rename offered the file to a nick
+                # that is no longer on the network.
+                # (frozen_queues holds a timestamp per user, not rows.)
+                if hasattr(store[new_key], "append"):
+                    for queued in store[new_key]:
+                        if isinstance(queued, dict) and "user_raw" in queued:
+                            queued["user_raw"] = new_nick
                 moved.append(name)
 
         # #431: dcc.handle_download_request()'s slot-admission gate is built
@@ -638,6 +708,17 @@ def note_nick_change(old_nick, new_nick):
                     row["user"] = new_nick
                     if "active_transfers" not in moved:
                         moved.append("active_transfers")
+
+        # #601: the queue moved in memory; the file must follow, or a restart
+        # before the next unrelated queue write restores it under a nick that
+        # has gone, and the freeze sweep deletes it five minutes later.
+        # save_dcc_queue() does not take queue_lock (its callers hold it).
+        if "dcc_queue" in moved:
+            try:
+                import db
+                db.save_dcc_queue()
+            except Exception as save_err:
+                print(f"[NICK] Could not save the queue after {old_nick} -> {new_nick}: {save_err}")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)
@@ -2123,32 +2204,11 @@ def irc_loop():
                         s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
                         config.NICKNAME = alt_nick
                     
-                    # What the server actually calls us, taken from the numeric
-                    # it addressed to us rather than assumed from config.
-                    #
-                    # A nickname longer than the server's NICKLEN is not
-                    # refused - it is silently SHORTENED. Undernet allows 12,
-                    # so "DCCore-Server" registered as "DCCore-Serve" while the
-                    # daemon went on believing the longer name: it advertised
-                    # "@DCCore-Server", a nick nobody could PM or DCC, and said
-                    # "CURRENT_NICK settled as" the name it had never had. 433
-                    # was handled; this was not, because nothing failed.
-                    #
-                    # Assigned to NICKNAME only. ORIGINAL_NICK keeps the
-                    # configured value, and get_bot_aliases() already answers to
-                    # both - it was written for the same divergence after a 433,
-                    # and the master list is stamped by a subprocess with the
-                    # configured name either way, so a pasted "!<nick> <file>"
-                    # keeps matching.
-                    if is_server_numeric(a_line, "001"):
-                        given = numeric_target(a_line)
-                        if given and given != config.NICKNAME:
-                            print(f"[SERVER] Registered as {given}, not "
-                                  f"{config.NICKNAME} - the server changed it. "
-                                  f"The advert and every reply will use "
-                                  f"{given}.")
-                            config.PREVIOUS_NICK = config.NICKNAME
-                            config.NICKNAME = given
+                    # (The server's own name for us is read from the 001 in the
+                    # main loop below, adopt_registered_nick(): 001 is sent only
+                    # AFTER the USER line this loop is about to send, so it can
+                    # never arrive here - the block that used to sit at this spot
+                    # was unreachable, #594.)
 
                     if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
                         ident_str = getattr(config, 'IDENT', 'dccore')
@@ -2546,6 +2606,8 @@ def irc_loop():
                     # Anchored: "001" in line matched any message containing those three
                     # digits anywhere, including a perfectly ordinary track request.
                     if not joined and (is_server_numeric(line, "001") or is_server_numeric(line, "376")):
+                        if is_server_numeric(line, "001"):
+                            adopt_registered_nick(line)
                         joined = True
                         print(f"[INFO] Connected to the server. Waiting 5 seconds to settle before JOIN...")
                         
@@ -3040,7 +3102,7 @@ def irc_loop():
                         try:
                             import commands
                             import db
-                            db.check_and_rotate_day()
+                            rotate_the_day_without_stopping_the_bot()
                             
                             if msg.startswith("\x01") and msg.endswith("\x01"):
                                 ctcp_cmd = msg.strip("\x01").strip().upper()
@@ -3082,10 +3144,15 @@ def irc_loop():
                                 # able to answer.
                                 #
                                 # Private only, like the two branches above.
-                                # Answered INLINE rather than on a thread: the
-                                # receiver is blocked waiting for this, it is
-                                # one dict lookup and one send, and it touches
-                                # no disk. Admission control is entirely
+                                # The lookup is answered INLINE - it is one dict
+                                # read and it must settle the resume position
+                                # before the receiver can connect - but the
+                                # ACCEPT itself is paced and waits up to
+                                # MSG_DELAY for a slot, which on this thread
+                                # stalled every PING and every other line
+                                # (#577, #602). handle_resume_request(
+                                # background=True) sends it from a short
+                                # thread. Admission control is entirely
                                 # inside handle_resume_request() - it matches
                                 # on a port WE are listening on for this exact
                                 # nick, so a stray or forged line finds
@@ -3093,7 +3160,8 @@ def irc_loop():
                                 if (ctcp_cmd.startswith("DCC RESUME ")
                                         and target_chan.lower() == config.NICKNAME.lower()):
                                     dcc.handle_resume_request(
-                                        s, user, msg.strip("\x01").strip())
+                                        s, user, msg.strip("\x01").strip(),
+                                        background=True)
                                     continue
                                 if ctcp_cmd == "VERSION":
                                     # Answered inline rather than on a thread:
@@ -3162,7 +3230,7 @@ def irc_loop():
                                 # - see commands.diagnostics_are_for_the_admin().
                                 # Silently: an answer or a log line per stranger
                                 # is the noise this removes.
-                                if not commands.diagnostics_are_for_the_admin(user):
+                                if not commands.diagnostics_are_for_the_admin(user, user_host):
                                     continue
                                 with runtime.channel_users_lock():
                                     have_count = hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users
@@ -3186,7 +3254,7 @@ def irc_loop():
                                 # Same rule as !debugnames above: a stranger's
                                 # !ping used to make every DCCore in the channel
                                 # spend a paced line and report to its own admin.
-                                if not commands.diagnostics_are_for_the_admin(user):
+                                if not commands.diagnostics_are_for_the_admin(user, user_host):
                                     continue
                                 threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
                             # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
@@ -3206,19 +3274,19 @@ def irc_loop():
                                        or msg_lower == '!clearqueue'
                                        or msg_lower.startswith('!clearqueue '))):
                                 if msg.lower() == "!rehash":
-                                    threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), daemon=True).start()
+                                    threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg_lower.startswith("!ban "):
-                                    threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), daemon=True).start()
+                                    threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg_lower.startswith("!unban "):
-                                    threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
+                                    threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg.lower() == "!update":
-                                    threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), daemon=True).start()
+                                    threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
                                     # commands.handle_admin_clear_queue was added in #16 but never
                                     # wired into this dispatch chain, so the command had no caller
                                     # anywhere and typing it did nothing at all. The handler does
                                     # its own admin check.
-                                    threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), daemon=True).start()
+                                    threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
                             elif any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases):
                                 # Split on the first space only, so "!DCCore !rar Artist/Album"
                                 # still hands "!rar Artist/Album" to the download handler.

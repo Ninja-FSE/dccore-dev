@@ -969,6 +969,7 @@ def _cmd_pair(session, args):
     name = (args.split() or ["client"])[0]
     token = secrets.token_urlsafe(32)
     tokens = db.load_admin_tokens()
+    replaced = name in tokens
     tokens[name] = {"hash": make_password_hash(token),
                     "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "by": session.nick}
@@ -980,6 +981,13 @@ def _cmd_pair(session, args):
         session.send(f"Paired {name}. Its token, shown once - it opens this chat and nothing else:")
         session.send(f"  {token}")
         session.send(f"Revoke it with: unpair {name}")
+        if replaced:
+            # The old token stopped working the moment the new one was saved: a
+            # script that held it is locked out until it is given this one (or
+            # pairs itself again), and it would otherwise find out only from a
+            # refused login.
+            session.send(f"This replaced the token {name} had before - a script "
+                         f"still using the old one must be paired again.")
 
 
 def _cmd_unpair(session, args):
