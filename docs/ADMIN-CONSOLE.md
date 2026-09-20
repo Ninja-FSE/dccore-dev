@@ -493,7 +493,7 @@ have been replaced with spaces.
 | `DCCORE DROPPED <n>` | lines the bot had to drop for a slow client | |
 | `DCCORE TAKEN <ip>` | the address that took the console over | |
 | `DCCORE LISTFETCH <bot> <action>` | `auto` (asked again automatically), `arrived`, `unusable` | one line of prose that names the bot |
-| `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record | |
+| `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps> <started> <failed> <searches>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record; then when the bot started (epoch) and the failures and searches it has seen since | |
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |

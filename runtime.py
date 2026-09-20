@@ -365,6 +365,10 @@ list_update_gate = threading.Lock()
 # Sampled by stats_mgr.live_speed(); kept here rather than in that module so a
 # !rehash cannot reset it, and so readers that must not import the daemon can
 # still see it. webserver.py reads these two directly for the dashboard.
+# Failures and searches since this PROCESS started (#754), counted where every
+# one passes: announce.feed_event(). Here and not in announce.py, which a
+# !rehash reloads - a counter there would go back to zero on every Save.
+feed_counts = {"FAIL": 0, "SEARCH": 0}
 live_speed_bps = 0        # bytes/sec across every sending transfer, summed
 live_speed_sampled_at = 0.0
 

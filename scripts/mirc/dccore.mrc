@@ -547,6 +547,11 @@ alias dccore.status {
   hadd dccore.live st.bytes $6
   hadd dccore.live st.bps $7
   hadd dccore.live st.record $8
+  ; since the BOT started (#754); an older bot sends only eight fields and the
+  ; panel falls back to the window's own figures
+  if ($9 isnum) { hadd dccore.live st.started $9 }
+  if ($10 isnum) { hadd dccore.live st.failed $10 }
+  if ($11 isnum) { hadd dccore.live st.searches $11 }
   ; the SLOT and QUEUE lines of this burst follow at once; start afresh
   hdel -w dccore.live slot.*
   hdel -w dccore.live queue.*
@@ -758,9 +763,13 @@ alias dccore.panel {
   aline -l $dccore.win $dccore.nbsp sent $dccore.rfit($dccore.st(st.sent),6) / $dccore.bytes($dccore.st(st.bytes))
   aline -l $dccore.win $dccore.nbsp record $dccore.speed($dccore.st(st.record))
   aline -l 14 $dccore.win $dccore.nbsp
-  aline -l %head $dccore.win Since $asctime($dccore.st(opened),HH:nn)
-  aline -l $dccore.win $dccore.nbsp failed $dccore.rfit($dccore.st(failed),4)
-  aline -l $dccore.win $dccore.nbsp searches $dccore.rfit($dccore.st(searches),2)
+  var %since = $iif($dccore.st(st.started) > 0,$dccore.st(st.started),$dccore.st(opened))
+  var %fmt = $iif($calc($ctime - %since) > 72000,ddd HH:nn,HH:nn)
+  var %failed = $iif($dccore.st(st.failed) != $null,$dccore.st(st.failed),$dccore.st(failed))
+  var %searches = $iif($dccore.st(st.searches) != $null,$dccore.st(st.searches),$dccore.st(searches))
+  aline -l %head $dccore.win Since $asctime(%since,%fmt)
+  aline -l $dccore.win $dccore.nbsp failed $dccore.rfit(%failed,4)
+  aline -l $dccore.win $dccore.nbsp searches $dccore.rfit(%searches,2)
 }
 
 ; the nick on the selected panel line, for the right-click menu.

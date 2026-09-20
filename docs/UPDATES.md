@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The panel's Since box is the bot's start (#754)
+
+`runtime.feed_counts` counts FAIL and SEARCH in `announce.feed_event` (runtime, so a rehash does not reset it; counted
+before the console tickboxes can refuse a line). `adminchat.status_lines()` appends `<started_epoch> <failed>
+<searches>` to the STATUS line (now minus the uptime; a minor, additive change: an older script reads $1-$8).
+`dccore.status` stores them as `st.started`, `st.failed`, `st.searches` when present and the panel draws Since (with
+the weekday when more than 20 hours ago), failed and searches from them, falling back to `opened` and its own
+counters. ADMIN-CONSOLE.md documents the fields.
+
 ### 📍 Every command is in the @DCCore menu (#550)
 
 `menu @DCCore` now has submenus for every `/dccore` command and every console command that is worth a click. Prompts

@@ -234,8 +234,9 @@ class TheFieldPositionsMatchTheBot(unittest.TestCase):
         and the panel reads it by $gettok; QUEUE is keyed by $2 (pos)."""
         text = script_text().replace("\r\n", "\n")
         status = text.split("alias dccore.status {", 1)[1].split("\n}", 1)[0]
-        for n, name in enumerate(("used", "slots", "qfiles", "qusers", "sent", "bytes", "bps", "record"), start=1):
-            self.assertIn(f"st.{name} ${n}\n", status, name)
+        for n, name in enumerate(("used", "slots", "qfiles", "qusers", "sent", "bytes", "bps", "record",
+                                  "started", "failed", "searches"), start=1):
+            self.assertIn(f"st.{name} ${n}", status, name)
         body = self.handler("STATUS")
         self.assertIn("dccore.status $2-", body)
         self.assertIn("$2-", self.handler("SLOT"))
@@ -247,7 +248,7 @@ class TheFieldPositionsMatchTheBot(unittest.TestCase):
         # QUEUE <pos> <nick> <files> <frozen_secs_left>, stored without pos
         self.assertIn("$gettok(%l,3,32) > 0", panel)  # frozen
         line = adminchat.status_lines()[0]
-        self.assertEqual(len(line.split()), 10, "STATUS has eight figures")
+        self.assertEqual(len(line.split()), 13, "STATUS has eight figures and three since the bot started")
 
     def test_token(self):
         body = self.handler("TOKEN")

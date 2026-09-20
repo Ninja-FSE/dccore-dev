@@ -990,6 +990,7 @@ known_bots = runtime.known_bots
 # above it: a rehash re-executing this file must not strand a transfer that is
 # mid-handshake.
 dcc_send_offers = runtime.dcc_send_offers
+feed_counts = runtime.feed_counts          # FAIL and SEARCH events since the process started (#754)
 
 # Alt-nick reconnects (#376): a peer bot's own nick disappearing and an
 # ordinary collision variant of it (an added "_" or digit) joining shortly

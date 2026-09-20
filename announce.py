@@ -231,6 +231,14 @@ def feed_event(_kind, _text, **fields):
     `kind` parameter made that call a TypeError - caught by a test that
     expected a dispatch and saw none.
     """
+    # Counted before anything can refuse the line: what the bot has seen since it
+    # started is a fact about the bot, whatever a client chooses to show (#754).
+    try:
+        import runtime
+        if _kind in ("FAIL", "SEARCH"):
+            runtime.feed_counts[_kind] = runtime.feed_counts.get(_kind, 0) + 1
+    except Exception:
+        pass
     send_debug(_text, category=_kind)
     if not console_wants(_kind):
         return
