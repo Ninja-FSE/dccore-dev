@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 A foreign page cannot lock the operator out of the login (#609)
+
+`POST /login` is the one route outside the session gate and its failed-attempt pool is keyed on `request.remote_addr`;
+on the stock loopback install the operator's browser and any hostile page open in it both arrive as 127.0.0.1, so
+three cross-site `fetch(..., {mode: 'no-cors'})` POSTs with a wrong password blocked the operator's own login for
+`BAD_IP_BLOCK_SECONDS`, repeatable for ever. `_login_origin_ok(origin, referer, host)` now compares the `Origin`
+header (a sandboxed frame's `null` counts as foreign), or `Referer` when there is no `Origin`, with the request's own
+`Host` - lower-cased, default port stripped - the way `_setup_host_ok()` guards `/setup`; a mismatch is answered 403
+before the password is read and is never counted. A request with neither header (curl, the test client) passes: the
+guard is against the lockout, not a second password. ADMIN-CONSOLE.md says a reverse proxy must pass `Host` through.
+`tests/test_a_foreign_page_cannot_lock_the_operator_out_of_the_login.py` runs the audit's reproduction and the
+controls (own origin, case and `:80`, no headers, the operator's own failures still block).
+
 ### 📍 An automatic dial asks no stranger for the password (#608)
 
 #585 gated the stored token behind `dccore.peerok`, but with no token to send (a password-only install, after
