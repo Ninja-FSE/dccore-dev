@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The channel_users control test no longer bets on a race (#596)
+
+`test_without_the_lock_the_same_workload_corrupts_state` churned an unlocked dict for three seconds and asserted
+that the scheduler happened to interleave a writer inside an iteration. On a lightly loaded macOS runner it did not,
+and main was reported red twice in one day for changes that touched nothing near `channel_users`. The control is now
+deterministic: a reader holds an iteration open, a writer adds a channel key, the reader resumes - `RuntimeError`
+every time unlocked, no error and the write lands afterwards when the lock is held.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
