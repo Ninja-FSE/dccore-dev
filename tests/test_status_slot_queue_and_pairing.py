@@ -134,6 +134,31 @@ class TheStatusBurst(DCCoreTestCase):
         lines = adminchat.status_lines()
         self.assertEqual(len([l for l in lines if l.startswith("DCCORE QUEUE ")]), adminchat.QUEUE_LINES_MAX)
 
+    def test_the_position_is_the_order_the_users_are_served_not_the_alphabet(self):
+        """dcc.check_queue_and_send() walks dcc_queue in insertion order - the
+        first to ask is the first served - so that is what <pos> must count.
+        Sorted by nick, zed (who asked first) was shown as 2 (#612). helen and
+        Ivan, which the test above uses, are the same in both orders and so
+        could not tell them apart."""
+        config.dcc_queue.update({"zed": [1, 2], "Alice": [1]})
+
+        lines = adminchat.status_lines(now=1000.0)
+
+        self.assertEqual(lines[1:], ["DCCORE QUEUE 1 zed 2 0", "DCCORE QUEUE 2 Alice 1 0"])
+
+    def test_the_cap_keeps_the_head_of_the_queue_not_the_first_of_the_alphabet(self):
+        """With more than QUEUE_LINES_MAX waiting, the rows are the ones next
+        in line. Sorted by nick, the user at the head fell off the burst
+        whenever their nick sorted late (#612)."""
+        nicks = [f"nick_{chr(c)}" for c in range(ord("z"), ord("a") - 1, -1)]  # z first
+        for nick in nicks:
+            config.dcc_queue[nick] = [1]
+
+        rows = [l.split() for l in adminchat.status_lines() if l.startswith("DCCORE QUEUE ")]
+
+        self.assertEqual([r[3] for r in rows], nicks[:adminchat.QUEUE_LINES_MAX])
+        self.assertEqual(rows[0][2:4], ["1", "nick_z"])
+
     def test_an_empty_queue_row_is_not_listed(self):
         config.dcc_queue["gone"] = []
         self.assertEqual(adminchat.status_lines()[0].split()[4:6], ["0", "0"])

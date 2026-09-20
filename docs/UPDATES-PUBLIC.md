@@ -15,6 +15,9 @@
 
 - **Fixed: any website open in your browser could lock you out of the dashboard.** The login blocks an address after three wrong passwords, and on the usual install a page from another site, open in the same browser, could post three wrong passwords to your own dashboard and block your own login for fifteen minutes, over and over. A password sent by another site is now refused before it is looked at and does not count. If you reach the dashboard through a reverse proxy, it must pass the `Host` header through unchanged, or every login is refused with "This login was sent by another site".
 
+- **Fixed: the queue in the mIRC panel and the console's `queue` listing are in the order people are served.** They were sorted by nick, so someone who asked first could show as number 2, and with more than 20 waiting the person actually next in line could be missing from the panel. Needs the bot updated; the script is unchanged.
+
+
 
 - **Fixed (mIRC window): the panel's "Since" box counts from when the bot started, not from when the window was opened.** Closing and reopening the window used to reset the time, `failed` and `searches`. The bot now counts them from its own start and sends them with its status. Needs the bot updated; an older bot still shows the window's own figures. Update `dccore.mrc`.
 - **mIRC: every `/dccore` command is in the right-click menu.** Right-click in the @DCCore window: the quick views at the top, then Lists (show, fetch the changed ones), Library (find duplicate filenames, rebuild the list), Admin (ban, unban, clear a queue, reload the bot), Console command, Connection (connect or disconnect, pair, unpair, trust the bot's host), Window (options, panel, font size, clear) and the command list. Anything that changes something or takes minutes asks first, and Cancel sends nothing. The status and channel menus got Lists and the command list too. Update `dccore.mrc`.

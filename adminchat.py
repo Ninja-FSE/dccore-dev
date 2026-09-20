@@ -468,7 +468,12 @@ def status_lines(now=None):
         bps = int(moved / (now - started)) if started and now > started + 0.5 else 0
         lines.append(f"DCCORE SLOT {_clean(tx.get('user'), token=True)} {sent} "
                      f"{_num(tx.get('size'))} {bps} {_clean(tx.get('file'))}")
-    for pos, user in enumerate(sorted(queue, key=str.lower)[:QUEUE_LINES_MAX], start=1):
+    # In the queue's own order, which is the order dcc.check_queue_and_send()
+    # walks it (dict insertion order: first request first, kept across a
+    # save/load). Sorted by nick, the <pos> was an alphabetical rank shown as
+    # a position, and with more than 20 waiting the user actually next in
+    # line could fall off the burst altogether (#612).
+    for pos, user in enumerate(list(queue)[:QUEUE_LINES_MAX], start=1):
         left = 0
         if user.lower() in frozen:    # both dicts key on the lowercased nick; be sure
             left = max(0, int(FREEZE_TIMEOUT - (now - float(frozen[user.lower()] or 0))))
@@ -802,8 +807,9 @@ def _cmd_queue(session, args):
         session.send("The queue is empty.")
         return
     total = sum(len(rows) for rows in queue.values())
-    session.send(f"{total} file(s) queued for {len(queue)} user(s):")
-    for user_key in sorted(queue):
+    session.send(f"{total} file(s) queued for {len(queue)} user(s), in serving order:")
+    # The dispatcher's order, not alphabetical: the same walk dcc.py makes (#612).
+    for user_key in queue:
         session.send(f"  {user_key:<20} {len(queue[user_key]):>4} file(s)"
                      f"{'  FROZEN' if user_key in frozen else ''}")
 
