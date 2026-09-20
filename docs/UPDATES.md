@@ -11,6 +11,109 @@ re-runs the derivation in `defaults.py`; `LIST_BASE_NAME` stayed 'DCCore' in the
 process) derived it from the nick. The derivation is now `defaults.derive_list_base_name()`, still called once at
 import, and `apply_setup()` calls it after `apply_to()`. A LIST_BASE_NAME the operator set is left alone.
 
+### 📍 macOS autostart gets a PATH; the firewall script removes the Block rule Cancel made (#588, #589)
+
+The launchd agent inherited `/usr/bin:/bin:/usr/sbin:/sbin`, so `start-dccore.sh` found only Apple's stub and
+KeepAlive restarted it every ~10 s while the installer had said 'Done: DCCore is running now'. `install-
+autostart.command` now writes `EnvironmentVariables/PATH` = the installer shell's PATH, then Homebrew / python.org
+locations, then launchd's own (XML-escaped). `allow-firewall.bat` removed nothing but its own two rules, while Windows
+evaluates Block before Allow and Cancel on the Security Alert creates an inbound Block rule for python.exe: it now
+finds `sys.executable` of `%PY%`, and removes inbound Block rules whose `Program` is that path (PowerShell; a failure
+is a warning). `docs/WINDOWS.md` says so.
+
+### 📍 The Windows launchers run their Python, and autostart keeps running (#586, #587)
+
+`where python` finds the App Execution Alias stub in WindowsApps, so `start-dccore.bat` and `allow-firewall.bat`
+committed to it and never reached the install offer of #547. Each candidate (`py -3`, `python`) is now run once with
+`call` (a shim such as pyenv-win's `python.bat` never returns otherwise) and silenced; only one that answers becomes
+`%PY%`. `install-autostart.bat` follows `schtasks /create` with `New-ScheduledTaskSettingsSet` / `Set-ScheduledTask`:
+no execution time limit, start and keep running on battery, priority 4, three restarts a minute apart; if PowerShell
+cannot do it a warning says what to untick by hand and the task is still created.
+
+### 📍 An unknown filename does not scan the library unbounded (#580)
+
+The list-and-walk fallback in `handle_download_request()` is now behind `_library_scans` (a BoundedSemaphore of
+`MAX_CONCURRENT_LIBRARY_SCANS` = 2, taken without blocking: the request that cannot get one is answered `busy` and
+touches no disk) and a per-(list, lowercased name) miss memory (`LOOKUP_MISS_TTL_SECONDS` = 60, `LOOKUP_MISS_MEMORY` =
+512 entries, oldest dropped). Only a real miss is remembered, never a busy refusal. The slot is released in a
+`finally`. A file in the first folder's root never reaches either. The block itself is unchanged apart from its
+indentation.
+
+### 📍 A failed direct send tells the user (#599)
+
+The direct-send fast path builds a synthetic row that is never in `dcc_queue`. `release_queue_entry()` classified it
+as retryable and retained, so a failure sent no notice and logged 'kept for retry' for a retry nothing could perform.
+A row that is in no queue (identity check under `queue_lock`, so a renamed key still counts as queued) is now settled
+on its first failure, with a NOTICE that says 'Ask for it again' rather than 'Removed from your queue'.
+`tests/test_queue_integrity.py::test_unknown_user_does_not_raise` asserted the old retained-orphan behaviour and now
+asserts this.
+
+### 📍 `pair` in the dashboard Console shows the token (#581)
+
+`_cmd_pair` saved the token and then read `session.structured`, which the web shim (`_WebConsoleSession`) lacked, so
+the Console said 'Command failed' and the token was never shown while any script paired under that name was silently
+locked out. `hello` printed its DCCORE HELLO line and failed on `send_status`. The shim now has `structured = False`
+and `client`, `hello` is in `_CONSOLE_UNSUPPORTED_COMMANDS` with a message, `pair` says when it replaced an existing
+token, and a structural test fails if any supported handler reads a session attribute the shim lacks.
+
+### 📍 A failed midnight rotation does not stop every command (#592)
+
+`db.check_and_rotate_day()` is the first call in the per-message block and raises when the rollover cannot be
+written; the exception unwound the whole block, so no command, admin command or download was dispatched until
+the write worked. It still raises on purpose (no caller is handed un-rotated counters as current), so
+`irc.rotate_the_day_without_stopping_the_bot()` catches it at that one call site, says so once a minute and
+retries on that cadence (each failed attempt on Windows also costs the read thread a replace retry).
+
+### 📍 The channel admin commands check the host (#579)
+
+`commands.is_admin(user)` compared only the nick against `ADMIN_NICK`, while `irc.py` already parsed ident@host and
+`adminchat.is_admin_host()` matched it for the console. `is_admin(user, host=None)` now also requires, when
+`ADMIN_HOSTMASKS` is set, that `host` matches one of the patterns (the ident is not part of the proof; an all-wildcard
+pattern admits no one; a caller that passes no host is refused). With `ADMIN_HOSTMASKS` empty it is the nick alone,
+as before. The five handlers take `user_host=` and `irc.py` hands them the sender's, and the same gate covers
+`!ping`/`!debugnames` (`diagnostics_are_for_the_admin`). The console passes `authorised=True` and is unchanged.
+Help texts (en/fr/es), `defaults.py`, the sample and ADMIN-CONSOLE.md say so.
+
+### 📍 A resume reply does not block the IRC read thread (#577, #602)
+
+`handle_resume_request()` ran on the read thread and sent the ACCEPT through `outbound_pacer.wait_for_slot(MSG_DELAY)`:
+up to MSG_DELAY per matching RESUME with no PING answered and no line parsed, and - since `is_flooding()` stamps a
+request when it is handled - spaced out just enough that the sender was never muted. `background=True` (what
+`irc.py` passes) keeps the lookup and the position on the read thread and sends the paced reply from `_send_resume_accept`
+on a short thread: one at a time per offer (`accept_pending`), a RESUME that arrives meanwhile only moves the
+position, and the slot is waited for before the offer is read, so the reply carries the latest. Without `background`
+the behaviour is exactly as before.
+
+### 📍 A UNC path is refused before it is touched (#578)
+
+`os.path.join(base, r"\\host\share\x")` returns the UNC path unchanged, and `os.path.exists()` / `realpath()` ran
+on it before the containment check: on Windows an SMB connection (NTLM, as the bot's account) to a host the
+requester chose. `dcc.names_a_remote_or_absolute_path()` refuses, on the text and before any file system call:
+UNC and device paths everywhere (either slash, `//host` included, checked BEFORE the leading-slash strip that
+used to hide it), a drive or root-relative name on Windows, and a NUL byte. Applied to plain requests and, for
+remote forms only (a heading is written `D:\\...`), to `!rar`. Tests record every `os.path` call the handler
+makes and fail if any sees the remote name.
+
+### 📍 A nick change mid-transfer keeps the slot and the queue (#598, #601)
+
+`start_dcc_send()` found its `active_transfers` row and released its `user_processing_lock` entry by the nick the
+send started as, while `irc.note_nick_change()` had already rewritten the row and moved the lock to the new nick.
+After a `/nick` the row and the lock outlived the transfer: a slot lost until restart, the renamed user answered
+"already transferring" for good, rehash waiting out `REHASH_TRANSFER_WAIT`, `bytes_sent` frozen. The send now
+finds its row once (`_find_transfer_row`, by nick and file) and keeps it by identity; the lock is released under
+the row's current nick.
+
+`note_nick_change()` also never saved the queue it re-keyed, and left `user_raw` (the dispatcher's DCC target) as the
+old nick. It now rewrites `user_raw` on the moved rows and calls `db.save_dcc_queue()`.
+
+### 📍 The channel_users control test no longer bets on a race (#596)
+
+`test_without_the_lock_the_same_workload_corrupts_state` churned an unlocked dict for three seconds and asserted
+that the scheduler happened to interleave a writer inside an iteration. On a lightly loaded macOS runner it did not,
+and main was reported red twice in one day for changes that touched nothing near `channel_users`. The control is now
+deterministic: a reader holds an iteration open, a writer adds a channel key, the reader resumes - `RuntimeError`
+every time unlocked, no error and the write lands afterwards when the lock is held.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash

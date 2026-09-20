@@ -33,6 +33,77 @@ import runtime
 # comments mean when they say "queue_lock".
 queue_lock = runtime.queue_lock
 
+def names_a_remote_or_absolute_path(name, windows=None):
+    """True for a requested name that points somewhere the library is not (#578).
+
+    A request is a name inside the library, never a location. On Windows,
+    os.path.join(base, "\\\\host\\share\\x") returns the UNC path unchanged, and
+    the os.path.exists()/realpath() calls that come BEFORE the containment check
+    then make Windows resolve the host and open an SMB session as the account
+    running the bot - an outbound connection, and an NTLM handshake, that anybody
+    in the channel could start with one line. Refused here, on the text, before
+    anything touches the file system.
+
+    UNC and device paths (`\\\\host\\share`, `\\\\?\\`, `//host/share`: Windows reads a
+    doubled slash of either kind the same way) are refused everywhere - no real
+    library name starts that way. A drive letter (`C:\\x`), a drive-relative one
+    (`C:x`) or a root-relative one (`\\x`) can only mean something on Windows, so
+    they are refused only there (`windows` overrides, for tests). A NUL byte is
+    refused everywhere: os.path calls raise on it.
+    """
+    text = str(name)
+    if "\x00" in text:
+        return True
+    if text.replace("/", "\\").startswith("\\\\"):
+        return True
+    if windows is None:
+        windows = platform_compat.IS_WINDOWS
+    if windows:
+        import ntpath
+        if ntpath.splitdrive(text)[0] or text.startswith("\\"):
+            return True
+    return False
+
+
+# A LIBRARY-WIDE LOOKUP IS THE EXPENSIVE THING A REQUEST CAN ASK FOR (#580).
+# A name that is not in the first folder's root makes handle_download_request()
+# read every published list and then walk every configured folder; each request
+# runs on its own thread and the flood gate allows ten a nick per five seconds.
+# Two bounds, both cheap: only a few scans at a time (the rest are told the bot
+# is busy, at once, without touching the disk), and a name that just missed is
+# answered "not found" from memory for a minute - the same stale row pasted ten
+# times costs one scan, not ten.
+MAX_CONCURRENT_LIBRARY_SCANS = 2
+LOOKUP_MISS_TTL_SECONDS = 60.0
+LOOKUP_MISS_MEMORY = 512
+_library_scans = globals().get("_library_scans") or threading.BoundedSemaphore(MAX_CONCURRENT_LIBRARY_SCANS)
+_lookup_misses = globals().get("_lookup_misses") or {}
+_lookup_misses_lock = globals().get("_lookup_misses_lock") or threading.Lock()
+
+
+def _lookup_missed_recently(key):
+    with _lookup_misses_lock:
+        when = _lookup_misses.get(key)
+        if when is None:
+            return False
+        if time.monotonic() - when >= LOOKUP_MISS_TTL_SECONDS:
+            _lookup_misses.pop(key, None)
+            return False
+        return True
+
+
+def _note_lookup_miss(key):
+    with _lookup_misses_lock:
+        _lookup_misses.pop(key, None)          # re-noted: newest again
+        _lookup_misses[key] = time.monotonic()
+        excess = len(_lookup_misses) - LOOKUP_MISS_MEMORY
+        if excess > 0:
+            for stale in list(_lookup_misses)[:excess]:
+                _lookup_misses.pop(stale, None)
+
+
+
+
 def is_safe_path(base_dir, path, follow_symlinks=True):
     """Safety filter: prevents directory traversal attacks.
 
@@ -560,7 +631,18 @@ def release_queue_entry(user, next_file, delivered, reason=""):
     is_row = isinstance(next_file, dict)
     consumed_temp = bool(is_row and next_file.get("is_temporary_zip")
                          and not next_file.get("is_unpacked_rar_folder"))
-    retryable = is_row and not consumed_temp
+    # A row that is not in any queue is the direct-send fast path's synthetic
+    # one (see above): nothing will ever pick it up again, so "kept for retry"
+    # was a claim about a retry that could not happen - and, being "kept", it
+    # sent the user nothing, so the most common request (a free slot, no
+    # queue) got one attempt and silence when it failed (#599).
+    in_a_queue = False
+    if is_row:
+        with queue_lock:
+            in_a_queue = any(row is next_file
+                             for rows in list(config.dcc_queue.values()) if rows
+                             for row in rows)
+    retryable = is_row and in_a_queue and not consumed_temp
 
     retained = False
     gave_up = False
@@ -572,7 +654,12 @@ def release_queue_entry(user, next_file, delivered, reason=""):
             outcome = "delivered, " + str(removed) + " row(s) removed"
         elif not retryable:
             removed = _remove_by_identity()
-            why = "temporary archive already consumed" if consumed_temp else "row is not retryable"
+            if consumed_temp:
+                why = "temporary archive already consumed"
+            elif is_row and not in_a_queue:
+                why = "sent directly, not queued - nothing to retry"
+            else:
+                why = "row is not retryable"
             outcome = "failed (" + why + "), " + str(removed) + " row(s) removed"
         else:
             attempts = int(next_file.get("send_fails", 0)) + 1
@@ -596,11 +683,13 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         try:
             oserve_mod = sys.modules.get("oserve")
             dropped = next_file.get("file", "your file") if is_row else str(next_file)
+            # "Removed from your queue" is only true of a row that was in one.
+            tail = "Removed from your queue." if (in_a_queue or not is_row) else "Ask for it again when you are ready."
             if oserve_mod:
                 oserve_mod.queue_message(
                     user,
                     "NOTICE " + str(user) + " :" + config.C_BOLD + "Error" + config.C_RESET +
-                    ": Could not send " + str(dropped) + " (" + str(reason) + "). Removed from your queue.\r\n")
+                    ": Could not send " + str(dropped) + " (" + str(reason) + "). " + tail + "\r\n")
         except Exception as notify_err:
             print("[DCC QUEUE] Could not notify " + str(user) + ": " + str(notify_err))
 
@@ -1566,13 +1655,23 @@ def parse_resume_request(body):
     return filename.strip('"'), port, position
 
 
-def handle_resume_request(irc_sock, user, body):
+def handle_resume_request(irc_sock, user, body, background=False):
     """Answer a receiver's DCC RESUME with the DCC ACCEPT it is waiting for.
 
-    True if an ACCEPT was sent. False means no offer of ours matched, which
-    is the ordinary outcome for a stray or forged line and is not logged as
-    an error: anyone on the network can send this, and the only thing that
-    makes it ours is a port we are listening on for that exact nick.
+    True if an ACCEPT was sent - or, with `background`, is on its way. False
+    means no offer of ours matched, which is the ordinary outcome for a stray
+    or forged line and is not logged as an error: anyone on the network can
+    send this, and the only thing that makes it ours is a port we are
+    listening on for that exact nick.
+
+    `background` is what the IRC read loop passes (#577, #602). The ACCEPT goes
+    out through the shared pacer, which sleeps up to MSG_DELAY for a slot; done
+    on the read thread that is up to MSG_DELAY with no PING answered and no line
+    parsed, once per matching RESUME. So the lookup and the position - the parts
+    that must be settled before the receiver can connect - stay here, and the
+    paced send moves to a short-lived thread. One at a time per offer: a
+    RESUME that arrives while one is waiting only updates the position, and the
+    reply that goes out carries the latest.
     """
     parsed = parse_resume_request(body)
     if not parsed:
@@ -1593,6 +1692,62 @@ def handle_resume_request(irc_sock, user, body):
         # hanging, which is the failure this whole feature exists to end.
         position = max(0, min(position, size))
         offer["position"] = position
+        if background:
+            if offer.get("accept_pending"):
+                return True
+            offer["accept_pending"] = True
+
+    if not background:
+        return _send_resume_accept(irc_sock, user, key)
+    try:
+        threading.Thread(target=_send_resume_accept, args=(irc_sock, user, key, True),
+                         daemon=True).start()
+    except Exception as err:
+        with runtime.dcc_send_offers_lock:
+            offer = runtime.dcc_send_offers.get(key)
+            if offer:
+                offer.pop("accept_pending", None)
+        print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
+        return False
+    return True
+
+
+def _send_resume_accept(irc_sock, user, key, clear_pending=False):
+    """The paced half of handle_resume_request(): wait for the shared clock,
+    then send the ACCEPT for the position the offer holds at THAT moment, and
+    record that it was resumed.
+
+    The slot is waited for BEFORE the offer is read, so a RESUME that arrived
+    while this one waited has already moved the position, and the pending flag
+    stays set for the whole wait: that is what makes it one reply at a time.
+    """
+    port = key[1]
+    try:
+        # THROUGH THE SHARED CLOCK, not straight onto the socket (#453). A
+        # resume handshake is latency-sensitive, so it is not queued behind
+        # the round-robin - but it is still a PRIVMSG leaving this connection,
+        # and a peer that reconnects and resumes repeatedly could otherwise
+        # emit them as fast as it asked for them. Waiting for a slot keeps the
+        # reply prompt while still counting it against the same budget every
+        # other outbound line respects.
+        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
+    except Exception as err:
+        print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
+        if clear_pending:
+            with runtime.dcc_send_offers_lock:
+                offer = runtime.dcc_send_offers.get(key)
+                if offer:
+                    offer.pop("accept_pending", None)
+        return False
+
+    with runtime.dcc_send_offers_lock:
+        offer = runtime.dcc_send_offers.get(key)
+        if not offer:
+            return False
+        if clear_pending:
+            offer.pop("accept_pending", None)
+        size = int(offer.get("size") or 0)
+        position = int(offer.get("position") or 0)
         offered_name = offer["filename"]
 
     # The position is stored BEFORE the ACCEPT goes out, and that ordering is
@@ -1604,14 +1759,6 @@ def handle_resume_request(irc_sock, user, body):
     reply = (f"PRIVMSG {user} :\x01DCC ACCEPT {offered_name} "
              f"{port} {position}\x01\r\n")
     try:
-        # THROUGH THE SHARED CLOCK, not straight onto the socket (#453). A
-        # resume handshake is latency-sensitive, so it is not queued behind
-        # the round-robin - but it is still a PRIVMSG leaving this connection,
-        # and a peer that reconnects and resumes repeatedly could otherwise
-        # emit them as fast as it asked for them. Waiting for a slot keeps the
-        # reply prompt while still counting it against the same budget every
-        # other outbound line respects.
-        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
         irc_sock.sendall(reply.encode("utf-8", errors="ignore"))
     except Exception as err:
         print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
@@ -1852,6 +1999,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
 
+            # A pack request is a heading ("D:\\MEDIA\\<folder>\\...") - a drive
+            # letter is how a heading is written, so only the remote forms are
+            # refused here: a UNC or device path would be probed by realpath()
+            # in the containment check below before it could be refused (#578).
+            if names_a_remote_or_absolute_path(win_path, windows=False):
+                print(f"[SECURITY] Refused {user}'s pack request: {win_path!r} names a remote location.")
+                announce_mod.send_pack_error_notice(irc_sock, user)
+                return
+
             # This used to be a third, differently-shaped copy of the same
             # "D:\MUSIC\<folder>\" prefix-stripping list.resolve_list_folder()
             # already does - non-anchored `.replace("D:/", "")` calls rather
@@ -2049,7 +2205,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         requested_file, requested_size_hint = list_mod.strip_info_suffix(requested_file)
         requested_size_hint = requested_size_hint.lower().strip()
 
-        requested_file = str(requested_file).lstrip("/")
+        requested_file = str(requested_file)
+        # Before the "/" strip: "//host/share" is a UNC path to Windows, and
+        # once its slashes are stripped it would look like a harmless relative
+        # one. Refused on the text, before any file system call (#578).
+        if names_a_remote_or_absolute_path(requested_file):
+            print(f"[SECURITY] Refused {user}'s request: {requested_file!r} names a location, not a file in the library.")
+            announce.send_dcc_error(user, "invalid_path")
+            return
+        requested_file = requested_file.lstrip("/")
 
         # The master list lives in LOCAL_LIST_DIR, everything else in the
         # music directory. Matched on the names the list builder writes rather
@@ -2090,170 +2254,192 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
 
         is_master_zip = list_mod.is_list_artifact_name(requested_file)
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
-            # EVERY list, not just the master one. This is the lookup that
-            # turns a bare "!<nick> Some.Film.mkv" into a path on disk, and
-            # film and series moved into their own list file - so reading only
-            # the master would leave every video in the library listed,
-            # advertised and searchable, and impossible to actually get. The
-            # split would have been a regression dressed as a feature.
-            #
-            # Concatenated rather than searched file by file: the scan below
-            # reads folder headings and rows in order, and each list carries
-            # its own headings above its own rows, so joining them end to end
-            # leaves that state machine correct with nothing else changed.
-            # Master first, so a name in both resolves the same way it did
-            # before - the first copy the list names wins.
-            # Resolved at the top of this function, so the list a name is
-            # looked up in and the folders it is then looked for in cannot
-            # disagree.
-            list_paths = list_mod.all_list_paths(wanted_list)
-            if list_paths:
-                try:
-                    # STREAMED, NOT LOADED. This used to readlines() every
-                    # published list into one Python list and then, on a match,
-                    # walk BACKWARDS through it to the nearest folder heading.
-                    # The only thing the whole list in memory was for was that
-                    # backward walk. On a 5.4-million-file library that is
-                    # 460 MB of text as ~5.9 GB of str objects, on EVERY file
-                    # request - full_path below is "<first folder>/<name>" and a
-                    # track is never in a folder's root, so the direct check
-                    # fails and this runs each time. Measured live: a 5.9 GB
-                    # peak and 1.5 GB held afterwards, because the allocator
-                    # keeps its arenas. Three busy slots could mean three at
-                    # once.
-                    #
-                    # Headings precede their rows, so "the nearest heading
-                    # above the matching row" is simply the last heading seen
-                    # on the way down. One variable carries it; nothing is kept.
-                    # The heading is still resolved LAZILY, on a match only, so
-                    # a miss costs exactly what it cost before minus the memory.
-                    #
-                    # One generator across every list, in order, so a `break`
-                    # below leaves the whole lookup exactly as it left the old
-                    # single loop over the concatenation - and the heading
-                    # state carries across the file boundary the same way the
-                    # concatenation carried it, which is what the comment above
-                    # ("each list carries its own headings above its own rows")
-                    # relies on.
-                    def _list_lines(paths):
-                        for one_list in paths:
-                            with open(one_list, "r", encoding="utf-8",
-                                      errors="ignore") as lf:
-                                for raw_line in lf:
-                                    yield raw_line
+            # THE EXPENSIVE PART, BOUNDED (#580). A name that is not in the first
+            # folder's root is looked up by streaming every published list and,
+            # failing that, walking every configured folder - a full-library
+            # metadata scan, on this request's own thread, for one ~40 byte line.
+            # Ten of those per five seconds is what the flood gate allows a nick,
+            # so the cost is bounded here instead: a name that just missed is
+            # answered from memory, and only a few scans run at once.
+            miss_key = (str(wanted_list), str(requested_file).lower().strip())
+            if _lookup_missed_recently(miss_key):
+                announce.send_dcc_error(user, "file_not_found")
+                return
+            if not _library_scans.acquire(blocking=False):
+                print(f"[DCC-LOOKUP] {user}'s request for {requested_file!r} refused: "
+                      f"{MAX_CONCURRENT_LIBRARY_SCANS} library scans are already running.")
+                announce.send_dcc_error(user, "busy")
+                return
+            try:
+                # EVERY list, not just the master one. This is the lookup that
+                # turns a bare "!<nick> Some.Film.mkv" into a path on disk, and
+                # film and series moved into their own list file - so reading only
+                # the master would leave every video in the library listed,
+                # advertised and searchable, and impossible to actually get. The
+                # split would have been a regression dressed as a feature.
+                #
+                # Concatenated rather than searched file by file: the scan below
+                # reads folder headings and rows in order, and each list carries
+                # its own headings above its own rows, so joining them end to end
+                # leaves that state machine correct with nothing else changed.
+                # Master first, so a name in both resolves the same way it did
+                # before - the first copy the list names wins.
+                # Resolved at the top of this function, so the list a name is
+                # looked up in and the folders it is then looked for in cannot
+                # disagree.
+                list_paths = list_mod.all_list_paths(wanted_list)
+                if list_paths:
+                    try:
+                        # STREAMED, NOT LOADED. This used to readlines() every
+                        # published list into one Python list and then, on a match,
+                        # walk BACKWARDS through it to the nearest folder heading.
+                        # The only thing the whole list in memory was for was that
+                        # backward walk. On a 5.4-million-file library that is
+                        # 460 MB of text as ~5.9 GB of str objects, on EVERY file
+                        # request - full_path below is "<first folder>/<name>" and a
+                        # track is never in a folder's root, so the direct check
+                        # fails and this runs each time. Measured live: a 5.9 GB
+                        # peak and 1.5 GB held afterwards, because the allocator
+                        # keeps its arenas. Three busy slots could mean three at
+                        # once.
+                        #
+                        # Headings precede their rows, so "the nearest heading
+                        # above the matching row" is simply the last heading seen
+                        # on the way down. One variable carries it; nothing is kept.
+                        # The heading is still resolved LAZILY, on a match only, so
+                        # a miss costs exactly what it cost before minus the memory.
+                        #
+                        # One generator across every list, in order, so a `break`
+                        # below leaves the whole lookup exactly as it left the old
+                        # single loop over the concatenation - and the heading
+                        # state carries across the file boundary the same way the
+                        # concatenation carried it, which is what the comment above
+                        # ("each list carries its own headings above its own rows")
+                        # relies on.
+                        def _list_lines(paths):
+                            for one_list in paths:
+                                with open(one_list, "r", encoding="utf-8",
+                                          errors="ignore") as lf:
+                                    for raw_line in lf:
+                                        yield raw_line
 
-                    # THE LIST'S OWN SPELLING TRAVELS WITH THE FOLDER (#445).
-                    #
-                    # The match below is case-insensitive, deliberately -
-                    # list.find_duplicate_filenames() gives the reason in its
-                    # own docstring: "a requester typing a name back cannot be
-                    # expected to reproduce its case". What was missing is that
-                    # the path was then rebuilt from what the REQUESTER typed,
-                    # which is the one spelling known not to be the one on
-                    # disk. On Linux that names a file that does not exist and
-                    # the request is refused for a file the bot is publicly
-                    # advertising; on Windows it resolves, and the file is
-                    # offered and received under the requester's casing rather
-                    # than the operator's.
-                    target_folder = None
-                    target_name = ""
-                    fallback_folder = None
-                    fallback_name = ""
-                    clean_req = str(requested_file).lower().strip()
-                    request_prefix = f"!{config.NICKNAME} "
-                    # The most recent heading line, unresolved. ANY known
-                    # prefix, not just the one we write: this is what
-                    # RECOGNISES a heading, and checking only the current
-                    # prefix stops seeing the headings in every list already
-                    # in somebody's hands. Found by the test that counts
-                    # resolutions.
-                    last_heading = None
+                        # THE LIST'S OWN SPELLING TRAVELS WITH THE FOLDER (#445).
+                        #
+                        # The match below is case-insensitive, deliberately -
+                        # list.find_duplicate_filenames() gives the reason in its
+                        # own docstring: "a requester typing a name back cannot be
+                        # expected to reproduce its case". What was missing is that
+                        # the path was then rebuilt from what the REQUESTER typed,
+                        # which is the one spelling known not to be the one on
+                        # disk. On Linux that names a file that does not exist and
+                        # the request is refused for a file the bot is publicly
+                        # advertising; on Windows it resolves, and the file is
+                        # offered and received under the requester's casing rather
+                        # than the operator's.
+                        target_folder = None
+                        target_name = ""
+                        fallback_folder = None
+                        fallback_name = ""
+                        clean_req = str(requested_file).lower().strip()
+                        request_prefix = f"!{config.NICKNAME} "
+                        # The most recent heading line, unresolved. ANY known
+                        # prefix, not just the one we write: this is what
+                        # RECOGNISES a heading, and checking only the current
+                        # prefix stops seeing the headings in every list already
+                        # in somebody's hands. Found by the test that counts
+                        # resolutions.
+                        last_heading = None
 
-                    for line in _list_lines(list_paths):
-                        line_clean = line.strip()
-                        if any(line_clean.upper().startswith(p)
-                               for p in list_mod.LIST_FOLDER_PREFIXES):
-                            last_heading = line_clean
-                            continue
-                        if not line_clean.startswith(request_prefix):
-                            continue
-                        # str.split() puts what came BEFORE the separator in
-                        # [0], and the line starts with the separator - so [0]
-                        # is the empty string on every line here. The filename
-                        # is in [1]; the whole list lookup was dead code
-                        # without it, leaving the os.walk() below to answer
-                        # every request.
-                        parts_nick = line_clean.split(request_prefix, 1)
-                        rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
+                        for line in _list_lines(list_paths):
+                            line_clean = line.strip()
+                            if any(line_clean.upper().startswith(p)
+                                   for p in list_mod.LIST_FOLDER_PREFIXES):
+                                last_heading = line_clean
+                                continue
+                            if not line_clean.startswith(request_prefix):
+                                continue
+                            # str.split() puts what came BEFORE the separator in
+                            # [0], and the line starts with the separator - so [0]
+                            # is the empty string on every line here. The filename
+                            # is in [1]; the whole list lookup was dead code
+                            # without it, leaving the os.walk() below to answer
+                            # every request.
+                            parts_nick = line_clean.split(request_prefix, 1)
+                            rest_in_list = parts_nick[1].strip() if len(parts_nick) > 1 else ""
 
-                        current_file_in_list, current_size_in_list = list_mod.strip_info_suffix(rest_in_list)
+                            current_file_in_list, current_size_in_list = list_mod.strip_info_suffix(rest_in_list)
 
-                        if clean_req != str(current_file_in_list).lower().strip():
-                            continue
-                        if last_heading is None:
-                            continue
-                        # The prefix-stripping itself is
-                        # list_mod.resolve_list_folder() - this used to be a
-                        # second, hand-written copy of it, which could drift
-                        # from the original if the list format ever changed.
-                        # No explicit base: the heading itself says which
-                        # folder it belongs to once there is more than one
-                        # (#164), and pinning it to base_directory would
-                        # resolve every heading into the first.
-                        found_folder = list_mod.resolve_list_folder(
-                            last_heading, name=wanted_list)
-                        if found_folder is None:
-                            continue
+                            if clean_req != str(current_file_in_list).lower().strip():
+                                continue
+                            if last_heading is None:
+                                continue
+                            # The prefix-stripping itself is
+                            # list_mod.resolve_list_folder() - this used to be a
+                            # second, hand-written copy of it, which could drift
+                            # from the original if the list format ever changed.
+                            # No explicit base: the heading itself says which
+                            # folder it belongs to once there is more than one
+                            # (#164), and pinning it to base_directory would
+                            # resolve every heading into the first.
+                            found_folder = list_mod.resolve_list_folder(
+                                last_heading, name=wanted_list)
+                            if found_folder is None:
+                                continue
 
-                        # Two or more copies can share this exact name and
-                        # differ only in size. Without a size hint, or if it
-                        # matches nothing, the first copy the list names wins -
-                        # same as before this change, and pinned by
-                        # test_no_error_is_reported_for_a_duplicate. With one,
-                        # a copy whose own ::INFO:: size matches it wins
-                        # instead, so a request built from a search result's
-                        # exact line reaches the copy that result actually
-                        # named. A bare request (no hint - AutoQ.mrc and every
-                        # existing caller) still stops at this first match
-                        # exactly as before; only a hinted request that has
-                        # not matched yet pays for scanning on, since that is
-                        # the one case where the answer isn't already known.
-                        if fallback_folder is None:
-                            fallback_folder = found_folder
-                            fallback_name = str(current_file_in_list).strip()
-                            if not requested_size_hint:
+                            # Two or more copies can share this exact name and
+                            # differ only in size. Without a size hint, or if it
+                            # matches nothing, the first copy the list names wins -
+                            # same as before this change, and pinned by
+                            # test_no_error_is_reported_for_a_duplicate. With one,
+                            # a copy whose own ::INFO:: size matches it wins
+                            # instead, so a request built from a search result's
+                            # exact line reaches the copy that result actually
+                            # named. A bare request (no hint - AutoQ.mrc and every
+                            # existing caller) still stops at this first match
+                            # exactly as before; only a hinted request that has
+                            # not matched yet pays for scanning on, since that is
+                            # the one case where the answer isn't already known.
+                            if fallback_folder is None:
+                                fallback_folder = found_folder
+                                fallback_name = str(current_file_in_list).strip()
+                                if not requested_size_hint:
+                                    break
+                            if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
+                                target_folder = found_folder
+                                target_name = str(current_file_in_list).strip()
                                 break
-                        if requested_size_hint and current_size_in_list.lower().strip() == requested_size_hint:
-                            target_folder = found_folder
-                            target_name = str(current_file_in_list).strip()
+
+                        if target_folder is None:
+                            target_folder = fallback_folder
+                            target_name = fallback_name
+
+                        if target_folder is not None:
+                            # target_name, not requested_file (#445): the list's
+                            # spelling is the one that exists on disk, because the
+                            # list was written from the disk. The row that matched
+                            # is the row that names it.
+                            test_path = os.path.join(target_folder, target_name)
+                            if os.path.exists(platform_compat.long_path(test_path)):
+                                full_path = test_path
+                    except Exception as list_err:
+                        print(f"[DCC-LOOKUP ERROR] {list_err}")
+                if not os.path.exists(platform_compat.long_path(full_path)):
+                    # Last resort, once the list lookup has not placed the file:
+                    # walk for it. Each configured folder in turn, in the
+                    # operator's order, so the same name in two of them resolves
+                    # the way the list's own ordering already does.
+                    for search_root in search_roots:
+                        for root, dirs, files in os.walk(search_root):
+                            if requested_file in files:
+                                full_path = os.path.join(root, requested_file)
+                                break
+                        if os.path.exists(platform_compat.long_path(full_path)):
                             break
-
-                    if target_folder is None:
-                        target_folder = fallback_folder
-                        target_name = fallback_name
-
-                    if target_folder is not None:
-                        # target_name, not requested_file (#445): the list's
-                        # spelling is the one that exists on disk, because the
-                        # list was written from the disk. The row that matched
-                        # is the row that names it.
-                        test_path = os.path.join(target_folder, target_name)
-                        if os.path.exists(platform_compat.long_path(test_path)):
-                            full_path = test_path
-                except Exception as list_err:
-                    print(f"[DCC-LOOKUP ERROR] {list_err}")
+            finally:
+                _library_scans.release()
             if not os.path.exists(platform_compat.long_path(full_path)):
-                # Last resort, once the list lookup has not placed the file:
-                # walk for it. Each configured folder in turn, in the
-                # operator's order, so the same name in two of them resolves
-                # the way the list's own ordering already does.
-                for search_root in search_roots:
-                    for root, dirs, files in os.walk(search_root):
-                        if requested_file in files:
-                            full_path = os.path.join(root, requested_file)
-                            break
-                    if os.path.exists(platform_compat.long_path(full_path)):
-                        break
+                _note_lookup_miss(miss_key)
+
 
         # Against every legitimate root rather than one. is_safe_path() itself
         # is unchanged - each comparison still resolves symlinks and compares
@@ -2441,6 +2627,24 @@ def _wait_for_final_ack(conn, tracker, file_size):
     return tracker.last_advance_at
 
 
+def _find_transfer_row(user, file_name):
+    """The active_transfers row a send was started for, or None.
+
+    The dispatcher appends {"user", "file", ...} just before it starts the send
+    thread. Matched by nick and file, newest first; a nick alone is enough when
+    it is the only row that nick has (a pack's row is filed under the archive's
+    name, which is not always the name the send is handed).
+    """
+    key = str(user).lower()
+    with queue_lock:
+        rows = [tx for tx in config.active_transfers
+                if str(tx.get('user', '')).lower() == key]
+    for tx in reversed(rows):
+        if tx.get('file') == file_name or tx.get('next_file_obj') == file_name:
+            return tx
+    return rows[-1] if len(rows) == 1 else None
+
+
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing."""
     # Every failure this transfer reports carries the channel it was asked
@@ -2476,8 +2680,28 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     # loop below), but nothing recorded what it was a fraction OF. Matched by
     # user, the same way the send loop below updates bytes_sent: only one
     # transfer runs per user at a time, so this is unambiguous.
+    # #598: WHICH ROW IS THIS TRANSFER'S. The dispatcher appended one to
+    # config.active_transfers under the nick the send started as, and every
+    # lookup below used to find it by that nick again. A /nick in the middle
+    # of the send (irc.note_nick_change() rewrites the row's user and moves
+    # the in-progress lock to the new name) left every one of those lookups
+    # searching for a name nobody had any more: the row and the lock outlived
+    # the transfer for good, a slot was gone until a restart, the renamed user
+    # was locked out, and bytes_sent stopped updating. The row is held by
+    # identity instead; the nick is only what to look it up by once, here.
+    _row = _find_transfer_row(user, file_name)
+
+    def _mine(tx):
+        if _row is not None:
+            return tx is _row
+        return str(tx.get('user', '')).lower() == user.lower()
+
+    def _my_nick():
+        # Whatever name the transfer is filed under NOW - the lock moved with it.
+        return str((_row or {}).get('user') or user).lower()
+
     for tx in config.active_transfers:
-        if tx['user'].lower() == user.lower():
+        if _mine(tx):
             tx['size'] = file_size
     ip_long = get_public_ip_long()
     start_time = time.time()
@@ -2515,10 +2739,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             config.rar_inprogress = False
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
         with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers
-                                          if tx['user'].lower() != user.lower()]
+                                          if not _mine(tx)]
         return
 
     irc_sock = live_sock
@@ -2563,10 +2787,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # away at [RAR-HOLD].
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
             
         with queue_lock:
-            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
             
         # This abort returns BEFORE the try/finally that settles the queue row, so without
         # this call the same unreadable entry was re-selected every ~3 seconds forever,
@@ -2598,7 +2822,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                   f"the file, is what is missing. Nothing is retried until "
                   f"MY_IP_OR_DOCK is set.")
             if hasattr(config, 'user_processing_lock'):
-                config.user_processing_lock.discard(user.lower())
+                config.user_processing_lock.discard(_my_nick())
             return
 
         release_queue_entry(user, next_file, delivered=False,
@@ -2628,7 +2852,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try: irc_sock.sendall(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} No available DCC ports.\r\n".encode("utf-8", errors="ignore"))
         except: pass
         with queue_lock:
-            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
 
         # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
         # NOT charged to the retry budget - a busy spell must not discard good queued files.
@@ -2645,7 +2869,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # away at [RAR-HOLD].
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
         # #162 finding #8: this branch's own comment above says the row
         # stays queued for the next completion trigger - deleting the
         # archive it still points at contradicted that in the same breath.
@@ -2780,7 +3004,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # the size and the start moment go on the same row here, where both
         # are known. Read-only for everything else.
         for tx in config.active_transfers:
-            if tx['user'].lower() == user.lower():
+            if _mine(tx):
                 tx['size'] = file_size
                 tx['started_at'] = time.time()
         if resume_offset:
@@ -2792,7 +3016,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # record the channel advert publishes.
             bytes_sent = resume_offset
             for tx in config.active_transfers:
-                if tx['user'].lower() == user.lower():
+                if _mine(tx):
                     tx['bytes_sent'] = resume_offset
             print(f"[DCC-RESUME] Resuming {file_name} for {user} at byte "
                   f"{resume_offset} of {file_size}.")
@@ -2825,7 +3049,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 if acks.stalled() and acks.acked < bytes_sent:
                     raise _ReceiverStalled(acks.acked)
                 for tx in config.active_transfers:
-                    if tx['user'].lower() == user.lower():
+                    if _mine(tx):
                         tx['bytes_sent'] += len(chunk)
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.total_sent_bytes += len(chunk)
@@ -3068,7 +3292,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # 1. Clean up the transfer and the slot immediately
         try:
             with queue_lock:
-                config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+                config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.active_downloads = len(config.active_transfers)
         except Exception as trans_clean_err:
@@ -3150,7 +3374,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # away at [RAR-HOLD].
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
 
         # 7. Wake the queue automatically after three seconds, thread-safely
         # A retained row means the attempt FAILED and will be retried. Reusing the flat
