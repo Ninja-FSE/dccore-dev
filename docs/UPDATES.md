@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔢 HELLO carries the feed's minor version, and the guide says how to update a loaded script (#639)
+
+Audit M37. The channel field went into seven structured lines with PROTOCOL_MAJOR left at 1 (#574: "major 1 takes
+the extra field rather than a new number"), and the script only refuses `$2 != 1` - so an already-loaded older
+dccore.mrc connected to the new bot without a word and read the channel as the position, the slot, the byte count
+("slot #mp3/1", "at ##mp3"), and no document said how to replace a loaded script or what a mismatch looks like.
+
+`adminchat.PROTOCOL_MINOR = 1`; HELLO is now `DCCORE HELLO 1.1 <botnick> <version>`. The minor goes up every time
+a fixed field is inserted into a major-1 line. The script (1.1, `dccore.protominor` 1) reads major and minor apart:
+an unknown major is plain mode as before; an unknown minor keeps the structured feed and says *"speaks feed 1.x
+and this script was written for 1.y: some lines will show fields in the wrong place. Update whichever is older"*,
+with the reload command. The pre-minor script's own `$2 != 1` refuses "1.1" and falls back to plain mode saying
+"Update the script" - the message it was missing (mIRC compares numerically; the bot's constant must never read
+as exactly 1 again, and a test pins that). ADMIN-CONSOLE.md documents major.minor, gains "Updating the script"
+(save over the old file, `/reload -rs dccore.mrc`, `/dccore connect`; why not `/load`) and a troubleshooting entry
+for channel names where numbers should be. `tests/test_the_feed_says_which_minor_it_speaks.py` holds the bot's
+constant and the script's alias to each other. The mIRC side is not verified in mIRC.
+
 ### 📖 ADMIN-CONSOLE.md no longer credits configure.py with the hostmask step (#638)
 
 Audit M36. Step 2 of the console guide said `configure.py` "does steps 2 and 3 together". It does step 2 only -

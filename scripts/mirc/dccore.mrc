@@ -73,7 +73,11 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.0 }
+alias dccore.ver { return 1.1 }
+;  The feed's protocol minor this script was written for. The bot says
+;  its own in HELLO as major.minor; a different minor means a field was
+;  inserted on one side and the lines would read wrong - see HELLO below.
+alias dccore.protominor { return 1 }
 alias dccore.win { return @DCCore }
 alias dccore.opt { return $hget(dccore,$1) }
 alias dccore.st { return $hget(dccore.live,$1) }
@@ -195,7 +199,7 @@ alias dccore {
   if (%cmd == status) { dccore.send status | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
-  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1, for DCCore 1.13 and later. | return }
+  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for DCCore 1.13 and later. | return }
   if (%cmd == font) {
     if ($2 !isnum) || ($2 < 6) { dccore.sys Give a size, like /dccore font 14 (now: $dccore.fontsize $+ ). | return }
     dccore.set fontsize $2
@@ -484,10 +488,19 @@ alias dccore.structured {
   var %type = $1
   if (%type == HELLO) {
     .timerdccoreHello off
-    if ($2 != 1) {
-      dccore.sys $dccore.bot speaks protocol $2 and this script knows 1: falling back to plain mode. Update the script.
+    ; $2 is major.minor (a bot before 1.13's release says a bare 1).
+    ; A major we do not know: plain mode. A minor we do not know: the
+    ; lines still parse, but a field was inserted on one side, so say so.
+    var %major = $gettok($2,1,46)
+    var %minor = $gettok($2,2,46)
+    if (%minor == $null) { var %minor = 0 }
+    if (%major != 1) {
+      dccore.sys $dccore.bot speaks protocol $2 and this script knows 1. $+ $dccore.protominor $+ : falling back to plain mode. Update the script.
       dccore.plain
       return
+    }
+    if (%minor != $dccore.protominor) {
+      dccore.sys $dccore.bot speaks feed 1. $+ %minor and this script was written for 1. $+ $dccore.protominor $+ : some lines will show fields in the wrong place. Update whichever is older - for the script, save the new dccore.mrc over the old one and /reload -rs dccore.mrc
     }
     hadd dccore.live mode structured
     .timerdccoreHB 1 90 dccore.dead

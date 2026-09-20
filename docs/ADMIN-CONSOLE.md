@@ -471,10 +471,15 @@ fields, not prose. After logging in, send one console command:
 hello dccore.mrc 1.0
 ```
 
-The bot answers `DCCORE HELLO 1 <botnick> <version>` and, from then on, every
+The bot answers `DCCORE HELLO 1.1 <botnick> <version>` and, from then on, every
 line it sends on this session starts with `DCCORE`. A bot without this feature
 answers `Unknown command: hello` instead - stay in prose mode. The number in
-`HELLO` is the protocol major: refuse one you do not know.
+`HELLO` is the protocol version as `major.minor` (a bot from before the 1.13
+release says a bare `1`): refuse a major you do not know; a minor you do not
+know means a fixed field has been inserted on one side - the lines still
+parse, but a field is not where you expect it - so warn, and update whichever
+side is older. The minor goes up every time a field is inserted; the free-text
+field is always last, so appending nothing ever moves.
 
 Every line is **space-separated positional tokens, with the one free-text
 field last** - so in mIRC it is `$1`, `$2`, ... and `$N-`. Numbers are raw
@@ -483,7 +488,7 @@ have been replaced with spaces.
 
 | line | fixed fields | free text (last) |
 |---|---|---|
-| `DCCORE HELLO 1 <botnick>` | protocol major, nick | the version string |
+| `DCCORE HELLO 1.1 <botnick>` | protocol major.minor, nick | the version string |
 | `DCCORE REQUEST <nick> <channel> <file\|folder>` | | the name |
 | `DCCORE QUEUED <nick> <channel> <pos> <busy> <slots>` | position, slots busy / total | the name |
 | `DCCORE SENDING <nick> <channel> <slot> <slots> <bytes>` | slot n / m, size | the name |
@@ -693,15 +698,38 @@ sent at all: what is off there never reaches the script.
 /dccore font <size>          the window's font size, e.g. /dccore font 14
 ```
 
+### Updating the script
+
+A newer bot may send a line with a field the loaded script does not know
+about. Save the new `dccore.mrc` over the old one, then in mIRC:
+
+```
+/reload -rs dccore.mrc
+/dccore connect
+```
+
+`/reload` re-reads the file in place and keeps your settings and the stored
+token (they live in `dccore.ini` beside it); `/load` would add a second copy.
+The window says so itself when the two sides disagree: *"speaks feed 1.2 and
+this script was written for 1.1"* means update the script; the same line the
+other way round means update the bot.
+
 ### If something is off
 
+- **Channel names or nonsense numbers where the position, slot or size
+  should be** - the bot and the script disagree on where a field sits; the
+  script and the bot ship together, and one of them is older. The window
+  says which when it connects (see "Updating the script" above). A script
+  from before the channel field was added does not say so: it just shows
+  the channel as the next number - update it.
 - **Non-ASCII file names look garbled** - mIRC 6 shows text in your
   Windows code page and the bot sends UTF-8. mIRC 7 decodes the chat as
   UTF-8 and shows them correctly; the script is the same file on both.
 - **"Plain mode" in the window** - the bot is older than 1.13 and does
   not answer `hello`; the window shows the chat as it comes, with no
-  panel. Or the bot speaks a newer protocol than the script: update the
-  script.
+  panel. Or the bot speaks a newer protocol than the script - a script
+  from before the version carried a minor refuses `1.1` this way and says
+  "Update the script": do that (see "Updating the script" above).
 - **The stored token is refused** - it was revoked on the bot (`unpair`),
   replaced by pairing the same name from elsewhere, or the token file was
   moved; `/dccore pair` again, typing the password once. The script does

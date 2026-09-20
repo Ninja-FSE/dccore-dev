@@ -324,6 +324,18 @@ def strip_irc_formatting(text):
 # client formats. Tabs and control characters in any field become spaces.
 # ==========================================================================
 PROTOCOL_MAJOR = 1
+# The minor goes up every time a fixed field is INSERTED into a major-1 line
+# (#639, audit M37). The channel field after <nick> went in without any
+# number moving, on the reasoning that the protocol was unreleased - and an
+# already-loaded older dccore.mrc then parsed the channel as the position,
+# the slot, the byte count, with nothing anywhere saying why. HELLO now
+# carries "major.minor": a script that knows the major but a different
+# minor keeps parsing and warns that a field moved and which side to update;
+# the pre-minor script's own `$2 != 1` refuses "1.1" outright and falls back
+# to plain mode with "Update the script", which is the message it was
+# missing. The number is a string on the wire, never arithmetic: "1.10"
+# must not read as 1.1.
+PROTOCOL_MINOR = 1
 FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH", "LISTFETCH")
 
 
@@ -395,7 +407,8 @@ def structured_line(kind, fields):
 
 def hello_line():
     import defaults as config
-    return (f"DCCORE HELLO {PROTOCOL_MAJOR} {_clean(getattr(config, 'NICKNAME', ''), token=True)} "
+    return (f"DCCORE HELLO {PROTOCOL_MAJOR}.{PROTOCOL_MINOR} "
+            f"{_clean(getattr(config, 'NICKNAME', ''), token=True)} "
             f"{_clean(getattr(config, 'SCRIPT_VERSION', ''))}")
 
 

@@ -223,8 +223,11 @@ class TheFieldPositionsMatchTheBot(unittest.TestCase):
     def test_hello(self):
         line = adminchat.hello_line()
         body = self.handler("HELLO")
-        self.assertEqual(self.token_of(line, 2), str(adminchat.PROTOCOL_MAJOR))
-        self.assertIn("$2 != 1", body, "the major is checked")
+        self.assertEqual(self.token_of(line, 2),
+                         "%s.%s" % (adminchat.PROTOCOL_MAJOR, adminchat.PROTOCOL_MINOR))
+        self.assertIn("$gettok($2,1,46)", body, "the major is read out of major.minor")
+        self.assertIn("%major != 1", body, "the major is checked")
+        self.assertIn("%minor != $dccore.protominor", body, "and the minor (#639)")
         self.assertIn("$3", body)  # the bot's nick
         self.assertIn("$4-", body)  # the version
 

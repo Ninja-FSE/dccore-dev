@@ -126,7 +126,7 @@ class TheLineFormat(DCCoreTestCase):
 
     def test_hello_names_the_protocol_the_bot_and_the_build(self):
         self.set_config(NICKNAME="MusicBot", SCRIPT_VERSION="DCCore v9.9")
-        self.assertEqual(adminchat.hello_line(), "DCCORE HELLO 1 MusicBot DCCore v9.9")
+        self.assertEqual(adminchat.hello_line(), "DCCORE HELLO 1.1 MusicBot DCCore v9.9")
 
 
 class FeedEventTellsItTwice(DCCoreTestCase):
@@ -242,7 +242,7 @@ class ASessionThatSaysHello(DCCoreTestCase):
         # Since step 3 a first STATUS burst follows the greeting; HELLO is
         # still the first structured line the client sees.
         first = [l for l in s._outbox if l.startswith("DCCORE ")][0]
-        self.assertTrue(first.startswith("DCCORE HELLO 1 MusicBot "))
+        self.assertTrue(first.startswith("DCCORE HELLO 1.1 MusicBot "))
 
     def test_before_authentication_hello_is_just_a_wrong_password(self):
         """handle_command() is only reached once authenticated; a line on an
@@ -367,7 +367,7 @@ class OverARealChat(unittest.TestCase):
 
             self.client.sendall(b"hello dccore.mrc 1.0\n")
             text = self.read_until("DCCORE HELLO")
-            self.assertIn("DCCORE HELLO 1 MusicBot ", text)
+            self.assertIn("DCCORE HELLO 1.1 MusicBot ", text)
 
             announce.feed_event("SEARCH", 'dave searched "x" - 3 results', nick="dave", results=3, term="x")
             text = self.read_until("DCCORE SEARCH")
