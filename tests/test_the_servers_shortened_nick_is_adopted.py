@@ -101,9 +101,12 @@ class TheWiring(unittest.TestCase):
         self.assertNotIn("numeric_target(a_line)", prereg)
         self.assertNotIn('is_server_numeric(a_line, "001")', prereg)
 
-    def test_the_explanation_comes_after_the_adoption(self):
-        self.assertLess(self.loop.index("adopt_registered_nick(line)"),
-                        self.loop.index("shortened to {config.NICKNAME}"))
+    def test_the_explanation_names_the_adopted_nick(self):
+        """It sits earlier in the source than the 001 handling but runs after
+        it: 001 is the first numeric a server sends, 005 comes later. It prints
+        config.NICKNAME, which is the adopted name by then."""
+        self.assertIn("shortened to {config.NICKNAME}", self.loop)
+        self.assertIn('is_server_numeric(line, "005")', self.loop)
 
     def test_the_helper_is_the_only_place_that_takes_the_servers_name(self):
         lines = [l for l in self.source.splitlines() if "config.NICKNAME = given" in l]
