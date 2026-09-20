@@ -34,6 +34,10 @@
 
 - **Fixed: a password with a space at the start or end opened the dashboard but never the DCC console.** The console trimmed what you typed before checking it; the dashboard did not. Both now take the password exactly as you set it. If your password ends in a space and the console has been refusing it, it will work now.
 
+- **Fixed: a first-run setup that failed halfway could leave the bot starting with no admin password.** If the setup (in the browser or `configure.py`) wrote `settings.conf` but could not write `admin_config.py` - the file held open by an editor or a virus scanner, a full disk - and you restarted instead of retrying, the bot skipped the setup, joined IRC and refused to start the dashboard, and the setup page was never offered again. The password file is now written first, so a failed setup is simply offered again on the next start.
+
+
+
 
 
 

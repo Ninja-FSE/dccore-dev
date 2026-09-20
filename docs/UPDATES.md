@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The setup writes the password before settings.conf (#624)
+
+`webserver.apply_setup()` and `configure.main()` wrote settings.conf first and admin_config.py second. The two writes
+are not one transaction: once settings.conf carried NICKNAME, CHANNEL and ADMIN_NICK the REQUIRED gate was satisfied,
+so a failed password write (admin_config.py held open by an editor or a scanner, a disk that filled between the two)
+followed by a restart skipped the setup page, joined IRC and had `webserver.start()` refuse the dashboard for the
+missing hash, with the browser form never offered again. Both now write admin_config.py first: a hash on disk without
+settings.conf still trips the gate, the page comes back, and the next attempt replaces the line in place.
+`tests/test_the_setup_writes_the_password_before_settings_conf.py` drives both paths with a refusing writer.
+
 ### 🔑 The console takes the password exactly as it was set (#622)
 
 The setup page, `POST /api/settings/password` and the dashboard's login all hash and verify the password verbatim,
