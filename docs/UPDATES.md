@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The Windows launchers run their Python, and autostart keeps running (#586, #587)
+
+`where python` finds the App Execution Alias stub in WindowsApps, so `start-dccore.bat` and `allow-firewall.bat`
+committed to it and never reached the install offer of #547. Each candidate (`py -3`, `python`) is now run once with
+`call` (a shim such as pyenv-win's `python.bat` never returns otherwise) and silenced; only one that answers becomes
+`%PY%`. `install-autostart.bat` follows `schtasks /create` with `New-ScheduledTaskSettingsSet` / `Set-ScheduledTask`:
+no execution time limit, start and keep running on battery, priority 4, three restarts a minute apart; if PowerShell
+cannot do it a warning says what to untick by hand and the task is still created.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
