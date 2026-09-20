@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔑 A channel that needs a services login (477) is a refusal, not silence (#632)
+
+Audit M30. `JOIN_REFUSED_NUMERICS` held 405/471/473/474/475. Undernet answers a JOIN to a +r channel from a nick
+not logged in to X with 477 (ERR_NEEDREGGEDNICK); 476 and 479 say the name is not a channel name at all.
+`parse_join_refusal()` returned None for all three, so nothing was printed outside DEBUG_MODE, nothing was
+counted, and a channel the watchdog had marked "never confirmed" stayed at zero refusals - which
+`channels_to_rejoin()` reads as "worth another JOIN". The advert worker re-sent that JOIN every ANNOUNCE_INTERVAL
+for the life of the process and got the same numeric back each time; the operator's only clue was the one-off
+"never confirmed via NAMES" line with no reason in it.
+
+The three join the set and are counted like a ban. 477 gets its own wording (`JOIN_REFUSED_NEEDS_A_LOGIN`), since
+the answer is not "wait it out": the debug channel says the channel needs a registered nick, that the bot must log
+in to services first, and to put the login in Settings > On connect (or check it goes out before the JOIN) - and
+still shows the attempt count, so a login that never comes ends in "gave up" like any other refusal. 437
+(temporarily unavailable) is deliberately left out: that is what a channel is during a netsplit, and a retry that
+never gives up is right for a refusal that says it will pass. `tests/test_a_channel_that_needs_a_login_is_a_refusal.py`;
+the two existing guards on the set and the handler text updated.
+
 ### 📣 The advert skips a channel the bot is not in (#631)
 
 Audit M29. `announce_worker` walked `irc.configured_channels()` with no membership check, so a channel the bot

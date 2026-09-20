@@ -579,7 +579,28 @@ JOIN_REFUSED_NUMERICS = {
     "473",   # ERR_INVITEONLYCHAN
     "474",   # ERR_BANNEDFROMCHAN
     "475",   # ERR_BADCHANNELKEY
+    "476",   # ERR_BADCHANMASK - the name is not a channel name on this server
+    "477",   # ERR_NEEDREGGEDNICK - Undernet +r: a services login is required
+    "479",   # ERR_BADCHANNAME - illegal channel name (ircu, hybrid)
 }
+# 476, 477 and 479 joined the five in #632 (audit M30). All three were
+# answered in silence: parse_join_refusal() returned None, nothing was
+# printed outside DEBUG_MODE, nothing counted, and a channel the watchdog
+# had marked "never confirmed" stayed at zero refusals - so the advert worker
+# re-sent the JOIN every ANNOUNCE_INTERVAL for the life of the process and
+# got the same numeric back every time. 477 is the one that happens on a
+# live install: Undernet's +r needs an X login, and an operator without one
+# in the on-connect commands (or with one slower than the JOIN) saw only
+# "never confirmed via NAMES", with no reason.
+#
+# 437 (ERR_UNAVAILRESOURCE) is deliberately NOT here: "temporarily
+# unavailable" is what a channel is during a netsplit, and a retry that
+# never gives up is the right answer to a refusal that says it will pass.
+
+# 477 says what to do, and it is not "wait": the nick must be logged in to
+# services before the JOIN. The debug line names the fix rather than counting
+# down like a ban would, for the same reason 405 has its own wording below.
+JOIN_REFUSED_NEEDS_A_LOGIN = "477"
 
 # 405 belongs with the four above rather than with a throttle: it keeps being
 # true until the operator serves fewer channels, which is the same shape as a
@@ -3081,6 +3102,19 @@ def irc_loop():
                                     f"It is configured for more than the server "
                                     f"allows - remove some from CHANNEL rather "
                                     f"than waiting for this to clear.",
+                                    category="PART", notice="error")
+                            elif numeric == JOIN_REFUSED_NEEDS_A_LOGIN:
+                                # #632: the fix is a services login sent
+                                # before the JOIN, so say that - and keep
+                                # counting, so a login that never comes
+                                # ends in "gave up" like any other refusal.
+                                announce.send_debug(
+                                    f"{refused_chan} needs a registered nick "
+                                    f"({numeric}, channel mode +r): the bot must "
+                                    f"log in to services first. Put the login "
+                                    f"in Settings > On connect, or check that "
+                                    f"it is sent before the JOIN. "
+                                    f"Attempt {count}/{limit}.",
                                     category="PART", notice="error")
                             elif count >= limit:
                                 announce.send_debug(
