@@ -833,22 +833,65 @@ on *:CLOSE:@DCCore: {
 ;  Right-click menus
 ; ---------------------------------------------------------------------
 
+; Asking, for the menu items that need a word from you. $input is mIRC 6.0+.
+; "eo" is an edit box with OK/Cancel; Cancel or an empty box sends nothing.
+; No commas in the prompt texts: they would end the $input argument.
+alias dccore.ask {
+  var %v = $input($2-,eo,DCCore)
+  if (%v != $null) { dccore.send $1 %v }
+}
+; The same for a console command typed in full.
+alias dccore.askraw {
+  var %v = $input(Console command (see help),eo,DCCore)
+  if (%v != $null) { dccore.send %v }
+}
+; Yes or no first, for the ones that change something or take a while.
+alias dccore.confirm {
+  if ($input($2-,yq,DCCore)) { dccore.send $1 }
+}
+alias dccore.askfont {
+  var %v = $input(Font size (6 or more),eo,DCCore)
+  if (%v isnum) { dccore font %v }
+}
+
+; Every /dccore command, and every console command worth a click, is here.
 menu @DCCore {
   Status:dccore.send status
   Slots:dccore.send slots
   Queue:dccore.send queue
   Bans:dccore.send bans
   Uptime:dccore.send uptime
+  Version:dccore.send version
   -
   $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
   $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
   $iif($dccore.sels,Queue of $dccore.sels):dccore.send queue $dccore.sels
   -
-  Options...:dccore.options
-  Panel $iif($dccore.opt(panel),off,on):dccore panel $iif($dccore.opt(panel),off,on)
+  Lists
+  .Show the lists:dccore lists
+  .Fetch the changed lists:dccore fetch
+  .Ask a bot for its list...:dccore.ask fetch Ask which bot for its list
+  Library
+  .Find duplicate filenames:dccore.send verify
+  .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
+  Admin
+  .Ban...:dccore.ask ban Ban pattern (for example *!*@host.example)
+  .Unban...:dccore.ask unban Pattern to remove
+  .Clear a queue...:dccore.ask clearqueue Clear the queue of which nick
+  .Reload the bot (rehash)...:dccore.confirm rehash Reload the bot's code and settings?
+  Console command...:dccore.askraw
   -
-  $iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
-  Clear window:clear @DCCore
+  Connection
+  .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
+  .Pair with the bot:dccore pair $dccore.bot
+  .Forget the token (unpair):dccore unpair
+  .Trust the bot's host:dccore trust
+  Window
+  .Options...:dccore.options
+  .Panel $iif($dccore.opt(panel),off,on):dccore panel $iif($dccore.opt(panel),off,on)
+  .Font size...:dccore.askfont
+  .Clear window:clear @DCCore
+  Command list:dccore
 }
 
 menu nicklist {
@@ -860,6 +903,9 @@ menu nicklist {
 menu status,channel {
   DCCore
   .Open the window:dccore window
+  .Show the lists:dccore lists
+  .Fetch the changed lists:dccore fetch
+  .Command list:dccore
   .$iif($chat($dccore.bot),Disconnect,Connect):dccore $iif($chat($dccore.bot),disconnect,connect)
   .Options...:dccore.options
 }
