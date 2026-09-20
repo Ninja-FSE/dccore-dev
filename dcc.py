@@ -560,7 +560,18 @@ def release_queue_entry(user, next_file, delivered, reason=""):
     is_row = isinstance(next_file, dict)
     consumed_temp = bool(is_row and next_file.get("is_temporary_zip")
                          and not next_file.get("is_unpacked_rar_folder"))
-    retryable = is_row and not consumed_temp
+    # A row that is not in any queue is the direct-send fast path's synthetic
+    # one (see above): nothing will ever pick it up again, so "kept for retry"
+    # was a claim about a retry that could not happen - and, being "kept", it
+    # sent the user nothing, so the most common request (a free slot, no
+    # queue) got one attempt and silence when it failed (#599).
+    in_a_queue = False
+    if is_row:
+        with queue_lock:
+            in_a_queue = any(row is next_file
+                             for rows in list(config.dcc_queue.values()) if rows
+                             for row in rows)
+    retryable = is_row and in_a_queue and not consumed_temp
 
     retained = False
     gave_up = False
@@ -572,7 +583,12 @@ def release_queue_entry(user, next_file, delivered, reason=""):
             outcome = "delivered, " + str(removed) + " row(s) removed"
         elif not retryable:
             removed = _remove_by_identity()
-            why = "temporary archive already consumed" if consumed_temp else "row is not retryable"
+            if consumed_temp:
+                why = "temporary archive already consumed"
+            elif is_row and not in_a_queue:
+                why = "sent directly, not queued - nothing to retry"
+            else:
+                why = "row is not retryable"
             outcome = "failed (" + why + "), " + str(removed) + " row(s) removed"
         else:
             attempts = int(next_file.get("send_fails", 0)) + 1
@@ -596,11 +612,13 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         try:
             oserve_mod = sys.modules.get("oserve")
             dropped = next_file.get("file", "your file") if is_row else str(next_file)
+            # "Removed from your queue" is only true of a row that was in one.
+            tail = "Removed from your queue." if (in_a_queue or not is_row) else "Ask for it again when you are ready."
             if oserve_mod:
                 oserve_mod.queue_message(
                     user,
                     "NOTICE " + str(user) + " :" + config.C_BOLD + "Error" + config.C_RESET +
-                    ": Could not send " + str(dropped) + " (" + str(reason) + "). Removed from your queue.\r\n")
+                    ": Could not send " + str(dropped) + " (" + str(reason) + "). " + tail + "\r\n")
         except Exception as notify_err:
             print("[DCC QUEUE] Could not notify " + str(user) + ": " + str(notify_err))
 
