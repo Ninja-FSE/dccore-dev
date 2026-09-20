@@ -47,7 +47,7 @@ class OverSsh(unittest.TestCase):
 
     def test_each_ssh_variable_is_recognised(self):
         for name in ("SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"):
-            self.assertTrue(configure.over_ssh({name: "1.2.3.4 22 5.6.7.8 22"}), name)
+            self.assertTrue(configure.over_ssh({name: "192.0.2.1 22 192.0.2.2 22"}), name)
 
     def test_no_ssh_variable_is_not_ssh(self):
         self.assertFalse(configure.over_ssh({}))
