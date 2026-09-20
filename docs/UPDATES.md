@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 A refused token is not sent again, and the redial waits for the operator (#613)
+
+On `Incorrect Password.` to the stored token `dccore.mrc` only changed its message; the bot closed the unanswered
+session after 60 s, CHATCLOSE redialled in 5 s (the first line of every session resets the backoff), `dccore.connect`
+reset `tokentried` and the revoked token went out again. `note_bad_ip` counts per address across sessions, so the
+third session - about two minutes after the first, with the operator away - blocked the address for 15 minutes and
+every login was refused with no word why. The script now sets a live `tokenbad` on that refusal: the prompt branch
+does not send the token while it is set, `dccore.retry` returns before arming its timer (and says so), and the mark is
+cleared by a login (which says the stored token is still the refused one), a new TOKEN, or `unpair`. `/dccore connect`
+does not clear it: a dial the operator asks for prompts for the password rather than spending another attempt. The
+INPUT handler now records `typed 1` (reset by `dccore.connect`) so a mistyped hand password, which also sits in state
+`auth`, is not taken for the token - before, it drew the "refused the stored token" message. Not verified in mIRC;
+`tests/test_a_refused_token_is_not_sent_again.py` reads the script and pins each branch.
+
 ### 📍 The queue position is the serving order, not the alphabet (#612)
 
 `adminchat.status_lines()` numbered the `DCCORE QUEUE <pos>` rows from `sorted(queue, key=str.lower)` while
