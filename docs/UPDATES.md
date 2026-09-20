@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The channel admin commands check the host (#579)
+
+`commands.is_admin(user)` compared only the nick against `ADMIN_NICK`, while `irc.py` already parsed ident@host and
+`adminchat.is_admin_host()` matched it for the console. `is_admin(user, host=None)` now also requires, when
+`ADMIN_HOSTMASKS` is set, that `host` matches one of the patterns (the ident is not part of the proof; an all-wildcard
+pattern admits no one; a caller that passes no host is refused). With `ADMIN_HOSTMASKS` empty it is the nick alone,
+as before. The five handlers take `user_host=` and `irc.py` hands them the sender's, and the same gate covers
+`!ping`/`!debugnames` (`diagnostics_are_for_the_admin`). The console passes `authorised=True` and is unchanged.
+Help texts (en/fr/es), `defaults.py`, the sample and ADMIN-CONSOLE.md say so.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
