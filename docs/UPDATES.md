@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A fast big transfer reports its speed (#550)
+
+`stats_mgr.speed_is_measurable(duration, size=None)` needed one second, because a file inside the 4 MB send buffer is
+'sent' in one go and the clock measures memory. Since #526 the clock stops at the receiver's final acknowledgement,
+and a file past the buffer cannot be a memory copy: `LARGE_TRANSFER_BYTES` (8 MB, twice the buffer) and
+`MIN_LARGE_TRANSFER_SECONDS` (0.1 s) now let it through. `dcc.py` passes `file_size`. The speed RECORD keeps its own
+one-second floor. `dccore.mrc` prints 'at n/a' for a SENT line whose speed is 0.
+
 ### 📍 The queue menu reads the panel row without a regex (#584, #550)
 
 `dccore.sels`/`dccore.selq` took the nine-character nick field with `$regex(... /^>[ \xA0]+(.{9})/)`; on a real mIRC

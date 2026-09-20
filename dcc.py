@@ -3270,7 +3270,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         if stats_mgr_speed is None:
             import stats_mgr as stats_mgr_speed
         reported_speed = (final_calc_speed
-                          if stats_mgr_speed.speed_is_measurable(acute_duration)
+                          if stats_mgr_speed.speed_is_measurable(acute_duration, file_size)
                           else None)
 
         # The record the channel advert publishes. db has had

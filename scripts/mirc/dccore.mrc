@@ -486,7 +486,7 @@ alias dccore.structured {
   }
   if (%type == SENT) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) at $dccore.speed($6)
+    dccore.echo $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) $iif($6 > 0,at $dccore.speed($6),at n/a)
     return
   }
   if (%type == FAIL) {
