@@ -4489,8 +4489,17 @@ def apply_setup(changes, password_hash, log=print, settings_path=None, admin_pat
     where configure.py writes."""
     import configure
     import settings_file
-    configure.write_settings_conf(changes, path=settings_path)
+    # admin_config.py FIRST. The two writes are not one transaction, and
+    # only one order fails safe: once settings.conf carries NICKNAME, CHANNEL
+    # and ADMIN_NICK the REQUIRED gate is satisfied, so if it were written
+    # first and the password write then failed (the file held open by an
+    # editor or a scanner, a full disk), a restart would skip this page,
+    # join IRC and refuse the dashboard for the missing hash - with no way
+    # back to the form. A hash written before settings.conf hurts nothing:
+    # the gate still trips, the page is offered again and the next attempt
+    # replaces the line in place (#624).
     configure.write_admin_config_password(password_hash, path=admin_path)
+    configure.write_settings_conf(changes, path=settings_path)
     settings_file.apply_to(vars(config), path=settings_path, log=log)
     config.ADMIN_PASSWORD_HASH = password_hash
     # apply_to() assigned NICKNAME but did not re-run the derivations that

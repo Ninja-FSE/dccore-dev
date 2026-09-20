@@ -556,8 +556,10 @@ def offer_to_generate_master_list(file_directory_set):
 
 def main():
     changes, password_hash = collect_answers()
-    write_settings_conf(changes)
+    # The password file first - the only order that fails safe if the second
+    # write does not happen; webserver.apply_setup() says why (#624).
     write_admin_config_password(password_hash)
+    write_settings_conf(changes)
     offer_to_generate_master_list("FILE_DIRECTORY" in changes)
     offer_to_import_omenserve_stats()
 
