@@ -538,16 +538,35 @@ def restore_preserved_runtime(cfg, preserved_runtime):
     copy, and came back as a permanent phantom DCC slot on the very next
     rehash - two rehashes in a row is all it took.
 
-    Kept general rather than assuming `value is current` always holds (true
-    today for every name in PRESERVE_RUNTIME, since all of them are
-    runtime.py-bound) - if a future preserved key ever is NOT bound that
-    way, reload really would hand back a fresh, empty container, and the
-    merge below still produces the right content; only the final write
-    changes, from rebind to in-place mutation.
+    When `value is current` - true today for every name in PRESERVE_RUNTIME,
+    since all of them are runtime.py-bound - there is nothing to merge: the
+    snapshot IS the live object, and the reload never emptied it. That key
+    is counted as restored (the operator's log line says what survived) and
+    the container is not touched. It used to be merged anyway, which came
+    out as `current.clear(); current.update(copy_of_current)` on the live
+    dict and `current[:] = copy_of_current` on the live list - run on the
+    rehash thread with no lock held (#604). Every other writer of these
+    containers holds queue_lock / the fetch lock / the offers lock, so the
+    copy could go stale between being taken and being written back: a
+    transfer that finished and removed itself in between came back as a
+    phantom slot; a dict was momentarily empty between clear() and update(),
+    which count_active_fetches() and check_user_status() could see; and
+    clear() under another thread's iteration raised RuntimeError on the IRC
+    read thread, whose outer handler closes the socket.
+
+    Kept general below that check rather than assuming identity always
+    holds - if a future preserved key ever is NOT runtime.py-bound, reload
+    really would hand back a fresh, empty container, and the merge produces
+    the right content; only the final write changes, from rebind to in-place
+    mutation. (That merge is the only path that writes, and it runs with no
+    lock; a key that needs it should take the container's own lock here.)
     """
     restored = set()
     for key, value in preserved_runtime.items():
         current = getattr(cfg, key, None)
+        if value is current:
+            restored.add(key)
+            continue
         if isinstance(value, dict) and isinstance(current, dict):
             merged = dict(value)
             merged.update(current)      # window writes win
