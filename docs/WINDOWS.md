@@ -337,6 +337,13 @@ read from your settings, not typed in. Adding a firewall rule needs an
 administrator's yes, so the script re-opens itself elevated - the usual
 prompt. `remove-firewall.bat` takes both rules out again.
 
+Cancel does more than decline: Windows also creates an inbound **Block** rule
+for that `python.exe`, and a Block rule wins over any Allow rule, so a port rule
+alone would not fix it. The script therefore removes any inbound Block rule for
+the interpreter the bot runs on before it adds its own rules, and says so when
+it did. It touches no other program's rules and leaves an Allow rule the dialog
+made alone.
+
 ### Port forwarding
 
 **Forward TCP 55000–55010** to this machine for anyone to download from you.
