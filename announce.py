@@ -773,6 +773,7 @@ def send_dcc_error(user, error_type):
     errors = {
         "invalid_path": "Error: Invalid path.",
         "file_not_found": "Error: File not found.",
+        "busy": "Error: Busy looking up other files - try again in a moment.",
         "global_full": f"Error: The server's global queue is full ({config.MAX_GLOBAL_QUEUE} max).",
         "user_full": f"Error: You have reached your personal queue limit of {config.MAX_USER_QUEUE} files.",
         "rar_disabled": "Error: Folder packing (!rar) is disabled on this bot.",
