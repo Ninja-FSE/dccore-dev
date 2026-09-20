@@ -409,6 +409,7 @@ def status_lines(now=None):
     panel are drawn from, read from what the daemon already holds.
 
         DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>
+                      <started_epoch> <failed> <searches>      (the last three: since the bot started)
         DCCORE SLOT <nick> <sent> <total> <bps> <name>          one per active transfer
         DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>    one per queued user, first 20
 
@@ -438,9 +439,24 @@ def status_lines(now=None):
     except Exception as err:
         print(f"[ADMINCHAT] Status figures unavailable: {err}")
 
+    # Since the bot started, not since this client connected (#754): the start
+    # as an epoch (now minus the uptime), and the failures and searches the
+    # daemon itself has counted. Appended at the end of the line, which is
+    # what makes it a minor addition - an older script reads $1-$8 and stops.
+    started = failed = searches = 0
+    try:
+        import runtime
+        import stats_mgr as _stats
+        started = int(now - _stats.get_uptime_seconds())
+        failed = int(runtime.feed_counts.get("FAIL", 0))
+        searches = int(runtime.feed_counts.get("SEARCH", 0))
+    except Exception as err:
+        print(f"[ADMINCHAT] Start figures unavailable: {err}")
+
     lines = [f"DCCORE STATUS {len(transfers)} {_num(slots)} "
              f"{sum(len(rows) for rows in queue.values())} {len(queue)} "
-             f"{sent_today} {bytes_today} {bps_now} {record}"]
+             f"{sent_today} {bytes_today} {bps_now} {record} "
+             f"{started} {failed} {searches}"]
     for tx in transfers:
         sent = int(tx.get("bytes_sent") or 0)
         started = float(tx.get("started_at") or 0)

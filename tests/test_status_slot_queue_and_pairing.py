@@ -46,6 +46,15 @@ class TheStatusBurst(DCCoreTestCase):
         self._real_rolled = db.load_advanced_stats_rolled
         db.load_advanced_stats_rolled = lambda: [100, 999, 10, 1000, 38, 13300000000, "2026-09-18"]
         self.addCleanup(setattr, db, "load_advanced_stats_rolled", self._real_rolled)
+        # Since the bot started (#754): 100 s of uptime at now=1000, and the
+        # counts the daemon has kept.
+        self._real_uptime = stats_mgr.get_uptime_seconds
+        stats_mgr.get_uptime_seconds = lambda: 100
+        self.addCleanup(setattr, stats_mgr, "get_uptime_seconds", self._real_uptime)
+        import runtime
+        self._real_counts = dict(runtime.feed_counts)
+        runtime.feed_counts.update({"FAIL": 4, "SEARCH": 7})
+        self.addCleanup(lambda: runtime.feed_counts.update(self._real_counts))
         self._real_record = db.get_speed_record
         db.get_speed_record = lambda: 4800000
         self.addCleanup(setattr, db, "get_speed_record", self._real_record)
@@ -56,7 +65,7 @@ class TheStatusBurst(DCCoreTestCase):
 
         lines = adminchat.status_lines(now=1000.0)
 
-        self.assertEqual(lines[0], "DCCORE STATUS 1 3 5 2 38 13300000000 1500000 4800000")
+        self.assertEqual(lines[0], "DCCORE STATUS 1 3 5 2 38 13300000000 1500000 4800000 900 4 7")
 
     def test_a_slot_line_per_transfer_with_speed_from_its_own_clock(self):
         config.active_transfers[:] = [{"user": "erin", "file": "X Y.rar", "bytes_sent": 5000,
@@ -135,8 +144,8 @@ class TheStatusBurst(DCCoreTestCase):
         db.load_advanced_stats_rolled = boom
         import contextlib
         with contextlib.redirect_stdout(io.StringIO()):
-            lines = adminchat.status_lines()
-        self.assertEqual(lines[0], "DCCORE STATUS 0 3 0 0 0 0 0 0")
+            lines = adminchat.status_lines(now=1000.0)
+        self.assertEqual(lines[0], "DCCORE STATUS 0 3 0 0 0 0 0 0 900 4 7")
 
 
 class WhenTheBurstIsSent(DCCoreTestCase):
@@ -487,3 +496,87 @@ class TheResumeIsRecordedOnTheRow(unittest.TestCase):
             source = handle.read()
         start = source.index("tx['bytes_sent'] = resume_offset")
         self.assertIn("tx['resume_offset'] = resume_offset", source[start:start + 400])
+
+
+class TheBotsOwnStartAndCounts(DCCoreTestCase):
+    """The panel's Since box counts from the BOT's start (#754), not the window's."""
+
+    def setUp(self):
+        super().setUp()
+        import stats_mgr
+        import runtime
+        real = stats_mgr.get_uptime_seconds
+        stats_mgr.get_uptime_seconds = lambda: 3600
+        self.addCleanup(setattr, stats_mgr, "get_uptime_seconds", real)
+        self.saved = dict(runtime.feed_counts)
+        runtime.feed_counts.update({"FAIL": 0, "SEARCH": 0})
+        self.addCleanup(lambda: runtime.feed_counts.update(self.saved))
+        import announce
+        self.announce = announce
+        real_debug = announce.send_debug
+        announce.send_debug = lambda *a, **k: None
+        self.addCleanup(setattr, announce, "send_debug", real_debug)
+
+    def status(self):
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            return adminchat.status_lines(now=10000.0)[0].split()
+
+    def fail(self, text="x"):
+        self.announce.feed_event("FAIL", text, nick="a", channel="#c", acked_bytes=0, total_bytes=1, name="f", reason="r")
+
+    def test_the_start_is_now_minus_the_uptime(self):
+        self.assertEqual(self.status()[9], "6400")
+
+    def test_a_failure_and_a_search_are_counted_where_they_pass(self):
+        self.fail("x")
+        self.fail("y")
+        self.announce.feed_event("SEARCH", "z", nick="a", channel="#c", results=1, term="t")
+        self.assertEqual(self.status()[10:], ["2", "1"])
+
+    def test_the_other_kinds_are_not_counted(self):
+        self.announce.feed_event("SENT", "s", nick="a", channel="#c", bytes=1, seconds=1.0, bytes_per_s=1, name="f")
+        self.announce.feed_event("REQUEST", "r", nick="a", channel="#c", kind="file", name="f")
+        self.assertEqual(self.status()[10:], ["0", "0"])
+
+    def test_the_counts_live_in_runtime_so_a_rehash_does_not_reset_them(self):
+        import importlib
+        import runtime
+        self.fail("x")
+        importlib.reload(self.announce)
+        self.assertEqual(runtime.feed_counts["FAIL"], 1)
+        self.announce.send_debug = lambda *a, **k: None
+        self.fail("y")
+        self.assertEqual(runtime.feed_counts["FAIL"], 2)
+
+    def test_a_console_that_refuses_the_kind_still_lets_it_be_counted(self):
+        self.set_config(CONSOLE_SHOW_SEARCHES=False)
+        self.announce.feed_event("SEARCH", "z", nick="a", channel="#c", results=1, term="t")
+        self.assertEqual(self.status()[10:], ["0", "1"])
+
+    def test_the_doc_table_names_the_three_fields(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with io.open(os.path.join(root, "docs", "ADMIN-CONSOLE.md"), encoding="utf-8") as handle:
+            self.assertIn("<started> <failed> <searches>", handle.read())
+
+
+class ThePanelReadsThem(unittest.TestCase):
+
+    def panel(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with io.open(os.path.join(root, "scripts", "mirc", "dccore.mrc"), encoding="ascii", newline="") as handle:
+            text = handle.read().replace("\r\n", "\n")
+        return text.split("alias dccore.panel {", 1)[1].split("\n}", 1)[0]
+
+    def test_since_is_the_bots_start_when_it_says_and_the_window_otherwise(self):
+        self.assertIn("var %since = $iif($dccore.st(st.started) > 0,$dccore.st(st.started),$dccore.st(opened))", self.panel())
+
+    def test_a_start_more_than_a_day_ago_shows_the_day(self):
+        self.assertIn("ddd HH:nn,HH:nn", self.panel())
+
+    def test_the_counts_are_the_bots_and_fall_back_to_the_windows(self):
+        panel = self.panel()
+        self.assertIn("$iif($dccore.st(st.failed) != $null,$dccore.st(st.failed),$dccore.st(failed))", panel)
+        self.assertIn("$iif($dccore.st(st.searches) != $null,$dccore.st(st.searches),$dccore.st(searches))", panel)
