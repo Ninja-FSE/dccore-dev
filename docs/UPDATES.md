@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A failed midnight rotation does not stop every command (#592)
+
+`db.check_and_rotate_day()` is the first call in the per-message block and raises when the rollover cannot be
+written; the exception unwound the whole block, so no command, admin command or download was dispatched until
+the write worked. It still raises on purpose (no caller is handed un-rotated counters as current), so
+`irc.rotate_the_day_without_stopping_the_bot()` catches it at that one call site, says so once a minute and
+retries on that cadence (each failed attempt on Windows also costs the read thread a replace retry).
+
 ### 📍 The channel admin commands check the host (#579)
 
 `commands.is_admin(user)` compared only the nick against `ADMIN_NICK`, while `irc.py` already parsed ident@host and
