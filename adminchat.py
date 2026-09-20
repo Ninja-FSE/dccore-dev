@@ -638,7 +638,12 @@ class Session:
         prose from debug_sink already."""
         if self.closed or not self.authenticated or not self.structured:
             return
-        self.send(structured_line(kind, fields))
+        # `text` is the event's prose, handed to the sink beside the fields.
+        # The kinds that carry their own fields (REQUEST, SENT, ...) never
+        # read it; LISTFETCH's whole payload is that sentence, and it used to
+        # be looked for in the fields, where it was not - the window drew a
+        # bare "[LISTS]" tag (#750).
+        self.send(structured_line(kind, {"text": text, **fields}))
         # A slot or a queue just changed; the title bar should not wait for
         # the timer to say so. Flagged, not computed: this runs on the
         # emitting thread, which may hold queue_lock - see send_status().
