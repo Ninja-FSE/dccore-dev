@@ -1158,21 +1158,6 @@ def execute_search(irc_sock, user, search_term, channel):
         print(f"[MAINTENANCE BLOCK] Refused a search (@find) from {user}: an !update is running.")
         return
 
-    # Guard against two searches at once. This used to print to the console and
-    # return, sending the user nothing at all - their @find simply vanished.
-    #
-    # It was also unreachable with PAUSE_ON_UPDATE on, because the branch above
-    # returned first on the very same flag. Now that the two flags mean
-    # different things, this is the branch a second searcher actually reaches,
-    # so it has to say something, and something accurate: the previous wording
-    # anywhere near here blamed a MasterList rebuild that is not happening.
-    if getattr(config, 'search_inprogress', False):
-        oserve = sys.modules.get('oserve')
-        if oserve:
-            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Another search is running right now - try again in a moment.\r\n")
-        print(f"[SEARCH BLOCK] Ignored a search from {user}: another scan is already running.")
-        return
-        
     if len(search_term) < 3:
         oserve = sys.modules.get('oserve')
         if oserve:
@@ -1190,8 +1175,33 @@ def execute_search(irc_sock, user, search_term, channel):
               f"from {user}.")
         return
 
-    config.search_inprogress = True
-    
+    # Guard against two searches at once. This used to print to the console and
+    # return, sending the user nothing at all - their @find simply vanished.
+    #
+    # It was also unreachable with PAUSE_ON_UPDATE on, because the branch above
+    # returned first on the very same flag. Now that the two flags mean
+    # different things, this is the branch a second searcher actually reaches,
+    # so it has to say something, and something accurate: the previous wording
+    # anywhere near here blamed a MasterList rebuild that is not happening.
+    #
+    # CHECKED AND SET AS ONE STEP (#607). Every @find runs on its own thread,
+    # and this guard used to read the flag at the top of the function and set
+    # it here, with list_name_for_request()'s trip to lists.json in between -
+    # so two @find lines dispatched from the same recv() buffer both passed
+    # the check, both walked the master list at once, and the first to finish
+    # cleared the flag while the other was still running, admitting a third.
+    # The gate is the one !update takes for the same flag, so a rebuild and a
+    # search cannot slip past each other either. The refused searcher returns
+    # BEFORE the try below, so its finally never clears a flag it did not set.
+    with runtime.list_update_gate:
+        if getattr(config, 'search_inprogress', False):
+            oserve = sys.modules.get('oserve')
+            if oserve:
+                oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Another search is running right now - try again in a moment.\r\n")
+            print(f"[SEARCH BLOCK] Ignored a search from {user}: another scan is already running.")
+            return
+        config.search_inprogress = True
+
     try:
         current_list_path = find_latest_list(wanted)
         if not current_list_path or not os.path.exists(current_list_path):

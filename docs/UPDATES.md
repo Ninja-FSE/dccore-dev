@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 Two @find lines arriving together no longer both walk the list (#607)
+
+`execute_search()` runs on a thread per @find, and its "one search at a time" guard read `config.search_inprogress`
+at the top of the function and set it some twenty lines later, with `library.list_name_for_request()`'s trip to
+lists.json in between and no lock. Two @find lines dispatched from one recv() buffer both passed, both scanned the
+master list at once, and the first to finish cleared the flag while the other still ran, admitting a third - and an
+`!update` arriving then passed its "no scan running" check with a scan in progress. The check and the set are now
+one step under `runtime.list_update_gate`, the lock `!update` already takes for `update_inprogress` (#444); the
+refused searcher returns before the `try`, so its `finally` cannot release somebody else's flag.
+`handle_list_update_request()` checks and raises `search_inprogress` inside that same gate, and its `finally`
+clears it only when this request raised it (with PAUSE_ON_UPDATE off the flag belonged to a running search). The
+test forces the interleaving with a barrier inside the old window instead of betting on the scheduler.
+
 ### 📍 The queue save no longer pops keys out of the live queue (#606)
 
 `db.save_dcc_queue()` dropped every emptied user key from `config.dcc_queue` itself, and two of its callers
