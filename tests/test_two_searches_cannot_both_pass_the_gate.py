@@ -111,9 +111,14 @@ class TwoSearchersArrivingTogether(SearchCase):
             thread.start()
 
         # Wait for the outcome, whichever it is: both scanning (the defect)
-        # or one searcher refused and gone.
+        # or one searcher refused and gone AND the other one scanning. The
+        # refused one can return before the winner has reached the scan, so
+        # "one thread gone" alone is too early to count the scanners (that
+        # read 0 on a macOS runner).
         def decided():
-            return len(scanning) == 2 or any(not t.is_alive() for t in threads)
+            if len(scanning) == 2:
+                return True
+            return len(scanning) == 1 and any(not t.is_alive() for t in threads)
 
         deadline = time.monotonic() + 5
         while not decided() and time.monotonic() < deadline:
