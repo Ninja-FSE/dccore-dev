@@ -3102,10 +3102,15 @@ def irc_loop():
                                 # able to answer.
                                 #
                                 # Private only, like the two branches above.
-                                # Answered INLINE rather than on a thread: the
-                                # receiver is blocked waiting for this, it is
-                                # one dict lookup and one send, and it touches
-                                # no disk. Admission control is entirely
+                                # The lookup is answered INLINE - it is one dict
+                                # read and it must settle the resume position
+                                # before the receiver can connect - but the
+                                # ACCEPT itself is paced and waits up to
+                                # MSG_DELAY for a slot, which on this thread
+                                # stalled every PING and every other line
+                                # (#577, #602). handle_resume_request(
+                                # background=True) sends it from a short
+                                # thread. Admission control is entirely
                                 # inside handle_resume_request() - it matches
                                 # on a port WE are listening on for this exact
                                 # nick, so a stray or forged line finds
@@ -3113,7 +3118,8 @@ def irc_loop():
                                 if (ctcp_cmd.startswith("DCC RESUME ")
                                         and target_chan.lower() == config.NICKNAME.lower()):
                                     dcc.handle_resume_request(
-                                        s, user, msg.strip("\x01").strip())
+                                        s, user, msg.strip("\x01").strip(),
+                                        background=True)
                                     continue
                                 if ctcp_cmd == "VERSION":
                                     # Answered inline rather than on a thread:
