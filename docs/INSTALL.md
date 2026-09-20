@@ -83,7 +83,7 @@ python3 configure.py
 
 On Windows that command is **`py configure.py`**. A python.org install gives you `py` and `python`, not `python3` — and Windows 10 and 11 ship an App Execution Alias for that exact name, so `python3` opens the Microsoft Store or reports *"Python was not found"* even when Python is installed and working. Every `python3` below has the same Windows form; [WINDOWS.md](WINDOWS.md) uses it throughout.
 
-Six questions — nickname, IRC server, channel(s), admin nick, admin console password, and the music directory — written to `settings.conf` and `admin_config.py` for you.
+Six questions — nickname, IRC server, channel(s), admin nick, admin console password, and the music directory — written to `settings.conf` for you, with the password hash (and nothing else) in `admin_config.py`.
 
 The music directory is optional here. It is usually easier to browse and confirm it from the dashboard's Settings page once the bot is running than to type a path blind. Everything else stays changeable afterwards.
 
@@ -97,7 +97,7 @@ Safe to run again later: every prompt shows what is already configured as its de
 
 **`admin_config.py`** — Python. Copy `admin_config.py.sample` and edit. Better for values you would rather keep out of a file other tools rewrite, such as `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH`.
 
-Both are gitignored. `defaults.py` applies `admin_config.py` first and `settings.conf` second, so a value set in both takes the `settings.conf` one.
+Both are gitignored. `defaults.py` applies `admin_config.py` first and `settings.conf` second, so a value set in both takes the `settings.conf` one. The daemon says so at startup for every setting that `admin_config.py` sets to something `settings.conf` then overrides (`[CONFIG] settings.conf overrides WEBUI_HOST, which admin_config.py also sets ...`) — if an edit to `admin_config.py` seems to do nothing, that line is why.
 
 ### What must be set
 

@@ -171,9 +171,8 @@ class ApplyingIt(DCCoreTestCase):
         _, password_hash, _ = webserver.validate_setup_form(GOOD)
         webserver.apply_setup({"NICKNAME": "X"}, password_hash, log=lambda *_: None,
                               settings_path=self.settings, admin_path=self.admin)
-        with io.open(os.path.join(REPO_ROOT, "admin_config.py.sample"), encoding="utf-8") as handle:
-            sample = handle.read()
-        expected = configure.build_admin_config_text(sample, password_hash)
+        expected = configure.build_admin_config_text(configure.NEW_ADMIN_CONFIG_HEADER,
+                                                     password_hash)
         with io.open(self.admin, encoding="utf-8") as handle:
             got = handle.read()
         self.assertEqual(got.strip(), expected.strip())

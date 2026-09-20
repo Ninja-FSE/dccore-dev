@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧾 A new admin_config.py carries only the password, and a line settings.conf overrides is reported at boot (#623)
+
+`configure.write_admin_config_password()` seeded a missing admin_config.py from admin_config.py.sample, whose active
+lines - `WEBUI_ENABLED = True`, `WEBUI_HOST`, `WEBUI_PORT`, `ADMIN_CHAT_MODE = "listen"`, the two `DEBUG_TO_*` flags -
+then sat in the operator's own file from birth. Where the setup had just written the same name to settings.conf
+(`WEBUI_ENABLED`, `WEBUI_HOST`) they were dead, since defaults.py applies settings.conf second; where it had not,
+they silently diverged from defaults.py (every install ran `ADMIN_CHAT_MODE = "listen"` under a comment naming
+"auto" as the default; an install that declined the dashboard carried `WEBUI_ENABLED = True`). And the only shadow
+check, `settings_file.shadowed_by_admin_config()`, ran at dashboard-save time, so an operator who later followed the
+file's own comment, set `WEBUI_HOST = "0.0.0.0"` there and restarted, got a dashboard that ignored the edit and a
+console that said nothing. A new admin_config.py is now `configure.NEW_ADMIN_CONFIG_HEADER` (a comment saying where
+the other settings went) plus the `ADMIN_PASSWORD_HASH` line; the `sample_path` parameter is gone with the seeding.
+`settings_file.apply_to()` reports, in `report["shadowed"]` and as a `[CONFIG]` line, every name it applied that the
+`admin_config` module this process imported had also set to a different value - the same value in both is silent.
+The sample is unchanged: it is documentation for a hand setup, not a template any more.
+`tests/test_a_shadowed_admin_config_line_is_reported_at_boot.py` drives both.
+
 ### 🌐 The setup page is translated whole, not only its field labels (#621)
 
 The FR/ES switch on `/setup` translated the six field labels and their **?** help - the `settings.field.*` keys the

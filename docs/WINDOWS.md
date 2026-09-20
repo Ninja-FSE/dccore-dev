@@ -213,7 +213,8 @@ Asks nickname, IRC server, channel(s), admin nick, the admin console
 password, the music directory (optional - easier to set from the web
 dashboard once the daemon is running, if you would rather do it there),
 and whether to enable the web dashboard - and writes them to
-`settings.conf` and `admin_config.py` itself. Covers everything below;
+`settings.conf` itself, with the password hash (and nothing else) in
+`admin_config.py`. Covers everything below;
 skip to step 2 if you use it. The rest of this section is the manual
 equivalent, for anyone who would rather edit the files by hand.
 
