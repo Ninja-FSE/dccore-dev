@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 `pair` in the dashboard Console shows the token (#581)
+
+`_cmd_pair` saved the token and then read `session.structured`, which the web shim (`_WebConsoleSession`) lacked, so
+the Console said 'Command failed' and the token was never shown while any script paired under that name was silently
+locked out. `hello` printed its DCCORE HELLO line and failed on `send_status`. The shim now has `structured = False`
+and `client`, `hello` is in `_CONSOLE_UNSUPPORTED_COMMANDS` with a message, `pair` says when it replaced an existing
+token, and a structural test fails if any supported handler reads a session attribute the shim lacks.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
