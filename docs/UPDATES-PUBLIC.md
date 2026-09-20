@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: the browser setup page was only half translated.** Choosing FR or ES translated the field names and their **?** explanations but left the title, the intro, the password boxes, the network box, the button, the note, every error message and the "Saved" page in English. The whole page now follows the language you pick.
 - **Fixed: the browser setup page started with the dashboard box unticked** while telling you the music folder "can be chosen later on the Settings page" - a first run that followed that advice ended with a bot that served nothing and no Settings page to fix it from. The box now starts ticked (your own machine only, unless you also tick the network box); untick it and the page says plainly that the folder then has to be typed there or set in `settings.conf` afterwards.
 - **Fixed: a reload of the settings (`!rehash`, or Save in the dashboard) could, very rarely, bring back a transfer that had just finished as a busy slot, or drop the IRC connection.** The reload copied the bot's live state and wrote the copy straight back, with nothing to stop a transfer finishing or a ban being checked in between. Nothing was ever emptied by a reload, so it now leaves that state alone.
 
@@ -35,6 +36,7 @@
 - **Fixed: a password with a space at the start or end opened the dashboard but never the DCC console.** The console trimmed what you typed before checking it; the dashboard did not. Both now take the password exactly as you set it. If your password ends in a space and the console has been refusing it, it will work now.
 
 - **Fixed: a first-run setup that failed halfway could leave the bot starting with no admin password.** If the setup (in the browser or `configure.py`) wrote `settings.conf` but could not write `admin_config.py` - the file held open by an editor or a virus scanner, a full disk - and you restarted instead of retrying, the bot skipped the setup, joined IRC and refused to start the dashboard, and the setup page was never offered again. The password file is now written first, so a failed setup is simply offered again on the next start.
+
 
 
 

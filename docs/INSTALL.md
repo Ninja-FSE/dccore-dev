@@ -70,8 +70,10 @@ Flask, which the launcher offers to install first; without it, the terminal
 questions below are asked instead.
 
 `/setup` is the same form as the dashboard's Settings page cut down to what a
-first start needs, with the same **?** explanations, in English, French or
-Spanish. Everything else is on the Settings page afterwards.
+first start needs, with the same **?** explanations, and the whole page -
+labels, explanations, error messages and the Saved page - follows the
+language you pick: English, French or Spanish. Everything else is on the
+Settings page afterwards.
 
 ### In the terminal
 
