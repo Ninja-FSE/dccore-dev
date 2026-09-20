@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The LISTFETCH line carries its text (#750)
+
+`Session.event_sink(kind, fields, text)` passed only `fields` to `structured_line()`; LISTFETCH's payload is the
+sentence, which travels as `text`, so the line ended after the action. The sink now passes `{'text': text, **fields}`;
+the other kinds never read it and a field named text still wins. The tests that shipped with LISTFETCH built the
+fields by hand with a text in them and never saw it: the new ones go through `announce.feed_event` and the session's
+outbox.
+
 ### 📍 Lists and fetch in the console, LISTFETCH in the feed (#750)
 
 `adminchat`: `lists` (from `webserver.build_fetched_bot_list_summaries()`, one line per bot: freshness, count, age,
