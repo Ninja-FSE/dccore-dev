@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 preflight reads its children as UTF-8 (#620)
+
+`scripts/preflight.py` captured the test-count run and the hostile-environment probe with `capture_output=True,
+text=True` and no encoding, so it decoded with the locale code page, strict - cp1253 on the operator's Greek Windows -
+while the children write UTF-8 (oserve.py's console guard reconfigures the test child; `hostile_env()` sets
+`PYTHONUTF8=1` for the probe). The first byte cp1253 leaves undefined, 0x9f in any emoji a test prints, killed the
+reader thread inside `subprocess.run`: a UnicodeDecodeError traceback landed in preflight's output looking like a test
+failure, and the captured stream was None - on a red run whose failure text carried such a character, the count came
+out as "only 0 collected". A new `capture()` helper runs both with `encoding="utf-8", errors="replace"`, the way
+commands.py, dcc.py and update_list.py already did. The sweep in `test_a_filename_your_code_page_cannot_spell.py`
+over parents that capture output now includes preflight, and `test_preflight_reads_its_children_in_utf8.py` drives
+`capture()` for real from a Python forced onto a narrow locale (C/ASCII on POSIX, the ANSI code page on Windows),
+probing rather than assuming that the locale could be narrowed.
+
 ### 🛑 The Linux and macOS autostart installers no longer start the bot at once (#619)
 
 `install-autostart.sh` ran `systemctl --user enable --now` and `install-autostart.command` ran `launchctl load -w`

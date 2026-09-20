@@ -195,6 +195,15 @@ class TheGuardSurvivesAPathItCannotSpell(unittest.TestCase):
         self.assertIn("ga", done.stdout)
 
 
+# Every module that runs a child and reads what it printed. scripts/preflight.py
+# joined for #620: it captured the test suite and the hostile-environment probe
+# with text=True, and on a Greek Windows the reader thread died on the first
+# emoji a test printed - stdout came back as None, and a red run's count was
+# reported as "only 0 collected".
+PARENTS = ("commands.py", "dcc.py", "update_list.py",
+           os.path.join("scripts", "preflight.py"))
+
+
 class NoParentDecodesWithTheLocaleCodePage(unittest.TestCase):
     """text=True on its own means "decode with whatever the console uses",
     which is the parent half of the same bug."""
@@ -218,14 +227,14 @@ class NoParentDecodesWithTheLocaleCodePage(unittest.TestCase):
 
     def test_there_are_calls_to_check(self):
         every = []
-        for name in ("commands.py", "dcc.py", "update_list.py"):
+        for name in PARENTS:
             every.extend(self.captured_runs(name))
 
         self.assertTrue(every, "no captured subprocess runs found - has the "
                                "pattern gone stale?")
 
     def test_each_one_names_its_encoding(self):
-        for name in ("commands.py", "dcc.py", "update_list.py"):
+        for name in PARENTS:
             for node, kwargs in self.captured_runs(name):
                 with self.subTest(module=name, line=node.lineno):
                     self.assertIn(
@@ -236,7 +245,7 @@ class NoParentDecodesWithTheLocaleCodePage(unittest.TestCase):
                         % (name, node.lineno))
 
     def test_and_replaces_rather_than_raising(self):
-        for name in ("commands.py", "dcc.py", "update_list.py"):
+        for name in PARENTS:
             for node, kwargs in self.captured_runs(name):
                 with self.subTest(module=name, line=node.lineno):
                     self.assertIn(
@@ -247,7 +256,7 @@ class NoParentDecodesWithTheLocaleCodePage(unittest.TestCase):
 
     def test_the_values_are_the_ones_intended(self):
         """The keyword being present is not the same as it being right."""
-        for name in ("commands.py", "dcc.py", "update_list.py"):
+        for name in PARENTS:
             text = source(name)
             with self.subTest(module=name):
                 self.assertIn('encoding="utf-8"', text)
