@@ -484,7 +484,7 @@ class TheLauncherHook(DCCoreTestCase):
         if not webserver.HAVE_FLASK:
             raise unittest.SkipTest(NEEDS_FLASK)
         asked = []
-        self.assertEqual(configure.offer_setup_in_browser(ask=lambda p: asked.append(p) or "", log=lambda *_: None), 0)
+        self.assertEqual(configure.offer_setup_in_browser(ask=lambda p: asked.append(p) or "", log=lambda *_: None, environ={}), 0)
         self.assertEqual(asked, [])
 
     def test_nobody_at_the_keyboard_is_a_no(self):
