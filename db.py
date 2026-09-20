@@ -1101,17 +1101,26 @@ def save_fetch_history(rows):
 
 
 def save_dcc_queue():
-    """Persist the DCC queue, dropping users whose list is now empty.
+    """Persist the DCC queue, leaving out users whose list is now empty.
 
     Previously this truncated dcc_queue.txt and then serialised straight into the open
     handle. Any crash, disk-full or concurrent writer between those two steps left a
     truncated file - and load_dcc_queue() treats an unparseable file as "start empty",
     so the entire queue disappeared silently on the next boot.
+
+    This function READS config.dcc_queue and never writes to it (#606). It used
+    to pop the emptied keys from the live dict as well, and two of its callers
+    run after their `with queue_lock:` block has closed - so that pop raced the
+    lock-held live iterations in dcc.py (next_waiting_pack_owner, the temp-
+    archive cleanup in start_dcc_send's finally) and raised "dictionary
+    changed size during iteration" in THEIR thread. Emptied keys are now
+    dropped by the code that empties them, under queue_lock, in
+    dcc.release_queue_entry(); the file never held them either way.
     """
     import json
 
     try:
-        # ONE COPY, THEN WALK THE COPY (#452). Both loops below used to walk
+        # ONE COPY, THEN WALK THE COPY (#452). The loop below used to walk
         # config.dcc_queue live while holding only _disk_lock - which guards
         # the FILE, not the dict. Every writer mutates it under queue_lock,
         # so a key added or removed mid-walk raised "dictionary changed size
@@ -1119,20 +1128,14 @@ def save_dcc_queue():
         # only in RAM until the next successful save, and a restart in between
         # lost it.
         #
-        # queue_lock cannot be taken here - five of the six callers in dcc.py
-        # are already inside `with queue_lock:` and it is a plain
+        # queue_lock cannot be taken here - most callers in dcc.py and
+        # commands.py are already inside `with queue_lock:` and it is a plain
         # threading.Lock, so locking would deadlock the request path. dict()
         # copies the mapping in one step under the GIL, which is what #432
         # settled on for get_total_queued_count() for the same reason: a
         # concurrent change can leave this snapshot one entry stale, never
         # raise.
         live = dict(config.dcc_queue)
-
-        # Drop users whose queue is now empty. Deleting from the real dict is
-        # the point, but the KEYS come from the copy.
-        for user_key, files in live.items():
-            if not files:
-                config.dcc_queue.pop(user_key, None)
 
         with _disk_lock:
             snapshot = {k: list(v) for k, v in live.items() if v}
