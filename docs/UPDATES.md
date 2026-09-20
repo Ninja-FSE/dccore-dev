@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 macOS autostart gets a PATH; the firewall script removes the Block rule Cancel made (#588, #589)
+
+The launchd agent inherited `/usr/bin:/bin:/usr/sbin:/sbin`, so `start-dccore.sh` found only Apple's stub and
+KeepAlive restarted it every ~10 s while the installer had said 'Done: DCCore is running now'. `install-
+autostart.command` now writes `EnvironmentVariables/PATH` = the installer shell's PATH, then Homebrew / python.org
+locations, then launchd's own (XML-escaped). `allow-firewall.bat` removed nothing but its own two rules, while Windows
+evaluates Block before Allow and Cancel on the Security Alert creates an inbound Block rule for python.exe: it now
+finds `sys.executable` of `%PY%`, and removes inbound Block rules whose `Program` is that path (PowerShell; a failure
+is a warning). `docs/WINDOWS.md` says so.
+
 ### 📍 The Windows launchers run their Python, and autostart keeps running (#586, #587)
 
 `where python` finds the App Execution Alias stub in WindowsApps, so `start-dccore.bat` and `allow-firewall.bat`
