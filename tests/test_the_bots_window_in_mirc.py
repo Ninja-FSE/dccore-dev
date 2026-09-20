@@ -112,7 +112,7 @@ class EveryLineTypeIsHandled(unittest.TestCase):
 
     def test_every_feed_kind_and_every_control_line(self):
         handled = set(re.findall(r"%type == (\w+)", script_text()))
-        expected = set(adminchat.FEED_KINDS) | {"HELLO", "LOG", "OUT", "DROPPED",
+        expected = set(adminchat.FEED_KINDS) | {"HELLO", "LOG", "OUT", "DROPPED", "PING",
                                                 "STATUS", "SLOT", "QUEUE", "TOKEN"}
         self.assertEqual(expected - handled, set())
 

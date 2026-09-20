@@ -19,6 +19,9 @@
 
 - **Fixed (mIRC window): a token the bot refuses no longer locks you out of your own bot.** If the stored token had been revoked (`unpair`, or the same name paired again from another machine), the script sent it again on every automatic reconnect, and the third refusal - about two minutes later, with nobody at the keyboard - blocked your address for 15 minutes with no word why. The script now says the token was refused, does not send it again, and stops reconnecting by itself until you type the password or `/dccore pair` again. A mistyped password no longer draws the "refused the stored token" message either. Update `dccore.mrc`.
 
+- **Fixed: the mIRC window no longer reconnects every couple of minutes while the bot is busy but fine.** The bot's status update (the window's heartbeat) could wait behind a slow disk operation for as long as the window's 90-second limit, and the window then declared the link dead and logged in again, over and over. The bot now sends a short keep-alive line instead when its figures are not ready in time, and the feed keeps flowing meanwhile. Update both the bot and `dccore.mrc`.
+
+
 
 
 

@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The heartbeat no longer waits on queue_lock (#614)
+
+The STATUS burst is the structured session's only heartbeat, and the writer computed it inline: `status_lines()` calls
+`stats_mgr.live_speed()`, which takes `dcc.queue_lock`, and reads the stats DB. A lock held past the script's 90 s
+(a slow `db.save_dcc_queue` under the lock, a locked DB) parked the writer with nothing at all going out - feed, LOG
+or STATUS - so `dccore.mrc` called the link dead, reconnected, and the new session's writer parked at the same point:
+a login line every ~100 s while the bot and its IRC loop were fine. `Session.send_status()` now computes the burst on
+a helper thread and waits `STATUS_WAIT` (2 s) for it; past that it sends `DCCORE PING` and goes on draining the
+outbox. The helper is left to finish, no second one is started while it runs, and its lines go out on the pass that
+finds it done in time. `hello`'s first burst, sent on the reader thread, gets the same bound. `dccore.mrc` swallows
+`PING` (the on CHAT handler resets the timer on any line already; an unknown type would have been echoed).
+ADMIN-CONSOLE.md documents the line. Tests hold `dcc.queue_lock` around a session over a socketpair.
+
 ### 🔒 A refused token is not sent again, and the redial waits for the operator (#613)
 
 On `Incorrect Password.` to the stored token `dccore.mrc` only changed its message; the bot closed the unanswered
