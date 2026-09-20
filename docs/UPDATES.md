@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The IRC ident and real name follow the nickname (#744)
+
+`irc.py` sent `USER <getattr(config,'IDENT','dccore')> 0 * :<getattr(config,'REALNAME','dccore bot')>`; neither
+setting existed, so every bot was dccore@host. `irc.registration_names()` now returns the ident and real name from the
+configured nickname (`ORIGINAL_NICK`, not the temporary alternate) at each connection. `irc.ident_for_nick()`: lower
+case (`scripts/capture_adverts.py` documents that Undernet answers an upper-case username with 468 and closes the
+link), ASCII letters and digits only, cut to `IDENT_MAX_LENGTH` = 10, `dccore` if nothing is left. The real name is
+the nickname unchanged. The old `IDENT`/`REALNAME` getattr side door is gone.
+
 ### 📍 The nick and 'in' have a space between them (#550)
 
 `dccore.in` returned `$+($chr(32),in,$chr(32),$1)`; mIRC drops a leading space from an alias's return value, so `$2 $+
