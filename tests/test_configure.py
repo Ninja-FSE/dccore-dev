@@ -63,57 +63,42 @@ class BuildAdminConfigTextTests(unittest.TestCase):
 
 
 class WriteAdminConfigPasswordTests(unittest.TestCase):
-    """The file I/O wrapper, against real temp files - never the repo's own
-    admin_config.py/admin_config.py.sample, via the path/sample_path
-    overrides configure.py's own functions accept for exactly this reason."""
+    """The file I/O wrapper, against a real temp file - never the repo's own
+    admin_config.py, via the path override configure.py's own function
+    accepts for exactly this reason."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="dccore-setup-test-")
         self.path = os.path.join(self.tmp, "admin_config.py")
-        self.sample_path = os.path.join(self.tmp, "admin_config.py.sample")
 
     def tearDown(self):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_creates_from_the_sample_when_neither_real_file_exists(self):
-        with open(self.sample_path, "w", encoding="utf-8") as handle:
-            handle.write("ADMIN_HOSTMASKS = [\"\"]\n# Generate with: python adminchat.py\nADMIN_PASSWORD_HASH = \"\"\n")
-
+    def test_creates_the_header_and_the_password_line_when_no_file_exists(self):
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            configure.write_admin_config_password("REALHASH", path=self.path,
-                                              sample_path=self.sample_path)
+            configure.write_admin_config_password("REALHASH", path=self.path)
 
         with open(self.path, encoding="utf-8") as handle:
             written = handle.read()
-        self.assertIn('ADMIN_PASSWORD_HASH = "REALHASH"', written)
-        self.assertIn('ADMIN_HOSTMASKS = [""]', written)
+        self.assertEqual(written, configure.NEW_ADMIN_CONFIG_HEADER
+                         + 'ADMIN_PASSWORD_HASH = "REALHASH"\n')
 
-    def test_creates_a_bare_file_when_neither_real_file_nor_sample_exists(self):
-        configure.write_admin_config_password("REALHASH", path=self.path,
-                                          sample_path=self.sample_path)
-
-        with open(self.path, encoding="utf-8") as handle:
-            written = handle.read()
-        self.assertIn('ADMIN_PASSWORD_HASH = "REALHASH"', written)
-
-    def test_a_real_existing_file_is_edited_not_replaced_from_the_sample(self):
-        with open(self.sample_path, "w", encoding="utf-8") as handle:
-            handle.write("ADMIN_HOSTMASKS = [\"\"]\nADMIN_PASSWORD_HASH = \"\"\n")
+    def test_a_real_existing_file_is_edited_not_replaced(self):
         with open(self.path, "w", encoding="utf-8") as handle:
             handle.write("ADMIN_HOSTMASKS = [\"real.host.example\"]\n"
                          "ADMIN_PASSWORD_HASH = \"OLDHASH\"\n")
 
-        configure.write_admin_config_password("NEWHASH", path=self.path,
-                                          sample_path=self.sample_path)
+        configure.write_admin_config_password("NEWHASH", path=self.path)
 
         with open(self.path, encoding="utf-8") as handle:
             written = handle.read()
         self.assertIn('ADMIN_PASSWORD_HASH = "NEWHASH"', written)
         self.assertIn("real.host.example", written,
                       "an existing real admin_config.py must never be "
-                      "replaced by the sample's own placeholder content")
+                      "replaced")
+        self.assertNotIn(configure.NEW_ADMIN_CONFIG_HEADER, written)
 
 
 class WriteSettingsConfTests(DCCoreTestCase):

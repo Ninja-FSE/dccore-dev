@@ -587,7 +587,8 @@ def apply_to(namespace, path=None, log=print):
     still get a correct daemon with the defaults intact.
     """
     path = path or settings_path()
-    report = {"path": path, "applied": {}, "unknown": [], "bad": [], "read_error": None}
+    report = {"path": path, "applied": {}, "unknown": [], "bad": [], "shadowed": [],
+              "read_error": None}
 
     if not os.path.exists(path):
         return report
@@ -621,14 +622,50 @@ def apply_to(namespace, path=None, log=print):
         namespace[key] = value
         report["applied"][key] = value
 
+    report["shadowed"] = _overridden_admin_config_values(report["applied"])
     _log_summary(report, path, log)
     return report
+
+
+def _overridden_admin_config_values(applied):
+    """[(name, admin_config's value)] for each name this file just applied
+    that admin_config.py had ALSO set - to something else.
+
+    The only other shadow check, shadowed_by_admin_config(), runs when the
+    dashboard SAVES a setting. Nothing said anything when the daemon
+    STARTED, which is when the collision actually bites: an operator who
+    edits WEBUI_HOST in admin_config.py (its own comment tells them to) and
+    restarts gets a dashboard that ignores the edit and a console that
+    says nothing about why (#623).
+
+    sys.modules rather than `import admin_config`: what matters is the
+    module THIS process applied, `from admin_config import *` in defaults.py
+    a moment before this runs. A process that never imported it (no file at
+    boot, or a caller that is not defaults.py) has nothing to compare
+    against, and importing one from disk here would report a file the
+    daemon did not read.
+
+    Only a DIFFERENT value counts. The same value in both files loses
+    nothing - and a warning that fires on every boot for a harmless line
+    is a warning nobody reads by the time it matters.
+    """
+    module = sys.modules.get("admin_config")
+    if module is None:
+        return []
+    return sorted(((key, getattr(module, key)) for key, value in applied.items()
+                   if hasattr(module, key) and getattr(module, key) != value),
+                  key=lambda item: item[0])
 
 
 def _log_summary(report, path, log):
     name = os.path.basename(path)
     if report["applied"]:
         log(f"[CONFIG] Applied {len(report['applied'])} setting(s) from {name}.")
+    for key, admin_value in report["shadowed"]:
+        log(f"[CONFIG] {name} overrides {key}, which admin_config.py also sets "
+            f"(to {admin_value!r}): {name} is applied second and wins. Change "
+            f"it in {name} or the dashboard's Settings page, or remove the "
+            f"line from admin_config.py.")
     for key in report["unknown"]:
         assigned = RUNTIME_ASSIGNED.get(key)
         if assigned:

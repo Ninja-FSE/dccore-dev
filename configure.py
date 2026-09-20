@@ -317,9 +317,9 @@ def write_settings_conf(changes, path=None):
 
 
 def build_admin_config_text(existing_text, password_hash):
-    """The pure edit: `existing_text` (whatever admin_config.py, or failing
-    that admin_config.py.sample, or failing that a bare fresh comment,
-    already reads as - see write_admin_config_password()) with
+    """The pure edit: `existing_text` (whatever admin_config.py already
+    reads as, or NEW_ADMIN_CONFIG_HEADER when there is none yet - see
+    write_admin_config_password()) with
     ADMIN_PASSWORD_HASH set to `password_hash`, replacing an existing
     assignment in place or appending a new one. Pulled out as a pure
     function, no file I/O, so the text transformation itself is directly
@@ -341,25 +341,43 @@ def build_admin_config_text(existing_text, password_hash):
     return text + new_line + "\n"
 
 
-def write_admin_config_password(password_hash, path=None, sample_path=None):
+# What a NEW admin_config.py starts as - a header and nothing live. It used
+# to be seeded from admin_config.py.sample, whose ACTIVE lines (WEBUI_ENABLED
+# = True, WEBUI_HOST, WEBUI_PORT, ADMIN_CHAT_MODE = "listen", the DEBUG_TO_*
+# pair) then sat in the operator's own file from birth: dead where the setup
+# had just written the same name to settings.conf, which is applied second,
+# and silently different from defaults.py where it had not (an install that
+# declined the dashboard still carried WEBUI_ENABLED = True; every install
+# got ADMIN_CHAT_MODE = "listen" under a comment naming "auto" as the
+# default). The sample stays what it is - documentation to copy by hand -
+# but the setup seeds only what it actually sets (#623).
+NEW_ADMIN_CONFIG_HEADER = """\
+# admin_config.py - created by the DCCore setup.
+#
+# The setup writes only the console/dashboard password here. Everything else
+# it asked for went to settings.conf, which defaults.py applies AFTER this
+# file - so a setting present in both takes settings.conf's value, and a
+# line added here for a name settings.conf also sets does nothing (the daemon
+# says so at startup). Edit settings.conf, or the dashboard's Settings page,
+# for those. admin_config.py.sample explains what else can go in this file.
+"""
+
+
+def write_admin_config_password(password_hash, path=None):
     """Only ADMIN_PASSWORD_HASH - never overwrites anything else a hand-
     edited admin_config.py already has (ADMIN_HOSTMASKS, most notably).
     Replaces an existing ADMIN_PASSWORD_HASH line in place if this is a
-    re-run; appends a new one otherwise, creating the file from
-    admin_config.py.sample's own template if it does not exist yet at all.
-    `path`/`sample_path` override the real repo locations - tests use them,
-    real runs never pass them.
+    re-run; appends a new one otherwise, creating the file as
+    NEW_ADMIN_CONFIG_HEADER plus that one line if it does not exist yet at
+    all. `path` overrides the real repo location - tests use it, real runs
+    never pass it.
     """
     path = path or os.path.join(REPO_ROOT, "admin_config.py")
-    sample_path = sample_path or os.path.join(REPO_ROOT, "admin_config.py.sample")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as handle:
             existing_text = handle.read()
-    elif os.path.exists(sample_path):
-        with open(sample_path, "r", encoding="utf-8") as handle:
-            existing_text = handle.read()
     else:
-        existing_text = "# admin_config.py - created by configure.py\n"
+        existing_text = NEW_ADMIN_CONFIG_HEADER
 
     text = build_admin_config_text(existing_text, password_hash)
 
