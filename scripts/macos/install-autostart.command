@@ -4,9 +4,17 @@
 #
 # Writes a launchd agent, ~/Library/LaunchAgents/com.dccore.bot.plist, that
 # runs start-dccore.sh - the launcher, not oserve.py directly, because the
-# launcher is what puts the working directory right - and loads it now and
-# at every login. Its output goes to ~/Library/Logs/dccore.log.
+# launcher is what puts the working directory right - and registers it for
+# every login. Its output goes to ~/Library/Logs/dccore.log.
 # remove-autostart.command takes it out again. No administrator needed.
+#
+# The agent is written and enabled, not loaded: `launchctl load` starts it at
+# once (RunAtLoad, which KeepAlive/SuccessfulExit implies anyway), the docs say
+# to run the bot by hand first, and nothing refuses a second instance, so the
+# operator who ran this with that bot still up got a twin - a second daemon on
+# the alternate nick, in the same channels, writing the same data/ files
+# (#619). Like the Windows installer, this one registers the start and leaves
+# starting it now to the operator, once the hand-run bot is stopped.
 #
 # Double-click it in Finder (the first time: right-click, Open, because it
 # came from the internet), or run it from Terminal. Plain sh: macOS's
@@ -82,12 +90,22 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 
-# Unload first so a re-run after moving the folder picks up the new path.
+# Unload first so a re-run after moving the folder picks up the new path at
+# the next login. `unload -w` also marks the label disabled, as an earlier
+# remove-autostart.command did, and launchd would then skip the plist at
+# login: `enable` clears that without loading (starting) the agent now.
 launchctl unload -w "$PLIST" >/dev/null 2>&1
-launchctl load -w "$PLIST" || exit 1
+if ! launchctl enable "gui/$(id -u)/com.dccore.bot"; then
+    echo
+    echo "  launchctl could not enable the agent. It is written; if it does not"
+    echo "  start at your next login, run the load command below once."
+fi
 
 echo
-echo "  Done: DCCore is running now and starts at every login."
+echo "  Done: DCCore starts the next time you log in. It was not started now,"
+echo "  so a bot you are running by hand is not doubled. To have launchd run"
+echo "  it already: stop the hand-run bot (Ctrl-C in its terminal), then"
+echo "      launchctl load -w \"$PLIST\"      start it now"
 echo "      tail -f \"$LOG\"                       its output"
 echo "      launchctl unload -w \"$PLIST\"    stop it until next login"
 echo "  remove-autostart.command undoes this."

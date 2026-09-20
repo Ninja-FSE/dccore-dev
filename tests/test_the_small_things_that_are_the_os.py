@@ -22,6 +22,7 @@ import configparser
 import io
 import os
 import plistlib
+import re
 import shutil
 import stat
 import subprocess
@@ -397,7 +398,7 @@ class TheLinuxAutostart(_Posix, unittest.TestCase):
     def unit_path(self):
         return os.path.join(self.home, ".config", "systemd", "user", "dccore.service")
 
-    def test_install_writes_a_user_unit_and_enables_it_now(self):
+    def test_install_writes_a_user_unit_and_enables_it_for_the_next_login(self):
         self.recorder("systemctl")
         rc, out = self.run_sh(("linux", "install-autostart.sh"))
         self.assertEqual(rc, 0, out)
@@ -412,7 +413,7 @@ class TheLinuxAutostart(_Posix, unittest.TestCase):
         self.assertEqual(unit["Install"]["WantedBy"], "default.target")
         calls = self.calls_made()
         self.assertIn("systemctl --user daemon-reload", calls)
-        self.assertIn("systemctl --user enable --now dccore.service", calls)
+        self.assertIn("systemctl --user enable dccore.service", calls)
         self.assertIn("loginctl enable-linger", out)
 
     def test_install_writes_a_unit_systemd_reads_back_as_the_folder_with_a_space_percent_or_dollar_in_its_name(self):
@@ -437,7 +438,25 @@ class TheLinuxAutostart(_Posix, unittest.TestCase):
                         unit["Service"]["ExecStart"])
         self.assertTrue(systemd_path(unit["Service"]["WorkingDirectory"]).lower().endswith(awkward.lower()),
                         unit["Service"]["WorkingDirectory"])
-        self.assertIn("systemctl --user enable --now dccore.service", self.calls_made())
+        self.assertIn("systemctl --user enable dccore.service", self.calls_made())
+
+    def test_install_does_not_start_the_unit_while_a_hand_run_bot_may_be_up(self):
+        """#619: `enable --now` started the bot at once, and with no instance
+        guard anywhere a bot still running by hand - which INSTALL.md says to do
+        first - got a twin on the alternate nick, writing the same data/ files.
+        Like the Windows installer, this one only registers the start and says
+        how to start it now once the hand-run bot is stopped."""
+        self.recorder("systemctl")
+        rc, out = self.run_sh(("linux", "install-autostart.sh"))
+        self.assertEqual(rc, 0, out)
+        for call in self.calls_made():
+            words = call.split()
+            self.assertNotIn("--now", words, call)
+            self.assertNotIn("start", words, call)
+            self.assertNotIn("restart", words, call)
+        self.assertIn("systemctl --user start dccore", out)
+        self.assertIn("stop the hand-run bot", out)
+        self.assertNotIn("running now", out)
 
     def test_install_refuses_an_unconfigured_tree(self):
         os.remove(os.path.join(self.root, "settings.conf"))
@@ -472,7 +491,7 @@ class TheMacAutostart(_Posix, unittest.TestCase):
     def plist_path(self):
         return os.path.join(self.home, "Library", "LaunchAgents", "com.dccore.bot.plist")
 
-    def test_install_writes_an_agent_and_loads_it(self):
+    def test_install_writes_an_agent_and_enables_it_for_the_next_login(self):
         self.recorder("launchctl")
         rc, out = self.run_sh(("macos", "install-autostart.command"))
         self.assertEqual(rc, 0, out)
@@ -484,7 +503,37 @@ class TheMacAutostart(_Posix, unittest.TestCase):
         self.assertEqual(plist["KeepAlive"], {"SuccessfulExit": False})
         self.assertTrue(plist["StandardOutPath"].endswith("dccore.log"))
         calls = self.calls_made()
-        self.assertTrue(any(c.startswith("launchctl load -w ") and c.endswith("com.dccore.bot.plist") for c in calls), calls)
+        # the uid is whatever `id -u` said in the shell that ran it (no
+        # os.getuid() on Windows, where this still runs under Git Bash)
+        self.assertTrue(any(re.match(r"launchctl enable gui/\d+/com\.dccore\.bot$", c) for c in calls), calls)
+
+    def test_install_does_not_load_the_agent_while_a_hand_run_bot_may_be_up(self):
+        """#619: `launchctl load` starts the agent at once (RunAtLoad, which
+        KeepAlive/SuccessfulExit implies anyway), so a bot still running by
+        hand got a twin. The installer enables the label without loading it and
+        says how to load it now once the hand-run bot is stopped."""
+        self.recorder("launchctl")
+        rc, out = self.run_sh(("macos", "install-autostart.command"))
+        self.assertEqual(rc, 0, out)
+        for call in self.calls_made():
+            words = call.split()
+            self.assertNotIn("load", words, call)
+            self.assertNotIn("bootstrap", words, call)
+            self.assertNotIn("start", words, call)
+            self.assertNotIn("kickstart", words, call)
+        self.assertRegex(out, r'launchctl load -w "[^"]*/Library/LaunchAgents/com\.dccore\.bot\.plist"')
+        self.assertIn("stop the hand-run bot", out)
+        self.assertNotIn("running now", out)
+
+    def test_an_enable_that_fails_still_leaves_the_agent_written_and_says_so(self):
+        """launchctl enable is 10.10+; if it refuses, the plist is still there
+        for the next login and the operator is told the one command to run."""
+        self.recorder("launchctl", rc=1)
+        rc, out = self.run_sh(("macos", "install-autostart.command"))
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(os.path.isfile(self.plist_path()))
+        self.assertIn("could not enable", out)
+        self.assertIn("launchctl load -w", out)
 
     def test_the_plist_survives_a_path_xml_would_choke_on(self):
         """An & in the folder name must be escaped, not break the plist."""

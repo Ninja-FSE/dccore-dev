@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛑 The Linux and macOS autostart installers no longer start the bot at once (#619)
+
+`install-autostart.sh` ran `systemctl --user enable --now` and `install-autostart.command` ran `launchctl load -w`
+on a plist with RunAtLoad, so both started the launcher at install time. INSTALL.md tells the operator to run the bot
+by hand first, and nothing - oserve.py, the launcher, the setup check (which only fails when zero DCC ports bind, and
+an idle bot binds none) - refuses a second instance: run while the hand-run bot was still up, the installer started a
+twin on ALT_NICKNAME, in the same channels, writing the same data/ files, with the dashboard bind failure logged and
+ignored. Both installers now do what the Windows one already did: register the start (`systemctl --user enable`;
+the plist written and `launchctl enable gui/<uid>/com.dccore.bot` - `unload -w`, which the remover and the re-run
+path use, marks the label disabled and `enable` clears that without loading it) and print how to start it now once
+the hand-run bot is stopped (`systemctl --user start dccore`; `launchctl load -w <plist>`). A failing `launchctl
+enable` (pre-10.10) is reported, not fatal: the plist is written either way. The `_Posix` tests run both scripts
+with a recording fake and assert that no call starts anything. Not verified on a real systemd or launchd host.
+
 ### 🐧 The Linux autostart unit survives a folder name with a space, % or $ (#618)
 
 `scripts/linux/install-autostart.sh` wrote `ExecStart=$ROOT/scripts/linux/start-dccore.sh` and `WorkingDirectory=$ROOT`

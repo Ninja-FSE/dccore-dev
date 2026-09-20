@@ -185,11 +185,19 @@ the working directory is right.
 | Windows (Task Scheduler, at logon) | `scripts\windows\install-autostart.bat` | `scripts\windows\remove-autostart.bat` |
 
 They refuse a tree that has not been set up yet - run the launcher once
-first, since the setup questions cannot be answered by a service. On Linux
-the unit starts at login; to have it start at boot without anyone logging
-in, once: `loginctl enable-linger $USER`. Its output is in `journalctl
---user -u dccore -f`; on macOS in `~/Library/Logs/dccore.log`; on Windows the
-bot's own window opens at logon, as it does from a double-click.
+first, since the setup questions cannot be answered by a service. None of
+them starts the bot at once: the bot does not refuse a second copy of
+itself, so an installer that started one while the bot you ran by hand was
+still up would leave two bots sharing `data/`, the second on the alternate
+nick. Each says how to start it now, once the hand-run bot is stopped:
+`systemctl --user start dccore` on Linux, `launchctl load -w
+~/Library/LaunchAgents/com.dccore.bot.plist` on macOS, `start-dccore.bat` on
+Windows. The same applies later: with the autostart in place, do not also
+start the launcher by hand while it is running. On Linux the unit starts at
+login; to have it start at boot without anyone logging in, once: `loginctl
+enable-linger $USER`. Its output is in `journalctl --user -u dccore -f`; on
+macOS in `~/Library/Logs/dccore.log`; on Windows the bot's own window opens
+at logon, as it does from a double-click.
 
 ## Build the first list
 

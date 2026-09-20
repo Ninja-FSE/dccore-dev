@@ -5,8 +5,15 @@
 # Writes a systemd USER unit, ~/.config/systemd/user/dccore.service, that
 # runs start-dccore.sh - the launcher, not oserve.py directly, because the
 # launcher is what puts the working directory right (every data path is
-# relative; see docs/INSTALL.md) - and enables it now and at every login.
+# relative; see docs/INSTALL.md) - and enables it for every login.
 # remove-autostart.sh takes it out again.
+#
+# The unit is enabled, not started: the docs say to run the bot by hand
+# first, and nothing refuses a second instance, so `enable --now` while that
+# hand-run bot was still up started a twin - a second daemon on the alternate
+# nick, in the same channels, writing the same data/ files (#619). Like the
+# Windows installer, this one registers the start and leaves starting it now
+# to the operator, once the hand-run bot is stopped.
 #
 # A user unit needs no root and stores no password. It starts when you log
 # in; to have it start at boot without a login, once:
@@ -72,10 +79,13 @@ WantedBy=default.target
 EOF
 
 systemctl --user daemon-reload || exit 1
-systemctl --user enable --now dccore.service || exit 1
+systemctl --user enable dccore.service || exit 1
 
 echo
-echo "  Done: DCCore is running now and starts at every login."
+echo "  Done: DCCore starts the next time you log in. It was not started now,"
+echo "  so a bot you are running by hand is not doubled. To have systemd run"
+echo "  it already: stop the hand-run bot (Ctrl-C in its terminal), then"
+echo "      systemctl --user start dccore       start it now"
 echo "      systemctl --user status dccore      how it is doing"
 echo "      journalctl --user -u dccore -f      its output"
 echo "      systemctl --user stop dccore        stop it (until next login)"

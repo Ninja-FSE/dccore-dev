@@ -29,6 +29,10 @@
 
 - **Fixed (Linux): autostart works from a folder whose name has a space, `%` or `$` in it.** `install-autostart.sh` said "Done" but the bot never came up: systemd read `~/My Files/dccore/...` as the program `/home/me/My` and restarted it every ten seconds. The unit it writes now quotes the path. If you installed autostart from such a folder, run `./scripts/linux/install-autostart.sh` again.
 
+- **Fixed: the Linux and macOS "start with the system" installers no longer start a second bot.** Both used to start the bot the moment they were run, and since the guide says to run the bot by hand first, doing that with the bot still up gave you two bots - the second on the alternate nick, in the same channels, sharing the same queue and statistics files. Like the Windows installer, they now only register the start for your next login and tell you how to start it under systemd or launchd right away, once you have stopped the one you ran by hand.
+
+
+
 
 
 
