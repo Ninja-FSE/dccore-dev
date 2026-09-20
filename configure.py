@@ -98,7 +98,7 @@ import defaults as config  # noqa: E402
 import settings_file  # noqa: E402
 
 
-def _ask(prompt, default=None):
+def _ask(prompt, default=None, check=None):
     """One prompt, with `default` shown and used on a bare Enter.
 
     Every field here either has a real, always-non-blank default (SERVER,
@@ -115,6 +115,13 @@ def _ask(prompt, default=None):
             if default:
                 return default
             print("  This can't be blank - it's required before the daemon will start.")
+            continue
+        # `check` returns what is wrong with an answer, or None (#591): asked
+        # again here, where the operator can fix it, rather than written to
+        # settings.conf to fail at the IRC server as a nick that is "taken".
+        problem = check(raw) if check else None
+        if problem:
+            print(f"  That will not do: {problem}.")
             continue
         return raw
 
@@ -150,7 +157,7 @@ def collect_answers():
 
     changes = {}
 
-    nickname = _ask("Nickname", default=_current("NICKNAME"))
+    nickname = _ask("Nickname", default=_current("NICKNAME"), check=settings_file.nick_problem)
     changes["NICKNAME"] = nickname
 
     server = _ask("IRC server", default=_current("SERVER", "irc.undernet.org"))
@@ -160,7 +167,7 @@ def collect_answers():
     changes["CHANNEL"] = channel
 
     admin_nick = _ask("Admin nick (who may run !ban/!rehash/!update/!clearqueue)",
-                      default=_current("ADMIN_NICK"))
+                      default=_current("ADMIN_NICK"), check=settings_file.nicks_problem)
     changes["ADMIN_NICK"] = admin_nick
 
     print()

@@ -3769,7 +3769,18 @@ def build_console_log_payload(since=0):
 # Commands that make no sense over a stateless HTTP request. "quit" closes a
 # DCC CHAT session (session.close()) - _WebConsoleSession below has no socket
 # to close and no persistent identity for that to mean anything about.
-_CONSOLE_UNSUPPORTED_COMMANDS = frozenset({"quit"})
+#
+# "hello" switches a session to the structured feed (#550): it sets
+# session.structured and pushes STATUS lines to a client that draws a window
+# from them. A one-shot HTTP request has no feed to switch, and the dashboard's
+# own Console is prose. It used to fail halfway - after printing the DCCORE
+# HELLO line - on an attribute the shim did not have (#581).
+_CONSOLE_UNSUPPORTED_COMMANDS = frozenset({"quit", "hello"})
+_CONSOLE_UNSUPPORTED_MESSAGES = {
+    "quit": "'quit' closes a DCC CHAT session; there is not one here. Just close this tab.",
+    "hello": "'hello' switches a DCC CHAT session to the structured feed for a script "
+             "such as dccore.mrc; this console is the dashboard's own and has no feed to switch.",
+}
 
 
 class _WebConsoleSession:
@@ -3779,6 +3790,13 @@ class _WebConsoleSession:
     not guessed at. Never a real Session: no socket, no writer thread,
     nothing to close.
     """
+
+    # What the handlers read besides .send(): pair asks .structured to choose
+    # between a DCCORE TOKEN line and prose (#581). A web request is always
+    # prose - it used to be missing, so `pair` wrote the new token to disk and
+    # then raised before showing it.
+    structured = False
+    client = "web"
 
     def __init__(self, nick):
         self.nick = nick
@@ -3811,8 +3829,8 @@ def build_console_command_result(command_text, remote_addr=None):
 
     name = stripped.split(None, 1)[0].lower()
     if name in _CONSOLE_UNSUPPORTED_COMMANDS:
-        return 200, {"lines": ["'quit' closes a DCC CHAT session; there is not "
-                               "one here. Just close this tab."]}
+        return 200, {"lines": [_CONSOLE_UNSUPPORTED_MESSAGES.get(
+            name, f"'{name}' is not available in this console.")]}
 
     session = _WebConsoleSession(f"web:{remote_addr or 'unknown'}")
     adminchat.handle_command(session, stripped)
@@ -4319,6 +4337,7 @@ def validate_setup_form(form):
     the same {NAME: value} dict configure.collect_answers() builds - what
     was answered is written, what was left blank is not - so the files the
     page writes are the files the terminal writes."""
+    import settings_file
     errors = []
     changes = {}
 
@@ -4328,9 +4347,9 @@ def validate_setup_form(form):
     nickname = text("NICKNAME")
     if not nickname:
         errors.append(("NICKNAME", "A nickname is needed."))
-    elif " " in nickname or nickname[0] in "#&:0123456789":
-        errors.append(("NICKNAME", "An IRC nickname has no spaces and does not "
-                                   "start with a digit or a #."))
+    elif settings_file.nick_problem(nickname):
+        errors.append(("NICKNAME", "That is not an IRC nickname: "
+                       + settings_file.nick_problem(nickname) + "."))
     else:
         changes["NICKNAME"] = nickname
 
@@ -4357,8 +4376,9 @@ def validate_setup_form(form):
     if not admin_nick:
         errors.append(("ADMIN_NICK", "Your own nick is needed - the person who may "
                                      "run the admin commands."))
-    elif " " in admin_nick:
-        errors.append(("ADMIN_NICK", "A nick has no spaces."))
+    elif settings_file.nicks_problem(admin_nick):
+        errors.append(("ADMIN_NICK", "That is not an IRC nickname: "
+                       + settings_file.nicks_problem(admin_nick) + "."))
     else:
         changes["ADMIN_NICK"] = admin_nick
 
@@ -4403,6 +4423,9 @@ def apply_setup(changes, password_hash, log=print, settings_path=None, admin_pat
     configure.write_admin_config_password(password_hash, path=admin_path)
     settings_file.apply_to(vars(config), path=settings_path, log=log)
     config.ADMIN_PASSWORD_HASH = password_hash
+    # apply_to() assigned NICKNAME but did not re-run the derivations that
+    # depend on it; the list rebuild is a new process and does (#590).
+    config.derive_list_base_name()
     return {"written": sorted(changes)}
 
 
