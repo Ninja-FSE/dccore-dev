@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A taken-over console hears it, and does not take it back (#583, #597, #600)
+
+`_promote()` queued the takeover notice with `send()` and closed the socket on the next statement, so the writer
+thread never sent it (0/40 over loopback); in structured mode it would have been wrapped as `DCCORE OUT` and never
+reached the script's `taken` check. It is now written inline through `close(announce_text=...)`: prose for a plain
+session, and for a structured one a line of its own, `DCCORE TAKEN <ip>` (documented in the protocol table; a script
+that does not know the type ignores it), which `dccore.mrc` turns into state `taken`, the state in which CHATCLOSE
+does not retry.
+
 ### 📍 The window keeps its history and the queue menu names the nick (#582, #584, #550)
 
 `dccore.rebuild` closed @DCCore and then read the lines of the new, empty window: the history was lost, the first

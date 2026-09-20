@@ -1119,8 +1119,20 @@ def _promote(session):
         print(f"[ADMINCHAT] Could not attach the debug sink: {sink_err}")
 
     if previous is not None and previous is not session:
-        previous.send(f"Session taken over from {session.peer_ip}. Closing this one.")
-        previous.close(announce_text=None)
+        # Written INLINE, through close(announce_text=...), and not queued with
+        # send(): queueing hands the line to the writer thread and the very next
+        # statement closes the socket, so the writer found the session closed
+        # before it sent anything - the replaced client was never told (#583,
+        # #597, #600), never entered its "taken" state, and reconnected five
+        # seconds later, taking the console straight back. Two clients then
+        # traded it for ever. A structured session gets a line of its own
+        # (`DCCORE TAKEN <ip>`), not prose wrapped in DCCORE OUT, so a script can
+        # tell it apart from a console command's reply.
+        if previous.structured:
+            notice = f"DCCORE TAKEN {session.peer_ip}"
+        else:
+            notice = f"Session taken over from {session.peer_ip}. Closing this one."
+        previous.close(announce_text=notice)
     return previous
 
 
