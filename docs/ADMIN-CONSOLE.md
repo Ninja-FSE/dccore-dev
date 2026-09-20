@@ -644,8 +644,10 @@ Every five minutes a `[STATUS]` line summarises the numbers in the text
 too, so scrolling back shows how the day went. A bot that goes quiet for
 90 seconds is treated as gone and the chat is reopened; a chat that
 cannot be opened is retried after 5 s, 15 s, 60 s and then every two
-minutes. Closing the window closes the chat and stops the retries;
-`/dccore connect` starts them again.
+minutes. An offer the bot never answers - mIRC's own `Waiting for
+acknowledgement...` never gives up - is closed after 75 seconds and
+retried the same way. Closing the window closes the chat and stops the
+retries; `/dccore connect` starts them again.
 
 ### Options
 
@@ -708,6 +710,12 @@ sent at all: what is off there never reaches the script.
   login replaces the one before it. The client that was replaced says so
   and does not reconnect by itself, so the two of you take turns rather
   than trading it every few seconds.
+- **"No answer from <bot> in 75 seconds"** - the bot got the offer and
+  said nothing back. It refuses in silence when your host is not in
+  `ADMIN_HOSTMASKS`, when your address is blocked for 15 minutes after
+  three wrong passwords, or when it could not reach your client and its
+  own offer back was dropped (see `ADMIN_CHAT_MODE`); the bot's own log
+  says which. The script keeps retrying with the usual backoff.
 
 ## Limits and timeouts
 

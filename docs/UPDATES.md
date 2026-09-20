@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A chat the bot never answers is closed and retried (#615)
+
+`dccore.connect` issued `dcc chat` and waited for either a 401 or a CHATCLOSE; a bot that gets the offer and says
+nothing (the address is blocked after three wrong passwords, the host is not in `ADMIN_HOSTMASKS`, the offer could
+not be parsed, or its listen-back offer is firewalled) produces neither, and mIRC never times out its own outgoing
+chat, so the =bot window sat at "Waiting for acknowledgement..." for ever, `$chat()` stayed true, and every later
+connect - the on CONNECT and on JOIN ones included - answered "already open". `dccore.connect` now starts a one-shot
+`.timerdccoreOpen` (75 s) whose alias `dccore.noanswer`, if the state is still `opening`, says so, closes the
+window and goes through `dccore.retry` (guarded against CHATCLOSE retrying first). The first CHAT line, CHATCLOSE
+and `dccore.timers.off` cancel it. Source-reading test; not verified in mIRC.
+
 ### 📍 The heartbeat no longer waits on queue_lock (#614)
 
 The STATUS burst is the structured session's only heartbeat, and the writer computed it inline: `status_lines()` calls

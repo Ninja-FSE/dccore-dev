@@ -240,6 +240,13 @@ alias dccore.connect {
   dccore.sys Opening the console of $dccore.bot $+ ...
   dccore.title
   dcc chat $dccore.bot
+  ; mIRC never gives up on its own offer: when the bot does not answer
+  ; the CTCP (it is offline without a 401, cannot reach this client, or
+  ; refused this address without a word - it does after three wrong
+  ; passwords) the =bot window sits at "Waiting for acknowledgement..."
+  ; for ever, $chat() stays true and every later connect says "already
+  ; open". This timer is the only way out of that state.
+  .timerdccoreOpen 1 75 dccore.noanswer
 }
 
 ; A chat that never comes up (bot offline, dial refused) is retried with
@@ -257,7 +264,18 @@ alias dccore.retry {
   dccore.title
   .timerdccoreRetry 1 %delay dccore.connect
 }
+; The offer was never answered: close the window mIRC left waiting and
+; go through the same backoff as a chat the bot refused. Closing it may
+; fire CHATCLOSE, which retries by itself; the state check keeps the two
+; from both retrying.
+alias dccore.noanswer {
+  if ($dccore.st(state) != opening) { return }
+  dccore.sys No answer from $dccore.bot in 75 seconds: it is offline, cannot reach this client, or refused this address.
+  if ($chat($dccore.bot)) { window -c $+(=,$dccore.bot) }
+  if ($dccore.st(state) == opening) { hadd dccore.live state closed | dccore.title | dccore.retry }
+}
 alias dccore.timers.off {
+  .timerdccoreOpen off
   .timerdccoreRetry off
   .timerdccoreHB off
   .timerdccoreHello off
@@ -292,6 +310,7 @@ on *:CHATCLOSE: {
   var %was = $dccore.st(state)
   hadd dccore.live state closed
   hdel dccore.live mode
+  .timerdccoreOpen off
   .timerdccoreHB off
   .timerdccoreHello off
   dccore.sys Console closed $+ $iif(%was == in,$chr(32) $+ after $duration($calc($ctime - $dccore.st(opened)))) $+ .
@@ -314,6 +333,7 @@ on ^*:CHAT:*: {
   if (!$istok(in auth password taken,$dccore.st(state),32)) {
     hadd dccore.live state banner
     hadd dccore.live tries 0
+    .timerdccoreOpen off
     if ($window($+(=,$nick))) { window -h $+(=,$nick) }
     dccore.title
   }
