@@ -34,7 +34,7 @@
 ;    default text, on CHATCLOSE, hash tables with /hsave and /hload,
 ;    /hinc and /hdel -w, /timer -m, dialog tables with combo, check and
 ;    edit, $round, $regex, $duration, $qt, $base, and for the window
-;    background /background, /bset and /bwrite (a one-pixel .bmp of the
+;    background /background, /bset and /bwrite (a small .bmp of the
 ;    chosen colour: mIRC has no per-window background colour, only a
 ;    per-window picture). Nothing from
 ;    mIRC 7 (no $json, no UTF-8 switches): the wire is plain ASCII, the
@@ -510,9 +510,14 @@ alias dccore.window {
 
 ; The window's background colour. mIRC has no per-window colour setting
 ; (/color background is for every window at once), only a per-window
-; PICTURE, so the colour is a one-pixel .bmp beside the script, tiled. -1 is
-; "leave it as mIRC has it": the picture is removed. Written on first use
-; and kept, one file per colour.
+; PICTURE, so the colour is a .bmp beside the script, tiled. -1 is "leave it
+; as mIRC has it": the picture is removed. Written on first use and kept, one
+; file per colour.
+;
+; 128x128, not one pixel. Tiled, a one-pixel picture is drawn one pixel at a
+; time - over the whole window, on every repaint - and a window with a long
+; history crawled: every new line and every change to the options froze it.
+; 128x128 is a few hundred draws for the same window, and 48 KB on disk.
 alias dccore.background {
   if (!$window($dccore.win)) { return }
   var %c = $dccore.opt(bg)
@@ -521,12 +526,19 @@ alias dccore.background {
   if (%f) { background -t $dccore.win $qt(%f) }
 }
 alias dccore.bgfile {
-  var %f = $+($scriptdir,dccore-bg-,$1,.bmp)
+  var %f = $+($scriptdir,dccore-bg-,$1,-128.bmp)
   if ($isfile(%f)) { return %f }
   var %rgb = $dccore.rgb($1)
-  bset &dccorebg 1 66 77 58 0 0 0 0 0 0 0 54 0 0 0 40 0 0 0 1 0 0 0 1 0 0 0 1 0 24 0 0 0 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-  bset &dccorebg 55 $gettok(%rgb,3,46) $gettok(%rgb,2,46) $gettok(%rgb,1,46) 0
+  ; The 54-byte header of a 128x128, 24-bit bitmap: 49152 bytes of pixels,
+  ; 49206 in all, 384 bytes (already a multiple of four) to a row.
+  bset &dccorebg 1 66 77 54 192 0 0 0 0 0 0 54 0 0 0 40 0 0 0 128 0 0 0 128 0 0 0 1 0 24 0 0 0 0 0 0 192 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  ; One row is 128 pixels of blue, green, red; the rows are all the same.
+  var %px = $gettok(%rgb,3,46) $gettok(%rgb,2,46) $gettok(%rgb,1,46)
+  var %row = $str(%px $chr(32),128)
+  var %y = 0
+  while (%y < 128) { bset &dccorebg $calc(55 + %y * 384) %row | inc %y }
   bwrite $qt(%f) 0 -1 &dccorebg
+  bunset &dccorebg
   if ($isfile(%f)) { return %f }
 }
 ; mIRC's default palette, by colour number, as red.green.blue
@@ -852,6 +864,7 @@ alias dccore.fillcombo {
 on *:dialog:dccore.opt:sclick:1: {
   var %i = 1
   var %panel = $dccore.opt(panel)
+  var %bg = $dccore.opt(bg)
   while (%i <= 8) {
     var %g = $gettok($dccore.groups,%i,32)
     hadd dccore show. $+ %g $did(dccore.opt,$calc(100 + %i)).state
@@ -875,7 +888,7 @@ on *:dialog:dccore.opt:sclick:1: {
   if ($window($dccore.win)) {
     if (%panel != $dccore.opt(panel)) { dccore.rebuild }
     if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
-    dccore.background
+    if (%bg != $dccore.opt(bg)) { dccore.background }
     dccore.title
     dccore.panel
   }

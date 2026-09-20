@@ -4,6 +4,13 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The mIRC window's background is a 128x128 tile (#550)
+
+The background colour (#573) was a one-pixel `.bmp` tiled with `/background -t`. Tiled, that is one draw per pixel of
+the window on every repaint, and the window froze on every new line and every options change. The picture is now
+128x128 (`dccore-bg-<n>-128.bmp`, 48 KB, written the first time a colour is used), and the options save only calls
+`dccore.background` when the colour was changed. The one-pixel files are no longer used.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
