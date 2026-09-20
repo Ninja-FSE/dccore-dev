@@ -32,7 +32,12 @@ install and stops. On the first run it opens the setup page in your browser -
 nickname, server, channels, your nick, the password, the music folder, each
 with an explanation beside it - and starts the bot the moment you save. (No
 browser, or you said no to installing Flask? The same questions are asked in
-the terminal instead.) Every run after that checks the setup and starts the bot:
+the terminal instead - and so they are in an SSH session, because the page
+lives on the machine's own address and you could not open it from your
+computer. To use the page anyway, tunnel the port with
+`ssh -L 8420:127.0.0.1:8420 <machine>` and start the launcher with
+`DCCORE_SETUP_IN_BROWSER=1`. If a page is waiting and you cannot reach it,
+Ctrl-C and run `python3 configure.py`.) Every run after that checks the setup and starts the bot:
 
 | | |
 |---|---|
