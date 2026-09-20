@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 Setup falls back to the terminal where a browser is out of reach (#595)
+
+`configure.offer_setup_in_browser()` returned 0 whenever Flask imported, so the launcher served `/setup` on 127.0.0.1
+and `run_setup_until_configured()` looped for ever (`webbrowser.open`'s False ignored, Ctrl-C a traceback, nothing
+naming configure.py). `configure.over_ssh()` (SSH_CONNECTION / SSH_TTY / SSH_CLIENT) now makes it return 2 with an
+explanation, unless `DCCORE_SETUP_IN_BROWSER=1` says a tunnel is up. `run_setup_until_configured()` logs the ssh -L
+hint when the opener returned falsy, always names `python3 configure.py`, and catches KeyboardInterrupt (logs and
+returns None, port freed). `docs/INSTALL.md` says so.
+
 ### 📍 The server's shortened nick is adopted (#594)
 
 The 001-target adoption sat in the pre-USER loop, which breaks on the first NOTICE/PING and sends USER; 001 only comes

@@ -4667,12 +4667,24 @@ if HAVE_FLASK:
         log("[SETUP] (The code in the link is what lets only you use this page. "
             "The bot starts as soon as the form is saved.)")
         _quiet_the_request_log()
+        opened = False
         if getattr(config, "WEBUI_OPEN_BROWSER", True):
             try:
                 import webbrowser
-                (opener or webbrowser.open)(url)
+                opened = bool((opener or webbrowser.open)(url))
             except Exception as err:
                 log(f"[SETUP] Could not open a browser ({err}); open the link above yourself.")
+        # A page on this machine's 127.0.0.1 is no use to someone who is not at
+        # it (#595). webbrowser.open() says False on a machine with no browser
+        # and this used to ignore that, then wait for ever with nothing on
+        # screen saying how else to go on.
+        if not opened:
+            log("[SETUP] No browser was opened here. If this machine is one you reach over "
+                "SSH, tunnel the port (ssh -L "
+                f"{port}:127.0.0.1:{port} <this machine>) and open the link on your own "
+                "computer.")
+        log("[SETUP] To answer the questions in this window instead, press Ctrl-C and run: "
+            "python3 configure.py")
         try:
             # A loop rather than one wait(): a Windows console cannot deliver
             # Ctrl-C into an indefinite Event.wait(). `wait`, for tests, is
@@ -4681,6 +4693,10 @@ if HAVE_FLASK:
             while not done.wait(0.5):
                 if give_up():
                     break
+        except KeyboardInterrupt:
+            # Ctrl-C is how somebody who cannot reach the page leaves; it used to
+            # end in a traceback with nothing about what to do next (#595).
+            log("[SETUP] Stopped. Answer the questions here instead: python3 configure.py")
         finally:
             # A moment for the "Saved" page to reach the browser before the
             # socket goes away; then the port is free for the real dashboard.
