@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🌐 The setup page is translated whole, not only its field labels (#621)
+
+The FR/ES switch on `/setup` translated the six field labels and their **?** help - the `settings.field.*` keys the
+Settings page already had - and nothing else. `render_setup_page()` and `render_setup_saved_page()` looked up
+`setup.title`, `setup.intro`, the password labels, the LAN box, the folder placeholder, the button, the note and the
+Saved page under `setup.*` keys that no lang file defined, the channel placeholder was a bare literal, and
+`validate_setup_form()` had no language at all, so a French operator got a mixed-language form and "A nickname is
+needed." under "Pseudo". The 25 `setup.*` keys now exist in `web/lang/{en,fr,es}.json`, `validate_setup_form(form,
+lang="en")` reads its messages from the lang file (`setup.error.*`, the nickname problem from
+`settings_file.nick_problem()` staying English inside the translated sentence), and the route passes the language on,
+including to the "Could not write the settings" error. The English literals in `webserver.py` stay as the fallbacks.
+`tests/test_dashboard_translations_stay_complete.py` now counts the `"setup.*"` strings in `webserver.py` as
+referenced, so the parity and no-orphan checks cover these keys too. Test: every English fallback is absent from the
+fr/es page, every refusal's message is a `setup.error.*` value of the chosen language, the Saved page in both
+versions, and a French POST through the Flask app comes back with French errors.
+
 ### 📍 The setup writes the password before settings.conf (#624)
 
 `webserver.apply_setup()` and `configure.main()` wrote settings.conf first and admin_config.py second. The two writes
@@ -199,7 +215,6 @@ server dropped the bot. The claim (`user_processing_lock.add` and the `active_tr
 lock; the notice, the thread spawn and the save now run after it is released, the way section A's plain-file branch
 always has. A test drives all three paths and records whether the lock was held at the notice, the save and the
 thread start. The freeze sweep's `save_dcc_queue()` (once per expired timer) still runs under the lock.
-
 ### 🔒 A rehash no longer rewrites the live runtime containers with no lock held (#604)
 
 `commands.restore_preserved_runtime()` now skips a key whose preserved value *is* the live container (`value is

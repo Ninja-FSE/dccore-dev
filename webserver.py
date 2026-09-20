@@ -4393,53 +4393,65 @@ def build_setup_fields(lang="en", values=None):
     return fields
 
 
-def validate_setup_form(form):
+def validate_setup_form(form, lang="en"):
     """The form's answers -> (changes, password_hash, errors). `changes` is
     the same {NAME: value} dict configure.collect_answers() builds - what
     was answered is written, what was left blank is not - so the files the
-    page writes are the files the terminal writes."""
+    page writes are the files the terminal writes. The error messages come
+    from the lang file for fr/es, like the rest of the page (#621); the
+    nickname problem itself (settings_file.nick_problem) stays English."""
     import settings_file
+    strings = _setup_strings(lang)
     errors = []
     changes = {}
 
     def text(name):
         return str(form.get(name, "") or "").strip()
 
+    def say(key, english):
+        return strings.get(key, english)
+
+    def not_a_nick(problem):
+        return say("setup.error.nickname_invalid",
+                   "That is not an IRC nickname: {problem}.").replace("{problem}", problem)
+
     nickname = text("NICKNAME")
     if not nickname:
-        errors.append(("NICKNAME", "A nickname is needed."))
+        errors.append(("NICKNAME", say("setup.error.nickname_needed", "A nickname is needed.")))
     elif settings_file.nick_problem(nickname):
-        errors.append(("NICKNAME", "That is not an IRC nickname: "
-                       + settings_file.nick_problem(nickname) + "."))
+        errors.append(("NICKNAME", not_a_nick(settings_file.nick_problem(nickname))))
     else:
         changes["NICKNAME"] = nickname
 
     server = text("SERVER")
     if not server:
-        errors.append(("SERVER", "An IRC server is needed (irc.undernet.org is "
-                                 "the usual one)."))
+        errors.append(("SERVER", say("setup.error.server_needed",
+                                     "An IRC server is needed (irc.undernet.org is "
+                                     "the usual one).")))
     elif " " in server:
-        errors.append(("SERVER", "A server name has no spaces."))
+        errors.append(("SERVER", say("setup.error.server_spaces", "A server name has no spaces.")))
     else:
         changes["SERVER"] = server
 
     channel = text("CHANNEL")
     channels = [c.strip() for c in channel.split(",") if c.strip()]
     if not channels:
-        errors.append(("CHANNEL", "At least one channel is needed, like #mychannel."))
+        errors.append(("CHANNEL", say("setup.error.channel_needed",
+                                      "At least one channel is needed, like #mychannel.")))
     elif any(not c.startswith("#") or " " in c for c in channels):
-        errors.append(("CHANNEL", "Each channel starts with # and has no spaces; "
-                                  "separate several with commas."))
+        errors.append(("CHANNEL", say("setup.error.channel_shape",
+                                      "Each channel starts with # and has no spaces; "
+                                      "separate several with commas.")))
     else:
         changes["CHANNEL"] = ",".join(channels)
 
     admin_nick = text("ADMIN_NICK")
     if not admin_nick:
-        errors.append(("ADMIN_NICK", "Your own nick is needed - the person who may "
-                                     "run the admin commands."))
+        errors.append(("ADMIN_NICK", say("setup.error.admin_needed",
+                                         "Your own nick is needed - the person who may "
+                                         "run the admin commands.")))
     elif settings_file.nicks_problem(admin_nick):
-        errors.append(("ADMIN_NICK", "That is not an IRC nickname: "
-                       + settings_file.nicks_problem(admin_nick) + "."))
+        errors.append(("ADMIN_NICK", not_a_nick(settings_file.nicks_problem(admin_nick))))
     else:
         changes["ADMIN_NICK"] = admin_nick
 
@@ -4447,10 +4459,12 @@ def validate_setup_form(form):
     confirm = str(form.get("password_confirm", "") or "")
     password_hash = None
     if not password:
-        errors.append(("password", "A password is needed - it opens the admin "
-                                   "console and this dashboard."))
+        errors.append(("password", say("setup.error.password_needed",
+                                       "A password is needed - it opens the admin "
+                                       "console and this dashboard.")))
     elif password != confirm:
-        errors.append(("password", "The two passwords do not match."))
+        errors.append(("password", say("setup.error.password_mismatch",
+                                       "The two passwords do not match.")))
     else:
         password_hash = adminchat.make_password_hash(password)
 
@@ -4463,15 +4477,16 @@ def validate_setup_form(form):
         else:
             # "Later on the Settings page" is only true with the dashboard on;
             # with the box unticked the folder can only be set in the file (#603).
-            errors.append(("FILE_DIRECTORY", "That folder does not exist. Leave it "
-                                             "blank to choose it later on the "
-                                             "dashboard's Settings page."
-                                             if enable_webui else
-                                             "That folder does not exist. With the "
-                                             "dashboard off, leave it blank and set "
-                                             "FILE_DIRECTORY in settings.conf later, "
-                                             "or tick the dashboard box to choose it "
-                                             "on its Settings page."))
+            errors.append(("FILE_DIRECTORY",
+                           say("setup.error.folder_missing",
+                               "That folder does not exist. Leave it blank to choose "
+                               "it later on the dashboard's Settings page.")
+                           if enable_webui else
+                           say("setup.error.folder_missing_no_dashboard",
+                               "That folder does not exist. With the dashboard off, "
+                               "leave it blank and set FILE_DIRECTORY in settings.conf "
+                               "later, or tick the dashboard box to choose it on its "
+                               "Settings page.")))
 
     changes["WEBUI_ENABLED"] = enable_webui
     if enable_webui:
@@ -4555,14 +4570,14 @@ def render_setup_page(fields, token, lang="en", errors=(), values=None, port=842
         if name == "SERVER" and not value:
             value = "irc.undernet.org"
         if name == "CHANNEL":
-            placeholder = ' placeholder="#mychannel, #another"'
+            placeholder = ' placeholder="' + _html(strings.get("setup.channel_placeholder", "#mychannel, #another")) + '"'
         if name == "FILE_DIRECTORY":
             placeholder = ' placeholder="' + _html(strings.get("setup.folder_placeholder", "optional - can be chosen later on the Settings page")) + '"'
         rows.append(f'<label>{label}{help_html}<input type="text" name="{name}" '
                     f'value="{_html(value or "")}"{placeholder} autocomplete="off"></label>{error_html}')
     password_error = f'<div class="error">{_html(errors["password"])}</div>' if "password" in errors else ""
     rows.append(f'<label>{_html(strings.get("setup.password", "Admin password"))}'
-                f' <span class="help" title="{_html(strings.get("setup.password.help", "Opens the admin console and this dashboard. Kept as a hash, never in clear."))}">?</span>'
+                f' <span class="help" title="{_html(strings.get("setup.password_help", "Opens the admin console and this dashboard. Kept as a hash, never in clear."))}">?</span>'
                 f'<input type="password" name="password" autocomplete="new-password"></label>')
     rows.append(f'<label>{_html(strings.get("setup.password_again", "The same password again"))}'
                 f'<input type="password" name="password_confirm" autocomplete="new-password"></label>{password_error}')
@@ -4686,7 +4701,7 @@ if HAVE_FLASK:
                 return render_setup_saved_page(state["changes"] or {}, lang, port)
             if request.method == "GET":
                 return render_setup_page(build_setup_fields(lang), token, lang, port=port)
-            changes, password_hash, errors = validate_setup_form(request.form)
+            changes, password_hash, errors = validate_setup_form(request.form, lang)
             if errors:
                 values = {k: v for k, v in request.form.items() if k not in ("password", "password_confirm", "token")}
                 return render_setup_page(build_setup_fields(lang, values), token, lang,
@@ -4694,8 +4709,9 @@ if HAVE_FLASK:
             try:
                 apply_setup(changes, password_hash)
             except Exception as err:  # a full disk, a read-only folder
+                message = _setup_strings(lang).get("setup.error.write", "Could not write the settings: {error}")
                 return render_setup_page(build_setup_fields(lang, dict(request.form)), token, lang,
-                                         errors=[("NICKNAME", f"Could not write the settings: {err}")],
+                                         errors=[("NICKNAME", message.replace("{error}", str(err)))],
                                          values=dict(request.form), port=port), 500
             state["done"] = True
             state["changes"] = changes
