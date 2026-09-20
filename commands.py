@@ -475,6 +475,27 @@ def reattach_debug_sinks(announce_module, live_sinks):
     return reattached
 
 
+def reattach_event_sinks(announce_module, live_sinks):
+    """The structured feed's half of reattach_debug_sinks() (#576).
+
+    importlib.reload(announce) also resets announce._event_sinks to [], the
+    registry a structured console session (the mIRC script after `hello`)
+    receives every REQUEST/QUEUED/SENDING/SENT/FAIL/SEARCH/RESUMED and the
+    event-driven STATUS burst through. Only _debug_sinks was put back, and a
+    structured session drops those kinds from its debug sink because it
+    expects them as fields - so after any rehash it heard neither, while its
+    LOG lines kept arriving and made it look alive. Returns the sinks
+    actually appended.
+    """
+    reattached = []
+    with announce_module._debug_sinks_lock:
+        for sink in live_sinks:
+            if sink not in announce_module._event_sinks:
+                announce_module._event_sinks.append(sink)
+                reattached.append(sink)
+    return reattached
+
+
 def restore_preserved_runtime(cfg, preserved_runtime):
     """Merge `preserved_runtime` (captured from `cfg` right before a reload)
     back into `cfg`'s current attributes - MUTATING each container in
@@ -989,6 +1010,7 @@ def _handle_rehash_request(user, target_chan):
     # including this very rehash's own "Rehash completed!" line.
     with announce._debug_sinks_lock:
         live_debug_sinks = list(announce._debug_sinks)
+        live_event_sinks = list(announce._event_sinks)
 
     try:
         # 1b. QUIESCE FIRST (#310). A reload swaps the modules a
@@ -1105,6 +1127,11 @@ def _handle_rehash_request(user, target_chan):
         _reattached_sinks = reattach_debug_sinks(_ann, live_debug_sinks)
         if _reattached_sinks:
             print(f"[REHASH RAM] Reattached {len(_reattached_sinks)} admin console debug sink(s).")
+        # ...and the structured feed's own registry (#576), which the same
+        # reload emptied and which nothing else refills.
+        _reattached_events = reattach_event_sinks(_ann, live_event_sinks)
+        if _reattached_events:
+            print(f"[REHASH RAM] Reattached {len(_reattached_events)} structured feed sink(s).")
 
         # Read the freshly reloaded config
         import defaults as config
