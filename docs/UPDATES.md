@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 An unknown filename does not scan the library unbounded (#580)
+
+The list-and-walk fallback in `handle_download_request()` is now behind `_library_scans` (a BoundedSemaphore of
+`MAX_CONCURRENT_LIBRARY_SCANS` = 2, taken without blocking: the request that cannot get one is answered `busy` and
+touches no disk) and a per-(list, lowercased name) miss memory (`LOOKUP_MISS_TTL_SECONDS` = 60, `LOOKUP_MISS_MEMORY` =
+512 entries, oldest dropped). Only a real miss is remembered, never a busy refusal. The slot is released in a
+`finally`. A file in the first folder's root never reaches either. The block itself is unchanged apart from its
+indentation.
+
 ### 📍 A failed direct send tells the user (#599)
 
 The direct-send fast path builds a synthetic row that is never in `dcc_queue`. `release_queue_entry()` classified it
