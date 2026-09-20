@@ -605,6 +605,15 @@ def note_nick_change(old_nick, new_nick):
                           f"{name} entry alone, the new nick already has one.")
                     continue
                 store[new_key] = store.pop(old_key)
+                # #601: user_raw is what the dispatcher addresses the DCC
+                # offer to (dcc.py's section B). Left as the old nick, the
+                # next dispatch after a rename offered the file to a nick
+                # that is no longer on the network.
+                # (frozen_queues holds a timestamp per user, not rows.)
+                if hasattr(store[new_key], "append"):
+                    for queued in store[new_key]:
+                        if isinstance(queued, dict) and "user_raw" in queued:
+                            queued["user_raw"] = new_nick
                 moved.append(name)
 
         # #431: dcc.handle_download_request()'s slot-admission gate is built
@@ -638,6 +647,17 @@ def note_nick_change(old_nick, new_nick):
                     row["user"] = new_nick
                     if "active_transfers" not in moved:
                         moved.append("active_transfers")
+
+        # #601: the queue moved in memory; the file must follow, or a restart
+        # before the next unrelated queue write restores it under a nick that
+        # has gone, and the freeze sweep deletes it five minutes later.
+        # save_dcc_queue() does not take queue_lock (its callers hold it).
+        if "dcc_queue" in moved:
+            try:
+                import db
+                db.save_dcc_queue()
+            except Exception as save_err:
+                print(f"[NICK] Could not save the queue after {old_nick} -> {new_nick}: {save_err}")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)
@@ -3082,10 +3102,15 @@ def irc_loop():
                                 # able to answer.
                                 #
                                 # Private only, like the two branches above.
-                                # Answered INLINE rather than on a thread: the
-                                # receiver is blocked waiting for this, it is
-                                # one dict lookup and one send, and it touches
-                                # no disk. Admission control is entirely
+                                # The lookup is answered INLINE - it is one dict
+                                # read and it must settle the resume position
+                                # before the receiver can connect - but the
+                                # ACCEPT itself is paced and waits up to
+                                # MSG_DELAY for a slot, which on this thread
+                                # stalled every PING and every other line
+                                # (#577, #602). handle_resume_request(
+                                # background=True) sends it from a short
+                                # thread. Admission control is entirely
                                 # inside handle_resume_request() - it matches
                                 # on a port WE are listening on for this exact
                                 # nick, so a stray or forged line finds
@@ -3093,7 +3118,8 @@ def irc_loop():
                                 if (ctcp_cmd.startswith("DCC RESUME ")
                                         and target_chan.lower() == config.NICKNAME.lower()):
                                     dcc.handle_resume_request(
-                                        s, user, msg.strip("\x01").strip())
+                                        s, user, msg.strip("\x01").strip(),
+                                        background=True)
                                     continue
                                 if ctcp_cmd == "VERSION":
                                     # Answered inline rather than on a thread:

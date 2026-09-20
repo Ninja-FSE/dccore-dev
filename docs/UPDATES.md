@@ -14,6 +14,46 @@ as before. The five handlers take `user_host=` and `irc.py` hands them the sende
 `!ping`/`!debugnames` (`diagnostics_are_for_the_admin`). The console passes `authorised=True` and is unchanged.
 Help texts (en/fr/es), `defaults.py`, the sample and ADMIN-CONSOLE.md say so.
 
+### 📍 A resume reply does not block the IRC read thread (#577, #602)
+
+`handle_resume_request()` ran on the read thread and sent the ACCEPT through `outbound_pacer.wait_for_slot(MSG_DELAY)`:
+up to MSG_DELAY per matching RESUME with no PING answered and no line parsed, and - since `is_flooding()` stamps a
+request when it is handled - spaced out just enough that the sender was never muted. `background=True` (what
+`irc.py` passes) keeps the lookup and the position on the read thread and sends the paced reply from `_send_resume_accept`
+on a short thread: one at a time per offer (`accept_pending`), a RESUME that arrives meanwhile only moves the
+position, and the slot is waited for before the offer is read, so the reply carries the latest. Without `background`
+the behaviour is exactly as before.
+
+### 📍 A UNC path is refused before it is touched (#578)
+
+`os.path.join(base, r"\\host\share\x")` returns the UNC path unchanged, and `os.path.exists()` / `realpath()` ran
+on it before the containment check: on Windows an SMB connection (NTLM, as the bot's account) to a host the
+requester chose. `dcc.names_a_remote_or_absolute_path()` refuses, on the text and before any file system call:
+UNC and device paths everywhere (either slash, `//host` included, checked BEFORE the leading-slash strip that
+used to hide it), a drive or root-relative name on Windows, and a NUL byte. Applied to plain requests and, for
+remote forms only (a heading is written `D:\\...`), to `!rar`. Tests record every `os.path` call the handler
+makes and fail if any sees the remote name.
+
+### 📍 A nick change mid-transfer keeps the slot and the queue (#598, #601)
+
+`start_dcc_send()` found its `active_transfers` row and released its `user_processing_lock` entry by the nick the
+send started as, while `irc.note_nick_change()` had already rewritten the row and moved the lock to the new nick.
+After a `/nick` the row and the lock outlived the transfer: a slot lost until restart, the renamed user answered
+"already transferring" for good, rehash waiting out `REHASH_TRANSFER_WAIT`, `bytes_sent` frozen. The send now
+finds its row once (`_find_transfer_row`, by nick and file) and keeps it by identity; the lock is released under
+the row's current nick.
+
+`note_nick_change()` also never saved the queue it re-keyed, and left `user_raw` (the dispatcher's DCC target) as the
+old nick. It now rewrites `user_raw` on the moved rows and calls `db.save_dcc_queue()`.
+
+### 📍 The channel_users control test no longer bets on a race (#596)
+
+`test_without_the_lock_the_same_workload_corrupts_state` churned an unlocked dict for three seconds and asserted
+that the scheduler happened to interleave a writer inside an iteration. On a lightly loaded macOS runner it did not,
+and main was reported red twice in one day for changes that touched nothing near `channel_users`. The control is now
+deterministic: a reader holds an iteration open, a writer adds a channel key, the reader resumes - `RuntimeError`
+every time unlocked, no error and the write lands afterwards when the lock is held.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
