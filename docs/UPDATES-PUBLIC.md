@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a resumed transfer showed an absurd speed in the mIRC window's side panel** (108 MB/s on a link doing 6). After a bot restart, or whenever a client resumed, the panel divided the whole file position by the few seconds since the restart. It now counts only what was sent since.
 - **Fixed (mIRC window): `NICKin #channel` is `NICK in #channel` again.** On every request, queue, send, sent, failed and search line the nick ran together with the word "in" before the channel. Update `dccore.mrc`.
 - **Fixed: a fast transfer of a big file no longer says "at 0B/s".** A file of 8 MB or more that took between a tenth of a second and a second (easily done on a LAN: 35 MB/s moves 34 MB in under a second) was reported with no speed. Its speed is real, and is now shown; the old rule stays for small files, which can be handed to the network in one go. The mIRC window writes "at n/a" instead of "0B/s" when there is none.
 - **Fixed (mIRC window): the right-click "Queue of" menu now appears on a person's row.** It did not show on a sending row or a queue row, because the nick was read out of the row with a pattern mIRC did not handle as expected. It now reads the row with plain string functions. Update `dccore.mrc`.

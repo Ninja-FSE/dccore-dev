@@ -439,7 +439,12 @@ def status_lines(now=None):
     for tx in transfers:
         sent = int(tx.get("bytes_sent") or 0)
         started = float(tx.get("started_at") or 0)
-        bps = int(sent / (now - started)) if started and now > started + 0.5 else 0
+        # The speed is what THIS connection has moved, not what the receiver
+        # holds: a resumed send starts with bytes_sent already at the resume
+        # point, and dividing all of it by the seconds since it restarted
+        # showed 108 MB/s for a link doing 6 (#746).
+        moved = max(0, sent - int(tx.get("resume_offset") or 0))
+        bps = int(moved / (now - started)) if started and now > started + 0.5 else 0
         lines.append(f"DCCORE SLOT {_clean(tx.get('user'), token=True)} {sent} "
                      f"{_num(tx.get('size'))} {bps} {_clean(tx.get('file'))}")
     for pos, user in enumerate(sorted(queue, key=str.lower)[:QUEUE_LINES_MAX], start=1):
