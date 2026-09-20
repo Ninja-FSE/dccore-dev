@@ -86,8 +86,14 @@ The host and port are your own `WEBUI_HOST`/`WEBUI_PORT`. Open that address.
 ```
 
 The dashboard is opt-in - it is a network listener, so a missing switch is
-never read as consent to open one. Set `WEBUI_ENABLED = True` in
-`admin_config.py` or `settings.conf`. `py configure.py` asks you this.
+never read as consent to open one. Set `WEBUI_ENABLED = true` in
+`settings.conf` and restart. That is the file to edit: `py configure.py`
+writes your answer to the dashboard question there (`false` if you declined
+it), and where `settings.conf` and `admin_config.py` both set a name,
+`settings.conf` wins - so a `WEBUI_ENABLED = True` added to `admin_config.py`
+changes nothing while `settings.conf` still says `false`, and the daemon
+tells you so at startup (`[CONFIG] settings.conf overrides WEBUI_ENABLED
+...`). Running `py configure.py` again and answering yes does the same edit.
 
 **Flask is not installed:**
 

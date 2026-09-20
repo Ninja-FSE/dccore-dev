@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 WINDOWS.md names the file that actually turns the dashboard on (#637)
+
+Audit M35. The guide's fix for `[WEBUI] Disabled via config.WEBUI_ENABLED = False.` was "set WEBUI_ENABLED = True
+in admin_config.py or settings.conf". On a configure-made install that declined the dashboard, settings.conf holds
+`WEBUI_ENABLED = false` - the setup writes the answer either way - and settings.conf is applied after
+admin_config.py, so a True added to admin_config.py changed nothing; the operator restarted, saw the same line,
+and concluded the bot was broken. (The sample-seeding half of the finding was fixed by #623 and #636.)
+
+The passage now names settings.conf, says it is the file that wins where both set a name (and that the daemon
+reports the shadowed line at startup), says the setup wrote the answer there, and spells the value the way that
+file reads it (`true`). `configure.write_settings_conf()`'s docstring and a test docstring claimed the declined
+dashboard is "deliberately absent" from what is written - it is written as `false`, on purpose (a re-run that says
+no must switch off what an earlier run switched on); both now say so, and a test pins the explicit `false`.
+`tests/test_the_windows_guide_names_the_file_that_wins.py` reads the passage.
+
 ### 📄 admin_config.py.sample carries the defaults it documents (#636)
 
 Audit M34. INSTALL.md and WINDOWS.md say "copy admin_config.py.sample to admin_config.py and fill it in", and two
