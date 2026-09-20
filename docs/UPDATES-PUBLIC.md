@@ -23,6 +23,10 @@
 
 - **Fixed (mIRC window): a chat the bot never answers no longer leaves the script stuck at "opening".** When the bot got the offer but said nothing back (your address blocked for 15 minutes after wrong passwords, your host not allowed, or its own offer back dropped by a firewall), mIRC waited for ever, the window's title said "opening" and every later `/dccore connect` answered "already open" until you closed the `=bot` window by hand. After 75 seconds without an answer the script now says so, closes that window and retries with its usual backoff. Update `dccore.mrc`.
 
+- **Fixed (mIRC window): the labels in `/dccore options` were cut off.** "Side panel with slots, queue and today's totals", "Slots, queue and speed in the title bar", "Console replies in a separate window", the fixed-width font and a few small labels ended mid-word because they were wider than their tickboxes. The dialog is wider now and every label fits. Update `dccore.mrc`.
+
+
+
 
 
 
