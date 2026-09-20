@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📖 ADMIN-CONSOLE.md no longer credits configure.py with the hostmask step (#638)
+
+Audit M36. Step 2 of the console guide said `configure.py` "does steps 2 and 3 together". It does step 2 only -
+the password hash into admin_config.py - and never asks for ADMIN_HOSTMASKS (step 3); with no usable hostmask
+pattern the console ignores every DCC CHAT in silence, by design. A novice who took the guide at its word skipped
+step 3, got no reply, and was sent by "When it does not work" to check +x and typos instead of the step they had
+been told was done.
+
+The paragraph now says configure.py does this step for you, does NOT do step 3, and names both places to put the
+hostmasks (admin_config.py by hand, or Settings → Admin console); the troubleshooting entry for "ignores you
+completely" names the never-set case and why. `tests/test_the_console_guide_says_what_configure_does.py` reads
+the guide and checks the premise against configure.py's own prompts, so a hostmask prompt added later flags the
+wording the other way round.
+
 ### 🪟 WINDOWS.md names the file that actually turns the dashboard on (#637)
 
 Audit M35. The guide's fix for `[WEBUI] Disabled via config.WEBUI_ENABLED = False.` was "set WEBUI_ENABLED = True

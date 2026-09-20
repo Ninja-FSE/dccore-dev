@@ -73,9 +73,12 @@ ISP hostname, `+x` did not take and the console will not let you in.
 
 ### 2. Generate a password hash
 
-`python3 configure.py` does steps 2 and 3 together - the same password prompt as
+`python3 configure.py` does this step for you - the same password prompt as
 below, writing the resulting hash straight into `admin_config.py` - if you
-have not already run it. To do it by hand instead:
+have not already run it. **It does not do step 3**: it never asks for
+`ADMIN_HOSTMASKS`, and until that is set the console ignores every DCC CHAT
+without a word. Put it in `admin_config.py` by hand as step 3 shows, or on the
+dashboard's **Settings → Admin console** page. To do the hash by hand instead:
 
 From the DCCore directory, on either platform:
 
@@ -749,7 +752,9 @@ looks identical to a broken bot. Check the daemon log:
 ```
 
 That line tells you the host the server actually saw. Usually it means `+x` is not
-set, or `ADMIN_HOSTMASKS` has a typo.
+set, or `ADMIN_HOSTMASKS` has a typo - or was never set at all: `configure.py`
+writes the password hash but does not ask for hostmasks, so an install set up
+that way is still missing step 3.
 
 **The log says the password is not set.**
 
