@@ -234,11 +234,19 @@ prefix.
 | `clearqueue <nick>` | force-clear another user's queue |
 | `rehash` | reload modules in place |
 | `update` | rebuild the MasterList |
+| `lists` | the bots' lists we hold, whether each has changed since we took our copy, how big and how old |
+| `fetch [<bot>]` | ask every held bot whose list has changed (up to 10 at a time, skipping offline ones), or one bot whatever its freshness |
 | `help` | the command list |
 | `hello <client> <version>` | switch this session to the structured feed (below) |
 | `pair <client> <version>` | mint a login token for a script (below) |
 | `unpair [<client>]` | list the paired scripts, or revoke one |
 | `quit` | close the session |
+
+`lists` and `fetch` are the console side of the List Browser's freshness check and
+its automatic refresh. `fetch` goes through the same enqueue as the dashboard's
+button, so the slot limits, the duplicate guard and the queue ceiling are the same,
+and the lists arrive as their transfers finish - a structured client is told with
+a `LISTFETCH` line when one is asked for automatically, arrives, or cannot be used.
 
 `rehash` and `update` run in the background — `update` walks the whole library
 and can take minutes — so the console stays usable while they work. Their
@@ -484,6 +492,7 @@ have been replaced with spaces.
 | `DCCORE OUT` | | one line of a console command's reply |
 | `DCCORE DROPPED <n>` | lines the bot had to drop for a slow client | |
 | `DCCORE TAKEN <ip>` | the address that took the console over | |
+| `DCCORE LISTFETCH <bot> <action>` | `auto` (asked again automatically), `arrived`, `unusable` | one line of prose that names the bot |
 | `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record | |
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
@@ -647,6 +656,8 @@ sent at all: what is off there never reaches the script.
 /dccore options              what to show, colours, panel, title bar, beep
 /dccore window               open or focus @DCCore
 /dccore status               ask the bot for its status
+/dccore lists                the bots' lists we hold, and which have changed
+/dccore fetch [bot]          ask the bots whose lists changed, or one bot
 /dccore raw <command>        send any console command
 /dccore panel on|off         the side panel
 /dccore font <size>          the window's font size, e.g. /dccore font 14

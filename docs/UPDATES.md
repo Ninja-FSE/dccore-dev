@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 Lists and fetch in the console, LISTFETCH in the feed (#750)
+
+`adminchat`: `lists` (from `webserver.build_fetched_bot_list_summaries()`, one line per bot: freshness, count, age,
+online) and `fetch [bot]` (the changed ones oldest first, offline skipped, `FETCH_COMMAND_MAX` = 10, through
+`build_list_fetch_enqueue_result()` - the dashboard's enqueue, so the slot limits, duplicate guard and queue ceiling
+apply). New feed kind `LISTFETCH` (`DCCORE LISTFETCH <bot> <action> <text>`, actions auto / arrived / unusable), a
+debug-channel category only with DEBUG_CHANNEL_FEED, tag [LISTS]. `list_fetch.refetch_due_lists` and
+`process_fetched_list_zip` emit it through `_tell_the_console` (never raises, outside the fetch lock). `dccore.mrc`:
+`/dccore lists`, `/dccore fetch`, and the LISTFETCH line. ADMIN-CONSOLE.md documents the commands and the line.
+
 ### 📍 A resumed send's SLOT speed counts what it sent (#746)
 
 `adminchat.status_lines()` built the DCCORE SLOT speed as `bytes_sent / (now - started_at)`; a resumed send starts

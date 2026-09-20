@@ -188,6 +188,8 @@ alias dccore {
     return
   }
   if (%cmd == options) { dccore.options | return }
+  if (%cmd == lists) { dccore.send lists | return }
+  if (%cmd == fetch) { dccore.send fetch $2- | return }
   if (%cmd == window) { dccore.window | window -a $dccore.win | return }
   if (%cmd == status) { dccore.send status | return }
   if (%cmd == raw) { dccore.send $2- | return }
@@ -210,6 +212,8 @@ alias dccore {
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore options $+ $str($dccore.nbsp,14) what to show, colours, panel, title bar, beep
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore window $+ $str($dccore.nbsp,15) open or focus @DCCore
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore status $+ $str($dccore.nbsp,15) ask the bot for its status
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore lists $+ $str($dccore.nbsp,16) the bots' lists we hold, and which have changed
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore fetch [bot] $+ $str($dccore.nbsp,10) ask the bots whose lists changed, or one bot
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore raw <command> $+ $str($dccore.nbsp,8) send any console command (or just type it in the window)
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore panel on|off $+ $str($dccore.nbsp,8) the side panel
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore font <size> $+ $str($dccore.nbsp,10) the window's font size (now $dccore.fontsize $+ )
@@ -450,6 +454,12 @@ alias dccore.structured {
   if (%type == SLOT) { hadd dccore.live slot. $+ $dccore.st(nslots) $2- | hinc dccore.live nslots | dccore.panel.soon | return }
   if (%type == QUEUE) { hadd dccore.live queue. $+ $2 $3- | dccore.panel.soon | return }
   if (%type == OUT) { dccore.out $2- | return }
+  if (%type == LISTFETCH) {
+    ; <bot> <auto|arrived|unusable> <text>: a held bot list asked for again,
+    ; arrived, or not usable. The text already names the bot.
+    dccore.echo $dccore.tag(LISTS,search) $4-
+    return
+  }
   if (%type == TAKEN) {
     dccore.sys $dccore.bot $+ : another client ( $+ $2 $+ ) took over the console.
     hadd dccore.live state taken

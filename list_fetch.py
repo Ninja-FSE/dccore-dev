@@ -795,6 +795,16 @@ def lists_worth_refetching(now=None):
     return [bot for _when, bot in due]
 
 
+def _tell_the_console(bot, action, text):
+    """One `LISTFETCH` line for a console or the mIRC window (#750). Never raises:
+    a console that cannot be told must not fail a fetch."""
+    try:
+        import announce
+        announce.feed_event("LISTFETCH", text, bot=bot, action=action)
+    except Exception as err:
+        print(f"[LIST-FETCH] Could not tell the console about {bot}: {err}")
+
+
 def _note_auto_attempt(bot, when):
     """Remember that a sweep just asked `bot` for its list, on disk.
 
@@ -872,6 +882,7 @@ def refetch_due_lists(log=print, now=None):
             _note_auto_attempt(bot, time.time() if now is None else now)
             log(f"[LIST-FETCH] {bot}'s list has changed since we took our copy "
                 f"- asking again automatically.")
+            _tell_the_console(bot, "auto", f"{bot}'s list has changed - asking again automatically")
         else:
             # Not an error worth stopping for: the usual reason is that a
             # fetch for that bot is already outstanding, which is the right
@@ -958,7 +969,21 @@ def process_fetched_list_zip(bot, zip_path):
     seconds) is the same accepted tradeoff as above, extended to reads.
     """
     with _lock():
-        return _process_fetched_list_zip_unlocked(bot, zip_path)
+        result = _process_fetched_list_zip_unlocked(bot, zip_path)
+    # Outside the lock: telling a console can take a moment and nothing
+    # else should wait for it (#750).
+    try:
+        succeeded, reason = result
+    except (TypeError, ValueError):
+        succeeded, reason = bool(result), ""
+    if succeeded:
+        entry = (getattr(config, "fetched_bot_lists", {}) or {}).get(str(bot).strip().lower())
+        count = int((entry or {}).get("entry_count") or 0) if isinstance(entry, dict) else 0
+        _tell_the_console(bot, "arrived", f"{bot}'s list arrived: {count:,} files")
+    else:
+        _tell_the_console(bot, "unusable",
+                          f"{bot}'s list could not be used" + (f": {reason}" if reason else ""))
+    return result
 
 
 def _hold_existing_list(extract_dir):
