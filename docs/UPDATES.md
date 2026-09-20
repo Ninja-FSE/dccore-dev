@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 `pair` in the dashboard Console shows the token (#581)
+
+`_cmd_pair` saved the token and then read `session.structured`, which the web shim (`_WebConsoleSession`) lacked, so
+the Console said 'Command failed' and the token was never shown while any script paired under that name was silently
+locked out. `hello` printed its DCCORE HELLO line and failed on `send_status`. The shim now has `structured = False`
+and `client`, `hello` is in `_CONSOLE_UNSUPPORTED_COMMANDS` with a message, `pair` says when it replaced an existing
+token, and a structural test fails if any supported handler reads a session attribute the shim lacks.
+
 ### 📍 A failed midnight rotation does not stop every command (#592)
 
 `db.check_and_rotate_day()` is the first call in the per-message block and raises when the rollover cannot be
