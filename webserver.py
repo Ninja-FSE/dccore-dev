@@ -41,7 +41,10 @@ blocked (_note_bad_web_login()/_is_bad_web_ip(), same attempt-count and
 block-duration policy as adminchat.py's own DCC CHAT console tracker, reused
 from there directly) - in a POOL SEPARATE FROM adminchat.py's, on purpose:
 since the password is shared, a shared block budget would let a web attacker
-spend it down and lock the real operator out of the DCC console too.
+spend it down and lock the real operator out of the DCC console too. A POST
+whose Origin (or Referer) names another site is refused unread and uncounted
+(_login_origin_ok(), #609): on the loopback install a hostile page in the
+operator's own browser arrives from the same address as the operator.
 
 What plain-HTTP session/password transmission still cannot fix: an attacker
 already sharing the network segment can read the password and the session
@@ -3553,6 +3556,39 @@ def _clear_bad_web_ip(ip):
         _web_bad_ips.pop(ip, None)
 
 
+def _origin_netloc(url):
+    """host[:port] of an Origin, Referer or Host value, lower-cased, without
+    a default port - a browser writes neither Origin nor Host with :80 or
+    :443, but a proxy or a hand-typed URL may, and the two must still agree."""
+    from urllib.parse import urlsplit
+    netloc = urlsplit((url or "").strip()).netloc.lower()
+    for default in (":80", ":443"):
+        if netloc.endswith(default):
+            netloc = netloc[:-len(default)]
+    return netloc
+
+
+def _login_origin_ok(origin, referer, host):
+    """False when a login POST was sent by a page on another site.
+
+    The failed-attempt pool above is keyed on the address, and on the default
+    loopback install the operator's browser and any hostile page open in it
+    both arrive as 127.0.0.1: MAX_PASSWORD_ATTEMPTS cross-site POSTs with a
+    wrong password would block the operator's own login for
+    BAD_IP_BLOCK_SECONDS, repeatable for ever (#609). Every browser puts the
+    sending page's origin in Origin on a cross-site POST (a sandboxed frame
+    sends the literal "null"), an older one only in Referer; whichever is
+    present is compared with the Host header the request itself carries, the
+    way _setup_host_ok() guards /setup. A request with neither header (curl,
+    the test client) is not a browser forwarding another site's form and
+    passes: this is a guard against the lockout, not a second password."""
+    source = origin or referer
+    if not source:
+        return True
+    sender = _origin_netloc(source)
+    return bool(sender) and sender == _origin_netloc("//" + (host or "").strip())
+
+
 # ---------------------------------------------------------------------
 # CONSOLE
 #
@@ -3876,6 +3912,16 @@ if HAVE_FLASK:
             error = None
             if request.method == "POST":
                 ip = request.remote_addr
+                if not _login_origin_ok(request.headers.get("Origin"),
+                                        request.headers.get("Referer"),
+                                        request.host):
+                    # Refused before the password is looked at, and never
+                    # counted against the address: a foreign page must not
+                    # be able to spend the operator's own attempts (#609).
+                    error = ("This login was sent by another site and was "
+                             "ignored. Open the dashboard at its own address.")
+                    return LOGIN_PAGE.format(
+                        error_html='<p class="error">{}</p>'.format(error)), 403
                 if _is_bad_web_ip(ip):
                     error = "Too many failed attempts. Try again later."
                 else:

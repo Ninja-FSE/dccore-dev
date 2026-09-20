@@ -572,6 +572,16 @@ admin password hash and nothing else - the token store is never read there -
 so a stolen `.mrc` costs you a console session and nothing more, and one
 `unpair` ends even that. Pairing the same name again replaces the old token.
 
+The web login also refuses a password sent by a page on another site: a
+browser names the sending page in the `Origin` (or `Referer`) header, and when
+that is not the address the dashboard was opened at, the attempt is answered
+403 and not counted. Without this, any website open in the same browser could
+post three wrong passwords to `127.0.0.1:8420` and lock you out of your own
+dashboard for fifteen minutes, again and again. If you reach the dashboard
+through a reverse proxy, the proxy must pass the `Host` header through
+unchanged (`proxy_set_header Host $host;` in nginx), or every login is refused
+with "This login was sent by another site".
+
 ```
 unpair                 list the paired clients and when they were paired
 unpair dccore.mrc      revoke one; its next login is a wrong password
