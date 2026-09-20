@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 Every command is in the @DCCore menu (#550)
+
+`menu @DCCore` now has submenus for every `/dccore` command and every console command that is worth a click. Prompts
+are `$input` (mIRC 6.0+): `dccore.ask <command> <prompt>` (edit box, Cancel or empty sends nothing), `dccore.askraw`,
+`dccore.confirm <command> <prompt>` (yes or no; used for `update` and `rehash`), `dccore.askfont`. Prompt texts
+contain no commas. `ban`, `unban` and `clearqueue` are never sent without their argument. A test checks that every
+command the script implements and every non-plumbing console command has a menu entry.
+
 ### 📍 Lists and fetch in the console, LISTFETCH in the feed (#750)
 
 `adminchat`: `lists` (from `webserver.build_fetched_bot_list_summaries()`, one line per bot: freshness, count, age,
