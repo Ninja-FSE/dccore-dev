@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📄 admin_config.py.sample carries the defaults it documents (#636)
+
+Audit M34. INSTALL.md and WINDOWS.md say "copy admin_config.py.sample to admin_config.py and fill it in", and two
+of the sample's live lines were not the defaults: `ADMIN_CHAT_MODE = "listen"` sat under a comment naming "auto"
+the default and "right for most setups" (so a hand-made install never dialled the operator's client, and the
+console guide's table sent them debugging a choice they never made), and `WEBUI_ENABLED = True` opened a listener
+defaults.py keeps off, from a file the docs describe as opt-in. #623 stopped the setup seeding from the sample;
+the hand-copy path still read it.
+
+Both lines now carry defaults.py's value (`"auto"`, `False` with a line saying why), and
+`tests/test_the_sample_admin_config_says_what_defaults_say.py` holds every live line of the sample against
+defaults.py - the password hash and the hostmask list are placeholders and excepted - so the two cannot drift
+apart again.
+
 ### 🪪 The bot's own nick follows the server, not the NICK it sent (#635)
 
 Audit M33. The three paths that rename a registered bot - the reclaim of the main nick when its holder quits, the
