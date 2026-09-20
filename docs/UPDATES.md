@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🏷️ A third nick when both configured names are taken, and 437 is a refusal (#633)
+
+Audit M31. The 433/432 handler only reacted while the bot was still asking for its main nick: a 433 for the
+ALTERNATE did nothing, and 437 (ERR_UNAVAILRESOURCE - the nick delay Hybrid, ratbox and Solanum apply after a
+split or a kill) was matched nowhere. On a split storm, with ghosts holding both names, every reconnect was NICK
+main, 433, NICK alt, 433, silence until the server's registration timeout closed the link, ten seconds, and the
+same again for as long as the ghosts lived; on an EFnet-style server the same happened with 437 for the whole
+nick-delay window even when the alternate was free.
+
+`parse_nick_refusal()` reads 432/433/437 by the numeric (a 437 naming a channel is not a nick refusal and is
+returned as None) and both the handshake loop and the main loop go through it - the handshake used to match
+`" 433 "` and the English for 432. `fallback_nick(main, attempt)` is the ladder: the configured alternate first,
+then the alternate with a digit 1-9 (appended while the result fits every server's NICKLEN, replacing the last
+character otherwise, never the main nick again), then nothing more this connection - the count is per connection,
+because the ghosts may be gone by the next one. Once registered the old rule stands: a refused reclaim of the main
+nick goes back to the alternate and nowhere else, so a server that answers 433 for the name we already hold cannot
+walk us down the ladder. ALT_NICKNAME's help says so in all three languages; sample regenerated.
+`tests/test_a_third_nick_when_both_are_taken.py` drives the real `irc_loop()` registration against a scripted
+socket (no network) and reads the NICK lines it sends.
+
 ### 🔑 A channel that needs a services login (477) is a refusal, not silence (#632)
 
 Audit M30. `JOIN_REFUSED_NUMERICS` held 405/471/473/474/475. Undernet answers a JOIN to a +r channel from a nick

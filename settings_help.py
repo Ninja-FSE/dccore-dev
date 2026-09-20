@@ -171,7 +171,7 @@ PLAIN_HELP = {
     'SERVER': 'The IRC server the bot connects to. For Undernet leave it as irc.undernet.org.',
     'PORT': 'The port on that server. 6667 is the normal one for plain IRC; the bot does not use SSL.',
     'NICKNAME': "The bot's name on IRC. People request files with it (for example @YourBot for the list), so pick something short and easy to type. Required - the bot will not start without it.",
-    'ALT_NICKNAME': 'A backup name used if the main one is already taken when the bot connects. The bot switches back to the main name as soon as it is free.',
+    'ALT_NICKNAME': 'A backup name used if the main one is already taken when the bot connects. If this one is taken too, a digit is added to it. The bot switches back to the main name as soon as it is free.',
     'REJOIN_ATTEMPTS': 'How many times the bot tries to get back into a channel after being kicked before giving up on it. It waits until the next advert is due before each try, so it never looks like it is fighting the kick. 0 means never rejoin.',
     'ADMIN_NICK': 'Your own nick(s) - the people allowed to use the admin commands such as !ban, !rehash and !update. Separate several with commas. Required. If you have set ADMIN_HOSTMASKS, the command must also come from that host.',
     'CHANNEL': 'The channel(s) the bot serves in, separated by commas. The first one is where announcements go unless a request came from another channel. Required.',

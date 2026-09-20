@@ -96,9 +96,10 @@
 #NICKNAME = 
 
 # A backup name used if the main one is already taken when the bot connects.
-# The bot switches back to the main name as soon as it is free.
+# If this one is taken too, a digit is added to it. The bot switches back to
+# the main name as soon as it is free.
 #
-# Used when NICKNAME is taken; the bot keeps trying to reclaim the main nick afterwards
+# Used when NICKNAME is taken (with a digit added if this is taken too); the bot keeps trying to reclaim the main nick afterwards
 #ALT_NICKNAME = DCCore_
 
 # Your own nick(s) - the people allowed to use the admin commands such as

@@ -502,7 +502,7 @@
   "settings.field.SERVER.help": "El servidor IRC al que se conecta el bot. Para Undernet, deja irc.undernet.org.",
   "settings.field.PORT.help": "El puerto de ese servidor. 6667 es el habitual para IRC sin cifrar; el bot no usa SSL.",
   "settings.field.NICKNAME.help": "El nombre del bot en IRC. La gente pide los archivos con él (por ejemplo @TuBot para la lista), así que elige algo corto y fácil de escribir. Obligatorio: el bot no arranca sin él.",
-  "settings.field.ALT_NICKNAME.help": "Un nombre de reserva que se usa si el principal ya está ocupado al conectar. El bot vuelve al principal en cuanto queda libre.",
+  "settings.field.ALT_NICKNAME.help": "Un nombre de reserva que se usa si el principal ya está ocupado al conectar. Si también está ocupado, se le añade un dígito. El bot vuelve al principal en cuanto queda libre.",
   "settings.field.ADMIN_NICK.help": "Tu nick o nicks: las personas que pueden usar los comandos de administración como !ban, !rehash y !update. Separa varios con comas. Obligatorio. Si has definido ADMIN_HOSTMASKS, el comando también debe venir de ese host.",
   "settings.field.CHANNEL.help": "El canal o canales donde el bot comparte, separados por comas. El primero recibe los anuncios, salvo que la petición viniera de otro canal. Obligatorio.",
   "settings.field.DEBUG_CHANNEL.help": "Un canal tuyo donde el bot cuenta lo que hace: transferencias, entradas, baneos, problemas. Déjalo vacío para ninguno. No uses un canal donde haya otra gente: todo lo que el bot informa va allí.",

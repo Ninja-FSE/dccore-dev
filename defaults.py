@@ -62,7 +62,7 @@ PORT: int          = 6667          # The server's port; 6667 is plain IRC, and t
 # reasoning, and RAR_BINARY above for the same "None means unset" convention
 # this already used before REQUIRED existed.
 NICKNAME: str      = None
-ALT_NICKNAME: str  = "DCCore_"     # Used when NICKNAME is taken; the bot keeps trying to reclaim the main nick afterwards
+ALT_NICKNAME: str  = "DCCore_"     # Used when NICKNAME is taken (with a digit added if this is taken too); the bot keeps trying to reclaim the main nick afterwards
 ADMIN_NICK: str    = None          # Who may use the admin commands (!ban, !rehash, !update...), comma-separated for more than one; with ADMIN_HOSTMASKS set, they must come from that host as well
 CHANNEL: str       = None          # The channel(s) to serve in, comma-separated; the first one is where announcements go by default
 # Ships BLANK, and that is a deliberate reversal of #171's "#dccore-debug".

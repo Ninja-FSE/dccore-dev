@@ -248,6 +248,75 @@ def resolve_alt_nick(main_nick):
     return alt or f"{main_nick}`"
 
 
+# Numerics a server answers a NICK with when it will not give us that name.
+# 437 is ERR_UNAVAILRESOURCE, the nick-delay Hybrid, ratbox and Solanum
+# networks apply to a name that was just split or killed off - the same
+# situation as a ghost holding it, answered with a different number, and
+# never matched anywhere before #633.
+NICK_REFUSED_NUMERICS = {"432", "433", "437"}
+
+# How many names to try on one connection before waiting for the server:
+# the alternate, then nine derived from it. Past that the ghosts are not
+# going anywhere soon, and the reconnect starts the count again anyway.
+NICK_FALLBACK_LIMIT = 10
+
+# The shortest NICKLEN any server has (RFC 1459). A candidate this long or
+# shorter fits everywhere, so the digit can be appended; a longer alternate
+# has its last character replaced instead, which keeps the length the
+# server already accepted for the alternate itself.
+NICKLEN_EVERY_SERVER_ALLOWS = 9
+
+
+def parse_nick_refusal(line):
+    """The nickname a server just refused, or None.
+
+    `:server 433 * DCCore :Nickname is already in use` before registration,
+    `:server 433 DCCore_ DCCore :...` after it - the refused name is the
+    parameter after the target either way. 437 is also sent for a CHANNEL
+    that is temporarily unavailable, with the channel in that position; that
+    one is not ours to act on here and is returned as None.
+    """
+    match = re.match(r"^:\S+\s+(\d{3})\s+\S+\s+(\S+)", line)
+    if not match or match.group(1) not in NICK_REFUSED_NUMERICS:
+        return None
+    refused = match.group(2)
+    if refused[0] in "#&+!":
+        return None
+    return refused
+
+
+def fallback_nick(main_nick, attempt):
+    """The name to try after `attempt` refusals on this connection, or None
+    once there is nothing left worth trying.
+
+    Only the alternate used to exist (#633). With the main nick and the
+    alternate both held by ghosts after a split storm, the bot sent NICK
+    main, got 433, sent NICK alt, got 433 - and then nothing, until the
+    server's registration timeout closed the link, ten seconds passed, and
+    the same two lines went out again, for as long as the ghosts lived.
+
+    The first fallback is still the configured alternate. After that: the
+    alternate with a digit, 1 to 9, appended when the result is short
+    enough for every server and replacing the last character otherwise.
+    Never the main nick or the alternate again under another number.
+    """
+    alt = resolve_alt_nick(main_nick)
+    if attempt <= 1:
+        return alt
+    taken = {str(main_nick).lower(), alt.lower()}
+    number = attempt - 1
+    while number < NICK_FALLBACK_LIMIT:
+        digit = str(number)
+        if len(alt) + len(digit) <= NICKLEN_EVERY_SERVER_ALLOWS:
+            candidate = alt + digit
+        else:
+            candidate = alt[:-len(digit)] + digit
+        if candidate.lower() not in taken:
+            return candidate
+        number += 1
+    return None
+
+
 def numeric_target(line):
     """The nick a server numeric is addressed to, or None.
 
@@ -2328,22 +2397,34 @@ def irc_loop():
             continue
             
         # Send the handshake immediately; the server decides the nick via real 433 replies
+        # Refusals so far on THIS connection - the handshake loop and the
+        # main loop below share the count, since either may see the next
+        # one. Per connection on purpose: a reconnect starts again from the
+        # configured name, because the ghosts may be gone by then.
+        nick_refusals = 0
         try:
             s.sendall(f"NICK {config.NICKNAME}\r\n".encode("utf-8", errors="ignore"))
-            
+
             auth_buffer = b""
             while True:
                 auth_data = s.recv(SOCKET_READ_BYTES)
                 if not auth_data:
                     break
                 auth_buffer, auth_lines = take_complete_lines(auth_buffer, auth_data)
-                
+
                 for a_line in auth_lines:
-                    if " 433 " in a_line or "erroneous nickname" in a_line.lower():
-                        alt_nick = resolve_alt_nick(config.ORIGINAL_NICK)
-                        print(f"[SERVER 433] The nick {config.NICKNAME} was taken. Switching CURRENT_NICK to: {alt_nick}")
-                        s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
-                        config.NICKNAME = alt_nick
+                    # The numeric, not " 433 " or the English for 432 -
+                    # and 437 with them (#633). Same three as the main loop.
+                    refused = parse_nick_refusal(a_line)
+                    if refused is not None:
+                        nick_refusals += 1
+                        next_nick = fallback_nick(config.ORIGINAL_NICK, nick_refusals)
+                        if next_nick is None:
+                            print(f"[SERVER NICK] {refused} was refused too, and there are no more names to try. Waiting for the server.")
+                        else:
+                            print(f"[SERVER NICK] The nick {refused} was refused. Switching CURRENT_NICK to: {next_nick}")
+                            s.sendall(f"NICK {next_nick}\r\n".encode("utf-8", errors="ignore"))
+                            config.NICKNAME = next_nick
                     
                     # (The server's own name for us is read from the 001 in the
                     # main loop below, adopt_registered_nick(): 001 is sent only
@@ -2717,9 +2798,34 @@ def irc_loop():
                     # forge. The PRIVMSG/NOTICE test is gone because anchoring makes it not
                     # merely dead but harmful: a genuine 433 whose text happened to contain
                     # the word PRIVMSG would have been discarded.
-                    if is_server_numeric(line, "433") or is_server_numeric(line, "432"):
+                    # The guard names the numerics so a forged line can be
+                    # tested against it (tests/test_membership_events.py);
+                    # parse_nick_refusal() then reads WHICH name was refused
+                    # and steps aside for a 437 that names a channel.
+                    if is_server_numeric(line, "433") or is_server_numeric(line, "432") or is_server_numeric(line, "437"):
+                        refused_nick = parse_nick_refusal(line)
                         main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                        if str(config.NICKNAME).lower() == main_nick.lower():
+                        if refused_nick is None:
+                            pass
+                        elif not joined:
+                            # STILL REGISTERING (#633): every refusal moves
+                            # on to the next name, not just the first. With
+                            # both configured names held by ghosts the bot
+                            # used to go quiet here until the server closed
+                            # the link, and do the same again ten seconds
+                            # later. 437 lands here too - a nick delay is a
+                            # ghost by another number.
+                            nick_refusals += 1
+                            next_nick = fallback_nick(main_nick, nick_refusals)
+                            if next_nick is None:
+                                print(f"[NICK LADDER] {refused_nick} was refused too, and there are no more names to try. Waiting for the server.")
+                            else:
+                                print(f"[NICK LADDER] The server refused {refused_nick}. Trying: {next_nick}")
+                                s.sendall(f"NICK {next_nick}\r\n".encode("utf-8", errors="ignore"))
+                                config.NICKNAME = next_nick
+                        elif str(config.NICKNAME).lower() == main_nick.lower():
+                            # Registered, and the reclaim of the main nick
+                            # was refused: back to the alternate, as before.
                             alt_nick = resolve_alt_nick(main_nick)
                             print(f"[LIVE NICK COLLISION] The server reported a genuine collision for {main_nick}. Fallback nick: {alt_nick}")
                             s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
