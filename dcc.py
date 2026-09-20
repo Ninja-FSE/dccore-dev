@@ -33,6 +33,38 @@ import runtime
 # comments mean when they say "queue_lock".
 queue_lock = runtime.queue_lock
 
+def names_a_remote_or_absolute_path(name, windows=None):
+    """True for a requested name that points somewhere the library is not (#578).
+
+    A request is a name inside the library, never a location. On Windows,
+    os.path.join(base, "\\\\host\\share\\x") returns the UNC path unchanged, and
+    the os.path.exists()/realpath() calls that come BEFORE the containment check
+    then make Windows resolve the host and open an SMB session as the account
+    running the bot - an outbound connection, and an NTLM handshake, that anybody
+    in the channel could start with one line. Refused here, on the text, before
+    anything touches the file system.
+
+    UNC and device paths (`\\\\host\\share`, `\\\\?\\`, `//host/share`: Windows reads a
+    doubled slash of either kind the same way) are refused everywhere - no real
+    library name starts that way. A drive letter (`C:\\x`), a drive-relative one
+    (`C:x`) or a root-relative one (`\\x`) can only mean something on Windows, so
+    they are refused only there (`windows` overrides, for tests). A NUL byte is
+    refused everywhere: os.path calls raise on it.
+    """
+    text = str(name)
+    if "\x00" in text:
+        return True
+    if text.replace("/", "\\").startswith("\\\\"):
+        return True
+    if windows is None:
+        windows = platform_compat.IS_WINDOWS
+    if windows:
+        import ntpath
+        if ntpath.splitdrive(text)[0] or text.startswith("\\"):
+            return True
+    return False
+
+
 def is_safe_path(base_dir, path, follow_symlinks=True):
     """Safety filter: prevents directory traversal attacks.
 
@@ -1852,6 +1884,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
 
+            # A pack request is a heading ("D:\\MEDIA\\<folder>\\...") - a drive
+            # letter is how a heading is written, so only the remote forms are
+            # refused here: a UNC or device path would be probed by realpath()
+            # in the containment check below before it could be refused (#578).
+            if names_a_remote_or_absolute_path(win_path, windows=False):
+                print(f"[SECURITY] Refused {user}'s pack request: {win_path!r} names a remote location.")
+                announce_mod.send_pack_error_notice(irc_sock, user)
+                return
+
             # This used to be a third, differently-shaped copy of the same
             # "D:\MUSIC\<folder>\" prefix-stripping list.resolve_list_folder()
             # already does - non-anchored `.replace("D:/", "")` calls rather
@@ -2049,7 +2090,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         requested_file, requested_size_hint = list_mod.strip_info_suffix(requested_file)
         requested_size_hint = requested_size_hint.lower().strip()
 
-        requested_file = str(requested_file).lstrip("/")
+        requested_file = str(requested_file)
+        # Before the "/" strip: "//host/share" is a UNC path to Windows, and
+        # once its slashes are stripped it would look like a harmless relative
+        # one. Refused on the text, before any file system call (#578).
+        if names_a_remote_or_absolute_path(requested_file):
+            print(f"[SECURITY] Refused {user}'s request: {requested_file!r} names a location, not a file in the library.")
+            announce.send_dcc_error(user, "invalid_path")
+            return
+        requested_file = requested_file.lstrip("/")
 
         # The master list lives in LOCAL_LIST_DIR, everything else in the
         # music directory. Matched on the names the list builder writes rather

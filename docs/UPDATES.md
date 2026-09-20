@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A UNC path is refused before it is touched (#578)
+
+`os.path.join(base, r"\\host\share\x")` returns the UNC path unchanged, and `os.path.exists()` / `realpath()` ran
+on it before the containment check: on Windows an SMB connection (NTLM, as the bot's account) to a host the
+requester chose. `dcc.names_a_remote_or_absolute_path()` refuses, on the text and before any file system call:
+UNC and device paths everywhere (either slash, `//host` included, checked BEFORE the leading-slash strip that
+used to hide it), a drive or root-relative name on Windows, and a NUL byte. Applied to plain requests and, for
+remote forms only (a heading is written `D:\\...`), to `!rar`. Tests record every `os.path` call the handler
+makes and fail if any sees the remote name.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
