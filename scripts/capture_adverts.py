@@ -62,8 +62,8 @@ def main():
 
     # The username field must be lowercase on Undernet: it answers anything
     # else with "468 Your username is invalid" and closes the link before
-    # registration finishes. irc.py sends config.IDENT, which defaults to
-    # "dccore", for exactly this reason.
+    # registration finishes. irc.py sends the nickname in lower case (letters
+    # and digits only, irc.ident_for_nick()), for exactly this reason.
     ident = "".join(c for c in args.nick.lower() if c.isalnum()) or "observer"
     send(f"NICK {args.nick}")
     send(f"USER {ident} 0 * :advert capture")

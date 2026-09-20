@@ -272,6 +272,39 @@ def numeric_target(line):
     return None if target == "*" else target
 
 
+IDENT_MAX_LENGTH = 10          # USERLEN on Undernet; longer is cut by the server anyway
+
+
+def ident_for_nick(nick):
+    """The IRC ident (the part before the @ in nick!ident@host) for a nickname.
+
+    It follows the nickname (#744): a bot called SomeBot is somebot@host, not
+    the dccore@host every DCCore used to be. An ident is stricter than a
+    nickname, and Undernet is not forgiving about it - it answers a username
+    with an upper-case letter in it with "468 Your username is invalid" and
+    closes the link before registration finishes (scripts/capture_adverts.py
+    found that out). So the ident is the nickname in lower case, keeping only
+    ASCII letters and digits (the brackets, braces, "|", "-", "_", "^" and the
+    backtick a nickname may have are dropped), cut to USERLEN. Nothing left
+    falls back to "dccore".
+    """
+    kept = "".join(ch for ch in str(nick or "").lower()
+                   if ch.isascii() and ch.isalnum())[:IDENT_MAX_LENGTH]
+    return kept or "dccore"
+
+
+def registration_names():
+    """(ident, real name) for the USER line: both follow the configured nickname.
+
+    The CONFIGURED one (ORIGINAL_NICK, which is what NICKNAME was set to), not
+    whatever the bot is using this minute: with the first nick taken the bot
+    runs as its alternate for a while, and its identity should not flicker
+    with that. Read at every connection, so changing NICKNAME changes both.
+    """
+    configured = str(getattr(config, "ORIGINAL_NICK", None) or getattr(config, "NICKNAME", None) or "")
+    return ident_for_nick(configured), (configured or "dccore")
+
+
 def adopt_registered_nick(line):
     """Take the server's own name for us from the 001 it addressed to us.
 
@@ -2211,8 +2244,7 @@ def irc_loop():
                     # was unreachable, #594.)
 
                     if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
-                        ident_str = getattr(config, 'IDENT', 'dccore')
-                        real_str = getattr(config, 'REALNAME', 'dccore bot')
+                        ident_str, real_str = registration_names()
                         s.sendall(f"USER {ident_str} 0 * :{real_str}\r\n".encode("utf-8", errors="ignore"))
                         break
                 else:
