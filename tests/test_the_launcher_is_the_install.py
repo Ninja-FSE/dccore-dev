@@ -49,9 +49,22 @@ CONFIGURE_FAILS = ("import sys\nprint('CONFIGURE-RAN')\n"
 CONFIGURE_BROWSER = ("import sys\n"
                      "print('CONFIGURE-RAN', sys.argv[1:])\n"
                      "sys.exit(0 if '--setup-in-browser' in sys.argv else 1)\n")
+# The page was possible (0) but the daemon could not serve it, and the plain
+# call answers the questions: #617's fallback.
+CONFIGURE_BROWSER_THEN_ASKS = ("import sys\n"
+                               "print('CONFIGURE-RAN', sys.argv[1:])\n"
+                               "if not sys.argv[1:]:\n"
+                               "    open('settings.conf', 'w').write('NICKNAME = X\\n')\n")
 CHECK = "print('CHECK-RAN')\n"
 CHECK_FAILS = "print('CHECK-RAN')\nraise SystemExit(1)\n"
 OSERVE = "print('OSERVE-RAN')\n"
+# oserve.EXIT_SETUP_IN_THE_TERMINAL: the setup page could not finish on a tree
+# with no config (#617); once settings.conf exists it starts like the real one.
+OSERVE_PAGE_FAILS = ("import os, sys\n"
+                     "print('OSERVE-RAN')\n"
+                     "if not os.path.exists('settings.conf'):\n"
+                     "    print('[SETUP] Could not open the setup page - the port is taken.')\n"
+                     "    sys.exit(3)\n")
 
 
 class _LauncherBehaviour:
@@ -104,6 +117,55 @@ class _LauncherBehaviour:
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.markers(out), ["CONFIGURE-RAN ['--setup-in-browser']", "OSERVE-RAN"])
         self.assertIn("Welcome to DCCore", out)
+
+    def test_a_page_that_could_not_be_served_falls_back_to_the_questions_here(self):
+        """#617: with Flask there, the browser path was the only path, and a
+        taken port (another DCCore in a minimised window) ended every run in
+        "exited with code 1" with the terminal questions unreachable. The
+        daemon now exits 3 for that, and the launcher asks the questions,
+        then checks the setup and starts, as the terminal path does."""
+        rc, out = self.run_in(self.tree({"configure.py": CONFIGURE_BROWSER_THEN_ASKS,
+                                         self.check_path: CHECK, "oserve.py": OSERVE_PAGE_FAILS}))
+
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.markers(out), ["CONFIGURE-RAN ['--setup-in-browser']", "OSERVE-RAN",
+                                             "CONFIGURE-RAN []", "CONFIGURE-RAN ['--flask']", "OSERVE-RAN"])
+        self.assertIn("questions follow here", out)
+
+    def test_the_fallback_still_runs_the_setup_check(self):
+        """The check is silent when it passes (so it is absent above); a
+        fallback that skipped it would start a bot on whatever the questions
+        wrote, which is the one thing the check exists to refuse."""
+        rc, out = self.run_in(self.tree({"configure.py": CONFIGURE_BROWSER_THEN_ASKS,
+                                         self.check_path: CHECK_FAILS, "oserve.py": OSERVE_PAGE_FAILS}))
+
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(self.markers(out), ["CONFIGURE-RAN ['--setup-in-browser']", "OSERVE-RAN",
+                                             "CONFIGURE-RAN []", "CHECK-RAN"])
+        self.assertIn("Setup check failed", out)
+
+    def test_the_fallback_is_only_for_the_browser_path(self):
+        """A configured tree whose daemon happens to exit 3 is not a first
+        run: no questions, the exit code is reported as before."""
+        rc, out = self.run_in(self.tree({"settings.conf": "x\n", "configure.py": CONFIGURE_BROWSER_THEN_ASKS,
+                                         self.check_path: CHECK,
+                                         "oserve.py": "print('OSERVE-RAN')\nraise SystemExit(3)\n"}))
+
+        self.assertEqual(rc, 3, out)
+        self.assertEqual(self.markers(out), ["CONFIGURE-RAN ['--flask']", "OSERVE-RAN"])
+        self.assertNotIn("questions follow here", out)
+        self.assertIn("exited with code 3", out)
+
+    def test_questions_that_do_not_finish_after_the_page_failed_do_not_start_the_bot(self):
+        configure = ("import sys\nprint('CONFIGURE-RAN', sys.argv[1:])\n"
+                     "sys.exit(0 if '--setup-in-browser' in sys.argv else 1)\n")
+        rc, out = self.run_in(self.tree({"configure.py": configure, self.check_path: CHECK,
+                                         "oserve.py": OSERVE_PAGE_FAILS}))
+
+        self.assertNotEqual(rc, 0)
+        self.assertIn("did not finish", out)
+        self.assertEqual(self.markers(out), ["CONFIGURE-RAN ['--setup-in-browser']", "OSERVE-RAN",
+                                             "CONFIGURE-RAN []"])
 
     def test_setup_that_does_not_finish_does_not_start_the_bot(self):
         rc, out = self.run_in(self.tree({"configure.py": CONFIGURE_FAILS, self.check_path: CHECK, "oserve.py": OSERVE}))

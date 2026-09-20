@@ -272,6 +272,7 @@ if not errorlevel 1 (
     set "BROWSER_SETUP=1"
     goto :go
 )
+:ask_here
 %PY% configure.py
 if errorlevel 1 (
     echo.
@@ -314,6 +315,21 @@ echo   Closing this window stops the bot too - leave it open, or minimise it.
 echo.
 %PY% oserve.py
 set "RC=%errorlevel%"
+
+rem  THE PAGE COULD NOT BE SERVED (#617). oserve.py exits 3 when the setup
+rem  page was this first run's path and could not finish - the port was
+rem  taken (another DCCore in a minimised window, another program), or
+rem  Ctrl-C. Flask being there sent every run down the same road, and the
+rem  questions above were unreachable from here: ask them now, then check
+rem  the setup and start, as the terminal path does. Once they are answered
+rem  no later run comes this way.
+if "%BROWSER_SETUP%"=="1" if "%RC%"=="3" (
+    set "BROWSER_SETUP="
+    echo.
+    echo   The setup page could not be opened, so the questions follow here.
+    echo.
+    goto :ask_here
+)
 
 echo.
 if "%RC%"=="0" (

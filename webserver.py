@@ -4724,10 +4724,15 @@ if HAVE_FLASK:
             server = make_server(host, port, app, threaded=True)
         except (OSError, SystemExit) as err:
             # SystemExit too: werkzeug's server calls sys.exit(1) on a bind
-            # failure ("port in use", printed by it), and a taken port must
-            # not take the daemon down - the caller falls back to its old
-            # refusal, which says what to do.
-            log(f"[SETUP] Could not open the setup page on {host}:{port} ({err}).")
+            # failure ("port in use", printed by it to stderr), and a taken
+            # port must not take the daemon down - the caller falls back to
+            # its refusal. That SystemExit printed as "(1)" here, and the
+            # only causes and the only ways out went unsaid (#617).
+            reason = "the port is taken" if isinstance(err, SystemExit) else str(err)
+            log(f"[SETUP] Could not open the setup page on {host}:{port} - {reason}.")
+            log("[SETUP] Is another DCCore still running, maybe in a minimised window? "
+                "Stop it, or free the port, or put another WEBUI_PORT in settings.conf - "
+                "or answer the questions in the terminal instead: python3 configure.py")
             return None
         thread = threading.Thread(target=server.serve_forever, name="dccore-setup", daemon=True)
         thread.start()

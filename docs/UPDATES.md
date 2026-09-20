@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A first run whose setup page cannot bind falls back to the terminal questions (#617)
+
+With Flask importable `configure.py --setup-in-browser` answers 0 without asking, so the launchers started
+`oserve.py` to serve the setup page; when `run_setup_until_configured()` could not bind WEBUI_PORT (another DCCore
+in a minimised window, another program) it returned None and `startup()` fell to the refusal that says "copy the
+sample files", exit 1 - and every later run took the identical road, with the terminal questions unreachable from
+the launcher. The bind-failure line printed werkzeug's SystemExit as "(1)" and named no cause and no way out.
+Now: `run_setup_until_configured()` says "the port is taken", asks about another DCCore, and names `WEBUI_PORT`
+and `configure.py`; `startup()` exits `oserve.EXIT_SETUP_IN_THE_TERMINAL` (3) when the page was tried and did not
+configure anything (the refusal without a page keeps its 1 and its sample advice); `start-dccore.bat` and
+`start-dccore.sh` (which the .command execs) map a 3 on the browser path to the terminal questions, then the
+setup check, the Flask offer and the start, exactly as the terminal path does. A 3 from a configured tree is
+reported as before. Tests execute both launchers with stub scripts (the fallback, the check still running on it,
+questions that do not finish, and a configured tree that exits 3), and drive `startup()` and a held loopback port.
+
 ### 📍 The options dialog's labels fit their controls (#616)
 
 `dialog dccore.opt` uses `option dbu`: a horizontal unit is a quarter of the dialog font's average character width

@@ -68,6 +68,21 @@ if [ "$1" = "check" ]; then
     exit $?
 fi
 
+# --- the setup questions, in this terminal ------------------------------------
+# Used on a first run when the browser page was declined or is out of reach,
+# and again when the daemon could not serve it (below). Fails when setup did
+# not finish, so that the bot is not started on a half-written config.
+ask_the_questions_here() {
+    if ! "$PY" configure.py; then
+        echo
+        echo "  Setup did not finish, so DCCore was not started. Run this file"
+        echo "  again to pick it up where it stopped."
+        echo
+        return 1
+    fi
+    echo
+}
+
 # --- refuse to start without a local config --------------------------------
 # settings.conf is fully first-class (see scripts/setup_check.py's own note) -
 # the daemon starts fine from it alone, so this only refuses when NEITHER
@@ -123,15 +138,14 @@ if [ ! -f "admin_config.py" ] && [ ! -f "settings.conf" ]; then
     # before.
     if "$PY" configure.py --setup-in-browser; then
         BROWSER_SETUP=1
-    elif ! "$PY" configure.py; then
-        echo
-        echo "  Setup did not finish, so DCCore was not started. Run this file"
-        echo "  again to pick it up where it stopped."
-        echo
-        exit 1
+    else
+        ask_the_questions_here || exit 1
     fi
-    echo
 fi
+
+# A loop only for the browser path's fallback below; every other start goes
+# round exactly once.
+while :; do
 
 # --- refuse to start on a broken or dangerous config ------------------------
 # check-setup.py fails on a missing music directory, and on a config still
@@ -159,6 +173,24 @@ echo "  Closing this terminal stops the bot too - leave it open."
 echo
 "$PY" oserve.py
 RC=$?
+
+# THE PAGE COULD NOT BE SERVED (#617). oserve.py exits 3 when the setup page
+# was this first run's path and could not finish - the port was taken
+# (another DCCore in a minimised window, another program), or Ctrl-C. Flask
+# being there sent every run down the same road, and the questions above were
+# unreachable from here: ask them now, then check the setup and start, as the
+# terminal path does. Once they are answered no later run comes this way.
+if [ -n "$BROWSER_SETUP" ] && [ "$RC" -eq 3 ]; then
+    BROWSER_SETUP=
+    echo
+    echo "  The setup page could not be opened, so the questions follow here."
+    echo
+    ask_the_questions_here || exit 1
+    continue
+fi
+break
+
+done
 
 echo
 if [ "$RC" -eq 0 ]; then

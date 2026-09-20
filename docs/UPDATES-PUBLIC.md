@@ -25,6 +25,10 @@
 
 - **Fixed (mIRC window): the labels in `/dccore options` were cut off.** "Side panel with slots, queue and today's totals", "Slots, queue and speed in the title bar", "Console replies in a separate window", the fixed-width font and a few small labels ended mid-word because they were wider than their tickboxes. The dialog is wider now and every label fits. Update `dccore.mrc`.
 
+- **Fixed: a first run could get stuck when the setup page's port was already taken.** With Flask installed and port 8420 in use - typically another DCCore still running in a minimised window - every start ended in "exited with code 1" and advice to copy sample files, and the launcher never offered its own questions. The message now says the port is taken and what to do about it, and the launcher asks the setup questions in the terminal instead.
+
+
+
 
 
 
