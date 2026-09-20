@@ -15,7 +15,10 @@ before.
 
 `is_admin()` compares a nick against `ADMIN_NICK`. On Undernet a nick is not owned
 without services auth, so anyone can take the admin nick while you are offline and
-inherit every admin command, including the destructive `!clearqueue`.
+inherit every admin command, including the destructive `!clearqueue`. With
+`ADMIN_HOSTMASKS` set, the channel and private-message commands check the sender's
+host as well as the nick (see "The admin commands typed in a channel" below); with
+it empty they are still checked on the nick alone.
 
 The console replaces that with two independent factors:
 
@@ -436,7 +439,14 @@ ADMIN_CHANNEL_COMMANDS = False
 ```
 
 Admin authority then rests entirely on the services host plus the password, and
-no longer on a nick. The user commands — `!list`, `@find`, the queue triggers —
+no longer on a nick. You do not have to turn them off to be safe from a stolen
+nick, though: with `ADMIN_HOSTMASKS` set, `!ban`, `!unban`, `!rehash`, `!update`,
+`!clearqueue`, `!ping` and `!debugnames` typed in a channel or a private message
+are honoured only when the nick is in `ADMIN_NICK` **and** the sender's host
+matches one of the masks - the same test the console uses, so a host that lets you
+into the console lets you use these too, and a nick somebody else has taken does
+not. A line that does not say where it came from is refused. With
+`ADMIN_HOSTMASKS` empty the check is the nick alone, as it always was. The user commands — `!list`, `@find`, the queue triggers —
 are not affected either way. `!ping` and `!debugnames` are the operator's
 diagnostics rather than user commands: they answer only a nick in `ADMIN_NICK`
 (and, being channel commands, keep doing so with `ADMIN_CHANNEL_COMMANDS` off).
@@ -473,6 +483,7 @@ have been replaced with spaces.
 | `DCCORE LOG <CATEGORY>` | JOIN, PART, QUIT, BAN, HARDBAN, MUTE, TBAN, INFO | the prose, as the plain console shows it |
 | `DCCORE OUT` | | one line of a console command's reply |
 | `DCCORE DROPPED <n>` | lines the bot had to drop for a slow client | |
+| `DCCORE TAKEN <ip>` | the address that took the console over | |
 | `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record | |
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |

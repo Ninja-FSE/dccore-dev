@@ -39,6 +39,16 @@ mkdir -p "$AGENTS" "$HOME/Library/Logs" || exit 1
 ROOT_XML=$(printf '%s' "$ROOT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 LOG_XML=$(printf '%s' "$LOG" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
+# A launchd agent does not get the PATH of a shell: it gets
+# /usr/bin:/bin:/usr/sbin:/sbin. The Python this was installed and tested with
+# (python.org's in /usr/local/bin or /Library/Frameworks, Homebrew's in
+# /opt/homebrew/bin) is on the PATH of the Terminal this is run from and on no
+# other, so the launcher found only Apple's stub, said "Python was not found",
+# and launchd restarted it every ten seconds for ever (#588). The agent is given
+# this shell's PATH, then the places those installers use, then launchd's own.
+AGENT_PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/Library/Frameworks/Python.framework/Versions/Current/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+PATH_XML=$(printf '%s' "$AGENT_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -58,6 +68,11 @@ cat > "$PLIST" <<EOF
     <dict>
         <key>SuccessfulExit</key>
         <false/>
+    </dict>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>$PATH_XML</string>
     </dict>
     <key>StandardOutPath</key>
     <string>$LOG_XML</string>

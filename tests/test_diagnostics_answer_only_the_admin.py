@@ -90,13 +90,13 @@ class TheDispatchGatesBothBeforeDoingAnything(unittest.TestCase):
 
     def test_ping_checks_first(self):
         body = self.branch('elif msg.lower() == "!ping":')
-        gate = body.index("commands.diagnostics_are_for_the_admin(user)")
+        gate = body.index("commands.diagnostics_are_for_the_admin(user, user_host)")
         self.assertLess(gate, body.index("handle_ping_request"))
         self.assertIn("continue", body[gate:body.index("handle_ping_request")])
 
     def test_debugnames_checks_first(self):
         body = self.branch('elif msg.lower() == "!debugnames":')
-        gate = body.index("commands.diagnostics_are_for_the_admin(user)")
+        gate = body.index("commands.diagnostics_are_for_the_admin(user, user_host)")
         self.assertLess(gate, body.index("channel_users_lock()"))
         self.assertIn("continue", body[gate:body.index("channel_users_lock()")])
 
