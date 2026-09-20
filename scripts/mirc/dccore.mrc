@@ -170,6 +170,7 @@ alias dccore {
     dccore.forget token
     dccore.forget paired
     dccore.forget bothost
+    hdel dccore.live tokenbad
     dccore.title
     return
   }
@@ -234,6 +235,7 @@ alias dccore.connect {
   hadd dccore.live state opening
   hadd dccore.live byhand $iif($1 == byhand,1,0)
   hadd dccore.live tokentried 0
+  hadd dccore.live typed 0
   hadd dccore.live opened $ctime
   dccore.sys Opening the console of $dccore.bot $+ ...
   dccore.title
@@ -246,6 +248,7 @@ alias dccore.connect {
 alias dccore.retry {
   if (!$dccore.opt(auto)) { return }
   if (!$dccore.opt(wantopen)) { return }
+  if ($dccore.st(tokenbad)) { dccore.sys Not redialing by itself: the stored token was refused. /dccore pair again, or /dccore connect and type the password. | return }
   var %n = $calc($dccore.st(tries) + 1)
   hadd dccore.live tries %n
   var %delay = $gettok(5 15 60 120,$iif(%n > 4,4,%n),32)
@@ -341,7 +344,7 @@ alias dccore.line {
   if ($1 == DCCORE) { dccore.structured $2- | return }
 
   if (%text == Enter Your Password:) {
-    if ($dccore.opt(token) != $null) && (!$dccore.st(tokentried)) && (!$dccore.st(pairing)) {
+    if ($dccore.opt(token) != $null) && (!$dccore.st(tokentried)) && (!$dccore.st(tokenbad)) && (!$dccore.st(pairing)) {
       ; The token is only ever handed to the address the bot was paired from.
       ; Anyone on the network can take the bot's nick while it is away, and
       ; the script dials that nick by itself - so who answers is checked
@@ -362,13 +365,15 @@ alias dccore.line {
       if (!$dccore.peerok password) { return }
     }
     hadd dccore.live state password
-    dccore.sys Type the admin password here and press Enter. $iif($dccore.st(pairing),The script will then ask the bot for a token of its own.,(No token stored; /dccore pair keeps one.))
+    dccore.sys Type the admin password here and press Enter. $iif($dccore.st(pairing),The script will then ask the bot for a token of its own.,$iif($dccore.st(tokenbad),(The stored token was refused and is not sent again; /dccore pair replaces it.),(No token stored; /dccore pair keeps one.)))
     return
   }
   if (%text == Entering DCC Chat Admin Interface) {
     hadd dccore.live state in
     hdel dccore.live mode
     dccore.sys Logged in to $dccore.bot $+ . Saying hello...
+    if ($dccore.st(tokenbad)) && (!$dccore.st(pairing)) { dccore.sys The stored token is still the one the bot refused: /dccore pair replaces it. }
+    hdel dccore.live tokenbad
     dccore.send hello dccore.mrc $dccore.ver
     .timerdccoreHello 1 6 dccore.plain
     if ($dccore.st(pairing)) { dccore.send pair dccore.mrc $dccore.ver }
@@ -376,8 +381,15 @@ alias dccore.line {
     return
   }
   if (%text == Incorrect Password.) {
-    if (%state == auth) {
-      dccore.sys The bot refused the stored token. It may have been revoked on the bot: /dccore pair again, or type the password now.
+    ; state auth with nothing typed by hand: it was the stored token
+    if (%state == auth) && (!$dccore.st(typed)) {
+      ; The bot counts refusals per address across sessions and blocks the
+      ; address for 15 minutes at the third. Sent again on every automatic
+      ; redial, a revoked token would reach that on its own within minutes,
+      ; with the operator away; so it is not sent again and the redial waits
+      ; for the operator (a login, or a new token) instead.
+      hadd dccore.live tokenbad 1
+      dccore.sys The bot refused the stored token (revoked there, or replaced by a newer pairing). It is not sent again, and the script does not redial by itself: type the password now, or /dccore pair again. (Three refusals block this address for 15 minutes.)
       hadd dccore.live state password
       return
     }
@@ -487,6 +499,7 @@ alias dccore.structured {
   if (%type == TOKEN) {
     dccore.set token $3
     dccore.set paired $date
+    hdel dccore.live tokenbad
     if ($address($dccore.bot,2) != $null) { dccore.set bothost $address($dccore.bot,2) }
     hadd dccore.live pairing 0
     dccore.sys Paired as $2 $+ . The token is kept in dccore.ini; from now on the script logs in by itself. /dccore unpair revokes it.
@@ -829,6 +842,7 @@ on *:INPUT:@DCCore: {
   if ($dccore.st(state) == password) {
     ; the password, typed by hand: never shown, never stored
     hadd dccore.live state auth
+    hadd dccore.live typed 1
     dccore.send $1-
     dccore.echo $dccore.prompt ********
     halt

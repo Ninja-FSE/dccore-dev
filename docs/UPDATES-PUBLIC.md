@@ -17,6 +17,9 @@
 
 - **Fixed: the queue in the mIRC panel and the console's `queue` listing are in the order people are served.** They were sorted by nick, so someone who asked first could show as number 2, and with more than 20 waiting the person actually next in line could be missing from the panel. Needs the bot updated; the script is unchanged.
 
+- **Fixed (mIRC window): a token the bot refuses no longer locks you out of your own bot.** If the stored token had been revoked (`unpair`, or the same name paired again from another machine), the script sent it again on every automatic reconnect, and the third refusal - about two minutes later, with nobody at the keyboard - blocked your address for 15 minutes with no word why. The script now says the token was refused, does not send it again, and stops reconnecting by itself until you type the password or `/dccore pair` again. A mistyped password no longer draws the "refused the stored token" message either. Update `dccore.mrc`.
+
+
 
 
 - **Fixed (mIRC window): the panel's "Since" box counts from when the bot started, not from when the window was opened.** Closing and reopening the window used to reset the time, `failed` and `searches`. The bot now counts them from its own start and sends them with its status. Needs the bot updated; an older bot still shows the window's own figures. Update `dccore.mrc`.

@@ -693,8 +693,12 @@ sent at all: what is off there never reaches the script.
   panel. Or the bot speaks a newer protocol than the script: update the
   script.
 - **The stored token is refused** - it was revoked on the bot (`unpair`),
-  or the token file was moved; `/dccore pair` again, typing the password
-  once.
+  replaced by pairing the same name from elsewhere, or the token file was
+  moved; `/dccore pair` again, typing the password once. The script does
+  not send a refused token again and does not redial by itself until you
+  log in or pair again: a refusal counts as a wrong password, three of them
+  block your address for 15 minutes, and left to itself the redial would
+  reach that in about two minutes.
 - **Two people with the script** - the console is one session, and a
   login replaces the one before it. The client that was replaced says so
   and does not reconnect by itself, so the two of you take turns rather
