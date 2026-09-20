@@ -32,6 +32,10 @@
 - **Fixed: the Linux and macOS "start with the system" installers no longer start a second bot.** Both used to start the bot the moment they were run, and since the guide says to run the bot by hand first, doing that with the bot still up gave you two bots - the second on the alternate nick, in the same channels, sharing the same queue and statistics files. Like the Windows installer, they now only register the start for your next login and tell you how to start it under systemd or launchd right away, once you have stopped the one you ran by hand.
 
 
+- **Fixed: a password with a space at the start or end opened the dashboard but never the DCC console.** The console trimmed what you typed before checking it; the dashboard did not. Both now take the password exactly as you set it. If your password ends in a space and the console has been refusing it, it will work now.
+
+
+
 
 
 

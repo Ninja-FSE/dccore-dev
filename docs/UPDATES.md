@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔑 The console takes the password exactly as it was set (#622)
+
+The setup page, `POST /api/settings/password` and the dashboard's login all hash and verify the password verbatim,
+but `adminchat._check_password()` did `line.strip()` first - so a password with a leading or trailing space (a
+password-manager entry that ends in one, or `secret ` typed and confirmed identically) opened the dashboard and never
+the console: three refusals, a blocked address, nothing saying why. The console now verifies the line as it came
+(the reader has already split off the newline); only an empty line is still not an attempt. A test drives
+`_check_password` with `" swordfish "` stored and asserts that both doors say the same about it and its stripped form.
+
 ### 🧪 preflight reads its children as UTF-8 (#620)
 
 `scripts/preflight.py` captured the test-count run and the hostile-environment probe with `capture_output=True,
