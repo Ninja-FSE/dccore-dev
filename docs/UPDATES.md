@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 The dispatch notice and the queue save run outside queue_lock (#605)
+
+Section B of `check_queue_and_send` and both branches of `handle_download_request` called
+`announce.send_dcc_sending_notice()` - which since #550 does an `os.path.getsize()` on the library path for the
+console feed - and `db.save_dcc_queue()` (an fsync) from inside `with queue_lock:`. `FILE_DIRECTORY` may be an NFS
+mount, and a stat on a hung one blocks forever: `queue_worker` samples `live_speed()` under the same lock once a
+second, so every outbound line stopped, and the IRC read thread takes it on every NICK, so the PONGs stopped and the
+server dropped the bot. The claim (`user_processing_lock.add` and the `active_transfers` append) is what needs the
+lock; the notice, the thread spawn and the save now run after it is released, the way section A's plain-file branch
+always has. A test drives all three paths and records whether the lock was held at the notice, the save and the
+thread start. The freeze sweep's `save_dcc_queue()` (once per expired timer) still runs under the lock.
+
 ### 🔒 A rehash no longer rewrites the live runtime containers with no lock held (#604)
 
 `commands.restore_preserved_runtime()` now skips a key whose preserved value *is* the live container (`value is
@@ -18,6 +30,7 @@ active" or "nobody banned"; and `clear()` under the IRC read thread's iteration 
 restored, so the `[REHASH RAM]` line is unchanged. The merge path is kept for a future key that is not
 runtime.py-bound; it is the only path that writes, and it still runs with no lock. Tests: instrumented dict and list
 containers must see zero writes when they are their own snapshot, and a fresh container must still be filled.
+### 📍 The panel's Since box is the bot's start (#754)
 
 `runtime.feed_counts` counts FAIL and SEARCH in `announce.feed_event` (runtime, so a rehash does not reset it; counted
 before the console tickboxes can refuse a line). `adminchat.status_lines()` appends `<started_epoch> <failed>

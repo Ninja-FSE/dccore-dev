@@ -237,7 +237,7 @@ class TheEventsAreEmittedWhereTheyHappen(DCCoreTestCase):
         body = source[source.index("def handle_download_request("):]
         found = body.index("file_name = os.path.basename(full_path)")
         request = body.index('feed_event("REQUEST"', found)
-        decision = body.index("if not user_already_transferring", found)
+        decision = body.index("sends_now = (not user_already_transferring", found)
 
         self.assertLess(found, request)
         self.assertLess(request, decision)

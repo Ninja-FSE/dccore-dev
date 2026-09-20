@@ -1370,6 +1370,16 @@ def check_queue_and_send(irc_sock, completed_user):
         oserve.active_downloads = len(config.active_transfers)
         
     absent_users = []
+    # The row section B claimed, dispatched AFTER the lock is released (#605).
+    # The claim - user_processing_lock.add() and the active_transfers append -
+    # is what needs queue_lock. The notice does not, and it stat()s the library
+    # path for the console feed's byte count: on a hung NFS mount that stat
+    # blocks forever, and every thread that takes queue_lock blocks behind it -
+    # queue_worker samples live_speed() under it once a second (no more
+    # outbound lines of any kind) and the IRC read thread takes it on every
+    # NICK (no more PONGs, the server drops the bot). Section A's plain-file
+    # branch has always dispatched outside the lock; this is the same shape.
+    promoted = None
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         with queue_lock:
             # FIXED: re-check the slot count INSIDE the lock. The test above is already
@@ -1476,13 +1486,17 @@ def check_queue_and_send(irc_sock, completed_user):
                         config.user_processing_lock = set()
                     config.user_processing_lock.add(queue_key)
 
-                    print(f"[DCC QUEUE] New user {real_username} verified live in RAM for {g_chan}. Got slot.")
                     config.active_transfers.append({"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name})
-                    if oserve: oserve.active_downloads = len(config.active_transfers)
-
-                    announce_mod.send_dcc_sending_notice(real_username, g_name, path=g_path, channel=g_chan)
-                    threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
+                    promoted = (real_username, g_path, g_name, g_chan, g_next)
                     break
+
+    if promoted is not None:
+        real_username, g_path, g_name, g_chan, g_next = promoted
+        print(f"[DCC QUEUE] New user {real_username} verified live in RAM for {g_chan}. Got slot.")
+        if oserve: oserve.active_downloads = len(config.active_transfers)
+
+        announce_mod.send_dcc_sending_notice(real_username, g_name, path=g_path, channel=g_chan)
+        threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
 
     for absent_user, absent_chan in absent_users:
         freeze_absent_user(irc_sock, absent_user, absent_chan)
@@ -2181,18 +2195,23 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     "is_unpacked_rar_folder": True,
                     "is_temporary_zip": True
                 })
-                import db
-                db.save_dcc_queue()  # Commit straight to dcc_queue.txt
-                
                 user_pos = len(config.dcc_queue[user_key])
-                print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
-                
-                # One single clean line to the debug channel, nothing more
-                announce_mod.feed_event("REQUEST", f"{user} asked for the folder \"{clean_folder_name}\" - packing it, sending when done.",
-                                        nick=user, channel=target_chan, kind="folder", name=clean_folder_name)
-                
-                announce_mod.send_dcc_queue_notice(user, folder_name, user_pos, channel=target_chan)
-                threading.Thread(target=check_queue_and_send, args=(irc_sock, user), daemon=True).start()
+
+            # Persisted AFTER the lock is released (#605): save_dcc_queue()
+            # takes its own snapshot of the dict and fsyncs under disk_lock,
+            # and a slow or contended data/ disk must not hold queue_lock
+            # while it does - see the file branch below for the full story.
+            import db
+            db.save_dcc_queue()  # Commit straight to dcc_queue.txt
+
+            print(f"[RAR QUEUE] Added virtuell mapp {master_rar_filename} for {user} at position #{user_pos}.")
+
+            # One single clean line to the debug channel, nothing more
+            announce_mod.feed_event("REQUEST", f"{user} asked for the folder \"{clean_folder_name}\" - packing it, sending when done.",
+                                    nick=user, channel=target_chan, kind="folder", name=clean_folder_name)
+
+            announce_mod.send_dcc_queue_notice(user, folder_name, user_pos, channel=target_chan)
+            threading.Thread(target=check_queue_and_send, args=(irc_sock, user), daemon=True).start()
             return
 
 
@@ -2487,29 +2506,43 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             user_has_queue = len(config.dcc_queue.get(user_key, [])) > 0
 
             # Only a user who is clear in transfers, the queue AND the memory lock sends immediately
-            if not user_already_transferring and not user_is_processing and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS:
+            sends_now = (not user_already_transferring and not user_is_processing
+                         and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS)
+            if sends_now:
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
-                
+
                 next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False}
                 config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name})
-                if oserve: oserve.active_downloads = len(config.active_transfers)
-                announce.send_dcc_sending_notice(user, file_name, path=full_path, channel=target_chan)
-                threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, target_chan, next_file_fake), daemon=True).start()
-                return
             else:
                 # This user already has a track running; the row goes to dcc_queue.txt
                 if user_key not in config.dcc_queue:
                     config.dcc_queue[user_key] = []
                 config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False})
-                
-                # Save and update dcc_queue.txt on disk straight away
-                import db
-                db.save_dcc_queue()
-                
                 user_pos = len(config.dcc_queue[user_key])
-                announce.send_dcc_queue_notice(user, file_name, user_pos, channel=target_chan)
-                return
+
+        # EVERYTHING THAT TOUCHES A DISK RUNS AFTER THE LOCK IS RELEASED (#605).
+        # The claim above is what needs queue_lock. The SENDING notice
+        # stat()s the library path for the console feed's byte count, and
+        # save_dcc_queue() fsyncs dcc_queue.txt - FILE_DIRECTORY is allowed to
+        # be an NFS mount, and a hung one blocks a stat forever. With that stat
+        # inside the lock every thread that takes queue_lock froze behind it:
+        # queue_worker samples live_speed() under it once a second, so no
+        # outbound line of any kind went out, and the IRC read thread takes it
+        # on every NICK, so the PONGs stopped and the server dropped the bot.
+        # Outside the lock the hang is confined to this request's thread.
+        if sends_now:
+            if oserve: oserve.active_downloads = len(config.active_transfers)
+            announce.send_dcc_sending_notice(user, file_name, path=full_path, channel=target_chan)
+            threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, target_chan, next_file_fake), daemon=True).start()
+            return
+
+        # Save and update dcc_queue.txt on disk straight away
+        import db
+        db.save_dcc_queue()
+
+        announce.send_dcc_queue_notice(user, file_name, user_pos, channel=target_chan)
+        return
 
     except Exception as e:
         print(f"[DCC ERROR] {e}")
