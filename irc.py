@@ -1085,6 +1085,26 @@ def channels_to_rejoin(limit=None):
                       and int(entry.get("refusals", 0)) < limit)
 
 
+def channels_we_are_out_of():
+    """The channels the bot is not in right now, lowercased: thrown out,
+    never let in, or given up on. What the advert worker skips.
+
+    A pure read, like channels_to_rejoin(). kicked_channels is exactly this
+    set: an entry is written by a kick or by the watchdog for a JOIN that was
+    never answered, and note_joined() removes it the moment a 366 says the
+    bot is back. A channel past REJOIN_ATTEMPTS stays in it, which is the
+    point - that is the one nothing will ever put the bot back into.
+
+    Audit M29 (#631): the advert worker sent the advert and the CTCP SLOTS
+    line into every channel in CHANNEL regardless, so a channel the bot had
+    been kicked from - or one that was +i and never answered - cost two
+    MSG_DELAY slots on the shared pacer every ANNOUNCE_INTERVAL for the life
+    of the process, answered by 404s nothing reads.
+    """
+    with runtime.kicked_channels_lock:
+        return set(config.kicked_channels)
+
+
 def gave_up_on(limit=None):
     """The channels that used up their attempts. What the operator is told."""
     if limit is None:

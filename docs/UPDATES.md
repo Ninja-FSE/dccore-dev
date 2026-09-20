@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📣 The advert skips a channel the bot is not in (#631)
+
+Audit M29. `announce_worker` walked `irc.configured_channels()` with no membership check, so a channel the bot
+had been kicked from - including one past REJOIN_ATTEMPTS, which gets no more JOINs - and a channel that was +i
+and never answered its JOIN each still received the advert PRIVMSG and the CTCP SLOTS line every
+ANNOUNCE_INTERVAL. The server answers 404, nothing reads that, and each line costs a MSG_DELAY slot on the shared
+pacer that the channels the bot IS in were waiting for: with 14 channels and MSG_DELAY=5 that is 10 s of the
+outbound clock per cycle, for the life of the process.
+
+`irc.channels_we_are_out_of()` is a pure read of `config.kicked_channels` - which is exactly that set: a kick or
+an unanswered JOIN writes the entry, the 366 of a successful join removes it - and the worker reads it once per
+cycle and skips what it names. The rejoin above the loop keeps asking for as long as it is allowed to, and the
+channel is advertised again the moment a 366 puts it back. Same division as the rejoin itself: irc.py owns the
+rule, the worker only acts on it. `tests/test_the_advert_skips_a_channel_we_are_not_in.py` drives one real cycle
+of the worker with a kicked, a never-confirmed and a fine channel.
+
 ### 🚦 The outbound pump waits for the JOINs to land, and the stale VIP backlog is really cleared (#630)
 
 Audit M28. `irc.py` publishes `oserve.irc_connection` straight after `connect()`, before NICK/USER go out and

@@ -608,9 +608,25 @@ def announce_worker():
                 except Exception as rejoin_err:
                     print(f"[REJOIN ERROR] Could not attempt a rejoin: {rejoin_err}")
 
+                # Once per cycle, not per channel, and through the same
+                # module that owns the rule - see channels_we_are_out_of().
+                try:
+                    import irc as irc_mod
+                    out_of = irc_mod.channels_we_are_out_of()
+                except Exception as membership_err:
+                    print(f"[ANNOUNCE] Could not read which channels we are in: {membership_err}")
+                    out_of = set()
+
                 for chan in channels_to_spam:
                     chan = chan.strip()
                     if not chan:
+                        continue
+                    # Not in there (#631): kicked, refused, or never
+                    # confirmed. The server would answer 404 to both lines,
+                    # nothing reads that, and each costs a pacer slot the
+                    # channels the bot IS in are waiting for. The rejoin
+                    # above keeps asking for as long as it is allowed to.
+                    if chan.lower() in out_of:
                         continue
 
                     # #432: one channel's failure must cost that channel, not
