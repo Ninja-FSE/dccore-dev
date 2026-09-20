@@ -4337,6 +4337,7 @@ def validate_setup_form(form):
     the same {NAME: value} dict configure.collect_answers() builds - what
     was answered is written, what was left blank is not - so the files the
     page writes are the files the terminal writes."""
+    import settings_file
     errors = []
     changes = {}
 
@@ -4346,9 +4347,9 @@ def validate_setup_form(form):
     nickname = text("NICKNAME")
     if not nickname:
         errors.append(("NICKNAME", "A nickname is needed."))
-    elif " " in nickname or nickname[0] in "#&:0123456789":
-        errors.append(("NICKNAME", "An IRC nickname has no spaces and does not "
-                                   "start with a digit or a #."))
+    elif settings_file.nick_problem(nickname):
+        errors.append(("NICKNAME", "That is not an IRC nickname: "
+                       + settings_file.nick_problem(nickname) + "."))
     else:
         changes["NICKNAME"] = nickname
 
@@ -4375,8 +4376,9 @@ def validate_setup_form(form):
     if not admin_nick:
         errors.append(("ADMIN_NICK", "Your own nick is needed - the person who may "
                                      "run the admin commands."))
-    elif " " in admin_nick:
-        errors.append(("ADMIN_NICK", "A nick has no spaces."))
+    elif settings_file.nicks_problem(admin_nick):
+        errors.append(("ADMIN_NICK", "That is not an IRC nickname: "
+                       + settings_file.nicks_problem(admin_nick) + "."))
     else:
         changes["ADMIN_NICK"] = admin_nick
 
