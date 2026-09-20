@@ -324,7 +324,7 @@ def strip_irc_formatting(text):
 # client formats. Tabs and control characters in any field become spaces.
 # ==========================================================================
 PROTOCOL_MAJOR = 1
-FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH")
+FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH", "LISTFETCH")
 
 
 def _clean(value, token=False):
@@ -385,6 +385,11 @@ def structured_line(kind, fields):
                 f"{_clean(f.get('reason'))}")
     if kind == "SEARCH":
         return f"DCCORE SEARCH {nick} {chan} {_num(f.get('results'))} {_clean(f.get('term'))}"
+    if kind == "LISTFETCH":
+        # A held bot list: asked for automatically, arrived, or unusable (#750).
+        # No channel: it is about a bot, not a person's request.
+        return (f"DCCORE LISTFETCH {_clean(f.get('bot'), token=True)} "
+                f"{_clean(f.get('action'), token=True)} {_clean(f.get('text'))}")
     return f"DCCORE LOG {_clean(f.get('category') or kind or 'INFO', token=True)} {_clean(f.get('text'))}"
 
 
@@ -902,6 +907,105 @@ def _cmd_update(session, args):
         session.nick, CONSOLE_SOURCE, authorised=True))
 
 
+# LIST FRESHNESS AND FETCH (#750). The List Browser in the dashboard shows, for
+# every bot whose list we hold, whether their own advert says it has moved on
+# since we took our copy, and the automatic refresh asks again; the console had
+# nothing. `lists` shows the same verdicts and `fetch` asks, through the same
+# enqueue the dashboard's own button uses - so the slot limits, the duplicate
+# guard and the queue ceiling apply exactly as they do there.
+FETCH_COMMAND_MAX = 10       # bots asked by one `fetch`; a run of thirty is a burst nobody asked for
+
+
+def _held_lists():
+    """[(real nick, summary row)], one per bot whose list we hold.
+
+    The summaries carry one row per LIST a bot published, keyed "nick" or
+    "nick/marker"; the freshness, age and presence are the bot's, so the first
+    row (the bot's main list sorts first) stands for it. Acting on a bot uses
+    the real nick, never the display one.
+    """
+    import webserver
+    seen = {}
+    for row in webserver.build_fetched_bot_list_summaries():
+        if not row.get("held"):
+            continue
+        nick = str(row.get("bot", "")).split("/", 1)[0]
+        if nick and nick.lower() not in seen:
+            seen[nick.lower()] = (nick, row)
+    return list(seen.values())
+
+
+def _age_text(then, now=None):
+    try:
+        seconds = max(0, int((time.time() if now is None else now) - float(then)))
+    except (TypeError, ValueError):
+        return "?"
+    if seconds < 90:
+        return f"{seconds} s"
+    if seconds < 90 * 60:
+        return f"{seconds // 60} min"
+    if seconds < 48 * 3600:
+        return f"{seconds // 3600} h"
+    return f"{seconds // 86400} d"
+
+
+def _cmd_lists(session, args):
+    """`lists`: the held bot lists and whether each has changed since we took it."""
+    rows = _held_lists()
+    if not rows:
+        session.send("No bot's list is held yet. `fetch <bot>` asks one for its list.")
+        return
+    changed = [nick for nick, row in rows if row.get("freshness") == "changed"]
+    session.send(f"{len(rows)} held list(s), {len(changed)} changed since we took our copy:")
+    order = sorted(rows, key=lambda item: (item[1].get("freshness") != "changed", item[0].lower()))
+    for nick, row in order:
+        online = {True: "online", False: "offline"}.get(row.get("online"), "")
+        session.send(f"  {nick:<16} {str(row.get('freshness') or '?'):<8} "
+                     f"{int(row.get('count') or 0):>10,} files  "
+                     f"fetched {_age_text(row.get('fetched_at'))} ago  {online}".rstrip())
+    if changed:
+        session.send("Ask for the changed ones with `fetch`, or one bot with `fetch <bot>`.")
+
+
+def _ask_for_list(nick):
+    """(ok, message) after asking `nick` for its list through the dashboard's enqueue."""
+    import webserver
+    status, result = webserver.build_list_fetch_enqueue_result(nick)
+    if status == 200:
+        return True, f"asked {nick} for its list"
+    return False, f"{nick}: {result.get('error', 'refused')}"
+
+
+def _cmd_fetch(session, args):
+    """`fetch [bot]`: ask every held bot whose list has changed, or one bot."""
+    name = args.strip()
+    if name:
+        ok, message = _ask_for_list(name)
+        session.send((message + ". It arrives when the transfer finishes." if ok else message))
+        return
+
+    changed = [(nick, row) for nick, row in _held_lists() if row.get("freshness") == "changed"]
+    if not changed:
+        session.send("Nothing to fetch: no held list has changed. (A bot that publishes no "
+                     "date is never treated as changed; `fetch <bot>` asks one anyway.)")
+        return
+    asked, skipped = [], []
+    for nick, row in sorted(changed, key=lambda item: float(item[1].get("fetched_at") or 0)):
+        if row.get("online") is False:
+            skipped.append(f"{nick} (offline)")
+            continue
+        if len(asked) >= FETCH_COMMAND_MAX:
+            skipped.append(f"{nick} (over the limit of {FETCH_COMMAND_MAX} - run `fetch` again)")
+            continue
+        ok, message = _ask_for_list(nick)
+        (asked if ok else skipped).append(nick if ok else message)
+    if asked:
+        session.send(f"Asked {len(asked)} bot(s) for their lists: {', '.join(asked)}. "
+                     f"Each arrives when its transfer finishes.")
+    for line in skipped:
+        session.send(f"  not asked: {line}")
+
+
 def _cmd_quit(session, args):
     session.close(announce_text="Goodbye.")
     _forget(session)
@@ -1049,6 +1153,8 @@ COMMANDS = {
     "rehash":     (_cmd_rehash,     "reload modules in place",           "rehash"),
     "update":     (_cmd_update,     "rebuild the MasterList",            "update"),
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
+    "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
+    "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
