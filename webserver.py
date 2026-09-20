@@ -4421,6 +4421,9 @@ def apply_setup(changes, password_hash, log=print, settings_path=None, admin_pat
     configure.write_admin_config_password(password_hash, path=admin_path)
     settings_file.apply_to(vars(config), path=settings_path, log=log)
     config.ADMIN_PASSWORD_HASH = password_hash
+    # apply_to() assigned NICKNAME but did not re-run the derivations that
+    # depend on it; the list rebuild is a new process and does (#590).
+    config.derive_list_base_name()
     return {"written": sorted(changes)}
 
 

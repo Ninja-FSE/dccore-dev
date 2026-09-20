@@ -4,6 +4,13 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The browser setup re-derives the list name (#590)
+
+`webserver.apply_setup()` applies settings.conf through `settings_file.apply_to()`, which assigns NICKNAME but never
+re-runs the derivation in `defaults.py`; `LIST_BASE_NAME` stayed 'DCCore' in the daemon while `update_list.py` (a new
+process) derived it from the nick. The derivation is now `defaults.derive_list_base_name()`, still called once at
+import, and `apply_setup()` calls it after `apply_to()`. A LIST_BASE_NAME the operator set is left alone.
+
 ### 📍 macOS autostart gets a PATH; the firewall script removes the Block rule Cancel made (#588, #589)
 
 The launchd agent inherited `/usr/bin:/bin:/usr/sbin:/sbin`, so `start-dccore.sh` found only Apple's stub and
