@@ -497,6 +497,7 @@ have been replaced with spaces.
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20 in the order they are served: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
+| `DCCORE PING` | stands in for a status burst the bot could not compute in time; a client treats it as any other line and shows nothing | |
 
 `<channel>` is always exactly one token, straight after the nick: the channel
 the request or search was made in, or `-` when there is none (a request by
@@ -519,7 +520,11 @@ drawn from. It arrives:
   `QUEUED`, `RESUMED`), so the picture never waits for the timer;
 - every 30 seconds while the session is quiet. That is also the heartbeat: a
   client that has heard nothing for a minute or so knows the link is dead,
-  not merely idle.
+  not merely idle. The figures are read on a helper thread with a two-second
+  deadline; if they are not in by then (a queue lock or a stats database held
+  for that long by some slow disk operation) the bot sends `DCCORE PING`
+  instead, so a busy-but-alive bot is still heard from, and the feed keeps
+  flowing behind it. The burst follows once the figures can be read.
 
 The timer fills silence only. A client that is behind is already receiving
 lines, and a burst on top of a backlog would only push more of them off the

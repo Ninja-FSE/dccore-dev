@@ -324,6 +324,120 @@ class TheBurstNeverRunsOnTheEmittingThread(DCCoreTestCase):
         self.assertGreaterEqual(buffer.count(b"DCCORE STATUS "), 3)
 
 
+class TheHeartbeatDoesNotWaitOnQueueLock(DCCoreTestCase):
+    """#614: the burst is also the heartbeat. The writer computed it inline,
+    so a queue_lock (or a stats DB) held for the script's 90 seconds parked
+    the writer with nothing at all going out - feed, LOG or STATUS - and
+    the script called the link dead, reconnected, and the next writer
+    parked at the same point: a login every ~100 s while the bot was fine.
+    Now the figures get STATUS_WAIT on a helper; past that `DCCORE PING`
+    stands in and the writer goes on draining."""
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(setattr, adminchat, "STATUS_WAIT", adminchat.STATUS_WAIT)
+        adminchat.STATUS_WAIT = 0.2
+        # live_speed() takes dcc.queue_lock only when its sample is stale,
+        # and that timestamp is global state another test's leftover writer
+        # thread can refresh underneath this one (it did, on a macOS
+        # runner, and the helper sailed through). So the figure that blocks
+        # is stubbed to take the lock unconditionally: while the test holds
+        # queue_lock the helper cannot finish, and that is the property.
+        import dcc
+        import stats_mgr
+
+        def speed_behind_the_lock(now=None):
+            with dcc.queue_lock:
+                return 0
+
+        self.addCleanup(setattr, stats_mgr, "live_speed", stats_mgr.live_speed)
+        stats_mgr.live_speed = speed_behind_the_lock
+
+    def hold_queue_lock(self):
+        import dcc
+        self.assertTrue(dcc.queue_lock.acquire(timeout=3.0), "queue_lock is already held")
+        self.addCleanup(dcc.queue_lock.release)
+
+    def recv_until(self, sock, needle, seconds=3.0):
+        sock.settimeout(seconds)
+        buffer = b""
+        deadline = time.time() + seconds
+        while time.time() < deadline and needle not in buffer:
+            try:
+                buffer += sock.recv(65536)
+            except socket.timeout:
+                break
+        return buffer
+
+    def send_status_or_fail(self, s):
+        """send_status on its own thread: the old code parked on the lock,
+        and a test that parks with it hangs the run instead of failing."""
+        returned = threading.Event()
+        threading.Thread(target=lambda: (s.send_status(), returned.set()), daemon=True).start()
+        self.assertTrue(returned.wait(3.0), "send_status parked on queue_lock")
+
+    def test_a_ping_stands_in_for_a_burst_the_lock_holds_up(self):
+        self.hold_queue_lock()
+        s = adminchat.Session(socket.socket(), "127.0.0.1", "SysOp", "h")
+        self.addCleanup(s.close, None)
+        s.authenticated = True; s.structured = True
+        self.send_status_or_fail(s)
+        self.assertEqual(list(s._outbox), ["DCCORE PING"])
+        self.assertIsNotNone(s._status_job, "the figures are still being read")
+
+    def test_the_feed_keeps_flowing_while_the_lock_is_held(self):
+        """The audit's probe: the writer running, the lock taken, the timer
+        due - and a feed line and a LOG line emitted behind it. They reached
+        nobody; the outbox just grew."""
+        self.hold_queue_lock()
+        a, b = socket.socketpair()
+        self.addCleanup(a.close); self.addCleanup(b.close)
+        s = adminchat.Session(a, "127.0.0.1", "SysOp", "h")
+        s.authenticated = True; s.structured = True
+        s._status_sent_at = 0                      # the timer is due at once
+        s.start_writer()
+        buffer = self.recv_until(b, b"DCCORE PING\n")
+        self.assertIn(b"DCCORE PING\n", buffer, "nothing was heard: the writer is parked")
+        s.event_sink("SENDING", {"nick": "dana", "slot": 1, "slots": 3, "bytes": 1, "name": "x"}, "t")
+        s.debug_sink("something happened", "INFO")
+        buffer += self.recv_until(b, b"DCCORE LOG INFO something happened\n")
+        s.close(None)
+        self.assertIn(b"DCCORE SENDING dana", buffer)
+        self.assertIn(b"DCCORE LOG INFO something happened\n", buffer)
+        self.assertNotIn(b"DCCORE STATUS ", buffer, "no figures could be read while the lock was held")
+
+    def test_the_burst_follows_once_the_lock_frees(self):
+        """The helper is not abandoned and not doubled: the pass that finds
+        it finished in time sends its lines, and a fresh one is started
+        only when none is running."""
+        import dcc
+        self.assertTrue(dcc.queue_lock.acquire(timeout=3.0), "queue_lock is already held")
+        s = adminchat.Session(socket.socket(), "127.0.0.1", "SysOp", "h")
+        self.addCleanup(s.close, None)
+        s.authenticated = True; s.structured = True
+        try:
+            self.send_status_or_fail(s)
+            helper = s._status_job[0]
+            self.send_status_or_fail(s)
+            self.assertIs(s._status_job[0], helper, "a second helper was started behind the first")
+            self.assertEqual(list(s._outbox), ["DCCORE PING", "DCCORE PING"])
+        finally:
+            dcc.queue_lock.release()
+        self.send_status_or_fail(s)
+        self.assertIsNone(s._status_job)
+        self.assertEqual(sum(l.startswith("DCCORE STATUS ") for l in s._outbox), 1,
+                         "one burst: the helper that was waited for, and no other")
+
+    def test_the_script_swallows_the_ping(self):
+        """Any line resets the script's 90 s timer, so PING needs no handling
+        beyond not being echoed as an unknown type."""
+        with io.open(os.path.join(REPO_ROOT, "scripts", "mirc", "dccore.mrc"), encoding="utf-8") as handle:
+            script = handle.read()
+        self.assertIn("if (%type == PING) { return }", script)
+        timer = script.index(".timerdccoreHB 1 90 dccore.dead")
+        self.assertLess(timer, script.index("dccore.line $1-"), "the timer is reset before the line is read")
+
+
 class Pairing(DCCoreTestCase):
     def setUp(self):
         super().setUp()

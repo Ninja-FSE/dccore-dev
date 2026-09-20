@@ -478,6 +478,9 @@ alias dccore.structured {
     return
   }
   if (%type == STATUS) { dccore.status $2- | return }
+  ; PING: the bot could not read its figures in time and sent this so the
+  ; link is heard from; the heartbeat timer above was reset by it already
+  if (%type == PING) { return }
   if (%type == SLOT) { hadd dccore.live slot. $+ $dccore.st(nslots) $2- | hinc dccore.live nslots | dccore.panel.soon | return }
   if (%type == QUEUE) { hadd dccore.live queue. $+ $2 $3- | dccore.panel.soon | return }
   if (%type == OUT) { dccore.out $2- | return }

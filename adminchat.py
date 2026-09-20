@@ -400,6 +400,7 @@ def hello_line():
 
 
 STATUS_INTERVAL = 30.0        # seconds between STATUS bursts to a structured session
+STATUS_WAIT = 2.0             # seconds the figures get before a PING stands in for the burst (#614)
 QUEUE_LINES_MAX = 20          # QUEUE rows per burst: the head of the queue, not all of it
 FREEZE_TIMEOUT = 300.0        # dcc.py's five-minute countdown, for the QUEUE row's seconds-left
 
@@ -531,6 +532,7 @@ class Session:
         self._reported_dropped = 0
         self._status_sent_at = 0.0
         self._status_due = False      # set by event_sink, acted on by the writer
+        self._status_job = None       # (thread, lines) while a burst is being computed
         self._outbox = collections.deque(maxlen=OUTBOX_MAX)
         self._wake = threading.Event()
         self._lock = threading.Lock()
@@ -574,12 +576,41 @@ class Session:
         off the network (seen live, 2026-09-19, the first night with the
         mIRC script connected). So event_sink only flags that a burst is
         due, and the writer, which holds nothing, computes and sends it.
+
+        Computes it on a helper thread with a deadline, not inline (#614):
+        the burst is also the heartbeat, and a writer parked on queue_lock
+        (or a locked stats DB) for the script's 90 seconds sent nothing at
+        all - not the feed, not a LOG line - so the script called the link
+        dead, reconnected, and the new session's writer parked at the same
+        point: a login every ~100 s while the bot itself was fine. If the
+        figures are not in within STATUS_WAIT, `DCCORE PING` stands in for
+        the burst - any line resets the script's timer - and the helper is
+        left to finish; while it is still running no second one is started,
+        and its lines go out on the pass that finds them ready in time.
         """
         if self.closed or not self.authenticated or not self.structured:
             return
         self._status_sent_at = time.time()
         self._status_due = False
-        for line in status_lines():
+        job = self._status_job
+        if job is None or not job[0].is_alive():
+            lines = []
+
+            def compute():
+                try:
+                    lines.extend(status_lines())
+                except Exception as err:
+                    print(f"[ADMINCHAT] Status burst failed: {err}")
+
+            job = (threading.Thread(target=compute, daemon=True), lines)
+            self._status_job = job
+            job[0].start()
+        job[0].join(STATUS_WAIT)
+        if job[0].is_alive():
+            self.send("DCCORE PING")
+            return
+        self._status_job = None
+        for line in job[1]:
             self.send(line)
 
     def request_status(self):
