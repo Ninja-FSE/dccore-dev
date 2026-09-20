@@ -4,6 +4,13 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A resumed send's SLOT speed counts what it sent (#746)
+
+`adminchat.status_lines()` built the DCCORE SLOT speed as `bytes_sent / (now - started_at)`; a resumed send starts
+with `bytes_sent` at the resume offset. `dcc.start_dcc_send` now also stores `resume_offset` on the row and the speed
+is `(bytes_sent - resume_offset) / elapsed`, never negative. Progress (sent / total) is unchanged. Rows without an
+offset behave exactly as before.
+
 ### 📍 The IRC ident and real name follow the nickname (#744)
 
 `irc.py` sent `USER <getattr(config,'IDENT','dccore')> 0 * :<getattr(config,'REALNAME','dccore bot')>`; neither

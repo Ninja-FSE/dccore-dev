@@ -3018,6 +3018,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             for tx in config.active_transfers:
                 if _mine(tx):
                     tx['bytes_sent'] = resume_offset
+                    # Where THIS connection started, so a speed can be told from
+                    # the row: bytes_sent counts what the receiver holds, the
+                    # skipped part included (#746).
+                    tx['resume_offset'] = resume_offset
             print(f"[DCC-RESUME] Resuming {file_name} for {user} at byte "
                   f"{resume_offset} of {file_size}.")
 

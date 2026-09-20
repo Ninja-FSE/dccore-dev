@@ -66,6 +66,41 @@ class TheStatusBurst(DCCoreTestCase):
 
         self.assertEqual(lines[1], "DCCORE SLOT erin 5000 10000 2500 X Y.rar")
 
+    def test_a_resumed_transfer_counts_only_what_this_connection_moved(self):
+        """Resumed at 20 GB, five seconds in, 30 MB sent since: 6 MB/s - not
+        20 GB / 5 s, which read 4 GB/s and, a little later, 108 MB/s."""
+        resumed_at = 20 * 1024 ** 3
+        sent = resumed_at + 30_000_000
+        config.active_transfers[:] = [{"user": "erin", "file": "X.mkv", "bytes_sent": sent,
+                                       "size": 24 * 1024 ** 3, "started_at": 995.0,
+                                       "resume_offset": resumed_at}]
+
+        line = adminchat.status_lines(now=1000.0)[1]
+
+        self.assertEqual(line, f"DCCORE SLOT erin {sent} {24 * 1024 ** 3} 6000000 X.mkv")
+
+    def test_the_progress_still_counts_from_the_start_of_the_file(self):
+        """Only the speed changes: sent/total stays the receiver's whole copy."""
+        config.active_transfers[:] = [{"user": "e", "file": "x", "bytes_sent": 900, "size": 1000,
+                                       "started_at": 990.0, "resume_offset": 800}]
+        fields = adminchat.status_lines(now=1000.0)[1].split()
+        self.assertEqual(fields[3:5], ["900", "1000"])
+
+    def test_a_row_without_a_resume_offset_is_as_before(self):
+        config.active_transfers[:] = [{"user": "erin", "file": "X.rar", "bytes_sent": 5000,
+                                       "size": 10000, "started_at": 998.0}]
+        self.assertEqual(adminchat.status_lines(now=1000.0)[1], "DCCORE SLOT erin 5000 10000 2500 X.rar")
+
+    def test_a_resume_that_has_moved_nothing_yet_reads_zero_not_negative(self):
+        config.active_transfers[:] = [{"user": "e", "file": "x", "bytes_sent": 800, "size": 1000,
+                                       "started_at": 990.0, "resume_offset": 800}]
+        self.assertTrue(adminchat.status_lines(now=1000.0)[1].endswith(" 800 1000 0 x"))
+
+    def test_a_stale_offset_larger_than_bytes_sent_is_not_a_negative_speed(self):
+        config.active_transfers[:] = [{"user": "e", "file": "x", "bytes_sent": 100, "size": 1000,
+                                       "started_at": 990.0, "resume_offset": 5000}]
+        self.assertTrue(adminchat.status_lines(now=1000.0)[1].endswith(" 100 1000 0 x"))
+
     def test_a_transfer_that_has_just_started_reports_no_speed_yet(self):
         """Half a second of data is not a rate."""
         config.active_transfers[:] = [{"user": "e", "file": "x", "bytes_sent": 500, "size": 9, "started_at": 999.9}]
@@ -439,3 +474,16 @@ class OverARealChat(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheResumeIsRecordedOnTheRow(unittest.TestCase):
+    """The speed above needs to know where this connection started (#746)."""
+
+    def test_a_resumed_send_stores_its_offset_beside_bytes_sent(self):
+        import io
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with io.open(os.path.join(root, "dcc.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        start = source.index("tx['bytes_sent'] = resume_offset")
+        self.assertIn("tx['resume_offset'] = resume_offset", source[start:start + 400])

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a resumed transfer showed an absurd speed in the mIRC window's side panel** (108 MB/s on a link doing 6). After a bot restart, or whenever a client resumed, the panel divided the whole file position by the few seconds since the restart. It now counts only what was sent since.
 - **The bot's IRC identity follows its nickname.** Every DCCore used to appear on IRC as `dccore@host` with the real name "dccore bot", whatever it was called. The ident is now the nickname (in lower case, letters and digits only, up to 10 characters - Undernet refuses more), and the real name is the nickname, read at every connection: change `NICKNAME` and both change with it, with no new setting. A bot still called DCCore stays `dccore@host`. Takes effect at the next connection (after a restart). A hard ban written with the old ident (`*!dccore@*`) would no longer match a bot that has been renamed.
 - **Fixed (mIRC window): `NICKin #channel` is `NICK in #channel` again.** On every request, queue, send, sent, failed and search line the nick ran together with the word "in" before the channel. Update `dccore.mrc`.
 - **Fixed: a fast transfer of a big file no longer says "at 0B/s".** A file of 8 MB or more that took between a tenth of a second and a second (easily done on a LAN: 35 MB/s moves 34 MB in under a second) was reported with no speed. Its speed is real, and is now shown; the old rule stays for small files, which can be handed to the network in one go. The mIRC window writes "at n/a" instead of "0B/s" when there is none.
