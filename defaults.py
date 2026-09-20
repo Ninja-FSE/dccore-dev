@@ -1284,5 +1284,20 @@ def _sanitize_list_base_name(name):
     return cleaned or "DCCore"
 
 
-if LIST_BASE_NAME == "DCCore" and NICKNAME:
-    LIST_BASE_NAME = _sanitize_list_base_name(NICKNAME)
+def derive_list_base_name():
+    """An untouched LIST_BASE_NAME takes the nickname's value.
+
+    Run when this module is (re)loaded, and again by the browser setup page
+    once it has applied the new settings to the running process (#590): that
+    assigns NICKNAME but never re-executes this module, so the daemon kept the
+    shipped "DCCore" while the list rebuild - a fresh process that imports this
+    file anew - wrote "<nick>-<date>.zip". The daemon then looked for DCCore-*
+    and saw no list, though the dashboard said the rebuild had worked.
+    """
+    global LIST_BASE_NAME
+    if LIST_BASE_NAME == "DCCore" and NICKNAME:
+        LIST_BASE_NAME = _sanitize_list_base_name(NICKNAME)
+    return LIST_BASE_NAME
+
+
+derive_list_base_name()

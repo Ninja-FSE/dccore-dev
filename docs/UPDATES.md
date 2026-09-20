@@ -4,6 +4,13 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The browser setup re-derives the list name (#590)
+
+`webserver.apply_setup()` applies settings.conf through `settings_file.apply_to()`, which assigns NICKNAME but never
+re-runs the derivation in `defaults.py`; `LIST_BASE_NAME` stayed 'DCCore' in the daemon while `update_list.py` (a new
+process) derived it from the nick. The derivation is now `defaults.derive_list_base_name()`, still called once at
+import, and `apply_setup()` calls it after `apply_to()`. A LIST_BASE_NAME the operator set is left alone.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
