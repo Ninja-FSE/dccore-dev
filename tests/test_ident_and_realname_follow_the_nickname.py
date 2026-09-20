@@ -125,7 +125,9 @@ class TheUserLine(unittest.TestCase):
         handshake = source[source.index("ident_str, real_str = registration_names()") - 2500:
                            source.index("ident_str, real_str = registration_names()")]
         self.assertIn("def irc_loop", source[:source.index("ident_str, real_str = registration_names()")])
-        self.assertIn("a_line", handshake)
+        # Inside the connect loop, after this connection's connect() - not
+        # once at the top of irc_loop() (#634 moved USER next to NICK).
+        self.assertIn("s.connect(", handshake)
 
 
 if __name__ == "__main__":

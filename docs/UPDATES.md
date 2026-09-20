@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🤝 NICK and USER go out back to back; nothing is read before registration is sent (#634)
+
+Audit M32. After NICK, the handshake waited for a line containing 001, 002, PING or NOTICE before it sent USER.
+A server that says nothing until it has both lines (some ircds, most bouncers) never triggered it: the 70 s recv
+timed out and the connect was retried every 80 s for ever, with a log that only said "timed out". And when the
+trigger did arrive, the reader broke out of the chunk it was in - every line already decoded after it was dropped
+and the partial line in its buffer with them - so a 433 sharing a recv() chunk with "NOTICE AUTH" was thrown away
+and the bot waited for a registration the server had already refused. A PING before 001 was used as the cue and
+never answered.
+
+The pre-registration reader is gone. NICK and USER are sent back to back, as every client sends them, and the main
+loop is the registration from the first byte: it answers PING, walks the nick ladder on a refusal (#633) and adopts
+the name from the 001. `tests/test_nick_and_user_go_out_back_to_back.py` drives the real `irc_loop()` against a
+scripted socket: a silent server still gets both lines, a 433 in the same chunk as the first NOTICE (or split
+across two) is acted on, a pre-registration PING gets its PONG. Two source-reading guards that pinned the old
+reader's shape now pin the new one.
+
 ### 🏷️ A third nick when both configured names are taken, and 437 is a refusal (#633)
 
 Audit M31. The 433/432 handler only reacted while the bot was still asking for its main nick: a 433 for the

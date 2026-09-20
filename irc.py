@@ -2218,8 +2218,8 @@ MAX_PENDING_LINE_BYTES = 64 * 1024
 def take_complete_lines(buffer, chunk):
     """Add `chunk` to `buffer` and return (leftover_bytes, [decoded lines]).
 
-    Both the IRC read loop and the pre-auth NICK loop need this, and both used
-    to do it inline as:
+    The IRC read loop needs this (and so did the pre-auth NICK loop, until
+    #634 removed it), and both used to do it inline as:
 
         data = s.recv(2048).decode("utf-8", errors="ignore")   # decode FIRST
         buffer += data                                         # then accumulate
@@ -2396,51 +2396,32 @@ def irc_loop():
             time.sleep(10)
             continue
             
-        # Send the handshake immediately; the server decides the nick via real 433 replies
-        # Refusals so far on THIS connection - the handshake loop and the
-        # main loop below share the count, since either may see the next
-        # one. Per connection on purpose: a reconnect starts again from the
+        # NICK and USER back to back, like every other client (#634, audit
+        # M32). This used to send NICK and then wait for the server to say
+        # something - a 001, a PING, any NOTICE - before sending USER. Two
+        # things were wrong with that. A server that says nothing until it
+        # has BOTH lines (some ircds, most bouncers) never triggered it, so
+        # the 70 s recv timed out and the connect was retried every 80 s for
+        # ever with a log that only said "timed out". And when the trigger
+        # did arrive, the loop broke out of the chunk it was in: every line
+        # already decoded after it was dropped and the partial line left in
+        # the buffer with it - a 433 sharing a chunk with "NOTICE AUTH" (fast
+        # DNS, slow client) was thrown away, and the bot waited for a
+        # registration the server had already refused.
+        #
+        # The main loop below is the registration now: it answers PING,
+        # steps down the nick ladder on a refusal (#633) and adopts the name
+        # from the 001. Nothing here needs to read a byte first.
+        #
+        # Refusals so far on THIS connection, counted by the main loop. Per
+        # connection on purpose: a reconnect starts again from the
         # configured name, because the ghosts may be gone by then.
         nick_refusals = 0
         try:
+            ident_str, real_str = registration_names()
             s.sendall(f"NICK {config.NICKNAME}\r\n".encode("utf-8", errors="ignore"))
-
-            auth_buffer = b""
-            while True:
-                auth_data = s.recv(SOCKET_READ_BYTES)
-                if not auth_data:
-                    break
-                auth_buffer, auth_lines = take_complete_lines(auth_buffer, auth_data)
-
-                for a_line in auth_lines:
-                    # The numeric, not " 433 " or the English for 432 -
-                    # and 437 with them (#633). Same three as the main loop.
-                    refused = parse_nick_refusal(a_line)
-                    if refused is not None:
-                        nick_refusals += 1
-                        next_nick = fallback_nick(config.ORIGINAL_NICK, nick_refusals)
-                        if next_nick is None:
-                            print(f"[SERVER NICK] {refused} was refused too, and there are no more names to try. Waiting for the server.")
-                        else:
-                            print(f"[SERVER NICK] The nick {refused} was refused. Switching CURRENT_NICK to: {next_nick}")
-                            s.sendall(f"NICK {next_nick}\r\n".encode("utf-8", errors="ignore"))
-                            config.NICKNAME = next_nick
-                    
-                    # (The server's own name for us is read from the 001 in the
-                    # main loop below, adopt_registered_nick(): 001 is sent only
-                    # AFTER the USER line this loop is about to send, so it can
-                    # never arrive here - the block that used to sit at this spot
-                    # was unreachable, #594.)
-
-                    if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
-                        ident_str, real_str = registration_names()
-                        s.sendall(f"USER {ident_str} 0 * :{real_str}\r\n".encode("utf-8", errors="ignore"))
-                        break
-                else:
-                    continue
-                break
-                
-            print(f"[INFO] Handshake complete. CURRENT_NICK settled as: {config.NICKNAME}. Starting the reader...")
+            s.sendall(f"USER {ident_str} 0 * :{real_str}\r\n".encode("utf-8", errors="ignore"))
+            print(f"[INFO] Registration sent as {config.NICKNAME}. Starting the reader...")
 
             # SHORT RECV TIMEOUT (see the clock logic below): recv() lets go every
             # 20 seconds so we can run the keepalive and the silence timer ourselves.

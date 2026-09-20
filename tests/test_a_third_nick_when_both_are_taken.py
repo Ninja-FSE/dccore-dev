@@ -157,9 +157,10 @@ class _ScriptedSocket:
             return [line.strip() for line in self.sent]
 
 
-class RegistrationWalksTheLadder(DCCoreTestCase):
+class DrivesOneRegistration(DCCoreTestCase):
     """One real registration attempt of irc.irc_loop() against a scripted
-    server that refuses every name, stopped on the reconnect path."""
+    server, stopped on the reconnect path. No tests of its own - the classes
+    below (and test_nick_and_user_go_out_back_to_back.py) run it."""
 
     def setUp(self):
         super().setUp()
@@ -176,7 +177,11 @@ class RegistrationWalksTheLadder(DCCoreTestCase):
         self.addCleanup(setattr, irc.time, "sleep", self._real_sleep)
 
     def run_registration(self, *server_lines):
-        chunks = [(line + "\r\n").encode("utf-8") for line in server_lines]
+        """Every line the bot sent, one server line per recv() chunk. A bytes
+        entry is handed over as one chunk verbatim - for a chunk holding two
+        lines, or half of one."""
+        chunks = [line if isinstance(line, bytes) else (line + "\r\n").encode("utf-8")
+                  for line in server_lines]
         sock = _ScriptedSocket(chunks)
         irc.socket.socket = lambda *a, **k: sock
 
@@ -200,12 +205,19 @@ class RegistrationWalksTheLadder(DCCoreTestCase):
         thread.join(10)
         self.assertFalse(thread.is_alive(), "irc_loop() did not reach the reconnect path")
         self.assertEqual(outcome, {"stopped": True})
-        return [line for line in sock.lines_sent() if line.startswith("NICK ")]
+        return sock.lines_sent()
+
+    def nicks_asked_for(self, *server_lines):
+        return [line for line in self.run_registration(*server_lines) if line.startswith("NICK ")]
+
+
+class RegistrationWalksTheLadder(DrivesOneRegistration):
+    """A scripted server that refuses every name."""
 
     def test_both_names_taken_a_third_is_asked_for(self):
         """The audit's own trace, inverted: main refused, alternate refused,
         and then - instead of silence - the next name."""
-        nicks = self.run_registration(
+        nicks = self.nicks_asked_for(
             ":irc.example.net NOTICE AUTH :*** Looking up your hostname",
             server("433", "SomeBot"),
             server("433", "SomeBot_"),
@@ -214,17 +226,18 @@ class RegistrationWalksTheLadder(DCCoreTestCase):
         self.assertEqual(nicks, ["NICK SomeBot", "NICK SomeBot_", "NICK SomeBot_1", "NICK SomeBot_2"])
 
     def test_a_nick_delay_is_a_refusal_too(self):
-        nicks = self.run_registration(
+        nicks = self.nicks_asked_for(
             ":irc.example.net NOTICE AUTH :*** Looking up your hostname",
             server("437", "SomeBot"))
 
         self.assertEqual(nicks, ["NICK SomeBot", "NICK SomeBot_"])
 
     def test_a_refusal_before_the_servers_first_notice_counts_as_well(self):
-        """Some servers answer the NICK before they say anything else, so
-        the first refusal lands in the handshake loop and the second in the
-        main loop. One count, shared."""
-        nicks = self.run_registration(
+        """Some servers answer the NICK before they say anything else. One
+        count, wherever the refusal lands relative to the server's first
+        NOTICE (there used to be a separate handshake reader before it -
+        #634 - and this proved the two shared the count)."""
+        nicks = self.nicks_asked_for(
             server("433", "SomeBot"),
             ":irc.example.net NOTICE AUTH :*** Looking up your hostname",
             server("433", "SomeBot_"))
@@ -234,14 +247,14 @@ class RegistrationWalksTheLadder(DCCoreTestCase):
     def test_the_ladder_has_an_end(self):
         refusals = [server("433", "SomeBot"), server("433", "SomeBot_")]
         refusals += [server("433", "SomeBot_%d" % d) for d in range(1, 10)]
-        nicks = self.run_registration(
+        nicks = self.nicks_asked_for(
             ":irc.example.net NOTICE AUTH :*** Looking up your hostname", *refusals)
 
         self.assertEqual(len(nicks), 11, nicks)
         self.assertEqual(nicks[-1], "NICK SomeBot_9")
 
     def test_a_437_for_a_channel_asks_for_nothing(self):
-        nicks = self.run_registration(
+        nicks = self.nicks_asked_for(
             ":irc.example.net NOTICE AUTH :*** Looking up your hostname",
             ":irc.example.net 437 SomeBot #somechannel :Nick/channel is temporarily unavailable")
 
