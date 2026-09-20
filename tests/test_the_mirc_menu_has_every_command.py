@@ -85,7 +85,7 @@ class TheWindowMenu(unittest.TestCase):
         self.assertIn("Queue of $dccore.sels", self.menu)
 
     def test_the_submenus_use_the_dot_form(self):
-        for entry in (".Show the lists:", ".Fetch the changed lists:", ".Find duplicate filenames:",
+        for entry in (".Show the lists:", ".Fetch the changed lists:", ".Ask a bot for its list...:", ".Find duplicate filenames:",
                       ".Ban...:", ".Unban...:", ".Clear a queue...:", ".Options...:", ".Font size...:"):
             self.assertIn(entry, self.menu, entry)
 
@@ -99,6 +99,8 @@ class TheWindowMenu(unittest.TestCase):
         self.assertIn("dccore.ask ban ", self.menu)
         self.assertIn("dccore.ask unban ", self.menu)
         self.assertIn("dccore.ask clearqueue ", self.menu)
+        self.assertIn(".Ask a bot for its list...:dccore.ask fetch ", self.menu)
+        self.assertNotRegex(self.menu, r"dccore\.send fetch\b", "a named fetch needs the bot's nick")
         self.assertIn("Console command...:dccore.askraw", self.menu)
         self.assertNotRegex(self.menu, r"dccore\.send ban\b", "a ban needs a pattern")
         self.assertNotRegex(self.menu, r"dccore\.send unban\b")

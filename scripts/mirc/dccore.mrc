@@ -870,6 +870,7 @@ menu @DCCore {
   Lists
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
+  .Ask a bot for its list...:dccore.ask fetch Ask which bot for its list
   Library
   .Find duplicate filenames:dccore.send verify
   .Rebuild the list...:dccore.confirm update Rebuild the list? It walks the whole library and can take minutes.
