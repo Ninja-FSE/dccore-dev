@@ -35,9 +35,16 @@ if errorlevel 1 (
 )
 
 rem --- find an interpreter, as start-dccore.bat does ---------------------
+rem  Found is not the same as works (#586). On a stock Windows 10/11 with no
+rem  Python, `where python` finds the Microsoft Store's stub in WindowsApps -
+rem  which is on PATH by default, opens the Store and exits 9009 - and `py`
+rem  can exist with no Python behind it. So each candidate is RUN once: only
+rem  one that answers becomes %PY%, and a machine that has only a stub falls
+rem  through to the install offer below. `call`, because a shim (pyenv-win's
+rem  python.bat) is a batch file, and running one without it never comes back.
 set "PY="
-where py >nul 2>&1 && set "PY=py -3"
-if not defined PY where python >nul 2>&1 && set "PY=python"
+where py >nul 2>&1 && call py -3 -c "import sys" >nul 2>&1 && set "PY=py -3"
+if not defined PY where python >nul 2>&1 && call python -c "import sys" >nul 2>&1 && set "PY=python"
 if not defined PY for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
     if exist "%%~D\python.exe" set "PY="%%~D\python.exe""
 )
@@ -74,6 +81,24 @@ for /f "usebackq tokens=1-4" %%A in ("%PORTS_FILE%") do (
 )
 del /q "%PORTS_FILE%" >nul 2>&1
 
+rem --- a Block rule that "Cancel" left behind (#589) -----------------------
+rem  The dialog's Cancel does not just decline: it creates an inbound BLOCK
+rem  rule for this interpreter, and Windows Defender Firewall evaluates Block
+rem  rules before Allow rules - so the port rule below cannot help while it
+rem  exists, and the file's own promise (fix "Cancel") would be false. Any
+rem  inbound Block rule for THIS python.exe is removed first; nothing else is
+rem  touched, and an Allow rule the dialog made stays. Not fatal if PowerShell
+rem  cannot do it. No parenthesised block: a ")" in a PowerShell command
+rem  would end it.
+set "PYEXE_FILE=%TEMP%\dccore-pyexe.txt"
+del /q "%PYEXE_FILE%" >nul 2>&1
+%PY% -c "import sys; open(sys.argv[1], 'w').write(sys.executable)" "%PYEXE_FILE%" >nul 2>&1
+if not exist "%PYEXE_FILE%" goto :rules
+call powershell -NoProfile -Command "$exe = (Get-Content -Raw -LiteralPath '%PYEXE_FILE%').Trim(); $n = 0; Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $exe } | ForEach-Object { $r = $_ | Get-NetFirewallRule; if ($r.Direction -eq 'Inbound' -and $r.Action -eq 'Block') { $r | Remove-NetFirewallRule; $n++ } }; if ($n -gt 0) { Write-Host ('  Removed ' + $n + ' inbound Block rule(s) for ' + $exe + ' - the one Cancel made.') }"
+if errorlevel 1 echo   Could not look for a Block rule left by "Cancel"; if sends still time out, remove it in Windows Defender Firewall.
+del /q "%PYEXE_FILE%" >nul 2>&1
+
+:rules
 rem --- the rules ---------------------------------------------------------
 rem  Deleted first so running this twice leaves one rule, not two.
 echo.

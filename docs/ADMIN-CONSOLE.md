@@ -15,7 +15,10 @@ before.
 
 `is_admin()` compares a nick against `ADMIN_NICK`. On Undernet a nick is not owned
 without services auth, so anyone can take the admin nick while you are offline and
-inherit every admin command, including the destructive `!clearqueue`.
+inherit every admin command, including the destructive `!clearqueue`. With
+`ADMIN_HOSTMASKS` set, the channel and private-message commands check the sender's
+host as well as the nick (see "The admin commands typed in a channel" below); with
+it empty they are still checked on the nick alone.
 
 The console replaces that with two independent factors:
 
@@ -436,7 +439,14 @@ ADMIN_CHANNEL_COMMANDS = False
 ```
 
 Admin authority then rests entirely on the services host plus the password, and
-no longer on a nick. The user commands — `!list`, `@find`, the queue triggers —
+no longer on a nick. You do not have to turn them off to be safe from a stolen
+nick, though: with `ADMIN_HOSTMASKS` set, `!ban`, `!unban`, `!rehash`, `!update`,
+`!clearqueue`, `!ping` and `!debugnames` typed in a channel or a private message
+are honoured only when the nick is in `ADMIN_NICK` **and** the sender's host
+matches one of the masks - the same test the console uses, so a host that lets you
+into the console lets you use these too, and a nick somebody else has taken does
+not. A line that does not say where it came from is refused. With
+`ADMIN_HOSTMASKS` empty the check is the nick alone, as it always was. The user commands — `!list`, `@find`, the queue triggers —
 are not affected either way. `!ping` and `!debugnames` are the operator's
 diagnostics rather than user commands: they answer only a nick in `ADMIN_NICK`
 (and, being channel commands, keep doing so with `ADMIN_CHANNEL_COMMANDS` off).
@@ -473,6 +483,7 @@ have been replaced with spaces.
 | `DCCORE LOG <CATEGORY>` | JOIN, PART, QUIT, BAN, HARDBAN, MUTE, TBAN, INFO | the prose, as the plain console shows it |
 | `DCCORE OUT` | | one line of a console command's reply |
 | `DCCORE DROPPED <n>` | lines the bot had to drop for a slow client | |
+| `DCCORE TAKEN <ip>` | the address that took the console over | |
 | `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record | |
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
@@ -526,6 +537,16 @@ plain line otherwise. Paste it into the script's settings; it is not shown
 again. From then on the script answers `Enter Your Password:` with the token
 and is logged in exactly as with the password: the same hostmask check
 first, the same three attempts, the same IP block.
+
+**The script only sends the token to the bot it paired with.** It dials the
+bot's nick by itself, and on Undernet anyone can take a nick while the bot is
+away, so before answering `Enter Your Password:` it compares the host the nick
+has now with the one the bot had when the token was stored (`bothost` in
+`dccore.ini`, learned when the token arrives). A different host is not sent the
+token: the window says so and the script stops reconnecting by itself. If the bot
+really has moved, `/dccore trust` accepts its current host. A script paired
+before this check learns the host the first time the bot's is known; if it is
+not known yet (you share no channel with it) the token waits for `/dccore trust`.
 
 What a token does **not** do is open the dashboard. The web login checks the
 admin password hash and nothing else - the token store is never read there -
@@ -622,6 +643,7 @@ sent at all: what is off there never reaches the script.
 /dccore connect [botnick]    open the window and the chat (logs in with the token)
 /dccore disconnect           close the chat and stop reconnecting
 /dccore unpair               forget the token here and revoke it on the bot
+/dccore trust                accept the bot's current host as the one to send the token to
 /dccore options              what to show, colours, panel, title bar, beep
 /dccore window               open or focus @DCCore
 /dccore status               ask the bot for its status

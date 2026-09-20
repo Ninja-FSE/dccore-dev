@@ -98,7 +98,7 @@ import defaults as config  # noqa: E402
 import settings_file  # noqa: E402
 
 
-def _ask(prompt, default=None):
+def _ask(prompt, default=None, check=None):
     """One prompt, with `default` shown and used on a bare Enter.
 
     Every field here either has a real, always-non-blank default (SERVER,
@@ -115,6 +115,13 @@ def _ask(prompt, default=None):
             if default:
                 return default
             print("  This can't be blank - it's required before the daemon will start.")
+            continue
+        # `check` returns what is wrong with an answer, or None (#591): asked
+        # again here, where the operator can fix it, rather than written to
+        # settings.conf to fail at the IRC server as a nick that is "taken".
+        problem = check(raw) if check else None
+        if problem:
+            print(f"  That will not do: {problem}.")
             continue
         return raw
 
@@ -150,7 +157,7 @@ def collect_answers():
 
     changes = {}
 
-    nickname = _ask("Nickname", default=_current("NICKNAME"))
+    nickname = _ask("Nickname", default=_current("NICKNAME"), check=settings_file.nick_problem)
     changes["NICKNAME"] = nickname
 
     server = _ask("IRC server", default=_current("SERVER", "irc.undernet.org"))
@@ -160,7 +167,7 @@ def collect_answers():
     changes["CHANNEL"] = channel
 
     admin_nick = _ask("Admin nick (who may run !ban/!rehash/!update/!clearqueue)",
-                      default=_current("ADMIN_NICK"))
+                      default=_current("ADMIN_NICK"), check=settings_file.nicks_problem)
     changes["ADMIN_NICK"] = admin_nick
 
     print()
@@ -594,15 +601,37 @@ def offer_flask_if_the_dashboard_is_on():
     return 0
 
 
-def offer_setup_in_browser(ask=input, log=print):
+def over_ssh(environ=None):
+    """True in an SSH session: the browser page listens on 127.0.0.1 of THIS
+    machine, and the person at the keyboard is on another one (#595)."""
+    environ = os.environ if environ is None else environ
+    return any(environ.get(name) for name in ("SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"))
+
+
+def offer_setup_in_browser(ask=input, log=print, environ=None):
     """`configure.py --setup-in-browser`: the launchers' first-run hook (#547,
     Proposal 4). Returns 0 when the daemon can be started straight away to
     serve its setup page - Flask is importable, installed just now if the
     operator said yes - and 2 when the questions should be asked here in
-    the terminal instead: Flask declined, not installable, or no one at the
-    keyboard to ask. Never raises for any of those; the terminal path is
-    what it was.
+    the terminal instead: Flask declined, not installable, no one at the
+    keyboard to ask, or an SSH session. Never raises for any of those; the
+    terminal path is what it was.
+
+    THE BROWSER IS FOR A PERSON AT THE MACHINE (#595). The setup page listens
+    on 127.0.0.1, so over SSH the printed link is unreachable from the operator's
+    own computer and the daemon waited for a form nobody could open, for ever -
+    and Flask being importable was the only test, so it was the same dead end on
+    every later run. In an SSH session the questions are asked here.
+    DCCORE_SETUP_IN_BROWSER=1 says "I have a tunnel" and keeps the page.
     """
+    environ = os.environ if environ is None else environ
+    if over_ssh(environ) and environ.get("DCCORE_SETUP_IN_BROWSER") != "1":
+        log("  You are connected over SSH, so a page on this machine's own address")
+        log("  (127.0.0.1) could not be opened from your computer - the questions")
+        log("  follow here instead. To use the browser page anyway, tunnel the port")
+        log("  (ssh -L 8420:127.0.0.1:8420 <this machine>) and run this again with")
+        log("  DCCORE_SETUP_IN_BROWSER=1.")
+        return 2
     try:
         import flask  # noqa: F401
         log("  Setup opens in your browser.")

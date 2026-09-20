@@ -43,6 +43,23 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem  schtasks creates the task with Task Scheduler's stock settings, which are
+rem  for a maintenance job (#587): stop it after 72 hours, do not start it on
+rem  battery, stop it when unplugged, run it below normal priority. For a bot
+rem  that is meant to stay up that means it silently vanishes from IRC after
+rem  three days, and never starts on a laptop that is unplugged. So they are
+rem  replaced: no time limit, battery is fine, normal priority, and a restart
+rem  (up to three times, a minute apart) if it fails. Not fatal if it cannot be
+rem  done - the task exists and starts at logon either way.
+call powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Priority 4 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1); Set-ScheduledTask -TaskName 'DCCore' -Settings $s | Out-Null"
+if errorlevel 1 (
+    echo.
+    echo   The task was created, but Task Scheduler's defaults could not be
+    echo   changed: it may be stopped after 3 days, and will not run on battery.
+    echo   Open Task Scheduler, the DCCore task, Settings, and untick "Stop the
+    echo   task if it runs longer than", and the two battery options.
+)
+
 echo.
 echo   Done: DCCore starts the next time you log on, in its own window.
 echo   Start it by hand now with start-dccore.bat if you want it running

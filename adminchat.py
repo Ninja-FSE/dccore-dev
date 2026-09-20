@@ -969,6 +969,7 @@ def _cmd_pair(session, args):
     name = (args.split() or ["client"])[0]
     token = secrets.token_urlsafe(32)
     tokens = db.load_admin_tokens()
+    replaced = name in tokens
     tokens[name] = {"hash": make_password_hash(token),
                     "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "by": session.nick}
@@ -980,6 +981,13 @@ def _cmd_pair(session, args):
         session.send(f"Paired {name}. Its token, shown once - it opens this chat and nothing else:")
         session.send(f"  {token}")
         session.send(f"Revoke it with: unpair {name}")
+        if replaced:
+            # The old token stopped working the moment the new one was saved: a
+            # script that held it is locked out until it is given this one (or
+            # pairs itself again), and it would otherwise find out only from a
+            # refused login.
+            session.send(f"This replaced the token {name} had before - a script "
+                         f"still using the old one must be paired again.")
 
 
 def _cmd_unpair(session, args):
@@ -1111,8 +1119,20 @@ def _promote(session):
         print(f"[ADMINCHAT] Could not attach the debug sink: {sink_err}")
 
     if previous is not None and previous is not session:
-        previous.send(f"Session taken over from {session.peer_ip}. Closing this one.")
-        previous.close(announce_text=None)
+        # Written INLINE, through close(announce_text=...), and not queued with
+        # send(): queueing hands the line to the writer thread and the very next
+        # statement closes the socket, so the writer found the session closed
+        # before it sent anything - the replaced client was never told (#583,
+        # #597, #600), never entered its "taken" state, and reconnected five
+        # seconds later, taking the console straight back. Two clients then
+        # traded it for ever. A structured session gets a line of its own
+        # (`DCCORE TAKEN <ip>`), not prose wrapped in DCCORE OUT, so a script can
+        # tell it apart from a console command's reply.
+        if previous.structured:
+            notice = f"DCCORE TAKEN {session.peer_ip}"
+        else:
+            notice = f"Session taken over from {session.peer_ip}. Closing this one."
+        previous.close(announce_text=notice)
     return previous
 
 
