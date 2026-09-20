@@ -4317,10 +4317,25 @@ def build_setup_fields(lang="en", values=None):
     import settings_file
     strings = _setup_strings(lang)
     types = settings_file.declared_types(vars(config))
+    # A fresh page (nothing typed yet) starts with the dashboard box TICKED.
+    # defaults.py ships WEBUI_ENABLED = False (convention 1: a listener ships
+    # off), and read as-is that unticked the box on every first run - while
+    # the intro, the folder placeholder and the folder error all defer the
+    # music folder to "the dashboard's Settings page" (#603). A novice who
+    # took that advice and did not notice the box ended with a bot that
+    # served nothing and had no Settings page to fix it from. This page
+    # exists only because Flask is installed - the launcher just installed
+    # it for the dashboard - and the box still binds loopback unless the LAN
+    # box is ticked too; unticking it stays one click. A redisplay after an
+    # error keeps what the operator chose: an unticked box is simply absent
+    # from the POST, so `values` then lacks the key and config's False wins.
+    fresh = values is None
     values = values or {}
     fields = []
     for name in SETUP_FIELDS:
         current = values.get(name, getattr(config, name, None))
+        if name == "WEBUI_ENABLED" and fresh:
+            current = True
         field = _settings_field(name, types.get(name, str), current)
         label = strings.get(f"settings.field.{name}")
         if label:
@@ -4393,16 +4408,25 @@ def validate_setup_form(form):
     else:
         password_hash = adminchat.make_password_hash(password)
 
+    enable_webui = str(form.get("WEBUI_ENABLED", "") or "").lower() in ("1", "on", "true", "yes")
+
     file_directory = text("FILE_DIRECTORY")
     if file_directory:
         if os.path.isdir(file_directory):
             changes["FILE_DIRECTORY"] = file_directory
         else:
+            # "Later on the Settings page" is only true with the dashboard on;
+            # with the box unticked the folder can only be set in the file (#603).
             errors.append(("FILE_DIRECTORY", "That folder does not exist. Leave it "
                                              "blank to choose it later on the "
-                                             "dashboard's Settings page."))
+                                             "dashboard's Settings page."
+                                             if enable_webui else
+                                             "That folder does not exist. With the "
+                                             "dashboard off, leave it blank and set "
+                                             "FILE_DIRECTORY in settings.conf later, "
+                                             "or tick the dashboard box to choose it "
+                                             "on its Settings page."))
 
-    enable_webui = str(form.get("WEBUI_ENABLED", "") or "").lower() in ("1", "on", "true", "yes")
     changes["WEBUI_ENABLED"] = enable_webui
     if enable_webui:
         lan = str(form.get("WEBUI_LAN", "") or "").lower() in ("1", "on", "true", "yes")

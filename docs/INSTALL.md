@@ -59,7 +59,11 @@ that only the person at this machine can use the page: it is loopback-only,
 it exists only until the form is saved, and any website open in the same
 browser would otherwise be able to submit a password of its own. Save, and
 the bot starts in the same window; if you left the dashboard on, the page
-takes you to its login with the password you just chose. The page needs
+takes you to its login with the password you just chose. The dashboard box
+starts ticked (reachable from this machine only, unless you tick the
+network box too): the music folder is optional on this page because the
+Settings page can take it later - untick the dashboard and the folder has
+to be typed here or set in `settings.conf` afterwards. The page needs
 Flask, which the launcher offers to install first; without it, the terminal
 questions below are asked instead.
 
