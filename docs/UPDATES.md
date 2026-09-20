@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧭 The setup page starts with the dashboard box ticked (#603)
+
+`build_setup_fields()` read `WEBUI_ENABLED` straight from config, and defaults.py ships it `False` (convention 1),
+so on every first run the "Enable web dashboard" box rendered unticked - while the intro, the folder placeholder and
+the folder error all told the operator to choose the music folder "later on the dashboard's Settings page", and
+INSTALL.md described the box as "left on". A novice who took the page's own advice and did not notice the box ended
+with a bot that connected, served nothing and had no Settings page to fix it from; nothing on screen named
+`settings.conf`. A fresh page (no values typed yet) now ticks the box - the page only exists because Flask is
+installed, the launcher having just installed it for the dashboard, and the box still binds loopback unless the LAN
+box is ticked too - and a redisplay after an error keeps what the operator chose (an unticked box is absent from the
+POST, so config's `False` wins there). `validate_setup_form()` computes the dashboard choice first and, when the box
+is off, the folder error says to set `FILE_DIRECTORY` in `settings.conf` or tick the box, instead of promising a
+Settings page that will not exist. The shipped default is untouched. INSTALL.md says so.
+Tests: `tests/test_the_setup_page_starts_with_the_dashboard_ticked.py`.
+
 ### 📍 The panel's Since box is the bot's start (#754)
 
 `runtime.feed_counts` counts FAIL and SEARCH in `announce.feed_event` (runtime, so a rehash does not reset it; counted
