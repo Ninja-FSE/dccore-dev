@@ -322,7 +322,8 @@ KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 # EXPECT IT TO BE LARGE. Roughly the size of the lists again - four million
 # rows measured at 452MB. Built as each list is fetched, and safe to delete:
 # the filter stops working until the next fetch rebuilds it, and nothing else
-# reads it.
+# reads it. A damaged one is moved aside as list_index.db.corrupt-<timestamp>
+# and rebuilt from the lists on disk (#628); the copy can be deleted.
 LIST_INDEX_FILE: str = "./data/list_index.db"
 
 # One row per thing this bot has ever sent, {relative path or archive name ->

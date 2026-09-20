@@ -4,6 +4,31 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🩹 A damaged list_index.db is moved aside and rebuilt, and the log no longer promises a fetch will do it (#628)
+
+`list_index._connect()` failed on a corrupt or non-database file ("file is not a database", "database disk image is
+malformed"), printed that the cross-list filter was "off until the next fetch", and returned None. But every caller -
+`index_bot_list()` from a fetch completing, `backfill_missing()` at startup, `search()` and `bots_with_a_match()` from
+the filter bar - opens the file through that same function and failed the same way, so no fetch ever repaired it: the
+List Browser filter answered nothing for the rest of the install's life, the line was printed twice per keystroke, and
+the only recovery (deleting the file by hand) was documented in INSTALL.md and nowhere the operator would look. The
+index is a cache of lists still on disk, so `_connect()` now treats a bare `sqlite3.DatabaseError` (the class sqlite3
+raises only for SQLITE_NOTADB and SQLITE_CORRUPT - a locked file, a full disk or a build without FTS5 are
+`OperationalError`, a subclass, and are still left alone) as damage: the file is renamed to
+`<file>.corrupt-<timestamp>` (kept, never deleted), any `-wal`/`-shm` sidecar sqlite3 did not remove goes with it, a
+fresh index is created in its place, and a `_rebuild_pending` flag is set. The two dashboard readers call
+`_prepare_to_read()` first, which opens the index and, when the flag is set, runs `backfill_missing()` over
+`config.fetched_bot_lists` before answering - so the first filter query after the repair answers from the rebuilt
+index rather than reporting every held list as empty. The log line names the file it moved the index to; when the
+rename fails it says the file has to be deleted by hand, and the environmental "Unavailable" line says "off until it
+can be opened" rather than "until the next fetch". The open-and-create-schema block moved into `_open()`, which still
+closes the lazy handle before raising - on Windows the rename would fail otherwise. `backfill_missing()`'s summary
+line is now "Indexed N held list(s) the search index did not have", since it no longer runs only at upgrade.
+`tests/test_a_damaged_list_index_is_moved_aside_and_rebuilt.py` drives a damaged file through a fetch, the two
+readers, a held list rebuilt on the first query, the once-only rebuild, a locked/unwritable index left in place, and
+a rename that fails; two cases in `tests/test_crosslist_search.py` that relied on a corrupt file being "no index" now
+use an unwritable path.
+
 ### 💾 A stats.txt that cannot be read for a moment is no longer overwritten with zeros (#626)
 
 `db._load_advanced_stats_unlocked()` caught any error from `open()`/`read()` and returned the all-zero row. Harmless
