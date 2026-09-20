@@ -401,6 +401,11 @@ alias dccore.structured {
   if (%type == SLOT) { hadd dccore.live slot. $+ $dccore.st(nslots) $2- | hinc dccore.live nslots | dccore.panel.soon | return }
   if (%type == QUEUE) { hadd dccore.live queue. $+ $2 $3- | dccore.panel.soon | return }
   if (%type == OUT) { dccore.out $2- | return }
+  if (%type == TAKEN) {
+    dccore.sys $dccore.bot $+ : another client ( $+ $2 $+ ) took over the console.
+    hadd dccore.live state taken
+    return
+  }
   if (%type == DROPPED) {
     dccore.echo $dccore.tag(DROPPED,fail) $2 line(s) were dropped by the bot: this client fell behind.
     return
