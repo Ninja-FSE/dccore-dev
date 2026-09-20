@@ -12,7 +12,7 @@ import runtime
 # channel caller keeps the default and the nick check.
 
 
-def is_admin(user):
+def is_admin(user, host=None):
     """Return True if `user` may run admin commands.
 
     Centralises a check that was duplicated across five handlers, so the eventual
@@ -27,11 +27,15 @@ def is_admin(user):
     * ADMIN_NICK may now be a comma-separated list, so a second operator can be added
       without reintroducing a hardcoded name.
 
-    KNOWN LIMITATION: this is still nick-based, and an Undernet nick is not owned without
-    services auth - anyone can take the nick while the real admin is offline and gain
-    every admin command, now including the destructive !clearqueue. Closing that properly
-    means matching ident@host, which irc.py does not currently capture: its PRIVMSG regex
-    keeps only the nick. That is a separate change to irc.py plus this file.
+    An Undernet nick is not owned without services auth: anyone can take it while the
+    real admin is offline. So when ADMIN_HOSTMASKS is set, the nick alone is not enough
+    (#579) - the sender's HOST must match one of those patterns too, the same test the
+    DCC console applies. `host` is the "ident@host" half of the sender's prefix, as
+    irc.parse_privmsg() returns it (a bare host works too); a caller that cannot say
+    where the line came from passes nothing, and then it is refused - an authorisation
+    check has one safe direction when it does not know. With ADMIN_HOSTMASKS empty
+    (the default) nothing changes: the check is the nick, as it always was, and the
+    channel commands can be switched off with ADMIN_CHANNEL_COMMANDS.
     """
     import defaults as config
 
@@ -47,7 +51,16 @@ def is_admin(user):
     # answer, and it is to refuse.
     raw = getattr(config, 'ADMIN_NICK', '') or ''
     allowed = {n.strip().lower() for n in str(raw).split(',') if n.strip()}
-    return str(user).lower() in allowed
+    if str(user).lower() not in allowed:
+        return False
+
+    import adminchat
+    if not adminchat.admin_host_patterns():
+        return True
+    # adminchat reads the host half of an ident@host; a bare host has none.
+    if host and "@" not in str(host):
+        host = "x@" + str(host)
+    return adminchat.is_admin_host(host)
 
 
 def handle_help_request(s, user, target):
@@ -211,7 +224,7 @@ def handle_queue_remove(s, user, target):
         print(f"[COMMANDS] Removed {len(removed_archives)} orphaned temp archive(s) with {user}'s queue.")
     print(f"[COMMANDS] {user} removed their entire queue from the disk layout.")
 
-def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
+def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False, user_host=None):
     """Force-clear ANOTHER user's queue entirely - admin only (issue #15).
 
     For a ghost nick left behind by a netsplit or a reconnect.
@@ -224,7 +237,7 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
     import db
     import dcc
 
-    if not authorised and not is_admin(user):
+    if not authorised and not is_admin(user, user_host):
         print(f"[SECURITY] Unauthorised user {user} tried to run !clearqueue.")
         return
 
@@ -268,7 +281,7 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False):
             category="INFO")
         print(f"[ADMIN CLEARQUEUE] {user} tried to clear {target_nick}, but no queue or frozen entry was found.")
 
-def diagnostics_are_for_the_admin(user):
+def diagnostics_are_for_the_admin(user, host=None):
     """Whether `user` may run the bot's diagnostics - !ping and !debugnames.
 
     They used to answer ANYONE in the channel. Seen live by the user: another
@@ -284,7 +297,7 @@ def diagnostics_are_for_the_admin(user):
     Not !list: that is the discovery command every serving bot answers with
     its trigger, on purpose, and it stays public.
     """
-    return is_admin(user)
+    return is_admin(user, host)
 
 
 def handle_ping_request(irc_sock, user, target_chan):
@@ -850,7 +863,7 @@ def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
     return reloaded
 
 
-def handle_rehash_request(user, target_chan, authorised=False):
+def handle_rehash_request(user, target_chan, authorised=False, user_host=None):
     """Reload the modules live, in memory - one rehash at a time.
 
     THE SERIALISATION IS THE POINT OF THIS WRAPPER. The body below reloads
@@ -879,7 +892,7 @@ def handle_rehash_request(user, target_chan, authorised=False):
     before that write landed. Dropping it would silently lose the
     operator's change; waiting applies it.
     """
-    if not authorised and not is_admin(user):
+    if not authorised and not is_admin(user, user_host):
         print(f"[REHASH SECURITY] Ignored a rehash attempt from an unauthorised user: {user}")
         return
 
@@ -1257,12 +1270,12 @@ def _handle_rehash_request(user, target_chan):
         announce.send_debug(f"Rehash FAILED (Notices Resumed for safety): {e}", category="INFO")
 
 
-def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
+def handle_hard_ban_request(user, target_chan, msg_text, authorised=False, user_host=None):
     """Add a permanent wildcard pattern to hard_bans.txt, straight from IRC."""
     import defaults as config
     import announce
     
-    if not authorised and not is_admin(user):
+    if not authorised and not is_admin(user, user_host):
         print(f"[SECURITY] Unauthorised user {user} tried to run !ban.")
         return
 
@@ -1310,13 +1323,13 @@ def handle_hard_ban_request(user, target_chan, msg_text, authorised=False):
     else:
         announce.send_debug(f"Pattern {pattern} is already banned permanently.", category="INFO")
 
-def handle_hard_unban_request(user, target_chan, msg_text, authorised=False):
+def handle_hard_unban_request(user, target_chan, msg_text, authorised=False, user_host=None):
     """Remove a permanent wildcard pattern from hard_bans.txt, straight from IRC."""
     import defaults as config
     import announce
     import os
     
-    if not authorised and not is_admin(user):
+    if not authorised and not is_admin(user, user_host):
         # Logged, like !ban / !clearqueue / !rehash / !update all are. This
         # returned silently, so an operator auditing attempted privilege abuse
         # had a blind spot on exactly one command (#234).
@@ -1577,7 +1590,7 @@ def describe_duration(seconds):
     return f"{total // 3600}h {(total % 3600) // 60:02d}m"
 
 
-def handle_list_update_request(user, target_chan, authorised=False):
+def handle_list_update_request(user, target_chan, authorised=False, user_host=None):
     """Run update_list.py, wait for it, and read the file count from line 1 of the list."""
     import subprocess
     import sys
@@ -1589,7 +1602,7 @@ def handle_list_update_request(user, target_chan, authorised=False):
     import threading
     import time
     
-    if not authorised and not is_admin(user):
+    if not authorised and not is_admin(user, user_host):
         print(f"[SECURITY] Unauthorised user {user} tried to run !update.")
         return
 
