@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 An automatic dial asks no stranger for the password (#608)
+
+#585 gated the stored token behind `dccore.peerok`, but with no token to send (a password-only install, after
+`unpair`, or while pairing with the bot away) the same automatic dial - retry timer, JOIN of the bot's nick, IRC
+connect - still put "Type the admin password here" in @DCCore for whoever held the nick, and the typed password also
+opens the dashboard. `dccore.connect byhand` (from `/dccore connect` and `pair`) sets `byhand` in `dccore.live`; the
+timers dial without it. On `Enter Your Password:` with no token, a chat not opened by hand runs
+`dccore.peerok password` first (same branches: known host must match, unknown learned once, refusal closes the chat
+and stops the redial); a by-hand chat asks as before. The check is nested, not `&&`-joined: mIRC evaluates every
+identifier on an if-line and peerok has side effects. `%what` in peerok names what is withheld.
+
 ### 📍 Two @find lines arriving together no longer both walk the list (#607)
 
 `execute_search()` runs on a thread per @find, and its "one search at a time" guard read `config.search_inprogress`

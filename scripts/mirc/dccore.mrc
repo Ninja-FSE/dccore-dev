@@ -150,7 +150,7 @@ alias dccore {
     if ($dccore.bot == $null) { dccore.sys No bot nick yet. Use: /dccore connect <botnick> | return }
     dccore.set wantopen 1
     hadd dccore.live tries 0
-    dccore.connect
+    dccore.connect byhand
     return
   }
   if (%cmd == pair) {
@@ -161,7 +161,7 @@ alias dccore {
     hadd dccore.live tries 0
     if ($dccore.st(state) == in) { dccore.send pair dccore.mrc $dccore.ver | return }
     dccore.sys Pairing with $dccore.bot $+ : when the bot asks for the password, type it here once. The script keeps a token of its own from then on.
-    dccore.connect
+    dccore.connect byhand
     return
   }
   if (%cmd == unpair) {
@@ -224,12 +224,15 @@ alias dccore {
 ;  Connection
 ; ---------------------------------------------------------------------
 
+; "byhand" is the operator's own /dccore connect or pair; the retry timer,
+; a JOIN of the bot's nick and an IRC connect dial without it.
 alias dccore.connect {
   if ($dccore.bot == $null) { return }
   if (!$server) { dccore.sys Not connected to IRC; the chat will open when you are. | return }
   if ($chat($dccore.bot)) { dccore.sys A chat with $dccore.bot is already open. | return }
   dccore.window
   hadd dccore.live state opening
+  hadd dccore.live byhand $iif($1 == byhand,1,0)
   hadd dccore.live tokentried 0
   hadd dccore.live opened $ctime
   dccore.sys Opening the console of $dccore.bot $+ ...
@@ -349,6 +352,15 @@ alias dccore.line {
       dccore.send $dccore.opt(token)
       return
     }
+    ; No token to send, so the operator would type the password - into a
+    ; chat the script may have dialled by itself, to whoever holds the nick.
+    ; Only a chat the operator opened (/dccore connect or pair) is their own
+    ; act; one the script opened asks for the password only from the host the
+    ; bot is known to have. (Nested: mIRC evaluates every identifier in an
+    ; if-line, and peerok closes the chat when it says no.)
+    if (!$dccore.st(byhand)) {
+      if (!$dccore.peerok password) { return }
+    }
     hadd dccore.live state password
     dccore.sys Type the admin password here and press Enter. $iif($dccore.st(pairing),The script will then ask the bot for a token of its own.,(No token stored; /dccore pair keeps one.))
     return
@@ -392,21 +404,24 @@ alias dccore.line {
 ; the host the nick has NOW. A script paired before this check has none
 ; stored and learns it the first time the bot's host is known; if it is not
 ; known yet, the token waits rather than goes out unchecked.
+; $1 is what is being withheld: "password" (the prompt in a chat the script
+; dialled by itself), else the token.
 alias dccore.peerok {
+  var %what = $iif($1 == password,asking for the password,sending the token)
   var %now = $address($dccore.bot,2)
   var %known = $dccore.opt(bothost)
   if (%known == $null) {
     if (%now == $null) {
-      dccore.sys Not sending the token yet: $dccore.bot $+ 's host is not known, so it cannot be checked that this is the bot. Join a channel it is in, or /dccore trust once you are sure, then /dccore connect.
+      dccore.sys Not %what yet: $dccore.bot $+ 's host is not known, so it cannot be checked that this is the bot. Join a channel it is in, or /dccore trust once you are sure, then /dccore connect.
       dccore.abandon
       return $false
     }
     dccore.set bothost %now
-    dccore.sys Remembering that $dccore.bot is at %now $+ ; the token will only go there.
+    dccore.sys Remembering that $dccore.bot is at %now $+ ; the script will only log in there.
     return $true
   }
   if (%now == %known) { return $true }
-  dccore.sys NOT sending the token: $dccore.bot is at $iif(%now,%now,an unknown host) $+ , but the bot was paired at %known $+ . Someone else may hold its nick. If the bot really moved, /dccore trust, then /dccore connect.
+  dccore.sys NOT %what $+ : $dccore.bot is at $iif(%now,%now,an unknown host) $+ , but the bot is known to be at %known $+ . Someone else may hold its nick. If the bot really moved, /dccore trust, then /dccore connect.
   dccore.abandon
   return $false
 }

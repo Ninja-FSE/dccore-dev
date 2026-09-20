@@ -557,6 +557,16 @@ really has moved, `/dccore trust` accepts its current host. A script paired
 before this check learns the host the first time the bot's is known; if it is
 not known yet (you share no channel with it) the token waits for `/dccore trust`.
 
+The same check guards the password prompt in a chat the script opened by itself.
+With no token to send (you never paired, ran `unpair`, or are pairing while the
+bot is away) the script used to put "Type the admin password here" in the window
+for whoever held the nick. Now a chat you opened yourself with `/dccore connect`
+or `/dccore pair` asks as before - that is your own act - but one the script
+dialled after a JOIN, an IRC connect or a retry asks only if the nick is at the
+host the bot is known to have (`bothost`); otherwise the window says so and the
+script stops reconnecting until you `/dccore connect`. A script with no
+`bothost` yet learns the host the first time it is known, as for the token.
+
 What a token does **not** do is open the dashboard. The web login checks the
 admin password hash and nothing else - the token store is never read there -
 so a stolen `.mrc` costs you a console session and nothing more, and one
