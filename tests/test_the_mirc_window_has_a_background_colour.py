@@ -2,11 +2,11 @@
 
 mIRC has no per-window background COLOUR (`/color background` is for every
 window at once); a custom window can only be given a background PICTURE with
-`/background -t @window file`. So the option writes a one-pixel .bmp of the
-chosen colour beside the script and tiles it, and "none" removes the picture.
+`/background -t @window file`. So the option writes a small .bmp of the
+chosen colour beside the script and tiles it (128x128 - see TheBitmapItWrites), and "none" removes the picture.
 
 The script cannot be run here, so what can be checked is checked from its
-source: the bytes it writes really are a valid 1x1 24-bit bitmap, the palette
+source: the bytes it writes really are a valid 128x128 24-bit bitmap, the palette
 is the mIRC one, and the dialog and the save handler agree about which line of
 the combo is which colour.
 """
@@ -38,42 +38,70 @@ def alias_body(source, name):
 
 
 class TheBitmapItWrites(unittest.TestCase):
+    """A 128x128 tile, not one pixel: tiled, a one-pixel picture is drawn a
+    pixel at a time over the whole window on every repaint, and the window
+    crawled (every new line, every change in Options)."""
 
-    def bytes_written(self):
+    SIDE = 128
+
+    def head(self):
         body = alias_body(script(), "dccore.bgfile")
-        header = re.search(r"bset &dccorebg 1 ([0-9 ]+)\n", body)
+        header = re.search(r"bset &dccorebg 1 ([0-9 ]+)\r?\n", body)
         self.assertIsNotNone(header, "no header bset")
-        head = bytes(int(n) for n in header.group(1).split())
-        pixel = re.search(r"bset &dccorebg (\d+) ", body.split("bset &dccorebg 1", 1)[1])
-        return head, int(pixel.group(1))
+        return bytes(int(n) for n in header.group(1).split())
 
-    def test_the_header_is_a_valid_one_pixel_24_bit_bitmap(self):
-        head, pixel_at = self.bytes_written()
+    def test_the_header_is_a_valid_128_square_24_bit_bitmap(self):
+        head = self.head()
 
         self.assertEqual(len(head), 54)
         self.assertEqual(head[:2], b"BM")
         file_size, _r1, _r2, data_offset = struct.unpack("<IHHI", head[2:14])
         (dib, width, height, planes, bpp, compression, image_size,
          _xppm, _yppm, colours, important) = struct.unpack("<IiiHHIIiiII", head[14:54])
-        self.assertEqual((dib, width, height, planes, bpp, compression), (40, 1, 1, 1, 24, 0))
+        self.assertEqual((dib, width, height, planes, bpp, compression),
+                         (40, self.SIDE, self.SIDE, 1, 24, 0))
         self.assertEqual(data_offset, 54)
-        # one pixel, a row padded to four bytes
-        self.assertEqual(image_size, 4)
-        self.assertEqual(file_size, 54 + 4)
+        # 128 pixels of three bytes is 384 a row - already a multiple of four,
+        # so there is no row padding to write.
+        self.assertEqual((self.SIDE * 3) % 4, 0)
+        self.assertEqual(image_size, self.SIDE * self.SIDE * 3)
+        self.assertEqual(file_size, 54 + image_size)
         self.assertEqual((colours, important), (0, 0))
 
-    def test_the_pixel_goes_right_after_the_header_as_blue_green_red_pad(self):
-        head, pixel_at = self.bytes_written()
-
-        self.assertEqual(pixel_at, len(head) + 1, "mIRC binary variables count from 1")
+    def test_a_row_is_128_pixels_of_blue_green_red(self):
         body = alias_body(script(), "dccore.bgfile")
-        self.assertIn("$gettok(%rgb,3,46) $gettok(%rgb,2,46) $gettok(%rgb,1,46) 0", body)
+        self.assertIn("var %px = $gettok(%rgb,3,46) $gettok(%rgb,2,46) $gettok(%rgb,1,46)", body)
+        self.assertIn("var %row = $str(%px $chr(32),128)", body)
+
+    def test_every_row_goes_at_its_own_offset_after_the_header(self):
+        body = alias_body(script(), "dccore.bgfile")
+        # mIRC binary variables count from 1: the header is bytes 1-54, the
+        # first row starts at 55, and each row is 384 bytes on.
+        self.assertIn("while (%y < 128) { bset &dccorebg $calc(55 + %y * 384) %row | inc %y }", body)
+        self.assertEqual(len(self.head()) + 1, 55)
+
+    def test_the_rows_are_the_size_the_header_promises(self):
+        """Simulate the script's own arithmetic: 128 rows of 128 pixels of 3
+        bytes fill exactly the pixel data, no gap and no overlap."""
+        offsets = [55 + y * 384 for y in range(128)]
+        self.assertEqual(offsets[0], 55)
+        self.assertEqual(offsets[-1] + 384 - 1, 54 + self.SIDE * self.SIDE * 3)
+        self.assertTrue(all(b - a == 384 for a, b in zip(offsets, offsets[1:])))
+
+    def test_the_file_is_named_for_the_new_size(self):
+        """Somebody who already ran the one-pixel version has that file; the
+        new one must not be mistaken for it."""
+        body = alias_body(script(), "dccore.bgfile")
+        self.assertIn("dccore-bg-,$1,-128.bmp", body)
 
     def test_it_is_written_only_when_missing_and_only_reported_when_it_exists(self):
         body = alias_body(script(), "dccore.bgfile")
         self.assertIn("if ($isfile(%f)) { return %f }", body)
         self.assertTrue(body.rstrip().endswith("if ($isfile(%f)) { return %f }\n}") or
                         body.count("if ($isfile(%f)) { return %f }") == 2)
+
+    def test_the_binary_variable_is_freed(self):
+        self.assertIn("bunset &dccorebg", alias_body(script(), "dccore.bgfile"))
 
 
 class ThePalette(unittest.TestCase):
@@ -142,6 +170,18 @@ class TheDialogAndTheSave(unittest.TestCase):
         save = source[source.index("on *:dialog:dccore.opt:sclick:1:"):]
         save = save[:save.index("on *:dialog:dccore.opt:sclick:501:")]
         self.assertIn("dccore.background", save)
+
+    def test_saving_the_options_repaints_the_picture_only_if_the_colour_changed(self):
+        """Re-applying a picture repaints the whole window; an options save
+        that changed the font size or a checkbox has no business doing that."""
+        source = script()
+        save = source[source.index("on *:dialog:dccore.opt:sclick:1:"):]
+        save = save[:save.index("on *:dialog:dccore.opt:sclick:501:")]
+        self.assertIn("var %bg = $dccore.opt(bg)", save)
+        self.assertIn("if (%bg != $dccore.opt(bg)) { dccore.background }", save)
+        # remembered before the dialog's values are read into the table
+        self.assertLess(save.index("var %bg = $dccore.opt(bg)"), save.index("hadd dccore bg "))
+        self.assertLess(save.index("hadd dccore bg "), save.index("if (%bg != $dccore.opt(bg))"))
 
 
 class TheAlias(unittest.TestCase):
