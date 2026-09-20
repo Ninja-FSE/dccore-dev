@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A nick change mid-transfer keeps the slot and the queue (#598, #601)
+
+`start_dcc_send()` found its `active_transfers` row and released its `user_processing_lock` entry by the nick the
+send started as, while `irc.note_nick_change()` had already rewritten the row and moved the lock to the new nick.
+After a `/nick` the row and the lock outlived the transfer: a slot lost until restart, the renamed user answered
+"already transferring" for good, rehash waiting out `REHASH_TRANSFER_WAIT`, `bytes_sent` frozen. The send now
+finds its row once (`_find_transfer_row`, by nick and file) and keeps it by identity; the lock is released under
+the row's current nick.
+
+`note_nick_change()` also never saved the queue it re-keyed, and left `user_raw` (the dispatcher's DCC target) as the
+old nick. It now rewrites `user_raw` on the moved rows and calls `db.save_dcc_queue()`.
+
 ### 📍 The channel_users control test no longer bets on a race (#596)
 
 `test_without_the_lock_the_same_workload_corrupts_state` churned an unlocked dict for three seconds and asserted

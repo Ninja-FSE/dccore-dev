@@ -605,6 +605,15 @@ def note_nick_change(old_nick, new_nick):
                           f"{name} entry alone, the new nick already has one.")
                     continue
                 store[new_key] = store.pop(old_key)
+                # #601: user_raw is what the dispatcher addresses the DCC
+                # offer to (dcc.py's section B). Left as the old nick, the
+                # next dispatch after a rename offered the file to a nick
+                # that is no longer on the network.
+                # (frozen_queues holds a timestamp per user, not rows.)
+                if hasattr(store[new_key], "append"):
+                    for queued in store[new_key]:
+                        if isinstance(queued, dict) and "user_raw" in queued:
+                            queued["user_raw"] = new_nick
                 moved.append(name)
 
         # #431: dcc.handle_download_request()'s slot-admission gate is built
@@ -638,6 +647,17 @@ def note_nick_change(old_nick, new_nick):
                     row["user"] = new_nick
                     if "active_transfers" not in moved:
                         moved.append("active_transfers")
+
+        # #601: the queue moved in memory; the file must follow, or a restart
+        # before the next unrelated queue write restores it under a nick that
+        # has gone, and the freeze sweep deletes it five minutes later.
+        # save_dcc_queue() does not take queue_lock (its callers hold it).
+        if "dcc_queue" in moved:
+            try:
+                import db
+                db.save_dcc_queue()
+            except Exception as save_err:
+                print(f"[NICK] Could not save the queue after {old_nick} -> {new_nick}: {save_err}")
 
     # Unchanged behaviour, kept here so one function owns the whole rename.
     send_queue = getattr(config, "send_queue", None)
