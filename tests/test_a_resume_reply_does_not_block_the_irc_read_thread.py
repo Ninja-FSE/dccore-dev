@@ -44,15 +44,40 @@ class WhileThePacerIsBusy(DCCoreTestCase):
         # The pacer holds every send until the test lets it go.
         self.release = threading.Event()
         self.entered = threading.Event()
+        self.inside = 0            # helpers currently parked in the pacer stub
+        self.inside_lock = threading.Lock()
 
         def held(_interval):
-            self.entered.set()
-            self.release.wait(10)
+            with self.inside_lock:
+                self.inside += 1
+            try:
+                self.entered.set()
+                self.release.wait(10)
+            finally:
+                with self.inside_lock:
+                    self.inside -= 1
 
         patch = mock.patch.object(runtime.outbound_pacer, "wait_for_slot", held)
         patch.start()
+        # Release, THEN wait for every helper to leave the pacer before the
+        # next test starts. The offer lives in the module-global
+        # runtime.dcc_send_offers under the same (USER, PORT) in every test
+        # here, so a helper still parked from the previous test woke up in
+        # the next one, popped accept_pending off the NEW offer, and the
+        # third RESUME started a second helper: "2 != 1" on a slow runner
+        # (#778). Cleanups run last-registered first, so this one runs
+        # before patch.stop().
         self.addCleanup(patch.stop)
+        self.addCleanup(self.wait_for_the_helpers_to_leave)
         self.addCleanup(self.release.set)
+
+    def wait_for_the_helpers_to_leave(self):
+        end = time.time() + 5
+        while time.time() < end:
+            with self.inside_lock:
+                if self.inside == 0:
+                    return
+            time.sleep(0.01)
 
     def resume(self, position, **kw):
         return dcc.handle_resume_request(
