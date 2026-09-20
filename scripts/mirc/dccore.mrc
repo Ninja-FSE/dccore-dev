@@ -82,7 +82,11 @@ alias dccore.dot { return $chr(183) }
 ; " in #channel" after a nick, or nothing when the bot sent "-" (a request by
 ; private message, or one whose channel is no longer known). Written to be
 ; joined to the nick with $+ so an empty answer leaves no stray space.
-alias dccore.in { if ($1 == $null) || ($1 == -) { return } | return $+($chr(32),in,$chr(32),$1) }
+;
+; The spaces are non-breaking ones, $chr(160). A real space at the start of what
+; an alias returns is dropped by mIRC, so the nick and "in" ran together
+; ("FLACin #channel"); a non-breaking space is not a space to it and stays.
+alias dccore.in { if ($1 == $null) || ($1 == -) { return } | return $+($chr(160),in,$chr(160),$1) }
 
 alias dccore.init {
   if (!$hget(dccore)) { hmake dccore 32 }
