@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The queue save no longer pops keys out of the live queue (#606)
+
+`db.save_dcc_queue()` dropped every emptied user key from `config.dcc_queue` itself, and two of its callers
+(`release_queue_entry` on every completion, the poisoned-entry branch of `check_queue_and_send`) run after their
+`with queue_lock:` block has closed. That pop raced the lock-held live walks of `config.dcc_queue.items()` in
+`next_waiting_pack_owner()` and in start_dcc_send's temp-archive cleanup and raised "dictionary changed size during
+iteration" in their thread - and in the finally the `redispatch_waiting_pack()` call was the one unguarded step, so the
+error skipped `user_processing_lock.discard()` and the fallback trigger: the user whose pack had just finished stayed
+"already claimed elsewhere" until a rehash. The save now only reads the dict (the file never held empty keys either
+way); an emptied queue leaves with its key inside `release_queue_entry`'s own lock block (and in the poisoned-entry
+branch); the wake in the finally is wrapped like every other step there. db.py's "five of the six callers" comment was
+wrong and is gone. Tests: a save during a live walk, the key pruned under the lock, an AST check of the guard, and a
+loopback pack send whose wake raises.
+
 ### 🔒 The dispatch notice and the queue save run outside queue_lock (#605)
 
 Section B of `check_queue_and_send` and both branches of `handle_download_request` called

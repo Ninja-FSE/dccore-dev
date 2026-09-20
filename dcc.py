@@ -589,6 +589,17 @@ def release_queue_entry(user, next_file, delivered, reason=""):
 
     u_key = str(user).lower()
 
+    def _put_rows(key, kept):
+        # An emptied list leaves with its key, HERE, under queue_lock (#606).
+        # db.save_dcc_queue() used to pop it instead - after this function's
+        # lock block had closed - which raced next_waiting_pack_owner()'s and
+        # the temp-archive cleanup's live `config.dcc_queue.items()` walks
+        # and raised in their thread, out of start_dcc_send's finally.
+        if kept:
+            config.dcc_queue[key] = kept
+        else:
+            config.dcc_queue.pop(key, None)
+
     def _remove_by_identity():
         # THE NICK MAY HAVE MOVED WHILE THE FILE WAS SENDING (#455).
         #
@@ -608,7 +619,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
             kept = [row for row in rows if row is not next_file]
             removed = len(rows) - len(kept)
             if removed:
-                config.dcc_queue[u_key] = kept
+                _put_rows(u_key, kept)
                 return removed
 
         # dict() first: the scan walks every queue, and another thread
@@ -621,7 +632,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
             kept = [row for row in other_rows if row is not next_file]
             removed = len(other_rows) - len(kept)
             if removed:
-                config.dcc_queue[other_key] = kept
+                _put_rows(other_key, kept)
                 if other_key != u_key:
                     print(f"[DCC QUEUE] Settled {user}'s row under {other_key!r} "
                           f"- they renamed while it was sending.")
@@ -1152,6 +1163,9 @@ def check_queue_and_send(irc_sock, completed_user):
                                 config.dcc_queue[completed_user.lower()] = [
                                     e for e in config.dcc_queue[completed_user.lower()] if e is not next_file
                                 ]
+                                # The save no longer prunes an emptied key (#606).
+                                if not config.dcc_queue[completed_user.lower()]:
+                                    del config.dcc_queue[completed_user.lower()]
                         db.save_dcc_queue()
                         config.rar_inprogress = False
                         # #215: this release is the only moment another user's held pack can
@@ -3409,7 +3423,14 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # start. Nothing else revisits them - every check_queue_and_send()
             # caller passes the user who just finished, never the one turned
             # away at [RAR-HOLD].
-            redispatch_waiting_pack(irc_sock, just_finished=user)
+            try:
+                redispatch_waiting_pack(irc_sock, just_finished=user)
+            except Exception as wake_err:
+                # Guarded like every other step of this finally (#606): an
+                # exception here skipped the lock release and the fallback
+                # trigger below, and the finishing user stayed "already
+                # claimed elsewhere" until a rehash.
+                print("[DCC CLEANUP ERROR] Could not wake a waiting pack: " + str(wake_err))
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
 
