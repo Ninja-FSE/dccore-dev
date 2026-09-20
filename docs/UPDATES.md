@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏱️ The queue-progress receiver acks, so its three tests take 0.3 s instead of 60 (#641)
+
+Audit M39. Since #526 the sender waits for the receiver's final ack to reach the file size before it closes.
+`tests/test_queue_progress_is_recorded.py`'s receiver read to EOF and never sent the 4-byte ack, so each of its
+three tests ended only when the client's 20 s recv timed out - a deterministic 60 s per full run, with the
+sender logging "never acknowledged a single byte" and "Not counted ... ended short at N of N" on green tests,
+and a slower runner one race away from the "flaky on Windows" failures the file's history already records.
+
+The receiver now acks the running total after every read (`take()`), exactly as
+`tests/test_dcc_resume_end_to_end.py`'s does, and `drain()` asserts the whole file arrived and that the sender
+thread actually finished rather than trusting a join with a timeout. A silent receiver now fails the tests
+outright (recv times out) instead of passing slowly. Test-only; nothing shipped changes.
+
 ### 🔢 HELLO carries the feed's minor version, and the guide says how to update a loaded script (#639)
 
 Audit M37. The channel field went into seven structured lines with PROTOCOL_MAJOR left at 1 (#574: "major 1 takes
