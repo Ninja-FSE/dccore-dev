@@ -169,6 +169,15 @@ class ReadOnlyCommands(DCCoreTestCase):
         self.assertIn("erin", out)
         self.assertIn("3 file(s) queued", out)
 
+    def test_queue_lists_the_users_in_the_order_they_are_served(self):
+        """The same walk dcc.check_queue_and_send() makes - first to ask,
+        first served - not the alphabet, which put zed after alice though
+        zed was next in line (#612)."""
+        config.dcc_queue = {"zed": [{"file": "a.flac"}], "alice": [{"file": "b.flac"}]}
+        out = self.run_command("queue")
+        self.assertLess(out.index("zed"), out.index("alice"))
+        self.assertIn("in serving order", out)
+
     def test_queue_can_name_one_user_and_shows_their_files(self):
         config.dcc_queue = {"dave": [{"file": "Enter Sandman.flac"}]}
         out = self.run_command("queue dave")

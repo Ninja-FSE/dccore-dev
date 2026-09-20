@@ -218,7 +218,7 @@ prefix.
 | Command | Effect |
 |---|---|
 | `status` | everything at a glance — slots, queue, bans, list, uptime |
-| `queue [nick]` | queued files, all users or one |
+| `queue [nick]` | queued files, all users (in the order they are served) or one |
 | `slots` | what is sending right now, and how far along |
 | `bans` | permanent and timed bans |
 | `uptime` | how long the daemon has been running |
@@ -495,7 +495,7 @@ have been replaced with spaces.
 | `DCCORE LISTFETCH <bot> <action>` | `auto` (asked again automatically), `arrived`, `unusable` | one line of prose that names the bot |
 | `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps> <started> <failed> <searches>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record; then when the bot started (epoch) and the failures and searches it has seen since | |
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
-| `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
+| `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20 in the order they are served: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
 
 `<channel>` is always exactly one token, straight after the nick: the channel

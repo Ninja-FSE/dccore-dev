@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The queue position is the serving order, not the alphabet (#612)
+
+`adminchat.status_lines()` numbered the `DCCORE QUEUE <pos>` rows from `sorted(queue, key=str.lower)` while
+`dcc.check_queue_and_send()` walks `config.dcc_queue` in insertion order (first request first, kept across a
+save/load), so the mIRC panel showed an alphabetical rank labelled as a position and, with more than 20 waiting,
+the user actually next in line could fall off the burst. The rows now follow the queue's own order, as does the
+console's `queue` listing, whose header says "in serving order". Tests use nicks that sort the other way round from
+their arrival (the old ones used helen/Ivan, the same in both orders).
+
 ### 🔐 A foreign page cannot lock the operator out of the login (#609)
 
 `POST /login` is the one route outside the session gate and its failed-attempt pool is keyed on `request.remote_addr`;
