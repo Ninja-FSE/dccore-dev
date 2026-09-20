@@ -1355,7 +1355,12 @@ def _token_matches(supplied):
 
 
 def _check_password(session, line):
-    supplied = line.strip()
+    # Verbatim, bar the newline the reader already split on: the setup page,
+    # POST /api/settings/password and the dashboard's login all hash and
+    # verify the password exactly as typed, so a password with a leading or
+    # trailing space has to open this console too (#622). Only an empty line
+    # - a stray Enter at the prompt - is not an attempt.
+    supplied = line
     if not supplied:
         return
     # The password, or a paired client's token (#550, step 3). A token opens
