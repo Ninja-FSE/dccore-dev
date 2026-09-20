@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 💾 A stats.txt that cannot be read for a moment is no longer overwritten with zeros (#626)
+
+`db._load_advanced_stats_unlocked()` caught any error from `open()`/`read()` and returned the all-zero row. Harmless
+for a display, fatal for a writer: `update_stats_on_complete()` incremented the zeros and `_atomic_write` replaced
+stats.txt with them, and unlike the malformed-column path no `.corrupt` copy was kept. One share-deny lock from an AV,
+backup or indexer at the instant a transfer completed on Windows - the same class of interference
+`replace_with_retry()` exists for - or an EIO or a network-share hiccup, and the lifetime file and byte totals, which
+nothing recomputes, were gone; the advert and the Stats page then showed one file. The loader now lets the read error
+propagate: `update_stats_on_complete()` and `check_and_rotate_day()` raise before writing anything (their callers
+in dcc.py and irc.py already catch, log a `[DB ERROR]`/`[DB ROTATE ERROR]` line and carry on - the one transfer goes
+uncounted, the totals survive), and the read-only entry points `load_advanced_stats()` and
+`load_advanced_stats_rolled()` catch it through `_load_for_display_unlocked()` and keep showing zeros for that one
+refresh, logged after the lock is released. Nothing is preserved as `.corrupt` on this path: the file was fine, it
+just could not be opened right then, and renaming it away would leave the writers starting from zero too.
+`tests/test_an_unreadable_stats_file_is_never_overwritten_with_zeros.py` refuses `open()` once for the real file and
+checks the writers leave it byte-for-byte alone, that the next completion counts on top of the real totals, that the
+midnight rotation does not write either, and that the readers still answer with a row.
+
 ### 🔁 Turning AUTO_REFETCH_LISTS on live starts the refresh worker (#625)
 
 `list_fetch.auto_refetch_worker` was started in one place, `oserve.startup()`, and only when the setting was
@@ -22,7 +40,6 @@ worker idles. Nothing is added to `SETTINGS_RESTART_ONLY` and the help text is u
 the truth. `tests/test_turning_auto_refetch_on_live_starts_the_worker.py` drives the real rehash body with the
 reload, the transfer wait and the debug line stubbed and the thread starter injected: one start over two
 rehashes, none with the setting off, no thread outliving the test.
-
 ### 🧾 A new admin_config.py carries only the password, and a line settings.conf overrides is reported at boot (#623)
 
 `configure.write_admin_config_password()` seeded a missing admin_config.py from admin_config.py.sample, whose active
