@@ -4,6 +4,28 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 A rehash no longer rewrites the live runtime containers with no lock held (#604)
+
+`commands.restore_preserved_runtime()` now skips a key whose preserved value *is* the live container (`value is
+current`), which is every name in `PRESERVE_RUNTIME` since they are all runtime.py-bound and a reload never empties
+them. Until now it merged anyway, which came out as `current.clear(); current.update(copy)` on the live dict and
+`current[:] = copy` on the live list - on the rehash thread, outside queue_lock, the fetch lock and the offers lock
+that every other writer holds. Three races, all microseconds wide: a transfer that completed and removed itself under
+queue_lock between the copy and the write-back was put back as a phantom DCC slot; a dict was momentarily empty
+between `clear()` and `update()`, which `count_active_fetches()` / `check_user_status()` could read as "nothing
+active" or "nobody banned"; and `clear()` under the IRC read thread's iteration of `banned_users` / `muted_until` /
+`user_requests` raised RuntimeError outside the per-command try, which closes the socket. The key still counts as
+restored, so the `[REHASH RAM]` line is unchanged. The merge path is kept for a future key that is not
+runtime.py-bound; it is the only path that writes, and it still runs with no lock. Tests: instrumented dict and list
+containers must see zero writes when they are their own snapshot, and a fresh container must still be filled.
+
+`runtime.feed_counts` counts FAIL and SEARCH in `announce.feed_event` (runtime, so a rehash does not reset it; counted
+before the console tickboxes can refuse a line). `adminchat.status_lines()` appends `<started_epoch> <failed>
+<searches>` to the STATUS line (now minus the uptime; a minor, additive change: an older script reads $1-$8).
+`dccore.status` stores them as `st.started`, `st.failed`, `st.searches` when present and the panel draws Since (with
+the weekday when more than 20 hours ago), failed and searches from them, falling back to `opened` and its own
+counters. ADMIN-CONSOLE.md documents the fields.
+
 ### 🧭 The setup page starts with the dashboard box ticked (#603)
 
 `build_setup_fields()` read `WEBUI_ENABLED` straight from config, and defaults.py ships it `False` (convention 1),
@@ -20,14 +42,6 @@ Settings page that will not exist. The shipped default is untouched. INSTALL.md 
 Tests: `tests/test_the_setup_page_starts_with_the_dashboard_ticked.py`.
 
 ### 📍 The panel's Since box is the bot's start (#754)
-
-`runtime.feed_counts` counts FAIL and SEARCH in `announce.feed_event` (runtime, so a rehash does not reset it; counted
-before the console tickboxes can refuse a line). `adminchat.status_lines()` appends `<started_epoch> <failed>
-<searches>` to the STATUS line (now minus the uptime; a minor, additive change: an older script reads $1-$8).
-`dccore.status` stores them as `st.started`, `st.failed`, `st.searches` when present and the panel draws Since (with
-the weekday when more than 20 hours ago), failed and searches from them, falling back to `opened` and its own
-counters. ADMIN-CONSOLE.md documents the fields.
-
 ### 📍 Every command is in the @DCCore menu (#550)
 
 `menu @DCCore` now has submenus for every `/dccore` command and every console command that is worth a click. Prompts
