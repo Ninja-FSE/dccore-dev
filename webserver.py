@@ -3769,7 +3769,18 @@ def build_console_log_payload(since=0):
 # Commands that make no sense over a stateless HTTP request. "quit" closes a
 # DCC CHAT session (session.close()) - _WebConsoleSession below has no socket
 # to close and no persistent identity for that to mean anything about.
-_CONSOLE_UNSUPPORTED_COMMANDS = frozenset({"quit"})
+#
+# "hello" switches a session to the structured feed (#550): it sets
+# session.structured and pushes STATUS lines to a client that draws a window
+# from them. A one-shot HTTP request has no feed to switch, and the dashboard's
+# own Console is prose. It used to fail halfway - after printing the DCCORE
+# HELLO line - on an attribute the shim did not have (#581).
+_CONSOLE_UNSUPPORTED_COMMANDS = frozenset({"quit", "hello"})
+_CONSOLE_UNSUPPORTED_MESSAGES = {
+    "quit": "'quit' closes a DCC CHAT session; there is not one here. Just close this tab.",
+    "hello": "'hello' switches a DCC CHAT session to the structured feed for a script "
+             "such as dccore.mrc; this console is the dashboard's own and has no feed to switch.",
+}
 
 
 class _WebConsoleSession:
@@ -3779,6 +3790,13 @@ class _WebConsoleSession:
     not guessed at. Never a real Session: no socket, no writer thread,
     nothing to close.
     """
+
+    # What the handlers read besides .send(): pair asks .structured to choose
+    # between a DCCORE TOKEN line and prose (#581). A web request is always
+    # prose - it used to be missing, so `pair` wrote the new token to disk and
+    # then raised before showing it.
+    structured = False
+    client = "web"
 
     def __init__(self, nick):
         self.nick = nick
@@ -3811,8 +3829,8 @@ def build_console_command_result(command_text, remote_addr=None):
 
     name = stripped.split(None, 1)[0].lower()
     if name in _CONSOLE_UNSUPPORTED_COMMANDS:
-        return 200, {"lines": ["'quit' closes a DCC CHAT session; there is not "
-                               "one here. Just close this tab."]}
+        return 200, {"lines": [_CONSOLE_UNSUPPORTED_MESSAGES.get(
+            name, f"'{name}' is not available in this console.")]}
 
     session = _WebConsoleSession(f"web:{remote_addr or 'unknown'}")
     adminchat.handle_command(session, stripped)

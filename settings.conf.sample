@@ -102,9 +102,10 @@
 #ALT_NICKNAME = DCCore_
 
 # Your own nick(s) - the people allowed to use the admin commands such as
-# !ban, !rehash and !update. Separate several with commas. Required.
+# !ban, !rehash and !update. Separate several with commas. Required. If you
+# have set ADMIN_HOSTMASKS, the command must also come from that host.
 #
-# Who may use the admin commands (!ban, !rehash, !update...), comma-separated for more than one; the DCC console checks ADMIN_HOSTMASKS as well
+# Who may use the admin commands (!ban, !rehash, !update...), comma-separated for more than one; with ADMIN_HOSTMASKS set, they must come from that host as well
 # REQUIRED - the daemon refuses to start until this is set.
 #ADMIN_NICK = 
 
@@ -706,11 +707,17 @@
 #ADMIN_CHAT_MODE = auto
 
 # Let the admin commands (!ban, !rehash, !update...) also work when you type
-# them in the channel or a private message, not only in the console. Turn off
-# once you use the console, so a stolen nick cannot run them.
+# them in the channel or a private message, not only in the console. With
+# ADMIN_HOSTMASKS set they need your host as well as your nick; without it a
+# stolen nick can run them, so turn this off.
 #
 # Whether !ban, !unban, !rehash, !update and !clearqueue still work when typed in
 # a channel or a private message.
+# 
+# With ADMIN_HOSTMASKS set they need the right nick AND the right host, so a
+# stolen nick alone is not enough. With it empty they are checked on the nick
+# only, which anyone on Undernet can take while you are offline - set the
+# hostmask, or turn this off.
 # 
 # Left ON. The console is new, and locking yourself out of every admin command
 # because a hostmask has a typo in it is a bad first experience. Turn it off once
