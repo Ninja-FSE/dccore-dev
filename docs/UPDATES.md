@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A failed direct send tells the user (#599)
+
+The direct-send fast path builds a synthetic row that is never in `dcc_queue`. `release_queue_entry()` classified it
+as retryable and retained, so a failure sent no notice and logged 'kept for retry' for a retry nothing could perform.
+A row that is in no queue (identity check under `queue_lock`, so a renamed key still counts as queued) is now settled
+on its first failure, with a NOTICE that says 'Ask for it again' rather than 'Removed from your queue'.
+`tests/test_queue_integrity.py::test_unknown_user_does_not_raise` asserted the old retained-orphan behaviour and now
+asserts this.
+
 ### 📍 `pair` in the dashboard Console shows the token (#581)
 
 `_cmd_pair` saved the token and then read `session.structured`, which the web shim (`_WebConsoleSession`) lacked, so
