@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A rehash keeps the structured feed attached (#576)
+
+`importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
+snapshotted and reattached only the debug sinks. A structured console session (`dccore.mrc` after `hello`)
+gets REQUEST/QUEUED/SENDING/SENT/FAIL/SEARCH/RESUMED and the event-driven STATUS burst through its event sink,
+and drops those kinds from its debug sink, so after any rehash it heard neither - while LOG lines kept arriving
+and made it look alive. `commands.reattach_event_sinks()` is the sibling of `reattach_debug_sinks()`; the
+snapshot is taken under `_debug_sinks_lock` next to the debug one.
+
 ### 📍 The structured feed says which channel
 
 From the operator's first real session with `dccore.mrc` (#550): the SEARCH
