@@ -235,8 +235,8 @@ def feed_event(_kind, _text, **fields):
     # started is a fact about the bot, whatever a client chooses to show (#754).
     try:
         import runtime
-        if _kind in runtime.feed_counts:
-            runtime.feed_counts[_kind] += 1
+        if _kind in ("FAIL", "SEARCH"):
+            runtime.feed_counts[_kind] = runtime.feed_counts.get(_kind, 0) + 1
     except Exception:
         pass
     send_debug(_text, category=_kind)

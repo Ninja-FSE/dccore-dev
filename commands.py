@@ -389,6 +389,8 @@ def handle_pong_response(category="INFO"):
 #   rar_inprogress      - the documented "lock-clearing rehash" escape hatch for a
 #   user_processing_lock  packer that wedged; !rehash is the only way to clear them
 PRESERVE_RUNTIME = (
+    'feed_counts',        # failures and searches since the process started (#754); the
+                          # panel's Since box would go back to zero on every Save
     'active_transfers',   # losing this reports 0 active slots while transfers run,
                           # so the bot admits work beyond MAX_DCC_SLOTS
     'banned_users',       # every timed ban silently released
