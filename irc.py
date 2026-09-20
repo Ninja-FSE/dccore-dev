@@ -3188,7 +3188,7 @@ def irc_loop():
                                 # - see commands.diagnostics_are_for_the_admin().
                                 # Silently: an answer or a log line per stranger
                                 # is the noise this removes.
-                                if not commands.diagnostics_are_for_the_admin(user):
+                                if not commands.diagnostics_are_for_the_admin(user, user_host):
                                     continue
                                 with runtime.channel_users_lock():
                                     have_count = hasattr(config, 'channel_users') and target_chan.lower() in config.channel_users
@@ -3212,7 +3212,7 @@ def irc_loop():
                                 # Same rule as !debugnames above: a stranger's
                                 # !ping used to make every DCCore in the channel
                                 # spend a paced line and report to its own admin.
-                                if not commands.diagnostics_are_for_the_admin(user):
+                                if not commands.diagnostics_are_for_the_admin(user, user_host):
                                     continue
                                 threading.Thread(target=commands.handle_ping_request, args=(s, user, target_chan), daemon=True).start()
                             # Admin commands in channel. ADMIN_CHANNEL_COMMANDS retires these
@@ -3232,19 +3232,19 @@ def irc_loop():
                                        or msg_lower == '!clearqueue'
                                        or msg_lower.startswith('!clearqueue '))):
                                 if msg.lower() == "!rehash":
-                                    threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), daemon=True).start()
+                                    threading.Thread(target=commands.handle_rehash_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg_lower.startswith("!ban "):
-                                    threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), daemon=True).start()
+                                    threading.Thread(target=commands.handle_hard_ban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg_lower.startswith("!unban "):
-                                    threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), daemon=True).start()
+                                    threading.Thread(target=commands.handle_hard_unban_request, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg.lower() == "!update":
-                                    threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), daemon=True).start()
+                                    threading.Thread(target=commands.handle_list_update_request, args=(user, target_chan), kwargs={"user_host": user_host}, daemon=True).start()
                                 elif msg_lower == "!clearqueue" or msg_lower.startswith("!clearqueue "):
                                     # commands.handle_admin_clear_queue was added in #16 but never
                                     # wired into this dispatch chain, so the command had no caller
                                     # anywhere and typing it did nothing at all. The handler does
                                     # its own admin check.
-                                    threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), daemon=True).start()
+                                    threading.Thread(target=commands.handle_admin_clear_queue, args=(user, target_chan, msg), kwargs={"user_host": user_host}, daemon=True).start()
                             elif any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases):
                                 # Split on the first space only, so "!DCCore !rar Artist/Album"
                                 # still hands "!rar Artist/Album" to the download handler.
