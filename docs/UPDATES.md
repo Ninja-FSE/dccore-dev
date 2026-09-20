@@ -10,6 +10,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 $dccore.in($3)` printed 'NICKin #chan'. The spaces are now `$chr(160)`, which it keeps and which the script already
 uses for column padding.
 
+### 📍 A fast big transfer reports its speed (#550)
+
+`stats_mgr.speed_is_measurable(duration, size=None)` needed one second, because a file inside the 4 MB send buffer is
+'sent' in one go and the clock measures memory. Since #526 the clock stops at the receiver's final acknowledgement,
+and a file past the buffer cannot be a memory copy: `LARGE_TRANSFER_BYTES` (8 MB, twice the buffer) and
+`MIN_LARGE_TRANSFER_SECONDS` (0.1 s) now let it through. `dcc.py` passes `file_size`. The speed RECORD keeps its own
+one-second floor. `dccore.mrc` prints 'at n/a' for a SENT line whose speed is 0.
+
+### 📍 The queue menu reads the panel row without a regex (#584, #550)
+
+`dccore.sels`/`dccore.selq` took the nine-character nick field with `$regex(... /^>[ \xA0]+(.{9})/)`; on a real mIRC
+the pattern matched (`$regex` returned 1) but `$regml` gave an empty group, so no menu item appeared. Both now use
+`$sline`, `$mid`, `$remove(...,$chr(160))` and `$gettok`, which the operator's diagnostic showed to behave (row = 34
+characters, `>`, space, then the nick). The tests run the same steps in Python on rows built like the panel builds
+them, including a two-digit row number, a 13-character nick and every heading row.
+
 ### 📍 The mIRC window's background is a 128x128 tile (#550)
 
 The background colour (#573) was a one-pixel `.bmp` tiled with `/background -t`. Tiled, that is one draw per pixel of

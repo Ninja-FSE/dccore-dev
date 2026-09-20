@@ -21,7 +21,6 @@ characters are matched against the slots; the whole nick comes from there.
 
 import io
 import os
-import re
 import sys
 import unittest
 
@@ -91,61 +90,134 @@ class TheRebuild(unittest.TestCase):
 
 
 class TheRightClickNick(unittest.TestCase):
+    """The menu's nick is read with plain string functions, not a regex (a real
+    mIRC matched the old pattern and returned an empty group), and the logic is
+    checked here by running the same steps on rows built the way the panel
+    builds them."""
 
-    def test_a_queue_row_is_resolved_through_its_number_not_its_text(self):
+    NBSP = "\xa0"
+
+    # -- mIRC's own functions, for the few the script uses -------------------
+    def gettok(self, text, n, sep=" "):
+        parts = [p for p in text.split(sep)]
+        return parts[n - 1] if 0 < n <= len(parts) else ""
+
+    def mid(self, text, start, length):
+        return text[start - 1:start - 1 + length]
+
+    def fit(self, nick, width):
+        return (nick + self.NBSP * width)[:width]
+
+    def rfit(self, text, width):
+        return (self.NBSP * width + text)[-width:]
+
+    # -- the two aliases, step for step ----------------------------------------
+    def selq(self, row, status):
+        number = self.gettok(row, 1).replace(self.NBSP, "")
+        if number.isdigit() and status.get("queue." + number) is not None:
+            return self.gettok(status["queue." + number], 1)
+        return ""
+
+    def sels(self, row, status):
+        if not row or ord(row[0]) != 62:
+            return ""
+        wanted = self.mid(row, 3, 9).replace(self.NBSP, "")
+        if not wanted:
+            return ""
+        index = 1
+        while status.get("slot.%d" % index) is not None:
+            nick = self.gettok(status["slot.%d" % index], 1)
+            if nick[:9] == wanted:
+                return nick
+            index += 1
+        return ""
+
+    def status(self):
+        return {"queue.1": "longnickname1 4 0", "queue.2": "helen 1 0", "queue.12": "Ann 2 0",
+                "slot.1": "Fearsie 4293984256 24618096018 4857150 Blue Beetle (2023).mkv",
+                "slot.2": "longnickname1 100 200 300 Some File.flac"}
+
+    def queue_row(self, index, nick, files):
+        return self.rfit(str(index), 2) + " " + self.fit(nick, 9) + " " + files
+
+    def test_a_queue_row_gives_the_whole_long_nick(self):
+        self.assertEqual(self.selq(self.queue_row(1, "longnickname1", "4 files"), self.status()), "longnickname1")
+
+    def test_a_short_nick_comes_back_without_its_padding(self):
+        got = self.selq(self.queue_row(2, "helen", "1 file"), self.status())
+        self.assertEqual(got, "helen")
+        self.assertNotIn(self.NBSP, got)
+
+    def test_a_two_digit_row_number_works(self):
+        self.assertEqual(self.selq(self.queue_row(12, "Ann", "2 files"), self.status()), "Ann")
+
+    def test_a_sending_row_gives_the_nick(self):
+        row = "> " + self.fit("Fearsie", 9) + " 22.9GB  15%  4.68MB/s"
+        self.assertEqual(self.sels(row, self.status()), "Fearsie")
+
+    def test_the_row_from_the_users_own_diagnostic_works(self):
+        """34 characters: '>', a space, 'F' ... - what a real mIRC reported."""
+        row = "> Fearsie" + self.NBSP * 2 + " " + " 22.9GB  15%  4.68MB/s"
+        self.assertEqual(self.mid(row, 3, 1), "F")
+        self.assertEqual(self.sels(row, self.status()), "Fearsie")
+
+    def test_a_long_nick_in_a_sending_row_is_matched_by_its_first_nine_characters(self):
+        row = "> " + self.fit("longnickname1", 9) + " 1.2G   50%  1MB/s"
+        self.assertEqual(self.sels(row, self.status()), "longnickname1")
+
+    def test_rows_that_are_not_people_give_nothing(self):
+        status = self.status()
+        for row in ("Queue 1 (6 files)", "Sending 1/3", self.NBSP * 2 + "(2 free)", self.NBSP,
+                    self.NBSP * 2 + "sent       8 / 60.2GB", self.NBSP * 2 + "... 4 more", "Today",
+                    "Since 13:09", self.NBSP * 2 + "failed    0", ""):
+            self.assertEqual(self.selq(row, status), "", row)
+            self.assertEqual(self.sels(row, status), "", row)
+
+    def test_a_queue_row_that_the_status_no_longer_has_gives_nothing(self):
+        self.assertEqual(self.selq(self.queue_row(7, "gone", "1 file"), self.status()), "")
+
+    def test_a_sending_row_for_a_slot_that_ended_gives_nothing(self):
+        row = "> " + self.fit("Someoneelse", 9) + " 1G 5% 1MB/s"
+        self.assertEqual(self.sels(row, self.status()), "")
+
+    # -- what the script says ------------------------------------------------
+    def test_neither_alias_uses_a_regex_any_more(self):
+        for name in ("dccore.selq", "dccore.sels"):
+            self.assertNotIn("$regex", alias_body(name), name)
+            self.assertNotIn("{9}", alias_body(name), name)
+
+    def test_selq_reads_the_number_and_looks_it_up(self):
         body = alias_body("dccore.selq")
-        self.assertIn("(\\d+)", body)
-        self.assertIn("$dccore.st(queue. $+ $regml(dccoreq,1))", body)
-        self.assertNotIn("(\\S+)", body, "reading the nick off the padded text is the bug")
+        self.assertIn("var %t = $sline($dccore.win,1)", body)
+        self.assertIn("$remove($gettok(%t,1,32),$chr(160))", body)
+        self.assertIn("(%n isnum) && ($dccore.st(queue. $+ %n) != $null)", body)
+        self.assertIn("return $gettok($dccore.st(queue. $+ %n),1,32)", body)
 
-    def test_a_sending_row_is_matched_against_the_slots_by_its_nine_characters(self):
+    def test_sels_takes_nine_characters_after_the_arrow_and_matches_the_slots(self):
         body = alias_body("dccore.sels")
-        self.assertIn("(.{9})", body)
-        self.assertIn("$dccore.fit(%n,9) == %f", body)
+        self.assertIn("$asc($left(%t,1)) != 62", body)
+        self.assertIn("$remove($mid(%t,3,9),$chr(160))", body)
         self.assertIn("$dccore.st(slot. $+ %i)", body)
-        self.assertNotIn("(\\S+)", body)
+        self.assertIn("$left(%n,9) == %f", body)
 
     def test_the_lookups_use_the_same_keys_the_panel_is_drawn_from(self):
         text = script()
-        self.assertIn("$dccore.st(queue. $+ %i)", text[text.index("alias dccore.panel"):text.index("alias dccore.selq")])
-        self.assertIn("$dccore.st(slot. $+ %i)", text[text.index("alias dccore.panel"):text.index("alias dccore.selq")])
+        panel = text[text.index("alias dccore.panel"):text.index("alias dccore.selq")]
+        self.assertIn("$dccore.st(queue. $+ %i)", panel)
+        self.assertIn("$dccore.st(slot. $+ %i)", panel)
 
     def test_a_queue_row_starts_with_its_number_as_the_lookup_expects(self):
         panel = script()
         panel = panel[panel.index("alias dccore.panel"):panel.index("alias dccore.selq")]
         self.assertGreaterEqual(panel.count("$dccore.rfit(%i,2) $dccore.fit($gettok(%l,1,32),9)"), 2,
                                 "both the frozen and the ordinary queue row")
+        self.assertIn("aline -l $dccore.opt(col.sends) $dccore.win > $dccore.fit($gettok(%l,1,32),9)", panel)
 
     def test_the_menu_still_offers_both(self):
         text = script()
         self.assertIn("Queue of $dccore.selq", text)
         self.assertIn("Clear the queue of $dccore.selq", text)
         self.assertIn("Queue of $dccore.sels", text)
-
-    def test_the_regexes_do_what_the_script_relies_on(self):
-        """The two patterns, run on rows built exactly as the panel builds them."""
-        nbsp = "\xa0"
-
-        def fit(nick, width):
-            return (nick + nbsp * width)[:width]
-
-        def rfit(text, width):
-            return (nbsp * width + text)[-width:]
-
-        queue = rfit("3", 2) + " " + fit("longnickname1", 9) + " 4 files"
-        short = rfit("12", 2) + " " + fit("helen", 9) + " 1 file"
-        sending = "> " + fit("longnickname1", 9) + " 1.2G"
-
-        number = re.compile("^[ \xa0]*(\\d+)[ \xa0]+\\S")
-        self.assertEqual(number.match(queue).group(1), "3")
-        self.assertEqual(number.match(short).group(1), "12")
-        # headings and blank panel rows are not queue rows
-        for other in ("Queue 3 (12 files)", "\xa0sent 5 / 1.2G", "\xa0\xa0... 4 more", "Sending 1/3", "\xa0"):
-            self.assertIsNone(number.match(other), other)
-
-        nine = re.compile("^>[ \xa0]+(.{9})").match(sending).group(1)
-        self.assertEqual(nine, fit("longnickname1", 9))
-        self.assertEqual(nine, "longnickn")
 
 
 if __name__ == "__main__":

@@ -490,7 +490,7 @@ alias dccore.structured {
   }
   if (%type == SENT) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) at $dccore.speed($6)
+    dccore.echo $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) $iif($6 > 0,at $dccore.speed($6),at n/a)
     return
   }
   if (%type == FAIL) {
@@ -755,21 +755,29 @@ alias dccore.panel {
 
 ; the nick on the selected panel line, for the right-click menu.
 ; The panel shows a nick cut or padded to nine characters, so it is never read
-; back from the text: a queue row starts with its number, which names the row
-; in the status the panel was drawn from, and a sending row's nine characters
-; are matched against the slots. Either way the whole nick comes back, with no
-; padding on it.
+; back from the text as a nick: a queue row starts with its number, which names
+; the row in the status the panel was drawn from, and a sending row's nine
+; characters are matched against the slots. Either way the whole nick comes
+; back, with no padding on it.
+;
+; Plain string functions and no $regex: on a real mIRC the pattern that took
+; the nine characters out of a sending row matched, and gave back an empty
+; group. $sline, $mid, $remove and $gettok were seen to give what the panel
+; text says (the row was 34 characters, ">", a space, then the nick).
 alias dccore.selq {
-  if ($regex(dccoreq,$sline($dccore.win,1),/^[ \xA0]*(\d+)[ \xA0]+\S/)) { return $gettok($dccore.st(queue. $+ $regml(dccoreq,1)),1,32) }
+  var %t = $sline($dccore.win,1)
+  var %n = $remove($gettok(%t,1,32),$chr(160))
+  if (%n isnum) && ($dccore.st(queue. $+ %n) != $null) { return $gettok($dccore.st(queue. $+ %n),1,32) }
 }
 alias dccore.sels {
-  if ($regex(dccores,$sline($dccore.win,1),/^>[ \xA0]+(.{9})/)) {
-    var %f = $regml(dccores,1), %i = 1
-    while ($dccore.st(slot. $+ %i) != $null) {
-      var %n = $gettok($dccore.st(slot. $+ %i),1,32)
-      if ($dccore.fit(%n,9) == %f) { return %n }
-      inc %i
-    }
+  var %t = $sline($dccore.win,1)
+  if ($asc($left(%t,1)) != 62) { return }
+  var %f = $remove($mid(%t,3,9),$chr(160)), %i = 1
+  if (%f == $null) { return }
+  while ($dccore.st(slot. $+ %i) != $null) {
+    var %n = $gettok($dccore.st(slot. $+ %i),1,32)
+    if ($left(%n,9) == %f) { return %n }
+    inc %i
   }
 }
 
