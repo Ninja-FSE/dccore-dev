@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The window keeps its history and the queue menu names the nick (#582, #584, #550)
+
+`dccore.rebuild` closed @DCCore and then read the lines of the new, empty window: the history was lost, the first
+empty `/echo` halted the alias and `rebuilding` stayed 1, so the CLOSE handler ignored every close. The text is now
+copied into a hash table first (an empty line as a non-breaking space), `rebuilding` is `$ticks` and CLOSE ignores it
+after 5 s. `dccore.selq`/`dccore.sels` no longer read the nick off the panel text (cut or padded to nine characters):
+a queue row's number is looked up in `queue.N` of the status, a sending row's nine characters are matched against
+`slot.N`.
+
 ### 📍 Setup falls back to the terminal where a browser is out of reach (#595)
 
 `configure.offer_setup_in_browser()` returned 0 whenever Flask imported, so the launcher served `/setup` on 127.0.0.1

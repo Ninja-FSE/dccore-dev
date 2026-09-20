@@ -549,10 +549,27 @@ alias dccore.fontsize {
 alias dccore.rebuild {
   if (!$window($dccore.win)) { dccore.window | return }
   var %n = $line($dccore.win,0), %i = 1
-  hadd dccore.live rebuilding 1
+  ; The text is copied out BEFORE the window is closed - a closed window has
+  ; no lines to read - into a table, and an empty line is kept as a
+  ; non-breaking space (/hadd and /echo both refuse an empty text, and either
+  ; error would halt this alias half way).
+  if ($hget(dccore.rb)) { hfree dccore.rb }
+  hmake dccore.rb 100
+  while (%i <= %n) {
+    var %t = $line($dccore.win,%i)
+    if (%t == $null) { var %t = $dccore.nbsp }
+    hadd dccore.rb %i %t
+    inc %i
+  }
+  ; The time the rebuild began, not 1: the CLOSE handler ignores a close
+  ; while one is under way, and a rebuild that stopped half way must not
+  ; leave the window impossible to close for good.
+  hadd dccore.live rebuilding $ticks
   window -c $dccore.win
   dccore.window
-  while (%i <= %n) { echo -i2 $dccore.win $line($dccore.win,%i) | inc %i }
+  var %i = 1
+  while (%i <= %n) { echo -i2 $dccore.win $hget(dccore.rb,%i) | inc %i }
+  hfree dccore.rb
   hadd dccore.live rebuilding 0
 }
 
@@ -669,12 +686,24 @@ alias dccore.panel {
   aline -l $dccore.win $dccore.nbsp searches $dccore.rfit($dccore.st(searches),2)
 }
 
-; the nick on the selected panel line, for the right-click menu
+; the nick on the selected panel line, for the right-click menu.
+; The panel shows a nick cut or padded to nine characters, so it is never read
+; back from the text: a queue row starts with its number, which names the row
+; in the status the panel was drawn from, and a sending row's nine characters
+; are matched against the slots. Either way the whole nick comes back, with no
+; padding on it.
 alias dccore.selq {
-  if ($regex(dccoreq,$sline($dccore.win,1),/^[ \xA0]*\d+[ \xA0]+(\S+)[ \xA0]/)) { return $regml(dccoreq,1) }
+  if ($regex(dccoreq,$sline($dccore.win,1),/^[ \xA0]*(\d+)[ \xA0]+\S/)) { return $gettok($dccore.st(queue. $+ $regml(dccoreq,1)),1,32) }
 }
 alias dccore.sels {
-  if ($regex(dccores,$sline($dccore.win,1),/^>[ \xA0]+(\S+)[ \xA0]/)) { return $regml(dccores,1) }
+  if ($regex(dccores,$sline($dccore.win,1),/^>[ \xA0]+(.{9})/)) {
+    var %f = $regml(dccores,1), %i = 1
+    while ($dccore.st(slot. $+ %i) != $null) {
+      var %n = $gettok($dccore.st(slot. $+ %i),1,32)
+      if ($dccore.fit(%n,9) == %f) { return %n }
+      inc %i
+    }
+  }
 }
 
 ; ---------------------------------------------------------------------
@@ -708,7 +737,7 @@ on *:INPUT:@DCCore-console: {
 alias dccore.prompt { return $+($chr(2),$chr(3),$dccore.col(console),>,$chr(15)) }
 
 on *:CLOSE:@DCCore: {
-  if ($dccore.st(rebuilding)) { return }
+  if ($dccore.st(rebuilding)) && ($calc($ticks - $dccore.st(rebuilding)) < 5000) { return }
   ; closing the window closes the chat too; /dccore connect reopens both
   dccore.set wantopen 0
   dccore.timers.off
