@@ -461,6 +461,8 @@ def nick_problem(nick):
     text = str(nick)
     if not text:
         return "a nickname cannot be empty"
+    if "\n" in text or "\r" in text:
+        return f"{text!r} has a line break in it"
     for character in text:
         if character == " ":
             return f"{text!r} has a space in it"

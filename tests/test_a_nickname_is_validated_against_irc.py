@@ -63,6 +63,11 @@ class TheRule(unittest.TestCase):
         self.assertIn("not ASCII", settings_file.nick_problem("Βοτ"))
         self.assertIn("starts with '-'", settings_file.nick_problem("-Bot"))
 
+    def test_a_line_break_is_named_as_one(self):
+        """A value with a newline would be read as a second setting."""
+        self.assertIn("line break", settings_file.nick_problem("DCCore\nMAX_DCC_SLOTS = 99"))
+        self.assertIn("line break", settings_file.nick_problem("a\rb"))
+
     def test_empty_is_refused(self):
         self.assertTrue(settings_file.nick_problem(""))
 
