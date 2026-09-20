@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐧 The Linux autostart unit survives a folder name with a space, % or $ (#618)
+
+`scripts/linux/install-autostart.sh` wrote `ExecStart=$ROOT/scripts/linux/start-dccore.sh` and `WorkingDirectory=$ROOT`
+raw. systemd word-splits ExecStart=, so `~/My Files/dccore` became the executable `/home/me/My`; a `%` in the path
+is a specifier (the unit fails to load) and `$VAR` is substituted from the environment. Because the unit is
+`Restart=on-failure`, `enable --now` succeeded and the script said "Done" while the service looped on 203/EXEC every
+ten seconds. ExecStart= is now the double-quoted form with `\`, `"`, `%` and `$` escaped (`\\`, `\"`, `%%`, `$$`);
+WorkingDirectory= (not word-split, not $-expanded) gets `%%`. The macOS and Windows twins already escaped theirs.
+The test moves the tree under `My Files %h $HOME` (plus `"q" \b` where the file system allows) and decodes the unit
+by systemd's own rules - specifiers, quote removal, variable substitution - instead of looking for `%%`.
+
 ### 📍 A first run whose setup page cannot bind falls back to the terminal questions (#617)
 
 With Flask importable `configure.py --setup-in-browser` answers 0 without asking, so the launchers started

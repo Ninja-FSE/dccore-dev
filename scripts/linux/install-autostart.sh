@@ -42,6 +42,16 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT="$UNIT_DIR/dccore.service"
 mkdir -p "$UNIT_DIR" || exit 1
 
+# systemd reads the unit, not the shell (#618): ExecStart= is split on
+# whitespace unless the word is double-quoted (inside the quotes \ and "
+# are escapes), $VAR is replaced from the environment ($$ is one $) and %x
+# is a specifier in every setting. WorkingDirectory= is neither word-split
+# nor $-expanded, so only %% applies there. Unescaped, a folder called
+# "My Files" made the unit run /home/me/My and restart on 203/EXEC every
+# ten seconds after this script had said "Done".
+ROOT_EXEC=$(printf '%s' "$ROOT" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g; s/\$/$$/g')
+ROOT_WD=$(printf '%s' "$ROOT" | sed 's/%/%%/g')
+
 cat > "$UNIT" <<EOF
 # Written by scripts/linux/install-autostart.sh - re-run it after moving the
 # folder; remove-autostart.sh deletes this file.
@@ -52,8 +62,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=$ROOT
-ExecStart=$ROOT/scripts/linux/start-dccore.sh
+WorkingDirectory=$ROOT_WD
+ExecStart="$ROOT_EXEC/scripts/linux/start-dccore.sh"
 Restart=on-failure
 RestartSec=10
 

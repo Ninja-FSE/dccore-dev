@@ -333,7 +333,7 @@ class _Posix(_Tree):
             handle.write('#!/bin/sh\necho "%s $*" >> "%s"\nexit %d\n' % (name, self.calls.replace("\\", "/"), rc))
         os.chmod(path, 0o755)
 
-    def run_sh(self, rel, without=()):
+    def run_sh(self, rel, without=(), cwd=None):
         env = dict(os.environ)
         env["PATH"] = self.fakebin + os.pathsep + env.get("PATH", "")
         env["HOME"] = self.home
@@ -345,9 +345,49 @@ class _Posix(_Tree):
             # a fake that exits 127 the way a missing command would.
             self.recorder(name, rc=127)
         with io.open(os.devnull) as devnull:
-            done = subprocess.run([self.shell, os.path.join("scripts", *rel)], cwd=self.root, stdin=devnull,
+            done = subprocess.run([self.shell, os.path.join("scripts", *rel)], cwd=cwd or self.root, stdin=devnull,
                                   capture_output=True, text=True, errors="replace", timeout=120, env=env)
         return done.returncode, done.stdout + done.stderr
+
+
+def systemd_exec_word(value):
+    """The one word systemd makes of an ExecStart= value written in its
+    double-quoted form, by the rules of systemd.service(5) and
+    systemd.unit(5): specifiers first (only %% is a literal %; any other %
+    is a specifier or a load error), then quote removal (inside the quotes
+    \\\\ and \\" are the escapes, an unescaped " ends the word, and a second
+    word means the executable is not the path), then environment
+    substitution ($$ is a literal $; anything else after $ is a variable).
+    Raises AssertionError when the value is not one literal word."""
+    marker = "\x00"
+    unspec = value.replace("%%", marker)
+    assert "%" not in unspec, "a bare %% is a specifier: " + value
+    unspec = unspec.replace(marker, "%")
+    assert unspec.startswith('"') and unspec.endswith('"') and len(unspec) >= 2, "not double-quoted: " + value
+    word, i, inner = [], 0, unspec[1:-1]
+    while i < len(inner):
+        ch = inner[i]
+        if ch == "\\":
+            assert i + 1 < len(inner) and inner[i + 1] in '\\"', "unknown escape in: " + value
+            word.append(inner[i + 1])
+            i += 2
+            continue
+        assert ch != '"', "the quotes end before the path does (a second word): " + value
+        word.append(ch)  # whitespace included: that is what the quotes are for
+        i += 1
+    word = "".join(word)
+    unvar = word.replace("$$", marker)
+    assert "$" not in unvar, "a bare $ is an environment variable: " + value
+    return unvar.replace(marker, "$")
+
+
+def systemd_path(value):
+    """A path-valued setting such as WorkingDirectory=: not word-split, not
+    $-expanded, but %-specifiers still apply."""
+    marker = "\x00"
+    unspec = value.replace("%%", marker)
+    assert "%" not in unspec, "a bare %% is a specifier: " + value
+    return unspec.replace(marker, "%")
 
 
 class TheLinuxAutostart(_Posix, unittest.TestCase):
@@ -365,14 +405,39 @@ class TheLinuxAutostart(_Posix, unittest.TestCase):
         unit = configparser.ConfigParser(interpolation=None)
         unit.read(self.unit_path(), encoding="utf-8")
         root = os.path.realpath(self.root).replace("\\", "/")
-        self.assertTrue(unit["Service"]["ExecStart"].endswith("/scripts/linux/start-dccore.sh"))
-        self.assertTrue(unit["Service"]["WorkingDirectory"].replace("\\", "/").lower().endswith(os.path.basename(root).lower()))
+        self.assertTrue(systemd_exec_word(unit["Service"]["ExecStart"]).endswith("/scripts/linux/start-dccore.sh"))
+        self.assertTrue(systemd_path(unit["Service"]["WorkingDirectory"]).replace("\\", "/").lower()
+                        .endswith(os.path.basename(root).lower()))
         self.assertEqual(unit["Service"]["Restart"], "on-failure")
         self.assertEqual(unit["Install"]["WantedBy"], "default.target")
         calls = self.calls_made()
         self.assertIn("systemctl --user daemon-reload", calls)
         self.assertIn("systemctl --user enable --now dccore.service", calls)
         self.assertIn("loginctl enable-linger", out)
+
+    def test_install_writes_a_unit_systemd_reads_back_as_the_folder_with_a_space_percent_or_dollar_in_its_name(self):
+        """#618: systemd word-splits ExecStart= and expands % and $, so an
+        unquoted `~/My Files/dccore` ran /home/me/My and looped on 203/EXEC.
+        The tree is moved under such a name and the unit is decoded by
+        systemd's rules, not searched for %%."""
+        awkward = "My Files %h $HOME"
+        if os.name != "nt":
+            awkward += ' "q" \\b'      # not legal in a Windows folder name
+        tree = os.path.join(self.root, awkward)
+        os.makedirs(tree)
+        shutil.move(os.path.join(self.root, "scripts"), tree)
+        shutil.move(os.path.join(self.root, "settings.conf"), tree)
+        self.recorder("systemctl")
+        rc, out = self.run_sh(("linux", "install-autostart.sh"), cwd=tree)
+        self.assertEqual(rc, 0, out)
+        unit = configparser.ConfigParser(interpolation=None)
+        unit.read(self.unit_path(), encoding="utf-8")
+        tail = (awkward + "/scripts/linux/start-dccore.sh").lower()
+        self.assertTrue(systemd_exec_word(unit["Service"]["ExecStart"]).lower().endswith(tail),
+                        unit["Service"]["ExecStart"])
+        self.assertTrue(systemd_path(unit["Service"]["WorkingDirectory"]).lower().endswith(awkward.lower()),
+                        unit["Service"]["WorkingDirectory"])
+        self.assertIn("systemctl --user enable --now dccore.service", self.calls_made())
 
     def test_install_refuses_an_unconfigured_tree(self):
         os.remove(os.path.join(self.root, "settings.conf"))

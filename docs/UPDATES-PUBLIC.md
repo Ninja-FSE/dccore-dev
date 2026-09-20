@@ -27,6 +27,10 @@
 
 - **Fixed: a first run could get stuck when the setup page's port was already taken.** With Flask installed and port 8420 in use - typically another DCCore still running in a minimised window - every start ended in "exited with code 1" and advice to copy sample files, and the launcher never offered its own questions. The message now says the port is taken and what to do about it, and the launcher asks the setup questions in the terminal instead.
 
+- **Fixed (Linux): autostart works from a folder whose name has a space, `%` or `$` in it.** `install-autostart.sh` said "Done" but the bot never came up: systemd read `~/My Files/dccore/...` as the program `/home/me/My` and restarted it every ten seconds. The unit it writes now quotes the path. If you installed autostart from such a folder, run `./scripts/linux/install-autostart.sh` again.
+
+
+
 
 
 
