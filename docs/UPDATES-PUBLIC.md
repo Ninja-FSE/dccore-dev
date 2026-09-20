@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a user kicked from the channel was still treated as present.** Only a kick of the bot itself was noticed; anyone else kicked stayed in the bot's member list, so their queue kept being sent to a nick that might have long since disconnected - tying up a slot for every attempt - instead of being frozen like a user who parts. And after the bot itself was kicked and rejoined, people who had left in the meantime were still counted as present. A kick now counts as leaving, and the member list is rebuilt from scratch when the bot comes back.
 - **Fixed: switching on `AUTO_REFETCH_LISTS` from the Settings page (or by editing `settings.conf` and running `!rehash`) did nothing until the next restart.** The save reported success and no restart notice, but the hourly check that re-fetches a held list when its bot advertises a new one only ever started at boot. It now starts the moment the setting is turned on, and only once - saving other settings afterwards does not start it again.
 
 - **Fixed: a lifetime statistics reset after a transfer.** If `data/stats.txt` could not be read for a moment exactly when a transfer finished - on Windows an antivirus, backup or indexing tool briefly holding the file is enough - the bot counted that one transfer on top of zeros and saved the result, so years of file and byte totals became "1 file" in the advert and on the Stats page, with no copy kept. The bot now leaves the file alone and logs a `[DB ERROR]` line instead; that one transfer goes uncounted and the totals survive.

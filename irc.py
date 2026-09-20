@@ -928,8 +928,75 @@ def note_kicked_from(channel, by=""):
         config.kicked_channels[name] = {
             "refusals": 0, "kicked_at": time.time(), "by": str(by or ""),
             "reason": "kicked",
+            # Who is in there is no longer something we can see, so the
+            # first NAMES after the rejoin replaces the member list instead
+            # of merging into it - see learn_channel_names().
+            "members_stale": True,
         }
     return True
+
+
+def note_user_kicked(nick, channel):
+    """Somebody else was thrown out of `channel`. The same fact a PART
+    carries, mirrored the same way: out of config.channel_users, and into
+    recent_departures so a reconnect under an alt nick is recognised.
+    Returns whether they were actually there.
+
+    Audit M27 (#629): the KICK handler only ever looked at a kick of the
+    bot itself. Anyone else kicked stayed in channel_users - which dcc.py
+    treats as proof of presence - and because the bot then shared no
+    channel with them, their QUIT was never seen either. A kicked user who
+    disconnected kept being dispatched to: each attempt held a slot for the
+    accept timeout, the queue was never frozen, never reaped, and the files
+    were finally discarded as send failures instead.
+    """
+    key = str(nick or "").strip().lower()
+    chan = str(channel or "").strip().lower()
+    with runtime.channel_users_lock():
+        members = config.channel_users.get(chan)
+        found = members is not None and key in members
+        if found:
+            members.remove(key)
+    # #376: OBSERVED, not inferred - outside the lock, as the QUIT
+    # handler does, and only when we actually found them.
+    if found:
+        note_observed_departure(key, chan)
+    return found
+
+
+def forget_channel_members(channel):
+    """We were thrown out of `channel` and are not going back. Nothing can
+    keep that member list honest any more, and dcc.py reads it as proof a
+    user is present, so it goes.
+
+    A channel we WILL try to rejoin keeps its list: nobody in it did
+    anything, and dropping them would start the five-minute freeze timer on
+    every queue there while the bot waits for the next advert to ask its
+    way back in. That list is rebuilt from scratch instead - see
+    learn_channel_names().
+    """
+    name = str(channel or "").strip().lower()
+    with runtime.channel_users_lock():
+        config.channel_users.pop(name, None)
+
+
+def learn_channel_names(channel, names):
+    """Fold one 353 (NAMES) line into config.channel_users.
+
+    Normally a merge, because a large channel's NAMES arrives as several
+    353 lines and each one carries only part of the list. After a kick the
+    FIRST line replaces the list instead: everyone who left while the bot
+    was out would otherwise stay "present" for the life of the connection,
+    since the bot saw neither their PART nor their QUIT.
+    """
+    chan = str(channel or "").strip().lower()
+    with runtime.kicked_channels_lock:
+        entry = config.kicked_channels.get(chan)
+        rebuild = bool(entry) and bool(entry.pop("members_stale", False))
+    with runtime.channel_users_lock():
+        if rebuild or chan not in config.channel_users:
+            config.channel_users[chan] = set()
+        config.channel_users[chan].update(names)
 
 
 def note_join_unconfirmed(channel):
@@ -2828,10 +2895,9 @@ def irc_loop():
                         if name_match and is_valid_irc_target(name_match.group(1)):
                             chan = name_match.group(1).lower()
                             names = [n.strip("@+~&%").lower() for n in name_match.group(2).split()]
-                            with runtime.channel_users_lock():
-                                if chan not in config.channel_users:
-                                    config.channel_users[chan] = set()
-                                config.channel_users[chan].update(names)
+                            # A merge, except for the first line after a
+                            # kick - see learn_channel_names().
+                            learn_channel_names(chan, names)
 
                             # -------------------------------------------------
                             # RECONNECT THAW - this is what saves the queues:
@@ -2968,8 +3034,16 @@ def irc_loop():
                                     f"Will try to rejoin on the next advert.",
                                     category="PART", notice="warning")
                             else:
+                                # Not coming back, so nothing will ever
+                                # correct the member list - drop it.
+                                forget_channel_members(kicked_chan)
                                 print(f"[KICK] Removed from {kicked_chan}, which is "
                                       f"not in CHANNEL - not rejoining.")
+                        else:
+                            # Somebody else: the same departure a PART is
+                            # (#629). Left in channel_users, they stayed
+                            # "present" to dcc.py for the whole connection.
+                            note_user_kicked(victim, kicked_chan)
 
                     # And the answer when it will not have us back. Counted
                     # only for a channel we are already trying to return to -

@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 👢 A kick of another user is a departure, and the rejoin's NAMES rebuilds the member list (#629)
+
+Audit M27. The KICK handler only acted on a kick of the bot itself; anyone else kicked stayed in
+`config.channel_users`, which `dcc.user_is_present_in_ram()` reads as proof of presence, and since the bot then
+shared no channel with them their QUIT was invisible too - a kicked user who disconnected kept being dispatched
+to, each attempt holding a slot for the accept timeout, the queue never frozen or reaped. The bot's own kick left
+the list alone as well, and the rejoin's 353 only merged into it, so members who left while the bot was out stayed
+"present" for the life of the connection.
+
+`irc.note_user_kicked()` now removes the victim exactly as a PART does (and records the departure for #376);
+`note_kicked_from()` marks the member list stale and `learn_channel_names()` - which the 353 handler now goes
+through - replaces the list on the first NAMES line after the kick and merges the rest as before, so a large
+channel's multi-line NAMES still adds up. A channel the bot is not going back to has its list dropped
+(`forget_channel_members()`). The list of a channel the bot WILL rejoin is deliberately kept until then: dropping
+it would start the five-minute freeze timer on every queue there while the rejoin waits for the next advert.
+`tests/test_a_kick_of_another_user_is_a_departure.py`.
+
 ### 🩹 A damaged list_index.db is moved aside and rebuilt, and the log no longer promises a fetch will do it (#628)
 
 `list_index._connect()` failed on a corrupt or non-database file ("file is not a database", "database disk image is
