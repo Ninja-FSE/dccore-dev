@@ -165,6 +165,7 @@ alias dccore {
     else { dccore.sys Token forgotten here. To revoke it on the bot as well, type "unpair dccore.mrc" in the console once connected. }
     dccore.forget token
     dccore.forget paired
+    dccore.forget bothost
     dccore.title
     return
   }
@@ -173,6 +174,13 @@ alias dccore {
     dccore.timers.off
     if ($chat($dccore.bot)) { window -c $+(=,$dccore.bot) }
     dccore.sys Disconnected. Automatic reconnection is off until /dccore connect.
+    return
+  }
+  if (%cmd == trust) {
+    var %now = $address($dccore.bot,2)
+    if (%now == $null) { dccore.sys $dccore.bot $+ 's host is not known: be in a channel with it first. | return }
+    dccore.set bothost %now
+    dccore.sys The token may now go to $dccore.bot at %now $+ . /dccore connect to try again.
     return
   }
   if (%cmd == options) { dccore.options | return }
@@ -194,6 +202,7 @@ alias dccore {
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore connect [botnick] $+ $str($dccore.nbsp,4) open the window and the chat (logs in with the token)
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore disconnect $+ $str($dccore.nbsp,11) close the chat and stop reconnecting
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore unpair $+ $str($dccore.nbsp,15) forget the token here and revoke it on the bot
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore trust $+ $str($dccore.nbsp,16) accept the bot's current host as the one to send the token to
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore options $+ $str($dccore.nbsp,14) what to show, colours, panel, title bar, beep
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore window $+ $str($dccore.nbsp,15) open or focus @DCCore
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore status $+ $str($dccore.nbsp,15) ask the bot for its status
@@ -322,6 +331,11 @@ alias dccore.line {
 
   if (%text == Enter Your Password:) {
     if ($dccore.opt(token) != $null) && (!$dccore.st(tokentried)) && (!$dccore.st(pairing)) {
+      ; The token is only ever handed to the address the bot was paired from.
+      ; Anyone on the network can take the bot's nick while it is away, and
+      ; the script dials that nick by itself - so who answers is checked
+      ; first, not assumed.
+      if (!$dccore.peerok) { return }
       hadd dccore.live tokentried 1
       hadd dccore.live state auth
       dccore.send $dccore.opt(token)
@@ -365,6 +379,37 @@ alias dccore.line {
 
 ; A bot without the structured feed (older than 1.13), or one whose
 ; protocol we do not know: the window shows the chat as it comes.
+; Is the one on the other end of the chat the bot we paired with? The host
+; the bot had when the token was stored is kept (bothost) and compared with
+; the host the nick has NOW. A script paired before this check has none
+; stored and learns it the first time the bot's host is known; if it is not
+; known yet, the token waits rather than goes out unchecked.
+alias dccore.peerok {
+  var %now = $address($dccore.bot,2)
+  var %known = $dccore.opt(bothost)
+  if (%known == $null) {
+    if (%now == $null) {
+      dccore.sys Not sending the token yet: $dccore.bot $+ 's host is not known, so it cannot be checked that this is the bot. Join a channel it is in, or /dccore trust once you are sure, then /dccore connect.
+      dccore.abandon
+      return $false
+    }
+    dccore.set bothost %now
+    dccore.sys Remembering that $dccore.bot is at %now $+ ; the token will only go there.
+    return $true
+  }
+  if (%now == %known) { return $true }
+  dccore.sys NOT sending the token: $dccore.bot is at $iif(%now,%now,an unknown host) $+ , but the bot was paired at %known $+ . Someone else may hold its nick. If the bot really moved, /dccore trust, then /dccore connect.
+  dccore.abandon
+  return $false
+}
+; give up on this chat and do not retry by itself until told to
+alias dccore.abandon {
+  dccore.set wantopen 0
+  dccore.timers.off
+  hadd dccore.live state closed
+  if ($chat($dccore.bot)) { window -c $+(=,$dccore.bot) }
+  dccore.title
+}
 alias dccore.plain {
   .timerdccoreHello off
   if ($dccore.st(state) != in) { return }
@@ -413,6 +458,7 @@ alias dccore.structured {
   if (%type == TOKEN) {
     dccore.set token $3
     dccore.set paired $date
+    if ($address($dccore.bot,2) != $null) { dccore.set bothost $address($dccore.bot,2) }
     hadd dccore.live pairing 0
     dccore.sys Paired as $2 $+ . The token is kept in dccore.ini; from now on the script logs in by itself. /dccore unpair revokes it.
     dccore.title

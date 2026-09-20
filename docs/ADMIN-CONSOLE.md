@@ -538,6 +538,16 @@ again. From then on the script answers `Enter Your Password:` with the token
 and is logged in exactly as with the password: the same hostmask check
 first, the same three attempts, the same IP block.
 
+**The script only sends the token to the bot it paired with.** It dials the
+bot's nick by itself, and on Undernet anyone can take a nick while the bot is
+away, so before answering `Enter Your Password:` it compares the host the nick
+has now with the one the bot had when the token was stored (`bothost` in
+`dccore.ini`, learned when the token arrives). A different host is not sent the
+token: the window says so and the script stops reconnecting by itself. If the bot
+really has moved, `/dccore trust` accepts its current host. A script paired
+before this check learns the host the first time the bot's is known; if it is
+not known yet (you share no channel with it) the token waits for `/dccore trust`.
+
 What a token does **not** do is open the dashboard. The web login checks the
 admin password hash and nothing else - the token store is never read there -
 so a stolen `.mrc` costs you a console session and nothing more, and one
@@ -633,6 +643,7 @@ sent at all: what is off there never reaches the script.
 /dccore connect [botnick]    open the window and the chat (logs in with the token)
 /dccore disconnect           close the chat and stop reconnecting
 /dccore unpair               forget the token here and revoke it on the bot
+/dccore trust                accept the bot's current host as the one to send the token to
 /dccore options              what to show, colours, panel, title bar, beep
 /dccore window               open or focus @DCCore
 /dccore status               ask the bot for its status
