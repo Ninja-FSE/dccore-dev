@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (mIRC window): `FLACin #channel` is `FLAC in #channel` again.** On every request, queue, send, sent, failed and search line the nick ran together with the word "in" before the channel. Update `dccore.mrc`.
+- **Fixed (mIRC window): `NICKin #channel` is `NICK in #channel` again.** On every request, queue, send, sent, failed and search line the nick ran together with the word "in" before the channel. Update `dccore.mrc`.
 - **Fixed: the mIRC window was slow after the background colour was added.** The colour was a one-pixel picture that mIRC redraws one pixel at a time over the whole window, on every new line and every change in Options. It is now a 128x128 picture, and Options only repaints it when the colour itself was changed. The script writes the new picture the first time a colour is used; the old `dccore-bg-<n>.bmp` files beside it can be deleted.
 - **The mIRC window no longer hands its stored token to whoever takes the bot's nick.** The script reconnects to the bot by itself, and on Undernet anyone can take a nick while the bot is away, then accept that chat and receive the token. The script now sends it only if the nick's host is the one the bot had when the token was stored; otherwise it says so and stops reconnecting. If the bot really moved, `/dccore trust`. Update `dccore.mrc`.
 - **Fixed: two people (or two clients) with the console open no longer trade it back and forth every few seconds.** When a second client logged in, the first was never told it had been replaced, so it reconnected by itself five seconds later and took the console back, over and over. It is now told, says so in its window, and stays disconnected until you `/dccore connect`. Update `dccore.mrc`.

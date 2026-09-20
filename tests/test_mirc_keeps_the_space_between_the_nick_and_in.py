@@ -1,4 +1,4 @@
-"""The window printed "FLACin #channel" for "FLAC in #channel".
+"""The window printed "SomeNickin #channel" for "SomeNick in #channel".
 
 dccore.in returned " in #channel" built with $chr(32), so the result started with
 a space - and mIRC drops leading spaces from what an alias returns, which is why
@@ -58,11 +58,11 @@ class TheAlias(unittest.TestCase):
     def test_what_the_line_reads_like(self):
         """Simulate the join: nick, then the alias's result, then the rest."""
         nbsp = "\xa0"
-        nick, channel = "FLAC", "#Mp3Passion"
+        nick, channel = "SomeNick", "#example"
         result = nbsp + "in" + nbsp + channel
         line = nick + result + " asked for a file"
-        self.assertEqual(line.replace(nbsp, " "), "FLAC in #Mp3Passion asked for a file")
-        self.assertNotIn("FLACin", line.replace(nbsp, " "))
+        self.assertEqual(line.replace(nbsp, " "), "SomeNick in #example asked for a file")
+        self.assertNotIn("SomeNickin", line.replace(nbsp, " "))
 
 
 if __name__ == "__main__":

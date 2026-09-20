@@ -7,7 +7,7 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 ### 📍 The nick and 'in' have a space between them (#550)
 
 `dccore.in` returned `$+($chr(32),in,$chr(32),$1)`; mIRC drops a leading space from an alias's return value, so `$2 $+
-$dccore.in($3)` printed 'FLACin #chan'. The spaces are now `$chr(160)`, which it keeps and which the script already
+$dccore.in($3)` printed 'NICKin #chan'. The spaces are now `$chr(160)`, which it keeps and which the script already
 uses for column padding.
 
 ### 📍 The mIRC window's background is a 128x128 tile (#550)
