@@ -365,17 +365,16 @@ def startup(setup_page=None):
         print(f"[FETCH] Could not start fetch dispatcher: {fetch_worker_err}")
 
     # Only when it is switched on: a thread that would sleep for an hour and
-    # then find the feature disabled is a thread nobody needs. !rehash cannot
-    # start it, which is the honest cost of not running it by default - turning
-    # it on takes a restart, and the setting says so.
-    if getattr(config, "AUTO_REFETCH_LISTS", False):
-        try:
-            import list_fetch
-            threading.Thread(target=list_fetch.auto_refetch_worker,
-                             daemon=True).start()
-        except Exception as refetch_err:
-            print(f"[LIST-FETCH] Could not start the automatic refresh: "
-                  f"{refetch_err}")
+    # then find the feature disabled is a thread nobody needs. The same call
+    # runs again after every rehash (#625), so switching it on live starts
+    # the worker then - once, guarded in runtime.py - and no restart is
+    # needed.
+    try:
+        import list_fetch
+        list_fetch.ensure_auto_refetch_worker()
+    except Exception as refetch_err:
+        print(f"[LIST-FETCH] Could not start the automatic refresh: "
+              f"{refetch_err}")
 
     # Optional web dashboard (mostly read-only status views, plus the
     # cross-bot search/fetch routes - see webserver.py's module docstring).

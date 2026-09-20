@@ -1211,7 +1211,22 @@ def _handle_rehash_request(user, target_chan):
         if hasattr(announce, 'last_announce_time'):
             import time
             announce.last_announce_time = time.time()
-            
+
+        # The automatic list refresh (#625). oserve.startup() starts its
+        # worker only when AUTO_REFETCH_LISTS is on at boot, and a dashboard
+        # save that ticks it on lands here - so this is where it has to
+        # start, or the setting is "rehash started" and nothing else until
+        # the next restart. Idempotent: runtime.py remembers a worker already
+        # running, and a rehash that changed nothing starts nothing.
+        try:
+            import list_fetch as _list_fetch
+            if _list_fetch.ensure_auto_refetch_worker():
+                print("[REHASH] AUTO_REFETCH_LISTS is on: the automatic list "
+                      "refresh has started.")
+        except Exception as refetch_err:
+            print(f"[REHASH] Could not start the automatic list refresh: "
+                  f"{refetch_err}")
+
         # ---------------------------------------------------------------------
         # 4. FULLY AUTOMATIC CHANNEL SYNC (JOIN NEW / PART REMOVED)
         # ---------------------------------------------------------------------

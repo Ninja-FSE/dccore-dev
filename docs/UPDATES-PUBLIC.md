@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: switching on `AUTO_REFETCH_LISTS` from the Settings page (or by editing `settings.conf` and running `!rehash`) did nothing until the next restart.** The save reported success and no restart notice, but the hourly check that re-fetches a held list when its bot advertises a new one only ever started at boot. It now starts the moment the setting is turned on, and only once - saving other settings afterwards does not start it again.
+
 - **Fixed: the browser setup page was only half translated.** Choosing FR or ES translated the field names and their **?** explanations but left the title, the intro, the password boxes, the network box, the button, the note, every error message and the "Saved" page in English. The whole page now follows the language you pick.
 - **Fixed: the first-run setup left dashboard settings in `admin_config.py` that `settings.conf` then overrode for ever, without a word.** A fresh `admin_config.py` was a copy of the sample, so it started with `WEBUI_ENABLED = True`, `WEBUI_HOST`, `WEBUI_PORT` and `ADMIN_CHAT_MODE = "listen"` already in it - and since `settings.conf` wins where both set a name, editing those lines there (as the file's own comment suggested) did nothing. The setup now writes only the password into `admin_config.py`; everything else it asked for is in `settings.conf`, where the dashboard's Settings page edits it. And at startup the bot now says which settings `settings.conf` overrides from `admin_config.py`, so an edit that is being ignored is named rather than silent. An existing `admin_config.py` is not changed.
 

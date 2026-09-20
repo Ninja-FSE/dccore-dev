@@ -194,6 +194,16 @@ list_index_lock = threading.Lock()
 # reload costs one recount, which is harmless, where rebinding the lock is not.
 list_count_lock = threading.Lock()
 
+# The automatic list refresh's start guard (#625). list_fetch.ensure_auto_
+# refetch_worker() starts the hourly loop from wherever AUTO_REFETCH_LISTS is
+# found on - boot, or the rehash a dashboard save fires - and must start it
+# ONCE. Both halves of "once" live here: the lock for the reason every other
+# lock in this file does, and the flag because a flag in a module a rehash
+# reloads is reset by the very rehash that is about to consult it, and every
+# Settings save would then start one more worker.
+auto_refetch_guard   = threading.Lock()
+auto_refetch_started = False
+
 # Other bots advertising in our channels ------------------------------------
 # nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",
 #                  "last_seen"}, built from the periodic advert every

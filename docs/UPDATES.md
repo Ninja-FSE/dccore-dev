@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 Turning AUTO_REFETCH_LISTS on live starts the refresh worker (#625)
+
+`list_fetch.auto_refetch_worker` was started in one place, `oserve.startup()`, and only when the setting was
+already on at boot. A dashboard save that ticked it on wrote settings.conf and fired a rehash, the rehash body
+never looked at the setting, and `AUTO_REFETCH_LISTS` was not in `webserver.SETTINGS_RESTART_ONLY` either - so
+the operator got a green save, "rehash started", no restart notice, and no worker. Held lists went stale until
+the next restart; the only live effect was the one-shot `refetch_due_lists()` sweep irc.py runs on a reconnect.
+oserve.py's own comment said "the setting says so" about a restart the help never mentioned.
+
+New `list_fetch.ensure_auto_refetch_worker()` starts the hourly loop if the setting is on and it is not already
+running, and returns whether this call started it. `oserve.startup()` and the rehash body (after the reload, so
+it reads the saved value) both call it. The "already running" state - `runtime.auto_refetch_guard` and
+`runtime.auto_refetch_started` - lives in runtime.py, so a rehash cannot reset it and start one more worker per
+Settings save. Turning the setting off needs no stop: `refetch_due_lists()` reads the flag on every pass and the
+worker idles. Nothing is added to `SETTINGS_RESTART_ONLY` and the help text is unchanged, because both now tell
+the truth. `tests/test_turning_auto_refetch_on_live_starts_the_worker.py` drives the real rehash body with the
+reload, the transfer wait and the debug line stubbed and the thread starter injected: one start over two
+rehashes, none with the setting off, no thread outliving the test.
+
 ### 🧾 A new admin_config.py carries only the password, and a line settings.conf overrides is reported at boot (#623)
 
 `configure.write_admin_config_password()` seeded a missing admin_config.py from admin_config.py.sample, whose active
