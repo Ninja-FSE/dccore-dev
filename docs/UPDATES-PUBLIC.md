@@ -21,6 +21,10 @@
 
 - **Fixed: the mIRC window no longer reconnects every couple of minutes while the bot is busy but fine.** The bot's status update (the window's heartbeat) could wait behind a slow disk operation for as long as the window's 90-second limit, and the window then declared the link dead and logged in again, over and over. The bot now sends a short keep-alive line instead when its figures are not ready in time, and the feed keeps flowing meanwhile. Update both the bot and `dccore.mrc`.
 
+- **Fixed (mIRC window): a chat the bot never answers no longer leaves the script stuck at "opening".** When the bot got the offer but said nothing back (your address blocked for 15 minutes after wrong passwords, your host not allowed, or its own offer back dropped by a firewall), mIRC waited for ever, the window's title said "opening" and every later `/dccore connect` answered "already open" until you closed the `=bot` window by hand. After 75 seconds without an answer the script now says so, closes that window and retries with its usual backoff. Update `dccore.mrc`.
+
+
+
 
 
 
