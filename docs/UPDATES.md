@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The token goes only to the bot that was paired (#585, #550)
+
+`dccore.mrc` answered the first `Enter Your Password:` with the stored token, whoever held the bot's nick.
+`dccore.peerok` compares `$address(<bot>,2)` (*!*@host) with `bothost`, stored when the token arrives: same host,
+send; different, refuse and `dccore.abandon` (no automatic redial); none stored and the host known (a script paired
+before this), learn it once (trust on first use) and send; none stored and unknown, wait for `/dccore trust`. `unpair`
+forgets it. The bot's ADMIN_HOSTMASKS gate still bounds what a stolen token is worth.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
