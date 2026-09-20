@@ -37,7 +37,9 @@ lives on the machine's own address and you could not open it from your
 computer. To use the page anyway, tunnel the port with
 `ssh -L 8420:127.0.0.1:8420 <machine>` and start the launcher with
 `DCCORE_SETUP_IN_BROWSER=1`. If a page is waiting and you cannot reach it,
-Ctrl-C and run `python3 configure.py`.) Every run after that checks the setup and starts the bot:
+Ctrl-C and run `python3 configure.py`. And if the page could not be opened at
+all because port 8420 is taken - another DCCore still running in a minimised
+window, say - the launcher asks the questions in the terminal instead.) Every run after that checks the setup and starts the bot:
 
 | | |
 |---|---|

@@ -72,6 +72,13 @@ active_downloads = 0
 send_fails_count = 0       
 total_sent_bytes = 0       
 
+# The exit code of a first run whose setup page could not finish (#617): the
+# port was taken - another DCCore in a minimised window, another program - or
+# Ctrl-C in the wait. Distinct from the 1 of every other refusal so that the
+# launchers can tell "ask the questions in the terminal instead" from "stop",
+# which is the one road out of a tree that has no config and a taken port.
+EXIT_SETUP_IN_THE_TERMINAL = 3
+
 def queue_message(user, message, is_vip=False):
     """The queue's entry point, with a strictly isolated VIP express lane."""
     user_key = user.lower()
@@ -140,6 +147,17 @@ def startup(setup_page=None):
                   + ", ".join(sorted(unconfigured)) + " - opening the setup page.")
             serve()
             unconfigured = settings_file.unconfigured_required(vars(config), config.SHIPPED_DEFAULTS)
+            if unconfigured:
+                # The page was tried and could not finish - a taken port, or
+                # Ctrl-C. This is a first run, so "copy the sample" is the
+                # step the launchers exist to spare a first-timer, and every
+                # run took the same road (#617): name the terminal questions,
+                # and exit with the code the launchers map to asking them.
+                print("[CRITICAL] The setup page could not finish, so nothing is configured "
+                      "yet: " + ", ".join(sorted(unconfigured)) + ".")
+                print("[CRITICAL] Answer the questions in the terminal instead: "
+                      "python3 configure.py (the launcher does this itself now).")
+                sys.exit(EXIT_SETUP_IN_THE_TERMINAL)
     if unconfigured:
         print("[CRITICAL] The following required setting(s) are still unconfigured "
               "(blank, or still the shipped default):")

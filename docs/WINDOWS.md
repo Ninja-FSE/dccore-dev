@@ -54,7 +54,9 @@ The setup page is `http://127.0.0.1:8420/setup` and answers only to this
 PC, only until the form is saved, and only with the one-time code in the
 link the window prints and opens - so nothing else on your PC or in your
 browser can fill it in for you. If the browser did not open, copy the link
-from the window.
+from the window. If the page could not be opened at all because the port is
+taken - another DCCore still running in a minimised window, say - the window
+says so and asks the questions itself.
 
 If you would rather do the steps by hand - or need to re-run one - they are
 still there: `py configure.py` asks the questions, `py -3 -m pip install -r

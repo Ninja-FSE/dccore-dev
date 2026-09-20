@@ -392,6 +392,15 @@ class TheServer(DCCoreTestCase):
             result = webserver.run_setup_until_configured(port=port, log=logs.append, opener=lambda *_: None)
         self.assertIsNone(result)
         self.assertTrue(any("Could not open the setup page" in line for line in logs))
+        # #617: werkzeug's SystemExit used to print as "(1)", the cause and the
+        # ways out unsaid - a first-timer with another DCCore minimised saw
+        # nothing to do. The cause is named, and so are the ways out.
+        joined = "\n".join(logs)
+        self.assertIn(f"{port} - the port is taken", joined)
+        self.assertIn("another DCCore", joined)
+        self.assertIn("WEBUI_PORT", joined)
+        self.assertIn("configure.py", joined)
+        self.assertNotIn("(1)", joined)
 
     def test_a_taken_port_never_exits_the_process(self):
         """werkzeug's server calls sys.exit(1) on a bind failure; the daemon
@@ -451,13 +460,30 @@ class StartupUsesIt(DCCoreTestCase):
         self.assertNotIn("[CRITICAL]", output)
 
     def test_a_page_that_returns_without_configuring_still_refuses(self):
-        with self.assertRaises(SystemExit) as caught:
-            self.boot(setup_page=lambda: None)
-        self.assertEqual(caught.exception.code, 1)
+        """#617: a distinct exit code, and the terminal questions named -
+        this is a first run whose page could not finish (a taken port, or
+        Ctrl-C), and "copy the sample" is the step the launchers exist to
+        spare a first-timer. The launchers map the code to asking them."""
+        buffer = io.StringIO()
+        import contextlib
+        with self.assertRaises(SystemExit) as caught, contextlib.redirect_stdout(buffer):
+            self.oserve.startup(setup_page=lambda: None)
+        self.assertEqual(caught.exception.code, self.oserve.EXIT_SETUP_IN_THE_TERMINAL)
+        self.assertEqual(caught.exception.code, 3)
+        output = buffer.getvalue()
+        self.assertIn("[CRITICAL]", output)
+        self.assertIn("configure.py", output)
+        self.assertNotIn(".sample", output)
 
     def test_setup_page_false_is_the_old_refusal(self):
-        with self.assertRaises(SystemExit):
-            self.boot(setup_page=False)
+        """No page was tried (no Flask): exit 1 and the sample files, as
+        before - that code means "stop" to the launchers, not "ask"."""
+        buffer = io.StringIO()
+        import contextlib
+        with self.assertRaises(SystemExit) as caught, contextlib.redirect_stdout(buffer):
+            self.oserve.startup(setup_page=False)
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("settings.conf.sample", buffer.getvalue())
 
     def test_the_page_is_possible_exactly_when_flask_is(self):
         """No setting turns it off: loopback and one-shot by design."""
