@@ -31,6 +31,13 @@ FOREIGN = {"Origin": "http://evil.example", "Referer": "http://evil.example/lure
 
 class AForeignPageCannotSpendTheOperatorsAttempts(RouteCase):
 
+    def setUp(self):
+        super().setUp()
+        # RouteCase clears the block pool BEFORE each test; the test below that
+        # blocks 127.0.0.1 must not leave it blocked for every later module
+        # that logs in from the same address (the whole suite does).
+        self.addCleanup(webserver._web_bad_ips.clear)
+
     def foreign_post(self, password="x", **headers):
         return self.app.test_client().post(
             "/login", data={"password": password}, headers=headers or FOREIGN)
@@ -79,6 +86,10 @@ class AForeignPageCannotSpendTheOperatorsAttempts(RouteCase):
 
 
 class TheOperatorsOwnBrowserIsUntouched(RouteCase):
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(webserver._web_bad_ips.clear)
     """Controls: the refusal must not catch the dashboard's own form."""
 
     def own_post(self, password, **headers):
