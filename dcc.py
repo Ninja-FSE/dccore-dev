@@ -33,6 +33,38 @@ import runtime
 # comments mean when they say "queue_lock".
 queue_lock = runtime.queue_lock
 
+def names_a_remote_or_absolute_path(name, windows=None):
+    """True for a requested name that points somewhere the library is not (#578).
+
+    A request is a name inside the library, never a location. On Windows,
+    os.path.join(base, "\\\\host\\share\\x") returns the UNC path unchanged, and
+    the os.path.exists()/realpath() calls that come BEFORE the containment check
+    then make Windows resolve the host and open an SMB session as the account
+    running the bot - an outbound connection, and an NTLM handshake, that anybody
+    in the channel could start with one line. Refused here, on the text, before
+    anything touches the file system.
+
+    UNC and device paths (`\\\\host\\share`, `\\\\?\\`, `//host/share`: Windows reads a
+    doubled slash of either kind the same way) are refused everywhere - no real
+    library name starts that way. A drive letter (`C:\\x`), a drive-relative one
+    (`C:x`) or a root-relative one (`\\x`) can only mean something on Windows, so
+    they are refused only there (`windows` overrides, for tests). A NUL byte is
+    refused everywhere: os.path calls raise on it.
+    """
+    text = str(name)
+    if "\x00" in text:
+        return True
+    if text.replace("/", "\\").startswith("\\\\"):
+        return True
+    if windows is None:
+        windows = platform_compat.IS_WINDOWS
+    if windows:
+        import ntpath
+        if ntpath.splitdrive(text)[0] or text.startswith("\\"):
+            return True
+    return False
+
+
 # A LIBRARY-WIDE LOOKUP IS THE EXPENSIVE THING A REQUEST CAN ASK FOR (#580).
 # A name that is not in the first folder's root makes handle_download_request()
 # read every published list and then walk every configured folder; each request
@@ -68,6 +100,8 @@ def _note_lookup_miss(key):
         if excess > 0:
             for stale in list(_lookup_misses)[:excess]:
                 _lookup_misses.pop(stale, None)
+
+
 
 
 def is_safe_path(base_dir, path, follow_symlinks=True):
@@ -597,7 +631,18 @@ def release_queue_entry(user, next_file, delivered, reason=""):
     is_row = isinstance(next_file, dict)
     consumed_temp = bool(is_row and next_file.get("is_temporary_zip")
                          and not next_file.get("is_unpacked_rar_folder"))
-    retryable = is_row and not consumed_temp
+    # A row that is not in any queue is the direct-send fast path's synthetic
+    # one (see above): nothing will ever pick it up again, so "kept for retry"
+    # was a claim about a retry that could not happen - and, being "kept", it
+    # sent the user nothing, so the most common request (a free slot, no
+    # queue) got one attempt and silence when it failed (#599).
+    in_a_queue = False
+    if is_row:
+        with queue_lock:
+            in_a_queue = any(row is next_file
+                             for rows in list(config.dcc_queue.values()) if rows
+                             for row in rows)
+    retryable = is_row and in_a_queue and not consumed_temp
 
     retained = False
     gave_up = False
@@ -609,7 +654,12 @@ def release_queue_entry(user, next_file, delivered, reason=""):
             outcome = "delivered, " + str(removed) + " row(s) removed"
         elif not retryable:
             removed = _remove_by_identity()
-            why = "temporary archive already consumed" if consumed_temp else "row is not retryable"
+            if consumed_temp:
+                why = "temporary archive already consumed"
+            elif is_row and not in_a_queue:
+                why = "sent directly, not queued - nothing to retry"
+            else:
+                why = "row is not retryable"
             outcome = "failed (" + why + "), " + str(removed) + " row(s) removed"
         else:
             attempts = int(next_file.get("send_fails", 0)) + 1
@@ -633,11 +683,13 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         try:
             oserve_mod = sys.modules.get("oserve")
             dropped = next_file.get("file", "your file") if is_row else str(next_file)
+            # "Removed from your queue" is only true of a row that was in one.
+            tail = "Removed from your queue." if (in_a_queue or not is_row) else "Ask for it again when you are ready."
             if oserve_mod:
                 oserve_mod.queue_message(
                     user,
                     "NOTICE " + str(user) + " :" + config.C_BOLD + "Error" + config.C_RESET +
-                    ": Could not send " + str(dropped) + " (" + str(reason) + "). Removed from your queue.\r\n")
+                    ": Could not send " + str(dropped) + " (" + str(reason) + "). " + tail + "\r\n")
         except Exception as notify_err:
             print("[DCC QUEUE] Could not notify " + str(user) + ": " + str(notify_err))
 
@@ -1603,13 +1655,23 @@ def parse_resume_request(body):
     return filename.strip('"'), port, position
 
 
-def handle_resume_request(irc_sock, user, body):
+def handle_resume_request(irc_sock, user, body, background=False):
     """Answer a receiver's DCC RESUME with the DCC ACCEPT it is waiting for.
 
-    True if an ACCEPT was sent. False means no offer of ours matched, which
-    is the ordinary outcome for a stray or forged line and is not logged as
-    an error: anyone on the network can send this, and the only thing that
-    makes it ours is a port we are listening on for that exact nick.
+    True if an ACCEPT was sent - or, with `background`, is on its way. False
+    means no offer of ours matched, which is the ordinary outcome for a stray
+    or forged line and is not logged as an error: anyone on the network can
+    send this, and the only thing that makes it ours is a port we are
+    listening on for that exact nick.
+
+    `background` is what the IRC read loop passes (#577, #602). The ACCEPT goes
+    out through the shared pacer, which sleeps up to MSG_DELAY for a slot; done
+    on the read thread that is up to MSG_DELAY with no PING answered and no line
+    parsed, once per matching RESUME. So the lookup and the position - the parts
+    that must be settled before the receiver can connect - stay here, and the
+    paced send moves to a short-lived thread. One at a time per offer: a
+    RESUME that arrives while one is waiting only updates the position, and the
+    reply that goes out carries the latest.
     """
     parsed = parse_resume_request(body)
     if not parsed:
@@ -1630,6 +1692,62 @@ def handle_resume_request(irc_sock, user, body):
         # hanging, which is the failure this whole feature exists to end.
         position = max(0, min(position, size))
         offer["position"] = position
+        if background:
+            if offer.get("accept_pending"):
+                return True
+            offer["accept_pending"] = True
+
+    if not background:
+        return _send_resume_accept(irc_sock, user, key)
+    try:
+        threading.Thread(target=_send_resume_accept, args=(irc_sock, user, key, True),
+                         daemon=True).start()
+    except Exception as err:
+        with runtime.dcc_send_offers_lock:
+            offer = runtime.dcc_send_offers.get(key)
+            if offer:
+                offer.pop("accept_pending", None)
+        print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
+        return False
+    return True
+
+
+def _send_resume_accept(irc_sock, user, key, clear_pending=False):
+    """The paced half of handle_resume_request(): wait for the shared clock,
+    then send the ACCEPT for the position the offer holds at THAT moment, and
+    record that it was resumed.
+
+    The slot is waited for BEFORE the offer is read, so a RESUME that arrived
+    while this one waited has already moved the position, and the pending flag
+    stays set for the whole wait: that is what makes it one reply at a time.
+    """
+    port = key[1]
+    try:
+        # THROUGH THE SHARED CLOCK, not straight onto the socket (#453). A
+        # resume handshake is latency-sensitive, so it is not queued behind
+        # the round-robin - but it is still a PRIVMSG leaving this connection,
+        # and a peer that reconnects and resumes repeatedly could otherwise
+        # emit them as fast as it asked for them. Waiting for a slot keeps the
+        # reply prompt while still counting it against the same budget every
+        # other outbound line respects.
+        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
+    except Exception as err:
+        print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
+        if clear_pending:
+            with runtime.dcc_send_offers_lock:
+                offer = runtime.dcc_send_offers.get(key)
+                if offer:
+                    offer.pop("accept_pending", None)
+        return False
+
+    with runtime.dcc_send_offers_lock:
+        offer = runtime.dcc_send_offers.get(key)
+        if not offer:
+            return False
+        if clear_pending:
+            offer.pop("accept_pending", None)
+        size = int(offer.get("size") or 0)
+        position = int(offer.get("position") or 0)
         offered_name = offer["filename"]
 
     # The position is stored BEFORE the ACCEPT goes out, and that ordering is
@@ -1641,14 +1759,6 @@ def handle_resume_request(irc_sock, user, body):
     reply = (f"PRIVMSG {user} :\x01DCC ACCEPT {offered_name} "
              f"{port} {position}\x01\r\n")
     try:
-        # THROUGH THE SHARED CLOCK, not straight onto the socket (#453). A
-        # resume handshake is latency-sensitive, so it is not queued behind
-        # the round-robin - but it is still a PRIVMSG leaving this connection,
-        # and a peer that reconnects and resumes repeatedly could otherwise
-        # emit them as fast as it asked for them. Waiting for a slot keeps the
-        # reply prompt while still counting it against the same budget every
-        # other outbound line respects.
-        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
         irc_sock.sendall(reply.encode("utf-8", errors="ignore"))
     except Exception as err:
         print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
@@ -1889,6 +1999,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 
             win_path = re.sub(r'\s*\[[^\]]+\]$', '', raw_win_path).strip()
 
+            # A pack request is a heading ("D:\\MEDIA\\<folder>\\...") - a drive
+            # letter is how a heading is written, so only the remote forms are
+            # refused here: a UNC or device path would be probed by realpath()
+            # in the containment check below before it could be refused (#578).
+            if names_a_remote_or_absolute_path(win_path, windows=False):
+                print(f"[SECURITY] Refused {user}'s pack request: {win_path!r} names a remote location.")
+                announce_mod.send_pack_error_notice(irc_sock, user)
+                return
+
             # This used to be a third, differently-shaped copy of the same
             # "D:\MUSIC\<folder>\" prefix-stripping list.resolve_list_folder()
             # already does - non-anchored `.replace("D:/", "")` calls rather
@@ -2086,7 +2205,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         requested_file, requested_size_hint = list_mod.strip_info_suffix(requested_file)
         requested_size_hint = requested_size_hint.lower().strip()
 
-        requested_file = str(requested_file).lstrip("/")
+        requested_file = str(requested_file)
+        # Before the "/" strip: "//host/share" is a UNC path to Windows, and
+        # once its slashes are stripped it would look like a harmless relative
+        # one. Refused on the text, before any file system call (#578).
+        if names_a_remote_or_absolute_path(requested_file):
+            print(f"[SECURITY] Refused {user}'s request: {requested_file!r} names a location, not a file in the library.")
+            announce.send_dcc_error(user, "invalid_path")
+            return
+        requested_file = requested_file.lstrip("/")
 
         # The master list lives in LOCAL_LIST_DIR, everything else in the
         # music directory. Matched on the names the list builder writes rather
@@ -2500,6 +2627,24 @@ def _wait_for_final_ack(conn, tracker, file_size):
     return tracker.last_advance_at
 
 
+def _find_transfer_row(user, file_name):
+    """The active_transfers row a send was started for, or None.
+
+    The dispatcher appends {"user", "file", ...} just before it starts the send
+    thread. Matched by nick and file, newest first; a nick alone is enough when
+    it is the only row that nick has (a pack's row is filed under the archive's
+    name, which is not always the name the send is handed).
+    """
+    key = str(user).lower()
+    with queue_lock:
+        rows = [tx for tx in config.active_transfers
+                if str(tx.get('user', '')).lower() == key]
+    for tx in reversed(rows):
+        if tx.get('file') == file_name or tx.get('next_file_obj') == file_name:
+            return tx
+    return rows[-1] if len(rows) == 1 else None
+
+
 def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     """Handle the network ports and the CTCP, and stream the bytes with accurate timing."""
     # Every failure this transfer reports carries the channel it was asked
@@ -2535,8 +2680,28 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     # loop below), but nothing recorded what it was a fraction OF. Matched by
     # user, the same way the send loop below updates bytes_sent: only one
     # transfer runs per user at a time, so this is unambiguous.
+    # #598: WHICH ROW IS THIS TRANSFER'S. The dispatcher appended one to
+    # config.active_transfers under the nick the send started as, and every
+    # lookup below used to find it by that nick again. A /nick in the middle
+    # of the send (irc.note_nick_change() rewrites the row's user and moves
+    # the in-progress lock to the new name) left every one of those lookups
+    # searching for a name nobody had any more: the row and the lock outlived
+    # the transfer for good, a slot was gone until a restart, the renamed user
+    # was locked out, and bytes_sent stopped updating. The row is held by
+    # identity instead; the nick is only what to look it up by once, here.
+    _row = _find_transfer_row(user, file_name)
+
+    def _mine(tx):
+        if _row is not None:
+            return tx is _row
+        return str(tx.get('user', '')).lower() == user.lower()
+
+    def _my_nick():
+        # Whatever name the transfer is filed under NOW - the lock moved with it.
+        return str((_row or {}).get('user') or user).lower()
+
     for tx in config.active_transfers:
-        if tx['user'].lower() == user.lower():
+        if _mine(tx):
             tx['size'] = file_size
     ip_long = get_public_ip_long()
     start_time = time.time()
@@ -2574,10 +2739,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             config.rar_inprogress = False
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
         with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers
-                                          if tx['user'].lower() != user.lower()]
+                                          if not _mine(tx)]
         return
 
     irc_sock = live_sock
@@ -2622,10 +2787,10 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # away at [RAR-HOLD].
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
             
         with queue_lock:
-            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
             
         # This abort returns BEFORE the try/finally that settles the queue row, so without
         # this call the same unreadable entry was re-selected every ~3 seconds forever,
@@ -2657,7 +2822,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                   f"the file, is what is missing. Nothing is retried until "
                   f"MY_IP_OR_DOCK is set.")
             if hasattr(config, 'user_processing_lock'):
-                config.user_processing_lock.discard(user.lower())
+                config.user_processing_lock.discard(_my_nick())
             return
 
         release_queue_entry(user, next_file, delivered=False,
@@ -2687,7 +2852,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         try: irc_sock.sendall(f"NOTICE {user} :{config.C_BOLD}Error:{config.C_RESET} No available DCC ports.\r\n".encode("utf-8", errors="ignore"))
         except: pass
         with queue_lock:
-            config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+            config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
 
         # Port exhaustion is TRANSIENT and is not this entry's fault, so it is deliberately
         # NOT charged to the retry budget - a busy spell must not discard good queued files.
@@ -2704,7 +2869,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # away at [RAR-HOLD].
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
         # #162 finding #8: this branch's own comment above says the row
         # stays queued for the next completion trigger - deleting the
         # archive it still points at contradicted that in the same breath.
@@ -2839,7 +3004,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # the size and the start moment go on the same row here, where both
         # are known. Read-only for everything else.
         for tx in config.active_transfers:
-            if tx['user'].lower() == user.lower():
+            if _mine(tx):
                 tx['size'] = file_size
                 tx['started_at'] = time.time()
         if resume_offset:
@@ -2851,7 +3016,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # record the channel advert publishes.
             bytes_sent = resume_offset
             for tx in config.active_transfers:
-                if tx['user'].lower() == user.lower():
+                if _mine(tx):
                     tx['bytes_sent'] = resume_offset
             print(f"[DCC-RESUME] Resuming {file_name} for {user} at byte "
                   f"{resume_offset} of {file_size}.")
@@ -2884,7 +3049,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 if acks.stalled() and acks.acked < bytes_sent:
                     raise _ReceiverStalled(acks.acked)
                 for tx in config.active_transfers:
-                    if tx['user'].lower() == user.lower():
+                    if _mine(tx):
                         tx['bytes_sent'] += len(chunk)
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.total_sent_bytes += len(chunk)
@@ -3127,7 +3292,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # 1. Clean up the transfer and the slot immediately
         try:
             with queue_lock:
-                config.active_transfers[:] = [tx for tx in config.active_transfers if tx['user'].lower() != user.lower()]
+                config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
                 oserve = sys.modules.get('oserve')
                 if oserve: oserve.active_downloads = len(config.active_transfers)
         except Exception as trans_clean_err:
@@ -3209,7 +3374,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # away at [RAR-HOLD].
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock.discard(user.lower())
+            config.user_processing_lock.discard(_my_nick())
 
         # 7. Wake the queue automatically after three seconds, thread-safely
         # A retained row means the attempt FAILED and will be retried. Reusing the flat
