@@ -1642,22 +1642,34 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
     # Every path that returns after this point must put the flag back, or the
     # bot refuses every future update until it restarts. There is exactly one
     # such path today - the search-already-running denial below - and it does.
+    #
+    # The search flag is checked and set inside the SAME gate (#607). It used
+    # to be read and raised just below it, outside the lock - and every @find
+    # runs on its own thread and raises the same flag, so a search arriving in
+    # that window passed its own guard while this request passed this one,
+    # and the rebuild's finally then cleared a flag the searcher still relied
+    # on. list.execute_search() takes this gate for its check-and-set too, so
+    # whichever of the two gets the lock first is the one the other sees.
+    paused_searches = False
     with runtime.list_update_gate:
         if getattr(config, 'update_inprogress', False) is True:
             announce.send_debug(f"List update request from {user} denied: An update is already running.", category="INFO")
             return
         config.update_inprogress = True
 
-    # The global maintenance lock is only taken if the switch is True in config
-    if getattr(config, 'PAUSE_ON_UPDATE', True) is True:
-        if getattr(config, 'search_inprogress', False) is True:
-            announce.send_debug(f"List update request from {user} denied: Another system scan is already running.", category="INFO")
-            # The flag was raised by the gate above and this request is not
-            # going to use it. Leaving it set would deny every later update
-            # for the life of the process.
-            config.update_inprogress = False
-            return
-        config.search_inprogress = True
+        # The global maintenance lock is only taken if the switch is True in config
+        if getattr(config, 'PAUSE_ON_UPDATE', True) is True:
+            if getattr(config, 'search_inprogress', False) is True:
+                announce.send_debug(f"List update request from {user} denied: Another system scan is already running.", category="INFO")
+                # The flag was raised by the gate above and this request is not
+                # going to use it. Leaving it set would deny every later update
+                # for the life of the process.
+                config.update_inprogress = False
+                return
+            config.search_inprogress = True
+            paused_searches = True
+
+    if paused_searches:
         print(f"[MAINTENANCE START] {user} ran !update. Searching and sharing are now PAUSED.")
         announce.send_debug(f"System maintenance initiated by {user}. MasterList is rebuilding, file requests temporarily paused...", category="INFO")
     else:
@@ -1818,8 +1830,11 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             config.last_list_update_error = str(e)
             config.last_list_update_seconds = int(time.time() - started)
         finally:
-            # Release the global pause lock again
-            config.search_inprogress = False
+            # Release the global pause lock again - but only if THIS request
+            # raised it. With PAUSE_ON_UPDATE off the flag belongs to whatever
+            # @find is running, and clearing it here let a second search in.
+            if paused_searches:
+                config.search_inprogress = False
 
             # Clear the maintenance flag, so list.py knows the list is ready
             config.update_inprogress = False

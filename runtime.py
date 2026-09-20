@@ -359,6 +359,11 @@ def resolve_display_nick(nick):
 # in between - so two requests arriving in that window both passed the guard
 # and both started a rebuild, two subprocesses writing the same .new temp
 # paths. The check and the set have to be one step.
+#
+# list.execute_search() takes the same gate for search_inprogress (#607): a
+# thread per @find read that flag and set it twenty lines later, so two @find
+# lines from one recv() buffer both walked the master list at once. One lock
+# for both flags, so a search and a rebuild cannot slip past each other.
 list_update_gate = threading.Lock()
 
 # Live transfer rate ---------------------------------------------------------
