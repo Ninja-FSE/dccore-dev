@@ -443,6 +443,52 @@ def encode_irc_escapes(text):
         lambda match: "\\x%02x" % ord(match.group()), str(text))
 
 
+# WHAT AN IRC NICKNAME MAY BE (#591). The server decides, and the protocol
+# (RFC 2812, and ircu on Undernet) says: ASCII, a letter or one of [ ] \\ ` _ ^ { | }
+# first, then those plus digits and "-". Anything else - a Greek letter, "!",
+# ".", "*", a comma, a leading "-" or digit, a space - is answered with 432
+# "Erroneous Nickname", which the handshake treats like 433 "in use": the bot
+# quietly ran as the shipped alternate ("DCCore_") and reported the nick as
+# "taken". Every path that writes a nickname comes through here, so the operator
+# hears it when they type it.
+NICK_SETTINGS = frozenset({"NICKNAME", "ALT_NICKNAME", "ADMIN_NICK"})
+_NICK_FIRST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz[]\\`_^{|}"
+_NICK_REST = _NICK_FIRST + "0123456789-"
+
+
+def nick_problem(nick):
+    """Why `nick` cannot be an IRC nickname, or None if it can."""
+    text = str(nick)
+    if not text:
+        return "a nickname cannot be empty"
+    for character in text:
+        if character == " ":
+            return f"{text!r} has a space in it"
+        if ord(character) > 127:
+            return (f"{text!r} has the character {character!r}, which is not ASCII - "
+                    "IRC servers refuse it")
+    if text[0] not in _NICK_FIRST:
+        return f"{text!r} starts with {text[0]!r}; a nickname starts with a letter or one of [ ] \\ ` _ ^ {{ | }}"
+    for character in text[1:]:
+        if character not in _NICK_REST:
+            return f"{text!r} has {character!r} in it; a nickname has letters, digits and [ ] \\ ` _ ^ {{ | }} -"
+    return None
+
+
+def nicks_problem(value):
+    """The same for a comma-separated list (ADMIN_NICK)."""
+    parts = [part.strip() for part in str(value).split(",")]
+    if not any(parts):
+        return "a nickname cannot be empty"
+    for part in parts:
+        if not part:
+            continue
+        problem = nick_problem(part)
+        if problem:
+            return problem
+    return None
+
+
 def coerce(name, raw, default, declared=None):
     """Convert `raw` to `declared`, or to the type of `default` without one.
 
@@ -480,6 +526,11 @@ def coerce(name, raw, default, declared=None):
         if isinstance(default, int):
             return int(lowered)
         return lowered
+
+    if name in NICK_SETTINGS and text:
+        problem = nicks_problem(text) if name == "ADMIN_NICK" else nick_problem(text)
+        if problem:
+            raise ValueError(f"not a valid IRC nickname: {problem}")
 
     if default is None and not text:
         # A setting whose default is None is "unset unless you say otherwise"

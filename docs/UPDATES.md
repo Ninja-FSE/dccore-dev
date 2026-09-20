@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 Nicknames are validated against what IRC allows (#591)
+
+`settings_file.nick_problem()` / `nicks_problem()` (ASCII; a letter or one of [ ] \\ ` _ ^ { | } first, then those
+plus digits and '-'; ADMIN_NICK is a comma-separated list) are applied in `coerce()` for NICKNAME, ALT_NICKNAME and
+ADMIN_NICK, which every path into config goes through (settings.conf, the Settings page, `apply_settings_changes`); a
+bad value is a 'bad' setting with the reason. `validate_setup_form()` uses the same rule instead of its own, and
+`configure._ask(check=...)` asks again. Blank is unchanged. Length is not checked (NICKLEN is the server's, #594).
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash
