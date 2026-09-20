@@ -39,6 +39,25 @@ def run(label, argv, env=None):
     return ok
 
 
+def capture(argv, env=None):
+    """Run argv with its output captured, decoded as UTF-8.
+
+    The children write UTF-8: the test child reconfigures its streams the
+    moment a test imports oserve.py (install_console_encoding_guard), and
+    hostile_env() sets PYTHONUTF8=1 for the probe. `text=True` on its own
+    decodes with the locale code page instead - cp1253 on a Greek Windows,
+    strict - and a byte that code page leaves undefined (0x81, 0x9f, ...:
+    any emoji, an A-acute) does not raise out of subprocess.run on Windows.
+    It kills the reader thread, a UnicodeDecodeError traceback lands in
+    preflight's own output where it reads as a test failure, and the captured
+    stream comes back as None. On a green run that was a misleading traceback;
+    on a red run whose failure text carried such a character, the count was
+    parsed from None and reported as "only 0 collected".
+    """
+    return subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True,
+                          encoding="utf-8", errors="replace")
+
+
 def hostile_env():
     """A copy of the environment with host-installed tooling made undiscoverable.
 
@@ -139,10 +158,7 @@ def main():
     # A test file that silently becomes empty - a bad edit, a broken import - lets
     # the suite report success while testing less. Pin a floor so shrinkage is loud.
     MIN_TESTS = 165
-    counted = subprocess.run(
-        [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
-        cwd=REPO_ROOT, capture_output=True, text=True,
-    )
+    counted = capture([py, "-m", "unittest", "discover", "-s", "tests", "-t", "."])
     match = re.search(r"Ran (\d+) tests", (counted.stderr or "") + (counted.stdout or ""))
     total = int(match.group(1)) if match else 0
     print("")
@@ -162,9 +178,9 @@ def main():
     # A hostile pass that is not actually hostile is worse than no check at all: it
     # reports safety it never tested. This exact assertion caught the first version
     # of this script, which hid nothing.
-    probe = subprocess.run(
+    probe = capture(
         [py, "-c", "import platform_compat; print(platform_compat.rar_command() or 'NONE')"],
-        cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+        env=env,
     )
     found = probe.stdout.strip()
     print("")
