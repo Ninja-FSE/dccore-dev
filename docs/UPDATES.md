@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 A resume reply does not block the IRC read thread (#577, #602)
+
+`handle_resume_request()` ran on the read thread and sent the ACCEPT through `outbound_pacer.wait_for_slot(MSG_DELAY)`:
+up to MSG_DELAY per matching RESUME with no PING answered and no line parsed, and - since `is_flooding()` stamps a
+request when it is handled - spaced out just enough that the sender was never muted. `background=True` (what
+`irc.py` passes) keeps the lookup and the position on the read thread and sends the paced reply from `_send_resume_accept`
+on a short thread: one at a time per offer (`accept_pending`), a RESUME that arrives meanwhile only moves the
+position, and the slot is waited for before the offer is read, so the reply carries the latest. Without `background`
+the behaviour is exactly as before.
+
 ### 📍 A rehash keeps the structured feed attached (#576)
 
 `importlib.reload(announce)` resets `announce._event_sinks` to `[]` as well as `_debug_sinks`, but the rehash

@@ -1566,13 +1566,23 @@ def parse_resume_request(body):
     return filename.strip('"'), port, position
 
 
-def handle_resume_request(irc_sock, user, body):
+def handle_resume_request(irc_sock, user, body, background=False):
     """Answer a receiver's DCC RESUME with the DCC ACCEPT it is waiting for.
 
-    True if an ACCEPT was sent. False means no offer of ours matched, which
-    is the ordinary outcome for a stray or forged line and is not logged as
-    an error: anyone on the network can send this, and the only thing that
-    makes it ours is a port we are listening on for that exact nick.
+    True if an ACCEPT was sent - or, with `background`, is on its way. False
+    means no offer of ours matched, which is the ordinary outcome for a stray
+    or forged line and is not logged as an error: anyone on the network can
+    send this, and the only thing that makes it ours is a port we are
+    listening on for that exact nick.
+
+    `background` is what the IRC read loop passes (#577, #602). The ACCEPT goes
+    out through the shared pacer, which sleeps up to MSG_DELAY for a slot; done
+    on the read thread that is up to MSG_DELAY with no PING answered and no line
+    parsed, once per matching RESUME. So the lookup and the position - the parts
+    that must be settled before the receiver can connect - stay here, and the
+    paced send moves to a short-lived thread. One at a time per offer: a
+    RESUME that arrives while one is waiting only updates the position, and the
+    reply that goes out carries the latest.
     """
     parsed = parse_resume_request(body)
     if not parsed:
@@ -1593,6 +1603,62 @@ def handle_resume_request(irc_sock, user, body):
         # hanging, which is the failure this whole feature exists to end.
         position = max(0, min(position, size))
         offer["position"] = position
+        if background:
+            if offer.get("accept_pending"):
+                return True
+            offer["accept_pending"] = True
+
+    if not background:
+        return _send_resume_accept(irc_sock, user, key)
+    try:
+        threading.Thread(target=_send_resume_accept, args=(irc_sock, user, key, True),
+                         daemon=True).start()
+    except Exception as err:
+        with runtime.dcc_send_offers_lock:
+            offer = runtime.dcc_send_offers.get(key)
+            if offer:
+                offer.pop("accept_pending", None)
+        print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
+        return False
+    return True
+
+
+def _send_resume_accept(irc_sock, user, key, clear_pending=False):
+    """The paced half of handle_resume_request(): wait for the shared clock,
+    then send the ACCEPT for the position the offer holds at THAT moment, and
+    record that it was resumed.
+
+    The slot is waited for BEFORE the offer is read, so a RESUME that arrived
+    while this one waited has already moved the position, and the pending flag
+    stays set for the whole wait: that is what makes it one reply at a time.
+    """
+    port = key[1]
+    try:
+        # THROUGH THE SHARED CLOCK, not straight onto the socket (#453). A
+        # resume handshake is latency-sensitive, so it is not queued behind
+        # the round-robin - but it is still a PRIVMSG leaving this connection,
+        # and a peer that reconnects and resumes repeatedly could otherwise
+        # emit them as fast as it asked for them. Waiting for a slot keeps the
+        # reply prompt while still counting it against the same budget every
+        # other outbound line respects.
+        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
+    except Exception as err:
+        print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
+        if clear_pending:
+            with runtime.dcc_send_offers_lock:
+                offer = runtime.dcc_send_offers.get(key)
+                if offer:
+                    offer.pop("accept_pending", None)
+        return False
+
+    with runtime.dcc_send_offers_lock:
+        offer = runtime.dcc_send_offers.get(key)
+        if not offer:
+            return False
+        if clear_pending:
+            offer.pop("accept_pending", None)
+        size = int(offer.get("size") or 0)
+        position = int(offer.get("position") or 0)
         offered_name = offer["filename"]
 
     # The position is stored BEFORE the ACCEPT goes out, and that ordering is
@@ -1604,14 +1670,6 @@ def handle_resume_request(irc_sock, user, body):
     reply = (f"PRIVMSG {user} :\x01DCC ACCEPT {offered_name} "
              f"{port} {position}\x01\r\n")
     try:
-        # THROUGH THE SHARED CLOCK, not straight onto the socket (#453). A
-        # resume handshake is latency-sensitive, so it is not queued behind
-        # the round-robin - but it is still a PRIVMSG leaving this connection,
-        # and a peer that reconnects and resumes repeatedly could otherwise
-        # emit them as fast as it asked for them. Waiting for a slot keeps the
-        # reply prompt while still counting it against the same budget every
-        # other outbound line respects.
-        runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
         irc_sock.sendall(reply.encode("utf-8", errors="ignore"))
     except Exception as err:
         print(f"[DCC-RESUME] Could not answer {user}'s resume request: {err}")
