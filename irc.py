@@ -272,6 +272,34 @@ def numeric_target(line):
     return None if target == "*" else target
 
 
+def adopt_registered_nick(line):
+    """Take the server's own name for us from the 001 it addressed to us.
+
+    A nickname longer than the server's NICKLEN is not refused - it is silently
+    SHORTENED. Undernet allows 12, so "DCCore-Server" registers as
+    "DCCore-Serve" while the daemon goes on believing the longer name: it
+    advertises "@DCCore-Server", a nick nobody can PM or DCC, private messages
+    and DCC offers addressed to the real nick fail every `target == NICKNAME`
+    test, and a KICK of the bot is not recognised. 433 was handled; this was
+    not, because nothing fails.
+
+    Assigned to NICKNAME only. ORIGINAL_NICK keeps the configured value and
+    get_bot_aliases() answers to both - it was written for the same divergence
+    after a 433 - and the master list is stamped by a subprocess with the
+    configured name either way, so a pasted "!<nick> <file>" keeps matching.
+
+    Returns the nick adopted, or None if the server called us what we thought.
+    """
+    given = numeric_target(line)
+    if given and given != config.NICKNAME:
+        print(f"[SERVER] Registered as {given}, not {config.NICKNAME} - the "
+              f"server changed it. The advert and every reply will use {given}.")
+        config.PREVIOUS_NICK = config.NICKNAME
+        config.NICKNAME = given
+        return given
+    return None
+
+
 def isupport_nicklen(line):
     """The NICKLEN a 005 RPL_ISUPPORT line advertises, or None.
 
@@ -2176,32 +2204,11 @@ def irc_loop():
                         s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
                         config.NICKNAME = alt_nick
                     
-                    # What the server actually calls us, taken from the numeric
-                    # it addressed to us rather than assumed from config.
-                    #
-                    # A nickname longer than the server's NICKLEN is not
-                    # refused - it is silently SHORTENED. Undernet allows 12,
-                    # so "DCCore-Server" registered as "DCCore-Serve" while the
-                    # daemon went on believing the longer name: it advertised
-                    # "@DCCore-Server", a nick nobody could PM or DCC, and said
-                    # "CURRENT_NICK settled as" the name it had never had. 433
-                    # was handled; this was not, because nothing failed.
-                    #
-                    # Assigned to NICKNAME only. ORIGINAL_NICK keeps the
-                    # configured value, and get_bot_aliases() already answers to
-                    # both - it was written for the same divergence after a 433,
-                    # and the master list is stamped by a subprocess with the
-                    # configured name either way, so a pasted "!<nick> <file>"
-                    # keeps matching.
-                    if is_server_numeric(a_line, "001"):
-                        given = numeric_target(a_line)
-                        if given and given != config.NICKNAME:
-                            print(f"[SERVER] Registered as {given}, not "
-                                  f"{config.NICKNAME} - the server changed it. "
-                                  f"The advert and every reply will use "
-                                  f"{given}.")
-                            config.PREVIOUS_NICK = config.NICKNAME
-                            config.NICKNAME = given
+                    # (The server's own name for us is read from the 001 in the
+                    # main loop below, adopt_registered_nick(): 001 is sent only
+                    # AFTER the USER line this loop is about to send, so it can
+                    # never arrive here - the block that used to sit at this spot
+                    # was unreachable, #594.)
 
                     if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
                         ident_str = getattr(config, 'IDENT', 'dccore')
@@ -2599,6 +2606,8 @@ def irc_loop():
                     # Anchored: "001" in line matched any message containing those three
                     # digits anywhere, including a perfectly ordinary track request.
                     if not joined and (is_server_numeric(line, "001") or is_server_numeric(line, "376")):
+                        if is_server_numeric(line, "001"):
+                            adopt_registered_nick(line)
                         joined = True
                         print(f"[INFO] Connected to the server. Waiting 5 seconds to settle before JOIN...")
                         

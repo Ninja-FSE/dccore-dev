@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The server's shortened nick is adopted (#594)
+
+The 001-target adoption sat in the pre-USER loop, which breaks on the first NOTICE/PING and sends USER; 001 only comes
+after USER, so it never ran and `config.NICKNAME` kept the long name (every `target_chan.lower() ==
+config.NICKNAME.lower()` test failed for PMs to the real nick). The logic is `irc.adopt_registered_nick()`, called
+from the main loop's 001 handling before `joined = True`; the unreachable copy is removed and a comment says why. The
+005 explanation ('so it was shortened to X') now prints the adopted name.
+
 ### 📍 Nicknames are validated against what IRC allows (#591)
 
 `settings_file.nick_problem()` / `nicks_problem()` (ASCII; a letter or one of [ ] \\ ` _ ^ { | } first, then those
