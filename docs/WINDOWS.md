@@ -404,6 +404,12 @@ only: no administrator, no stored password. `remove-autostart.bat` deletes
 the entry. It refuses a tree that has never been set up, since the setup
 questions need someone at the keyboard - run the launcher once first.
 
+Only one bot runs from a folder: a second start - the task and a
+double-click, or two logon sessions - is refused with "DCCore is already
+running from this folder", and does nothing. Under the task the launcher
+does not ask questions (the Flask offer prints its command instead), so a
+window nobody is watching never waits for a key.
+
 ## The admin console
 
 Optional, and off until configured. See [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md) for

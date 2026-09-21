@@ -89,6 +89,9 @@ total_sent_bytes = 0
 # launchers can tell "ask the questions in the terminal instead" from "stop",
 # which is the one road out of a tree that has no config and a taken port.
 EXIT_SETUP_IN_THE_TERMINAL = 3
+# Another DCCore already holds this data folder (#710). Its own number, so
+# a launcher can say "already running" rather than "failed".
+EXIT_ALREADY_RUNNING = 4
 
 def queue_message(user, message, is_vip=False):
     """The queue's entry point, with a strictly isolated VIP express lane."""
@@ -134,6 +137,21 @@ def startup(setup_page=None):
     assert the SystemExit instead.
     """
     print(f"--- {config.SCRIPT_VERSION} is starting up ---")
+
+    # ONE INSTANCE PER DATA FOLDER, before anything is read or written
+    # (#710). The lock lives beside the queue file, so two trees with two
+    # data folders are two bots, as they should be, and two starts of one
+    # tree are refused. Held until the process ends.
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(config.DCC_QUEUE_FILE)), "dccore.lock")
+    try:
+        platform_compat.take_instance_lock(lock_path)
+    except platform_compat.AlreadyRunning as running:
+        who = f" (pid {running.pid})" if running.pid else ""
+        print(f"[CRITICAL] DCCore is already running on this folder{who} - "
+              f"a second copy would share its queue, its stats file and its DCC ports.")
+        print("[CRITICAL] Stop the other one first (its own window, or the autostart task), "
+              "or run a second bot from a second folder.")
+        sys.exit(EXIT_ALREADY_RUNNING)
 
     # The hard backstop for #170's RFC: scripts/setup_check.py's pre-flight
     # report is a friendlier, EARLIER warning an operator can choose to run

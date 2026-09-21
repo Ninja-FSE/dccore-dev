@@ -610,6 +610,13 @@ class DCCoreTestCase(unittest.TestCase):
                                             "adminchat_tokens.json")
         self.set_config(ADMIN_TOKENS_FILE=db.ADMIN_TOKENS_FILE)
 
+        # The single-instance lock (#710): oserve.startup() takes it beside
+        # the queue file - in this test's temp tree, since DCC_QUEUE_FILE is
+        # redirected above - and holds it for the process. Released here so
+        # the next test that boots is not refused as a second instance.
+        import platform_compat as _platform_compat
+        self.addCleanup(_platform_compat.release_instance_lock)
+
         # Same shape, found the same way: the state guard caught it the first
         # time a test drove a transfer all the way to completion, because
         # db.record_download() is only reached on the success path and

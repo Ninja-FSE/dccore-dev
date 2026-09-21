@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 One daemon per data folder, and the logon task asks nothing (#710)
+
+Audit L46. Nothing checked for an already-running instance - not the daemon, not the launchers - so a
+logon-task start plus a double-click (or a second logon session of the same account) ran two bots on one
+data folder: the second took `ALT_NICKNAME`, both wrote `dcc_queue.txt` and `stats.txt` whole, and their DCC
+listeners shared the eleven-port range; `install-autostart.bat`'s own closing text invited the second start.
+And with the dashboard on and Flask missing, the task's launcher window stopped at `configure.py --flask`'s
+`input()` until somebody answered it.
+
+`platform_compat.take_instance_lock()` holds an OS lock on `data/dccore.lock` (`msvcrt.locking` on Windows,
+`fcntl.flock` elsewhere; the lock, not the file, is the guard, so a crash leaves nothing stale) and writes the
+pid for the message; `oserve.startup()` takes it before it reads or writes anything and refuses a second copy
+with `[CRITICAL] DCCore is already running on this folder (pid N)` and `EXIT_ALREADY_RUNNING = 4`, which
+`start-dccore.bat` names. The task runs `start-dccore.bat autostart`, which sets `DCCORE_AUTOSTART`, and
+under it the Flask offer prints its command instead of asking. On Windows the locked byte sits past the pid,
+because a locked byte cannot be read by anyone, the holder included. The test harness releases the lock
+after every test, so a boot in one test is not the next test's second instance. WINDOWS.md and the installer
+say so. `tests/test_one_daemon_per_data_folder.py`: a second process is refused and told the holder's pid,
+the lock dies with its process, the same process may take it twice, a released lock can be taken; the daemon
+exits with its code and message and a first start takes the lock beside the queue file; the task passes
+`autostart`, the launcher reads it and names an already-running bot; and the Flask offer under the flag asks
+nothing. With the code stashed, all nine fail.
+
 ### 🧩 The bot checks the script's version in hello (#709)
 
 Audit L45. The channel field went into every event line without a number moving; #795 gave `HELLO` a minor

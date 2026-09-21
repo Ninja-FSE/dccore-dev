@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Added: only one DCCore runs from a folder.** Starting a second copy - the Windows logon task and a double-click, say - is refused with "already running" instead of two bots sharing one queue, one stats file and one set of ports. The logon task also no longer stops at a question nobody is there to answer.
 - **Added (mIRC console): the bot now tells an out-of-date `dccore.mrc` to update itself**, right after it connects, instead of letting its panel silently show fields in the wrong place.
 - **Added: a lost IRC connection now shows up as a notice on the dashboard**, as the help text always said it would. The help now lists exactly what earns a notice: a lost connection, a kick or a refused join, a failed list rebuild.
 - **Docs: leftover wording from earlier versions is cleaned up** - a "phase 2" that no longer exists, `config.py` where the file is `defaults.py`, `python oserve.py` on Windows where `py` is what works, and the finished multiple-lists work listed as done in the roadmap.

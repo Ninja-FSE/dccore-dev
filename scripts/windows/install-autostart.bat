@@ -33,7 +33,7 @@ if not exist "admin_config.py" if not exist "settings.conf" (
 
 rem  /f replaces an existing entry of the same name, so running this twice
 rem  is fine. `call`, so a wrapper on PATH (the tests use one) returns here.
-call schtasks /create /tn "DCCore" /sc onlogon /tr "\"%~dp0start-dccore.bat\"" /f
+call schtasks /create /tn "DCCore" /sc onlogon /tr "\"%~dp0start-dccore.bat\" autostart" /f
 if errorlevel 1 (
     echo.
     echo   Task Scheduler refused. The Task Scheduler service may be off, or
@@ -63,7 +63,8 @@ if errorlevel 1 (
 echo.
 echo   Done: DCCore starts the next time you log on, in its own window.
 echo   Start it by hand now with start-dccore.bat if you want it running
-echo   already. remove-autostart.bat undoes this.
+echo   already - only one copy runs from this folder, so a second start
+echo   is refused, not doubled. remove-autostart.bat undoes this.
 echo.
 pause
 exit /b 0
