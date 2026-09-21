@@ -3952,7 +3952,11 @@ if HAVE_FLASK:
             status = 401 if error else 200
             return LOGIN_PAGE.format(error_html=error_html), status
 
-        @app.route("/logout", methods=["GET", "POST"])
+        # POST only (#673, audit L9): the page's own button is a form, and a
+        # GET that changes state is a link any other site can make the
+        # operator's browser follow with the Lax cookie attached - a cross-
+        # site navigation to /logout dropped the dashboard to the login form.
+        @app.route("/logout", methods=["POST"])
         def logout():
             session.clear()
             return redirect("/login")

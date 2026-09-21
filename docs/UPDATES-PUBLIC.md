@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (dashboard): a link from another site could log you out.** Logging out now only happens from the dashboard's own button.
 - **Fixed (dashboard): a web page served from another port on the same machine could submit dashboard actions with your login.** Actions that take no form data - start a list rebuild, purge offline lists, mark notices read - relied on the browser's same-site cookie rule, which treats every port on a host as one site. Every dashboard action now has to come from the dashboard's own address.
 - **Fixed: a flood of one-off "bots" could push the real ones out of the List Browser.** The registry of other bots is capped at 2000, and when it overflowed it dropped the entries seen least recently - which, in a burst of thousands of new nicks, were the genuine bots. It now drops the nicks that have only advertised once, and keeps the bots that keep advertising.
 - **Fixed: control characters in a request or a search no longer reach the log, the debug channel or the admin console.** A user could type terminal escape codes and IRC colours into a `!rar` or `@find` line and have them rendered on the operator's screen. They are stripped as the line arrives.

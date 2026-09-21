@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 /logout answers POST alone (#673)
+
+Audit L9. The route accepted GET (and HEAD) and cleared the session: with the cookie `SameSite=Lax`, a
+top-level navigation from any site - a link, a redirect - to `http://127.0.0.1:8420/logout` carried the cookie
+and logged the operator out; the dashboard's next poll answered 401 and the page dropped to the login form. A
+nuisance, not a breach. The page's own button has always been a POST form (`web/index.html`), so GET was unused
+by the app. `methods=["POST"]` now; `tests/test_a_link_cannot_log_the_operator_out.py` runs the audit's
+navigation and checks the session survives it (a GET lands on the static route's 404 rather than a 405, and
+either way nothing happens), refuses HEAD/PUT/DELETE, keeps the page's own form working, reads the rule's
+methods, and reads the page for the form. Three of five fail with the old route.
+
 ### 🧪 The running-pack fixture joins its packer before it ends (#828)
 
 Test-only. `TheThreadIsTheAnswer` in `tests/test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` (#651)
