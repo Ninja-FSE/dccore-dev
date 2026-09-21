@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🍎 The macOS Gatekeeper note covers Sequoia (#662)
+
+Audit M60. The launcher's header, the autostart installer and INSTALL.md said: the first time, right-click the
+.command, choose Open, confirm once. Apple removed that Control-click override in macOS 15 (Sequoia): after the
+refusal the file has to be allowed from System Settings > Privacy & Security ("Open Anyway"), or de-quarantined
+with `xattr -d com.apple.quarantine`. A first-timer on Sequoia following the note got the same refusal again with
+no Open button. The header also pointed at a README-FIRST.txt that has never existed.
+
+All three texts now give both roads - right-click > Open on macOS 14 and earlier, Privacy & Security > Open
+Anyway on 15 and later - and the xattr one-liner for both launchers at once; the phantom file is gone.
+`tests/test_the_gatekeeper_note_covers_sequoia.py` reads them. Docs and comments only.
+
 ### 🌐 dccore.mrc dials on the bot's network, whatever connection fired it (#661)
 
 Audit M59. The script never recorded which network the bot lives on: `dcc chat <bot>` ran in whatever connection

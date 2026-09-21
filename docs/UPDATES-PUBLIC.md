@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (docs, macOS): the first-run note no longer sends you down a road macOS 15 closed.** "Right-click, Open, confirm once" still works on macOS 14 and earlier; on Sequoia and later the file must be allowed from System Settings → Privacy & Security ("Open Anyway") after the first refusal. The launcher, the autostart installer and the install guide now say both, plus the one Terminal line (`xattr -d com.apple.quarantine`) that skips the dialogs.
 - **Fixed (mIRC): on a client connected to more than one network, the script could dial the bot on the wrong one.** It now remembers the network you paired or connected on and opens the console there, whichever window you type in and whichever network reconnects. Update `dccore.mrc`; the network is picked up the next time you `/dccore connect` or the bot joins a channel you share.
 - **Fixed: a user who came back at the very moment their five minutes ran out could lose their queue anyway.** The countdown checked whether they were still away and then erased the queue as two separate steps; a return landing between the two was erased regardless, and the countdown's own thread crashed. It is one step now.
 - **Fixed: the "Sent:" line for a file requested by private message never reached the channel.** When a user asked by /msg and a slot was free, the completion notice was addressed to the bot itself and quietly dropped. It now goes to the channel like every other completion.

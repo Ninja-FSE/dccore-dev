@@ -16,9 +16,12 @@
 # (#619). Like the Windows installer, this one registers the start and leaves
 # starting it now to the operator, once the hand-run bot is stopped.
 #
-# Double-click it in Finder (the first time: right-click, Open, because it
-# came from the internet), or run it from Terminal. Plain sh: macOS's
-# default shell for .command files is zsh, but /bin/sh is always there.
+# Double-click it in Finder, or run it from Terminal. The first time
+# Gatekeeper refuses it because it came from the internet: right-click >
+# Open on macOS 14 and earlier, System Settings > Privacy & Security >
+# "Open Anyway" on macOS 15 and later - see the note at the top of
+# start-dccore.command. Plain sh: macOS's default shell for .command files
+# is zsh, but /bin/sh is always there.
 
 cd "$(cd "$(dirname "$0")" && pwd -P)/../.." || exit 1
 ROOT="$(pwd -P)"
