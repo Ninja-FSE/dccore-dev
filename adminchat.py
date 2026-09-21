@@ -42,7 +42,10 @@ and uptime, and prompts.
 
 This one screens the host on the incoming CTCP, before replying at all. A stranger
 gets no banner, no connection, no reply of any kind, and no way to learn whether
-the mask was wrong. The cost of an unauthorised attempt is one regex.
+the mask was wrong. The cost of an unauthorised attempt is one regex. When the
+bot listens instead of dialling, the listener takes a connection only from the
+address the operator's CTCP advertised (#680) - a scanner that reaches the port
+first is dropped without a word and the window stays open for the operator.
 
 CONNECTION DIRECTION, AND THE INBOUND SURFACE
 ---------------------------------------------
@@ -1614,7 +1617,10 @@ def handle_dcc_chat(irc_sock, line, nick, ctcp_text):
         # pay CONNECT_TIMEOUT discovering it again on every single login.
         print(f"[ADMINCHAT] ADMIN_CHAT_MODE is 'listen'; offering the connection to {nick} "
               f"rather than dialling {ip}:{port}.")
-        threading.Thread(target=_listen_and_serve, args=(irc_sock, nick, host, token),
+        # The address the CTCP advertised is the one the connection has to
+        # come from (#680): the listener would otherwise take whoever reached
+        # the port first.
+        threading.Thread(target=_listen_and_serve, args=(irc_sock, nick, host, token, ip),
                          daemon=True).start()
         return True
 
@@ -1739,7 +1745,7 @@ def _connect_and_serve(irc_sock, nick, host, ip, port, token=None):
     _serve(sock, ip, nick, host, f"opened to {ip}:{port}")
 
 
-def _listen_and_serve(irc_sock, nick, host, token=None):
+def _listen_and_serve(irc_sock, nick, host, token=None, expected_ip=None):
     """Listen on the configured range and offer the connection back.
 
     Used when the client's own offer cannot be dialled - it asked for passive
@@ -1781,7 +1787,7 @@ def _listen_and_serve(irc_sock, nick, host, token=None):
             return
         _listening = True
     try:
-        _listen_and_serve_locked(irc_sock, nick, host, token)
+        _listen_and_serve_locked(irc_sock, nick, host, token, expected_ip)
     finally:
         # #423: a safety net now, not the release point. The two return paths
         # in _listen_and_serve_locked before it ever opens a listener land
@@ -1794,9 +1800,21 @@ def _listen_and_serve(irc_sock, nick, host, token=None):
             _listening = False
 
 
-def _listen_and_serve_locked(irc_sock, nick, host, token=None):
+def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None):
     """The listener itself. Only ever called with _listening set, so at most
-    one of these holds a port at a time."""
+    one of these holds a port at a time.
+
+    `expected_ip` is the address the operator's CTCP advertised, when it
+    advertised one (#680, audit L16): the host check gates who can make the
+    bot OPEN a listener, but accept() took whoever reached the port first
+    in the LISTEN_TIMEOUT window - a scanner on the public DCC range got the
+    banner (nick, version, platform) and three password prompts, the single
+    listener was gone, and the operator's own connect found the port closed.
+    A peer from any other address is dropped without a word and the listener
+    keeps waiting for the rest of the window. A passive offer carries no
+    address, so there is nothing to compare and the first peer is taken as
+    before.
+    """
     import dcc
 
     global _listening
@@ -1833,8 +1851,22 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None):
         irc_sock.sendall(offer.encode("utf-8", errors="ignore"))
         print(f"[ADMINCHAT] Offered DCC CHAT to {nick} on "
               f"{getattr(config, 'MY_IP_OR_DOCK', '?')}:{port}; waiting for the connection.")
-        sock, addr = listener.accept()
-        peer_ip = addr[0]
+        deadline = time.monotonic() + LISTEN_TIMEOUT
+        while True:
+            listener.settimeout(max(0.001, deadline - time.monotonic()))
+            sock, addr = listener.accept()
+            peer_ip = addr[0]
+            if not expected_ip or peer_ip == expected_ip:
+                break
+            # Not the operator (#680): no banner, no prompt, and the window
+            # is still open for the address the offer was made to.
+            print(f"[ADMINCHAT] Dropped a connection from {peer_ip} on port {port}: "
+                  f"the DCC CHAT was offered to {nick} at {expected_ip}. Still waiting.")
+            try:
+                sock.close()
+            except OSError:
+                pass
+            sock = None
     except socket.timeout:
         print(f"[ADMINCHAT] {nick} did not accept the DCC CHAT offer within "
               f"{int(LISTEN_TIMEOUT)}s; giving the port back.")

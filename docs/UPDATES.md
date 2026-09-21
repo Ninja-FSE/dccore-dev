@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 The console listener takes only the operator's connection (#680)
+
+Audit L16. The host check gates who can make the bot OPEN a listener; `accept()` then took whoever reached the
+port first inside `LISTEN_TIMEOUT`, and the only check after it was `is_bad_ip()`. The DCC port range is
+public and scanned: a scanner that connected in the window got the banner (nick, version, platform, the rar
+binary's path) and three password prompts, the single listener was gone with it, the operator's own connect
+found the port closed, and the scanner's failed attempts were logged under the operator's nick and host.
+
+`handle_dcc_chat()`'s listen-mode branch now hands the address the CTCP advertised to
+`_listen_and_serve_locked(..., expected_ip)`, and the listener loops on `accept()` until the window's
+deadline: a peer from any other address is closed without a word - no banner, no prompt - and logged as
+`Dropped a connection from <ip> on port <n>: the DCC CHAT was offered to <nick> at <ip>. Still waiting.`; the
+operator's own connection is served when it arrives. A passive offer advertises no address, so there the first
+peer is taken as before. The module docstring and ADMIN-CONSOLE.md say so.
+`tests/test_the_listener_takes_only_the_operator.py` runs the real listener over loopback with `_serve()`
+recorded and the window cut to 1.5 s: the operator at the advertised address is served; a stranger gets EOF
+and no banner, the listener is still there for a second peer and closes on the timeout with nobody served;
+a passive offer takes the first peer; and the listen-mode branch is read for the argument. All four fail with
+the old listener. `test_one_passive_listener`'s stubs take the new argument.
+
 ### 🧩 Every line of a structured session starts with DCCORE (#679)
 
 Audit L15. `Session.close(announce_text=...)` writes its text inline - the writer thread is about to stop, so

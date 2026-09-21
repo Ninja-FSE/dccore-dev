@@ -834,7 +834,12 @@ moment is testing something else — usually a forwarding rule rather than a liv
 listener.
 
 You do not have to work out which it is. Set `ADMIN_CHAT_MODE = "listen"` and the
-bot stops dialling you altogether.
+bot stops dialling you altogether. The listener it opens answers only a connection
+from the address your client advertised in its CTCP; anything else that reaches
+the port during the window is dropped without a banner, logged as
+`Dropped a connection from <ip> ... Still waiting.`, and the port stays open for
+you. (A passive request advertises no address, so there the first connection is
+taken.)
 
 **The log says it could not connect to you at `0.0.0.0`.**
 
