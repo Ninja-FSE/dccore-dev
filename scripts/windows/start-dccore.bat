@@ -4,7 +4,7 @@ setlocal
 rem ---------------------------------------------------------------------
 rem  DCCore launcher for Windows.
 rem
-rem  The important line is the cd below. Every data path in config.py is
+rem  The important line is the cd below. Every data path in defaults.py is
 rem  relative - ./data/bans.txt, ./lists - so they resolve against the
 rem  working directory. Double-clicking this file from anywhere, or
 rem  running it from a shortcut, would otherwise start the daemon with a
@@ -226,7 +226,7 @@ if not exist "admin_config.py" if not exist "settings.conf" if exist "local_conf
     echo   Nothing to copy - start the daemon once and it renames the file
     echo   for you, keeping every setting in it:
     echo.
-    echo       python oserve.py
+    echo       py oserve.py
     echo.
     echo   Do NOT copy admin_config.py.sample over the top: that leaves your
     echo   real settings stranded in local_config.py.

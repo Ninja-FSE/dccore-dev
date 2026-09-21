@@ -206,7 +206,7 @@ Waiting for acknowledgement...
 DCC Chat connection established
 
 Welcome to DCCore
-DCCore v1.10.0-RC1 - platform=posix python=3.10 rar=/usr/bin/rar
+DCCore v1.12.2 - platform=posix python=3.10 rar=/usr/bin/rar
 
 Enter Your Password:
 ```
@@ -878,8 +878,8 @@ Three wrong passwords from that IP. Wait 15 minutes, or restart the daemon — t
 block lives in memory only.
 
 **Locked out entirely.**
-Edit `admin_config.py` and restart. Until phase 2 flips the switch, the channel
-commands still work, so you are never without a way in.
+Edit `admin_config.py` and restart. While `ADMIN_CHANNEL_COMMANDS` is on (it
+ships on), the channel commands still work, so you are never without a way in.
 
 ---
 
@@ -900,4 +900,3 @@ depth behind it. Optional TLS is on the list for a later phase.
 
 Optional, and not built: TLS on the chat (Python's `ssl` is stdlib, and iroffer
 supports it), and iroffer's second restricted admin tier (`hadminhost`).
-- **Phase 4, optional** — TLS on the chat, and a second restricted admin tier.

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs: leftover wording from earlier versions is cleaned up** - a "phase 2" that no longer exists, `config.py` where the file is `defaults.py`, `python oserve.py` on Windows where `py` is what works, and the finished multiple-lists work listed as done in the roadmap.
 - **Docs: the install guide lists everything `configure.py` asks, in the order it asks it** - including the dashboard question, its follow-ups, and the two offers at the end (build the list now; import OmenServe totals) that the old "six questions" left out.
 - **Fixed: the setup check no longer reports a failure in "config.py", a file that does not exist** - it names `defaults.py`, the one it means.
 - **Docs: the roadmap no longer calls the flood ban a "day-ban"** - it is a timed ban, one hour by default (`FLOOD_BAN_SECONDS`).

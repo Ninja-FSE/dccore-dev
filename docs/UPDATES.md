@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 Stale phrasing and module names are gone from operator-facing text (#701)
+
+Audit L37. Remnants of earlier phases and of the `config.py` rename sat where a novice reads them:
+ADMIN-CONSOLE.md's "Until phase 2 flips the switch" (the switch is `ADMIN_CHANNEL_COMMANDS`; no phase
+numbering exists in the doc), a dangling "Phase 4" bullet duplicating the prose above it, an example banner
+from v1.10.0-RC1; "produced from config.py" in `settings.conf.sample` and its generator; "Every data path in
+config.py" in both launchers' headers; the Windows launcher's first-run hint saying `python oserve.py` where
+every guide says `py`; `requirements.txt` pointing at `docs/README.md`, which is at the root; and FUTURE.md
+filing the finished multi-list work (all five stages "in", #26 complete) under "Planned", right under the
+sentence that says everything there is not working. Each is fixed: the lockout names the switch, the bullet
+is gone, the banner is this tree's version, the generator (and so the regenerated sample) and the launchers
+say `defaults.py`, the hint says `py`, `requirements.txt` says `README.md`, and the multi-list section moved
+under "Implemented" with its design narrative intact. `tests/test_no_stale_phrasing_in_operator_text.py` reads
+for the class: no phase numbers in the console guide, the banner matches `SCRIPT_VERSION`, no bare
+`config.py` in the operator files (the rename heading excepted), the launcher's `py`, the README the
+requirements point at exists, and nothing under "Planned" reports a stage "in".
+
 ### 📝 The guide lists what configure.py asks (#700)
 
 Audit L36. INSTALL.md said `configure.py` asks "six questions" and omitted the dashboard yes/no; WINDOWS.md

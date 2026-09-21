@@ -9,7 +9,7 @@
 # settings.conf is gitignored, so your values never show up as a diff
 # and are never overwritten by an update.
 #
-# GENERATED FILE - do not edit by hand. It is produced from config.py by
+# GENERATED FILE - do not edit by hand. It is produced from defaults.py by
 # scripts/gen_settings_sample.py, and a test fails if the two disagree.
 #
 # NOTES

@@ -25,6 +25,41 @@ What DCCore does today, and what it does not do yet.
 - **Every folder heading says what it holds** — `14 files, 1.20GB` on its own line under the heading, placed so that every program that reads these lists (other DCCore bots, AutoQ, DCCore's own request handling) ignores it. Companion files (`.srt`, `.nfo`, `.sfv`…) travel with the film they belong to when the video list is split out, and stay with an album otherwise.
 - **A partially unreadable library fails the rebuild** rather than silently publishing a truncated list.
 
+### Multiple lists, and multiple folders per list
+
+Done, all five stages - kept here with the design it was built to, because the reasoning is what a later change has to argue with.
+
+The largest gap against OmenServe, which has had both since long before this project started. DCCore now serves **several** directories into **one** list, and **several** lists, each bound to its own channels — #26 below is complete.
+
+`SEPARATE_VIDEO_LIST` is not that feature and does not pre-empt it: it splits one scan's output by content type, where this splits by folder set and binds each list to a channel. An operator whose film and music already live in separate folders wants this one, and turns that switch off.
+
+The design is settled:
+
+- One trigger, unchanged. `@<botnick>` everywhere; no new syntax for anybody to learn.
+- A list has an operator-facing name and a set of directories. Names are never typed in a channel.
+- A channel is bound to exactly one list; a list may serve several channels. A request uses the list bound to the channel it arrived in.
+- A private message uses the list marked primary, since a PM carries no channel.
+- A channel with no list bound gets nothing: no advert, no requests answered.
+
+**Multi-folder is done.** `library.py` answers which folders and in what order, resolution reads a folder's label out of a heading, and the scan builds one list from all of them. The Settings page landed with it — a reorderable list with a validated add and a folder browser (`GET`/`POST /api/folders`, `GET /api/folders/browse`), so `data/library_folders.json` no longer needs hand-editing.
+
+Multi-list then follows: allow more than one list object, with per-channel adverts falling out nearly free. The folder set moves inside a list at that point, which is why every caller goes through one accessor rather than reading a setting directly — the move rebinds the accessor instead of touching 54 call sites a second time.
+
+**Stage 1 is in.** `library.ServedList` is the list object — a name, the folders it is built from, the channels it answers in, and which one is primary — stored in `data/lists.json` and read through `lists()`, `primary_list()`, `list_for_channel()` and `list_by_name()`. `folders()` now takes an optional list name and defaults to the primary's, so all thirteen existing callers are untouched and, with no `lists.json` on disk, every install resolves to one implicit list over exactly the folders it served before. Nothing the daemon does has changed yet.
+
+**Stage 2 is in.** A list's files live in its own directory: the primary keeps `LOCAL_LIST_DIR` itself — so nothing moves and no upgrade migrates anything — and every other list gets a subdirectory named after it. The list is in the *path*, not the filename, so the `-RAR-`/`-VIDEO-`/`-FULL-` markers and everything that parses them are untouched. `generate_master_list()` takes a list name and `generate_all_lists()` builds every one, each independently: one failing does not stop the rest, and the failures are named.
+
+**Stage 3 is in.** A request is answered from the list bound to the channel it arrived in. The rule has three parts: an explicitly bound channel gets its list; otherwise the primary answers *if it binds no channels of its own*, which is what every install today is and what stops this being an upgrade that silences every bot; otherwise nothing, which is what makes binding mean something. A private message is the primary - it carries no channel to route on - except that a `!rar` row copied from another list's advert carries its folder label, and that routes it to the list the label belongs to (#653). The list request, `@find` and file requests all route; a channel bound to nothing is answered with silence rather than an error, because an error implies something went wrong and nothing did.
+
+**Stage 4 is in.** Each channel advertises the list it actually serves. The advert loop already read the figures once per channel — it just read the same ones every time — so this is the loop asking which list first, and skipping a channel with none bound. The advert is where the multi-list rule is most visible: a bot silently present in a channel it does not serve, rather than one announcing a library it will refuse to send from.
+
+**Stage 5 is in, and #26 is complete.** The Settings page's Paths category defines them: a name, which channels it serves, its folders, and which one is primary. With one list the familiar folder editor stays exactly where it was and a button moves you to the list editor — one editor, never two, because a second place to edit folders that quietly does nothing is worse than either alone. `GET`/`POST /api/lists` validate the whole set and report every fault at once.
+
+Two pieces were worth doing carefully rather than quickly, and one of them turned out the opposite way to what this section used to predict:
+
+- **Containment.** This said `is_safe_path()` would become "inside *any* configured root", and called that the one place a mistake is a security bug rather than an inconvenience. Right about the risk, wrong about the answer: widening it that way is a strictly weaker test. Because a heading names its own folder, resolution returns *which* folder it landed in and the check runs against that one — the same strength as when there was only ever one. `is_safe_path()` itself was never touched.
+- **Index identity.** Two folders can hold the same relative path — the same album in flac and in mp3 is the ordinary case — so an entry has to record which folder it came from. That is the label leading every path, and it is what makes the containment answer above possible.
+
 ### Receiving files from other bots
 
 - **Cross-bot fetch** — request a file with `!<bot> <filename>` or a whole list with `@<botnick>`, and track it from the dashboard.
@@ -62,39 +97,6 @@ What DCCore does today, and what it does not do yet.
 ## Planned
 
 Ordered by what unblocks what, not by preference.
-
-### Multiple lists, and multiple folders per list
-
-The largest gap against OmenServe, which has had both since long before this project started. DCCore now serves **several** directories into **one** list, and **several** lists, each bound to its own channels — #26 below is complete.
-
-`SEPARATE_VIDEO_LIST` is not that feature and does not pre-empt it: it splits one scan's output by content type, where this splits by folder set and binds each list to a channel. An operator whose film and music already live in separate folders wants this one, and turns that switch off.
-
-The design is settled:
-
-- One trigger, unchanged. `@<botnick>` everywhere; no new syntax for anybody to learn.
-- A list has an operator-facing name and a set of directories. Names are never typed in a channel.
-- A channel is bound to exactly one list; a list may serve several channels. A request uses the list bound to the channel it arrived in.
-- A private message uses the list marked primary, since a PM carries no channel.
-- A channel with no list bound gets nothing: no advert, no requests answered.
-
-**Multi-folder is done.** `library.py` answers which folders and in what order, resolution reads a folder's label out of a heading, and the scan builds one list from all of them. The Settings page landed with it — a reorderable list with a validated add and a folder browser (`GET`/`POST /api/folders`, `GET /api/folders/browse`), so `data/library_folders.json` no longer needs hand-editing.
-
-Multi-list then follows: allow more than one list object, with per-channel adverts falling out nearly free. The folder set moves inside a list at that point, which is why every caller goes through one accessor rather than reading a setting directly — the move rebinds the accessor instead of touching 54 call sites a second time.
-
-**Stage 1 is in.** `library.ServedList` is the list object — a name, the folders it is built from, the channels it answers in, and which one is primary — stored in `data/lists.json` and read through `lists()`, `primary_list()`, `list_for_channel()` and `list_by_name()`. `folders()` now takes an optional list name and defaults to the primary's, so all thirteen existing callers are untouched and, with no `lists.json` on disk, every install resolves to one implicit list over exactly the folders it served before. Nothing the daemon does has changed yet.
-
-**Stage 2 is in.** A list's files live in its own directory: the primary keeps `LOCAL_LIST_DIR` itself — so nothing moves and no upgrade migrates anything — and every other list gets a subdirectory named after it. The list is in the *path*, not the filename, so the `-RAR-`/`-VIDEO-`/`-FULL-` markers and everything that parses them are untouched. `generate_master_list()` takes a list name and `generate_all_lists()` builds every one, each independently: one failing does not stop the rest, and the failures are named.
-
-**Stage 3 is in.** A request is answered from the list bound to the channel it arrived in. The rule has three parts: an explicitly bound channel gets its list; otherwise the primary answers *if it binds no channels of its own*, which is what every install today is and what stops this being an upgrade that silences every bot; otherwise nothing, which is what makes binding mean something. A private message is the primary - it carries no channel to route on - except that a `!rar` row copied from another list's advert carries its folder label, and that routes it to the list the label belongs to (#653). The list request, `@find` and file requests all route; a channel bound to nothing is answered with silence rather than an error, because an error implies something went wrong and nothing did.
-
-**Stage 4 is in.** Each channel advertises the list it actually serves. The advert loop already read the figures once per channel — it just read the same ones every time — so this is the loop asking which list first, and skipping a channel with none bound. The advert is where the multi-list rule is most visible: a bot silently present in a channel it does not serve, rather than one announcing a library it will refuse to send from.
-
-**Stage 5 is in, and #26 is complete.** The Settings page's Paths category defines them: a name, which channels it serves, its folders, and which one is primary. With one list the familiar folder editor stays exactly where it was and a button moves you to the list editor — one editor, never two, because a second place to edit folders that quietly does nothing is worse than either alone. `GET`/`POST /api/lists` validate the whole set and report every fault at once.
-
-Two pieces were worth doing carefully rather than quickly, and one of them turned out the opposite way to what this section used to predict:
-
-- **Containment.** This said `is_safe_path()` would become "inside *any* configured root", and called that the one place a mistake is a security bug rather than an inconvenience. Right about the risk, wrong about the answer: widening it that way is a strictly weaker test. Because a heading names its own folder, resolution returns *which* folder it landed in and the check runs against that one — the same strength as when there was only ever one. `is_safe_path()` itself was never touched.
-- **Index identity.** Two folders can hold the same relative path — the same album in flac and in mp3 is the ordinary case — so an entry has to record which folder it came from. That is the label leading every path, and it is what makes the containment answer above possible.
 
 ### Test coverage where it is thinnest
 
