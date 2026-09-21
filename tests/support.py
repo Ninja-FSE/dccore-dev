@@ -575,6 +575,14 @@ class DCCoreTestCase(unittest.TestCase):
                                                 "lists.json"))
         self.set_config(LIBRARY_FOLDERS_FILE=os.path.join(
             self._fetch_history_dir, "library_folders.json"))
+        # A DIRECTORY this time (#643): oserve.startup() makedirs
+        # FETCHED_FILES_DIR, so every test that boots the daemon for real
+        # created data/fetched in the operator's tree - and the preflight
+        # guard, which walked files only, could not see an empty directory.
+        # Not created here: the code under test is what creates it, and a
+        # test that wants to see that happen can.
+        self.set_config(FETCHED_FILES_DIR=os.path.join(
+            self._fetch_history_dir, "fetched"))
 
         self._real_known_bots_file = db.KNOWN_BOTS_FILE
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,

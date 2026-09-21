@@ -8,8 +8,14 @@
 # python3 stub), but a first-timer will not open Terminal to run it.
 #
 # Gatekeeper will refuse a .command downloaded from the internet the first
-# time: right-click it, choose Open, and confirm once. After that a
-# double-click works. README-FIRST.txt says the same.
+# time. On macOS 14 and earlier: right-click it, choose Open, confirm once.
+# On macOS 15 (Sequoia) and later that override is gone: after the refusal,
+# open System Settings > Privacy & Security, scroll to the message about
+# this file and click "Open Anyway", then double-click it again. Either way
+# it is once; after that a double-click works. From Terminal, this does the
+# same without the dialogs:
+#
+#   xattr -d com.apple.quarantine scripts/macos/*.command
 #
 # Usage:
 #   double-click                 first run: ask the setup questions;

@@ -892,8 +892,44 @@ def refetch_due_lists(log=print, now=None):
     return started
 
 
+def ensure_auto_refetch_worker(start=None):
+    """Start the hourly loop below if AUTO_REFETCH_LISTS is on and it is not
+    already running. Returns True only when this call started it.
+
+    Called from oserve.startup() AND from the rehash body (#625). The worker
+    used to be started by startup() alone, so ticking the setting on the
+    dashboard - a save that fires a rehash - reported "rehash started" with
+    no restart notice and started nothing: held lists went stale until the
+    next restart, and the only live effect was the one-shot sweep irc.py runs
+    on a reconnect.
+
+    ONCE. The lock and the flag are runtime.py's, not this module's, for the
+    reason every start guard in this project lives there: a module a rehash
+    reloads gets a fresh flag and a fresh lock, and whether this module is on
+    that list today is not something "one worker, never two" should depend
+    on - a flag reset by the very rehash about to consult it would start one
+    more worker per Settings save, each asking bots for lists. Turning the
+    setting OFF needs no stop: refetch_due_lists() reads the flag on every
+    pass and does nothing while it is off, so the worker simply idles.
+
+    `start` is the thread starter, injectable so a test can watch the
+    decision without a real thread outliving it.
+    """
+    if not getattr(config, "AUTO_REFETCH_LISTS", False):
+        return False
+    with runtime.auto_refetch_guard:
+        if runtime.auto_refetch_started:
+            return False
+        starter = start or (lambda: threading.Thread(
+            target=auto_refetch_worker, daemon=True).start())
+        starter()
+        runtime.auto_refetch_started = True
+    return True
+
+
 def auto_refetch_worker(sleep=None):
-    """The loop. Started from oserve.startup() when AUTO_REFETCH_LISTS is on.
+    """The loop. Started by ensure_auto_refetch_worker() above, from boot or
+    from a rehash, once AUTO_REFETCH_LISTS is on.
 
     Deliberately its own thread and not a branch of the fetch dispatcher: that
     one runs every two seconds and only touches the queue, while this reads

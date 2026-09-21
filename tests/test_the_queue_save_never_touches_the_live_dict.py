@@ -260,8 +260,16 @@ class AFailedWakeStillReleasesTheUser(ack.ARealReceiver):
         real_trigger = dcc.check_queue_and_send
 
         def recording_trigger(irc_sock, completed_user):
+            # Only THIS test's user sets the event. Every completed send in
+            # the suite starts a delayed_queue_trigger_fallback thread that
+            # calls dcc.check_queue_and_send 3 s (or 15 s x fails) later,
+            # through the module attribute - so one from an earlier test can
+            # land here while this stub is installed, and did (#642:
+            # ['dave'] != ['someuser'] in preflight's hostile pass, where
+            # the test order differs). Recorded, not counted.
             self.fallback_args.append(completed_user)
-            self.fallback_fired.set()
+            if completed_user == USER:
+                self.fallback_fired.set()
         dcc.check_queue_and_send = recording_trigger
         self.addCleanup(setattr, dcc, "check_queue_and_send", real_trigger)
 
@@ -279,7 +287,7 @@ class AFailedWakeStillReleasesTheUser(ack.ARealReceiver):
     def test_the_fallback_trigger_still_fires(self):
         self._send_with_a_broken_wake()
         self.assertTrue(self.fallback_fired.wait(15), "the delayed queue trigger never ran")
-        self.assertEqual(self.fallback_args, [USER])
+        self.assertIn(USER, self.fallback_args)
 
     def test_the_pack_interlock_is_released(self):
         self._send_with_a_broken_wake()

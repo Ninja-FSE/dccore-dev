@@ -45,7 +45,19 @@ window, say - the launcher asks the questions in the terminal instead.) Every ru
 |---|---|
 | Windows | double-click `scripts\windows\start-dccore.bat` |
 | Linux | `./scripts/linux/start-dccore.sh` |
-| macOS | double-click `scripts/macos/start-dccore.command` (the first time, right-click → Open, because it came from the internet) |
+| macOS | double-click `scripts/macos/start-dccore.command` (the first time Gatekeeper refuses it - see below) |
+
+**macOS, the first time.** Gatekeeper refuses a `.command` that came from the
+internet. On macOS 14 and earlier, right-click it and choose **Open**, then
+confirm once. On macOS 15 (Sequoia) and later that override no longer exists:
+after the refusal, open **System Settings → Privacy & Security**, scroll down
+to the message about the file and click **Open Anyway**, then double-click it
+again. Either way it is once. If you would rather do it from Terminal, this
+clears both launchers at once:
+
+```
+xattr -d com.apple.quarantine scripts/macos/*.command
+```
 
 The terminal that opens is the bot: closing it stops the bot. Everything
 below is the same setup done by hand, for when you want a step on its own.
@@ -110,7 +122,7 @@ Three things are deliberately *not* required:
 
 ### Disk the dashboard uses
 
-The List Browser lists the bots it has seen advertising in your channels; a bot that never advertises can be added by nick in the sidebar (**Add a bot that does not advertise**), and stays until you use **Forget**. The List Browser's filter searches every bot list you have downloaded at once, which needs a search index at `data/list_index.db`. It is built as each list is fetched and is roughly the size of the lists again — ten large lists can mean several hundred megabytes. `LIST_INDEX_FILE` moves it. Deleting it is safe: the filter stops working until the next fetch rebuilds it, and nothing else uses it.
+The List Browser lists the bots it has seen advertising in your channels; a bot that never advertises can be added by nick in the sidebar (**Add a bot that does not advertise**), and stays until you use **Forget**. The List Browser's filter searches every bot list you have downloaded at once, which needs a search index at `data/list_index.db`. It is built as each list is fetched and is roughly the size of the lists again — ten large lists can mean several hundred megabytes. `LIST_INDEX_FILE` moves it. Deleting it is safe: the filter stops working until the next fetch rebuilds it, and nothing else uses it. If the file is ever damaged (a torn restore, a disk error), DCCore moves it aside as `list_index.db.corrupt-<timestamp>`, starts a fresh one and re-indexes the lists you hold at the next filter query; the log says so, and the moved copy can be deleted.
 
 ## Check before you start
 

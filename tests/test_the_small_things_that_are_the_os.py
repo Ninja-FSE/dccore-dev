@@ -195,13 +195,18 @@ class TheWindowsHelpers(_Tree, unittest.TestCase):
 
     def run_bat(self, name, with_python=True):
         system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
-        env = dict(os.environ)
         path = [self.fakebin]
         if with_python:
             path.append(os.path.dirname(sys.executable))
         path.append(system32)
-        env.update({"PATH": os.pathsep.join(path), "TEMP": self.root, "TMP": self.root,
-                    "LOCALAPPDATA": self.home, "ProgramFiles": self.home})
+        # All three Program Files names (#647): a 64-bit cmd.exe resets
+        # ProgramFiles from ProgramW6432 on start, so overriding the one
+        # alone left the launcher searching the real C:\Program Files. And
+        # case-insensitively - see env_with() in test_python_missing_help.
+        from tests.test_python_missing_help_do_not_fail import env_with
+        env = env_with({"PATH": os.pathsep.join(path), "TEMP": self.root, "TMP": self.root,
+                        "LOCALAPPDATA": self.home, "ProgramFiles": self.home,
+                        "ProgramW6432": self.home, "ProgramFiles(x86)": self.home})
         cmd = shutil.which("cmd.exe") or shutil.which("cmd")
         with io.open(os.devnull) as devnull:
             done = subprocess.run([cmd, "/c", os.path.join("scripts", "windows", name)], cwd=self.root,

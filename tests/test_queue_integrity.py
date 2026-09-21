@@ -251,11 +251,14 @@ class ReleaseQueueEntryTests(DCCoreTestCase):
     # -- rows that must not be retried -----------------------------------
 
     def test_consumed_temporary_archive_is_dropped_on_first_failure(self):
-        """Guards: retrying a temp .rar the cleanup step already deleted."""
-        # The cleanup step in start_dcc_send removes the temporary archive from
-        # disk, so any retry would abort on file_size == 0 and emit a misleading
-        # error to the channel. Such a row is settled at once.
-        temp = queue_row(user="dave", filename="Album.rar", is_temporary_zip=True)
+        """Guards: retrying a temp .rar that is gone from disk."""
+        # A temporary archive that no longer exists cannot be sent again: any
+        # retry would abort on file_size == 0 and emit a misleading error to
+        # the channel. Such a row is settled at once. (One whose archive is
+        # still on disk is retried like a plain file since #657 - see
+        # test_a_failed_pack_send_keeps_its_archive_and_row.py.)
+        temp = queue_row(user="dave", filename="Album.rar", is_temporary_zip=True,
+                         path="/nowhere/on/this/disk/Album.rar")
         neighbour = queue_row(user="dave", filename="Neighbour.flac")
         self.config.dcc_queue["dave"] = [temp, neighbour]
 

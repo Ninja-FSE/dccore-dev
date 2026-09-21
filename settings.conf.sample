@@ -96,9 +96,10 @@
 #NICKNAME = 
 
 # A backup name used if the main one is already taken when the bot connects.
-# The bot switches back to the main name as soon as it is free.
+# If this one is taken too, a digit is added to it. The bot switches back to
+# the main name as soon as it is free.
 #
-# Used when NICKNAME is taken; the bot keeps trying to reclaim the main nick afterwards
+# Used when NICKNAME is taken (with a digit added if this is taken too); the bot keeps trying to reclaim the main nick afterwards
 #ALT_NICKNAME = DCCore_
 
 # Your own nick(s) - the people allowed to use the admin commands such as
@@ -459,7 +460,8 @@
 # EXPECT IT TO BE LARGE. Roughly the size of the lists again - four million
 # rows measured at 452MB. Built as each list is fetched, and safe to delete:
 # the filter stops working until the next fetch rebuilds it, and nothing else
-# reads it.
+# reads it. A damaged one is moved aside as list_index.db.corrupt-<timestamp>
+# and rebuilt from the lists on disk (#628); the copy can be deleted.
 #LIST_INDEX_FILE = ./data/list_index.db
 
 # Where the count of how often each file was sent is kept, for the Most
@@ -661,10 +663,13 @@
 # Delay in seconds for the ordinary message queue
 #MSG_DELAY = 5.0
 
-# The same wait, for lines going to your debug channel.
+# How long to wait between lines to your debug channel. Never less than
+# MSG_DELAY - every line the bot sends shares one clock, and a smaller number
+# here has no effect. Set it higher than MSG_DELAY to slow the debug channel
+# down further; 0 means the same as MSG_DELAY.
 #
-# Pause between each line sent to the debug channel
-#DEBUG_MSG_DELAY = 0.5
+# Wait between debug-channel lines; the larger of this and MSG_DELAY is used, so it can only slow the debug channel down (0 = the same as MSG_DELAY)
+#DEBUG_MSG_DELAY = 0.0
 
 # Who may open the admin console over DCC chat, by host. On Undernet, log in
 # to X with mode +x and use your yourname.users.undernet.org host - only you

@@ -73,8 +73,20 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.0 }
+alias dccore.ver { return 1.1 }
+;  The feed's protocol minor this script was written for. The bot says
+;  its own in HELLO as major.minor; a different minor means a field was
+;  inserted on one side and the lines would read wrong - see HELLO below.
+alias dccore.protominor { return 1 }
 alias dccore.win { return @DCCore }
+;  The name this copy pairs under. Per installation, not the literal
+;  "dccore.mrc" (#649): the bot keeps one token per name and pairing a
+;  name again replaces its token - so with every copy called the same,
+;  pairing a laptop silently revoked the desktop, whose stored token
+;  was then refused. The tail is the mIRC folder hashed, which is what
+;  makes two installs two names; the same install pairing again still
+;  replaces its own token, which is how a lost one is rotated.
+alias dccore.client { return dccore.mrc- $+ $left($md5($mircdir),8) }
 alias dccore.opt { return $hget(dccore,$1) }
 alias dccore.st { return $hget(dccore.live,$1) }
 alias dccore.nbsp { return $chr(160) }
@@ -148,6 +160,7 @@ alias dccore {
   if (%cmd == connect) {
     if ($2 != $null) { dccore.set bot $2 }
     if ($dccore.bot == $null) { dccore.sys No bot nick yet. Use: /dccore connect <botnick> | return }
+    dccore.remember.net
     dccore.set wantopen 1
     hadd dccore.live tries 0
     dccore.connect byhand
@@ -156,20 +169,22 @@ alias dccore {
   if (%cmd == pair) {
     if ($2 != $null) { dccore.set bot $2 }
     if ($dccore.bot == $null) { dccore.sys No bot nick yet. Use: /dccore pair <botnick> | return }
+    dccore.remember.net
     dccore.set wantopen 1
     hadd dccore.live pairing 1
     hadd dccore.live tries 0
-    if ($dccore.st(state) == in) { dccore.send pair dccore.mrc $dccore.ver | return }
+    if ($dccore.st(state) == in) { dccore.send pair $dccore.client $dccore.ver | return }
     dccore.sys Pairing with $dccore.bot $+ : when the bot asks for the password, type it here once. The script keeps a token of its own from then on.
     dccore.connect byhand
     return
   }
   if (%cmd == unpair) {
-    if ($dccore.st(state) == in) { dccore.send unpair dccore.mrc | dccore.sys Token forgotten here and revoked on the bot. }
-    else { dccore.sys Token forgotten here. To revoke it on the bot as well, type "unpair dccore.mrc" in the console once connected. }
+    if ($dccore.st(state) == in) { dccore.send unpair $dccore.client | dccore.sys Token forgotten here and revoked on the bot. }
+    else { dccore.sys Token forgotten here. To revoke it on the bot as well, type "unpair $dccore.client $+ " in the console once connected. }
     dccore.forget token
     dccore.forget paired
     dccore.forget bothost
+    dccore.forget net
     hdel dccore.live tokenbad
     dccore.title
     return
@@ -195,7 +210,7 @@ alias dccore {
   if (%cmd == status) { dccore.send status | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
-  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1, for DCCore 1.13 and later. | return }
+  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for DCCore 1.13 and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }
   if (%cmd == font) {
     if ($2 !isnum) || ($2 < 6) { dccore.sys Give a size, like /dccore font 14 (now: $dccore.fontsize $+ ). | return }
     dccore.set fontsize $2
@@ -227,8 +242,35 @@ alias dccore {
 
 ; "byhand" is the operator's own /dccore connect or pair; the retry timer,
 ; a JOIN of the bot's nick and an IRC connect dial without it.
+;  Which network the bot lives on (#661). Nothing recorded it: the dial
+;  ran in whatever connection fired it - on CONNECT/JOIN/401/CHATCLOSE
+;  the event's own, on /dccore connect the active window's - so on a
+;  client on two networks the CTCP went to the wrong one (401, a retry
+;  loop stuck there) and every reconnect of the other network said
+;  "already open". The network is kept from the moment the operator
+;  typed /dccore connect or pair (that connection IS the bot's), or from
+;  the bot's own JOIN, and every dial is moved onto it with /scid.
+alias dccore.remember.net { if ($server) { dccore.set net $iif($network,$network,$server) } }
+;  The connection id the bot's network is on right now, or $null when
+;  that network is not connected. With nothing recorded: this one.
+alias dccore.cid {
+  var %net = $dccore.opt(net)
+  if (%net == $null) { return $cid }
+  var %i = 1
+  while (%i <= $scon(0)) {
+    if ($scon(%i).network == %net) || ($scon(%i).server == %net) { return $scon(%i).cid }
+    inc %i
+  }
+  return
+}
+;  True when this connection is the bot's network, or none is recorded yet.
+alias dccore.here { return $iif($dccore.opt(net) == $null,$true,$iif($network == $dccore.opt(net),$true,$iif($server == $dccore.opt(net),$true,$false))) }
 alias dccore.connect {
   if ($dccore.bot == $null) { return }
+  ; On the bot's network, not the one that happened to fire this (#661).
+  var %cid = $dccore.cid
+  if (%cid == $null) { dccore.sys Not connected to $dccore.opt(net) $+ , where $dccore.bot lives; the chat will open when you are. | return }
+  if (%cid != $cid) { scid %cid dccore.connect $1- | return }
   if (!$server) { dccore.sys Not connected to IRC; the chat will open when you are. | return }
   if ($chat($dccore.bot)) { dccore.sys A chat with $dccore.bot is already open. | return }
   dccore.window
@@ -292,14 +334,15 @@ raw 401:*: {
 }
 
 on *:JOIN:#: {
-  if ($nick == $dccore.bot) && ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && (!$chat($dccore.bot)) {
+  if ($nick == $dccore.bot) && ($dccore.here) && ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && (!$chat($dccore.bot)) {
+    if ($dccore.opt(net) == $null) { dccore.remember.net }
     hadd dccore.live tries 0
     .timerdccoreRetry 1 3 dccore.connect
   }
 }
 
 on *:CONNECT: {
-  if ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && ($dccore.bot != $null) {
+  if ($dccore.here) && ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && ($dccore.bot != $null) {
     hadd dccore.live tries 0
     .timerdccoreRetry 1 8 dccore.connect
   }
@@ -396,7 +439,7 @@ alias dccore.line {
     hdel dccore.live tokenbad
     dccore.send hello dccore.mrc $dccore.ver
     .timerdccoreHello 1 6 dccore.plain
-    if ($dccore.st(pairing)) { dccore.send pair dccore.mrc $dccore.ver }
+    if ($dccore.st(pairing)) { dccore.send pair $dccore.client $dccore.ver }
     dccore.title
     return
   }
@@ -484,10 +527,19 @@ alias dccore.structured {
   var %type = $1
   if (%type == HELLO) {
     .timerdccoreHello off
-    if ($2 != 1) {
-      dccore.sys $dccore.bot speaks protocol $2 and this script knows 1: falling back to plain mode. Update the script.
+    ; $2 is major.minor (a bot before 1.13's release says a bare 1).
+    ; A major we do not know: plain mode. A minor we do not know: the
+    ; lines still parse, but a field was inserted on one side, so say so.
+    var %major = $gettok($2,1,46)
+    var %minor = $gettok($2,2,46)
+    if (%minor == $null) { var %minor = 0 }
+    if (%major != 1) {
+      dccore.sys $dccore.bot speaks protocol $2 and this script knows 1. $+ $dccore.protominor $+ : falling back to plain mode. Update the script.
       dccore.plain
       return
+    }
+    if (%minor != $dccore.protominor) {
+      dccore.sys $dccore.bot speaks feed 1. $+ %minor and this script was written for 1. $+ $dccore.protominor $+ : some lines will show fields in the wrong place. Update whichever is older - for the script, save the new dccore.mrc over the old one and /reload -rs dccore.mrc
     }
     hadd dccore.live mode structured
     .timerdccoreHB 1 90 dccore.dead

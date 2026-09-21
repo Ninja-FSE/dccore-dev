@@ -128,6 +128,8 @@ class _WorkerCase(DCCoreTestCase):
         config.send_queue = {}
         config.bot_joined_channel = True
         self.oserve.bot_joined_channel = True
+        # The pump also waits for activation (#630); the harness resets this.
+        config.activation_triggered = True
         runtime.outbound_pacer = runtime.OutboundPacer()
         self.sock = TimestampedSocket()
         self.oserve.irc_connection = self.sock

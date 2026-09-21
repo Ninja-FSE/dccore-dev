@@ -132,10 +132,10 @@ class WriteSettingsConfTests(DCCoreTestCase):
 
     def test_writes_exactly_the_dict_it_was_given(self):
         """No filtering happens at this layer any more - collect_answers()
-        already decided what belongs in `changes` (a blank SERVER, or the
-        dashboard left off, are both simply absent from the dict, never
-        written as an explicit "no"). A key genuinely absent from `changes`
-        must not appear in the file at all."""
+        already decided what belongs in `changes` (a blank SERVER is simply
+        absent from the dict; the dashboard answer is in it either way, see
+        test_declining_the_dashboard_writes_an_explicit_off). A key genuinely
+        absent from `changes` must not appear in the file at all."""
         configure.write_settings_conf({"NICKNAME": "MyBot"}, path=self.path)
 
         with open(self.path, encoding="utf-8") as handle:
@@ -143,6 +143,19 @@ class WriteSettingsConfTests(DCCoreTestCase):
         self.assertIn("NICKNAME = MyBot", written)
         self.assertNotIn("SERVER", written)
         self.assertNotIn("WEBUI", written)
+
+
+    def test_declining_the_dashboard_writes_an_explicit_off(self):
+        """#637: the declined dashboard IS written, as `false`, and to the
+        file the daemon reads last - so a re-run that says no to a dashboard
+        an earlier run switched on really switches it off, and WINDOWS.md
+        can point at settings.conf as the one place to turn it on."""
+        configure.write_settings_conf({"NICKNAME": "MyBot", "WEBUI_ENABLED": False},
+                                      path=self.path)
+
+        with open(self.path, encoding="utf-8") as handle:
+            written = handle.read()
+        self.assertIn("WEBUI_ENABLED = false", written)
 
 
 class CurrentValueTests(DCCoreTestCase):

@@ -75,6 +75,18 @@ class BootCase(DCCoreTestCase):
         self._real_worker = queue_mgr.queue_worker
         queue_mgr.queue_worker = lambda: self.workers.append(1)
         self.addCleanup(lambda: setattr(queue_mgr, "queue_worker", self._real_worker))
+        # And the fetch dispatcher it starts eleven lines later (#799). Only
+        # the subclass that tests it stubbed it, so every OTHER boot left a
+        # real `while True` thread calling dcc_fetch.check_fetch_queue()
+        # every 2 s for the rest of the process - through whichever oserve
+        # stub a later test had installed, which is how a test that had
+        # just paused transfers found three fetch requests already sent.
+        import dcc_fetch
+        self.dispatchers = []
+        self._real_dispatcher = dcc_fetch.fetch_dispatcher_worker
+        dcc_fetch.fetch_dispatcher_worker = lambda: self.dispatchers.append(1)
+        self.addCleanup(setattr, dcc_fetch, "fetch_dispatcher_worker",
+                        self._real_dispatcher)
 
     def boot(self, **kwargs):
         """Run startup(), capturing its console output."""
@@ -339,14 +351,8 @@ class TheCrossBotFetchDispatcherIsStarted(BootCase):
         super().setUp()
         import dcc_fetch
         self.dcc_fetch = dcc_fetch
-        # Stubbed like the queue worker above, and for the same reason: the
-        # real one is a while True loop, and the suite would accumulate one
-        # live thread per test that boots.
-        self.dispatchers = []
-        self._real_dispatcher = dcc_fetch.fetch_dispatcher_worker
-        dcc_fetch.fetch_dispatcher_worker = lambda: self.dispatchers.append(1)
-        self.addCleanup(setattr, dcc_fetch, "fetch_dispatcher_worker",
-                        self._real_dispatcher)
+        # The stub itself now lives in BootCase.setUp (#799): every boot
+        # needs it, not just this class. self.dispatchers is what it records.
 
     def _wait_for_dispatchers(self):
         """The thread is real even though its target is stubbed."""

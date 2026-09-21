@@ -96,10 +96,14 @@ class TheWiring(unittest.TestCase):
         self.assertLess(block.index("adopt_registered_nick(line)"), block.index("joined = True"))
 
     def test_the_dead_copy_before_registration_is_gone(self):
-        """001 cannot arrive before USER is sent; the block there never ran."""
-        prereg = self.loop[:self.loop.index('if " 001 " in a_line or " 002 " in a_line')]
+        """001 cannot arrive before USER is sent; the block there never ran.
+        Since #634 nothing is read before USER goes out at all - NICK and
+        USER are sent back to back and the main loop is the registration -
+        so the pre-registration reader this block sat in is gone with it."""
+        prereg = self.loop[:self.loop.index("s.settimeout(20.0)")]
         self.assertNotIn("numeric_target(a_line)", prereg)
         self.assertNotIn('is_server_numeric(a_line, "001")', prereg)
+        self.assertNotIn("s.recv(", prereg, "a line is read before USER is sent")
 
     def test_the_explanation_names_the_adopted_nick(self):
         """It sits earlier in the source than the 001 handling but runs after

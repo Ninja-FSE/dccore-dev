@@ -306,11 +306,14 @@ def write_settings_conf(changes, path=None):
     """A thin pass-through to settings_file.save() - the exact same
     read-modify-write-and-verify path the dashboard's Settings page and CLI
     edits already use, not a hand-rolled write. `changes` is already exactly
-    what should be written - collect_answers() decides what belongs in it
-    (a blank SERVER, or the web dashboard left off, are both deliberately
-    absent rather than written as an explicit "no" - config.py's own real
-    defaults already say that). `path` overrides settings_file's own
-    default location - tests use it, real runs never pass it."""
+    what should be written - collect_answers() decides what belongs in it:
+    a blank SERVER is deliberately absent rather than written as an explicit
+    "no" (defaults.py already says that), while the dashboard answer IS
+    written either way, as `WEBUI_ENABLED = false` when declined - a re-run
+    that says no to a dashboard an earlier run switched on must switch it
+    off, and settings.conf is where the daemon reads that switch from last
+    (#637). `path` overrides settings_file's own default location - tests
+    use it, real runs never pass it."""
     # save() already logs its own "[CONFIG] Wrote N setting(s)..." line
     # (log=print by default) - nothing more to print here.
     return settings_file.save(vars(config), changes, path=path)

@@ -352,6 +352,8 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
         config.vip_queue = []
         config.send_queue = {}
         self._real_time = queue_mgr.time
+        # The pump also waits for activation (#630); the harness resets this.
+        config.activation_triggered = True
         self.shim = _SleepShim()
         queue_mgr.time = self.shim
         self.worker = None

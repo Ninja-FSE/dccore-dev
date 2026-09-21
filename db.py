@@ -228,11 +228,30 @@ def remove_hard_ban(pattern):
 # already holding the lock.
 # ---------------------------------------------------------------------------
 
+def _default_stats_row():
+    """All zeros, dated today: the row a bot with no history starts from."""
+    return [0, 0, 0, 0, 0, 0, datetime.datetime.now().strftime("%Y-%m-%d")]
+
+
 def _load_advanced_stats_unlocked():
-    """Parse stats.txt. Caller must hold _disk_lock."""
+    """Parse stats.txt. Caller must hold _disk_lock.
+
+    Raises whatever open()/read() raised when the file exists but cannot be
+    read at this instant (a share-deny lock from an AV or backup tool on
+    Windows, an EIO, a network share hiccup). It used to catch that and hand
+    back the all-zero row, which was harmless for a display and fatal for a
+    writer: update_stats_on_complete() incremented the zeros and atomically
+    wrote them over the real file, and unlike the malformed-column path below
+    it kept no .corrupt copy. One unreadable moment at the end of one transfer
+    cost the lifetime totals, which nothing recomputes (#626). The file was
+    fine - it just could not be read right then - so preserving it is wrong
+    too; the only correct move for a writer is to leave it alone and say so.
+    The read-only entry points (load_advanced_stats, load_advanced_stats_rolled)
+    catch this themselves and keep showing zeros for that one refresh.
+    """
     STATS_FILE = config.STATS_FILE
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    default_stats = [0, 0, 0, 0, 0, 0, today_str]
+    default_stats = _default_stats_row()
 
     if not os.path.exists(STATS_FILE):
         return default_stats
@@ -241,12 +260,8 @@ def _load_advanced_stats_unlocked():
     # PermissionError on Windows - which is finding #25 in the same audit,
     # committed here while fixing #26. Caught by running it, not by reading it.
     reason = None
-    try:
-        with open(STATS_FILE, "r") as f:
-            parts = f.read().strip().split()
-    except Exception as e:
-        print(f"[DB ERROR] Could not read stats.txt, using defaults: {e}")
-        return default_stats
+    with open(STATS_FILE, "r") as f:
+        parts = f.read().strip().split()
 
     try:
         if len(parts) == 7:
@@ -351,10 +366,24 @@ def _coerce_file_size(file_size):
         return 0
 
 
+def _load_for_display_unlocked():
+    """The row for a READER, which must not raise: a file that cannot be read
+    this instant shows as zeros for one refresh, and nothing on this path
+    writes those zeros back. Returns (row, error-or-None) so the caller can
+    log after releasing _disk_lock. Caller must hold _disk_lock."""
+    try:
+        return _load_advanced_stats_unlocked(), None
+    except Exception as err:
+        return _default_stats_row(), err
+
+
 def load_advanced_stats():
     """Read stats.txt. Format: total_files total_bytes yest_files yest_bytes today_files today_bytes last_date"""
     with _disk_lock:
-        return _load_advanced_stats_unlocked()
+        stats, unreadable = _load_for_display_unlocked()
+    if unreadable is not None:
+        print(f"[DB ERROR] Could not read stats.txt, using defaults: {unreadable}")
+    return stats
 
 
 def save_advanced_stats(stats):
@@ -392,7 +421,9 @@ def load_advanced_stats_rolled():
     a defensive copy here would be guarding nothing.
     """
     with _disk_lock:
-        stats = _load_advanced_stats_unlocked()
+        stats, unreadable = _load_for_display_unlocked()
+    if unreadable is not None:
+        print(f"[DB ERROR] Could not read stats.txt, using defaults: {unreadable}")
     _rotate_day_unlocked(stats)
     return stats
 
@@ -404,7 +435,9 @@ def check_and_rotate_day():
     returned a freshly loaded row on failure, which meant a logging error could
     make this hand back UN-ROTATED counters that the caller would treat as
     current - silently wrong data instead of a loud failure. The original had no
-    handler either; this keeps that contract.
+    handler either; this keeps that contract. A stats.txt that cannot be read
+    raises out of here too, before anything is written (#626) - the caller in
+    irc.py reports it and tries again a minute later.
     """
     with _disk_lock:
         stats = _load_advanced_stats_unlocked()
@@ -423,6 +456,11 @@ def update_stats_on_complete(file_size):
     acquisition, which is the entire point of this function: dcc.py used to do
     it by hand with load and save as separate locked calls, and concurrent
     completions silently overwrote each other's increments.
+
+    Raises when stats.txt exists but cannot be read, and writes NOTHING then:
+    counting this one transfer on top of zeros would replace the lifetime
+    totals with it (#626). The caller in dcc.py logs it; the transfer goes
+    uncounted, which is the smaller loss by far.
     """
     clean_size = _coerce_file_size(file_size)
     with _disk_lock:

@@ -248,6 +248,113 @@ def resolve_alt_nick(main_nick):
     return alt or f"{main_nick}`"
 
 
+# Numerics a server answers a NICK with when it will not give us that name.
+# 437 is ERR_UNAVAILRESOURCE, the nick-delay Hybrid, ratbox and Solanum
+# networks apply to a name that was just split or killed off - the same
+# situation as a ghost holding it, answered with a different number, and
+# never matched anywhere before #633.
+NICK_REFUSED_NUMERICS = {"432", "433", "437", "438"}
+# 438 is ERR_NICKTOOFAST - Undernet's "Nick change too fast. Please wait 30
+# seconds" - and can only follow a NICK sent AFTER registration. It joined
+# in #635, with the rule that a refusal of a registered bot's NICK means
+# "you still have the name you had": nothing to fall back to, nothing to
+# resend, and config.NICKNAME must not have moved.
+
+# How many names to try on one connection before waiting for the server:
+# the alternate, then nine derived from it. Past that the ghosts are not
+# going anywhere soon, and the reconnect starts the count again anyway.
+NICK_FALLBACK_LIMIT = 10
+
+# The shortest NICKLEN any server has (RFC 1459). A candidate this long or
+# shorter fits everywhere, so the digit can be appended; a longer alternate
+# has its last character replaced instead, which keeps the length the
+# server already accepted for the alternate itself.
+NICKLEN_EVERY_SERVER_ALLOWS = 9
+
+
+def parse_nick_refusal(line):
+    """The nickname a server just refused, or None.
+
+    `:server 433 * DCCore :Nickname is already in use` before registration,
+    `:server 433 DCCore_ DCCore :...` after it - the refused name is the
+    parameter after the target either way. 437 is also sent for a CHANNEL
+    that is temporarily unavailable, with the channel in that position; that
+    one is not ours to act on here and is returned as None.
+    """
+    match = re.match(r"^:\S+\s+(\d{3})\s+\S+\s+(\S+)", line)
+    if not match or match.group(1) not in NICK_REFUSED_NUMERICS:
+        return None
+    refused = match.group(2)
+    if refused[0] in "#&+!":
+        return None
+    return refused
+
+
+def note_own_nick_change(old_nick, new_nick):
+    """The server says the client called `old_nick` is now `new_nick`. If
+    that client is us, follow it. Returns True if it was.
+
+    THE SERVER'S NICK EVENT IS THE ONLY THING THAT RENAMES A REGISTERED BOT
+    (#635, audit M33). Every self-NICK sender used to assign config.NICKNAME
+    the moment it wrote the command, before the server had answered - and
+    nothing ever reconciled it. A 438 ("nick change too fast") to a reclaim,
+    a rename services forced on us, a rehash rename refused within
+    Undernet's 30 s window: the server knew the bot by one name and
+    config.NICKNAME said another until the next reconnect, and every
+    "is this addressed to me" test - DCC CHAT, SEND and RESUME offers,
+    private messages, the self-message filter, a KICK of the bot - compared
+    against a nick the bot did not hold.
+
+    So the senders no longer assign, and this is the one place that does
+    once registered (registration itself is settled by the 001, see
+    adopt_registered_nick()). Matched on the OLD nick against the name we
+    currently hold, which after the change above is exactly what the server
+    thinks it is - never on the alias list, which carries names anybody may
+    have picked up since.
+    """
+    held = str(getattr(config, "NICKNAME", "") or "")
+    if not held or str(old_nick or "").lower() != held.lower():
+        return False
+    new = str(new_nick or "").strip()
+    if not new or new == held:
+        return False
+    print(f"[NICK] The server now calls the bot {new} (was {held}).")
+    config.NICKNAME = new
+    return True
+
+
+def fallback_nick(main_nick, attempt):
+    """The name to try after `attempt` refusals on this connection, or None
+    once there is nothing left worth trying.
+
+    Only the alternate used to exist (#633). With the main nick and the
+    alternate both held by ghosts after a split storm, the bot sent NICK
+    main, got 433, sent NICK alt, got 433 - and then nothing, until the
+    server's registration timeout closed the link, ten seconds passed, and
+    the same two lines went out again, for as long as the ghosts lived.
+
+    The first fallback is still the configured alternate. After that: the
+    alternate with a digit, 1 to 9, appended when the result is short
+    enough for every server and replacing the last character otherwise.
+    Never the main nick or the alternate again under another number.
+    """
+    alt = resolve_alt_nick(main_nick)
+    if attempt <= 1:
+        return alt
+    taken = {str(main_nick).lower(), alt.lower()}
+    number = attempt - 1
+    while number < NICK_FALLBACK_LIMIT:
+        digit = str(number)
+        if len(alt) + len(digit) <= NICKLEN_EVERY_SERVER_ALLOWS:
+            candidate = alt + digit
+        else:
+            candidate = alt[:-len(digit)] + digit
+        if candidate.lower() not in taken:
+            return candidate
+        number += 1
+    return None
+
+
 def numeric_target(line):
     """The nick a server numeric is addressed to, or None.
 
@@ -444,6 +551,27 @@ def is_valid_irc_target(value):
     return bool(text) and not _UNSAFE_IRC_TARGET_RE.search(text)
 
 
+# The wait before the next connection attempt (#663, audit M61). It used to
+# be a flat 10 s on every path, and ircu's IPcheck throttles an address that
+# reconnects too often inside its clone period (4 in 40 s by default) -
+# counting refused connects too, and only resetting after a gap longer than
+# the period. So once a run of drops tripped the throttle, the 10 s cadence
+# kept it tripped, each attempt answered with "ERROR :Your host is trying to
+# (re)connect too fast -- throttled" and closed, for as long as the bot kept
+# trying. Doubling from 10 s to a five-minute ceiling gets out from under
+# the window; a link that registered resets the count, so an ordinary drop
+# still comes back in ten seconds.
+RECONNECT_DELAY_FIRST = 10.0
+RECONNECT_DELAY_MAX = 300.0
+
+
+def reconnect_delay(failures_in_a_row):
+    """Seconds to wait before the next attempt, after this many attempts in a
+    row that never registered: 10, 20, 40, 80, 160, then 300."""
+    failures = max(0, int(failures_in_a_row))
+    return float(min(RECONNECT_DELAY_MAX, RECONNECT_DELAY_FIRST * (2 ** max(0, failures - 1))))
+
+
 # How many inbound lines to keep for a disconnect report. Fifteen covers the
 # exchange around a drop - the JOINs, the NAMES burst, and the server's own
 # ERROR line - without turning a log into a transcript.
@@ -579,7 +707,28 @@ JOIN_REFUSED_NUMERICS = {
     "473",   # ERR_INVITEONLYCHAN
     "474",   # ERR_BANNEDFROMCHAN
     "475",   # ERR_BADCHANNELKEY
+    "476",   # ERR_BADCHANMASK - the name is not a channel name on this server
+    "477",   # ERR_NEEDREGGEDNICK - Undernet +r: a services login is required
+    "479",   # ERR_BADCHANNAME - illegal channel name (ircu, hybrid)
 }
+# 476, 477 and 479 joined the five in #632 (audit M30). All three were
+# answered in silence: parse_join_refusal() returned None, nothing was
+# printed outside DEBUG_MODE, nothing counted, and a channel the watchdog
+# had marked "never confirmed" stayed at zero refusals - so the advert worker
+# re-sent the JOIN every ANNOUNCE_INTERVAL for the life of the process and
+# got the same numeric back every time. 477 is the one that happens on a
+# live install: Undernet's +r needs an X login, and an operator without one
+# in the on-connect commands (or with one slower than the JOIN) saw only
+# "never confirmed via NAMES", with no reason.
+#
+# 437 (ERR_UNAVAILRESOURCE) is deliberately NOT here: "temporarily
+# unavailable" is what a channel is during a netsplit, and a retry that
+# never gives up is the right answer to a refusal that says it will pass.
+
+# 477 says what to do, and it is not "wait": the nick must be logged in to
+# services before the JOIN. The debug line names the fix rather than counting
+# down like a ban would, for the same reason 405 has its own wording below.
+JOIN_REFUSED_NEEDS_A_LOGIN = "477"
 
 # 405 belongs with the four above rather than with a throttle: it keeps being
 # true until the operator serves fewer channels, which is the same shape as a
@@ -928,8 +1077,75 @@ def note_kicked_from(channel, by=""):
         config.kicked_channels[name] = {
             "refusals": 0, "kicked_at": time.time(), "by": str(by or ""),
             "reason": "kicked",
+            # Who is in there is no longer something we can see, so the
+            # first NAMES after the rejoin replaces the member list instead
+            # of merging into it - see learn_channel_names().
+            "members_stale": True,
         }
     return True
+
+
+def note_user_kicked(nick, channel):
+    """Somebody else was thrown out of `channel`. The same fact a PART
+    carries, mirrored the same way: out of config.channel_users, and into
+    recent_departures so a reconnect under an alt nick is recognised.
+    Returns whether they were actually there.
+
+    Audit M27 (#629): the KICK handler only ever looked at a kick of the
+    bot itself. Anyone else kicked stayed in channel_users - which dcc.py
+    treats as proof of presence - and because the bot then shared no
+    channel with them, their QUIT was never seen either. A kicked user who
+    disconnected kept being dispatched to: each attempt held a slot for the
+    accept timeout, the queue was never frozen, never reaped, and the files
+    were finally discarded as send failures instead.
+    """
+    key = str(nick or "").strip().lower()
+    chan = str(channel or "").strip().lower()
+    with runtime.channel_users_lock():
+        members = config.channel_users.get(chan)
+        found = members is not None and key in members
+        if found:
+            members.remove(key)
+    # #376: OBSERVED, not inferred - outside the lock, as the QUIT
+    # handler does, and only when we actually found them.
+    if found:
+        note_observed_departure(key, chan)
+    return found
+
+
+def forget_channel_members(channel):
+    """We were thrown out of `channel` and are not going back. Nothing can
+    keep that member list honest any more, and dcc.py reads it as proof a
+    user is present, so it goes.
+
+    A channel we WILL try to rejoin keeps its list: nobody in it did
+    anything, and dropping them would start the five-minute freeze timer on
+    every queue there while the bot waits for the next advert to ask its
+    way back in. That list is rebuilt from scratch instead - see
+    learn_channel_names().
+    """
+    name = str(channel or "").strip().lower()
+    with runtime.channel_users_lock():
+        config.channel_users.pop(name, None)
+
+
+def learn_channel_names(channel, names):
+    """Fold one 353 (NAMES) line into config.channel_users.
+
+    Normally a merge, because a large channel's NAMES arrives as several
+    353 lines and each one carries only part of the list. After a kick the
+    FIRST line replaces the list instead: everyone who left while the bot
+    was out would otherwise stay "present" for the life of the connection,
+    since the bot saw neither their PART nor their QUIT.
+    """
+    chan = str(channel or "").strip().lower()
+    with runtime.kicked_channels_lock:
+        entry = config.kicked_channels.get(chan)
+        rebuild = bool(entry) and bool(entry.pop("members_stale", False))
+    with runtime.channel_users_lock():
+        if rebuild or chan not in config.channel_users:
+            config.channel_users[chan] = set()
+        config.channel_users[chan].update(names)
 
 
 def note_join_unconfirmed(channel):
@@ -1016,6 +1232,26 @@ def channels_to_rejoin(limit=None):
         return sorted(name for name, entry in config.kicked_channels.items()
                       if name in wanted
                       and int(entry.get("refusals", 0)) < limit)
+
+
+def channels_we_are_out_of():
+    """The channels the bot is not in right now, lowercased: thrown out,
+    never let in, or given up on. What the advert worker skips.
+
+    A pure read, like channels_to_rejoin(). kicked_channels is exactly this
+    set: an entry is written by a kick or by the watchdog for a JOIN that was
+    never answered, and note_joined() removes it the moment a 366 says the
+    bot is back. A channel past REJOIN_ATTEMPTS stays in it, which is the
+    point - that is the one nothing will ever put the bot back into.
+
+    Audit M29 (#631): the advert worker sent the advert and the CTCP SLOTS
+    line into every channel in CHANNEL regardless, so a channel the bot had
+    been kicked from - or one that was +i and never answered - cost two
+    MSG_DELAY slots on the shared pacer every ANNOUNCE_INTERVAL for the life
+    of the process, answered by 404s nothing reads.
+    """
+    with runtime.kicked_channels_lock:
+        return set(config.kicked_channels)
 
 
 def gave_up_on(limit=None):
@@ -2041,8 +2277,8 @@ MAX_PENDING_LINE_BYTES = 64 * 1024
 def take_complete_lines(buffer, chunk):
     """Add `chunk` to `buffer` and return (leftover_bytes, [decoded lines]).
 
-    Both the IRC read loop and the pre-auth NICK loop need this, and both used
-    to do it inline as:
+    The IRC read loop needs this (and so did the pre-auth NICK loop, until
+    #634 removed it), and both used to do it inline as:
 
         data = s.recv(2048).decode("utf-8", errors="ignore")   # decode FIRST
         buffer += data                                         # then accumulate
@@ -2190,6 +2426,10 @@ def irc_loop():
     if not hasattr(config, 'connection_epoch'):
         config.connection_epoch = 0
 
+    # Attempts in a row that never reached a 001 (#663): what the wait before
+    # the next one is sized by. Reset the moment a connection registers.
+    registration_failures = 0
+
     # THE RECONNECT LOOP: makes sure this thread never dies on a split or a disconnect
     while True:
         # Every connection starts by trying to claim the bot's real original nick
@@ -2211,47 +2451,42 @@ def irc_loop():
                 oserve_mod.irc_connection = s
             print(f"[CONNECT] Connected to socket successfully!")
         except Exception as e:
-            print(f"[ERROR] Connection failed: {e}. Reconnecting in 10 seconds...")
+            registration_failures += 1
+            delay = reconnect_delay(registration_failures)
+            print(f"[ERROR] Connection failed: {e}. Reconnecting in {delay:.0f} seconds...")
             # `joined` lives in the irc_loop frame and is only reset after a SUCCESSFUL
             # handshake, so a failed attempt used to leave it latched True from the
             # previous connection - which is what let a stale watchdog pass its guard.
             joined = False
-            time.sleep(10)
+            time.sleep(delay)
             continue
             
-        # Send the handshake immediately; the server decides the nick via real 433 replies
+        # NICK and USER back to back, like every other client (#634, audit
+        # M32). This used to send NICK and then wait for the server to say
+        # something - a 001, a PING, any NOTICE - before sending USER. Two
+        # things were wrong with that. A server that says nothing until it
+        # has BOTH lines (some ircds, most bouncers) never triggered it, so
+        # the 70 s recv timed out and the connect was retried every 80 s for
+        # ever with a log that only said "timed out". And when the trigger
+        # did arrive, the loop broke out of the chunk it was in: every line
+        # already decoded after it was dropped and the partial line left in
+        # the buffer with it - a 433 sharing a chunk with "NOTICE AUTH" (fast
+        # DNS, slow client) was thrown away, and the bot waited for a
+        # registration the server had already refused.
+        #
+        # The main loop below is the registration now: it answers PING,
+        # steps down the nick ladder on a refusal (#633) and adopts the name
+        # from the 001. Nothing here needs to read a byte first.
+        #
+        # Refusals so far on THIS connection, counted by the main loop. Per
+        # connection on purpose: a reconnect starts again from the
+        # configured name, because the ghosts may be gone by then.
+        nick_refusals = 0
         try:
+            ident_str, real_str = registration_names()
             s.sendall(f"NICK {config.NICKNAME}\r\n".encode("utf-8", errors="ignore"))
-            
-            auth_buffer = b""
-            while True:
-                auth_data = s.recv(SOCKET_READ_BYTES)
-                if not auth_data:
-                    break
-                auth_buffer, auth_lines = take_complete_lines(auth_buffer, auth_data)
-                
-                for a_line in auth_lines:
-                    if " 433 " in a_line or "erroneous nickname" in a_line.lower():
-                        alt_nick = resolve_alt_nick(config.ORIGINAL_NICK)
-                        print(f"[SERVER 433] The nick {config.NICKNAME} was taken. Switching CURRENT_NICK to: {alt_nick}")
-                        s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
-                        config.NICKNAME = alt_nick
-                    
-                    # (The server's own name for us is read from the 001 in the
-                    # main loop below, adopt_registered_nick(): 001 is sent only
-                    # AFTER the USER line this loop is about to send, so it can
-                    # never arrive here - the block that used to sit at this spot
-                    # was unreachable, #594.)
-
-                    if " 001 " in a_line or " 002 " in a_line or "PING" in a_line or "NOTICE" in a_line:
-                        ident_str, real_str = registration_names()
-                        s.sendall(f"USER {ident_str} 0 * :{real_str}\r\n".encode("utf-8", errors="ignore"))
-                        break
-                else:
-                    continue
-                break
-                
-            print(f"[INFO] Handshake complete. CURRENT_NICK settled as: {config.NICKNAME}. Starting the reader...")
+            s.sendall(f"USER {ident_str} 0 * :{real_str}\r\n".encode("utf-8", errors="ignore"))
+            print(f"[INFO] Registration sent as {config.NICKNAME}. Starting the reader...")
 
             # SHORT RECV TIMEOUT (see the clock logic below): recv() lets go every
             # 20 seconds so we can run the keepalive and the silence timer ourselves.
@@ -2266,8 +2501,10 @@ def irc_loop():
             # BACKOFF: without a pause here the loop spun as fast as TCP could connect.
             # Undernet's connection throttle closes the link immediately when you come
             # back too fast, which gave tens of attempts a second and guaranteed we
-            # stayed throttled - or got K-lined - instead of recovering.
-            time.sleep(10)
+            # stayed throttled - or got K-lined - instead of recovering. Growing
+            # since #663, for the same reason at a slower cadence.
+            registration_failures += 1
+            time.sleep(reconnect_delay(registration_failures))
             continue
 
         # This connection is now live: claim a fresh epoch. Any thread still running from
@@ -2349,6 +2586,10 @@ def irc_loop():
             # with it empty, every frozen user looks absent and their queue gets reaped.
             if getattr(config, 'channel_users', None):
                 config.bot_joined_channel = True
+                # Before anything below runs the sweep (#652): the frozen
+                # timestamps get the outage added, so wake_restored_queues()
+                # judges them by online time only.
+                dcc.resume_freeze_clock()
                 # #530: queues restored from disk have no trigger of their
                 # own - a JOIN wakes only FROZEN users, and the global sweep
                 # otherwise runs when some other transfer completes. Look
@@ -2398,8 +2639,9 @@ def irc_loop():
                     if not main_nick_active:
                         print(f"\n[NICK RECOVERY] The ghost nick {main_nick} timed out. Changing nick...")
                         try:
+                            # Asked for, not yet held: config.NICKNAME
+                            # follows the server's NICK event (#635).
                             sock_inst.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
-                            config.NICKNAME = main_nick
                             break
                         except:
                             break
@@ -2548,6 +2790,18 @@ def irc_loop():
                         is_for_me = f"PRIVMSG {config.NICKNAME}" in line or f" {config.NICKNAME} " in line or f"@{config.NICKNAME.lower()}" in line.lower()
                         if not is_channel_traffic or is_for_me or "ERROR" in line:
                             print(f"[RAW IN] {line.strip()}")
+                    # The server's last word before it hangs up (#663). It
+                    # was read and dropped: a throttled reconnect printed
+                    # "Server closed connection" and nothing about why, and
+                    # the retry cadence that caused it stayed the same.
+                    if line.startswith("ERROR ") or line.startswith("ERROR:"):
+                        print(f"[SERVER] {line}")
+                        lowered = line.lower()
+                        if "throttl" in lowered or "too fast" in lowered:
+                            print("[SERVER] The server refuses a client that comes back too "
+                                  "fast. The next attempt waits longer, doubling up to "
+                                  f"{RECONNECT_DELAY_MAX:.0f} seconds, until one registers.")
+
                     if line.startswith("PING"):
                         parts = line.split()
                         if len(parts) > 1:
@@ -2609,13 +2863,42 @@ def irc_loop():
                     # forge. The PRIVMSG/NOTICE test is gone because anchoring makes it not
                     # merely dead but harmful: a genuine 433 whose text happened to contain
                     # the word PRIVMSG would have been discarded.
-                    if is_server_numeric(line, "433") or is_server_numeric(line, "432"):
+                    # The guard names the numerics so a forged line can be
+                    # tested against it (tests/test_membership_events.py);
+                    # parse_nick_refusal() then reads WHICH name was refused
+                    # and steps aside for a 437 that names a channel.
+                    if is_server_numeric(line, "433") or is_server_numeric(line, "432") or is_server_numeric(line, "437"):
+                        refused_nick = parse_nick_refusal(line)
                         main_nick = getattr(config, 'ORIGINAL_NICK', 'DCCore')
-                        if str(config.NICKNAME).lower() == main_nick.lower():
-                            alt_nick = resolve_alt_nick(main_nick)
-                            print(f"[LIVE NICK COLLISION] The server reported a genuine collision for {main_nick}. Fallback nick: {alt_nick}")
-                            s.sendall(f"NICK {alt_nick}\r\n".encode("utf-8", errors="ignore"))
-                            config.NICKNAME = alt_nick
+                        if refused_nick is None:
+                            pass
+                        elif not joined:
+                            # STILL REGISTERING (#633): every refusal moves
+                            # on to the next name, not just the first. With
+                            # both configured names held by ghosts the bot
+                            # used to go quiet here until the server closed
+                            # the link, and do the same again ten seconds
+                            # later. 437 lands here too - a nick delay is a
+                            # ghost by another number.
+                            nick_refusals += 1
+                            next_nick = fallback_nick(main_nick, nick_refusals)
+                            if next_nick is None:
+                                print(f"[NICK LADDER] {refused_nick} was refused too, and there are no more names to try. Waiting for the server.")
+                            else:
+                                print(f"[NICK LADDER] The server refused {refused_nick}. Trying: {next_nick}")
+                                s.sendall(f"NICK {next_nick}\r\n".encode("utf-8", errors="ignore"))
+                                config.NICKNAME = next_nick
+                        else:
+                            # Registered, and a NICK the bot sent - the
+                            # reclaim of its main nick, a rehash rename - was
+                            # refused: taken (433), too soon (438), held
+                            # back after a split (437). The bot still has the
+                            # name it had, and config.NICKNAME still says so
+                            # because nothing assigned it at the send (#635).
+                            # Nothing to resend: the old reply here re-sent
+                            # NICK <alt> to a server that already called us
+                            # that.
+                            print(f"[LIVE NICK COLLISION] The server refused {refused_nick}; the bot keeps {config.NICKNAME}.")
 
                     # Reclaim the main nick the moment the other client releases it
                     # Anchored twice over. The old test matched " QUIT "/" PART " anywhere,
@@ -2629,8 +2912,9 @@ def irc_loop():
                             if event_source_nick(line) == main_nick.lower():
                                 print(f"[NICK RECOVERY] The main nick {main_nick} logged out. Reclaiming it now...")
                                 try:
+                                    # Asked for, not yet held: config.NICKNAME
+                                    # follows the server's NICK event (#635).
                                     s.sendall(f"NICK {main_nick}\r\n".encode("utf-8", errors="ignore"))
-                                    config.NICKNAME = main_nick
                                 except Exception as recovery_err:
                                     print(f"[NICK RECOVERY ERROR] Could not reclaim the nick: {recovery_err}")
 
@@ -2797,6 +3081,10 @@ def irc_loop():
                     if is_user_event(line, "NICK"):
                         nick_match = re.match(r"^:([^!\s]+)!\S*\s+NICK\s+:?(\S+)", line)
                         if nick_match:
+                            # Ours? Then this is the moment the bot's name
+                            # changes - not when the NICK was sent (#635).
+                            note_own_nick_change(nick_match.group(1),
+                                                 nick_match.group(2).strip())
                             # Everything this user owns, not just their
                             # outbound messages - see note_nick_change().
                             note_nick_change(nick_match.group(1),
@@ -2828,10 +3116,9 @@ def irc_loop():
                         if name_match and is_valid_irc_target(name_match.group(1)):
                             chan = name_match.group(1).lower()
                             names = [n.strip("@+~&%").lower() for n in name_match.group(2).split()]
-                            with runtime.channel_users_lock():
-                                if chan not in config.channel_users:
-                                    config.channel_users[chan] = set()
-                                config.channel_users[chan].update(names)
+                            # A merge, except for the first line after a
+                            # kick - see learn_channel_names().
+                            learn_channel_names(chan, names)
 
                             # -------------------------------------------------
                             # RECONNECT THAW - this is what saves the queues:
@@ -2968,8 +3255,16 @@ def irc_loop():
                                     f"Will try to rejoin on the next advert.",
                                     category="PART", notice="warning")
                             else:
+                                # Not coming back, so nothing will ever
+                                # correct the member list - drop it.
+                                forget_channel_members(kicked_chan)
                                 print(f"[KICK] Removed from {kicked_chan}, which is "
                                       f"not in CHANNEL - not rejoining.")
+                        else:
+                            # Somebody else: the same departure a PART is
+                            # (#629). Left in channel_users, they stayed
+                            # "present" to dcc.py for the whole connection.
+                            note_user_kicked(victim, kicked_chan)
 
                     # And the answer when it will not have us back. Counted
                     # only for a channel we are already trying to return to -
@@ -2987,6 +3282,19 @@ def irc_loop():
                                     f"It is configured for more than the server "
                                     f"allows - remove some from CHANNEL rather "
                                     f"than waiting for this to clear.",
+                                    category="PART", notice="error")
+                            elif numeric == JOIN_REFUSED_NEEDS_A_LOGIN:
+                                # #632: the fix is a services login sent
+                                # before the JOIN, so say that - and keep
+                                # counting, so a login that never comes
+                                # ends in "gave up" like any other refusal.
+                                announce.send_debug(
+                                    f"{refused_chan} needs a registered nick "
+                                    f"({numeric}, channel mode +r): the bot must "
+                                    f"log in to services first. Put the login "
+                                    f"in Settings > On connect, or check that "
+                                    f"it is sent before the JOIN. "
+                                    f"Attempt {count}/{limit}.",
                                     category="PART", notice="error")
                             elif count >= limit:
                                 announce.send_debug(
@@ -3339,9 +3647,20 @@ def irc_loop():
                 _release_socket()
                 break
 
-        # Reset every flag before the next pass through the reconnect loop
-        print("[CONNECT] Lost the connection. Reconnecting to the IRC server in 10 seconds...")
+        # Reset every flag before the next pass through the reconnect loop.
+        # A link that registered and then dropped comes back in ten seconds;
+        # one that never got a 001 - refused, throttled, closed during the
+        # handshake - waits longer each time (#663).
+        if joined:
+            registration_failures = 0
+        else:
+            registration_failures += 1
+        reconnect_wait = reconnect_delay(registration_failures)
+        print(f"[CONNECT] Lost the connection. Reconnecting to the IRC server in {reconnect_wait:.0f} seconds...")
         config.bot_joined_channel = False
+        # The freeze box's clock stops with the link (#652): the seconds the
+        # bot is away count against nobody's queue. Resumed at activation.
+        dcc.pause_freeze_clock()
         
         # FIXED: clears the in-memory channel lists on a crash, so the bot does not block its own nick next time
         with runtime.channel_users_lock():
@@ -3356,7 +3675,16 @@ def irc_loop():
             oserve_mod.bot_joined_channel = False
         _release_socket()
         announce.is_ready = False
-        import queue_mgr
-        if "channel_announce" in queue_mgr.config.send_queue:
-            queue_mgr.config.send_queue["channel_announce"] = []
-        time.sleep(10)
+        # The VIP lane is where adverts and rejoins live, and everything in
+        # it was written for the connection that just died: an advert's
+        # figures are stale, a rejoin is for channels the new connection
+        # joins by itself, and a command reply is to someone who asked a
+        # link ago. This used to empty send_queue["channel_announce"], a key
+        # oserve.queue_message() never writes - adverts go to vip_queue -
+        # so it cleared nothing (#630). queue_worker does the same on a
+        # failed send; this is the same decision at the other exit.
+        stale_vip = len(getattr(config, 'vip_queue', ()) or ())
+        if stale_vip:
+            del config.vip_queue[:]
+            print(f"[CONNECT] Dropped {stale_vip} queued VIP line(s) from the dead connection.")
+        time.sleep(reconnect_wait)

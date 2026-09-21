@@ -14,7 +14,8 @@
 #
 # The audit that produced this found twenty-one such functions. Fifteen were
 # uncovered when the gate was first run; tests/test_uncovered_daemon_functions.py
-# took that to the two below. Both are `while True:` loops that own the
-# process, which is a different kind of problem from a function nobody called.
+# took that to two `while True:` loops that own the process, which is a
+# different kind of problem from a function nobody called; both are covered now.
 
-irc.py::irc_loop                  # the read loop: connects a real socket, blocks on recv, and never returns. resolve_dcc_address() and take_complete_lines() were lifted out of it (#193, #180) precisely so the parts that HAVE logic could be tested; what is left is the loop itself. Covering it needs a fake connection the loop can be pointed at.
+# irc.py::irc_loop left the list with #633: tests/test_a_third_nick_when_both_are_taken.py
+# points the loop at a scripted socket and drives one registration attempt for real.

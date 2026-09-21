@@ -62,7 +62,7 @@ PORT: int          = 6667          # The server's port; 6667 is plain IRC, and t
 # reasoning, and RAR_BINARY above for the same "None means unset" convention
 # this already used before REQUIRED existed.
 NICKNAME: str      = None
-ALT_NICKNAME: str  = "DCCore_"     # Used when NICKNAME is taken; the bot keeps trying to reclaim the main nick afterwards
+ALT_NICKNAME: str  = "DCCore_"     # Used when NICKNAME is taken (with a digit added if this is taken too); the bot keeps trying to reclaim the main nick afterwards
 ADMIN_NICK: str    = None          # Who may use the admin commands (!ban, !rehash, !update...), comma-separated for more than one; with ADMIN_HOSTMASKS set, they must come from that host as well
 CHANNEL: str       = None          # The channel(s) to serve in, comma-separated; the first one is where announcements go by default
 # Ships BLANK, and that is a deliberate reversal of #171's "#dccore-debug".
@@ -322,7 +322,8 @@ KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 # EXPECT IT TO BE LARGE. Roughly the size of the lists again - four million
 # rows measured at 452MB. Built as each list is fetched, and safe to delete:
 # the filter stops working until the next fetch rebuilds it, and nothing else
-# reads it.
+# reads it. A damaged one is moved aside as list_index.db.corrupt-<timestamp>
+# and rebuilt from the lists on disk (#628); the copy can be deleted.
 LIST_INDEX_FILE: str = "./data/list_index.db"
 
 # One row per thing this bot has ever sent, {relative path or archive name ->
@@ -454,7 +455,7 @@ MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
 MAX_SEARCH_RESULTS: int = 5      # Maximum result lines sent in reply to an @find
 MSG_DELAY: float        = 5.0    # Delay in seconds for the ordinary message queue
-DEBUG_MSG_DELAY: float  = 0.5    # Pause between each line sent to the debug channel
+DEBUG_MSG_DELAY: float  = 0.0    # Wait between debug-channel lines; the larger of this and MSG_DELAY is used, so it can only slow the debug channel down (0 = the same as MSG_DELAY)
 
 # Port range for DCC sends (must be open on the firewall and router)
 # ---------------------------------------------------------------------

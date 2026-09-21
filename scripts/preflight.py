@@ -72,7 +72,20 @@ def hostile_env():
         del env[key]
     # Keep only the interpreter's own directory on PATH, so anything the code
     # locates via shutil.which has to be something CI would also have.
-    env["PATH"] = os.path.dirname(sys.executable)
+    #
+    # Plus System32 on Windows (#642). cmd.exe is the operating system, not
+    # host tooling - a bare Windows runner has it, and the .bat launcher tests
+    # are gated on finding it - so hiding it made every one of them skip in
+    # this pass and "PASS" say nothing about the launchers. Git Bash, rar and
+    # the rest live under Program Files and stay hidden. (A WSL bash.exe in
+    # System32 would be found by the POSIX classes here; the skip report
+    # below is where that shows.)
+    path = [os.path.dirname(sys.executable)]
+    if os.name == "nt":
+        system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+        if os.path.isdir(system32):
+            path.append(system32)
+    env["PATH"] = os.pathsep.join(path)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
     return env
@@ -90,11 +103,19 @@ WRITABLE_STATE = ("settings.conf", "data")
 
 
 def state_snapshot():
-    """Every real state file, with its modification time.
+    """Every real state file AND directory, with its modification time.
 
-    Compared before and after the suite. A test that redirects its writes
+    Compared before and after every pass. A test that redirects its writes
     correctly leaves this identical; one that does not shows up as an added
     or touched path, named.
+
+    Directories too (#643): this used to walk files only, so an empty
+    directory a test created under data/ - data/fetched, made by
+    oserve.startup()'s makedirs for a test that never redirected
+    FETCHED_FILES_DIR - was invisible, and the guard could not name the
+    test that had just written into the operator's tree. A directory's own
+    mtime is left out on purpose: it changes whenever an entry is added or
+    removed, which the entries themselves already report.
     """
     seen = {}
     for target in WRITABLE_STATE:
@@ -102,7 +123,10 @@ def state_snapshot():
         if os.path.isfile(path):
             seen[target] = os.path.getmtime(path)
         elif os.path.isdir(path):
-            for root, _dirs, names in os.walk(path):
+            seen[target + os.sep] = None
+            for root, dirs, names in os.walk(path):
+                for name in dirs:
+                    seen[os.path.relpath(os.path.join(root, name), REPO_ROOT) + os.sep] = None
                 for name in names:
                     full = os.path.join(root, name)
                     try:
@@ -119,7 +143,7 @@ def report_state_writes(before, after):
     if not added and not touched:
         return True
     print()
-    print("  THE SUITE WROTE REAL STATE FILES:")
+    print("  THE SUITE WROTE REAL STATE FILES (a trailing separator marks a directory):")
     for path in added:
         print(f"    created  {path}")
     for path in touched:
@@ -127,6 +151,36 @@ def report_state_writes(before, after):
     print("  A test wrote outside its temp directory. Redirect it in "
           "tests/support.py setUp() - see LISTS_FILE there for the pattern.")
     return False
+
+
+# How many skips the normal pass may carry before preflight refuses to call
+# it a pass. Skips are legitimate - a Windows box cannot exercise permission
+# bits, a POSIX box has no cmd.exe - and the ceiling is set well above what
+# any one platform skips for those reasons (about a dozen here, a few dozen
+# on a shell with no bash), so that only a whole family of tests going dark
+# trips it. The REASONS are always printed, whatever the count: that is the
+# part that turns "skipped=35" into "run this from Git Bash".
+MAX_SKIPPED = 60
+
+SKIP_REASON = re.compile(r"\.\.\. skipped ['\"](.*)['\"]\s*$")
+
+
+def skip_report(output):
+    """(skipped, {reason: count}) from a verbose unittest run.
+
+    The count comes from the summary line ("OK (skipped=14)"), the reasons
+    from the per-test lines. The two can disagree - a class whose
+    setUpClass raises SkipTest is one line for the whole class - and the
+    summary is the authority; the reasons are the explanation.
+    """
+    match = re.search(r"skipped=(\d+)", output)
+    skipped = int(match.group(1)) if match else 0
+    reasons = {}
+    for line in output.splitlines():
+        found = SKIP_REASON.search(line)
+        if found:
+            reasons[found.group(1)] = reasons.get(found.group(1), 0) + 1
+    return skipped, reasons
 
 
 def main():
@@ -151,15 +205,25 @@ def main():
                            "function_coverage.py")]),
     ]
 
+    # Taken once, compared after EVERY pass that runs the suite (#643). The
+    # comparison used to happen here, right after these checks - so the
+    # count pass and the hostile pass below could write settings.conf or
+    # data/ and preflight said PASS. A path that derives differently with
+    # ProgramFiles stripped is exactly the kind of write only the hostile
+    # pass would make, and it was the one pass never checked.
     state_before = state_snapshot()
     results = [run(label, argv) for label, argv in checks]
     results.append(report_state_writes(state_before, state_snapshot()))
 
     # A test file that silently becomes empty - a bad edit, a broken import - lets
     # the suite report success while testing less. Pin a floor so shrinkage is loud.
+    # Verbose, so the same run also says which tests were skipped and why (#642):
+    # a skipped test is one that ran nothing, and until this nothing parsed
+    # "skipped=N" - a pass that skipped a hundred tests printed PASS.
     MIN_TESTS = 165
-    counted = capture([py, "-m", "unittest", "discover", "-s", "tests", "-t", "."])
-    match = re.search(r"Ran (\d+) tests", (counted.stderr or "") + (counted.stdout or ""))
+    counted = capture([py, "-m", "unittest", "discover", "-v", "-s", "tests", "-t", "."])
+    output = (counted.stderr or "") + (counted.stdout or "")
+    match = re.search(r"Ran (\d+) tests", output)
     total = int(match.group(1)) if match else 0
     print("")
     print(f"=== test count: {total} (floor {MIN_TESTS}) ===")
@@ -169,6 +233,26 @@ def main():
         results.append(False)
     else:
         print("--- test count: PASS")
+        results.append(True)
+
+    results.append(report_state_writes(state_before, state_snapshot()))
+
+    skipped, reasons = skip_report(output)
+    print("")
+    print(f"=== skipped: {skipped} of {total} (ceiling {MAX_SKIPPED}) ===")
+    for reason, count in sorted(reasons.items(), key=lambda item: (-item[1], item[0])):
+        print(f"    {count:3d}  {reason}")
+    # The launcher classes' own wording - not "needs a POSIX shell", which
+    # one Windows-hosted test says about itself with bash right there.
+    if any(reason.startswith("no POSIX shell on PATH") for reason in reasons):
+        print("    (no bash/sh on PATH: the POSIX launcher tests did not run. From")
+        print("     Windows, run preflight from Git Bash to include them.)")
+    if skipped > MAX_SKIPPED:
+        print(f"--- skipped FAILED: {skipped} tests ran nothing. A whole family of tests")
+        print("    is dark on this machine, and PASS would not cover it.")
+        results.append(False)
+    else:
+        print("--- skipped: PASS")
         results.append(True)
 
     # The pass CI effectively performs and a developer machine never does.
@@ -210,6 +294,7 @@ def main():
             [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
             env=env,
         ))
+        results.append(report_state_writes(state_before, state_snapshot()))
 
     print()
     if all(results):

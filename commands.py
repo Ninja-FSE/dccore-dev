@@ -387,7 +387,9 @@ def handle_pong_response(category="INFO"):
 # NOT preserved, deliberately - these are cleared ON PURPOSE and that behaviour is kept:
 #   send_queue          - blanked below so stale text cannot collide after the reload
 #   rar_inprogress      - the documented "lock-clearing rehash" escape hatch for a
-#   user_processing_lock  packer that wedged; !rehash is the only way to clear them
+#   user_processing_lock  packer that wedged; !rehash is the only way to clear them.
+#                         Kept instead while the packer's thread is alive (#651) -
+#                         see clear_or_keep_pack_interlocks().
 PRESERVE_RUNTIME = (
     'feed_counts',        # failures and searches since the process started (#754); the
                           # panel's Since box would go back to zero on every Save
@@ -443,6 +445,41 @@ PRESERVE_RUNTIME = (
     'private_message_decline_sends',  # and the burst window, so a rehash is not
                                       # a way to get the bot talking again
 )
+
+
+def clear_or_keep_pack_interlocks(cfg, pack_running, packing_for, log=print):
+    """The rehash's "lock-clearing" step, made conditional (#651, audit M49).
+
+    Cleared: config.rar_inprogress and user_processing_lock, the folder
+    packer's two process-wide interlocks. That has always been the
+    documented escape hatch for a packer that died without releasing them -
+    and it was unconditional, so a rehash whose quiesce wait timed out
+    under a RUNNING pack (a big album takes minutes; the wait gives up after
+    REHASH_TRANSFER_WAIT) cleared them anyway and woke the queue. The user's
+    still-queued row then passed both interlocks on the next trigger and a
+    second rar started on the same archive path, unlinking the file the
+    first was writing.
+
+    So: `pack_running` (the packer THREAD is alive - dcc.a_pack_is_running())
+    keeps them. The reload has already reset rar_inprogress to False, so it
+    is put back, and the lock keeps the users it held. The packer's own
+    finally releases both when it finishes, as it always did. Not running
+    means the flags, if set, are stale - the wedged case - and the hatch
+    works as before. Returns True if the interlocks were cleared.
+    """
+    if pack_running:
+        cfg.rar_inprogress = True
+        if not hasattr(cfg, 'user_processing_lock') or cfg.user_processing_lock is None:
+            cfg.user_processing_lock = set()
+        cfg.user_processing_lock.update(packing_for)
+        who = ", ".join(sorted(packing_for)) or "someone"
+        log(f"[REHASH] A folder pack is still running for {who}; the pack interlocks "
+            f"are kept and release when it finishes. Nothing was interrupted.")
+        return False
+    cfg.rar_inprogress = False
+    if hasattr(cfg, 'user_processing_lock'):
+        cfg.user_processing_lock = set()
+    return True
 
 
 def rehash_nick_change_line(old_baseline_nick, new_nickname):
@@ -1059,6 +1096,13 @@ def _handle_rehash_request(user, target_chan):
         # occasionally interrupts a transfer, and the log says which happened.
         import dcc as _dcc_quiesce
         _dcc_quiesce.wait_for_transfers_to_finish()
+        # Whether a folder pack is STILL running when the wait gives up
+        # (#651): the wait counts one as busy, but after REHASH_TRANSFER_WAIT
+        # it carries on regardless, and the reload below resets
+        # config.rar_inprogress to False. Read before the reload, acted on
+        # after it - see clear_or_keep_pack_interlocks().
+        _pack_still_running = _dcc_quiesce.a_pack_is_running()
+        _packing_for = set(getattr(config, 'user_processing_lock', set()) or set())
 
         # 2. REHASH: reload every core module live, in memory. The ORDER matters
         # and is documented on reload_modules_in_order() itself.
@@ -1125,6 +1169,15 @@ def _handle_rehash_request(user, target_chan):
             _cfg.ORIGINAL_NICK = _cfg.NICKNAME
             print(f"[REHASH RAM] config.py changed the nickname to {_cfg.NICKNAME!r}; "
                   f"re-baselined, still answering to {baseline_nick!r}.")
+            # The new name is the TARGET, not yet the bot's name on the wire
+            # (#635): config.NICKNAME stays what the server calls us until
+            # its NICK event says otherwise - a rename refused with 438
+            # ("too fast") or 433 used to leave config saying a name the
+            # server never gave. ORIGINAL_NICK carries the target, so a
+            # reconnect asks for it and the reclaim path chases it.
+            _wanted_nick = _cfg.NICKNAME
+            if live_nick:
+                _cfg.NICKNAME = live_nick
 
             # Also change it LIVE, right now, over the connection that is
             # already open - the same live-sync treatment a CHANNEL edit
@@ -1136,14 +1189,14 @@ def _handle_rehash_request(user, target_chan):
             # watching the change happen in the dashboard has every reason to
             # expect the bot to answer to the new name immediately, the way
             # a channel add/remove already does.
-            _nick_line = rehash_nick_change_line(baseline_nick, _cfg.NICKNAME)
+            _nick_line = rehash_nick_change_line(baseline_nick, _wanted_nick)
             if _nick_line:
                 _oserve_for_nick = sys.modules.get('oserve')
                 _live_sock_for_nick = getattr(_oserve_for_nick, 'irc_connection', None) if _oserve_for_nick else None
                 if _live_sock_for_nick:
                     try:
                         _live_sock_for_nick.sendall(_nick_line.encode("utf-8", errors="ignore"))
-                        print(f"[REHASH NICK] Sent a live NICK change to {_cfg.NICKNAME!r}.")
+                        print(f"[REHASH NICK] Sent a live NICK change to {_wanted_nick!r}.")
                     except Exception as _nick_err:
                         print(f"[REHASH NICK ERROR] Could not send the live nick change: {_nick_err}")
                 else:
@@ -1211,7 +1264,22 @@ def _handle_rehash_request(user, target_chan):
         if hasattr(announce, 'last_announce_time'):
             import time
             announce.last_announce_time = time.time()
-            
+
+        # The automatic list refresh (#625). oserve.startup() starts its
+        # worker only when AUTO_REFETCH_LISTS is on at boot, and a dashboard
+        # save that ticks it on lands here - so this is where it has to
+        # start, or the setting is "rehash started" and nothing else until
+        # the next restart. Idempotent: runtime.py remembers a worker already
+        # running, and a rehash that changed nothing starts nothing.
+        try:
+            import list_fetch as _list_fetch
+            if _list_fetch.ensure_auto_refetch_worker():
+                print("[REHASH] AUTO_REFETCH_LISTS is on: the automatic list "
+                      "refresh has started.")
+        except Exception as refetch_err:
+            print(f"[REHASH] Could not start the automatic list refresh: "
+                  f"{refetch_err}")
+
         # ---------------------------------------------------------------------
         # 4. FULLY AUTOMATIC CHANNEL SYNC (JOIN NEW / PART REMOVED)
         # ---------------------------------------------------------------------
@@ -1248,10 +1316,11 @@ def _handle_rehash_request(user, target_chan):
         # 5. Confirm, through the VIP express lane
         announce.send_debug(f"Rehash completed! RAM-Memory preserved seamlessly without disk-paging.", category="INFO")
         
-        # Clear any stale locks and ghost blocks left over before the rehash
-        config.rar_inprogress = False
-        if hasattr(config, 'user_processing_lock'):
-            config.user_processing_lock = set()
+        # Clear any stale locks and ghost blocks left over before the rehash -
+        # unless the packer that holds them is still running (#651).
+        import dcc as _dcc_pack
+        clear_or_keep_pack_interlocks(
+            config, _pack_still_running and _dcc_pack.a_pack_is_running(), _packing_for)
 
         # Take the real, live network socket straight from memory
         oserve_mod = sys.modules.get('oserve')

@@ -103,7 +103,10 @@ class TheConstraintsTheHeaderPromises(unittest.TestCase):
         self.assertIn("$chr(160)", script_text())
 
     def test_the_wire_is_ascii_the_script_sends(self):
-        for must in ("hello dccore.mrc", "pair dccore.mrc", "unpair dccore.mrc"):
+        """hello names the client TYPE; pair and unpair name this copy's own
+        pairing name, $dccore.client (#649), which is dccore.mrc plus a tail."""
+        for must in ("hello dccore.mrc", "pair $dccore.client", "unpair $dccore.client",
+                     "alias dccore.client { return dccore.mrc- $+ "):
             self.assertIn(must, script_text())
 
 
@@ -223,8 +226,11 @@ class TheFieldPositionsMatchTheBot(unittest.TestCase):
     def test_hello(self):
         line = adminchat.hello_line()
         body = self.handler("HELLO")
-        self.assertEqual(self.token_of(line, 2), str(adminchat.PROTOCOL_MAJOR))
-        self.assertIn("$2 != 1", body, "the major is checked")
+        self.assertEqual(self.token_of(line, 2),
+                         "%s.%s" % (adminchat.PROTOCOL_MAJOR, adminchat.PROTOCOL_MINOR))
+        self.assertIn("$gettok($2,1,46)", body, "the major is read out of major.minor")
+        self.assertIn("%major != 1", body, "the major is checked")
+        self.assertIn("%minor != $dccore.protominor", body, "and the minor (#639)")
         self.assertIn("$3", body)  # the bot's nick
         self.assertIn("$4-", body)  # the version
 

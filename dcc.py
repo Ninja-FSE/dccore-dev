@@ -579,8 +579,13 @@ def release_queue_entry(user, next_file, delivered, reason=""):
     inherited by a later request for the same filename.
 
     Two kinds of row are deliberately NOT retryable, because retrying them can only fail:
-      * a consumed temporary archive - the cleanup step deletes the .rar it points at, so
-        every retry would abort immediately on file_size == 0 and emit a misleading error;
+      * a temporary archive that is GONE from disk - every retry would abort immediately
+        on file_size == 0 and emit a misleading error. While the archive is still there
+        a packed row is as retryable as a plain file (#657, audit M55): the cleanup used
+        to delete the .rar first and this function then found it "consumed" - a circular
+        reason, and a 3 GB album that took ten minutes to pack got exactly one 30-second
+        accept window before the user had to !rar it again. The finally now settles the
+        row BEFORE the cleanup and keeps the archive for a row it kept;
       * a legacy non-dict row, which has nowhere to store a counter.
     Both are settled on their first failure.
     """
@@ -640,8 +645,12 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         return 0
 
     is_row = isinstance(next_file, dict)
-    consumed_temp = bool(is_row and next_file.get("is_temporary_zip")
-                         and not next_file.get("is_unpacked_rar_folder"))
+    packed = bool(is_row and next_file.get("is_temporary_zip")
+                  and not next_file.get("is_unpacked_rar_folder"))
+    # Consumed means the archive is not there to send again (#657) - not
+    # merely that this was an archive.
+    consumed_temp = packed and not os.path.exists(
+        platform_compat.long_path(str(next_file.get("path") or "")))
     # A row that is not in any queue is the direct-send fast path's synthetic
     # one (see above): nothing will ever pick it up again, so "kept for retry"
     # was a claim about a retry that could not happen - and, being "kept", it
@@ -666,7 +675,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         elif not retryable:
             removed = _remove_by_identity()
             if consumed_temp:
-                why = "temporary archive already consumed"
+                why = "temporary archive is gone from disk"
             elif is_row and not in_a_queue:
                 why = "sent directly, not queued - nothing to retry"
             else:
@@ -849,6 +858,69 @@ def redispatch_waiting_pack(irc_sock, just_finished=None):
                      daemon=True).start()
     return owner
 
+FREEZE_TIMEOUT = 300.0   # seconds an absent user's queue is kept, counted only while the bot is online
+
+
+def pause_freeze_clock(now=None):
+    """The bot's link is gone: stop the freeze box's clock (#652, audit M50).
+
+    Called from the disconnect epilogue. Idempotent - a second call while
+    already paused keeps the earlier moment, which is the one the outage
+    started at.
+    """
+    if runtime.freeze_clock_paused_at is None:
+        runtime.freeze_clock_paused_at = time.time() if now is None else now
+
+
+def resume_freeze_clock(now=None, log=print):
+    """The bot is channel-synced again: move every frozen timestamp forward by
+    the outage, so the seconds it was away count for nobody. Returns the
+    seconds skipped, 0.0 if the clock was not paused.
+
+    ONE CLOCK. The per-user timer thread already refused to count the bot's
+    own downtime ("the bot's own downtime must NEVER count against a user's
+    queue"), while the sweep in check_queue_and_send() compared the frozen
+    timestamp with wall time - so as soon as bot_joined_channel came back, the
+    sweep deleted queues the timer said had sixty seconds on them. Rebasing
+    the timestamp makes the sweep, the timer and the console's "seconds left"
+    read the same figure: time the bot has been ONLINE since the freeze.
+    """
+    paused_at = runtime.freeze_clock_paused_at
+    if paused_at is None:
+        return 0.0
+    runtime.freeze_clock_paused_at = None
+    skipped = max(0.0, (time.time() if now is None else now) - paused_at)
+    frozen = getattr(config, "frozen_queues", None)
+    if skipped and isinstance(frozen, dict) and frozen:
+        with queue_lock:
+            for key in list(frozen):
+                try:
+                    frozen[key] = float(frozen[key]) + skipped
+                except (TypeError, ValueError):
+                    pass
+        log(f"[DCC FREEZE] The bot was away {int(skipped)}s; that time counts "
+            f"against none of the {len(frozen)} frozen queue(s).")
+    return skipped
+
+
+def frozen_users_channel_is_synced(user_key):
+    """Can the bot see the channel this user's queue belongs to?
+
+    The freeze means "not in any channel we share", and that is only an
+    observation once the channel's NAMES has arrived on this connection -
+    channel_users is cleared on every disconnect and rebuilt per channel.
+    Until then the bot is not in a position to say the user is gone, so
+    the deletion waits (#652). A queue with no channel on its rows is
+    judged as before.
+    """
+    rows = getattr(config, "dcc_queue", {}).get(user_key) or []
+    chan = announce_channel_for(rows[0]) if rows else None
+    if not chan:
+        return True
+    with runtime.channel_users_lock():
+        return str(chan).lower() in getattr(config, "channel_users", {})
+
+
 def freeze_absent_user(irc_sock, user, target_chan):
     """Start the five-minute countdown for a queued user who is not in any
     of our channels. Idempotent: a user already counting down is left alone,
@@ -893,7 +965,14 @@ def freeze_absent_user(irc_sock, user, target_chan):
         t_key = target_user.lower()
         elapsed = 0
 
-        while elapsed < 300:
+        # ONE CLOCK (#652): `elapsed` is read from the frozen timestamp, the
+        # same figure the sweep in check_queue_and_send() and the console's
+        # seconds-left use - not counted here on its own. The bot's outage
+        # is taken out of that timestamp by resume_freeze_clock() when the
+        # link is back, so the pause below is what it always was, and the
+        # sweep can no longer delete what this countdown says has a minute
+        # left.
+        while elapsed < FREEZE_TIMEOUT:
             time.sleep(10)
 
             # A) Something else already thawed the queue (JOIN / NAMES / !rehash)
@@ -915,19 +994,43 @@ def freeze_absent_user(irc_sock, user, target_chan):
                 threading.Thread(target=check_queue_and_send, args=(sock, target_user), daemon=True).start()
                 return
 
-            elapsed += 10
+            # D) The bot is up but has no member list for this user's channel
+            # yet (its NAMES has not arrived, or the rejoin was refused): it
+            # cannot say the user is gone. Wait, without counting.
+            if not frozen_users_channel_is_synced(t_key):
+                continue
 
-        if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
-            with queue_lock:
-                if t_key in config.dcc_queue:
-                    for f_obj in config.dcc_queue[t_key]:
-                        if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
-                            try: os.remove(f_obj['path'])
-                            except: pass
-                    del config.dcc_queue[t_key]
-                    db.save_dcc_queue()
-                del config.frozen_queues[t_key]
+            try:
+                elapsed = time.time() - float(config.frozen_queues.get(t_key) or time.time())
+            except (TypeError, ValueError):
+                elapsed += 10
+
+        # THE FREEZE IS TESTED AND TAKEN UNDER THE LOCK, IN ONE MOVE (#659,
+        # audit M57). This used to test `t_key in frozen_queues` outside
+        # queue_lock and then, inside it, delete the queue and `del` the key
+        # without looking again. The JOIN thaw and the sweep thaw both remove
+        # that key; one landing in the gap meant the timer erased the queue
+        # of a user who was verifiably back and then died on the KeyError -
+        # the freezer destroying the queue it exists to preserve, and no
+        # "Timer expired" line to say so. pop() under the lock answers
+        # "was it still frozen" and takes it in the same step; only a real
+        # answer erases anything.
+        still_frozen = False
+        with queue_lock:
+            frozen = getattr(config, 'frozen_queues', None)
+            if isinstance(frozen, dict):
+                still_frozen = frozen.pop(t_key, None) is not None
+            if still_frozen and t_key in config.dcc_queue:
+                for f_obj in config.dcc_queue[t_key]:
+                    if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
+                        try: os.remove(f_obj['path'])
+                        except: pass
+                del config.dcc_queue[t_key]
+                db.save_dcc_queue()
+        if still_frozen:
             announce_mod.send_debug(f"Timer expired for {target_user} in {original_chan}. Personal queue has been erased.", category="PART")
+        else:
+            print(f"[DCC FREEZE-ABORT] {target_user} was thawed as the countdown ended. The queue is safe.")
 
     threading.Thread(target=user_queue_timer, args=(irc_sock, user, target_chan), daemon=True).start()
 
@@ -1008,7 +1111,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     del config.frozen_queues[f_user]
                     print(f"[DCC FREEZE-THAW] {f_user} is back in the channel list. Their queue was saved.")
                     continue
-                if (current_time - freeze_timestamp) > 300.0:
+                # The same clock as the timer thread (#652): the timestamp
+                # has the bot's own downtime taken out of it, and a channel
+                # the bot has no member list for yet is not evidence of
+                # absence - see frozen_users_channel_is_synced().
+                if (current_time - freeze_timestamp) > FREEZE_TIMEOUT and frozen_users_channel_is_synced(f_user):
                     if f_user in config.dcc_queue:
                         for f_obj in config.dcc_queue[f_user]:
                             if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
@@ -1108,6 +1215,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     # thing the interlocks exist to guarantee - so the finally only releases
                     # what this call still owns.
                     handed_off = False
+                    runtime.packer_thread = threading.current_thread()
                     try:
                         handed_off = _inline_rar_packer_body(sock)
                     except Exception as packer_err:
@@ -1119,6 +1227,11 @@ def check_queue_and_send(irc_sock, completed_user):
                         release_queue_entry(completed_user, next_file, delivered=False,
                                             reason="pack failed: " + str(packer_err))
                     finally:
+                        # The pack itself is over either way (#651): what is
+                        # handed off is the SEND, which active_transfers
+                        # already counts.
+                        if runtime.packer_thread is threading.current_thread():
+                            runtime.packer_thread = None
                         if not handed_off:
                             config.rar_inprogress = False
                             # #215: this release is the only moment another user's held pack can
@@ -1855,6 +1968,23 @@ def transfers_are_paused():
     return bool(getattr(config, "transfers_paused", False))
 
 
+def a_pack_is_running():
+    """Is the folder packer's thread alive right now?
+
+    The rehash needs this and config.rar_inprogress cannot answer it (#651,
+    audit M49): the flag is True both while `rar` runs and after a packer
+    died without releasing it, and the reload resets it to False either
+    way. A rehash whose quiesce wait timed out under a running pack then
+    cleared both interlocks and woke the queue, and the user's still-queued
+    row could start a second rar on the same archive path - the double-pack
+    the packer's own docstring records fixing. The thread is the difference
+    between "packing" and "wedged": alive, keep the interlocks; gone, they
+    are stale and the rehash is the documented way to clear them.
+    """
+    thread = runtime.packer_thread
+    return thread is not None and thread.is_alive()
+
+
 def wait_for_transfers_to_finish(timeout=None, poll=0.5, sleep=None,
                                  log=print):
     """Stop starting new sends, then wait for the ones in flight to end.
@@ -1958,6 +2088,24 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         print(f"[DCC] No list is bound to {target_chan!r}; ignoring the "
               f"request from {user}.")
         return
+    # A private message has no channel to route on, but a labelled `!rar`
+    # row does (#653): its first component names a folder, and folders
+    # belong to lists. Routed by that label; an ambiguous one is refused
+    # with a notice saying where to ask instead.
+    if not str(target_chan or "").startswith(("#", "&")):
+        spec = str(requested_file or "").strip()
+        if spec[:5].lower() == "!rar ":
+            parts = list_mod.list_heading_parts(spec[5:].split("::INFO::")[0].strip())
+            routed = library.list_name_for_label(parts[0] if parts else "", wanted_list)
+            if routed is None:
+                print(f"[DCC] {user}'s private request names a folder label that "
+                      f"more than one list serves; asked them to use the channel.")
+                announce.send_dcc_error(user, "ambiguous_list")
+                return
+            if routed != wanted_list:
+                print(f"[DCC] {user}'s private request is a {routed!r} row; "
+                      f"answering from that list rather than {wanted_list!r}.")
+                wanted_list = routed
     # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------
@@ -2547,8 +2695,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # Outside the lock the hang is confined to this request's thread.
         if sends_now:
             if oserve: oserve.active_downloads = len(config.active_transfers)
-            announce.send_dcc_sending_notice(user, file_name, path=full_path, channel=target_chan)
-            threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, target_chan, next_file_fake), daemon=True).start()
+            # Where "Sent:" goes, resolved the way the queued paths resolve
+            # it (#658, audit M56). target_chan is the raw wire target, and
+            # for a private request that is the bot's own nick: the
+            # completion line went out as PRIVMSG <ournick>, cost a VIP slot,
+            # and the read loop dropped it as our own message. #530 fixed
+            # this for rows picked up from the queue via
+            # announce_channel_for(); this path never went through it.
+            announce_chan = announce_channel_for(next_file_fake)
+            announce.send_dcc_sending_notice(user, file_name, path=full_path, channel=announce_chan)
+            threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, announce_chan, next_file_fake), daemon=True).start()
             return
 
         # Save and update dcc_queue.txt on disk straight away
@@ -2594,6 +2750,19 @@ class _AckTracker:
 
     def __init__(self, start=0):
         self.acked = int(start)
+        # What has actually been handed to the kernel so far - the send loop
+        # keeps this current. An acknowledgement cannot honestly exceed it
+        # (#656, audit M54): the tracker used to accept any word above what
+        # it held, so one 0xFFFFFFFF from a peer that read nothing satisfied
+        # "acked >= file_size" for any file under 4 GB - "Sent:" announced,
+        # totals and the download counter incremented, the queue row
+        # consumed, at no bandwidth cost - and a client acking in the wrong
+        # byte order (4096 -> 1 MB) was declared complete after one packet
+        # and cut off. A word past `sent` is not a position the receiver can
+        # hold; it is ignored and counted, and the transfer then lives or
+        # dies on the real acks like any other.
+        self.sent = int(start)
+        self.overshoots = 0
         self.received_any = False
         self.eof = False
         self.last_advance_at = time.time()
@@ -2625,6 +2794,9 @@ class _AckTracker:
                 candidate += 1 << 32
             else:
                 return
+        if candidate > self.sent:
+            self.overshoots += 1
+            return
         if candidate > self.acked:
             self.acked = candidate
             self.last_advance_at = time.time()
@@ -3087,6 +3259,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 try:
                     conn.sendall(chunk)
                     bytes_sent += len(chunk)
+                    acks.sent = bytes_sent
                 except socket.error as e:
                     raise e
                 # Read whatever the receiver has acknowledged so far, without
@@ -3367,9 +3540,28 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except: pass
         try: dcc_sock.close()
         except: pass
-        # 4. The RAR cache and the send lock
+        # 4. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
+        #    unconditional pop(0), which removed whatever was first at that instant rather
+        #    than the entry actually sent. See release_queue_entry.
+        #
+        #    BEFORE the disk cleanup, since #657: the cleanup used to run first and
+        #    delete a packed archive whose send had just failed, and the settle then
+        #    found the archive gone and dropped the row - one 30-second accept window
+        #    for a pack that took up to RAR_TIMEOUT to build. Settled first, a failed
+        #    pack keeps its row for MAX_SEND_FAILS like a plain file, and the cleanup
+        #    below keeps the archive for a row that was kept.
+        row_retained = False
         try:
-            file_still_needed = False
+            row_retained = release_queue_entry(
+                user, next_file, delivered=transfer_completed,
+                reason="transfer complete" if transfer_completed else "transfer did not complete")
+        except Exception as pop_err:
+            print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
+
+        # 5. The RAR cache and the send lock
+        try:
+            # A row kept for retry needs its archive (#657).
+            file_still_needed = bool(row_retained)
             safe_path = str(file_path)
 
             if _is_temp_zip_cache_file(safe_path):
@@ -3399,17 +3591,6 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except Exception as file_rm_err:
             print(f"[DCC CLEANUP ERROR] Could not run the disk cleanup: {file_rm_err}")
         
-        # 5. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
-        #    unconditional pop(0), which removed whatever was first at that instant rather
-        #    than the entry actually sent. See release_queue_entry.
-        row_retained = False
-        try:
-            row_retained = release_queue_entry(
-                user, next_file, delivered=transfer_completed,
-                reason="transfer complete" if transfer_completed else "transfer did not complete")
-        except Exception as pop_err:
-            print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
-
         # 6. Release the memory lock and rule out duplicate threads.
         # #162 finding #6: a plain audio file never owned rar_inprogress - this ran
         # unconditionally on EVERY transfer's completion, so bob's ordinary MP3

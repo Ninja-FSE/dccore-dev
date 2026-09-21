@@ -4,6 +4,596 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 The reconnect backs off, and the server's ERROR line is shown (#663)
+
+Audit M61. Every reconnect path slept a flat 10 s. ircu's IPcheck throttles an address that reconnects too often
+inside its clone period (4 in 40 s by default), counts refused connects too, and resets only after a gap longer
+than the period - so once a run of drops tripped it, the 10 s cadence kept it tripped: every attempt was answered
+with `ERROR :Your host is trying to (re)connect too fast -- throttled` and closed, and the bot never got back on
+by itself. The ERROR line was read and dropped, so the log said "Server closed connection" and nothing about why.
+
+`reconnect_delay(failures)` doubles from 10 s to a five-minute ceiling for attempts in a row that never reached
+a 001 (a failed connect, a failed handshake send, a link closed before registering); a connection that
+registers resets the count, so an ordinary drop still comes back in ten seconds, and the wait is printed as it
+grows. An `ERROR` line from the server is printed as `[SERVER] ...`, and one that says throttled/too fast is
+named for what it is. `tests/test_the_reconnect_backs_off.py` drives the real `irc_loop()` through a series of
+scripted connections (the audit's fake-ircu probe: 10, 20, 40, 80; a registration resets; an ordinary drop is
+10) with the reconnect sleep recorded.
+
+### 🍎 The macOS Gatekeeper note covers Sequoia (#662)
+
+Audit M60. The launcher's header, the autostart installer and INSTALL.md said: the first time, right-click the
+.command, choose Open, confirm once. Apple removed that Control-click override in macOS 15 (Sequoia): after the
+refusal the file has to be allowed from System Settings > Privacy & Security ("Open Anyway"), or de-quarantined
+with `xattr -d com.apple.quarantine`. A first-timer on Sequoia following the note got the same refusal again with
+no Open button. The header also pointed at a README-FIRST.txt that has never existed.
+
+All three texts now give both roads - right-click > Open on macOS 14 and earlier, Privacy & Security > Open
+Anyway on 15 and later - and the xattr one-liner for both launchers at once; the phantom file is gone.
+`tests/test_the_gatekeeper_note_covers_sequoia.py` reads them. Docs and comments only.
+
+### 🌐 dccore.mrc dials on the bot's network, whatever connection fired it (#661)
+
+Audit M59. The script never recorded which network the bot lives on: `dcc chat <bot>` ran in whatever connection
+invoked it - the event's own for CONNECT/JOIN/401/CHATCLOSE, the active window's for /dccore connect - and the
+retry timer is one global name. On a client on two networks the CTCP went to the wrong one: a 401, a retry loop
+stuck there ("X is not online" every two minutes while the bot was up), and every reconnect of the other network
+saying "already open".
+
+`dccore.remember.net` keeps `$network` (or `$server`) from the moment the operator types /dccore connect or
+/dccore pair - that connection IS the bot's - or from the bot's own JOIN when nothing is recorded; `dccore.cid`
+finds that network's connection id across every connection (`$scon`), `dccore.connect` moves itself onto it with
+/scid (and says so when that network is not connected), and the CONNECT and JOIN triggers fire only there
+(`dccore.here`). /dccore unpair forgets it; /dccore version names it. All mIRC 6.0-era multi-server identifiers.
+ADMIN-CONSOLE.md gains the "more than one network" entry. `tests/test_the_script_dials_on_the_bots_network.py`
+reads the script. Not verified in mIRC.
+
+### 🔒 The freeze timer tests and takes the freeze under the lock, in one move (#659)
+
+Audit M57. `user_queue_timer`'s expiry read `t_key in config.frozen_queues` outside `queue_lock`, then under the
+lock deleted the user's queue and did an unconditional `del config.frozen_queues[t_key]` without looking again.
+The JOIN thaw (an unlocked pop) and the sweep thaw (under the lock) both remove that key; one landing in the gap -
+the user back at the 300 s mark - meant the timer erased the queue of someone who was verifiably present and then
+died on the KeyError, with no "Timer expired" line. Rare, silent.
+
+The expiry now does one `frozen_queues.pop(t_key, None)` under the lock and erases the queue only when that
+returned a value; a thaw in the gap leaves the queue alone and says so.
+`tests/test_the_freeze_timer_takes_the_freeze_under_the_lock.py` makes the race deterministic - the test holds
+`queue_lock`, waits until the countdown is blocked on it, thaws the user, lets go - for the JOIN thaw and the
+sweep thaw, with the plain expiry as the control; both race cases fail against the old code exactly as the audit
+described.
+
+### 📢 "Sent:" for a private request on the direct path goes to a channel (#658)
+
+Audit M56. `handle_download_request()` handed the raw wire target to `start_dcc_send()` as the announce channel on
+the direct-send path (a slot free, no queue - the common first request). For a private request that target is the
+bot's own nick, so `send_transfer_complete()` built `PRIVMSG <ournick> :Sent ...`: queued into the VIP lane, a
+pacer slot spent, dropped by the read loop as our own message. The transfer completed and the feed's SENT event
+fired; only the public advert was lost. #530 fixed exactly this for rows picked up from the queue via
+`announce_channel_for()`; the direct path never went through it, and a PM `!list` takes the same path.
+
+The direct path now resolves `announce_channel_for(next_file_fake)` - the request's channel if it is one, the
+configured default otherwise - and hands that to both the SENDING notice and `start_dcc_send()`, as the queued
+paths do. `tests/test_a_private_requests_sent_line_goes_to_a_channel.py` drives a PM request through the real
+path with the send captured, and checks the line `send_transfer_complete()` builds from it at the wire.
+
+### 🔁 A packed archive whose send fails is retried, not deleted (#657)
+
+Audit M55. On any failed send of a packed .rar - the 30 s accept timeout with the user away from the keyboard, a
+receiver that hung up, a stall - `start_dcc_send()`'s finally deleted the archive (its step 4) before settling the
+row (step 5), and `release_queue_entry()` then classified the row as a "consumed temporary archive" and dropped
+it with "Removed from your queue". A plain file in the identical situation was kept and re-offered up to
+MAX_SEND_FAILS times; the justification for the difference was circular - the archive was only unusable because
+that same finally had just deleted it - and a 3 GB album that took ten minutes to pack got exactly one 30-second
+window before the user had to !rar it again, holding rar_inprogress for everyone while it packed a second time.
+
+The finally now settles the row first and the cleanup keeps the archive for a row that was kept; a packed row is
+retryable while its archive exists on disk (the same MAX_SEND_FAILS budget, the same 15 s × attempts back-off),
+and is dropped - with the archive - only when the budget runs out or the archive is gone. The dispatch paths
+already guard temp rows with an existence check. `tests/test_a_failed_pack_send_keeps_its_archive_and_row.py`
+sends a real archive over loopback: a hang-up keeps both, an exhausted budget removes both, a delivery still
+cleans up; the existing `test_queue_integrity` case now says what it guards (an archive that is gone).
+
+### 🧾 An acknowledgement past what was sent is not a completion (#656)
+
+Audit M54. `_AckTracker` accepted any 32-bit word above what it held, with no upper bound tied to what had
+actually been sent, and `_wait_for_final_ack()` only tested `acked >= file_size`. One word of 0xFFFFFFFF from a
+peer that read nothing therefore completed any file under 4 GB: "Sent:" announced, Files/bytes totals and the
+most-downloaded counter incremented, the queue row consumed, at no bandwidth cost - and repeated, the public stats
+inflated. A legitimate client acking in the wrong byte order (4096 → 1 MB) was declared complete after one packet
+and cut off.
+
+The send loop keeps the tracker told what has been handed to the kernel (`acks.sent`), and `_advance()` ignores
+and counts a word past it: not a position the receiver can hold. The transfer then lives or dies on the real acks
+- a peer that sends only bogus words stalls and fails, and an honest client whose stream includes one stray high
+word still completes on its real ones. `tests/test_an_ack_past_what_was_sent_is_not_a_completion.py` plays the
+audit's probe over loopback (a failure, no "Sent:") and the honest-client case; the isolated tracker tests now
+say what was sent, as the send loop does.
+
+### 🎟️ The shared outbound clock serves its waiters in arrival order (#655)
+
+Audit M53. `OutboundPacer.wait_for_slot()` was sleep-and-retry with no queue: every waiter slept until the same
+instant and whoever woke first took the slot. Four threads share the clock - queue_worker's VIP and standard
+lanes, the debug drain, the !ping and DCC ACCEPT direct waiters - so queue_worker's strict alternation bounded
+VIP to two of its OWN slots while the worker lost each of those to the drain by coin toss: with a drain backlog
+VIP got about a quarter of the slots and gaps of ten to fourteen slots (a minute at MSG_DELAY=5) between
+consecutive VIP lines, long enough to push a "Sending:" notice past the receiver's accept window.
+
+Tickets now, handed out in arrival order and served in that order, on a Condition: only the ticket being served
+sleeps against the clock, the rest wait to be woken, and a waiter that leaves without its slot (its thread torn
+down) marks its ticket abandoned so the line moves on. The combined rate is unchanged - every reservation still
+holds the one clock for its interval - and the queue_mgr comment now states the bound it can actually promise.
+`tests/test_the_outbound_clock_serves_in_arrival_order.py`: the audit's three-lane probe (no lane skipped while
+waiting), a held clock released over four queued waiters served in the order they arrived, an abandoned ticket
+stepped over, and the interval still enforced.
+
+### 📬 A private `!rar` request is routed by its folder label (#653)
+
+Audit M51. `list_for_request()` answers a target that is not a channel with the primary, on the premise that a PM
+carries nothing to route on. A `!Bot !rar <Label>/<Album>` row copied from a list bound to another channel and
+sent by /msg - a common habit with serving bots - was therefore resolved against the primary's folders: refused
+as not found when the label existed only in the other list (no reply to the requester, "Directory not found" in
+the debug channel), or, with the same label and path under the primary too, the primary's folder packed instead
+of the one the row advertised - the outcome routing exists to prevent.
+
+The label is something to route on. `library.list_name_for_label(label, default)`: the primary keeps the request
+if it has the label; otherwise the one other list that has it; two others whose labels name the same folder are
+one answer; two naming different folders are ambiguous and `None` says so. `handle_download_request()` applies it
+to a `!rar` request whose target is not a channel and, on ambiguity, sends a new `ambiguous_list` notice: "request
+it in the channel it was advertised in". A bare filename by PM is still the primary's - it carries no label.
+FUTURE.md's stage-3 sentence says so. `tests/test_a_private_rar_request_is_routed_by_its_label.py` drives the
+real request path over two lists on two trees.
+
+### ⏱️ The freeze box has one clock (#652)
+
+Audit M50. Two things measured an absent user's five minutes. The per-user timer thread counted ten seconds at a
+time and refused to count while the bot was offline; the sweep at the top of `check_queue_and_send()` compared the
+frozen timestamp with wall time and ran the moment `bot_joined_channel` came back - which activation sets as soon
+as ANY channel's NAMES has arrived. So a user who left #b a minute before the bot lost its link for eleven
+minutes had their queue and temp archives deleted by the wake-up sweep on the way back ("frozen for over five
+minutes and never came back") while the timer thread still said sixty seconds - and before #b's NAMES had even
+arrived.
+
+The disconnect epilogue now stops the clock (`dcc.pause_freeze_clock()`, the moment kept in
+`runtime.freeze_clock_paused_at` so a rehash cannot lose it) and activation restarts it
+(`dcc.resume_freeze_clock()`, before the wake-up sweep) by moving every frozen timestamp forward by the outage. The
+sweep, the timer thread - which now reads its elapsed time off that timestamp instead of counting on its own -
+and the console's seconds-left therefore all measure the same thing: time the bot has been online since the
+freeze. And neither deletes a queue whose channel the bot has no member list for yet
+(`frozen_users_channel_is_synced()`): until that channel's NAMES arrives, absence is not an observation.
+`tests/test_the_freeze_box_has_one_clock.py` replays the audit's scenario (kept as the control, it deletes; with
+the outage taken out, it keeps) and parks the timer thread on an Event to show it reads the clock.
+
+### 📦 A rehash keeps the packer's interlocks while a pack is still running (#651)
+
+Audit M49. `wait_for_transfers_to_finish()` counts a running folder pack as busy, but after REHASH_TRANSFER_WAIT
+(120 s) it returns False and carries on - and the rehash never looked at the value. The reload then reset
+`config.rar_inprogress` to False (defaults.py re-executes) and the rehash rebound `user_processing_lock` to an
+empty set, both while `rar` was still running (RAR_TIMEOUT is half an hour). The user's still-queued row passed
+both interlocks on the next trigger for that nick - a second !rar, a JOIN thaw, the freeze-abort timer - and a
+second packer started on the same archive path, unlinking the file the first was writing: the double-pack the
+packer's own docstring records fixing, reopened by a dashboard Save two minutes into a big box set.
+
+The flags cannot tell packing from wedged; the packer's thread can. `inline_rar_packer` records itself in
+`runtime.packer_thread` (runtime.py is never reloaded) and clears it in its finally; `dcc.a_pack_is_running()`
+reads it. The rehash reads that right after the wait and again after the reload, and
+`commands.clear_or_keep_pack_interlocks()` keeps both interlocks (putting `rar_inprogress` back after the reload's
+reset) and says so in the log while the thread is alive, and clears them - the documented escape hatch for a
+packer that died holding them - when it is not. The packer's own finally still releases them when it finishes.
+`tests/test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` drives a real pack to the point where rar runs.
+
+### ⏲️ DEBUG_MSG_DELAY says it is floored to MSG_DELAY, and ships as 0 = "the same" (#650)
+
+Audit M48. The debug drain asks the shared clock for `max(MSG_DELAY, DEBUG_MSG_DELAY)` - on purpose since #406 -
+so any DEBUG_MSG_DELAY below MSG_DELAY is inert, and the shipped 0.5 was one. The defaults.py comment, the
+Settings-page help in three languages and settings.conf.sample all described it as "the same wait, for lines
+going to your debug channel": an operator lowering it to speed the debug channel up saw nothing change and had no
+way to learn why.
+
+The pacer is unchanged. The default is now `0.0`, meaning "the same as MSG_DELAY" (no behaviour changes: the
+expression already gave MSG_DELAY for anything below it), and every text says the floor: never less than
+MSG_DELAY, every line the bot sends shares one clock, a smaller number has no effect, a larger one slows the debug
+channel further. `tests/test_debug_msg_delay_says_it_is_floored.py`. Sample regenerated.
+
+### 🔑 Each mIRC install pairs under its own name (#649)
+
+Audit M47. Every copy of dccore.mrc paired as the literal `dccore.mrc`, and the bot keeps one token per name,
+replacing it when the name pairs again - so pairing the script on a laptop silently revoked the desktop's token.
+Before #601 made the script stop redialling on a refusal, the desktop then looped through refusals until the
+shared home address was blocked for fifteen minutes, with nothing but a stdout line on the bot to say why.
+
+The script now pairs (and unpairs) as `$dccore.client` = `dccore.mrc-<8 hex>`, the tail being the mIRC folder
+hashed (`$md5($mircdir)`, both mIRC 6.0-era), so two installs are two names and two tokens; the same install
+pairing again still replaces its own token, which is how a lost one is rotated. `hello` still names the client
+type. `/dccore version` says which name this copy pairs as. ADMIN-CONSOLE.md's pairing passages say so. The bot
+side needed no change; `tests/test_each_mirc_install_pairs_under_its_own_name.py` proves two names hold two
+valid tokens and reads the script for the name it sends. Not verified in mIRC.
+
+### 🧪 The dashboard's JavaScript is parsed by a real engine where one exists (#648)
+
+Audit M46. Every web/ test was a hand-written scanner modelling comments, strings and bracket depth; the audit fed
+`web/app.js` an unbalanced ternary, a missing operand, `var var`, misplaced-but-balanced braces and a dangling
+`else`, and every test stayed green while `node --check` rejected each. The inline `<script>` at the top of
+`web/index.html` was scanned by nothing. Node is on every GitHub-hosted runner and was unused.
+
+`tests/test_the_dashboard_javascript_parses_in_a_real_engine.py` runs `node --check` on every `web/**/*.js` and on
+every inline `<script>` block in `web/*.html` (written out to a temp file), skipping where there is no node -
+the scanner is the everywhere half, and its docstring now says so - with a control that the same command refuses
+the five snippets, so a node that accepted everything could not pass it. Test-only.
+
+### 🔍 The launcher's search for an installed Python is executed (#647)
+
+Audit M45. `start-dccore.bat` searches `%LOCALAPPDATA%\Programs\Python\Python3*` and `%ProgramFiles%\Python3*`
+when `where` finds nothing - the commonest reason a first-timer's Python is invisible is the missed "Add to PATH"
+box - and no test had ever run that search: every test either had Python on PATH or pointed both folders at
+empty directories, and "searches again after installing" was a text match. The verifier also found that the
+tests' `ProgramFiles` override was silently undone: a 64-bit cmd.exe resets ProgramFiles from ProgramW6432 on
+start, so the launcher under test really searched `C:\Program Files\Python3*`, and every TheOfferRun test
+would have failed on a machine with an all-users install.
+
+`ThePythonTheInstallerPutSomewhere` (Windows-only, like every .bat test) plants a working python.exe - a venv
+redirector copied up beside its pyvenv.cfg, no 30 MB install - under a tree whose name has a space, with nothing
+on PATH: the per-user folder is found, the all-users folder is found, per-user wins when both exist, a leftover
+folder with no python.exe is passed over, and the control with nothing planted reaches the offer. Breaking the
+glob fails four of five. Both launcher fixtures now override ProgramFiles, ProgramW6432 and ProgramFiles(x86)
+together - and case-insensitively (`env_with()`): os.environ upper-cases its keys on Windows, so a plain
+`dict.update({"ProgramW6432": ...})` added a second key differing only in case, and which duplicate the child
+saw was luck - the override won here and the original won on one CI runner, where the all-users tests then
+searched the real Program Files. Test-only.
+
+### 🚪 The setup page's "do not open the browser" branch is executed (#646)
+
+Audit M44. The test for `WEBUI_OPEN_BROWSER = False` set the flag and then read `run_setup_until_configured()`'s
+source for the `if` line; the executed server test ran with the flag on, so the False branch had never run under
+a test - moving the opener call outside the guard (keeping the `if`) passed all 42 tests in the module.
+
+`test_set_it_up_in_the_browser.py` now starts the real server with the flag off, an opener that records, and a
+`wait` that gives up the moment the page has said "No browser was opened here" - and asserts the opener was never
+called, the link and the SSH-tunnel hint were still printed, and the server returned None. The audit's mutant
+fails it. The source pin stays as the everywhere half (the executed test needs loopback), renamed to say so.
+Test-only.
+
+### ⏳ The DCC ACCEPT pacing is driven, not read (#645)
+
+Audit M43. `tests/test_the_resume_handshake_takes_its_turn.py` read dcc.py for the string "wait_for_slot" before
+"irc_sock.sendall(reply.encode(" in `_send_resume_accept()`'s text - which a comment satisfies, and which stayed
+green with the call commented out or moved into `if False:`; only "moved after the send" was caught. The function
+needs only a `runtime.dcc_send_offers` entry and an object with `.sendall()`, and
+`test_complete_means_the_receiver_acked_it.py` was already calling it for real.
+
+A spy in place of `runtime.outbound_pacer` and a recording socket share one log, and the order of the two calls is
+read off it: the ACCEPT goes out, it takes a slot of MSG_DELAY (not a number of its own), the slot comes before
+the write, a stray RESUME for no offer of ours touches neither, and with `background=True` (what the read loop
+passes) the same order holds on the helper thread. All three of the audit's mutants fail. Test-only.
+
+### 🎯 The feed's channel wiring is driven, not read (#644)
+
+Audit M42. `tests/test_the_feed_says_which_channel.py` checked the SEARCH and both REQUEST channel wirings by
+regex on list.py and dcc.py, under a docstring saying the emitters were "not callable without a live socket and
+a list on disk" - while `execute_search()` was driven in three other test files and `handle_download_request()`
+in ten. A regex on the call is satisfied by a call whose `channel` has been shadowed with the wrong value two
+lines above it; the queue-pickup SENDING sites were checked the same way, by counting call sites.
+
+The file now drives the real functions against a one-track library and master list with dcc's threads recorded
+(`InlineThread`) and reads a real event sink: a search with a hit and one without, a file request and a folder
+request (and its QUEUED), and three of the four SENDING sites - the direct send, the per-user queue pickup and the
+global sweep. The fourth (a packed archive picked up from the queue) needs a real rar run and stays a text check
+that says so. The audit's own mutant - `channel = "#wrongroom"` before the SEARCH emit, `target_chan` before the
+REQUEST one - passed the old file and fails six of these. Test-only.
+
+### 🧵 Boot tests no longer leak a live fetch dispatcher thread (#799)
+
+`tests/test_startup.py`'s BootCase stubbed `queue_mgr.queue_worker` so `oserve.startup()` does not leave a live
+pump per test - but not `dcc_fetch.fetch_dispatcher_worker`, which startup() starts eleven lines later; only the
+one subclass that tests the dispatcher stubbed it. Every other boot (and the browser-setup boot in
+`test_set_it_up_in_the_browser.py`) left a real `while True` thread calling `check_fetch_queue()` every 2 s for
+the rest of the suite, through whichever oserve stub a later test had installed. On ubuntu/3.10 the tick landed
+between `paste(10)` and `set_config(transfers_paused=True)` in
+`test_nothing_is_dispatched_while_transfers_are_paused`, which then found three requests already sent - the red
+first runs of #797 and #798.
+
+Both fixtures stub the dispatcher now; `tests/test_a_boot_test_leaves_no_dispatcher_behind.py` boots through the
+fixture and asserts no thread runs the real loop afterwards, and asserts the same suite-wide for every boot that
+ran before it. Test-only.
+
+### 🧾 preflight's state guard checks every pass, sees directories, and data/fetched is redirected (#643)
+
+Audit M41. `scripts/preflight.py` compared its state snapshot once, right after the first checks; the count pass
+and the hostile pass ran afterwards with no comparison, so a write that only happens with ProgramFiles stripped
+passed preflight. And the snapshot walked files only: an empty directory created under data/ - `data/fetched`,
+which `oserve.startup()` makedirs for every test that boots the daemon without redirecting FETCHED_FILES_DIR -
+was invisible (it was sitting in this worktree, left by the suite, when this was written).
+
+The snapshot is taken once and compared after each of the three suite-running passes; it records directories
+(reported with a trailing separator) as well as files; and `DCCoreTestCase` redirects `FETCHED_FILES_DIR` under
+its own temp dir like the nine state files before it, without creating it - the code under test does that.
+`tests/test_preflight_checks_every_pass_for_state_writes.py`.
+
+### 🛫 preflight counts what was skipped, and keeps cmd.exe in the hostile pass (#642)
+
+Audit M40. `scripts/preflight.py` parsed only "Ran N": a skipped test is one that ran nothing, and a pass that
+skipped a hundred printed PASS. On Windows a good share of the launcher and OS-script tests skip - the hostile
+pass strips PATH to the interpreter's directory, so cmd.exe (the operating system, not host tooling) was
+unfindable and every .bat class skipped there; from PowerShell there is no bash either, so the POSIX launcher
+classes skipped in the normal pass too. A launcher regression could pass local preflight with nothing having run
+it.
+
+The count pass now runs verbose and `skip_report()` reads the summary count and every per-test reason; preflight
+prints them (`=== skipped: N of M (ceiling 60) ===` and a reason-by-count list, with a hint when the reason is a
+missing POSIX shell) and refuses to pass above `MAX_SKIPPED = 60` - well above what any one platform legitimately
+skips, low enough that a whole family going dark trips it. `hostile_env()` keeps `%SystemRoot%\System32` on the
+Windows PATH so cmd.exe is found and the .bat launcher tests run in that pass; Program Files stays hidden.
+CONVENTIONS.md says what the skip report means. `tests/test_preflight_counts_what_was_skipped.py`.
+
+Running the real preflight for this found two more things. `irc.py::irc_loop` left `tests/uncovered_functions.txt`:
+#633's tests drive it against a scripted socket, and the gate fails on an allowlisted function that has become
+covered (CI does not run that step, which is why #789 was green). And
+`test_the_fallback_trigger_still_fires` failed in the hostile pass with `['dave'] != ['someuser']`: every completed
+send in the suite starts a `delayed_queue_trigger_fallback` thread that calls `dcc.check_queue_and_send` 3 s
+later through the module attribute, so one from an earlier test landed in this test's recording stub in an order
+the hostile pass produces. The stub now counts only its own user.
+
+### ⏱️ The queue-progress receiver acks, so its three tests take 0.3 s instead of 60 (#641)
+
+Audit M39. Since #526 the sender waits for the receiver's final ack to reach the file size before it closes.
+`tests/test_queue_progress_is_recorded.py`'s receiver read to EOF and never sent the 4-byte ack, so each of its
+three tests ended only when the client's 20 s recv timed out - a deterministic 60 s per full run, with the
+sender logging "never acknowledged a single byte" and "Not counted ... ended short at N of N" on green tests,
+and a slower runner one race away from the "flaky on Windows" failures the file's history already records.
+
+The receiver now acks the running total after every read (`take()`), exactly as
+`tests/test_dcc_resume_end_to_end.py`'s does, and `drain()` asserts the whole file arrived and that the sender
+thread actually finished rather than trusting a join with a timeout. A silent receiver now fails the tests
+outright (recv times out) instead of passing slowly. Test-only; nothing shipped changes.
+
+### 🔢 HELLO carries the feed's minor version, and the guide says how to update a loaded script (#639)
+
+Audit M37. The channel field went into seven structured lines with PROTOCOL_MAJOR left at 1 (#574: "major 1 takes
+the extra field rather than a new number"), and the script only refuses `$2 != 1` - so an already-loaded older
+dccore.mrc connected to the new bot without a word and read the channel as the position, the slot, the byte count
+("slot #mp3/1", "at ##mp3"), and no document said how to replace a loaded script or what a mismatch looks like.
+
+`adminchat.PROTOCOL_MINOR = 1`; HELLO is now `DCCORE HELLO 1.1 <botnick> <version>`. The minor goes up every time
+a fixed field is inserted into a major-1 line. The script (1.1, `dccore.protominor` 1) reads major and minor apart:
+an unknown major is plain mode as before; an unknown minor keeps the structured feed and says *"speaks feed 1.x
+and this script was written for 1.y: some lines will show fields in the wrong place. Update whichever is older"*,
+with the reload command. The pre-minor script's own `$2 != 1` refuses "1.1" and falls back to plain mode saying
+"Update the script" - the message it was missing (mIRC compares numerically; the bot's constant must never read
+as exactly 1 again, and a test pins that). ADMIN-CONSOLE.md documents major.minor, gains "Updating the script"
+(save over the old file, `/reload -rs dccore.mrc`, `/dccore connect`; why not `/load`) and a troubleshooting entry
+for channel names where numbers should be. `tests/test_the_feed_says_which_minor_it_speaks.py` holds the bot's
+constant and the script's alias to each other. The mIRC side is not verified in mIRC.
+
+### 📖 ADMIN-CONSOLE.md no longer credits configure.py with the hostmask step (#638)
+
+Audit M36. Step 2 of the console guide said `configure.py` "does steps 2 and 3 together". It does step 2 only -
+the password hash into admin_config.py - and never asks for ADMIN_HOSTMASKS (step 3); with no usable hostmask
+pattern the console ignores every DCC CHAT in silence, by design. A novice who took the guide at its word skipped
+step 3, got no reply, and was sent by "When it does not work" to check +x and typos instead of the step they had
+been told was done.
+
+The paragraph now says configure.py does this step for you, does NOT do step 3, and names both places to put the
+hostmasks (admin_config.py by hand, or Settings → Admin console); the troubleshooting entry for "ignores you
+completely" names the never-set case and why. `tests/test_the_console_guide_says_what_configure_does.py` reads
+the guide and checks the premise against configure.py's own prompts, so a hostmask prompt added later flags the
+wording the other way round.
+
+### 🪟 WINDOWS.md names the file that actually turns the dashboard on (#637)
+
+Audit M35. The guide's fix for `[WEBUI] Disabled via config.WEBUI_ENABLED = False.` was "set WEBUI_ENABLED = True
+in admin_config.py or settings.conf". On a configure-made install that declined the dashboard, settings.conf holds
+`WEBUI_ENABLED = false` - the setup writes the answer either way - and settings.conf is applied after
+admin_config.py, so a True added to admin_config.py changed nothing; the operator restarted, saw the same line,
+and concluded the bot was broken. (The sample-seeding half of the finding was fixed by #623 and #636.)
+
+The passage now names settings.conf, says it is the file that wins where both set a name (and that the daemon
+reports the shadowed line at startup), says the setup wrote the answer there, and spells the value the way that
+file reads it (`true`). `configure.write_settings_conf()`'s docstring and a test docstring claimed the declined
+dashboard is "deliberately absent" from what is written - it is written as `false`, on purpose (a re-run that says
+no must switch off what an earlier run switched on); both now say so, and a test pins the explicit `false`.
+`tests/test_the_windows_guide_names_the_file_that_wins.py` reads the passage.
+
+### 📄 admin_config.py.sample carries the defaults it documents (#636)
+
+Audit M34. INSTALL.md and WINDOWS.md say "copy admin_config.py.sample to admin_config.py and fill it in", and two
+of the sample's live lines were not the defaults: `ADMIN_CHAT_MODE = "listen"` sat under a comment naming "auto"
+the default and "right for most setups" (so a hand-made install never dialled the operator's client, and the
+console guide's table sent them debugging a choice they never made), and `WEBUI_ENABLED = True` opened a listener
+defaults.py keeps off, from a file the docs describe as opt-in. #623 stopped the setup seeding from the sample;
+the hand-copy path still read it.
+
+Both lines now carry defaults.py's value (`"auto"`, `False` with a line saying why), and
+`tests/test_the_sample_admin_config_says_what_defaults_say.py` holds every live line of the sample against
+defaults.py - the password hash and the hostmask list are placeholders and excepted - so the two cannot drift
+apart again.
+
+### 🪪 The bot's own nick follows the server, not the NICK it sent (#635)
+
+Audit M33. The three paths that rename a registered bot - the reclaim of the main nick when its holder quits, the
+background monitor that does the same on a timer, and a rehash that found NICKNAME changed in the file - all
+assigned `config.NICKNAME` the moment they wrote the NICK command, and nothing reconciled it afterwards: the NICK
+event handler had no branch for the bot itself, and 438 ("nick change too fast", Undernet's 30 s window) was
+matched nowhere. A refused reclaim, a refused rehash rename or a rename services forced on the bot left the
+server knowing it by one name and config saying another until the next reconnect - and every "is this for me"
+test (DCC CHAT/SEND/RESUME offers, private messages, the self-message filter, a KICK of the bot) compared
+against a nick the bot did not hold.
+
+The senders no longer assign. `note_own_nick_change()` - called from the NICK event handler, matched on the old
+nick against the name the bot holds - is now the one thing that renames a registered bot; a refused NICK
+(433/437/438) after registration keeps the name and re-sends nothing (the old branch re-sent the alternate to a
+server that already called us that). The rehash keeps `config.NICKNAME` at the live name and puts the file's
+new name in ORIGINAL_NICK as the target, so the reclaim path and the next connect chase it and a refusal cannot
+leave config wrong. Registration is unchanged: the ladder (#633) assigns while unregistered because the 001
+settles it. `tests/test_the_bots_own_nick_follows_the_server.py` drives the real read loop past 001 with the
+threads it would start stubbed: a forced rename is followed, a reclaim is not the bot's name until the server
+says so, a reclaim refused as too fast or as taken leaves the name alone.
+
+### 🤝 NICK and USER go out back to back; nothing is read before registration is sent (#634)
+
+Audit M32. After NICK, the handshake waited for a line containing 001, 002, PING or NOTICE before it sent USER.
+A server that says nothing until it has both lines (some ircds, most bouncers) never triggered it: the 70 s recv
+timed out and the connect was retried every 80 s for ever, with a log that only said "timed out". And when the
+trigger did arrive, the reader broke out of the chunk it was in - every line already decoded after it was dropped
+and the partial line in its buffer with them - so a 433 sharing a recv() chunk with "NOTICE AUTH" was thrown away
+and the bot waited for a registration the server had already refused. A PING before 001 was used as the cue and
+never answered.
+
+The pre-registration reader is gone. NICK and USER are sent back to back, as every client sends them, and the main
+loop is the registration from the first byte: it answers PING, walks the nick ladder on a refusal (#633) and adopts
+the name from the 001. `tests/test_nick_and_user_go_out_back_to_back.py` drives the real `irc_loop()` against a
+scripted socket: a silent server still gets both lines, a 433 in the same chunk as the first NOTICE (or split
+across two) is acted on, a pre-registration PING gets its PONG. Two source-reading guards that pinned the old
+reader's shape now pin the new one.
+
+### 🏷️ A third nick when both configured names are taken, and 437 is a refusal (#633)
+
+Audit M31. The 433/432 handler only reacted while the bot was still asking for its main nick: a 433 for the
+ALTERNATE did nothing, and 437 (ERR_UNAVAILRESOURCE - the nick delay Hybrid, ratbox and Solanum apply after a
+split or a kill) was matched nowhere. On a split storm, with ghosts holding both names, every reconnect was NICK
+main, 433, NICK alt, 433, silence until the server's registration timeout closed the link, ten seconds, and the
+same again for as long as the ghosts lived; on an EFnet-style server the same happened with 437 for the whole
+nick-delay window even when the alternate was free.
+
+`parse_nick_refusal()` reads 432/433/437 by the numeric (a 437 naming a channel is not a nick refusal and is
+returned as None) and both the handshake loop and the main loop go through it - the handshake used to match
+`" 433 "` and the English for 432. `fallback_nick(main, attempt)` is the ladder: the configured alternate first,
+then the alternate with a digit 1-9 (appended while the result fits every server's NICKLEN, replacing the last
+character otherwise, never the main nick again), then nothing more this connection - the count is per connection,
+because the ghosts may be gone by the next one. Once registered the old rule stands: a refused reclaim of the main
+nick goes back to the alternate and nowhere else, so a server that answers 433 for the name we already hold cannot
+walk us down the ladder. ALT_NICKNAME's help says so in all three languages; sample regenerated.
+`tests/test_a_third_nick_when_both_are_taken.py` drives the real `irc_loop()` registration against a scripted
+socket (no network) and reads the NICK lines it sends.
+
+### 🔑 A channel that needs a services login (477) is a refusal, not silence (#632)
+
+Audit M30. `JOIN_REFUSED_NUMERICS` held 405/471/473/474/475. Undernet answers a JOIN to a +r channel from a nick
+not logged in to X with 477 (ERR_NEEDREGGEDNICK); 476 and 479 say the name is not a channel name at all.
+`parse_join_refusal()` returned None for all three, so nothing was printed outside DEBUG_MODE, nothing was
+counted, and a channel the watchdog had marked "never confirmed" stayed at zero refusals - which
+`channels_to_rejoin()` reads as "worth another JOIN". The advert worker re-sent that JOIN every ANNOUNCE_INTERVAL
+for the life of the process and got the same numeric back each time; the operator's only clue was the one-off
+"never confirmed via NAMES" line with no reason in it.
+
+The three join the set and are counted like a ban. 477 gets its own wording (`JOIN_REFUSED_NEEDS_A_LOGIN`), since
+the answer is not "wait it out": the debug channel says the channel needs a registered nick, that the bot must log
+in to services first, and to put the login in Settings > On connect (or check it goes out before the JOIN) - and
+still shows the attempt count, so a login that never comes ends in "gave up" like any other refusal. 437
+(temporarily unavailable) is deliberately left out: that is what a channel is during a netsplit, and a retry that
+never gives up is right for a refusal that says it will pass. `tests/test_a_channel_that_needs_a_login_is_a_refusal.py`;
+the two existing guards on the set and the handler text updated.
+
+### 📣 The advert skips a channel the bot is not in (#631)
+
+Audit M29. `announce_worker` walked `irc.configured_channels()` with no membership check, so a channel the bot
+had been kicked from - including one past REJOIN_ATTEMPTS, which gets no more JOINs - and a channel that was +i
+and never answered its JOIN each still received the advert PRIVMSG and the CTCP SLOTS line every
+ANNOUNCE_INTERVAL. The server answers 404, nothing reads that, and each line costs a MSG_DELAY slot on the shared
+pacer that the channels the bot IS in were waiting for: with 14 channels and MSG_DELAY=5 that is 10 s of the
+outbound clock per cycle, for the life of the process.
+
+`irc.channels_we_are_out_of()` is a pure read of `config.kicked_channels` - which is exactly that set: a kick or
+an unanswered JOIN writes the entry, the 366 of a successful join removes it - and the worker reads it once per
+cycle and skips what it names. The rejoin above the loop keeps asking for as long as it is allowed to, and the
+channel is advertised again the moment a 366 puts it back. Same division as the rejoin itself: irc.py owns the
+rule, the worker only acts on it. `tests/test_the_advert_skips_a_channel_we_are_not_in.py` drives one real cycle
+of the worker with a kicked, a never-confirmed and a fine channel.
+
+### 🚦 The outbound pump waits for the JOINs to land, and the stale VIP backlog is really cleared (#630)
+
+Audit M28. `irc.py` publishes `oserve.irc_connection` straight after `connect()`, before NICK/USER go out and
+seconds before the JOINs land, and `queue_mgr.queue_worker()`'s only gate was "is there a socket" - so whatever
+the previous connection left queued (a "Sent:" notice, queue positions, a rejoin) drained into a window the server
+answers with 451 and 404, and the lines vanished with no log line. The disconnect epilogue meant to drop stale
+adverts emptied `send_queue["channel_announce"]`, a key `oserve.queue_message()` never writes (adverts go to
+`vip_queue`), so it cleared nothing.
+
+The pump now has the same second gate as the debug drain: it holds until `config.activation_triggered` - set once
+every target channel has answered its JOIN or the watchdog gave up waiting, cleared by the epilogue. Deliberately
+NOT `bot_joined_channel`: that stays False on a connection that never got into a channel, and the rejoin JOIN goes
+through this very pump. The epilogue now empties `vip_queue` (and says how many lines it dropped), the same
+decision the pump already takes on a failed send. `tests/test_the_pump_waits_for_the_joins_to_land.py`; the
+three existing pump tests set the flag in their setUp.
+
+### 👢 A kick of another user is a departure, and the rejoin's NAMES rebuilds the member list (#629)
+
+Audit M27. The KICK handler only acted on a kick of the bot itself; anyone else kicked stayed in
+`config.channel_users`, which `dcc.user_is_present_in_ram()` reads as proof of presence, and since the bot then
+shared no channel with them their QUIT was invisible too - a kicked user who disconnected kept being dispatched
+to, each attempt holding a slot for the accept timeout, the queue never frozen or reaped. The bot's own kick left
+the list alone as well, and the rejoin's 353 only merged into it, so members who left while the bot was out stayed
+"present" for the life of the connection.
+
+`irc.note_user_kicked()` now removes the victim exactly as a PART does (and records the departure for #376);
+`note_kicked_from()` marks the member list stale and `learn_channel_names()` - which the 353 handler now goes
+through - replaces the list on the first NAMES line after the kick and merges the rest as before, so a large
+channel's multi-line NAMES still adds up. A channel the bot is not going back to has its list dropped
+(`forget_channel_members()`). The list of a channel the bot WILL rejoin is deliberately kept until then: dropping
+it would start the five-minute freeze timer on every queue there while the rejoin waits for the next advert.
+`tests/test_a_kick_of_another_user_is_a_departure.py`.
+
+### 🩹 A damaged list_index.db is moved aside and rebuilt, and the log no longer promises a fetch will do it (#628)
+
+`list_index._connect()` failed on a corrupt or non-database file ("file is not a database", "database disk image is
+malformed"), printed that the cross-list filter was "off until the next fetch", and returned None. But every caller -
+`index_bot_list()` from a fetch completing, `backfill_missing()` at startup, `search()` and `bots_with_a_match()` from
+the filter bar - opens the file through that same function and failed the same way, so no fetch ever repaired it: the
+List Browser filter answered nothing for the rest of the install's life, the line was printed twice per keystroke, and
+the only recovery (deleting the file by hand) was documented in INSTALL.md and nowhere the operator would look. The
+index is a cache of lists still on disk, so `_connect()` now treats a bare `sqlite3.DatabaseError` (the class sqlite3
+raises only for SQLITE_NOTADB and SQLITE_CORRUPT - a locked file, a full disk or a build without FTS5 are
+`OperationalError`, a subclass, and are still left alone) as damage: the file is renamed to
+`<file>.corrupt-<timestamp>` (kept, never deleted), any `-wal`/`-shm` sidecar sqlite3 did not remove goes with it, a
+fresh index is created in its place, and a `_rebuild_pending` flag is set. The two dashboard readers call
+`_prepare_to_read()` first, which opens the index and, when the flag is set, runs `backfill_missing()` over
+`config.fetched_bot_lists` before answering - so the first filter query after the repair answers from the rebuilt
+index rather than reporting every held list as empty. The log line names the file it moved the index to; when the
+rename fails it says the file has to be deleted by hand, and the environmental "Unavailable" line says "off until it
+can be opened" rather than "until the next fetch". The open-and-create-schema block moved into `_open()`, which still
+closes the lazy handle before raising - on Windows the rename would fail otherwise. `backfill_missing()`'s summary
+line is now "Indexed N held list(s) the search index did not have", since it no longer runs only at upgrade.
+`tests/test_a_damaged_list_index_is_moved_aside_and_rebuilt.py` drives a damaged file through a fetch, the two
+readers, a held list rebuilt on the first query, the once-only rebuild, a locked/unwritable index left in place, and
+a rename that fails; two cases in `tests/test_crosslist_search.py` that relied on a corrupt file being "no index" now
+use an unwritable path.
+
+### 💾 A stats.txt that cannot be read for a moment is no longer overwritten with zeros (#626)
+
+`db._load_advanced_stats_unlocked()` caught any error from `open()`/`read()` and returned the all-zero row. Harmless
+for a display, fatal for a writer: `update_stats_on_complete()` incremented the zeros and `_atomic_write` replaced
+stats.txt with them, and unlike the malformed-column path no `.corrupt` copy was kept. One share-deny lock from an AV,
+backup or indexer at the instant a transfer completed on Windows - the same class of interference
+`replace_with_retry()` exists for - or an EIO or a network-share hiccup, and the lifetime file and byte totals, which
+nothing recomputes, were gone; the advert and the Stats page then showed one file. The loader now lets the read error
+propagate: `update_stats_on_complete()` and `check_and_rotate_day()` raise before writing anything (their callers
+in dcc.py and irc.py already catch, log a `[DB ERROR]`/`[DB ROTATE ERROR]` line and carry on - the one transfer goes
+uncounted, the totals survive), and the read-only entry points `load_advanced_stats()` and
+`load_advanced_stats_rolled()` catch it through `_load_for_display_unlocked()` and keep showing zeros for that one
+refresh, logged after the lock is released. Nothing is preserved as `.corrupt` on this path: the file was fine, it
+just could not be opened right then, and renaming it away would leave the writers starting from zero too.
+`tests/test_an_unreadable_stats_file_is_never_overwritten_with_zeros.py` refuses `open()` once for the real file and
+checks the writers leave it byte-for-byte alone, that the next completion counts on top of the real totals, that the
+midnight rotation does not write either, and that the readers still answer with a row.
+
+### 🔁 Turning AUTO_REFETCH_LISTS on live starts the refresh worker (#625)
+
+`list_fetch.auto_refetch_worker` was started in one place, `oserve.startup()`, and only when the setting was
+already on at boot. A dashboard save that ticked it on wrote settings.conf and fired a rehash, the rehash body
+never looked at the setting, and `AUTO_REFETCH_LISTS` was not in `webserver.SETTINGS_RESTART_ONLY` either - so
+the operator got a green save, "rehash started", no restart notice, and no worker. Held lists went stale until
+the next restart; the only live effect was the one-shot `refetch_due_lists()` sweep irc.py runs on a reconnect.
+oserve.py's own comment said "the setting says so" about a restart the help never mentioned.
+
+New `list_fetch.ensure_auto_refetch_worker()` starts the hourly loop if the setting is on and it is not already
+running, and returns whether this call started it. `oserve.startup()` and the rehash body (after the reload, so
+it reads the saved value) both call it. The "already running" state - `runtime.auto_refetch_guard` and
+`runtime.auto_refetch_started` - lives in runtime.py, so a rehash cannot reset it and start one more worker per
+Settings save. Turning the setting off needs no stop: `refetch_due_lists()` reads the flag on every pass and the
+worker idles. Nothing is added to `SETTINGS_RESTART_ONLY` and the help text is unchanged, because both now tell
+the truth. `tests/test_turning_auto_refetch_on_live_starts_the_worker.py` drives the real rehash body with the
+reload, the transfer wait and the debug line stubbed and the thread starter injected: one start over two
+rehashes, none with the setting off, no thread outliving the test.
+
 ### 📍 The options dialog has room to spare (#782)
 
 #767 made every label fit by a Tahoma 8pt / 96 DPI character table; the operator's screenshot showed the real dialog
