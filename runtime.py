@@ -313,6 +313,15 @@ private_messages_lock = threading.Lock()
 kicked_channels = {}
 kicked_channels_lock = threading.Lock()
 
+# config.send_queue's lock (#665, audit L1). The per-user text lanes are
+# written by every request, search and reply thread (oserve.queue_message)
+# and drained by the pump (queue_mgr.next_standard_line), and had no lock:
+# their correctness rested on where CPython happens to check for a thread
+# switch, which differs between 3.10 and 3.11+ and is gone on a
+# free-threaded build. The two touches are tiny; both take this. Here, not
+# in queue_mgr.py or oserve.py - a !rehash reloads those.
+send_queue_lock = threading.Lock()
+
 dcc_send_offers = {}
 dcc_send_offers_lock = threading.Lock()
 

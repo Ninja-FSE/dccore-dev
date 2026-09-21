@@ -91,9 +91,12 @@ def queue_message(user, message, is_vip=False):
         return
         
     import queue_mgr
-    if user_key not in queue_mgr.config.send_queue:
-        queue_mgr.config.send_queue[user_key] = []
-    queue_mgr.config.send_queue[user_key].append(message)
+    import runtime
+    # One step, under the pump's lock (#665): the pump drops an emptied
+    # user's key, and a create-then-append that straddled that lost the
+    # line or raised KeyError here.
+    with runtime.send_queue_lock:
+        queue_mgr.config.send_queue.setdefault(user_key, []).append(message)
 
 
 

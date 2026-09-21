@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 config.send_queue has a lock (#665)
+
+Audit L1. The per-user text lanes are written by every request, search and reply thread
+(`oserve.queue_message()`: not-in, create, append) and drained by the pump (`queue_mgr.next_standard_line()`:
+get, falsy, pop the key), with no lock: their correctness rested on where CPython happens to check for a thread
+switch - unreachable on 3.11+, reachable on 3.10 (the documented minimum) and on a free-threaded build. Where
+reachable, the line just appended landed on a list the pump was dropping with its key and vanished, or the
+producer died on a KeyError mid-results.
+
+`runtime.send_queue_lock` (runtime.py, so a rehash cannot rebind it) guards `next_standard_line()`, the pump's
+per-user cap and `queue_message()`, whose three steps are one `setdefault(...).append(...)`.
+`tests/test_the_send_queue_has_a_lock.py` makes the interleaving deterministic: the pump holds the lock and drops
+an emptied key, a request thread arrives and must wait, and its line lands in the live dict afterwards.
+
 ### 🔁 The reconnect backs off, and the server's ERROR line is shown (#663)
 
 Audit M61. Every reconnect path slept a flat 10 s. ircu's IPcheck throttles an address that reconnects too often

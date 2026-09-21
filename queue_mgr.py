@@ -30,16 +30,21 @@ def next_standard_line(send_queue, last_served):
     rotation later. A user who has gone entirely (a rehash reset, say) means
     "start from the top", which is the only place left to start.
     """
-    users = builtins.list(send_queue.keys())
-    if not users:
+    # Under the lock the producers take (#665): the get-falsy-pop below and
+    # queue_message()'s not-in-create-append are each three steps, and an
+    # interleaving lost the line just appended (it landed on the list this
+    # was about to drop with the key) or raised KeyError in the producer.
+    with runtime.send_queue_lock:
+        users = builtins.list(send_queue.keys())
+        if not users:
+            return None
+        start = users.index(last_served) + 1 if last_served in users else 0
+        for user in users[start:] + users[:start]:
+            lines = send_queue.get(user)
+            if lines:
+                return user, lines.pop(0)
+            send_queue.pop(user, None)
         return None
-    start = users.index(last_served) + 1 if last_served in users else 0
-    for user in users[start:] + users[:start]:
-        lines = send_queue.get(user)
-        if lines:
-            return user, lines.pop(0)
-        send_queue.pop(user, None)
-    return None
 
 def queue_worker():
     """Flood-protection worker, with a separate express lane for searches and adverts."""
@@ -71,11 +76,12 @@ def queue_worker():
                 print(f"[QUEUE CAP] Dropped {dropped} old VIP lines (cap is {max_vip}).")
 
             max_user = getattr(config, 'MAX_USER_SEND_QUEUE', 100)
-            for q_user in list(config.send_queue.keys()):
-                if len(config.send_queue.get(q_user, [])) > max_user:
-                    q_dropped = len(config.send_queue[q_user]) - max_user
-                    del config.send_queue[q_user][:q_dropped]
-                    print(f"[QUEUE CAP] Dropped {q_dropped} old lines for {q_user} (cap is {max_user}).")
+            with runtime.send_queue_lock:
+                for q_user in list(config.send_queue.keys()):
+                    if len(config.send_queue.get(q_user, [])) > max_user:
+                        q_dropped = len(config.send_queue[q_user]) - max_user
+                        del config.send_queue[q_user][:q_dropped]
+                        print(f"[QUEUE CAP] Dropped {q_dropped} old lines for {q_user} (cap is {max_user}).")
 
             # FIXED: hold everything while the bot is offline instead of draining into
             # a void. Both lanes below pop BEFORE testing `if current_sock:`, so once
