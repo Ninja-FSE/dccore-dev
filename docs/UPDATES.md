@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A failed pack's partial archive is removed (#717)
+
+Audit L53. `subprocess.run(timeout=RAR_TIMEOUT)` kills rar mid-write, and a non-zero exit leaves whatever it
+wrote, at `target_rar_path` either way. The queue row points at the SOURCE folder, so neither
+`discard_orphaned_temp_archives()` nor the send's own finally ever named that file; the row was retried and
+after `MAX_SEND_FAILS` dropped, with a multi-GB partial left in `TMP_ZIP_DIR` until the same folder was packed
+again or an operator found it (the auditor measured a 7 MB partial from a 0.4 s timeout with the real rar).
+`dcc._discard_partial_archive()` removes it in both failure branches - the path is exclusively this pack's
+output - and says what it removed and why; the timeout is re-raised afterwards, so the wrapper's handling of
+the failure (the retry budget, the interlocks) is unchanged.
+`tests/test_a_failed_packs_partial_archive_is_removed.py` runs the real packer path with rar stubbed to write a
+partial and then exit 255 or time out: the file is gone, the log says so, `TMP_ZIP_DIR` is empty, and the row
+is still charged and kept for a retry with the interlocks released. Three of four fail with the old code.
+
 ### 📦 The pack interlocks are released once (#714)
 
 Audit L50. `_inline_rar_packer_body()`'s poisoned-row exit and no-room exit each cleared `rar_inprogress`,

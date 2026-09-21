@@ -1359,10 +1359,18 @@ def check_queue_and_send(irc_sock, completed_user):
                     # filename in its error output is decoded here or
                     # nowhere, and a pack that failed for a nameable
                     # reason must not become a pack that failed silently.
-                    process = subprocess.run(cmd, capture_output=True,
-                                             text=True, encoding="utf-8",
-                                             errors="replace",
-                                             timeout=rar_timeout)
+                    try:
+                        process = subprocess.run(cmd, capture_output=True,
+                                                 text=True, encoding="utf-8",
+                                                 errors="replace",
+                                                 timeout=rar_timeout)
+                    except subprocess.TimeoutExpired:
+                        # rar was killed mid-write: whatever it wrote sits at
+                        # the target path, and nothing else ever names that
+                        # file (#717). Removed here; the wrapper's handling of
+                        # the failure is unchanged.
+                        _discard_partial_archive(target_rar_path, "timed out")
+                        raise
                     
                     if process.returncode == 0 and os.path.exists(target_rar_path):
                         print(f"[LINEAR RAR] Compression succeeded. Waiting 2.0s for the disk to sync...")
@@ -1413,6 +1421,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     else:
                         error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
                         print(f"[LINJAR RAR ERROR] {error_msg}")
+                        _discard_partial_archive(target_rar_path, "rar exited " + str(process.returncode))
                         announce_mod.send_debug(f"Pack FAILED in queue slot for {completed_user}: {error_msg}", category="PART")
                         # Charge the failure to the retry budget instead of recursing. The old
                         # code cleared the interlocks and called check_queue_and_send inline,
@@ -1963,6 +1972,27 @@ def transfers_are_paused():
     other message less believable.
     """
     return bool(getattr(config, "transfers_paused", False))
+
+
+def _discard_partial_archive(target_rar_path, why):
+    """Remove what a failed rar run left at its output path (#717, audit L53).
+
+    A run that timed out (killed mid-write) or exited non-zero left the
+    partial archive at target_rar_path. The queue row points at the SOURCE
+    folder, so neither discard_orphaned_temp_archives() nor the send's own
+    finally ever named that file; the row was retried, and after
+    MAX_SEND_FAILS dropped, with a multi-GB partial left in TMP_ZIP_DIR until
+    the same folder was packed again or an operator found it. The path is
+    exclusively this pack's output, so removing it is safe.
+    """
+    try:
+        if os.path.exists(target_rar_path):
+            size = os.path.getsize(target_rar_path)
+            os.remove(target_rar_path)
+            print(f"[LINEAR RAR] Removed the partial archive a run that {why} left behind "
+                  f"({size:,} bytes): {os.path.basename(target_rar_path)}")
+    except OSError as err:
+        print(f"[LINEAR RAR] Could not remove the partial archive {target_rar_path}: {err}")
 
 
 def a_pack_is_running():

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a `!rar` pack that failed or timed out no longer leaves a partial archive behind in the temp folder.**
 - **Fixed: a rare timing where one packed album finishing while another user's was waiting could let two `rar` runs start on the same archive.** The packer's interlocks are now released exactly once.
 - **Added: only one DCCore runs from a folder.** Starting a second copy - the Windows logon task and a double-click, say - is refused with "already running" instead of two bots sharing one queue, one stats file and one set of ports. The logon task also no longer stops at a question nobody is there to answer.
 - **Added (mIRC console): the bot now tells an out-of-date `dccore.mrc` to update itself**, right after it connects, instead of letting its panel silently show fields in the wrong place.
