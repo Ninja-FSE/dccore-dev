@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🖥️ A first run ends on one dashboard tab (#689)
+
+Audit L25. `run_setup_until_configured()` had already put the browser on the setup page, whose "Saved" screen
+polls `/login` and navigates there the moment the real app answers. `webserver.start()` then called
+`_open_in_browser()` with no knowledge the setup page had just run, and opened `http://127.0.0.1:8420/` as
+well: a first run with the dashboard on loopback (the form's default) ended on two dashboard tabs, one on
+`/login` and one on `/` (which redirects to `/login`). `run_setup_until_configured()` now sets
+`_browser_is_on_the_saved_page` when the tab it opened is going to arrive at the login by itself - a browser
+was opened AND the dashboard was chosen - and `_open_in_browser()` stands down once, logging *"The setup
+page's tab opens the login by itself; not opening another."*; the next start opens as it always did.
+`tests/test_a_first_run_ends_on_one_dashboard_tab.py`: the flag on its own (stands down, once, and not
+without it), and the audit's reproduction against the real setup server - a browser "opened" by the recorder,
+the form saved with the dashboard on, then start()'s call opens nothing; with no dashboard chosen the flag
+is not left set. Four of five fail with the old code.
+
 ### 📝 A legacy SCRIPT_VERSION line in settings.conf is explained, not called a misspelling (#688)
 
 Audit L24. An older dashboard's Settings page offered `SCRIPT_VERSION` and wrote it into `settings.conf`;

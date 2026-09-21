@@ -3660,8 +3660,20 @@ def _console_debug_sink(msg_text, category="INFO"):
         _console_next_id += 1
 
 
+# The browser is already on the dashboard's login (#689, audit L25): the
+# setup page's "Saved" screen polls /login and navigates there by itself
+# as soon as the real app answers, so start() opening the dashboard as well
+# gave a first run two tabs, one on /login and one on / (which redirects to
+# /login). Set by run_setup_until_configured() when the page it served is
+# going to do that; read and cleared by _open_in_browser(), once.
+_browser_is_on_the_saved_page = False
+
+
 def _open_in_browser(host, port, opener=None, log=print):
     """Open the dashboard in the default browser, if that was asked for.
+
+    Not when the setup page's own browser tab is about to arrive here on
+    its own (#689): a first run ends on one dashboard tab, not two.
 
     LOOPBACK ONLY, and not because of security - because of what the machine
     probably is. A dashboard bound to the LAN is as likely to be running on a
@@ -3672,6 +3684,11 @@ def _open_in_browser(host, port, opener=None, log=print):
     BROWSER variable is not a reason to stop the bot starting - the address
     was printed a line above either way.
     """
+    global _browser_is_on_the_saved_page
+    if _browser_is_on_the_saved_page:
+        _browser_is_on_the_saved_page = False
+        log("[WEBUI] The setup page's tab opens the login by itself; not opening another.")
+        return False
     if not getattr(config, "WEBUI_OPEN_BROWSER", True):
         return False
     if not dashboard_is_loopback_only(host):
@@ -4888,6 +4905,11 @@ if HAVE_FLASK:
             server.server_close()
         if not done.is_set():
             return None
+        # The saved page in the browser polls /login and goes there when the
+        # dashboard answers (#689) - exactly when the dashboard was chosen
+        # and a browser was opened here. start() must not open a second tab.
+        global _browser_is_on_the_saved_page
+        _browser_is_on_the_saved_page = bool(opened and result["changes"].get("WEBUI_ENABLED"))
         log(f"[SETUP] Settings written: {', '.join(result['changes'])}. Starting.")
         return result["changes"]
 
