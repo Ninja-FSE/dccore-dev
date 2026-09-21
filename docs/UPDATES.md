@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 Three tests that could not fail (#705)
+
+Audit L41, test-only. `test_the_old_shape_would_have_grown_without_limit` added 20,000 items to a plain
+`set()` and asserted 20,000 - a test of Python's set - while the regression its class documents (a
+`security._ban_notified` reverted to a plain set) left all seven of its neighbours green, because they build
+their own `_NotifiedNicks`. `test_what_the_old_arithmetic_did_to_a_real_file` divided literals.
+`test_every_emitter_goes_through_it` substring-matched the source for `feed_event("KIND"`, which a
+commented-out or `if False:`-wrapped call satisfied, and its `category="KIND"` guard named a string that
+exists nowhere. The first is replaced by a guard on the module global's type; the second is deleted; the
+third now drives each emitter the way the daemon calls it - `send_dcc_sending_notice`,
+`send_dcc_queue_notice`, `send_transfer_complete`, `_report_transfer_failure`, a registered offer resumed -
+and reads the kinds off the event sink (REQUEST and SEARCH, which need a library, are driven in
+`test_the_feed_says_which_channel`). The audit's two mutants - the SENDING call wrapped in `if False:`, the
+registry reverted to `set()` - each fail one of the new tests.
+
 ### 🧪 The harness redirects the console's token store (#704)
 
 Audit L40, test-only. `DCCoreTestCase` redirected sixteen state files but not `db.ADMIN_TOKENS_FILE`, and
