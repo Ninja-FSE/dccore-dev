@@ -409,9 +409,46 @@ class TheServer(DCCoreTestCase):
         body = source.split("def run_setup_until_configured(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("except (OSError, SystemExit)", body)
 
+    @unittest.skipUnless(LOOPBACK_OK, NEEDS_LOOPBACK)
     def test_the_browser_is_not_opened_when_the_operator_said_not_to(self):
-        """A stand-in for the real thing: no server, just the decision."""
+        """The False branch, executed (#646, audit M44): the server is
+        started with the flag off and an opener that records, told to give
+        up as soon as it has said what it says instead of opening one, and
+        the opener must never have been called. The source pin below used
+        to be the only test of this branch, and moving the opener call
+        outside the guard passed it."""
         self.set_config(WEBUI_OPEN_BROWSER=False)
+        port = free_port()
+        logs, opened = [], []
+        said_so = threading.Event()
+
+        def log(line):
+            logs.append(line)
+            if "No browser was opened here" in line:
+                said_so.set()
+
+        result = {}
+
+        def run():
+            result["changes"] = webserver.run_setup_until_configured(
+                port=port, log=log, opener=opened.append, token="tok",
+                wait=said_so.is_set)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join(15)
+
+        self.assertFalse(thread.is_alive(), "the server did not give up when told to")
+        self.assertTrue(said_so.is_set(), logs)
+        self.assertEqual(opened, [], "the browser was opened with WEBUI_OPEN_BROWSER off")
+        self.assertIsNone(result["changes"])
+        joined = "\n".join(logs)
+        self.assertIn("/setup?token=tok", joined, "the link is still printed for the operator to open")
+        self.assertIn("ssh -L", joined, "and the way to reach it over SSH")
+
+    def test_the_decision_reads_the_setting_and_nothing_else(self):
+        """The everywhere half of the test above, which needs loopback: the
+        guard is the setting, read with the shipped default of True."""
         source = io.open(os.path.join(REPO_ROOT, "webserver.py"), encoding="utf-8").read()
         body = source.split("def run_setup_until_configured(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn('if getattr(config, "WEBUI_OPEN_BROWSER", True):', body)

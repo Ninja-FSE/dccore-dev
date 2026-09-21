@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚪 The setup page's "do not open the browser" branch is executed (#646)
+
+Audit M44. The test for `WEBUI_OPEN_BROWSER = False` set the flag and then read `run_setup_until_configured()`'s
+source for the `if` line; the executed server test ran with the flag on, so the False branch had never run under
+a test - moving the opener call outside the guard (keeping the `if`) passed all 42 tests in the module.
+
+`test_set_it_up_in_the_browser.py` now starts the real server with the flag off, an opener that records, and a
+`wait` that gives up the moment the page has said "No browser was opened here" - and asserts the opener was never
+called, the link and the SSH-tunnel hint were still printed, and the server returned None. The audit's mutant
+fails it. The source pin stays as the everywhere half (the executed test needs loopback), renamed to say so.
+Test-only.
+
 ### ⏳ The DCC ACCEPT pacing is driven, not read (#645)
 
 Audit M43. `tests/test_the_resume_handshake_takes_its_turn.py` read dcc.py for the string "wait_for_slot" before
