@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (mIRC): the Options window has more room around its texts.** On a real mIRC the label "Side panel with slots, queue and today's totals" ran to the edge of its box and up against the next one. Every label now has at least a fifth of its space to spare, a few are shorter ("Side panel: slots, queue and totals", "Status every", "min, 0 = off"), and the two columns have more air between them. Update `dccore.mrc`.
 - **Fixed: the browser setup page was only half translated.** Choosing FR or ES translated the field names and their **?** explanations but left the title, the intro, the password boxes, the network box, the button, the note, every error message and the "Saved" page in English. The whole page now follows the language you pick.
 - **Fixed: the first-run setup left dashboard settings in `admin_config.py` that `settings.conf` then overrode for ever, without a word.** A fresh `admin_config.py` was a copy of the sample, so it started with `WEBUI_ENABLED = True`, `WEBUI_HOST`, `WEBUI_PORT` and `ADMIN_CHAT_MODE = "listen"` already in it - and since `settings.conf` wins where both set a name, editing those lines there (as the file's own comment suggested) did nothing. The setup now writes only the password into `admin_config.py`; everything else it asked for is in `settings.conf`, where the dashboard's Settings page edits it. And at startup the bot now says which settings `settings.conf` overrides from `admin_config.py`, so an edit that is being ignored is named rather than silent. An existing `admin_config.py` is not changed.
 

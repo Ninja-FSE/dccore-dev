@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📍 The options dialog has room to spare (#782)
+
+#767 made every label fit by a Tahoma 8pt / 96 DPI character table; the operator's screenshot showed the real dialog
+font rendering about 10 % wider, so a label with 10.8 % to spare touched its neighbour. Every label now has at least
+20 % (worst 21.6 %), the left column is 170 dbu (gap 12 to the right column, was 4), three labels are shorter, and the
+edits beside a widened label move with it; control ids unchanged.
+`tests/test_the_options_dialog_labels_have_room_to_spare.py` requires the margin and the gap for every label.
+
 ### 🧾 A new admin_config.py carries only the password, and a line settings.conf overrides is reported at boot (#623)
 
 `configure.write_admin_config_password()` seeded a missing admin_config.py from admin_config.py.sample, whose active
