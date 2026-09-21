@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 A packed archive whose send fails is retried, not deleted (#657)
+
+Audit M55. On any failed send of a packed .rar - the 30 s accept timeout with the user away from the keyboard, a
+receiver that hung up, a stall - `start_dcc_send()`'s finally deleted the archive (its step 4) before settling the
+row (step 5), and `release_queue_entry()` then classified the row as a "consumed temporary archive" and dropped
+it with "Removed from your queue". A plain file in the identical situation was kept and re-offered up to
+MAX_SEND_FAILS times; the justification for the difference was circular - the archive was only unusable because
+that same finally had just deleted it - and a 3 GB album that took ten minutes to pack got exactly one 30-second
+window before the user had to !rar it again, holding rar_inprogress for everyone while it packed a second time.
+
+The finally now settles the row first and the cleanup keeps the archive for a row that was kept; a packed row is
+retryable while its archive exists on disk (the same MAX_SEND_FAILS budget, the same 15 s × attempts back-off),
+and is dropped - with the archive - only when the budget runs out or the archive is gone. The dispatch paths
+already guard temp rows with an existence check. `tests/test_a_failed_pack_send_keeps_its_archive_and_row.py`
+sends a real archive over loopback: a hang-up keeps both, an exhausted budget removes both, a delivery still
+cleans up; the existing `test_queue_integrity` case now says what it guards (an archive that is gone).
+
 ### 🧾 An acknowledgement past what was sent is not a completion (#656)
 
 Audit M54. `_AckTracker` accepted any 32-bit word above what it held, with no upper bound tied to what had

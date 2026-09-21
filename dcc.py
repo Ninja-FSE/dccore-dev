@@ -579,8 +579,13 @@ def release_queue_entry(user, next_file, delivered, reason=""):
     inherited by a later request for the same filename.
 
     Two kinds of row are deliberately NOT retryable, because retrying them can only fail:
-      * a consumed temporary archive - the cleanup step deletes the .rar it points at, so
-        every retry would abort immediately on file_size == 0 and emit a misleading error;
+      * a temporary archive that is GONE from disk - every retry would abort immediately
+        on file_size == 0 and emit a misleading error. While the archive is still there
+        a packed row is as retryable as a plain file (#657, audit M55): the cleanup used
+        to delete the .rar first and this function then found it "consumed" - a circular
+        reason, and a 3 GB album that took ten minutes to pack got exactly one 30-second
+        accept window before the user had to !rar it again. The finally now settles the
+        row BEFORE the cleanup and keeps the archive for a row it kept;
       * a legacy non-dict row, which has nowhere to store a counter.
     Both are settled on their first failure.
     """
@@ -640,8 +645,12 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         return 0
 
     is_row = isinstance(next_file, dict)
-    consumed_temp = bool(is_row and next_file.get("is_temporary_zip")
-                         and not next_file.get("is_unpacked_rar_folder"))
+    packed = bool(is_row and next_file.get("is_temporary_zip")
+                  and not next_file.get("is_unpacked_rar_folder"))
+    # Consumed means the archive is not there to send again (#657) - not
+    # merely that this was an archive.
+    consumed_temp = packed and not os.path.exists(
+        platform_compat.long_path(str(next_file.get("path") or "")))
     # A row that is not in any queue is the direct-send fast path's synthetic
     # one (see above): nothing will ever pick it up again, so "kept for retry"
     # was a claim about a retry that could not happen - and, being "kept", it
@@ -666,7 +675,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         elif not retryable:
             removed = _remove_by_identity()
             if consumed_temp:
-                why = "temporary archive already consumed"
+                why = "temporary archive is gone from disk"
             elif is_row and not in_a_queue:
                 why = "sent directly, not queued - nothing to retry"
             else:
@@ -3508,9 +3517,28 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except: pass
         try: dcc_sock.close()
         except: pass
-        # 4. The RAR cache and the send lock
+        # 4. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
+        #    unconditional pop(0), which removed whatever was first at that instant rather
+        #    than the entry actually sent. See release_queue_entry.
+        #
+        #    BEFORE the disk cleanup, since #657: the cleanup used to run first and
+        #    delete a packed archive whose send had just failed, and the settle then
+        #    found the archive gone and dropped the row - one 30-second accept window
+        #    for a pack that took up to RAR_TIMEOUT to build. Settled first, a failed
+        #    pack keeps its row for MAX_SEND_FAILS like a plain file, and the cleanup
+        #    below keeps the archive for a row that was kept.
+        row_retained = False
         try:
-            file_still_needed = False
+            row_retained = release_queue_entry(
+                user, next_file, delivered=transfer_completed,
+                reason="transfer complete" if transfer_completed else "transfer did not complete")
+        except Exception as pop_err:
+            print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
+
+        # 5. The RAR cache and the send lock
+        try:
+            # A row kept for retry needs its archive (#657).
+            file_still_needed = bool(row_retained)
             safe_path = str(file_path)
 
             if _is_temp_zip_cache_file(safe_path):
@@ -3540,17 +3568,6 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         except Exception as file_rm_err:
             print(f"[DCC CLEANUP ERROR] Could not run the disk cleanup: {file_rm_err}")
         
-        # 5. SETTLE THE QUEUE ROW - by identity, with a retry budget. This replaces an
-        #    unconditional pop(0), which removed whatever was first at that instant rather
-        #    than the entry actually sent. See release_queue_entry.
-        row_retained = False
-        try:
-            row_retained = release_queue_entry(
-                user, next_file, delivered=transfer_completed,
-                reason="transfer complete" if transfer_completed else "transfer did not complete")
-        except Exception as pop_err:
-            print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
-
         # 6. Release the memory lock and rule out duplicate threads.
         # #162 finding #6: a plain audio file never owned rar_inprogress - this ran
         # unconditionally on EVERY transfer's completion, so bob's ordinary MP3
