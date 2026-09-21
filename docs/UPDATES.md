@@ -4,6 +4,30 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛫 preflight counts what was skipped, and keeps cmd.exe in the hostile pass (#642)
+
+Audit M40. `scripts/preflight.py` parsed only "Ran N": a skipped test is one that ran nothing, and a pass that
+skipped a hundred printed PASS. On Windows a good share of the launcher and OS-script tests skip - the hostile
+pass strips PATH to the interpreter's directory, so cmd.exe (the operating system, not host tooling) was
+unfindable and every .bat class skipped there; from PowerShell there is no bash either, so the POSIX launcher
+classes skipped in the normal pass too. A launcher regression could pass local preflight with nothing having run
+it.
+
+The count pass now runs verbose and `skip_report()` reads the summary count and every per-test reason; preflight
+prints them (`=== skipped: N of M (ceiling 60) ===` and a reason-by-count list, with a hint when the reason is a
+missing POSIX shell) and refuses to pass above `MAX_SKIPPED = 60` - well above what any one platform legitimately
+skips, low enough that a whole family going dark trips it. `hostile_env()` keeps `%SystemRoot%\System32` on the
+Windows PATH so cmd.exe is found and the .bat launcher tests run in that pass; Program Files stays hidden.
+CONVENTIONS.md says what the skip report means. `tests/test_preflight_counts_what_was_skipped.py`.
+
+Running the real preflight for this found two more things. `irc.py::irc_loop` left `tests/uncovered_functions.txt`:
+#633's tests drive it against a scripted socket, and the gate fails on an allowlisted function that has become
+covered (CI does not run that step, which is why #789 was green). And
+`test_the_fallback_trigger_still_fires` failed in the hostile pass with `['dave'] != ['someuser']`: every completed
+send in the suite starts a `delayed_queue_trigger_fallback` thread that calls `dcc.check_queue_and_send` 3 s
+later through the module attribute, so one from an earlier test landed in this test's recording stub in an order
+the hostile pass produces. The stub now counts only its own user.
+
 ### ⏱️ The queue-progress receiver acks, so its three tests take 0.3 s instead of 60 (#641)
 
 Audit M39. Since #526 the sender waits for the receiver's final ack to reach the file size before it closes.
