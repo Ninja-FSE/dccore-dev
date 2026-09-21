@@ -148,6 +148,9 @@ class TheReport(DCCoreTestCase):
         self.assertIn("'video'", drop[0])
         self.assertIn("50", drop[0])
         self.assertIn("20", drop[0])
+        self.assertIn("Check that list's folder/mount", drop[0],
+                      "the folder to check is the shrunk list's own, not 'the music directory'")
+        self.assertNotIn("music directory", drop[0])
         self.assertTrue(any("Main: 130 files (+30 new)" in m for m in messages),
                         "what the other list gained is not lost behind the warning")
         self.assertFalse(any("successfully completed" in m for m in messages))
@@ -159,6 +162,7 @@ class TheReport(DCCoreTestCase):
         drop = [m for m in messages if "DROPPED" in m]
         self.assertEqual(len(drop), 1)
         self.assertNotIn("of the list", drop[0])
+        self.assertIn("Check the music directory/mount", drop[0])
         self.assertFalse(any("List update completed in" in m for m in messages))
 
     def test_one_list_reads_exactly_as_before(self):

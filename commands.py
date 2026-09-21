@@ -1880,11 +1880,16 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                     # same [INFO] tag anyway would only look distinct without
                     # being distinct.
                     for name, was, now in shrunk:
-                        which = f" of the list {name!r}" if len(new_counts) > 1 else ""
+                        # Named by the list, and the folder it says to check
+                        # is that list's own: "the music directory" is a
+                        # wrong pointer when it is the films that vanished.
+                        several = len(new_counts) > 1
+                        which = f" of the list {name!r}" if several else ""
+                        where = "that list's folder/mount" if several else "the music directory/mount"
                         announce.send_debug(
                             f"List update completed, but the file count{which} DROPPED from "
                             f"{was:,} to {config.C_BOLD}{now:,}{config.C_RESET} "
-                            f"({was - now:,} fewer). Check the music directory/mount "
+                            f"({was - now:,} fewer). Check {where} "
                             f"before trusting this list.",
                             category="INFO"
                         )
