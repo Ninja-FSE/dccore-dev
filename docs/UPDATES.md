@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 A wait, not a sleep; and preflight's note names the pass that failed (#706)
+
+Audit L42, test-only. `test_the_window_closes_itself_after_the_duration` slept 0.4 s for a 0.15 s window and
+asserted the raw flag the closer thread sets - a bet on the scheduler that a loaded runner loses; it waits
+for the condition with a deadline now (`wait_for`, from test_adminchat). `scripts/preflight.py`'s "only the
+hidden-tooling pass failed" note fired whenever the LAST result was False and all earlier ones True - and with
+the hostile pass SKIPPED (rar reachable regardless) the last result is the test-count floor, so an operator
+whose count had dropped was told to fix a hidden-tooling dependency that does not exist. The condition is
+`only_the_hidden_pass_failed(results, hostile_ran)` now: it knows whether the hidden pass ran and which of
+its two results is the run, and says nothing for the state check or an earlier failure.
+`tests/test_preflights_note_names_the_pass_that_failed.py` runs the audit's case and the three others, reads
+the tail for the call and the flag, and the window test for the wait.
+
 ### 🧪 Three tests that could not fail (#705)
 
 Audit L41, test-only. `test_the_old_shape_would_have_grown_without_limit` added 20,000 items to a plain
