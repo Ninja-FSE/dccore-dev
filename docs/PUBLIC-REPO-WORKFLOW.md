@@ -98,17 +98,20 @@ the omissions surface, because it is the last point at which they are cheap.
   a visitor to the public repo reads. This checklist named only the first of
   them until v1.11.0, when the second was found by grepping for the old
   number rather than by following the list.
-- **Update the test count in `docs/FUTURE.md` AND in `README.md`'s own Tests
-  section** - two different sentences, in two different files, that say the
-  same number and drift independently. Measure both here, at release time,
-  from the merged tree, not in the branches: it is one line that every
-  branch is tempted to touch, so three concurrent PRs mean a three-way
-  conflict and a number that was never true of any tree that existed -
-  whichever merged last wins with a count measured before the other two
-  landed. Measured once, on what actually shipped, it is right by
-  construction. `README.md`'s sentence used to also name
-  `scripts/preflight.py` by file, which is dev-only tooling stripped at
-  extraction (step 2 below) - worth a fresh read rather than a straight
+- **Update the test count in `docs/FUTURE.md`** - the one place it lives
+  since #698; `README.md`'s Tests section points there rather than carrying a
+  second copy, because two sentences in two files that say the same number
+  drifted independently (4994 against 5237 on one commit, neither true of the
+  tree). Measure it here, at release time, from the merged tree, not in the
+  branches: it is one line that every branch is tempted to touch, so three
+  concurrent PRs mean a three-way conflict and a number that was never true
+  of any tree that existed - whichever merged last wins with a count measured
+  before the other two landed. Measured once, on what actually shipped, it is
+  right by construction. `tests/test_the_test_count_is_kept_in_one_place.py`
+  refuses a figure more than a tenth off what the loader discovers, so a
+  roll that forgets this line fails the suite. `README.md`'s sentence used to
+  also name `scripts/preflight.py` by file, which is dev-only tooling stripped
+  at extraction (step 2 below) - worth a fresh read rather than a straight
   number swap, since a sentence naming a file that will not exist for the
   reader is its own kind of stale.
 - **Tag the release** on `dccore` after the merge, matching the changelog

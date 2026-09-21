@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The test count is kept in one place (#698)
+
+Audit L34. README.md said 4994 tests and FUTURE.md said 5237 on the same commit; the loader found 5287. Two
+sentences in two files said the same number and drifted independently, and a reader comparing them saw a
+project that could not count its own tests. The count lives in FUTURE.md's Quality section alone now (6266
+on this tree, measured by the loader); README's Tests section says "thousands of them" and points there;
+PUBLIC-REPO-WORKFLOW.md's release checklist names the one place. `tests/test_the_test_count_is_kept_in_one_place.py`
+reads the shipped prose for any other four-digit "N tests" claim, checks README points at the roadmap, refuses
+a FUTURE.md figure more than a tenth off what the loader discovers - so a roll that forgets the line fails the
+suite while an ordinary PR need not touch it - and reads the checklist.
+
 ### 📝 The flood ban is described as timed, not as a day-ban (#697)
 
 Audit L33. `FLOOD_BAN_SECONDS` ships as 3600, and its own comment explains that the old midnight expiry was
