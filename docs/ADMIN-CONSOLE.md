@@ -280,7 +280,7 @@ failures. It has two destinations, both on by default:
 | | |
 |---|---|
 | `DEBUG_TO_CHANNEL` | the coloured line in `DEBUG_CHANNEL`, as always |
-| `DEBUG_TO_CONSOLE` | the plain text in an attached admin console |
+| `DEBUG_TO_CONSOLE` | the plain text in an attached admin console - and, for `dccore.mrc`, the structured feed's event lines too: off means the window goes quiet, not just its `LOG` lines |
 
 Once the console is doing the job, in `admin_config.py`:
 

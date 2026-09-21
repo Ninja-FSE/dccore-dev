@@ -227,8 +227,10 @@ def remove_event_sink(sink):
 def feed_event(_kind, _text, **fields):
     """One feed event, told twice: the prose to send_debug() under the kind
     as its category, and the fields to every event sink. The console
-    tickboxes (console_wants) gate the fields exactly as they gate the
-    prose, so a kind the operator unticked reaches no client either way.
+    tickboxes (console_wants) and the console switch itself
+    (DEBUG_TO_CONSOLE) gate the fields exactly as they gate the prose, so
+    a kind the operator unticked - or a console they switched off -
+    reaches no client either way.
 
     The two positionals are underscored so no field can collide with them:
     REQUEST carries a field called `kind` ("file" or "folder"), and a plain
@@ -244,7 +246,12 @@ def feed_event(_kind, _text, **fields):
     except Exception:
         pass
     send_debug(_text, category=_kind)
-    if not console_wants(_kind):
+    # DEBUG_TO_CONSOLE was checked on the prose path alone (#678, audit
+    # L14): with it off the plain console went quiet as documented, while
+    # a structured session kept getting every REQUEST/QUEUED/SENDING/SENT/
+    # FAIL/SEARCH line - only LOG stopped - and the stdout floor printed
+    # the same event as undelivered at the same time.
+    if not getattr(config, "DEBUG_TO_CONSOLE", True) or not console_wants(_kind):
         return
     with _debug_sinks_lock:
         sinks = _event_sinks[:]

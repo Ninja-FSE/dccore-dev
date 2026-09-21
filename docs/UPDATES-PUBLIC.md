@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (mIRC console): turning "Send debug lines to admin console" off now quietens the whole window.** The transfer and search events kept arriving in the mIRC console with the switch off; only the log lines stopped.
 - **Fixed: the dashboard and console login throttles no longer remember every address that ever mistyped a password.** An address that failed once or twice was kept for as long as the bot ran; on a bot reachable from the internet that grew without limit. Such addresses are now forgotten after the block window, and old failures no longer add up to a block.
 - **Fixed (first run): the setup page now warns when a password already in `settings.conf` would override the one you just chose after a restart** - and says what to do about it. The terminal setup already said this; the browser one did not.
 - **Fixed (first run): the setup page's one-time link is now good for one browser only.** On a Linux machine shared with other users, the link - and the code in it - could be read from the browser's command line with `ps` while the page was open. The first browser to open the link is the only one the page answers to; if you are told it was already opened elsewhere, restart DCCore for a fresh link.

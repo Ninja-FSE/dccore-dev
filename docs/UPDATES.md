@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 DEBUG_TO_CONSOLE off silences the structured feed too (#678)
+
+Audit L14. `send_debug()` honoured `DEBUG_TO_CONSOLE` before fanning prose out to the debug sinks;
+`feed_event()` handed the fields to the event sinks gated only by the per-kind tickboxes. A structured
+`dccore.mrc` session drops the prose of feed kinds and lives on the fields, so after the operator unticked
+"Send debug lines to admin console" the plain console went quiet as documented while the mIRC window kept
+showing every REQUEST/QUEUED/SENDING/SENT/FAIL/SEARCH line - only `LOG` stopped - and the stdout floor printed
+the same event as undelivered at the same moment. `feed_event()` now returns before the event fan-out when
+the switch is off, exactly as it does for an unticked kind; the counts (#754) are still kept, and the prose
+still goes to the channel and the floor. ADMIN-CONSOLE.md's routing table says so.
+`tests/test_the_console_switch_gates_the_structured_feed.py`: no sink gets the event with the switch off, the
+sink gets it with it on, the tickbox still gates on its own, the count is kept; and the audit's own probe - a
+real `Session` in structured mode with both sinks attached - gets both lines with the console on and neither
+with it off, with the floor still saying so. Two of six fail with the old `feed_event()`.
+
 ### 🔐 An address that failed to log in once or twice is forgotten (#677)
 
 Audit L13. `webserver._web_bad_ips` (the dashboard's failed-login pool) deleted an entry only on a successful
