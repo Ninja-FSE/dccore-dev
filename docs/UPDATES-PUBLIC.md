@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: on a fresh install with nothing configured, the setup check and the bot now say "run the launcher, or configure.py" instead of "copy the sample files".** Copying a sample by hand skipped the guided setup the launcher provides, and switched on things the sample has on.
 - **Fixed (Windows): `allow-firewall.bat` works when the account that answers the administrator prompt is not yours.** It used to look for Python again as that account and stop with "Python was not found"; the ports and the interpreter are now worked out as you, before the prompt, and handed over. A folder with an apostrophe in its name no longer stops the prompt from appearing.
 - **Docs (mIRC): the console token is stored in clear text in `dccore.ini` beside the script - the guide and the script now say so and tell you to treat that file like a password.** The `.mrc` itself holds nothing; `/dccore unpair` revokes a token that may have travelled.
 - **Fixed (mIRC console): a failed transfer with no filename, or a filename ending in ` ::`, showed the wrong name or reason in the window.** Such names are now written so the script always reads the name and the reason correctly; a missing name shows as `?`.

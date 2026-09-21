@@ -8,7 +8,7 @@ handles that at import time.
 
 The launchers defeated it. Their "no config found" test runs in shell, BEFORE
 any Python is imported, so it fired before the migration could - and the advice
-it printed ("copy admin_config.py.sample to admin_config.py") is exactly the
+it printed then ("copy admin_config.py.sample to admin_config.py") is exactly the
 condition that makes the migration skip for good, because it only acts when
 admin_config.py does NOT already exist. Reproduced against the real v1.10.0 tag:
 the operator followed the instruction and ended with an empty sample config,

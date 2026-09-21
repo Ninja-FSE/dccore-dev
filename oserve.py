@@ -166,8 +166,11 @@ def startup(setup_page=None):
               "(blank, or still the shipped default):")
         for name in unconfigured:
             print(f"[CRITICAL]   {name}")
-        print("[CRITICAL] Set them in admin_config.py or settings.conf before starting - "
-              "see admin_config.py.sample / settings.conf.sample.")
+        # The launcher or configure.py, not "see the sample" (#685): copying
+        # the sample by hand is the step both exist to spare a first-timer.
+        print("[CRITICAL] Run the launcher (start-dccore - it asks the questions, or opens "
+              "the setup page in your browser), or python3 configure.py, or set them in "
+              "settings.conf or admin_config.py by hand before starting.")
         sys.exit(1)
 
     # FILE_DIRECTORY is deliberately NOT in settings_file.REQUIRED (see its

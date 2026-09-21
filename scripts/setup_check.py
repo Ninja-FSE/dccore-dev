@@ -331,9 +331,15 @@ def main(platform):
         ok("migrated local_config.py to admin_config.py (renamed in #170; the "
            "file is gitignored, so the upgrade could not rename it for you)")
     elif not admin_config_present and not settings_conf_present:
-        fail("no admin_config.py and no settings.conf - copy admin_config.py.sample "
-             "to admin_config.py, or settings.conf.sample to settings.conf, and fill "
-             "one of them in, or the daemon will use the upstream defaults")
+        # Not "copy the sample" (#685, audit L21): that is the manual step
+        # the launchers replaced (#547), and a novice who followed it
+        # created admin_config.py by hand - which is the launcher's
+        # first-run gate - so the questions and the browser page were never
+        # offered, and the copied sample turned the dashboard and the debug
+        # channel on for them.
+        fail("no admin_config.py and no settings.conf - nothing is configured yet. "
+             f"Run {platform.start_cmd} (it asks the questions, or opens the setup page "
+             f"in your browser), or {platform.python} configure.py")
     elif not admin_config_present:
         ok("configured via settings.conf (no admin_config.py)")
     elif not settings_conf_present:

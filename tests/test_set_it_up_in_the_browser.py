@@ -525,14 +525,16 @@ class StartupUsesIt(DCCoreTestCase):
         self.assertNotIn(".sample", output)
 
     def test_setup_page_false_is_the_old_refusal(self):
-        """No page was tried (no Flask): exit 1 and the sample files, as
-        before - that code means "stop" to the launchers, not "ask"."""
+        """No page was tried (no Flask): exit 1 and the refusal, as before -
+        that code means "stop" to the launchers, not "ask". The refusal
+        names the launcher and configure.py, not the sample files (#685)."""
         buffer = io.StringIO()
         import contextlib
         with self.assertRaises(SystemExit) as caught, contextlib.redirect_stdout(buffer):
             self.oserve.startup(setup_page=False)
         self.assertEqual(caught.exception.code, 1)
-        self.assertIn("settings.conf.sample", buffer.getvalue())
+        self.assertIn("[CRITICAL] Run the launcher (start-dccore", buffer.getvalue())
+        self.assertIn("configure.py", buffer.getvalue())
 
     def test_the_page_is_possible_exactly_when_flask_is(self):
         """No setting turns it off: loopback and one-shot by design."""

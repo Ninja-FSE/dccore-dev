@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 Nothing configured says "run the launcher", not "copy the sample" (#685)
+
+Audit L21. `start-dccore check` is the documented pre-flight, and on a tree with neither `admin_config.py`
+nor `settings.conf` it FAILed with "copy admin_config.py.sample to admin_config.py, or settings.conf.sample to
+settings.conf, and fill one of them in" - exactly the manual step the launchers (#547) replaced, while the
+next three FAILs on the same screen already said "Run configure.py". A novice who followed the stale line
+created `admin_config.py` by hand, which is the launcher's first-run gate: the questions and the browser
+setup page were never offered, and the copied sample turned the dashboard and the debug channel on for
+them. `oserve.py`'s own refusal ("see admin_config.py.sample / settings.conf.sample") said the same.
+
+Both say the same thing now: `nothing is configured yet. Run <the platform's launcher> (it asks the
+questions, or opens the setup page in your browser), or <python> configure.py` - the check through
+`Platform.start_cmd`, so Windows names the `.bat` and Linux the `.sh`. Still a FAIL; only the advice changed.
+`tests/test_nothing_configured_says_run_the_launcher.py` runs `check-setup.py` for real against an empty
+configuration and the daemon's own refusal through `startup()`, and checks neither names a sample any more.
+Four of five fail with the old text.
+
 ### 🪟 The elevated firewall copy only runs netsh (#684)
 
 Audit L20. After `Start-Process -Verb RunAs`, `allow-firewall.bat` ran under whichever account answered UAC
