@@ -344,7 +344,10 @@ It adds one inbound rule for TCP `DCC_PORT_START`–`DCC_PORT_END` (55000–5501
 unless you changed them) and, if the dashboard is on, one for its port; both
 read from your settings, not typed in. Adding a firewall rule needs an
 administrator's yes, so the script re-opens itself elevated - the usual
-prompt. `remove-firewall.bat` takes both rules out again.
+prompt. The ports and the interpreter are worked out before that, as you, and
+handed to the elevated copy, so it works when the account that answers the
+prompt is not yours (a standard user with a parent's password) and has no
+Python of its own. `remove-firewall.bat` takes both rules out again.
 
 Cancel does more than decline: Windows also creates an inbound **Block** rule
 for that `python.exe`, and a Block rule wins over any Allow rule, so a port rule

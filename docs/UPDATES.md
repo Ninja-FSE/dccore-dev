@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🪟 The elevated firewall copy only runs netsh (#684)
+
+Audit L20. After `Start-Process -Verb RunAs`, `allow-firewall.bat` ran under whichever account answered UAC
+and searched for Python again with THAT account's `%LOCALAPPDATA%` and `py -3`. A standard-user operator whose
+parent typed the admin password got "Python was not found - run start-dccore.bat first" on a machine where the
+launcher works (the launcher's Python is per-user, `InstallAllUsers=0`), and no rule was added. Separately,
+a folder with an apostrophe in its name (`C:\Users\O'Brien\...`) ended the PowerShell string in the relaunch
+line early, so the script never elevated at all.
+
+The unelevated half now finds the interpreter, reads the ports and learns `sys.executable` as the operator,
+and hands them to the elevated copy as arguments - `elevated <dcc start> <dcc end> <web port> <web on>
+"<python.exe>"` - through `$env:DCCORE_SELF` / `$env:DCCORE_ARGS`, never inside a quoted PowerShell string.
+The copy takes its arguments at the top, skips the search and the ports, and runs the Block-rule step (its
+interpreter path through `$env:DCCORE_PYEXE`, for the same apostrophe reason) and netsh. `remove-firewall.bat`'s
+relaunch goes through `$env:` too. WINDOWS.md says so. `tests/test_the_elevated_firewall_copy_only_runs_netsh.py`
+runs the .bat for real on Windows: the relaunch carries the operator's ports and interpreter; the elevated
+half with NO Python on PATH adds both rules from its arguments and never relaunches; a folder named `O'Brien`
+reaches PowerShell whole; and three source-reading checks for the other platforms. The #589 tests are
+updated to the new shape (the path is read into `%PYEXE%` at once; nothing of cmd's is expanded inside the
+PowerShell text now).
+
 ### 📝 The token file is said to be clear text (#683)
 
 Audit L19, wording only. `hsave` writes mIRC's hash table as plain item/value text, so the console token

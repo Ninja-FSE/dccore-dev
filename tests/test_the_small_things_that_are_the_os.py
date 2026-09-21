@@ -250,11 +250,16 @@ class TheWindowsHelpers(_Tree, unittest.TestCase):
 
     def test_allow_not_elevated_asks_windows_and_does_not_touch_netsh(self):
         self.recorder("net", rc=2)    # `net session` fails: not an administrator
-        self.recorder("powershell")
+        # The relaunch names the file and its arguments through the
+        # environment (#684), so the fake records those too.
+        self.fake("powershell", f'echo powershell %* [%DCCORE_SELF%] [%DCCORE_ARGS%]>> "{self.calls}"\nexit /b 0\n')
         self.recorder("netsh")
         rc, out = self.run_bat("allow-firewall.bat")
         calls = self.calls_made()
-        self.assertTrue(any("powershell" in c and "-Verb RunAs" in c and "allow-firewall.bat" in c for c in calls), calls)
+        relaunch = [c for c in calls if "powershell" in c and "-Verb RunAs" in c]
+        self.assertEqual(len(relaunch), 1, calls)
+        self.assertIn("-FilePath $env:DCCORE_SELF -ArgumentList $env:DCCORE_ARGS", relaunch[0])
+        self.assertIn("allow-firewall.bat]", relaunch[0])
         self.assertFalse(any(c.startswith("netsh") for c in calls), calls)
         self.assertIn("administrator", out)
 
