@@ -19,7 +19,10 @@ redirector copied up beside its pyvenv.cfg, no 30 MB install - under a tree whos
 on PATH: the per-user folder is found, the all-users folder is found, per-user wins when both exist, a leftover
 folder with no python.exe is passed over, and the control with nothing planted reaches the offer. Breaking the
 glob fails four of five. Both launcher fixtures now override ProgramFiles, ProgramW6432 and ProgramFiles(x86)
-together. Test-only.
+together - and case-insensitively (`env_with()`): os.environ upper-cases its keys on Windows, so a plain
+`dict.update({"ProgramW6432": ...})` added a second key differing only in case, and which duplicate the child
+saw was luck - the override won here and the original won on one CI runner, where the all-users tests then
+searched the real Program Files. Test-only.
 
 ### 🚪 The setup page's "do not open the browser" branch is executed (#646)
 

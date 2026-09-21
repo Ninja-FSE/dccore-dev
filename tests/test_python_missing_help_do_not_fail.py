@@ -34,6 +34,24 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 WINDOWS = os.path.join(REPO_ROOT, "scripts", "windows", "start-dccore.bat")
+
+
+def env_with(overrides):
+    """A copy of os.environ with `overrides` applied CASE-INSENSITIVELY.
+
+    os.environ upper-cases its keys on Windows ("PROGRAMW6432"), and a plain
+    dict.update({"ProgramW6432": ...}) adds a second key differing only in
+    case. Windows resolves the duplicate however it likes: on this host the
+    override won, on one CI runner the original did, and the launcher under
+    test searched the real C:\Program Files (#647). Remove the old spelling
+    first, whatever it is.
+    """
+    env = dict(os.environ)
+    for name, value in overrides.items():
+        for present in [k for k in env if k.lower() == name.lower()]:
+            del env[present]
+        env[name] = value
+    return env
 LINUX = os.path.join(REPO_ROOT, "scripts", "linux", "start-dccore.sh")
 
 
@@ -153,9 +171,8 @@ class TheOfferRun(unittest.TestCase):
 
     def run_launcher(self, answer):
         system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
-        env = dict(os.environ)
         programfiles = os.path.join(self.root, "programfiles")
-        env.update({
+        env = env_with({
             "PATH": self.fakebin + os.pathsep + system32,   # no python, no py
             "LOCALAPPDATA": os.path.join(self.root, "localappdata"),
             # All three names (#647): a 64-bit cmd.exe resets ProgramFiles
@@ -296,8 +313,7 @@ class ThePythonTheInstallerPutSomewhere(unittest.TestCase):
 
     def run_check(self):
         system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
-        env = dict(os.environ)
-        env.update({
+        env = env_with({
             "PATH": self.fakebin + os.pathsep + system32,   # no python, no py
             "LOCALAPPDATA": self.localappdata,
             "ProgramFiles": self.programfiles, "ProgramW6432": self.programfiles,
