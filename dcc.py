@@ -2064,6 +2064,24 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         print(f"[DCC] No list is bound to {target_chan!r}; ignoring the "
               f"request from {user}.")
         return
+    # A private message has no channel to route on, but a labelled `!rar`
+    # row does (#653): its first component names a folder, and folders
+    # belong to lists. Routed by that label; an ambiguous one is refused
+    # with a notice saying where to ask instead.
+    if not str(target_chan or "").startswith(("#", "&")):
+        spec = str(requested_file or "").strip()
+        if spec[:5].lower() == "!rar ":
+            parts = list_mod.list_heading_parts(spec[5:].split("::INFO::")[0].strip())
+            routed = library.list_name_for_label(parts[0] if parts else "", wanted_list)
+            if routed is None:
+                print(f"[DCC] {user}'s private request names a folder label that "
+                      f"more than one list serves; asked them to use the channel.")
+                announce.send_dcc_error(user, "ambiguous_list")
+                return
+            if routed != wanted_list:
+                print(f"[DCC] {user}'s private request is a {routed!r} row; "
+                      f"answering from that list rather than {wanted_list!r}.")
+                wanted_list = routed
     # ---------------------------------------------------------------------
     # The global maintenance gate:
     # ---------------------------------------------------------------------

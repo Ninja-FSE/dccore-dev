@@ -806,6 +806,7 @@ def send_dcc_error(user, error_type):
         "user_full": f"Error: You have reached your personal queue limit of {config.MAX_USER_QUEUE} files.",
         "rar_disabled": "Error: Folder packing (!rar) is disabled on this bot.",
         "not_configured": "Error: This bot's music library is not configured yet - ask the operator to set it up.",
+        "ambiguous_list": "Error: That folder name is served by more than one of this bot's lists - request it in the channel it was advertised in.",
     }
     msg_text = errors.get(error_type, "Error: Unknown transfer issue.")
     msg = f"NOTICE {user} :{config.C_BOLD}{msg_text}{config.C_RESET}\r\n"

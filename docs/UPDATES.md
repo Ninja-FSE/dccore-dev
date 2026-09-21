@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📬 A private `!rar` request is routed by its folder label (#653)
+
+Audit M51. `list_for_request()` answers a target that is not a channel with the primary, on the premise that a PM
+carries nothing to route on. A `!Bot !rar <Label>/<Album>` row copied from a list bound to another channel and
+sent by /msg - a common habit with serving bots - was therefore resolved against the primary's folders: refused
+as not found when the label existed only in the other list (no reply to the requester, "Directory not found" in
+the debug channel), or, with the same label and path under the primary too, the primary's folder packed instead
+of the one the row advertised - the outcome routing exists to prevent.
+
+The label is something to route on. `library.list_name_for_label(label, default)`: the primary keeps the request
+if it has the label; otherwise the one other list that has it; two others whose labels name the same folder are
+one answer; two naming different folders are ambiguous and `None` says so. `handle_download_request()` applies it
+to a `!rar` request whose target is not a channel and, on ambiguity, sends a new `ambiguous_list` notice: "request
+it in the channel it was advertised in". A bare filename by PM is still the primary's - it carries no label.
+FUTURE.md's stage-3 sentence says so. `tests/test_a_private_rar_request_is_routed_by_its_label.py` drives the
+real request path over two lists on two trees.
+
 ### ⏱️ The freeze box has one clock (#652)
 
 Audit M50. Two things measured an absent user's five minutes. The per-user timer thread counted ten seconds at a
