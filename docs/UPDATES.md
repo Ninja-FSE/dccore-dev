@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏳ The DCC ACCEPT pacing is driven, not read (#645)
+
+Audit M43. `tests/test_the_resume_handshake_takes_its_turn.py` read dcc.py for the string "wait_for_slot" before
+"irc_sock.sendall(reply.encode(" in `_send_resume_accept()`'s text - which a comment satisfies, and which stayed
+green with the call commented out or moved into `if False:`; only "moved after the send" was caught. The function
+needs only a `runtime.dcc_send_offers` entry and an object with `.sendall()`, and
+`test_complete_means_the_receiver_acked_it.py` was already calling it for real.
+
+A spy in place of `runtime.outbound_pacer` and a recording socket share one log, and the order of the two calls is
+read off it: the ACCEPT goes out, it takes a slot of MSG_DELAY (not a number of its own), the slot comes before
+the write, a stray RESUME for no offer of ours touches neither, and with `background=True` (what the read loop
+passes) the same order holds on the helper thread. All three of the audit's mutants fail. Test-only.
+
 ### 🎯 The feed's channel wiring is driven, not read (#644)
 
 Audit M42. `tests/test_the_feed_says_which_channel.py` checked the SEARCH and both REQUEST channel wirings by
