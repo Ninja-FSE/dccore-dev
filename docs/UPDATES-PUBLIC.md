@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (mIRC console): a failed transfer with no filename, or a filename ending in ` ::`, showed the wrong name or reason in the window.** Such names are now written so the script always reads the name and the reason correctly; a missing name shows as `?`.
 - **Fixed (admin console): when the bot listens for your console connection, it now answers only your address.** Anything else that reached the port in that minute got the welcome banner and a password prompt, and took the single listener so your own connection failed. Strangers are now dropped silently and the port stays open for you.
 - **Fixed (mIRC console): the two closing lines the bot sends ("Goodbye.", "Line too long.") are now proper feed lines like everything else after `hello`.** The shipped script showed them correctly either way.
 - **Fixed (mIRC console): turning "Send debug lines to admin console" off now quietens the whole window.** The transfer and search events kept arriving in the mIRC console with the switch off; only the log lines stopped.

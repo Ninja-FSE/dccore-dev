@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧩 A FAIL line always parses in the script (#682)
+
+Audit L18. `DCCORE FAIL <nick> <chan> <acked> <total> <name> :: <reason>`: only a ` :: ` INSIDE the name was
+defused (to ` : : `). An empty name gave `... 0 0  :: reason` - two spaces - and `dccore.mrc` collapses runs of
+spaces, so `$6-` was `:: reason`, `$pos` found no ` :: `, and the window showed the file as `:: reason` and
+the reason as `failed`. A name ending in ` ::` gave `name :: :: reason`: the name parsed, the reason showed as
+`:: reason`. An empty name needs a queue row without a file, a trailing ` ::` a non-Windows filesystem - real
+but rare. `adminchat._name()` now defuses every standalone `::` in a name wherever it sits (`foo ::` ->
+`foo : :`, `::` -> `: :`), leaves `a::b` and `Song: Part II` alone, and renders an empty name as `?` on every
+kind. `tests/test_a_fail_line_always_parses_in_the_script.py` asserts through a model of the script's own
+split - `DCCORE` stripped, spaces collapsed, `$6-`, the first ` :: ` - so the property is what the window
+shows: name and reason come back right for every shape the audit listed, the model reads the OLD lines the
+way the audit traced them, and every kind's empty name is `?`. Four of eight fail with the old code.
+
 ### 🧪 A mis-typed row does not kill the console's writer (#681)
 
 Audit L17, test-only. The finding: `_writer_loop()` called `send_status()` -> `status_lines()` with no guard

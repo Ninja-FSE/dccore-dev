@@ -432,6 +432,23 @@ def _clean(value, token=False):
     return text.strip()
 
 
+# A "::" standing on its own - bounded by whitespace or the ends of the name.
+_MARKER_TOKEN = re.compile(r"(?<!\S)::(?!\S)")
+
+
+def _name(value):
+    """A filename field: the last field of most lines, and on FAIL the one
+    before the ` :: ` that separates it from the reason. A `::` of its own
+    inside the name used to be defused (` :: ` -> ` : : `) but one at the
+    END was not (#682, audit L18): "name ::" gave "name :: :: reason" and the
+    script read the reason as ":: reason". An empty name gave "0 0  ::
+    reason", and the script - which collapses runs of spaces - read the name
+    as ":: reason" and the reason as nothing. Every standalone `::` is
+    defused now, wherever it sits, and an empty name is "?"."""
+    text = _MARKER_TOKEN.sub(": :", _clean(value))
+    return text or "?"
+
+
 def _num(value):
     try:
         return str(int(value))
@@ -462,7 +479,7 @@ def structured_line(kind, fields):
     f = fields or {}
     nick = _clean(f.get("nick"), token=True)
     chan = _channel_token(f.get("channel"))
-    name = _clean(f.get("name")).replace(" :: ", " : : ")
+    name = _name(f.get("name"))
     kind = str(kind or "").upper()
     if kind == "REQUEST":
         return f"DCCORE REQUEST {nick} {chan} {_clean(f.get('kind') or 'file', token=True)} {name}"
