@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a user leaving a channel with a part message containing the word PART could be recorded as leaving the wrong channel** - their queue was then not frozen while they were away, or frozen while they were present. The channel is read from the command, not from the message.
 - **Fixed: temp files a crash or a Ctrl-C left in `data/` are cleaned up at the next start, and on Linux/macOS the state files (`hard_bans.txt`, `dcc_queue.txt`) are no longer made owner-only by the bot's own saves.** The console token store stays owner-only.
 - **Fixed: a bot registry that could not be saved (a full disk, a permission) is tried again at the next advert instead of half a minute later, the List Browser says when a source you added or removed did not reach the disk, and Ctrl-C saves the registry once more before the bot exits.**
 - **Fixed (dashboard): importing lifetime totals while a transfer completed could lose that transfer from the counts.** The import now updates the totals in one step, so a transfer finishing at the same moment is counted.

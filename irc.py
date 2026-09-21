@@ -758,6 +758,35 @@ def parse_kick(line):
     return match.group(1), match.group(2), match.group(3)
 
 
+def parse_part(line):
+    r"""(nick, channel) for a well-formed PART, or None.
+
+    The channel is the FIRST token after the command, not the last " PART
+    <token>" in the line (#693, audit L29): the old `^:([^!]+)!.* PART
+    (\S+)` search was greedy, and a part reason of "I PART #rock now" put
+    bob in the wrong channel - kept in the one he left (his queue never
+    frozen, a later send to a channel he was gone from) and removed from
+    #rock while he sat there. Anchored on the prefix and `\S*\s+` after the
+    bang, as parse_kick() is.
+    """
+    match = re.match(r"^:([^!\s]+)!\S*\s+PART\s+(\S+)", line)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def parse_join(line):
+    r"""(nick, channel) for a well-formed JOIN, or None. Same shape as
+    parse_part() (#693): the old search's greedy `.*` took the last " JOIN
+    <token>", and an extended-join line (":n!u@h JOIN #c account :Real
+    Name") carries free text after the channel too. A leading ":" on the
+    channel is tolerated, as before."""
+    match = re.match(r"^:([^!\s]+)!\S*\s+JOIN\s+:?(\S+)", line)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
 def parse_join_refusal(line):
     """(channel, numeric) when the server refuses a JOIN, or None.
 
@@ -3171,10 +3200,10 @@ def irc_loop():
                     # themselves into config.channel_users for a channel they are not in -
                     # which dcc.py reads as proof of presence before it dispatches.
                     elif is_user_event(line, "JOIN") and event_source_nick(line) != config.NICKNAME.lower():
-                        join_match = re.search(r"^:([^!]+)!.* JOIN :?(\S+)", line)
-                        if join_match and is_valid_irc_target(join_match.group(2)):
-                            joined_user = join_match.group(1)
-                            joined_chan = join_match.group(2)
+                        join_match = parse_join(line)
+                        if join_match and is_valid_irc_target(join_match[1]):
+                            joined_user = join_match[0]
+                            joined_chan = join_match[1]
                             j_key = joined_user.lower()
                             
                             with runtime.channel_users_lock():
@@ -3205,10 +3234,10 @@ def irc_loop():
                     # Anchored: as JOIN. This one removes people from channel_users, which
                     # freezes their queue and starts the five-minute delete timer.
                     elif is_user_event(line, "PART"):
-                        part_match = re.search(r"^:([^!]+)!.* PART (\S+)", line)
-                        if part_match and is_valid_irc_target(part_match.group(2)):
-                            p_user = part_match.group(1).lower()
-                            p_chan = part_match.group(2).lower()
+                        part_match = parse_part(line)
+                        if part_match and is_valid_irc_target(part_match[1]):
+                            p_user = part_match[0].lower()
+                            p_chan = part_match[1].lower()
                             with runtime.channel_users_lock():
                                 if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
                                     config.channel_users[p_chan].remove(p_user)

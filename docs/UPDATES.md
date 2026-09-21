@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📡 A part reason cannot name the channel (#693)
+
+Audit L29. The PART handler's `^:([^!]+)!.* PART (\S+)` with `re.search` was greedy: the channel group was
+whatever followed the LAST ` PART <token>` in the line, which may sit inside the user-typed reason. bob
+parting `#music` with reason "I PART #rock now" while also in `#rock` was kept in `#music` (his queue never
+frozen while absent; a later send to a channel he had left) and wrongly removed from `#rock` (frozen while he
+sat there). The JOIN handler shared the greedy `.*`, and an extended-join line carries an account and a real
+name after the channel. `irc.parse_part()` and `irc.parse_join()` take the first token after the command,
+anchored on the prefix with `\S*\s+` after the bang as `parse_kick()` is, and the two handlers go through
+them. `tests/test_a_part_reason_cannot_name_the_channel.py`: the audit's line names the channel actually
+left, the ordinary shapes, a PART or JOIN typed into a channel is neither, the verifier's `#music,#rock`
+control is left to `is_valid_irc_target()` as before, the extended-join line, and the handlers read to go
+through the named parsers. The membership-guard tests' anchors follow the handlers' new lines.
+
 ### 💾 Leftover temp files in data/ are swept, and state files are readable again (#692)
 
 Audit L28. `db._atomic_write()` creates `data/.tmp_XXXX.swap` with `mkstemp()` and swaps it into place. A
