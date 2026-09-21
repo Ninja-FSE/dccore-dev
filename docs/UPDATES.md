@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧾 preflight's state guard checks every pass, sees directories, and data/fetched is redirected (#643)
+
+Audit M41. `scripts/preflight.py` compared its state snapshot once, right after the first checks; the count pass
+and the hostile pass ran afterwards with no comparison, so a write that only happens with ProgramFiles stripped
+passed preflight. And the snapshot walked files only: an empty directory created under data/ - `data/fetched`,
+which `oserve.startup()` makedirs for every test that boots the daemon without redirecting FETCHED_FILES_DIR -
+was invisible (it was sitting in this worktree, left by the suite, when this was written).
+
+The snapshot is taken once and compared after each of the three suite-running passes; it records directories
+(reported with a trailing separator) as well as files; and `DCCoreTestCase` redirects `FETCHED_FILES_DIR` under
+its own temp dir like the nine state files before it, without creating it - the code under test does that.
+`tests/test_preflight_checks_every_pass_for_state_writes.py`.
+
 ### 🛫 preflight counts what was skipped, and keeps cmd.exe in the hostile pass (#642)
 
 Audit M40. `scripts/preflight.py` parsed only "Ran N": a skipped test is one that ran nothing, and a pass that

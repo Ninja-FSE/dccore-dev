@@ -103,11 +103,19 @@ WRITABLE_STATE = ("settings.conf", "data")
 
 
 def state_snapshot():
-    """Every real state file, with its modification time.
+    """Every real state file AND directory, with its modification time.
 
-    Compared before and after the suite. A test that redirects its writes
+    Compared before and after every pass. A test that redirects its writes
     correctly leaves this identical; one that does not shows up as an added
     or touched path, named.
+
+    Directories too (#643): this used to walk files only, so an empty
+    directory a test created under data/ - data/fetched, made by
+    oserve.startup()'s makedirs for a test that never redirected
+    FETCHED_FILES_DIR - was invisible, and the guard could not name the
+    test that had just written into the operator's tree. A directory's own
+    mtime is left out on purpose: it changes whenever an entry is added or
+    removed, which the entries themselves already report.
     """
     seen = {}
     for target in WRITABLE_STATE:
@@ -115,7 +123,10 @@ def state_snapshot():
         if os.path.isfile(path):
             seen[target] = os.path.getmtime(path)
         elif os.path.isdir(path):
-            for root, _dirs, names in os.walk(path):
+            seen[target + os.sep] = None
+            for root, dirs, names in os.walk(path):
+                for name in dirs:
+                    seen[os.path.relpath(os.path.join(root, name), REPO_ROOT) + os.sep] = None
                 for name in names:
                     full = os.path.join(root, name)
                     try:
@@ -132,7 +143,7 @@ def report_state_writes(before, after):
     if not added and not touched:
         return True
     print()
-    print("  THE SUITE WROTE REAL STATE FILES:")
+    print("  THE SUITE WROTE REAL STATE FILES (a trailing separator marks a directory):")
     for path in added:
         print(f"    created  {path}")
     for path in touched:
@@ -194,6 +205,12 @@ def main():
                            "function_coverage.py")]),
     ]
 
+    # Taken once, compared after EVERY pass that runs the suite (#643). The
+    # comparison used to happen here, right after these checks - so the
+    # count pass and the hostile pass below could write settings.conf or
+    # data/ and preflight said PASS. A path that derives differently with
+    # ProgramFiles stripped is exactly the kind of write only the hostile
+    # pass would make, and it was the one pass never checked.
     state_before = state_snapshot()
     results = [run(label, argv) for label, argv in checks]
     results.append(report_state_writes(state_before, state_snapshot()))
@@ -217,6 +234,8 @@ def main():
     else:
         print("--- test count: PASS")
         results.append(True)
+
+    results.append(report_state_writes(state_before, state_snapshot()))
 
     skipped, reasons = skip_report(output)
     print("")
@@ -275,6 +294,7 @@ def main():
             [py, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
             env=env,
         ))
+        results.append(report_state_writes(state_before, state_snapshot()))
 
     print()
     if all(results):
