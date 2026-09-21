@@ -551,6 +551,27 @@ def is_valid_irc_target(value):
     return bool(text) and not _UNSAFE_IRC_TARGET_RE.search(text)
 
 
+# The wait before the next connection attempt (#663, audit M61). It used to
+# be a flat 10 s on every path, and ircu's IPcheck throttles an address that
+# reconnects too often inside its clone period (4 in 40 s by default) -
+# counting refused connects too, and only resetting after a gap longer than
+# the period. So once a run of drops tripped the throttle, the 10 s cadence
+# kept it tripped, each attempt answered with "ERROR :Your host is trying to
+# (re)connect too fast -- throttled" and closed, for as long as the bot kept
+# trying. Doubling from 10 s to a five-minute ceiling gets out from under
+# the window; a link that registered resets the count, so an ordinary drop
+# still comes back in ten seconds.
+RECONNECT_DELAY_FIRST = 10.0
+RECONNECT_DELAY_MAX = 300.0
+
+
+def reconnect_delay(failures_in_a_row):
+    """Seconds to wait before the next attempt, after this many attempts in a
+    row that never registered: 10, 20, 40, 80, 160, then 300."""
+    failures = max(0, int(failures_in_a_row))
+    return float(min(RECONNECT_DELAY_MAX, RECONNECT_DELAY_FIRST * (2 ** max(0, failures - 1))))
+
+
 # How many inbound lines to keep for a disconnect report. Fifteen covers the
 # exchange around a drop - the JOINs, the NAMES burst, and the server's own
 # ERROR line - without turning a log into a transcript.
@@ -2405,6 +2426,10 @@ def irc_loop():
     if not hasattr(config, 'connection_epoch'):
         config.connection_epoch = 0
 
+    # Attempts in a row that never reached a 001 (#663): what the wait before
+    # the next one is sized by. Reset the moment a connection registers.
+    registration_failures = 0
+
     # THE RECONNECT LOOP: makes sure this thread never dies on a split or a disconnect
     while True:
         # Every connection starts by trying to claim the bot's real original nick
@@ -2426,12 +2451,14 @@ def irc_loop():
                 oserve_mod.irc_connection = s
             print(f"[CONNECT] Connected to socket successfully!")
         except Exception as e:
-            print(f"[ERROR] Connection failed: {e}. Reconnecting in 10 seconds...")
+            registration_failures += 1
+            delay = reconnect_delay(registration_failures)
+            print(f"[ERROR] Connection failed: {e}. Reconnecting in {delay:.0f} seconds...")
             # `joined` lives in the irc_loop frame and is only reset after a SUCCESSFUL
             # handshake, so a failed attempt used to leave it latched True from the
             # previous connection - which is what let a stale watchdog pass its guard.
             joined = False
-            time.sleep(10)
+            time.sleep(delay)
             continue
             
         # NICK and USER back to back, like every other client (#634, audit
@@ -2474,8 +2501,10 @@ def irc_loop():
             # BACKOFF: without a pause here the loop spun as fast as TCP could connect.
             # Undernet's connection throttle closes the link immediately when you come
             # back too fast, which gave tens of attempts a second and guaranteed we
-            # stayed throttled - or got K-lined - instead of recovering.
-            time.sleep(10)
+            # stayed throttled - or got K-lined - instead of recovering. Growing
+            # since #663, for the same reason at a slower cadence.
+            registration_failures += 1
+            time.sleep(reconnect_delay(registration_failures))
             continue
 
         # This connection is now live: claim a fresh epoch. Any thread still running from
@@ -2761,6 +2790,18 @@ def irc_loop():
                         is_for_me = f"PRIVMSG {config.NICKNAME}" in line or f" {config.NICKNAME} " in line or f"@{config.NICKNAME.lower()}" in line.lower()
                         if not is_channel_traffic or is_for_me or "ERROR" in line:
                             print(f"[RAW IN] {line.strip()}")
+                    # The server's last word before it hangs up (#663). It
+                    # was read and dropped: a throttled reconnect printed
+                    # "Server closed connection" and nothing about why, and
+                    # the retry cadence that caused it stayed the same.
+                    if line.startswith("ERROR ") or line.startswith("ERROR:"):
+                        print(f"[SERVER] {line}")
+                        lowered = line.lower()
+                        if "throttl" in lowered or "too fast" in lowered:
+                            print("[SERVER] The server refuses a client that comes back too "
+                                  "fast. The next attempt waits longer, doubling up to "
+                                  f"{RECONNECT_DELAY_MAX:.0f} seconds, until one registers.")
+
                     if line.startswith("PING"):
                         parts = line.split()
                         if len(parts) > 1:
@@ -3606,8 +3647,16 @@ def irc_loop():
                 _release_socket()
                 break
 
-        # Reset every flag before the next pass through the reconnect loop
-        print("[CONNECT] Lost the connection. Reconnecting to the IRC server in 10 seconds...")
+        # Reset every flag before the next pass through the reconnect loop.
+        # A link that registered and then dropped comes back in ten seconds;
+        # one that never got a 001 - refused, throttled, closed during the
+        # handshake - waits longer each time (#663).
+        if joined:
+            registration_failures = 0
+        else:
+            registration_failures += 1
+        reconnect_wait = reconnect_delay(registration_failures)
+        print(f"[CONNECT] Lost the connection. Reconnecting to the IRC server in {reconnect_wait:.0f} seconds...")
         config.bot_joined_channel = False
         # The freeze box's clock stops with the link (#652): the seconds the
         # bot is away count against nobody's queue. Resumed at activation.
@@ -3638,4 +3687,4 @@ def irc_loop():
         if stale_vip:
             del config.vip_queue[:]
             print(f"[CONNECT] Dropped {stale_vip} queued VIP line(s) from the dead connection.")
-        time.sleep(10)
+        time.sleep(reconnect_wait)

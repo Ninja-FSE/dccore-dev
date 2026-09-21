@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔁 The reconnect backs off, and the server's ERROR line is shown (#663)
+
+Audit M61. Every reconnect path slept a flat 10 s. ircu's IPcheck throttles an address that reconnects too often
+inside its clone period (4 in 40 s by default), counts refused connects too, and resets only after a gap longer
+than the period - so once a run of drops tripped it, the 10 s cadence kept it tripped: every attempt was answered
+with `ERROR :Your host is trying to (re)connect too fast -- throttled` and closed, and the bot never got back on
+by itself. The ERROR line was read and dropped, so the log said "Server closed connection" and nothing about why.
+
+`reconnect_delay(failures)` doubles from 10 s to a five-minute ceiling for attempts in a row that never reached
+a 001 (a failed connect, a failed handshake send, a link closed before registering); a connection that
+registers resets the count, so an ordinary drop still comes back in ten seconds, and the wait is printed as it
+grows. An `ERROR` line from the server is printed as `[SERVER] ...`, and one that says throttled/too fast is
+named for what it is. `tests/test_the_reconnect_backs_off.py` drives the real `irc_loop()` through a series of
+scripted connections (the audit's fake-ircu probe: 10, 20, 40, 80; a registration resets; an ordinary drop is
+10) with the reconnect sleep recorded.
+
 ### 🍎 The macOS Gatekeeper note covers Sequoia (#662)
 
 Audit M60. The launcher's header, the autostart installer and INSTALL.md said: the first time, right-click the
