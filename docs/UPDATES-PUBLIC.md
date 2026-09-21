@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Added (mIRC console): the bot now tells an out-of-date `dccore.mrc` to update itself**, right after it connects, instead of letting its panel silently show fields in the wrong place.
 - **Added: a lost IRC connection now shows up as a notice on the dashboard**, as the help text always said it would. The help now lists exactly what earns a notice: a lost connection, a kick or a refused join, a failed list rebuild.
 - **Docs: leftover wording from earlier versions is cleaned up** - a "phase 2" that no longer exists, `config.py` where the file is `defaults.py`, `python oserve.py` on Windows where `py` is what works, and the finished multiple-lists work listed as done in the roadmap.
 - **Docs: the install guide lists everything `configure.py` asks, in the order it asks it** - including the dashboard question, its follow-ups, and the two offers at the end (build the list now; import OmenServe totals) that the old "six questions" left out.

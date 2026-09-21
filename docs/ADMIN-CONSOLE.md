@@ -473,11 +473,16 @@ A client that draws a window - `dccore.mrc` is the one this exists for - wants
 fields, not prose. After logging in, send one console command:
 
 ```
-hello dccore.mrc 1.0
+hello dccore.mrc 1.1
 ```
 
 The bot answers `DCCORE HELLO 1.1 <botnick> <version>` and, from then on, every
-line it sends on this session starts with `DCCORE`. A bot without this feature
+line it sends on this session starts with `DCCORE`. The second word of your
+`hello` is your client's own version, and the bot reads it: one older than
+the oldest script that reads this bot's lines right (`1.1`, the first to know
+the channel field) is answered, right after `HELLO`, with a plain line saying
+to update the script - the feed still switches on, since the major is the
+same, but a field will read wrong until you do. A bot without this feature
 answers `Unknown command: hello` instead - stay in prose mode. The number in
 `HELLO` is the protocol version as `major.minor` (a bot from before the minor
 was added says a bare `1`): refuse a major you do not know; a minor you do not
@@ -727,7 +732,9 @@ about. Save the new `dccore.mrc` over the old one, then in mIRC:
 token (they live in `dccore.ini` beside it); `/load` would add a second copy.
 The window says so itself when the two sides disagree: *"speaks feed 1.2 and
 this script was written for 1.1"* means update the script; the same line the
-other way round means update the bot.
+other way round means update the bot. The bot checks in the other direction
+too: a script older than the one its lines were written for is told
+*"Update the script"* right after `hello`.
 
 ### If something is off
 

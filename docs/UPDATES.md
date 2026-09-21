@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧩 The bot checks the script's version in hello (#709)
+
+Audit L45. The channel field went into every event line without a number moving; #795 gave `HELLO` a minor
+and taught `dccore.mrc` to check it. The other direction was still missing: `hello <client> <version>` carries
+the script's own version and the bot logged it and nothing more, so an operator who pulled the bot but not
+the script (a file copied into mIRC's folder by hand) got REQUEST lines reading "bob asked for file
+Artist/Album" and SENDING slot numbers showing the channel, with nothing saying why.
+`adminchat.MIN_SCRIPT_VERSION = "1.1"` names the oldest script that reads this bot's lines right, and
+`_cmd_hello()` answers an older one - or one with no version it can read - with a plain `DCCORE OUT` line
+right after `HELLO`: *"This dccore.mrc is version 1.0; this bot's lines are for 1.1 or later. Update the
+script ... or the panel will read a field wrong."* Structured mode still switches on: the major is the same
+and the script keeps parsing. Versions compare as tuples ("1.10" is ten, not one). ADMIN-CONSOLE.md's
+example says `hello dccore.mrc 1.1` and both version notes mention the check.
+`tests/test_the_bot_checks_the_scripts_version.py`: the comparison (older, equal, newer, "1.10", junk and
+none), the pre-field script told right after HELLO with the feed still on, the current one not nagged, a
+hello with no version told, the console log, and the shipped script not being too old for its own bot.
+
 ### 🔔 A lost connection is a notice, and what earns one is written down (#708)
 
 Audit L44. `record_notice()` is reached only through `send_debug(notice=...)`, by the nine call sites that

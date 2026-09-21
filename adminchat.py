@@ -419,7 +419,31 @@ PROTOCOL_MAJOR = 1
 # missing. The number is a string on the wire, never arithmetic: "1.10"
 # must not read as 1.1.
 PROTOCOL_MINOR = 1
+# The oldest dccore.mrc that reads this bot's lines right (#709, audit L45):
+# the one that knows HELLO carries major.minor and that a channel field
+# follows the nick. `hello <client> <version>` carries the script's own
+# version and the bot used to log it and nothing more, so an operator who
+# pulled the bot but not the script got every event line shifted by one
+# field with nothing saying why. The script checks the bot's number; this
+# is the bot checking the script's, and saying so in the window.
+MIN_SCRIPT_VERSION = "1.1"
 FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH", "LISTFETCH")
+
+
+def _version_tuple(text):
+    """"1.10" -> (1, 10); anything that is not digits and dots -> None."""
+    parts = str(text or "").strip().split(".")
+    if not parts or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def script_is_too_old(version):
+    """Whether a client that said `hello <client> <version>` predates
+    MIN_SCRIPT_VERSION - or gave no version this bot can read."""
+    ours = _version_tuple(MIN_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is None or theirs < ours
 
 
 def _clean(value, token=False):
@@ -1233,8 +1257,19 @@ def _cmd_hello(session, args):
     """
     parts = args.split()
     session.client = parts[0] if parts else "unknown"
+    version = parts[1] if len(parts) > 1 else ""
     session.structured = True
     session.send(hello_line())
+    if script_is_too_old(version):
+        # After HELLO, as a plain OUT line the window shows (#709): the
+        # script keeps parsing - the major is the same - but a field it
+        # does not know about sits in every event line.
+        session.send(f"This {session.client} is version {version or 'unknown'}; this bot's "
+                     f"lines are for {MIN_SCRIPT_VERSION} or later. Update the script "
+                     f"(scripts/mirc/dccore.mrc in the bot's folder), or the panel will "
+                     f"read a field wrong.")
+        print(f"[ADMINCHAT] {session.nick}'s {session.client} is {version or 'unknown'}; "
+              f"{MIN_SCRIPT_VERSION} or later reads this bot's lines. Told them.")
     session.send_status()
     print(f"[ADMINCHAT] {session.nick}'s session switched to the structured feed "
           f"({session.client} {' '.join(parts[1:]) or '?'}).")
