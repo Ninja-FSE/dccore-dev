@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -95,9 +96,21 @@ class AfterTheRealSetupPage(setup.TheServer):
         while time.time() < deadline and not opened:
             time.sleep(0.02)
         browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
-        browser.open(f"http://127.0.0.1:{port}/setup?token=tok", timeout=5).read()
+        # Waited for, not bet on: this file runs early in the suite, and on
+        # a cold macOS runner the setup server's first answer took longer
+        # than one five-second timeout.
+        last = None
+        for _ in range(12):
+            try:
+                browser.open(f"http://127.0.0.1:{port}/setup?token=tok", timeout=5).read()
+                break
+            except (urllib.error.URLError, OSError) as err:
+                last = err
+                time.sleep(0.5)
+        else:
+            self.fail("the setup page never answered: %r; log: %r" % (last, logs))
         browser.open(f"http://127.0.0.1:{port}/setup",
-                     data=urllib.parse.urlencode(dict(form, token="tok")).encode(), timeout=5).read()
+                     data=urllib.parse.urlencode(dict(form, token="tok")).encode(), timeout=10).read()
         thread.join(10)
         self.assertFalse(thread.is_alive())
         return opened, logs
