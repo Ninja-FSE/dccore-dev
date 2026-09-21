@@ -114,6 +114,18 @@ the omissions surface, because it is the last point at which they are cheap.
   at extraction (step 2 below) - worth a fresh read rather than a straight
   number swap, since a sentence naming a file that will not exist for the
   reader is its own kind of stale.
+- **Check the Python pin in `scripts/windows/start-dccore.bat`** - `PY_VERSION`
+  and its two SHA-256 lines (#711). The launcher installs exactly that
+  python.org build for a first-timer with no Python, and it fails safe (a
+  hash mismatch refuses to run the file) but never fresh: a 3.x.y security
+  release lands and the launcher keeps installing the old one until somebody
+  remembers. So remember here, once per release: look at python.org's
+  current release in the pinned minor, and if it moved, bump the three lines
+  and run `DCCORE_VERIFY_PYTHON_PIN=1 python -m unittest
+  tests.test_python_missing_help_do_not_fail` (it fetches the hashes and
+  checks them). WINDOWS.md's sample transcript carries the same number, and
+  `tests/test_the_python_pin_has_one_home.py` fails the moment the two
+  disagree - so bump both, and the test says which one you forgot.
 - **Tag the release** on `dccore` after the merge, matching the changelog
   heading exactly. `v1.10.0` in the changelog and `v1.9.0-RC1` on the tag is
   the kind of mismatch nobody notices until someone reports a bug against a

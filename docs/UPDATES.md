@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The Python pin has a freshness step and one guarded copy (#711)
+
+Audit L47. `start-dccore.bat` pins `PY_VERSION` and two SHA-256 hashes for the Python it installs for a
+first-timer; the pin fails safe and is tested, but nothing in the release workflow said to look at it - a
+3.x.y security release lands and the launcher keeps installing the old one until somebody remembers - and
+WINDOWS.md's sample transcript repeated the literal number with nothing tying it to the launcher, so the
+first bump would leave the guide naming a version the launcher no longer prints. PUBLIC-REPO-WORKFLOW.md's
+release checklist now has the step (look at python.org's current release in the pinned minor; bump the three
+lines; run the opt-in `DCCORE_VERIFY_PYTHON_PIN=1` check), and `tests/test_the_python_pin_has_one_home.py`
+keeps the transcript's number equal to the launcher's - saying which to bump - and refuses the version in
+any other prose.
+
 ### 🔒 One daemon per data folder, and the logon task asks nothing (#710)
 
 Audit L46. Nothing checked for an already-running instance - not the daemon, not the launchers - so a
