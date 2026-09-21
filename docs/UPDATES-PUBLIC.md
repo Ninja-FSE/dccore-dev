@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs (Windows): "Did it actually start?" no longer refers to "step 7" and "step 4" of a list that comes later in the guide.**
 - **Fixed: a very long debug-channel line (a long folder name, an error with a full path) is now shortened with an ellipsis instead of being cut by the server mid-colour**, which left the rest of the line painted in the background colour.
 - **Fixed: a user leaving a channel with a part message containing the word PART could be recorded as leaving the wrong channel** - their queue was then not frozen while they were away, or frozen while they were present. The channel is read from the command, not from the message.
 - **Fixed: temp files a crash or a Ctrl-C left in `data/` are cleaned up at the next start, and on Linux/macOS the state files (`hard_bans.txt`, `dcc_queue.txt`) are no longer made owner-only by the bot's own saves.** The console token store stays owner-only.

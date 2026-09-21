@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 WINDOWS.md's "Did it actually start?" says what it means (#695)
+
+Audit L31. The section was written under a since-removed "The seven steps" list. Read top to bottom, a
+first-timer met "Step 7 prints a lot" right after "The two steps" (steps 1 and 2) and "That is step 4" with
+no referent - the list meant is "Before you start", fifty lines further down - and either hunted through the
+guide or assumed they had skipped something; the Setup section's "skipped step 4" had the same problem with
+its three-step list. The three now say what they mean: the launcher's window; the optional Flask install,
+with the command and where the item lives; "Flask was never installed".
+`tests/test_the_windows_guide_names_what_a_step_means.py` guards the property rather than the wording: every
+"step N" in the guide is preceded by a numbered item N above it - the old text reads as dangling at lines 70
+and 104 - and reads the three places.
+
 ### 📡 The debug-channel line fits the wire (#694)
 
 Audit L30. `send_debug()` wrapped its text in about 170 bytes of colour framing with no line-length budget -

@@ -67,9 +67,9 @@ requirements-web.txt` installs the dashboard's one dependency,
 
 ## Did it actually start?
 
-Step 7 prints a lot. Three lines tell you whether the **web dashboard** came
-up, and they are worth knowing apart because they send you to different
-places.
+The launcher's window prints a lot. Three lines tell you whether the **web
+dashboard** came up, and they are worth knowing apart because they send you to
+different places.
 
 **It is running:**
 
@@ -101,8 +101,10 @@ tells you so at startup (`[CONFIG] settings.conf overrides WEBUI_ENABLED
 [WEBUI] Flask not installed; dashboard disabled.
 ```
 
-That is step 4. The daemon itself needs nothing beyond the standard library
-and carries on serving files perfectly well - only the dashboard is
+That is the optional Flask install - the launcher offers it, or
+`py -3 -m pip install -r requirements-web.txt` by hand (item 4 under "Before
+you start", below). The daemon itself needs nothing beyond the standard
+library and carries on serving files perfectly well - only the dashboard is
 unavailable, which is why a missing Flask is a message rather than a failure.
 
 (A different line, `[WEBUI] Could not import webserver: ...`, means
@@ -287,8 +289,8 @@ Ctrl-C in that window stops it. The launcher runs the setup check first and
 refuses to start if it fails.
 
 Then read the first few lines it prints - see [Did it actually
-start?](#did-it-actually-start) above for the four that tell you whether the
-dashboard came up, and which of them means you skipped step 4.
+start?](#did-it-actually-start) above for the lines that tell you whether the
+dashboard came up, and which of them means Flask was never installed.
 
 ---
 
