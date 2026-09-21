@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (mIRC): on a client connected to more than one network, the script could dial the bot on the wrong one.** It now remembers the network you paired or connected on and opens the console there, whichever window you type in and whichever network reconnects. Update `dccore.mrc`; the network is picked up the next time you `/dccore connect` or the bot joins a channel you share.
 - **Fixed: a user who came back at the very moment their five minutes ran out could lose their queue anyway.** The countdown checked whether they were still away and then erased the queue as two separate steps; a return landing between the two was erased regardless, and the countdown's own thread crashed. It is one step now.
 - **Fixed: the "Sent:" line for a file requested by private message never reached the channel.** When a user asked by /msg and a slot was free, the completion notice was addressed to the bot itself and quietly dropped. It now goes to the channel like every other completion.
 - **Fixed: a packed album whose send failed once had to be requested and packed all over again.** If the user missed the 30-second accept window (or their client dropped the connection), the bot deleted the freshly packed archive and removed the request - while an ordinary file in the same situation was simply retried. A packed archive is now kept and retried the same number of times as any other file, and only deleted once those attempts are used up.

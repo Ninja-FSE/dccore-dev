@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🌐 dccore.mrc dials on the bot's network, whatever connection fired it (#661)
+
+Audit M59. The script never recorded which network the bot lives on: `dcc chat <bot>` ran in whatever connection
+invoked it - the event's own for CONNECT/JOIN/401/CHATCLOSE, the active window's for /dccore connect - and the
+retry timer is one global name. On a client on two networks the CTCP went to the wrong one: a 401, a retry loop
+stuck there ("X is not online" every two minutes while the bot was up), and every reconnect of the other network
+saying "already open".
+
+`dccore.remember.net` keeps `$network` (or `$server`) from the moment the operator types /dccore connect or
+/dccore pair - that connection IS the bot's - or from the bot's own JOIN when nothing is recorded; `dccore.cid`
+finds that network's connection id across every connection (`$scon`), `dccore.connect` moves itself onto it with
+/scid (and says so when that network is not connected), and the CONNECT and JOIN triggers fire only there
+(`dccore.here`). /dccore unpair forgets it; /dccore version names it. All mIRC 6.0-era multi-server identifiers.
+ADMIN-CONSOLE.md gains the "more than one network" entry. `tests/test_the_script_dials_on_the_bots_network.py`
+reads the script. Not verified in mIRC.
+
 ### 🔒 The freeze timer tests and takes the freeze under the lock, in one move (#659)
 
 Audit M57. `user_queue_timer`'s expiry read `t_key in config.frozen_queues` outside `queue_lock`, then under the

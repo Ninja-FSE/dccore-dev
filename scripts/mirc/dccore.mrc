@@ -160,6 +160,7 @@ alias dccore {
   if (%cmd == connect) {
     if ($2 != $null) { dccore.set bot $2 }
     if ($dccore.bot == $null) { dccore.sys No bot nick yet. Use: /dccore connect <botnick> | return }
+    dccore.remember.net
     dccore.set wantopen 1
     hadd dccore.live tries 0
     dccore.connect byhand
@@ -168,6 +169,7 @@ alias dccore {
   if (%cmd == pair) {
     if ($2 != $null) { dccore.set bot $2 }
     if ($dccore.bot == $null) { dccore.sys No bot nick yet. Use: /dccore pair <botnick> | return }
+    dccore.remember.net
     dccore.set wantopen 1
     hadd dccore.live pairing 1
     hadd dccore.live tries 0
@@ -182,6 +184,7 @@ alias dccore {
     dccore.forget token
     dccore.forget paired
     dccore.forget bothost
+    dccore.forget net
     hdel dccore.live tokenbad
     dccore.title
     return
@@ -207,7 +210,7 @@ alias dccore {
   if (%cmd == status) { dccore.send status | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
-  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for DCCore 1.13 and later. Pairs as $dccore.client $+ . | return }
+  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for DCCore 1.13 and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }
   if (%cmd == font) {
     if ($2 !isnum) || ($2 < 6) { dccore.sys Give a size, like /dccore font 14 (now: $dccore.fontsize $+ ). | return }
     dccore.set fontsize $2
@@ -239,8 +242,35 @@ alias dccore {
 
 ; "byhand" is the operator's own /dccore connect or pair; the retry timer,
 ; a JOIN of the bot's nick and an IRC connect dial without it.
+;  Which network the bot lives on (#661). Nothing recorded it: the dial
+;  ran in whatever connection fired it - on CONNECT/JOIN/401/CHATCLOSE
+;  the event's own, on /dccore connect the active window's - so on a
+;  client on two networks the CTCP went to the wrong one (401, a retry
+;  loop stuck there) and every reconnect of the other network said
+;  "already open". The network is kept from the moment the operator
+;  typed /dccore connect or pair (that connection IS the bot's), or from
+;  the bot's own JOIN, and every dial is moved onto it with /scid.
+alias dccore.remember.net { if ($server) { dccore.set net $iif($network,$network,$server) } }
+;  The connection id the bot's network is on right now, or $null when
+;  that network is not connected. With nothing recorded: this one.
+alias dccore.cid {
+  var %net = $dccore.opt(net)
+  if (%net == $null) { return $cid }
+  var %i = 1
+  while (%i <= $scon(0)) {
+    if ($scon(%i).network == %net) || ($scon(%i).server == %net) { return $scon(%i).cid }
+    inc %i
+  }
+  return
+}
+;  True when this connection is the bot's network, or none is recorded yet.
+alias dccore.here { return $iif($dccore.opt(net) == $null,$true,$iif($network == $dccore.opt(net),$true,$iif($server == $dccore.opt(net),$true,$false))) }
 alias dccore.connect {
   if ($dccore.bot == $null) { return }
+  ; On the bot's network, not the one that happened to fire this (#661).
+  var %cid = $dccore.cid
+  if (%cid == $null) { dccore.sys Not connected to $dccore.opt(net) $+ , where $dccore.bot lives; the chat will open when you are. | return }
+  if (%cid != $cid) { scid %cid dccore.connect $1- | return }
   if (!$server) { dccore.sys Not connected to IRC; the chat will open when you are. | return }
   if ($chat($dccore.bot)) { dccore.sys A chat with $dccore.bot is already open. | return }
   dccore.window
@@ -304,14 +334,15 @@ raw 401:*: {
 }
 
 on *:JOIN:#: {
-  if ($nick == $dccore.bot) && ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && (!$chat($dccore.bot)) {
+  if ($nick == $dccore.bot) && ($dccore.here) && ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && (!$chat($dccore.bot)) {
+    if ($dccore.opt(net) == $null) { dccore.remember.net }
     hadd dccore.live tries 0
     .timerdccoreRetry 1 3 dccore.connect
   }
 }
 
 on *:CONNECT: {
-  if ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && ($dccore.bot != $null) {
+  if ($dccore.here) && ($dccore.opt(wantopen)) && ($dccore.opt(auto)) && ($dccore.bot != $null) {
     hadd dccore.live tries 0
     .timerdccoreRetry 1 8 dccore.connect
   }

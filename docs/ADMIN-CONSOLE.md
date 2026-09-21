@@ -744,6 +744,12 @@ other way round means update the bot.
   log in or pair again: a refusal counts as a wrong password, three of them
   block your address for 15 minutes, and left to itself the redial would
   reach that in about two minutes.
+- **You are on more than one network** - the script remembers which
+  network the bot is on from the moment you type `/dccore connect` or
+  `/dccore pair` there (or from the bot's own join), and every later dial -
+  on connect, on the bot's join, on a retry, or `/dccore connect` typed in
+  a window on another network - goes to that network. Pairing again from
+  another network moves it. `/dccore version` says which network it holds.
 - **Two people with the script** - the console is one session, and a
   login replaces the one before it. The client that was replaced says so
   and does not reconnect by itself, so the two of you take turns rather
