@@ -474,8 +474,8 @@ hello dccore.mrc 1.0
 The bot answers `DCCORE HELLO 1.1 <botnick> <version>` and, from then on, every
 line it sends on this session starts with `DCCORE`. A bot without this feature
 answers `Unknown command: hello` instead - stay in prose mode. The number in
-`HELLO` is the protocol version as `major.minor` (a bot from before the 1.13
-release says a bare `1`): refuse a major you do not know; a minor you do not
+`HELLO` is the protocol version as `major.minor` (a bot from before the minor
+was added says a bare `1`): refuse a major you do not know; a minor you do not
 know means a fixed field has been inserted on one side - the lines still
 parse, but a field is not where you expect it - so warn, and update whichever
 side is older. The minor goes up every time a field is inserted; the free-text
@@ -614,9 +614,9 @@ the password or with a token - to mint or revoke one. The file lives where
 `scripts/mirc/dccore.mrc` is the client the feed above was designed for:
 the bot's whole life in one mIRC window, so that running DCCore feels no
 different from running a script inside mIRC. It needs **mIRC 6.10 or
-later** - everything it uses dates from mIRC 6.x - and a bot of 1.13 or
-later. On an older bot it still works as a plain console, without the
-panel.
+later** - everything it uses dates from mIRC 6.x - and a bot that answers
+`hello`: the DCCore this script ships with, or a later one. On an older bot
+it still works as a plain console, without the panel.
 
 ### First time
 
@@ -731,8 +731,8 @@ other way round means update the bot.
 - **Non-ASCII file names look garbled** - mIRC 6 shows text in your
   Windows code page and the bot sends UTF-8. mIRC 7 decodes the chat as
   UTF-8 and shows them correctly; the script is the same file on both.
-- **"Plain mode" in the window** - the bot is older than 1.13 and does
-  not answer `hello`; the window shows the chat as it comes, with no
+- **"Plain mode" in the window** - the bot is from before `hello` and
+  does not answer it; the window shows the chat as it comes, with no
   panel. Or the bot speaks a newer protocol than the script - a script
   from before the version carried a minor refuses `1.1` this way and says
   "Update the script": do that (see "Updating the script" above).

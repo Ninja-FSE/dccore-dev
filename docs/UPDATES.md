@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The mIRC docs and script no longer require a bot that does not exist (#666)
+
+Audit L2. `docs/ADMIN-CONSOLE.md` ("a bot of 1.13 or later", "older than 1.13", "before the 1.13 release") and
+`scripts/mirc/dccore.mrc` (its header, the `/dccore version` text and two comments) named 1.13 as the bot the
+script needs, from a tree whose `SCRIPT_VERSION` is v1.12.2 - a release that has not been cut. An operator who
+read the requirement against their bot's version would conclude the script could not work with it. The claims
+now say what they mean: a bot that answers `hello`, the DCCore the script ships with or a later one; the bare
+`1` in `HELLO` is "a bot from before the minor was added". The release roll is where a number may be named.
+
+`tests/test_the_docs_do_not_require_a_bot_that_does_not_exist.py` reads the shipped operator docs and the
+script: no "DCCore x.y", "bot of x.y", "older than x.y", "before x.y", "since x.y" or "from x.y" may name a
+version above `SCRIPT_VERSION` (the changelogs and the roadmap are outside the sweep; they may name what is to
+come). The regex is itself tested against the six phrases the audit found and against "protocol 1.1" and
+"mIRC 6.10". Not verified in mIRC: the script change is comment and message text only.
+
 ### 🔐 config.send_queue has a lock (#665)
 
 Audit L1. The per-user text lanes are written by every request, search and reply thread
