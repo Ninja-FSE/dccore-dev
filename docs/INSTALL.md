@@ -71,7 +71,12 @@ the daemon serves one page, `http://127.0.0.1:8420/setup`, and waits. The
 link it prints - and opens in your browser - carries a one-time code, so
 that only the person at this machine can use the page: it is loopback-only,
 it exists only until the form is saved, and any website open in the same
-browser would otherwise be able to submit a password of its own. Save, and
+browser would otherwise be able to submit a password of its own. The code is
+good for one browser - the first one it is opened in - so on a Linux box
+shared with other users, where the browser's command line (and the link in
+it) is readable with `ps`, nobody else can open the page after you have; if
+you are told the link was already opened elsewhere, stop DCCore and start it
+again for a fresh code. Save, and
 the bot starts in the same window; if you left the dashboard on, the page
 takes you to its login with the password you just chose. The dashboard box
 starts ticked (reachable from this machine only, unless you tick the

@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 The setup-page code is good for one browser (#675)
+
+Audit L11. `run_setup_until_configured()` prints `http://127.0.0.1:8420/setup?token=...` and hands it to
+`webbrowser.open()`. On Linux that is `xdg-open` with the URL in argv, and the browser it starts keeps the URL
+in its own argv for as long as it runs - so on a host shared with other users, `ps aux | grep token=` during
+the setup window gave a second user the code, and the page binds 127.0.0.1, which every local user reaches:
+they could submit the form first with a password of their own. Single-user desktops (the target install),
+macOS (the URL goes to osascript over a pipe) and Windows are unaffected.
+
+The code is bound to the first browser that presents it: `create_setup_app()`'s gate gives that request an
+HttpOnly `dccore-setup` cookie (`after_request`), and from then on the code is accepted only together with it.
+A second browser with the code is refused with *"This link has already been opened in another browser, and
+the code in it is good for one. If that was not you, stop DCCore and start it again: it prints a new link with
+a new code."* - and if the other user was somehow first, that is what the operator sees, which is the alarm.
+The cookie alone is not the code; once the form is saved the saved page and its `/login` poll need neither, as
+before. INSTALL.md says so next to the one-time code.
+
+`tests/test_the_setup_code_is_good_for_one_browser.py`: the first browser gets the cookie, a second is refused
+on GET and on POST (nothing applied), the bound one saves, cookie-without-code and wrong-cookie-with-code are
+refused, the saved page is open to all, and `/?token=` binds too; the guide is read. Six of nine fail with the
+old gate. `test_set_it_up_in_the_browser`'s real-server test drives one cookie-keeping browser now and adds
+the second-browser refusal over a real socket.
+
 ### 🧪 The setup app's routes are walked like the dashboard's (#674)
 
 Audit L10, test-only. `tests/test_every_route_is_behind_the_login.py` walks `create_app()`'s `url_map` so a

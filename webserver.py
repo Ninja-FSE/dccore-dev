@@ -75,7 +75,7 @@ import platform_compat
 import runtime
 
 try:
-    from flask import (Flask, jsonify, redirect, request, send_file,
+    from flask import (Flask, g, jsonify, redirect, request, send_file,
                        send_from_directory, session)
     HAVE_FLASK = True
 except ImportError:
@@ -4688,7 +4688,18 @@ if HAVE_FLASK:
         """The setup-only app: /setup, and nothing the real app has."""
         app = Flask("dccore-setup", static_folder=None)
         app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
-        state = {"done": False, "changes": None}
+        # `bound`: the browser the code was first presented from (#675,
+        # audit L11). The link is handed to the OS opener, and on Linux
+        # that is xdg-open with the URL in argv, which the browser keeps in
+        # its own argv for as long as it runs - readable by any other local
+        # user via ps, for the whole setup window, on a host where 127.0.0.1
+        # is reachable by everyone. So the code is good for one browser:
+        # the first request that carries it gets a cookie, and from then on
+        # the code is accepted only together with that cookie. A second
+        # browser with the code from ps is refused, and if it was somehow
+        # first, the operator's own is - loudly, with what to do.
+        state = {"done": False, "changes": None, "bound": None}
+        SETUP_COOKIE = "dccore-setup"
 
         def refused(why):
             return (f"<!doctype html><meta charset='utf-8'><p style='font-family:sans-serif'>"
@@ -4706,7 +4717,25 @@ if HAVE_FLASK:
                 return refused("Open the exact link printed in DCCore's window - it "
                                "carries a one-time code, so that only the person at "
                                "this machine can set the bot up.")
+            if state["bound"] is None:
+                import secrets
+                state["bound"] = secrets.token_urlsafe(24)
+                g.setup_cookie_to_set = state["bound"]
+                return None
+            held = request.cookies.get(SETUP_COOKIE, "")
+            if not hmac.compare_digest(held.encode("utf-8"), state["bound"].encode("utf-8")):
+                return refused("This link has already been opened in another browser, "
+                               "and the code in it is good for one. If that was not "
+                               "you, stop DCCore and start it again: it prints a new "
+                               "link with a new code.")
             return None
+
+        @app.after_request
+        def bind_the_first_browser(response):
+            value = getattr(g, "setup_cookie_to_set", None)
+            if value:
+                response.set_cookie(SETUP_COOKIE, value, httponly=True, samesite="Lax", path="/")
+            return response
 
         @app.route("/")
         def root():
