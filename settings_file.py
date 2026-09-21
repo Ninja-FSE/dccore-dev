@@ -477,6 +477,35 @@ def nick_problem(nick):
     return None
 
 
+def server_problem(value):
+    """Why `value` cannot be SERVER - a host name the bot can resolve - or
+    None if it can (#687, audit L23).
+
+    The natural first-timer spellings "irc.undernet.org:6667" and a pasted
+    "irc://irc.undernet.org" were accepted, and connect() then failed on
+    name resolution every ten seconds for ever - "[ERROR] Connection failed:
+    [Errno 11001] getaddrinfo failed" - with nothing saying the colon or the
+    scheme was the problem. The port has its own setting (PORT), and a host
+    name has no ":", "/" or spaces in it.
+    """
+    text = str(value).strip()
+    if not text:
+        return "a server name cannot be empty"
+    if "://" in text:
+        return (f"{text!r} is a URL; SERVER is the host name alone, "
+                f"e.g. {text.split('://', 1)[1].split('/', 1)[0].split(':', 1)[0] or 'irc.undernet.org'}")
+    if "/" in text:
+        return f"{text!r} has a / in it; SERVER is the host name alone"
+    if ":" in text:
+        host, _colon, port = text.partition(":")
+        if port.isdigit():
+            return f"{text!r} carries the port; put {host!r} in SERVER and {port} in PORT"
+        return f"{text!r} has a : in it; SERVER is the host name alone, and PORT is its own setting"
+    if " " in text:
+        return f"{text!r} has a space in it"
+    return None
+
+
 def nicks_problem(value):
     """The same for a comma-separated list (ADMIN_NICK)."""
     parts = [part.strip() for part in str(value).split(",")]
@@ -533,6 +562,11 @@ def coerce(name, raw, default, declared=None):
         problem = nicks_problem(text) if name == "ADMIN_NICK" else nick_problem(text)
         if problem:
             raise ValueError(f"not a valid IRC nickname: {problem}")
+
+    if name == "SERVER" and text:
+        problem = server_problem(text)
+        if problem:
+            raise ValueError(f"not a server name: {problem}")
 
     if default is None and not text:
         # A setting whose default is None is "unset unless you say otherwise"

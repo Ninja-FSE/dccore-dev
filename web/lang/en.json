@@ -519,7 +519,7 @@
   "setup.error.nickname_needed": "A nickname is needed.",
   "setup.error.nickname_invalid": "That is not an IRC nickname: {problem}.",
   "setup.error.server_needed": "An IRC server is needed (irc.undernet.org is the usual one).",
-  "setup.error.server_spaces": "A server name has no spaces.",
+  "setup.error.server_shape": "A server name has no spaces, no port and no irc:// - just the host, e.g. irc.undernet.org (the port is a separate setting).",
   "setup.error.channel_needed": "At least one channel is needed, like #mychannel.",
   "setup.error.channel_shape": "Each channel starts with # and has no spaces; separate several with commas.",
   "setup.error.admin_needed": "Your own nick is needed - the person who may run the admin commands.",

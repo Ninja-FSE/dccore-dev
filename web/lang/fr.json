@@ -634,7 +634,7 @@
   "setup.error.nickname_needed": "Un pseudo est nécessaire.",
   "setup.error.nickname_invalid": "Ce n'est pas un pseudo IRC : {problem}.",
   "setup.error.server_needed": "Un serveur IRC est nécessaire (irc.undernet.org est le plus courant).",
-  "setup.error.server_spaces": "Un nom de serveur ne contient pas d'espace.",
+  "setup.error.server_shape": "Un nom de serveur ne contient ni espace, ni port, ni irc:// - seulement l'hôte, p. ex. irc.undernet.org (le port est un réglage à part).",
   "setup.error.channel_needed": "Au moins un canal est nécessaire, par exemple #moncanal.",
   "setup.error.channel_shape": "Chaque canal commence par # et ne contient pas d'espace ; séparez-en plusieurs par des virgules.",
   "setup.error.admin_needed": "Votre propre pseudo est nécessaire - la personne autorisée à lancer les commandes admin.",

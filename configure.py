@@ -160,7 +160,8 @@ def collect_answers():
     nickname = _ask("Nickname", default=_current("NICKNAME"), check=settings_file.nick_problem)
     changes["NICKNAME"] = nickname
 
-    server = _ask("IRC server", default=_current("SERVER", "irc.undernet.org"))
+    server = _ask("IRC server", default=_current("SERVER", "irc.undernet.org"),
+                  check=settings_file.server_problem)
     changes["SERVER"] = server
 
     channel = _ask("Channel(s), comma-separated", default=_current("CHANNEL"))

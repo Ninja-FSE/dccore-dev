@@ -634,7 +634,7 @@
   "setup.error.nickname_needed": "Hace falta un apodo.",
   "setup.error.nickname_invalid": "Eso no es un apodo de IRC: {problem}.",
   "setup.error.server_needed": "Hace falta un servidor IRC (irc.undernet.org es el habitual).",
-  "setup.error.server_spaces": "Un nombre de servidor no lleva espacios.",
+  "setup.error.server_shape": "Un nombre de servidor no lleva espacios, ni puerto, ni irc:// - solo el host, p. ej. irc.undernet.org (el puerto es un ajuste aparte).",
   "setup.error.channel_needed": "Hace falta al menos un canal, como #micanal.",
   "setup.error.channel_shape": "Cada canal empieza por # y no lleva espacios; separa varios con comas.",
   "setup.error.admin_needed": "Hace falta tu propio apodo - la persona que puede ejecutar los comandos de administración.",

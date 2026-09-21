@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔌 SERVER is a host name, and says so when it is not (#687)
+
+Audit L23. The setup form refused only a space in SERVER, and PORT is not on the form, so the natural
+first-timer spelling `irc.undernet.org:6667` - or a pasted `irc://irc.undernet.org` - was accepted and
+written, and `connect()` failed on name resolution every ten seconds for ever: `[ERROR] Connection failed:
+[Errno 11001] getaddrinfo failed. Reconnecting in 10 seconds...`, with nothing saying the colon or the scheme
+was the problem. `configure.py`'s prompt and a hand-edited `settings.conf` took the same values.
+
+`settings_file.server_problem()` names what is wrong and what to write instead - a URL ("SERVER is the host
+name alone, e.g. irc.undernet.org"), `host:port` ("put 'irc.undernet.org' in SERVER and 6667 in PORT"), a `/`,
+a `:` without a port, a space, a blank - and all three doors refuse through it: the setup form
+(`setup.error.server_shape` in en/es/fr, replacing `server_spaces`, whose case it covers), `configure.py`'s
+`_ask(..., check=server_problem)`, and `_check_writable()` for `settings.conf` and the dashboard's Settings
+page. `tests/test_server_is_a_host_name.py`: the audit's three spellings and the other shapes, real hosts
+passing, the form in three languages, the reader raising with the fix named, and the prompt wired. Seven of
+nine fail with the old code.
+
 ### 🖥️ A size setting's help says the unit the page shows (#686)
 
 Audit L22. `settings_help.PLAIN_HELP` is one text for two readers: `settings.conf.sample`, where the value IS

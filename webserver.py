@@ -4453,8 +4453,14 @@ def validate_setup_form(form, lang="en"):
         errors.append(("SERVER", say("setup.error.server_needed",
                                      "An IRC server is needed (irc.undernet.org is "
                                      "the usual one).")))
-    elif " " in server:
-        errors.append(("SERVER", say("setup.error.server_spaces", "A server name has no spaces.")))
+    elif settings_file.server_problem(server):
+        # ":" and "/" as well as a space (#687): "irc.undernet.org:6667" and
+        # a pasted irc:// URL were accepted and the bot looped on
+        # getaddrinfo every ten seconds with nothing saying why.
+        errors.append(("SERVER", say("setup.error.server_shape",
+                                     "A server name has no spaces, no port and no irc:// - "
+                                     "just the host, e.g. irc.undernet.org (the port is a "
+                                     "separate setting).")))
     else:
         changes["SERVER"] = server
 
