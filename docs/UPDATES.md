@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The diagnostic gates in the read loop are executed, not read (#703)
+
+Audit L39, test-only. `irc_loop()`'s inline dispatch - the admin gates on `!ping` and `!debugnames` and
+the CTCP VERSION reply - was guarded by source-substring tests alone. They catch a gate moved after its
+action, but the verifier's mutant - the gate kept in place and neutralised with `and False` - passed all
+nine. `!ping` has an executed backstop inside `handle_ping_request()`; `!debugnames` does not (its RAM-CHECK
+notice is built and queued inline), and neither does VERSION's reply. Since #789 the loop is driven for real
+against a scripted server, so `tests/test_the_diagnostic_gates_are_executed_not_read.py` runs the lines
+through it after 001, with the loop's threads recorded and the fake `oserve`'s queue watched: a stranger's
+`!debugnames` queues nothing and the admin's gets the RAM-CHECK; a stranger's `!ping` starts no thread and
+the admin's starts `handle_ping_request` for them; a CTCP VERSION is answered through the paced VIP queue and
+not at all with the reply off. The audit's mutant fails two of the six. (The audit's other suggestion - lifting
+the dispatch out of the loop into a function - is not needed for the coverage and is left as it is.)
+
 ### 📝 Stale phrasing and module names are gone from operator-facing text (#701)
 
 Audit L37. Remnants of earlier phases and of the `config.py` rename sat where a novice reads them:
