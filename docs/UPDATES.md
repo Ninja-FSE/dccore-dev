@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The setup check names the module that exists (#699)
+
+Audit L35. Half of it is #685 (the check on an empty tree said "copy the samples"). The other half: the
+check's `import defaults` failure was reported as *"config.py did not load"* - a file that has not existed
+since the rename the guides describe - and sent an operator looking for it. It says *"defaults.py did not
+load (it reads admin_config.py and settings.conf)"* now, and the two comments that still said `config.py`
+say `defaults.py`. `tests/test_the_check_names_the_module_that_exists.py` reads the message, refuses any
+other bare `config.py` in the check, and pins that the tree has `defaults.py` and no `config.py`.
+
 ### 📝 The test count is kept in one place (#698)
 
 Audit L34. README.md said 4994 tests and FUTURE.md said 5237 on the same commit; the loader found 5287. Two

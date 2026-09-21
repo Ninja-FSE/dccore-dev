@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: the setup check no longer reports a failure in "config.py", a file that does not exist** - it names `defaults.py`, the one it means.
 - **Docs: the roadmap no longer calls the flood ban a "day-ban"** - it is a timed ban, one hour by default (`FLOOD_BAN_SECONDS`).
 - **Docs: the install guide no longer says `!rar` packing "has no size cap"** - it has had one (`MAX_RAR_FOLDER_SIZE`, 10 GB) for a while; the upgrade note now gives the real reason video folders are not packable.
 - **Docs (Windows): "Did it actually start?" no longer refers to "step 7" and "step 4" of a list that comes later in the guide.**

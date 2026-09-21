@@ -15,7 +15,7 @@ scripts/linux/check-setup.py and scripts/windows/check-setup.py were the same
 file twice - 151 identical lines out of ~220, checking the same ten settings,
 differing only in a docstring, os.name, a rar hint and a few command names.
 
-Two hand-maintained copies of the same knowledge about config.py is the shape
+Two hand-maintained copies of the same knowledge about defaults.py is the shape
 PRESERVE_RUNTIME already was here: a second list that had to be kept in step
 with the first, drifted, and stopped matching reality without saying anything.
 
@@ -297,7 +297,7 @@ def main(platform):
     print()
     print("Configuration")
 
-    # #162 finding #19: settings.conf is fully first-class - config.py applies
+    # #162 finding #19: settings.conf is fully first-class - defaults.py applies
     # it SECOND (so it wins over admin_config.py on a shared key), the daemon
     # starts fine from it alone, and every setting an operator would otherwise
     # put in admin_config.py (including ADMIN_HOSTMASKS/ADMIN_PASSWORD_HASH -
@@ -350,7 +350,10 @@ def main(platform):
     try:
         import defaults as config
     except Exception as err:
-        fail(f"config.py did not load: {err}")
+        # defaults.py, the module's name since the rename the guides
+        # describe (#699): the message said "config.py", a file that does
+        # not exist, and sent an operator looking for it.
+        fail(f"defaults.py did not load (it reads admin_config.py and settings.conf): {err}")
         print()
         print("  Cannot continue without a config.")
         return 1
