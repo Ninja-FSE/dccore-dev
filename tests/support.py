@@ -596,6 +596,17 @@ class DCCoreTestCase(unittest.TestCase):
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
                                           "known_bots.json")
 
+        # The console's token store (#704, audit L40). Every password check
+        # goes through db.load_admin_tokens() on this path, so every login
+        # test read the OPERATOR'S data/adminchat_tokens.json from the cwd
+        # - each wrong-password test verified PBKDF2 against every real
+        # token - and a `pair` reached from any test but the two that
+        # redirected it themselves would have written the live store.
+        self._real_admin_tokens_file = db.ADMIN_TOKENS_FILE
+        db.ADMIN_TOKENS_FILE = os.path.join(self._fetch_history_dir,
+                                            "adminchat_tokens.json")
+        self.set_config(ADMIN_TOKENS_FILE=db.ADMIN_TOKENS_FILE)
+
         # Same shape, found the same way: the state guard caught it the first
         # time a test drove a transfer all the way to completion, because
         # db.record_download() is only reached on the success path and
@@ -696,6 +707,7 @@ class DCCoreTestCase(unittest.TestCase):
         db.NOTICES_FILE = self._real_notices_file
         db.PRIVATE_MESSAGES_FILE = self._real_pm_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
+        db.ADMIN_TOKENS_FILE = self._real_admin_tokens_file
         # NOT self._real_download_counts_file / self._real_speed_record_file
         # / self._real_dcc_queue_file - see the three _ORPHANED_*_SINK
         # constants above. A start_dcc_send() thread still settling its

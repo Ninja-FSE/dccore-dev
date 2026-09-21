@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The harness redirects the console's token store (#704)
+
+Audit L40, test-only. `DCCoreTestCase` redirected sixteen state files but not `db.ADMIN_TOKENS_FILE`, and
+every `_check_password()` path goes through `db.load_admin_tokens()` on it: `test_adminchat`'s login tests
+read the operator's `data/adminchat_tokens.json` from the cwd - on a machine whose bot has paired
+`dccore.mrc`, each wrong-password test verified PBKDF2 against every real token - and a `pair` reached from
+any test but the two that redirected the path themselves would have written the live store (preflight's
+`data/` walk would have caught the write, nothing the read). `FETCHED_FILES_DIR`, the audit's other name, was
+redirected by #643. The harness now points `db.ADMIN_TOKENS_FILE` and `config.ADMIN_TOKENS_FILE` at a file in
+its temp directory beside `known_bots.json`, and restores the constant on teardown.
+`tests/test_a_login_test_never_reads_the_operators_token_store.py` runs the audit's probe (`os.path.exists`
+recorded through a wrong-password check: only the temp store is probed), writes a pairing and checks the real
+store is untouched, and runs a harness test from a plain `TestCase` to see the constant put back. Three of
+four fail with the old harness.
+
 ### 🧪 The diagnostic gates in the read loop are executed, not read (#703)
 
 Audit L39, test-only. `irc_loop()`'s inline dispatch - the admin gates on `!ping` and `!debugnames` and
