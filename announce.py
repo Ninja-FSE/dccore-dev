@@ -149,8 +149,12 @@ def _debug_drain_worker(my_id):
             # sleep on separate, unrelated clocks, and the server only ever saw
             # their sum. Reserved before the send for the same reason the other
             # lane does it before, not after: a failed send still costs its slot.
+            # The floor is the point, and the setting's help now says so
+            # (#650): a DEBUG_MSG_DELAY below MSG_DELAY - the shipped 0.5
+            # was one - changed nothing, while three texts described it as
+            # the debug channel's own pace. 0 means "the same as MSG_DELAY".
             runtime.outbound_pacer.wait_for_slot(
-                max(config.MSG_DELAY, getattr(config, 'DEBUG_MSG_DELAY', 0.5)))
+                max(config.MSG_DELAY, getattr(config, 'DEBUG_MSG_DELAY', 0)))
             try:
                 irc_sock.sendall(msg.encode("utf-8", errors="ignore"))
             except Exception as send_err:

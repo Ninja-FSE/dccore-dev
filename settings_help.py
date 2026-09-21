@@ -224,7 +224,7 @@ PLAIN_HELP = {
     'BROADCAST_SEARCH_COOLDOWN': 'How many seconds must pass between two of those search-all-bots searches, to be polite to the other bots in the channel.',
     'CTCP_VERSION_REPLY': 'Answer when somebody asks the bot what software it runs (a CTCP VERSION request). The answer goes only to the person who asked. Turn off to stay quiet about it.',
     'MSG_DELAY': 'How many seconds the bot waits between the lines it sends to the server. Protects you from being disconnected for flooding. 5 is safe on Undernet; lower is faster but riskier.',
-    'DEBUG_MSG_DELAY': 'The same wait, for lines going to your debug channel.',
+    'DEBUG_MSG_DELAY': 'How long to wait between lines to your debug channel. Never less than MSG_DELAY - every line the bot sends shares one clock, and a smaller number here has no effect. Set it higher than MSG_DELAY to slow the debug channel down further; 0 means the same as MSG_DELAY.',
     'THEME': 'The colour scheme for everything the bot says in the channel - the advert, the notices, the search results. Pick one you like; it is how people tell your bot apart from the others.',
     'CUSTOM_THEME_BORDER': "Override one colour of the chosen theme: the block that frames each message. Leave unset to keep the theme's own colour.",
     'CUSTOM_THEME_SEPARATOR': 'Override one colour of the chosen theme: the block between the parts of a message.',

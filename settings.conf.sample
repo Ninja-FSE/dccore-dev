@@ -663,10 +663,13 @@
 # Delay in seconds for the ordinary message queue
 #MSG_DELAY = 5.0
 
-# The same wait, for lines going to your debug channel.
+# How long to wait between lines to your debug channel. Never less than
+# MSG_DELAY - every line the bot sends shares one clock, and a smaller number
+# here has no effect. Set it higher than MSG_DELAY to slow the debug channel
+# down further; 0 means the same as MSG_DELAY.
 #
-# Pause between each line sent to the debug channel
-#DEBUG_MSG_DELAY = 0.5
+# Wait between debug-channel lines; the larger of this and MSG_DELAY is used, so it can only slow the debug channel down (0 = the same as MSG_DELAY)
+#DEBUG_MSG_DELAY = 0.0
 
 # Who may open the admin console over DCC chat, by host. On Undernet, log in
 # to X with mode +x and use your yourname.users.undernet.org host - only you

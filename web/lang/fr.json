@@ -511,7 +511,7 @@
   "settings.field.MAX_GLOBAL_QUEUE.help": "Le nombre maximum de fichiers en attente, toutes files confondues.",
   "settings.field.MAX_SEARCH_RESULTS.help": "Combien de fichiers correspondants sont renvoyés à quelqu'un qui cherche avec @find. Chaque résultat est une ligne envoyée à cette personne.",
   "settings.field.MSG_DELAY.help": "Combien de secondes le bot attend entre les lignes qu'il envoie au serveur. Vous protège d'une déconnexion pour flood. 5 est sûr sur Undernet ; moins est plus rapide mais plus risqué.",
-  "settings.field.DEBUG_MSG_DELAY.help": "La même attente, pour les lignes envoyées à votre salon de debug.",
+  "settings.field.DEBUG_MSG_DELAY.help": "Combien de temps attendre entre les lignes envoyées à votre salon de debug. Jamais moins que MSG_DELAY - toutes les lignes que le bot envoie partagent la même horloge, et une valeur plus petite ici n'a aucun effet. Mettez plus que MSG_DELAY pour ralentir davantage le salon de debug ; 0 signifie la même chose que MSG_DELAY.",
   "settings.field.DCC_PORT_START.help": "Le premier port sur lequel le bot écoute pour envoyer un fichier. Derrière un routeur, redirigez toute la plage (du début à la fin) vers la machine du bot, sinon personne ne peut télécharger chez vous.",
   "settings.field.DCC_PORT_END.help": "Le dernier port de cette plage. Chaque transfert simultané a besoin de son propre port : gardez au moins autant de ports que d'envois simultanés.",
   "settings.field.MAX_FETCH_SLOTS.help": "Combien de téléchargements DEPUIS d'autres bots vous lancez en même temps. Séparé de vos propres envois, pour que vos téléchargements ne prennent jamais de place à ceux qui téléchargent chez vous.",

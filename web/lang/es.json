@@ -511,7 +511,7 @@
   "settings.field.MAX_GLOBAL_QUEUE.help": "El máximo de archivos esperando en todas las colas juntas.",
   "settings.field.MAX_SEARCH_RESULTS.help": "Cuántos archivos coincidentes se devuelven a quien busca con @find. Cada resultado es una línea enviada a esa persona.",
   "settings.field.MSG_DELAY.help": "Cuántos segundos espera el bot entre las líneas que envía al servidor. Te protege de que te desconecten por flood. 5 es seguro en Undernet; menos es más rápido pero más arriesgado.",
-  "settings.field.DEBUG_MSG_DELAY.help": "La misma espera, para las líneas que van a tu canal de debug.",
+  "settings.field.DEBUG_MSG_DELAY.help": "Cuánto esperar entre líneas hacia tu canal de debug. Nunca menos que MSG_DELAY: todas las líneas que envía el bot comparten un mismo reloj, y un número menor aquí no tiene efecto. Ponlo por encima de MSG_DELAY para frenar más el canal de debug; 0 significa lo mismo que MSG_DELAY.",
   "settings.field.DCC_PORT_START.help": "El primer puerto en el que escucha el bot al enviar un archivo. Si estás detrás de un router, redirige todo el rango (de inicio a fin) a la máquina del bot, o nadie podrá descargar de ti.",
   "settings.field.DCC_PORT_END.help": "El último puerto de ese rango. Cada transferencia simultánea necesita su propio puerto: mantén al menos tantos puertos como envíos simultáneos.",
   "settings.field.MAX_FETCH_SLOTS.help": "Cuántas descargas DESDE otros bots haces a la vez. Separado de tus propios envíos, para que tus descargas nunca quiten sitio a quienes descargan de ti.",

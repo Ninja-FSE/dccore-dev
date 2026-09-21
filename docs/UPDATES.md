@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏲️ DEBUG_MSG_DELAY says it is floored to MSG_DELAY, and ships as 0 = "the same" (#650)
+
+Audit M48. The debug drain asks the shared clock for `max(MSG_DELAY, DEBUG_MSG_DELAY)` - on purpose since #406 -
+so any DEBUG_MSG_DELAY below MSG_DELAY is inert, and the shipped 0.5 was one. The defaults.py comment, the
+Settings-page help in three languages and settings.conf.sample all described it as "the same wait, for lines
+going to your debug channel": an operator lowering it to speed the debug channel up saw nothing change and had no
+way to learn why.
+
+The pacer is unchanged. The default is now `0.0`, meaning "the same as MSG_DELAY" (no behaviour changes: the
+expression already gave MSG_DELAY for anything below it), and every text says the floor: never less than
+MSG_DELAY, every line the bot sends shares one clock, a smaller number has no effect, a larger one slows the debug
+channel further. `tests/test_debug_msg_delay_says_it_is_floored.py`. Sample regenerated.
+
 ### 🔑 Each mIRC install pairs under its own name (#649)
 
 Audit M47. Every copy of dccore.mrc paired as the literal `dccore.mrc`, and the bot keeps one token per name,
