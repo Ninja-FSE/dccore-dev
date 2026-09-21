@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a rare timing where one packed album finishing while another user's was waiting could let two `rar` runs start on the same archive.** The packer's interlocks are now released exactly once.
 - **Added: only one DCCore runs from a folder.** Starting a second copy - the Windows logon task and a double-click, say - is refused with "already running" instead of two bots sharing one queue, one stats file and one set of ports. The logon task also no longer stops at a question nobody is there to answer.
 - **Added (mIRC console): the bot now tells an out-of-date `dccore.mrc` to update itself**, right after it connects, instead of letting its panel silently show fields in the wrong place.
 - **Added: a lost IRC connection now shows up as a notice on the dashboard**, as the help text always said it would. The help now lists exactly what earns a notice: a lost connection, a kick or a refused join, a failed list rebuild.

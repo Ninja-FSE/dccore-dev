@@ -1280,14 +1280,14 @@ def check_queue_and_send(irc_sock, completed_user):
                                 if not config.dcc_queue[completed_user.lower()]:
                                     del config.dcc_queue[completed_user.lower()]
                         db.save_dcc_queue()
-                        config.rar_inprogress = False
-                        # #215: this release is the only moment another user's held pack can
-                        # start. Nothing else revisits them - every check_queue_and_send()
-                        # caller passes the user who just finished, never the one turned
-                        # away at [RAR-HOLD].
-                        redispatch_waiting_pack(irc_sock, just_finished=completed_user)
-                        if hasattr(config, 'user_processing_lock'):
-                            config.user_processing_lock.discard(completed_user.lower())
+                        # The interlocks are released ONCE, by the wrapper's
+                        # finally (#714, audit L50): this exit used to clear
+                        # rar_inprogress, wake the next waiting pack and drop
+                        # the lock itself, and then return None - on which the
+                        # finally did all three again. The second, unconditional
+                        # `rar_inprogress = False` could clear a claim the first
+                        # wake had just handed to another user's pack, leaving
+                        # two rar processes on one archive path.
                         announce_mod.send_debug(
                             f"Poisoned queue entry discarded for {config.C_BOLD}{completed_user}{config.C_RESET}: path outside the music root.",
                             category="HARDBAN")
@@ -1396,10 +1396,7 @@ def check_queue_and_send(irc_sock, completed_user):
                         if not room:
                             print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
                                   f"the packed archive stays queued for the next trigger.")
-                            config.rar_inprogress = False
-                            redispatch_waiting_pack(irc_sock, just_finished=completed_user)
-                            if hasattr(config, 'user_processing_lock'):
-                                config.user_processing_lock.discard(completed_user.lower())
+                            # Released by the wrapper's finally, once (#714).
                             return
                         if oserve: oserve.active_downloads = len(config.active_transfers)
 

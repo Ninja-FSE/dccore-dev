@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The pack interlocks are released once (#714)
+
+Audit L50. `_inline_rar_packer_body()`'s poisoned-row exit and no-room exit each cleared `rar_inprogress`,
+woke the next waiting pack (`redispatch_waiting_pack`) and dropped the user lock, then returned None - on
+which `inline_rar_packer()`'s finally did all three again. The second wake re-targeted the same waiting user
+(harmlessly RAR-BLOCKed), but if that user's dispatch had claimed the interlocks in the microseconds between
+the two releases, the wrapper's unconditional `rar_inprogress = False` cleared the claim while their rar ran -
+leaving the packer interlock open for any later trigger (a JOIN thaw, a freeze-abort, a restored-queue wake)
+to start a second rar on the same archive path, the corruption `wait_for_transfers_to_finish()`'s own comment
+describes. The two exits now return to the wrapper without releasing; the finally is the one place.
+`tests/test_the_pack_interlocks_are_released_once.py` drives both exits with the audit's own model - the
+first wake claims the interlocks for the woken user - and checks one wake and a standing claim; both fail with
+the old double release. `test_audit_rar_pack_and_slots`' two source-reading tests now read the property
+(released once, by the wrapper) rather than the duplicated lines.
+
 ### 🧪 The VIP-lane drop on disconnect is executed, not read (#713)
 
 Audit L49, test-only. The finding - the disconnect epilogue reset `send_queue["channel_announce"]`, a key
