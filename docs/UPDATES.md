@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The guide lists what configure.py asks (#700)
+
+Audit L36. INSTALL.md said `configure.py` asks "six questions" and omitted the dashboard yes/no; WINDOWS.md
+listed a different set; neither mentioned the two offers `main()` makes afterwards - generate the list now,
+import OmenServe totals - so a novice expecting six was surprised by "Import them now?" with nothing
+explaining it. INSTALL.md now carries the list in the order asked (the seven questions, the dashboard's LAN
+and Flask follow-ups, the music folder's create-it offer, then the two offers) under an anchor, and WINDOWS.md
+summarises and points at it. `tests/test_the_guide_lists_what_configure_asks.py` reads the prompts out of
+`configure.py` in source order and requires the guide's numbered items to follow them one each, the
+follow-ups and offers to be named, "six questions" to be gone, and the pointer to exist - so a prompt added
+to `configure.py` without a line in the guide fails the suite.
+
 ### 📝 The setup check names the module that exists (#699)
 
 Audit L35. Half of it is #685 (the check on an empty tree said "copy the samples"). The other half: the

@@ -219,8 +219,10 @@ on PATH, because WinRAR does not add itself to PATH.
 
 Asks nickname, IRC server, channel(s), admin nick, the admin console
 password, the music directory (optional - easier to set from the web
-dashboard once the daemon is running, if you would rather do it there),
-and whether to enable the web dashboard - and writes them to
+dashboard once the daemon is running, if you would rather do it there)
+and whether to enable the web dashboard, then offers to build the file
+list and to import OmenServe totals - the full list, in the order asked,
+is in [INSTALL.md](INSTALL.md#what-configure-asks) - and writes them to
 `settings.conf` itself, with the password hash (and nothing else) in
 `admin_config.py`. Covers everything below;
 skip to step 2 if you use it. The rest of this section is the manual

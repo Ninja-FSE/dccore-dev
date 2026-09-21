@@ -100,7 +100,17 @@ python3 configure.py
 
 On Windows that command is **`py configure.py`**. A python.org install gives you `py` and `python`, not `python3` — and Windows 10 and 11 ship an App Execution Alias for that exact name, so `python3` opens the Microsoft Store or reports *"Python was not found"* even when Python is installed and working. Every `python3` below has the same Windows form; [WINDOWS.md](WINDOWS.md) uses it throughout.
 
-Six questions — nickname, IRC server, channel(s), admin nick, admin console password, and the music directory — written to `settings.conf` for you, with the password hash (and nothing else) in `admin_config.py`.
+<a id="what-configure-asks"></a>What it asks, in order:
+
+1. **Nickname.**
+2. **IRC server** (`irc.undernet.org` unless you say otherwise).
+3. **Channel(s)**, comma-separated.
+4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
+5. **Admin console password**, typed twice and never shown; only its hash is written.
+6. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
+7. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
+
+Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe totals** from its `vars.ini` if you are coming from there. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
 
 The music directory is optional here. It is usually easier to browse and confirm it from the dashboard's Settings page once the bot is running than to type a path blind. Everything else stays changeable afterwards.
 
