@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The running-pack fixture joins its packer before it ends (#828)
+
+Test-only. `TheThreadIsTheAnswer` in `tests/test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` (#651)
+registered `addCleanup(self._let_everything_finish)` and then `addCleanup(setattr, runtime, "packer_thread",
+None)`. Cleanups run last-in-first-out, so the reference was nulled first and the join found nothing: the
+packer thread was released but never waited for, and its finally - `config.rar_inprogress = False`,
+`redispatch_waiting_pack()` - ran into the next test's own pack. Seen on #827 (ubuntu / 3.14):
+`test_while_rar_runs_the_pack_is_running` found the flag cleared under it. The cleanups are the other way
+round now, the join asserts the thread finished, and `TheFixtureLeavesNoPackerBehind` runs one of the class's
+tests on its own and checks no thread of its own is left alive and `runtime.packer_thread` is None - which
+fails with the old order.
+
 ### 🤖 A burst of new nicks no longer evicts the real bots from the registry (#671)
 
 Audit L7. Any channel member can register a "bot" in `runtime.known_bots` with one unauthenticated line
