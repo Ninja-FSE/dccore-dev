@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The setup app's routes are walked like the dashboard's (#674)
+
+Audit L10, test-only. `tests/test_every_route_is_behind_the_login.py` walks `create_app()`'s `url_map` so a
+route added tomorrow is gated without anybody remembering the file - and its own docstring warned that a
+second Flask app would escape the walk. `create_setup_app()` is that app: its own `before_request` gate, three
+routes, each pinned by hand in `test_set_it_up_in_the_browser.py`, none walked. A route or an exemption added
+to it later would have passed the suite unnoticed. `EverySetupRouteIsBehindTheToken` now walks it the same
+way: every rule and method answers 403 without the token and 403 with the token from a foreign Host, the walk
+is checked to see the three routes it is meant to, and nothing is applied by any of it. Mutation-checked with
+an ungated `/lang` route plus a gate exemption for it: both walks catch it.
+
 ### 🔐 /logout answers POST alone (#673)
 
 Audit L9. The route accepted GET (and HEAD) and cleared the session: with the cookie `SameSite=Lax`, a
