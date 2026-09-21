@@ -154,10 +154,17 @@ class TheOfferRun(unittest.TestCase):
     def run_launcher(self, answer):
         system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
         env = dict(os.environ)
+        programfiles = os.path.join(self.root, "programfiles")
         env.update({
             "PATH": self.fakebin + os.pathsep + system32,   # no python, no py
             "LOCALAPPDATA": os.path.join(self.root, "localappdata"),
-            "ProgramFiles": os.path.join(self.root, "programfiles"),
+            # All three names (#647): a 64-bit cmd.exe resets ProgramFiles
+            # from ProgramW6432 on start, so the override of ProgramFiles
+            # alone was silently undone and the launcher under test searched
+            # the real C:\Program Files\Python3* - which is why these tests
+            # would have failed on any machine with an all-users install.
+            "ProgramFiles": programfiles, "ProgramW6432": programfiles,
+            "ProgramFiles(x86)": programfiles,
             "TEMP": self.temp, "TMP": self.temp,
             "DCCORE_NO_BROWSER": "1",
         })
@@ -242,6 +249,115 @@ class TheOfferRun(unittest.TestCase):
             done = subprocess.run([cmd, "/c", r"scripts\windows\start-dccore.bat", "check"], cwd=self.root,
                                   stdin=devnull, capture_output=True, text=True, errors="replace", timeout=120, env=env)
         return done.returncode, done.stdout + done.stderr
+
+
+@unittest.skipUnless(os.name == "nt" and (shutil.which("cmd.exe") or shutil.which("cmd")),
+                     "cmd.exe is only available on Windows")
+class ThePythonTheInstallerPutSomewhere(unittest.TestCase):
+    """The launcher's own search, executed (#647, audit M45): nothing on
+    PATH, but a python.exe under the folder the python.org installer uses
+    - per-user, or all-users - and the launcher must find it and run the
+    check with it. Until now every test either had Python on PATH or
+    pointed both folders at empty directories, and "searches again after
+    installing" was a text match; the `for /d` loop and its doubled quotes
+    had never run under a test.
+
+    The interpreter planted is a venv redirector: `python -m venv` makes a
+    Scripts\python.exe that finds the base interpreter through pyvenv.cfg
+    in its parent, and copied up one level it still does - so a folder
+    holding pyvenv.cfg and python.exe is a working "Python314" as far as
+    the launcher can tell, without a 30 MB install. The whole tree sits
+    under a directory with a space in its name, like Program Files does.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="dccore found python ")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        target = os.path.join(self.root, "scripts", "windows")
+        os.makedirs(target)
+        shutil.copy(WINDOWS, target)
+        # The check the launcher runs with whatever it found; it reports
+        # which interpreter that was.
+        with io.open(os.path.join(target, "check-setup.py"), "w", encoding="ascii") as handle:
+            handle.write("import sys\nprint('CHECK-RAN', sys.executable)\n")
+        self.fakebin = os.path.join(self.root, "fakebin")
+        os.makedirs(self.fakebin)
+        self.localappdata = os.path.join(self.root, "localappdata")
+        self.programfiles = os.path.join(self.root, "program files")
+        os.makedirs(self.localappdata)
+        os.makedirs(self.programfiles)
+
+    def plant(self, folder):
+        """A working python.exe at <folder>\python.exe, the installer's layout."""
+        subprocess.run([sys.executable, "-m", "venv", "--without-pip", folder],
+                       check=True, capture_output=True, timeout=120)
+        shutil.copy(os.path.join(folder, "Scripts", "python.exe"), os.path.join(folder, "python.exe"))
+        return os.path.join(folder, "python.exe")
+
+    def run_check(self):
+        system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+        env = dict(os.environ)
+        env.update({
+            "PATH": self.fakebin + os.pathsep + system32,   # no python, no py
+            "LOCALAPPDATA": self.localappdata,
+            "ProgramFiles": self.programfiles, "ProgramW6432": self.programfiles,
+            "ProgramFiles(x86)": self.programfiles,
+            "TEMP": self.root, "TMP": self.root, "DCCORE_NO_BROWSER": "1",
+        })
+        cmd = shutil.which("cmd.exe") or shutil.which("cmd")
+        with io.open(os.devnull) as devnull:
+            done = subprocess.run([cmd, "/c", r"scripts\windows\start-dccore.bat", "check"],
+                                  cwd=self.root, stdin=devnull, capture_output=True, text=True,
+                                  errors="replace", timeout=120, env=env)
+        return done.returncode, done.stdout + done.stderr
+
+    def test_the_per_user_install_is_found(self):
+        planted = self.plant(os.path.join(self.localappdata, "Programs", "Python", "Python314"))
+
+        rc, out = self.run_check()
+
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Python was not found", out)
+        self.assertIn("CHECK-RAN " + planted, out)
+
+    def test_the_all_users_install_is_found(self):
+        planted = self.plant(os.path.join(self.programfiles, "Python314"))
+
+        rc, out = self.run_check()
+
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Python was not found", out)
+        self.assertIn("CHECK-RAN " + planted, out)
+
+    def test_the_per_user_one_wins_when_both_exist(self):
+        """The installer's default is per-user; that is the one the operator
+        most likely just clicked through."""
+        per_user = self.plant(os.path.join(self.localappdata, "Programs", "Python", "Python314"))
+        self.plant(os.path.join(self.programfiles, "Python313"))
+
+        _rc, out = self.run_check()
+
+        self.assertIn("CHECK-RAN " + per_user, out)
+
+    def test_a_folder_with_no_python_exe_in_it_is_passed_over(self):
+        """A leftover "Python313" directory the uninstaller did not remove."""
+        os.makedirs(os.path.join(self.localappdata, "Programs", "Python", "Python313"))
+        planted = self.plant(os.path.join(self.programfiles, "Python314"))
+
+        rc, out = self.run_check()
+
+        self.assertEqual(rc, 0, out)
+        self.assertIn("CHECK-RAN " + planted, out)
+
+    def test_with_nothing_planted_the_search_comes_up_empty(self):
+        """The control: the same environment with no interpreter anywhere
+        reaches the offer - so the tests above found what they planted and
+        not something on this machine."""
+        rc, out = self.run_check()
+
+        self.assertNotEqual(rc, 0)
+        self.assertIn("Python was not found", out)
+        self.assertNotIn("CHECK-RAN", out)
 
 
 if __name__ == "__main__":

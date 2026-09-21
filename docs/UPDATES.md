@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔍 The launcher's search for an installed Python is executed (#647)
+
+Audit M45. `start-dccore.bat` searches `%LOCALAPPDATA%\Programs\Python\Python3*` and `%ProgramFiles%\Python3*`
+when `where` finds nothing - the commonest reason a first-timer's Python is invisible is the missed "Add to PATH"
+box - and no test had ever run that search: every test either had Python on PATH or pointed both folders at
+empty directories, and "searches again after installing" was a text match. The verifier also found that the
+tests' `ProgramFiles` override was silently undone: a 64-bit cmd.exe resets ProgramFiles from ProgramW6432 on
+start, so the launcher under test really searched `C:\Program Files\Python3*`, and every TheOfferRun test
+would have failed on a machine with an all-users install.
+
+`ThePythonTheInstallerPutSomewhere` (Windows-only, like every .bat test) plants a working python.exe - a venv
+redirector copied up beside its pyvenv.cfg, no 30 MB install - under a tree whose name has a space, with nothing
+on PATH: the per-user folder is found, the all-users folder is found, per-user wins when both exist, a leftover
+folder with no python.exe is passed over, and the control with nothing planted reaches the offer. Breaking the
+glob fails four of five. Both launcher fixtures now override ProgramFiles, ProgramW6432 and ProgramFiles(x86)
+together. Test-only.
+
 ### 🚪 The setup page's "do not open the browser" branch is executed (#646)
 
 Audit M44. The test for `WEBUI_OPEN_BROWSER = False` set the flag and then read `run_setup_until_configured()`'s
