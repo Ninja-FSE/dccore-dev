@@ -429,6 +429,15 @@ def run_forever():
             irc.irc_loop()
         except KeyboardInterrupt:
             print("\nShutting down...")
+            # One last flush of the bot registry (#691): it is written on a
+            # 30 s interval, and a Ctrl-C inside that window lost the last
+            # adverts and a source the dashboard had just added. Never
+            # fatal on the way out.
+            try:
+                import irc as _irc_flush
+                _irc_flush._flush_known_bots(force=True)
+            except Exception:
+                pass
             sys.exit(0)
         except Exception as main_err:
             print(f"[CRITICAL MAIN ERROR] The main loop stopped: {main_err}")

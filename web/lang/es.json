@@ -103,6 +103,7 @@
   "filelists.forgetSourceTitle": "Olvidar un bot que añadiste a mano. Uno que se anuncia no se puede olvidar: volvería en su siguiente anuncio.",
   "filelists.sourceAdded": "{nick} añadido. Se muestra en gris hasta que se anuncie o descargues su lista.",
   "filelists.sourceAlreadyKnown": "{nick} ya estaba en la lista; ahora se conserva hasta que lo olvides.",
+  "filelists.sourceNotOnDisk": "Pero el registro de bots no se pudo escribir en disco - el cambio se pierde en el próximo reinicio salvo que un guardado posterior tenga éxito. Revisa el registro del demonio y la carpeta data.",
   "filelists.sourceForgotten": "{nick} olvidado.",
   "filelists.couldNotAddSource": "No se pudo añadir: {error}",
   "filelists.couldNotForgetSource": "No se pudo olvidar: {error}",

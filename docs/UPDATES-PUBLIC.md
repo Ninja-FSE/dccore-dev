@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a bot registry that could not be saved (a full disk, a permission) is tried again at the next advert instead of half a minute later, the List Browser says when a source you added or removed did not reach the disk, and Ctrl-C saves the registry once more before the bot exits.**
 - **Fixed (dashboard): importing lifetime totals while a transfer completed could lose that transfer from the counts.** The import now updates the totals in one step, so a transfer finishing at the same moment is counted.
 - **Fixed (first run): after setting the bot up in the browser, only one dashboard tab opens.** The setup page's own tab already goes to the login by itself; the bot no longer opens a second one.
 - **Fixed: an old `SCRIPT_VERSION` line in `settings.conf`, written by an earlier version's Settings page, no longer makes every start-up say "check the spelling".** The log now says what the line is and that it can be deleted.

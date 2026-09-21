@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 💾 A failed bot-registry save is tried again, and said (#691)
+
+Audit L27. `db.save_known_bots()` caught every exception and returned None; `irc._flush_known_bots()` then
+stamped `runtime.known_bots_flushed_at` regardless and returned True. A failed write - disk full, a
+permission, a replace that outlasted its retries - was not tried again for `KNOWN_BOTS_FLUSH_SECONDS` (30 s);
+the dashboard's add-source and remove-source routes answered a plain 200 for a row that was not on disk; and
+shutdown did no final flush, so a Ctrl-C inside the window lost the last adverts and a source just added.
+
+`save_known_bots()` answers True or False and serialises a snapshot (the IRC thread inserts a bot in place
+while a dashboard request flushes, and `json.dumps()` over a dict changing size is a RuntimeError);
+`_flush_known_bots()` stamps the flush time only on True, so the next advert tries again; the two dashboard
+routes carry a `warning` when the write did not land, and the page shows it as the error it is
+(`filelists.sourceNotOnDisk`, en/es/fr); and the Ctrl-C path flushes once more on the way out, never fatally.
+`tests/test_a_failed_registry_save_is_tried_again.py`: True/False from the saver, the audit's probe (the disk
+refuses, the stamp stays and the next unforced call tries again), a landed flush recorded and on disk, a
+registry that grows under the writer, both routes warning and neither when it landed, the page's two handlers
+and three strings, and the shutdown flush. Six of nine fail with the old code.
+
 ### 💾 The stats import holds the disk lock once (#690)
 
 Audit L26. `apply_stats_import()` loaded the 7-column row with `db.load_advanced_stats()`, set the two lifetime

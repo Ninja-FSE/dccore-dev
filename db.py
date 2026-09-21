@@ -955,13 +955,25 @@ def save_admin_tokens(tokens):
 
 def save_known_bots(registry):
     """Write the bot registry, atomically, through the same lock and the same
-    temp-file-then-replace the other state files use."""
+    temp-file-then-replace the other state files use. True when it landed,
+    False when it did not (#691, audit L27): the caller stamps its flush
+    time by this, so a failed write is tried again on the next advert
+    rather than in KNOWN_BOTS_FLUSH_SECONDS.
+
+    Serialised from a snapshot, not the live dict: the IRC thread inserts a
+    bot in place while a dashboard request flushes, and json.dumps() over a
+    dict that changes size mid-iteration is a RuntimeError.
+    """
     try:
+        snapshot = {key: (dict(entry) if isinstance(entry, dict) else entry)
+                    for key, entry in dict(registry).items()}
         with _disk_lock:
             _atomic_write(KNOWN_BOTS_FILE,
-                          json.dumps(registry, indent=1, sort_keys=True, ensure_ascii=False))
+                          json.dumps(snapshot, indent=1, sort_keys=True, ensure_ascii=False))
+        return True
     except Exception as err:
         print(f"[DB ERROR] Could not save the bot registry: {err}")
+        return False
 
 
 def load_fetched_bot_lists():

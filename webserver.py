@@ -1544,7 +1544,14 @@ def build_add_source_result(bot_raw):
     entry.setdefault("last_seen", 0)
     entry["hand_entered"] = True
     runtime.known_bots[key] = entry
-    irc._flush_known_bots(force=True)
+    # Said when the row did not reach the disk (#691): it is in the registry
+    # and on the page, and gone at the next restart unless a later flush
+    # lands - a 200 that said nothing left the operator believing otherwise.
+    if not irc._flush_known_bots(force=True):
+        return 200, {"added": entry["nick"], "already_known": already,
+                     "warning": "Added, but the bot registry could not be written to disk "
+                                "- the row is kept until the next restart unless a later "
+                                "save succeeds. Check the daemon log and the data directory."}
     return 200, {"added": entry["nick"], "already_known": already}
 
 
@@ -1575,7 +1582,11 @@ def build_remove_source_result(bot_raw):
         return 409, {"error": f"{bot} is here because it advertises; it "
                               "would be back at its next advert."}
     runtime.known_bots.pop(key, None)
-    irc._flush_known_bots(force=True)
+    if not irc._flush_known_bots(force=True):
+        return 200, {"removed": bot,
+                     "warning": "Removed, but the bot registry could not be written to disk "
+                                "- the row is back at the next restart unless a later save "
+                                "succeeds. Check the daemon log and the data directory."}
     return 200, {"removed": bot}
 
 

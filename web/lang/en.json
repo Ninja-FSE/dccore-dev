@@ -103,6 +103,7 @@
   "filelists.forgetSourceTitle": "Forget a bot you added by hand. One that advertises cannot be forgotten - it would be back at its next advert.",
   "filelists.sourceAdded": "{nick} added. It shows grey until it advertises or you fetch its list.",
   "filelists.sourceAlreadyKnown": "{nick} was already in the list; it is now kept until you forget it.",
+  "filelists.sourceNotOnDisk": "But the bot registry could not be written to disk - the change is lost at the next restart unless a later save succeeds. Check the daemon log and the data directory.",
   "filelists.sourceForgotten": "{nick} forgotten.",
   "filelists.couldNotAddSource": "Could not add it: {error}",
   "filelists.couldNotForgetSource": "Could not forget it: {error}",

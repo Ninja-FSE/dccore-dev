@@ -1949,7 +1949,12 @@ def _flush_known_bots(now=None, force=False):
         return False
     try:
         import db
-        db.save_known_bots(runtime.known_bots)
+        # Stamped only when the write landed (#691): save_known_bots()
+        # swallows its own error, and a flush recorded regardless meant a
+        # failed save was not tried again for KNOWN_BOTS_FLUSH_SECONDS, and
+        # a restart in that window lost what the dashboard had just added.
+        if not db.save_known_bots(runtime.known_bots):
+            return False
         runtime.known_bots_flushed_at = now
         return True
     except Exception as err:

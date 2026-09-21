@@ -1276,7 +1276,13 @@
         return;
       }
       var key = res.data.already_known ? "filelists.sourceAlreadyKnown" : "filelists.sourceAdded";
-      showFilelistsSourceStatus(t(key).replace("{nick}", res.data.added), false);
+      // A 200 with a warning (#691): the row is on the page, and not on
+      // the disk. Said as the error it is, not swallowed into "added".
+      if (res.data.warning) {
+        showFilelistsSourceStatus(t(key).replace("{nick}", res.data.added) + " " + t("filelists.sourceNotOnDisk"), true);
+      } else {
+        showFilelistsSourceStatus(t(key).replace("{nick}", res.data.added), false);
+      }
       el.filelistsAddSourceInput.value = "";
       pollFilelistsBots();
     }).finally(function () {
@@ -1297,7 +1303,11 @@
           t("filelists.couldNotForgetSource").replace("{error}", (res.data && res.data.error) || ("HTTP " + res.status)), true);
         return;
       }
-      showFilelistsSourceStatus(t("filelists.sourceForgotten").replace("{nick}", res.data.removed), false);
+      if (res.data.warning) {
+        showFilelistsSourceStatus(t("filelists.sourceForgotten").replace("{nick}", res.data.removed) + " " + t("filelists.sourceNotOnDisk"), true);
+      } else {
+        showFilelistsSourceStatus(t("filelists.sourceForgotten").replace("{nick}", res.data.removed), false);
+      }
       el.filelistsAddSourceInput.value = "";
       pollFilelistsBots();
     }).finally(function () {
