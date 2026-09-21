@@ -79,6 +79,14 @@ alias dccore.ver { return 1.1 }
 ;  inserted on one side and the lines would read wrong - see HELLO below.
 alias dccore.protominor { return 1 }
 alias dccore.win { return @DCCore }
+;  The name this copy pairs under. Per installation, not the literal
+;  "dccore.mrc" (#649): the bot keeps one token per name and pairing a
+;  name again replaces its token - so with every copy called the same,
+;  pairing a laptop silently revoked the desktop, whose stored token
+;  was then refused. The tail is the mIRC folder hashed, which is what
+;  makes two installs two names; the same install pairing again still
+;  replaces its own token, which is how a lost one is rotated.
+alias dccore.client { return dccore.mrc- $+ $left($md5($mircdir),8) }
 alias dccore.opt { return $hget(dccore,$1) }
 alias dccore.st { return $hget(dccore.live,$1) }
 alias dccore.nbsp { return $chr(160) }
@@ -163,14 +171,14 @@ alias dccore {
     dccore.set wantopen 1
     hadd dccore.live pairing 1
     hadd dccore.live tries 0
-    if ($dccore.st(state) == in) { dccore.send pair dccore.mrc $dccore.ver | return }
+    if ($dccore.st(state) == in) { dccore.send pair $dccore.client $dccore.ver | return }
     dccore.sys Pairing with $dccore.bot $+ : when the bot asks for the password, type it here once. The script keeps a token of its own from then on.
     dccore.connect byhand
     return
   }
   if (%cmd == unpair) {
-    if ($dccore.st(state) == in) { dccore.send unpair dccore.mrc | dccore.sys Token forgotten here and revoked on the bot. }
-    else { dccore.sys Token forgotten here. To revoke it on the bot as well, type "unpair dccore.mrc" in the console once connected. }
+    if ($dccore.st(state) == in) { dccore.send unpair $dccore.client | dccore.sys Token forgotten here and revoked on the bot. }
+    else { dccore.sys Token forgotten here. To revoke it on the bot as well, type "unpair $dccore.client $+ " in the console once connected. }
     dccore.forget token
     dccore.forget paired
     dccore.forget bothost
@@ -199,7 +207,7 @@ alias dccore {
   if (%cmd == status) { dccore.send status | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
-  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for DCCore 1.13 and later. | return }
+  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for DCCore 1.13 and later. Pairs as $dccore.client $+ . | return }
   if (%cmd == font) {
     if ($2 !isnum) || ($2 < 6) { dccore.sys Give a size, like /dccore font 14 (now: $dccore.fontsize $+ ). | return }
     dccore.set fontsize $2
@@ -400,7 +408,7 @@ alias dccore.line {
     hdel dccore.live tokenbad
     dccore.send hello dccore.mrc $dccore.ver
     .timerdccoreHello 1 6 dccore.plain
-    if ($dccore.st(pairing)) { dccore.send pair dccore.mrc $dccore.ver }
+    if ($dccore.st(pairing)) { dccore.send pair $dccore.client $dccore.ver }
     dccore.title
     return
   }

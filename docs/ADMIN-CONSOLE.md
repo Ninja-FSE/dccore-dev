@@ -583,7 +583,12 @@ script stops reconnecting until you `/dccore connect`. A script with no
 What a token does **not** do is open the dashboard. The web login checks the
 admin password hash and nothing else - the token store is never read there -
 so a stolen `.mrc` costs you a console session and nothing more, and one
-`unpair` ends even that. Pairing the same name again replaces the old token.
+`unpair` ends even that. Pairing the same name again replaces the old token -
+which is why the script does not pair as the literal `dccore.mrc`: it pairs as
+`dccore.mrc-<8 hex>`, the tail derived from the mIRC folder it is loaded from,
+so a second machine (or a second mIRC on the same one) gets a name and a token
+of its own instead of silently revoking the first. The same copy pairing again
+still replaces its own token, which is how a lost one is rotated.
 
 The web login also refuses a password sent by a page on another site: a
 browser names the sending page in the `Origin` (or `Referer`) header, and when
@@ -596,8 +601,8 @@ unchanged (`proxy_set_header Host $host;` in nginx), or every login is refused
 with "This login was sent by another site".
 
 ```
-unpair                 list the paired clients and when they were paired
-unpair dccore.mrc      revoke one; its next login is a wrong password
+unpair                    list the paired clients and when they were paired
+unpair dccore.mrc-3f9a12c0   revoke one; its next login is a wrong password
 ```
 
 `pair` and `unpair` are console commands: you have to be logged in - with
@@ -625,7 +630,8 @@ Save the file anywhere (your mIRC folder is fine) and, in mIRC:
 with your bot's nick in place of `MusicBot`. The `@DCCore` window opens,
 the chat is offered exactly as `/dcc chat` would (path 1 or 2 above, as
 the bot decides), and when the bot asks for the password you **type it in
-the window, once**. The script then sends `pair dccore.mrc 1.0`, keeps the
+the window, once**. The script then sends `pair dccore.mrc-<id> 1.1` - the
+id is this mIRC install's own, see "What a token does not do" above - keeps the
 token the bot answers with in `dccore.ini` beside the script, and from
 then on connects and logs in without you: on `/dccore connect`, when mIRC
 connects to IRC, and whenever the bot's nick joins a channel you share.
@@ -731,8 +737,9 @@ other way round means update the bot.
   from before the version carried a minor refuses `1.1` this way and says
   "Update the script": do that (see "Updating the script" above).
 - **The stored token is refused** - it was revoked on the bot (`unpair`),
-  replaced by pairing the same name from elsewhere, or the token file was
-  moved; `/dccore pair` again, typing the password once. The script does
+  replaced by pairing the same name again (the same mIRC install; another
+  machine pairs under its own name and leaves this one alone), or the token
+  file was moved; `/dccore pair` again, typing the password once. The script does
   not send a refused token again and does not redial by itself until you
   log in or pair again: a refusal counts as a wrong password, three of them
   block your address for 15 minutes, and left to itself the redial would

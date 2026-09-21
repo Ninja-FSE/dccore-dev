@@ -103,7 +103,10 @@ class TheConstraintsTheHeaderPromises(unittest.TestCase):
         self.assertIn("$chr(160)", script_text())
 
     def test_the_wire_is_ascii_the_script_sends(self):
-        for must in ("hello dccore.mrc", "pair dccore.mrc", "unpair dccore.mrc"):
+        """hello names the client TYPE; pair and unpair name this copy's own
+        pairing name, $dccore.client (#649), which is dccore.mrc plus a tail."""
+        for must in ("hello dccore.mrc", "pair $dccore.client", "unpair $dccore.client",
+                     "alias dccore.client { return dccore.mrc- $+ "):
             self.assertIn(must, script_text())
 
 

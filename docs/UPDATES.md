@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔑 Each mIRC install pairs under its own name (#649)
+
+Audit M47. Every copy of dccore.mrc paired as the literal `dccore.mrc`, and the bot keeps one token per name,
+replacing it when the name pairs again - so pairing the script on a laptop silently revoked the desktop's token.
+Before #601 made the script stop redialling on a refusal, the desktop then looped through refusals until the
+shared home address was blocked for fifteen minutes, with nothing but a stdout line on the bot to say why.
+
+The script now pairs (and unpairs) as `$dccore.client` = `dccore.mrc-<8 hex>`, the tail being the mIRC folder
+hashed (`$md5($mircdir)`, both mIRC 6.0-era), so two installs are two names and two tokens; the same install
+pairing again still replaces its own token, which is how a lost one is rotated. `hello` still names the client
+type. `/dccore version` says which name this copy pairs as. ADMIN-CONSOLE.md's pairing passages say so. The bot
+side needed no change; `tests/test_each_mirc_install_pairs_under_its_own_name.py` proves two names hold two
+valid tokens and reads the script for the name it sends. Not verified in mIRC.
+
 ### 🧪 The dashboard's JavaScript is parsed by a real engine where one exists (#648)
 
 Audit M46. Every web/ test was a hand-written scanner modelling comments, strings and bracket depth; the audit fed
