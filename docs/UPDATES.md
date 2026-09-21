@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧾 An acknowledgement past what was sent is not a completion (#656)
+
+Audit M54. `_AckTracker` accepted any 32-bit word above what it held, with no upper bound tied to what had
+actually been sent, and `_wait_for_final_ack()` only tested `acked >= file_size`. One word of 0xFFFFFFFF from a
+peer that read nothing therefore completed any file under 4 GB: "Sent:" announced, Files/bytes totals and the
+most-downloaded counter incremented, the queue row consumed, at no bandwidth cost - and repeated, the public stats
+inflated. A legitimate client acking in the wrong byte order (4096 → 1 MB) was declared complete after one packet
+and cut off.
+
+The send loop keeps the tracker told what has been handed to the kernel (`acks.sent`), and `_advance()` ignores
+and counts a word past it: not a position the receiver can hold. The transfer then lives or dies on the real acks
+- a peer that sends only bogus words stalls and fails, and an honest client whose stream includes one stray high
+word still completes on its real ones. `tests/test_an_ack_past_what_was_sent_is_not_a_completion.py` plays the
+audit's probe over loopback (a failure, no "Sent:") and the honest-client case; the isolated tracker tests now
+say what was sent, as the send loop does.
+
 ### 🎟️ The shared outbound clock serves its waiters in arrival order (#655)
 
 Audit M53. `OutboundPacer.wait_for_slot()` was sleep-and-retry with no queue: every waiter slept until the same

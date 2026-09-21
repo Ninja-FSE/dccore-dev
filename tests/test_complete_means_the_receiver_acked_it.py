@@ -48,10 +48,16 @@ CONTENT = bytes(range(256)) * 400          # 102,400 bytes
 
 
 class TheAckTracker(unittest.TestCase):
-    """The parser, in isolation: cumulative, big-endian, 32-bit with wrap."""
+    """The parser, in isolation: cumulative, big-endian, 32-bit with wrap.
+
+    Every tracker here is told what has been sent (`sent`), as the send loop
+    keeps it told: since #656 an acknowledgement past that is not a position
+    the receiver can hold and is ignored - see TheAckCannotExceedWhatWasSent
+    below."""
 
     def test_a_single_ack_is_read(self):
         t = dcc._AckTracker()
+        t.sent = 4096
         t.feed(struct.pack("!I", 4096))
         self.assertEqual(t.acked, 4096)
         self.assertTrue(t.received_any)
@@ -60,6 +66,7 @@ class TheAckTracker(unittest.TestCase):
         """recv() hands back whatever is there; a 4-byte word can arrive in
         pieces, or several at once."""
         t = dcc._AckTracker()
+        t.sent = 300
         payload = struct.pack("!I", 100) + struct.pack("!I", 200) + struct.pack("!I", 300)
         t.feed(payload[:3])
         self.assertEqual(t.acked, 0, "three bytes is not yet a word")
@@ -72,6 +79,7 @@ class TheAckTracker(unittest.TestCase):
         """Cumulative totals never go backwards; a stale or duplicated word
         must not pull the count down."""
         t = dcc._AckTracker()
+        t.sent = 5000
         t.feed(struct.pack("!I", 5000))
         t.feed(struct.pack("!I", 3000))
         self.assertEqual(t.acked, 5000)
@@ -81,12 +89,14 @@ class TheAckTracker(unittest.TestCase):
         tracker must keep counting rather than believe the receiver went back
         to byte 100."""
         t = dcc._AckTracker(start=(1 << 32) - 1000)
+        t.sent = (1 << 32) + 100
         t.feed(struct.pack("!I", 100))              # wrapped: really 2**32 + 100
         self.assertEqual(t.acked, (1 << 32) + 100)
 
     def test_a_resume_starts_from_what_the_receiver_holds(self):
         t = dcc._AckTracker(start=50_000)
         self.assertEqual(t.acked, 50_000)
+        t.sent = 60_000
         t.feed(struct.pack("!I", 60_000))
         self.assertEqual(t.acked, 60_000)
 
@@ -97,6 +107,7 @@ class TheAckTracker(unittest.TestCase):
 
     def test_progress_resets_the_stall_clock(self):
         t = dcc._AckTracker()
+        t.sent = 10
         t.last_advance_at = time.time() - dcc.ACK_STALL_SECONDS - 1
         self.assertTrue(t.stalled())
         t.feed(struct.pack("!I", 10))
@@ -105,6 +116,7 @@ class TheAckTracker(unittest.TestCase):
     def test_a_word_that_does_not_advance_does_not_reset_the_stall_clock(self):
         """A receiver re-sending the same total is not making progress."""
         t = dcc._AckTracker()
+        t.sent = 10
         t.feed(struct.pack("!I", 10))
         t.last_advance_at = time.time() - dcc.ACK_STALL_SECONDS - 1
         t.feed(struct.pack("!I", 10))

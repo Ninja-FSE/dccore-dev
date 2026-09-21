@@ -2718,6 +2718,19 @@ class _AckTracker:
 
     def __init__(self, start=0):
         self.acked = int(start)
+        # What has actually been handed to the kernel so far - the send loop
+        # keeps this current. An acknowledgement cannot honestly exceed it
+        # (#656, audit M54): the tracker used to accept any word above what
+        # it held, so one 0xFFFFFFFF from a peer that read nothing satisfied
+        # "acked >= file_size" for any file under 4 GB - "Sent:" announced,
+        # totals and the download counter incremented, the queue row
+        # consumed, at no bandwidth cost - and a client acking in the wrong
+        # byte order (4096 -> 1 MB) was declared complete after one packet
+        # and cut off. A word past `sent` is not a position the receiver can
+        # hold; it is ignored and counted, and the transfer then lives or
+        # dies on the real acks like any other.
+        self.sent = int(start)
+        self.overshoots = 0
         self.received_any = False
         self.eof = False
         self.last_advance_at = time.time()
@@ -2749,6 +2762,9 @@ class _AckTracker:
                 candidate += 1 << 32
             else:
                 return
+        if candidate > self.sent:
+            self.overshoots += 1
+            return
         if candidate > self.acked:
             self.acked = candidate
             self.last_advance_at = time.time()
@@ -3211,6 +3227,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 try:
                     conn.sendall(chunk)
                     bytes_sent += len(chunk)
+                    acks.sent = bytes_sent
                 except socket.error as e:
                     raise e
                 # Read whatever the receiver has acknowledged so far, without
