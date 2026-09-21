@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The VIP-lane drop on disconnect is executed, not read (#713)
+
+Audit L49, test-only. The finding - the disconnect epilogue reset `send_queue["channel_announce"]`, a key
+nothing writes, while the VIP lane kept stale adverts and "Sending:" notices across a reconnect - was closed
+by #630 before this issue was filed: the dead reset is gone and the epilogue empties `config.vip_queue`, the
+lane those lines actually use. #630 pinned it by reading the epilogue's text; since #663 the reconnect loop
+runs for real against scripted connections, so `tests/test_a_dead_connections_vip_lines_are_dropped_for_real.py`
+executes it: two VIP lines queued before a drop are gone after it and the epilogue says "Dropped 2 queued
+VIP line(s)", an empty lane says nothing, and a user's standard lane - held across a reconnect on purpose -
+is left alone with no `channel_announce` key touched. With the drop disabled, it fails.
+
 ### 🧪 The heartbeat does not wait on the disk lock either (#712)
 
 Audit L48, test-only. The finding - the console's timer burst computed on the writer thread through
