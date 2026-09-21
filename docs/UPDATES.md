@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎯 The feed's channel wiring is driven, not read (#644)
+
+Audit M42. `tests/test_the_feed_says_which_channel.py` checked the SEARCH and both REQUEST channel wirings by
+regex on list.py and dcc.py, under a docstring saying the emitters were "not callable without a live socket and
+a list on disk" - while `execute_search()` was driven in three other test files and `handle_download_request()`
+in ten. A regex on the call is satisfied by a call whose `channel` has been shadowed with the wrong value two
+lines above it; the queue-pickup SENDING sites were checked the same way, by counting call sites.
+
+The file now drives the real functions against a one-track library and master list with dcc's threads recorded
+(`InlineThread`) and reads a real event sink: a search with a hit and one without, a file request and a folder
+request (and its QUEUED), and three of the four SENDING sites - the direct send, the per-user queue pickup and the
+global sweep. The fourth (a packed archive picked up from the queue) needs a real rar run and stays a text check
+that says so. The audit's own mutant - `channel = "#wrongroom"` before the SEARCH emit, `target_chan` before the
+REQUEST one - passed the old file and fails six of these. Test-only.
+
 ### 🧵 Boot tests no longer leak a live fetch dispatcher thread (#799)
 
 `tests/test_startup.py`'s BootCase stubbed `queue_mgr.queue_worker` so `oserve.startup()` does not leave a live
