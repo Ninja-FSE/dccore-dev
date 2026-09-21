@@ -500,8 +500,8 @@
 # once the process that was driving them is gone.
 #FETCH_HISTORY_FILE = ./data/fetch_history.json
 
-# Where the notices shown on the dashboard - kicks, failed rebuilds,
-# disconnects - are saved.
+# Where the notices shown on the dashboard - a lost connection, a kick or a
+# refused join, a failed list rebuild - are saved.
 #
 # Where the operator-facing notices live - the kicks, the give-ups, the
 # rebuilds that failed. Persisted because the events worth telling somebody

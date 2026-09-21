@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔔 A lost connection is a notice, and what earns one is written down (#708)
+
+Audit L44. `record_notice()` is reached only through `send_debug(notice=...)`, by the nine call sites that
+know they are one - list-rebuild failures, kick and rejoin, join refusals. The help for `NOTICES_FILE` said
+"kicks, failed rebuilds, disconnects", and the reconnect block only `print()`ed: a link that dropped every
+night left the dashboard's badge clear, and an operator reading the help assumed no disconnect had happened.
+The split relied on every future author remembering `notice=`, with no list of the intended events anywhere.
+
+`announce.NOTICE_EVENTS` is that list now - the event, the module, a piece of the line it emits, the severity
+- and the reconnect block raises a warning ("Lost the connection to the IRC server; reconnecting in N
+seconds.") through `send_debug` like the others, so the sinks and the badge see it at once and the channel
+line waits for the link. The help text (en, es, fr) names what is recorded: a lost connection, a kick or a
+refused join, a failed list rebuild. `tests/test_what_earns_a_notice_is_written_down.py` finds each named
+event's emitter by its line and checks it passes `notice=` with that severity; sweeps the tree for a
+`notice=` the list does not name (comments excepted); pins the severities; reads the help; and records the
+disconnect line through the real `send_debug` to see the warning land. Removing the disconnect notice, or
+adding a `notice=` without a list entry, each fail one test.
+
 ### 🧪 Importing oserve touches nothing (#707)
 
 Audit L43. `list.py` imports `oserve`, `announce` imports `list`, and `tests/support.py` imports `announce` -

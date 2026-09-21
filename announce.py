@@ -863,6 +863,27 @@ def send_dcc_queue_notice(user, file_name, position, channel=None):
 # glance, which is the only moment a badge gets read.
 NOTICE_SEVERITIES = ("warning", "error")
 
+# WHAT EARNS A NOTICE, written down once (#708, audit L44). record_notice()
+# is reached only through send_debug(notice=...), by the call sites that
+# know they are one - and that relied on every author remembering, with no
+# list of the intended events anywhere and a help text that promised
+# "disconnects" when no code path raised one. Each entry names the event,
+# the module that emits it and a piece of the line it emits, so a test can
+# find the emitter and check it passes notice=; a new kind of notice is
+# added here and there together.
+NOTICE_EVENTS = (
+    ("a list rebuild failed",           "commands.py", "External update_list.py failed",   "error"),
+    ("a list rebuild stalled",          "commands.py", "The library it",                    "error"),
+    ("a list rebuild timed out",        "commands.py", "Script execution timed out",       "error"),
+    ("activated with channels missing", "irc.py",      "channel(s) never confirmed via NAMES", "error"),
+    ("rejoined after a kick",           "irc.py",      "Rejoined {back.group(1)}",         "warning"),
+    ("kicked from a channel",           "irc.py",      "Kicked from {kicked_chan}",        "warning"),
+    ("the server allows fewer channels", "irc.py",     "more than the server",             "error"),
+    ("a join was refused",              "irc.py",      "Attempt {count}/{limit}",          "error"),
+    ("gave up rejoining",               "irc.py",      "gave up after {count} attempt(s)", "error"),
+    ("the connection was lost",         "irc.py",      "Lost the connection to the IRC server", "warning"),
+)
+
 NOTICES_MAX = 200
 
 

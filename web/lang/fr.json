@@ -557,7 +557,7 @@
   "settings.field.DOWNLOAD_COUNTS_FILE.help": "Où est conservé le compte des envois de chaque fichier, pour le tableau des plus téléchargés.",
   "settings.field.FETCHED_BOT_LISTS_FILE.help": "Où le bot se souvient des listes d'autres bots qu'il détient.",
   "settings.field.FETCH_HISTORY_FILE.help": "Où sont enregistrés les téléchargements terminés depuis d'autres bots, pour la page Téléchargements.",
-  "settings.field.NOTICES_FILE.help": "Où sont enregistrées les notifications affichées sur le tableau de bord : expulsions, reconstructions échouées, déconnexions.",
+  "settings.field.NOTICES_FILE.help": "Où sont enregistrées les notifications affichées sur le tableau de bord : une connexion perdue, une expulsion ou une entrée refusée, une reconstruction de la liste échouée.",
   "settings.field.PRIVATE_MESSAGES_FILE.help": "Où sont enregistrés les messages privés adressés au bot.",
   "settings.field.PRIVATE_MESSAGE_COOLDOWN_SECONDS.help": "Après avoir enregistré un message de quelqu'un, ignorer ses messages suivants pendant ce nombre de secondes, pour qu'une seule personne ne remplisse pas la page.",
   "settings.field.PRIVATE_MESSAGES_ENABLED.help": "Garder les messages privés envoyés au bot pour les lire sur la page Messages. Le bot n'y répond pas. Désactivez pour n'en garder aucun et répondre une fois à l'expéditeur en lui indiquant où s'adresser.",

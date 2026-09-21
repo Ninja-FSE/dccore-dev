@@ -3714,6 +3714,18 @@ def irc_loop():
         # The freeze box's clock stops with the link (#652): the seconds the
         # bot is away count against nobody's queue. Resumed at activation.
         dcc.pause_freeze_clock()
+        # A notice, not only a log line (#708): the dashboard's badge stayed
+        # clear through a link that dropped every night, while the help
+        # text for NOTICES_FILE promised disconnects among what it records.
+        # Queued through send_debug like the others; the channel line waits
+        # for the reconnect, the sinks and the badge do not.
+        try:
+            announce.send_debug(
+                f"Lost the connection to the IRC server; reconnecting in "
+                f"{reconnect_wait:.0f} seconds.",
+                category="INFO", notice="warning")
+        except Exception as notice_err:
+            print(f"[CONNECT] Could not record the disconnect: {notice_err}")
         
         # FIXED: clears the in-memory channel lists on a crash, so the bot does not block its own nick next time
         with runtime.channel_users_lock():
