@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📬 A request made during a rehash is queued, not dropped (#668)
+
+Audit L4. While a rehash quiesced (`config.transfers_paused`, up to `REHASH_TRANSFER_WAIT` per rehash - and
+several dashboard saves queue several waits back to back) `dcc.handle_download_request()` sent *"The bot is
+reloading its configuration. Your request is not lost - try again in a moment."* and returned without queuing
+anything; nothing replayed it after `resume_transfers()`. The request was lost unless the user typed it again,
+and they had been told to wait. The console said "Held a file request", which it had not.
+
+Only the dispatch has to wait. The request now goes on to the queue: the direct-send decision under
+`queue_lock` also requires `not transfers_are_paused()` (that path never went through
+`check_queue_and_send()`'s gate, so without it a request would have started a send the reload landed in the
+middle of), a `!rar` row queues as before with its dispatch gated, and the notice says *"Your request is queued
+and starts when the reload is done."* The rehash's wake after the reload runs `dcc.wake_restored_queues()` -
+one look per free slot - instead of one `check_queue_and_send()` pass, which dispatches one user and breaks:
+with requests queued rather than refused, several users can be waiting on that wake with nothing else due to
+wake them.
+
+`tests/test_a_request_during_a_rehash_is_queued_not_lost.py` drives `handle_download_request()` for real
+during the pause: a file request with free slots is queued and no send starts; a `!rar` request is queued; the
+notice says queued, not "try again"; after `resume_transfers()` the wake starts the send for dave, and for two
+held users starts both; the console line says queued; and `commands.py`'s wake targets
+`wake_restored_queues`. With the old gate restored, six of the seven fail.
+
 ### 🧪 The outbound pace is put back after a test (#667)
 
 Audit L3, test-only. Six setUps - two in `test_a_shared_outbound_pace.py`, one each in `test_reconnect.py`,

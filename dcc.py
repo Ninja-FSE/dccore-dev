@@ -2121,14 +2121,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
     # so gating on update_inprogress behind the same switch refuses exactly
     # what it refused before.
     # A rehash is quiescing: new sends wait, in-flight ones finish. Its own
-    # message, because "the list is rebuilding" would not be true.
+    # message, because "the list is rebuilding" would not be true. The
+    # request itself goes on (#668, audit L4): it used to be refused here
+    # with "Your request is not lost - try again in a moment", and nothing
+    # replayed it, so it was lost unless the user typed it again. Only the
+    # dispatch has to wait - check_queue_and_send() is gated, and the direct
+    # send below checks the pause under queue_lock - and the rehash wakes
+    # the queue once the reload is done, so a request queued now is served
+    # then. The notice says that.
     if transfers_are_paused():
         oserve = sys.modules.get('oserve')
         if oserve:
-            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: The bot is reloading its configuration. Your request is not lost - try again in a moment.\r\n")
-        print(f"[MAINTENANCE BLOCK] Held a file request from {user}: a rehash "
-              f"is waiting for transfers to finish.")
-        return
+            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: The bot is reloading its configuration. Your request is queued and starts when the reload is done.\r\n")
+        print(f"[MAINTENANCE] Queued a file request from {user} for after the "
+              f"rehash: it is waiting for transfers to finish.")
 
     if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'update_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
@@ -2668,8 +2674,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             user_has_queue = len(config.dcc_queue.get(user_key, [])) > 0
 
             # Only a user who is clear in transfers, the queue AND the memory lock sends immediately
+            # - and not while a rehash is quiescing (#668): this path does
+            # not go through check_queue_and_send()'s gate, so a request
+            # that reached here during the pause would have started a send
+            # the reload then landed in the middle of. Read under the lock.
             sends_now = (not user_already_transferring and not user_is_processing
-                         and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS)
+                         and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS
+                         and not transfers_are_paused())
             if sends_now:
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
