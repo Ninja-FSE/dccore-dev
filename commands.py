@@ -1560,6 +1560,52 @@ def count_from_master_list():
         return 0
 
 
+def count_by_list():
+    """[(name, files)] for every configured list, in the operator's order.
+
+    count_from_master_list() reads the PRIMARY list only - a call without a name
+    means the primary - so a second list (films, series, whatever the operator
+    called it) was never counted: the rebuild report gave the music's total and
+    said nothing of the rest (#873). The names are the ones the operator gave
+    the lists in lists.json; nothing here knows what they are.
+    """
+    import library
+    import list as _list_mod
+
+    counts = []
+    for entry in library.lists():
+        try:
+            files = _list_mod.get_file_count_date_size_and_raw_bytes(entry.name)[0]
+        except Exception as err:
+            print(f"[LIST READ ERROR] Could not count the list {entry.name!r}: {err}")
+            files = 0
+        counts.append((entry.name, int(files or 0)))
+    return counts
+
+
+def describe_list_counts(old, new):
+    """(sentence, shrunk) - what the rebuild report says about the lists.
+
+    One list keeps the wording it always had. Several are named one by one, each
+    with what it gained, so a second list's files are not lost in a total that
+    covers only the first. `shrunk` is the [(name, was, now)] of the lists that
+    ended up smaller: a folder that lost its mount does not look like "0 new".
+    """
+    before = dict(old)
+    shrunk = [(name, before.get(name, 0), count) for name, count in new
+              if count < before.get(name, 0)]
+    if len(new) == 1:
+        name, count = new[0]
+        added = count - before.get(name, 0)
+        return (f"MasterList now contains {count:,} files. "
+                f"Added {added:,} new file(s) since last index."), shrunk
+    parts = []
+    for name, count in new:
+        added = count - before.get(name, 0)
+        parts.append(f"{name}: {count:,} files ({added:+,} new)")
+    return "; ".join(parts) + ".", shrunk
+
+
 class ListUpdateStalled(Exception):
     """The child stopped reporting for longer than the stall window.
 
@@ -1746,7 +1792,7 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
         announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory...", category="INFO")
 
     # 1. Take the previous real file count from line 1
-    old_count = count_from_master_list()
+    old_counts = count_by_list()
     announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory, bot paused...", category="INFO")
     def async_list_updater():
         # HOW LONG THE WHOLE THING TOOK, from here rather than from the
@@ -1813,10 +1859,10 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                 # ---------------------------------------------------------------------
                 
                 # 3. Read the new file count from line 1
-                new_count = count_from_master_list()
+                new_counts = count_by_list()
 
-                # Work out the exact difference
-                added_files = new_count - old_count
+                # Work out the exact difference, list by list (#873)
+                summary, shrunk = describe_list_counts(old_counts, new_counts)
 
                 # #230: clamping straight to zero made a SHRUNK library read
                 # identically to an unchanged one - "Added 0 new file(s)" - even
@@ -1826,27 +1872,36 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
                 # than before) passes that guard, publishes a truncated index,
                 # and the operator who just lost real files from their share was
                 # told nothing changed.
-                if added_files < 0:
+                if shrunk:
                     # No dedicated warning category exists in send_debug() (see
                     # its own category list) - "INFO" here, same as the normal
                     # path, since the wording itself is what carries the
                     # warning; inventing a category that falls through to the
                     # same [INFO] tag anyway would only look distinct without
                     # being distinct.
-                    announce.send_debug(
-                        f"List update completed, but the file count DROPPED from "
-                        f"{old_count:,} to {config.C_BOLD}{new_count:,}{config.C_RESET} "
-                        f"({-added_files:,} fewer). Check the music directory/mount "
-                        f"before trusting this list.",
-                        category="INFO"
-                    )
+                    for name, was, now in shrunk:
+                        which = f" of the list {name!r}" if len(new_counts) > 1 else ""
+                        announce.send_debug(
+                            f"List update completed, but the file count{which} DROPPED from "
+                            f"{was:,} to {config.C_BOLD}{now:,}{config.C_RESET} "
+                            f"({was - now:,} fewer). Check the music directory/mount "
+                            f"before trusting this list.",
+                            category="INFO"
+                        )
+                    if len(new_counts) > 1:
+                        # A list that shrank must not hide what the others
+                        # gained: with several lists the summary follows the
+                        # warning. One list keeps the warning alone, as before.
+                        announce.send_debug(
+                            f"List update completed in "
+                            f"{describe_duration(time.time() - started)}. {summary}",
+                            category="INFO"
+                        )
                 else:
                     # 4. Confirm, through the VIP express lane
                     announce.send_debug(
                         f"List update successfully completed in "
-                        f"{describe_duration(time.time() - started)}! MasterList "
-                        f"now contains {new_count:,} files. "
-                        f"Added {added_files:,} new file(s) since last index.",
+                        f"{describe_duration(time.time() - started)}! {summary}",
                         category="INFO"
                     )
                 # The script itself succeeded either way - #230's shrink
