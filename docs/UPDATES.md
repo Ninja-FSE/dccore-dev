@@ -214,6 +214,17 @@ refused searcher returns before the `try`, so its `finally` cannot release someb
 `handle_list_update_request()` checks and raises `search_inprogress` inside that same gate, and its `finally`
 clears it only when this request raised it (with PAUSE_ON_UPDATE off the flag belonged to a running search). The
 test forces the interleaving with a barrier inside the old window instead of betting on the scheduler.
+### 🧪 The resume-reply test joins its helper before the next test
+
+`test_the_reply_carries_the_latest_position` (#725) failed with `2 != 1`
+on three CI runs of unrelated branches (#778). Each test in that module
+parks its ACCEPT helper in a stubbed pacer until the test's cleanup
+releases it, and every test registers the same `(USER, PORT)` offer in the
+module-global `runtime.dcc_send_offers` - so on a slow runner the previous
+test's helper woke up during the next one, popped `accept_pending` off the
+new offer, and the third RESUME started a second helper. The harness now
+counts helpers inside the stub and, at cleanup, releases them and waits
+for the count to reach zero before the patch is removed. Test-only.
 
 ### 📍 The queue save no longer pops keys out of the live queue (#606)
 
