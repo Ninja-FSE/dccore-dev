@@ -322,9 +322,12 @@ class DeadSocket:
 def install_fake_oserve(irc_connection=None):
     """Install a stub ``oserve`` module and return it.
 
-    Real oserve is the process entry point; importing it would start worker
-    threads. Everything else reaches it via sys.modules.get('oserve'), so a stub
-    is enough and keeps the tests single-threaded unless a case asks otherwise.
+    The real oserve is the process entry point, and it IS imported here -
+    list.py imports it, and announce imports list - but importing it runs
+    nothing (startup() runs only under __main__, and since #707 so do the
+    console installs). Everything else reaches oserve through
+    sys.modules.get('oserve'), so a stub in its place is what the tests
+    talk to, and what they observe.
     """
     stub = types.ModuleType("oserve")
     stub.irc_connection = irc_connection

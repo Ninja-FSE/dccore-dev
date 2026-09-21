@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 Importing oserve touches nothing (#707)
+
+Audit L43. `list.py` imports `oserve`, `announce` imports `list`, and `tests/support.py` imports `announce` -
+so `oserve.py`'s two module-level installs (the console encoding guard and the `_TimestampedStream` proxy)
+ran in every test process and wrapped the runner's `sys.stdout` and `sys.stderr` for the rest of the run:
+unittest's summaries came out timestamped, and a test asserting an exact printed line saw a prefix that
+depended on which module was imported first. `install_fake_oserve()`'s docstring said the real import was
+avoided and would start worker threads; neither was true. The installs (and the operator's timestamp
+format) sit under `if __name__ == "__main__":` at the top of `oserve.py` now - true exactly when
+`python oserve.py` is the program, so the daemon's first lines are still stamped and guarded and the
+"before config loads" order is kept - and an import touches nothing; the docstring says what happens.
+`tests/test_importing_oserve_touches_nothing.py` checks in child processes, where the streams start clean:
+`import announce; print('x')` prints a bare `x`, importing `oserve` wraps nothing and starts no thread, and
+the file run as `__main__` (its entry point replaced by a print) stamps that line. `test_startup`'s
+entry-point test splits on the last `__main__` guard now. The suite's own output loses its stamps.
+
 ### 🧪 A wait, not a sleep; and preflight's note names the pass that failed (#706)
 
 Audit L42, test-only. `test_the_window_closes_itself_after_the_duration` slept 0.4 s for a 0.15 s window and
