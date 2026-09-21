@@ -437,6 +437,11 @@ class StartupUsesIt(DCCoreTestCase):
         self._real_worker = queue_mgr.queue_worker
         queue_mgr.queue_worker = lambda: None
         self.addCleanup(setattr, queue_mgr, "queue_worker", self._real_worker)
+        # And the fetch dispatcher (#799) - see test_startup.BootCase.
+        import dcc_fetch
+        self._real_dispatcher = dcc_fetch.fetch_dispatcher_worker
+        dcc_fetch.fetch_dispatcher_worker = lambda: None
+        self.addCleanup(setattr, dcc_fetch, "fetch_dispatcher_worker", self._real_dispatcher)
 
     def boot(self, **kwargs):
         import contextlib

@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧵 Boot tests no longer leak a live fetch dispatcher thread (#799)
+
+`tests/test_startup.py`'s BootCase stubbed `queue_mgr.queue_worker` so `oserve.startup()` does not leave a live
+pump per test - but not `dcc_fetch.fetch_dispatcher_worker`, which startup() starts eleven lines later; only the
+one subclass that tests the dispatcher stubbed it. Every other boot (and the browser-setup boot in
+`test_set_it_up_in_the_browser.py`) left a real `while True` thread calling `check_fetch_queue()` every 2 s for
+the rest of the suite, through whichever oserve stub a later test had installed. On ubuntu/3.10 the tick landed
+between `paste(10)` and `set_config(transfers_paused=True)` in
+`test_nothing_is_dispatched_while_transfers_are_paused`, which then found three requests already sent - the red
+first runs of #797 and #798.
+
+Both fixtures stub the dispatcher now; `tests/test_a_boot_test_leaves_no_dispatcher_behind.py` boots through the
+fixture and asserts no thread runs the real loop afterwards, and asserts the same suite-wide for every boot that
+ran before it. Test-only.
+
 ### 🧾 preflight's state guard checks every pass, sees directories, and data/fetched is redirected (#643)
 
 Audit M41. `scripts/preflight.py` compared its state snapshot once, right after the first checks; the count pass
