@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (dashboard): the "?" help for the size settings said "in bytes" while the box beside it takes MB or KB.** The help now says which unit the page uses.
 - **Fixed: on a fresh install with nothing configured, the setup check and the bot now say "run the launcher, or configure.py" instead of "copy the sample files".** Copying a sample by hand skipped the guided setup the launcher provides, and switched on things the sample has on.
 - **Fixed (Windows): `allow-firewall.bat` works when the account that answers the administrator prompt is not yours.** It used to look for Python again as that account and stop with "Python was not found"; the ports and the interpreter are now worked out as you, before the prompt, and handed over. A folder with an apostrophe in its name no longer stops the prompt from appearing.
 - **Docs (mIRC): the console token is stored in clear text in `dccore.ini` beside the script - the guide and the script now say so and tell you to treat that file like a password.** The `.mrc` itself holds nothing; `/dccore unpair` revokes a token that may have travelled.

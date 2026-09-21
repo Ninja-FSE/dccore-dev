@@ -223,6 +223,7 @@
   "settings.manyUnsavedChanges": "{count} cambios sin guardar",
   "settings.setByHandNote": "Establecido a mano con algo que los menús no pueden ofrecer, así que se deja como texto.",
   "settings.whatThisDoes": "Qué hace este ajuste",
+  "settings.help.shownIn": "En esta página el valor se escribe y se muestra en {unit}; el archivo guarda bytes.",
   "settings.onConnectHeading": "Al conectar",
   "settings.onConnectSummary": "Enviado una vez que el servidor lo ha registrado y <strong>antes</strong> de unirse - un comando por línea, exactamente como lo escribiría en un cliente. En Undernet ese orden importa: iniciar sesión en X requiere <code>+x</code>, y unirse primero muestra su host real a todos los presentes en el canal. Use <code>%nick%</code> para el apodo que el servidor realmente le dio.",
   "settings.onConnectCommandsAriaLabel": "Comandos a enviar al conectar",

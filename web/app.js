@@ -3865,6 +3865,13 @@
   function settingsHelpHtml(field) {
     var help = fieldHelp(field);
     if (!help) { return ""; }
+    // The help is one text for two readers (#686): settings.conf.sample,
+    // where the value IS bytes, and this page, where a size field is typed
+    // and shown in the unit on its chip. So the page says which, after the
+    // shared text, or "in bytes" in the tooltip contradicts the MB beside it.
+    if (field.unit) {
+      help += " " + t("settings.help.shownIn").replace("{unit}", field.unit);
+    }
     return '<span class="settings-help" tabindex="0">' +
       '<span class="settings-help-mark" aria-hidden="true">?</span>' +
       '<span class="visually-hidden">' + escapeHtml(t("settings.whatThisDoes")) + "</span>" +

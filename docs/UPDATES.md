@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🖥️ A size setting's help says the unit the page shows (#686)
+
+Audit L22. `settings_help.PLAIN_HELP` is one text for two readers: `settings.conf.sample`, where the value IS
+bytes, and the dashboard's "?", where `SETTINGS_UNITS` types and shows `MAX_RAR_FOLDER_SIZE`,
+`MAX_FETCH_FILE_SIZE`, `MAX_LIST_TEXT_SIZE`, `MAX_FETCH_FOLDER_FILE_SIZE` and `MAX_FETCH_LIST_FILE_SIZE` in MB
+and `DCC_SEND_BUFFER` and `LIST_HEADER_MAX_BYTES` in KB. The tooltip said "in bytes" beside an MB chip; an
+operator who read it and typed 10737418240 into the MB box set a 10 PB limit. `settingsHelpHtml()` in
+`web/app.js` now appends, for a field with a unit, *"On this page the value is typed and shown in {unit}; the
+file keeps bytes."* after the shared text (`settings.help.shownIn`, in en/es/fr, through `t()` so it follows
+the language picker). The shared text is untouched, so the sample stays right.
+`tests/test_a_size_help_says_the_unit_the_page_shows.py` lifts `t()`, `fieldHelp()` and `settingsHelpHtml()`
+out of app.js and renders them in node with the page's real dictionaries and `_settings_field()`'s real
+fields: every unit field's tooltip ends with the sentence and its unit, in Spanish and French too, a field
+without a unit gets nothing added, the sample's text still says bytes, and every language carries the
+placeholder. Two of five fail with the old app.js.
+
 ### 📝 Nothing configured says "run the launcher", not "copy the sample" (#685)
 
 Audit L21. `start-dccore check` is the documented pre-flight, and on a tree with neither `admin_config.py`

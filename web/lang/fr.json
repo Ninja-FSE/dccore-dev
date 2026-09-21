@@ -223,6 +223,7 @@
   "settings.manyUnsavedChanges": "{count} modifications non enregistrées",
   "settings.setByHandNote": "Défini à la main avec une valeur que les menus ne peuvent pas proposer, donc laissé en texte.",
   "settings.whatThisDoes": "Ce que fait ce réglage",
+  "settings.help.shownIn": "Sur cette page la valeur se saisit et s'affiche en {unit} ; le fichier garde des octets.",
   "settings.onConnectHeading": "À la connexion",
   "settings.onConnectSummary": "Envoyé une fois que le serveur vous a enregistré et <strong>avant</strong> de rejoindre - une commande par ligne, exactement comme vous la taperiez dans un client. Sur Undernet cet ordre compte : se connecter à X nécessite <code>+x</code>, et rejoindre en premier montre votre véritable hôte à tous ceux déjà présents dans le canal. Utilisez <code>%nick%</code> pour le pseudo que le serveur vous a réellement attribué.",
   "settings.onConnectCommandsAriaLabel": "Commandes à envoyer à la connexion",
