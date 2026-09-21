@@ -3531,10 +3531,16 @@ def _note_bad_web_login(ip):
     if not ip:
         return
     with _web_bad_ips_lock:
-        entry = _web_bad_ips.get(ip) or [0, 0.0]
+        now = time.time()
+        # The addresses that never reached a block are forgotten after the
+        # block window (#677): the expiry below only ever saw blocked ones,
+        # and on an internet-exposed bind the rest stayed for ever.
+        adminchat.forget_stale_failures(_web_bad_ips, now)
+        entry = _web_bad_ips.get(ip) or [0, 0.0, now]
         entry[0] += 1
+        entry[2] = now
         if entry[0] >= adminchat.MAX_PASSWORD_ATTEMPTS:
-            entry[1] = time.time() + adminchat.BAD_IP_BLOCK_SECONDS
+            entry[1] = now + adminchat.BAD_IP_BLOCK_SECONDS
         _web_bad_ips[ip] = entry
 
 

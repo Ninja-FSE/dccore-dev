@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 An address that failed to log in once or twice is forgotten (#677)
+
+Audit L13. `webserver._web_bad_ips` (the dashboard's failed-login pool) deleted an entry only on a successful
+login from that address or when a block expired - and a block was only set at `MAX_PASSWORD_ATTEMPTS`. An
+address with one or two failures had `blocked_until == 0.0`, never met the expiry, and stayed for the life of
+the process: on an internet-exposed `WEBUI_HOST` bind, one entry per scanner that ever sent a `POST /login`,
+for ever (the auditor measured 100,000 entries that no amount of time removed). `adminchat._bad_ips`, the DCC
+console's pool with the same policy, had the same shape.
+
+Both entries carry when the address last failed, and `adminchat.forget_stale_failures()` runs under the lock
+on every new failure: an address that never reached a block and has not failed inside `BAD_IP_BLOCK_SECONDS`
+is dropped. A failure that old does not count towards a block either - two typos a day apart are not an
+attack - and blocked addresses are left to the expiry that already forgets them. An older two-field entry is
+treated as fresh by the first sweep. `tests/test_an_address_that_failed_once_is_forgotten.py` runs the same
+cases against both pools with a stubbed clock: the audit's scan of 2,000 addresses is gone after the window,
+forgotten at the window and kept just inside it, old failures do not add up to a block, three inside the
+window still block and expire as before, a blocked address is not swept, and the sweep on its own.
+
 ### 📝 The setup page says when settings.conf will shadow the password (#676)
 
 Audit L12. Half of it was closed by #624 (`admin_config.py` is written before `settings.conf`, so a failed

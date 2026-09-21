@@ -111,8 +111,28 @@ _pending = None               # at most one connected-but-unauthenticated sessio
 _listening = False            # at most one passive listener WAITING to be dialled
 _state_lock = threading.Lock()
 
-_bad_ips = {}                 # ip -> [failure_count, blocked_until]
+_bad_ips = {}                 # ip -> [failure_count, blocked_until, last_failure]
 _bad_lock = threading.Lock()
+
+
+def forget_stale_failures(pool, now, window=None):
+    """Drop the addresses in `pool` that failed fewer than
+    MAX_PASSWORD_ATTEMPTS times and not within `window` seconds (#677,
+    audit L13). Called under the pool's own lock; returns how many went.
+
+    An address with one or two failures never reached a block, so the
+    expiry in is_bad_ip() never deleted it, and it stayed for the life of
+    the process - on an internet-exposed bind, one entry per scanner that
+    ever tried, for ever. A failure older than the block window does not
+    count towards a block either: two typos a day apart are not an attack.
+    Blocked addresses are left to the expiry that already forgets them.
+    """
+    window = BAD_IP_BLOCK_SECONDS if window is None else window
+    stale = [ip for ip, entry in pool.items()
+             if not entry[1] and now - (entry[2] if len(entry) > 2 else now) >= window]
+    for ip in stale:
+        del pool[ip]
+    return len(stale)
 
 
 # ==========================================================================
@@ -320,10 +340,13 @@ def note_bad_ip(ip):
     if not ip:
         return
     with _bad_lock:
-        entry = _bad_ips.get(ip) or [0, 0.0]
+        now = time.time()
+        forget_stale_failures(_bad_ips, now)
+        entry = _bad_ips.get(ip) or [0, 0.0, now]
         entry[0] += 1
+        entry[2] = now
         if entry[0] >= MAX_PASSWORD_ATTEMPTS:
-            entry[1] = time.time() + BAD_IP_BLOCK_SECONDS
+            entry[1] = now + BAD_IP_BLOCK_SECONDS
             print(f"[ADMINCHAT] {ip} blocked for {int(BAD_IP_BLOCK_SECONDS)}s "
                   f"after {entry[0]} failed password attempt(s).")
         _bad_ips[ip] = entry
