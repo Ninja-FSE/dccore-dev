@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 A legacy SCRIPT_VERSION line in settings.conf is explained, not called a misspelling (#688)
+
+Audit L24. An older dashboard's Settings page offered `SCRIPT_VERSION` and wrote it into `settings.conf`;
+nothing ever removed the line. `NOT_SETTINGS` rightly keeps the name out of the overridable set, so the line
+is ignored - but the explanation table `RUNTIME_ASSIGNED` (#465) covered only `MY_IP_OR_DOCK` and
+`ORIGINAL_NICK`, so every boot and every `!rehash` said *"not a setting this version recognises. Check the
+spelling against settings.conf.sample"* of a name DCCore itself had written, spelled perfectly. The table now
+carries it: *"the code's own version, which an older Settings page wrote here; it is no longer configurable.
+Delete this line."* `tests/test_a_legacy_script_version_line_is_explained.py` applies such a file for real:
+the line is still ignored, the operator is told what it is and what to do, a real misspelling still gets the
+spelling hint, and every member of `NOT_SETTINGS` has an explanation. Two of four fail with the old table.
+
 ### 🔌 SERVER is a host name, and says so when it is not (#687)
 
 Audit L23. The setup form refused only a space in SERVER, and PORT is not on the form, so the natural

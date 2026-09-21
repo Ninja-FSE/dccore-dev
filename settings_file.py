@@ -256,6 +256,13 @@ RUNTIME_ASSIGNED = {
                       "you need to pin it"),
     "ORIGINAL_NICK": ("the daemon remembers this for itself, from NICKNAME, so "
                       "it can go back to it after a nick collision"),
+    # NOT_SETTINGS' one member (#688, audit L24): an older dashboard's
+    # Settings page offered it and wrote it here, nothing ever removed the
+    # line, and every boot and !rehash since said "check the spelling" of
+    # a name DCCore itself had written.
+    "SCRIPT_VERSION": ("the code's own version, which an older Settings page "
+                       "wrote here; it is no longer configurable. Delete this "
+                       "line"),
 }
 
 

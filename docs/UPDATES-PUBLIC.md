@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: an old `SCRIPT_VERSION` line in `settings.conf`, written by an earlier version's Settings page, no longer makes every start-up say "check the spelling".** The log now says what the line is and that it can be deleted.
 - **Fixed (setup): typing `irc.undernet.org:6667` or an `irc://` address as the server is now refused with an explanation, instead of accepted and then failing to connect every ten seconds.** The server is the host name alone; the port is its own setting.
 - **Fixed (dashboard): the "?" help for the size settings said "in bytes" while the box beside it takes MB or KB.** The help now says which unit the page uses.
 - **Fixed: on a fresh install with nothing configured, the setup check and the bot now say "run the launcher, or configure.py" instead of "copy the sample files".** Copying a sample by hand skipped the guided setup the launcher provides, and switched on things the sample has on.
