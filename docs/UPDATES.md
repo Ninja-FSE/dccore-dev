@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The dashboard's JavaScript is parsed by a real engine where one exists (#648)
+
+Audit M46. Every web/ test was a hand-written scanner modelling comments, strings and bracket depth; the audit fed
+`web/app.js` an unbalanced ternary, a missing operand, `var var`, misplaced-but-balanced braces and a dangling
+`else`, and every test stayed green while `node --check` rejected each. The inline `<script>` at the top of
+`web/index.html` was scanned by nothing. Node is on every GitHub-hosted runner and was unused.
+
+`tests/test_the_dashboard_javascript_parses_in_a_real_engine.py` runs `node --check` on every `web/**/*.js` and on
+every inline `<script>` block in `web/*.html` (written out to a temp file), skipping where there is no node -
+the scanner is the everywhere half, and its docstring now says so - with a control that the same command refuses
+the five snippets, so a node that accepted everything could not pass it. Test-only.
+
 ### 🔍 The launcher's search for an installed Python is executed (#647)
 
 Audit M45. `start-dccore.bat` searches `%LOCALAPPDATA%\Programs\Python\Python3*` and `%ProgramFiles%\Python3*`
