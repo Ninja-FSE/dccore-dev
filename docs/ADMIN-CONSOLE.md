@@ -587,8 +587,12 @@ script stops reconnecting until you `/dccore connect`. A script with no
 
 What a token does **not** do is open the dashboard. The web login checks the
 admin password hash and nothing else - the token store is never read there -
-so a stolen `.mrc` costs you a console session and nothing more, and one
-`unpair` ends even that. Pairing the same name again replaces the old token -
+so a stolen token costs you a console session and nothing more, and one
+`unpair` ends even that. For `dccore.mrc` the file that holds it is
+`dccore.ini` beside the script, and it is clear text: mIRC's hash-table save
+writes the token readable. The `.mrc` itself carries nothing. Keep `dccore.ini`
+as you would a password file - a copied mIRC folder or a shared PC is where it
+travels - and `/dccore unpair` the moment you think it has. Pairing the same name again replaces the old token -
 which is why the script does not pair as the literal `dccore.mrc`: it pairs as
 `dccore.mrc-<8 hex>`, the tail derived from the mIRC folder it is loaded from,
 so a second machine (or a second mIRC on the same one) gets a name and a token
@@ -637,11 +641,11 @@ the chat is offered exactly as `/dcc chat` would (path 1 or 2 above, as
 the bot decides), and when the bot asks for the password you **type it in
 the window, once**. The script then sends `pair dccore.mrc-<id> 1.1` - the
 id is this mIRC install's own, see "What a token does not do" above - keeps the
-token the bot answers with in `dccore.ini` beside the script, and from
-then on connects and logs in without you: on `/dccore connect`, when mIRC
-connects to IRC, and whenever the bot's nick joins a channel you share.
-The token opens the console and nothing else; the password never touches
-the disk.
+token the bot answers with in `dccore.ini` beside the script (in clear
+text - see "What a token does not do" above), and from then on connects
+and logs in without you: on `/dccore connect`, when mIRC connects to IRC,
+and whenever the bot's nick joins a channel you share. The token opens the
+console and nothing else; the password never touches the disk.
 
 If your client cannot be dialled and the bot offers the chat back (path
 2), mIRC shows its usual incoming-chat dialog the first time - accept it,

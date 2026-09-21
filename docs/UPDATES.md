@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The token file is said to be clear text (#683)
+
+Audit L19, wording only. `hsave` writes mIRC's hash table as plain item/value text, so the console token
+sits readable in `dccore.ini` beside the script. The script header and ADMIN-CONSOLE.md said where it was
+kept but never that it was clear text, and the guide's pairing section named "a stolen `.mrc`" as the cost
+when the `.mrc` carries nothing - the file that matters is `dccore.ini`; an operator who zipped their mIRC
+folder to share the script shipped the token with it, pointed at the wrong file. The header now says
+`dccore.ini is CLEAR TEXT`, treat it as a password file, and `/dccore unpair` the moment it may have travelled;
+the "Paired as" message says so at the moment the token is stored; the guide names the right file and its
+nature in "What a token does not do" and in the pairing walkthrough. No code change; `.gitignore` already
+keeps the file out (#575). `tests/test_the_token_file_is_said_to_be_clear_text.py` reads all three, pins the
+store as a plain `hsave` (so wording and code change together), and the `.gitignore` entry. Not verified in
+mIRC: comment and message text only.
+
 ### 🧩 A FAIL line always parses in the script (#682)
 
 Audit L18. `DCCORE FAIL <nick> <chan> <acked> <total> <name> :: <reason>`: only a ` :: ` INSIDE the name was

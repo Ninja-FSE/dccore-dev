@@ -24,6 +24,12 @@
 ;    nothing else - it cannot open the web dashboard - and
 ;    /dccore unpair revokes it at any time.
 ;
+;    dccore.ini is CLEAR TEXT (#683): mIRC's hash-table save writes the
+;    token readable, beside this file. Treat that file as you would a
+;    password file - it is what a copied mIRC folder or a shared PC
+;    gives away, not the .mrc - and /dccore unpair the moment you think
+;    it has travelled: the bot then refuses that token for good.
+;
 ;    Then:   /dccore              the command list
 ;            /dccore options      what to show, in which colour
 ;
@@ -577,7 +583,7 @@ alias dccore.structured {
     hdel dccore.live tokenbad
     if ($address($dccore.bot,2) != $null) { dccore.set bothost $address($dccore.bot,2) }
     hadd dccore.live pairing 0
-    dccore.sys Paired as $2 $+ . The token is kept in dccore.ini; from now on the script logs in by itself. /dccore unpair revokes it.
+    dccore.sys Paired as $2 $+ . The token is kept in dccore.ini beside the script, in clear text - keep that file as you would a password; from now on the script logs in by itself. /dccore unpair revokes it.
     dccore.title
     return
   }
