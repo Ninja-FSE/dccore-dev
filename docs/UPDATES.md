@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧹 What a user typed reaches the log as printable text (#670)
+
+Audit L6. `!DCCore !rar ]0;pwned4,4 SENT: admin.rar to victim` from any channel member: the
+artist-root refusal printed the text to stdout (a Windows Terminal window was retitled by the ESC sequence) and
+sent it through `send_debug()`, which strips only bold, reset and the mIRC colour byte, so the debug channel
+and the colour-rendering admin chat showed a red block that read like a fake SENT line inside the PART line. A
+search term took the same route through `execute_search()`'s own print and `feed_event()`. CR and LF cannot be
+injected (the reader splits on them), so no IRC command can be forged: cosmetic and misleading, not a takeover.
+
+`list.printable_text()` - `strip_control_codes()` and then every remaining C0 control, DEL and the C1 range -
+is applied where `irc.py` takes the request and the search text off the wire, so what every handler prints,
+logs and feeds is what the operator sees. NBSP and everything above U+009F are untouched; a search that is
+nothing but control characters is not run. `tests/test_what_a_user_typed_reaches_the_log_printable.py`: the
+cleaner on the audit's probe, on every control character, on real request text and on mIRC formatting; and
+`irc_loop()` driven for real (the ladder harness, threads recorded) - the request and the search handlers are
+handed the plain text, an all-control search is not started, an ordinary request arrives as typed. With
+`irc.py` unpatched, three of the eight fail.
+
 ### 🔐 A very broad ADMIN_HOSTMASKS entry is said out loud (#669)
 
 Audit L5. `is_admin_host()` refuses only a pattern that reduces to nothing once wildcards and separators are

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: control characters in a request or a search no longer reach the log, the debug channel or the admin console.** A user could type terminal escape codes and IRC colours into a `!rar` or `@find` line and have them rendered on the operator's screen. They are stripped as the line arrives.
 - **Added: a warning when an admin hostmask is far wider than one operator.** `*.users.undernet.org` puts the wildcard where your account name goes, so every logged-in user of the network would reach the console's password prompt; `*.org` names a whole top-level domain. Both still work as written, but the bot now says so at start-up, on `!rehash` and in `setup_check`, and tells you to write your own services host in full.
 - **Fixed: a file requested while the bot was reloading its settings was dropped, after telling the user it was "not lost".** The request is now queued and starts by itself once the reload is done, and the message says so.
 - **Fixed (docs, mIRC): the console script and its guide asked for "DCCore 1.13 or later", a version that does not exist yet.** They now say what is actually needed: a bot that answers `hello` - the DCCore the script ships with, or a later one.

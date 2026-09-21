@@ -3560,7 +3560,10 @@ def irc_loop():
                             elif msg.startswith("@find ") or msg.startswith("@locator "):
                                 parts = msg.split(" ", 1)
                                 if len(parts) > 1:
-                                    search_term = parts[1].strip()
+                                    # Formatting and control characters come
+                                    # off here, before the text is printed,
+                                    # logged or fed to the console (#670).
+                                    search_term = list.printable_text(parts[1]).strip()
                                     if search_term:
                                         threading.Thread(target=list.execute_search, args=(s, user, search_term, target_chan), daemon=True).start()
                             elif msg_lower == "!list":
@@ -3632,7 +3635,10 @@ def irc_loop():
                                 # still hands "!rar Artist/Album" to the download handler.
                                 parts = msg.split(" ", 1)
                                 if len(parts) > 1:
-                                    requested_file = parts[1].strip()
+                                    # As for a search (#670): what reaches the
+                                    # handler is what the terminal, the debug
+                                    # channel and the admin chat will show.
+                                    requested_file = list.printable_text(parts[1]).strip()
                                     threading.Thread(target=dcc.handle_download_request,
                                                     args=(s, user, requested_file, target_chan),
                                                     daemon=True).start()
