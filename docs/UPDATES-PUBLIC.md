@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs: the roadmap no longer calls the flood ban a "day-ban"** - it is a timed ban, one hour by default (`FLOOD_BAN_SECONDS`).
 - **Docs: the install guide no longer says `!rar` packing "has no size cap"** - it has had one (`MAX_RAR_FOLDER_SIZE`, 10 GB) for a while; the upgrade note now gives the real reason video folders are not packable.
 - **Docs (Windows): "Did it actually start?" no longer refers to "step 7" and "step 4" of a list that comes later in the guide.**
 - **Fixed: a very long debug-channel line (a long folder name, an error with a full path) is now shortened with an ellipsis instead of being cut by the server mid-colour**, which left the rest of the line painted in the background colour.

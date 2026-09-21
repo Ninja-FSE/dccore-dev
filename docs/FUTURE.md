@@ -13,7 +13,7 @@ What DCCore does today, and what it does not do yet.
 - **DCC SEND over IRC**, with a per-user and global queue, configurable slot limits, and a DCC port range you control.
 - **Album packing** — `!rar <folder>` builds an archive on demand and cleans it up afterwards, bounded by `MAX_RAR_FOLDER_SIZE` so a request cannot ask for an unbounded pack.
 - **Freeze box** — a user who parts or quits keeps their queue for five minutes; rejoining thaws it instantly rather than losing their place.
-- **Anti-flood** — a rolling request window, temporary mutes, and escalation to a day-ban for anyone who keeps going while muted.
+- **Anti-flood** — a rolling request window, temporary mutes, and escalation to a timed ban (`FLOOD_BAN_SECONDS`, one hour by default) for anyone who keeps going while muted.
 - **Ban list** — hard bans by hostmask pattern, timed bans, and a guard that refuses a pattern matching everyone.
 - **Long paths and non-ASCII filenames** work on both platforms: Windows `MAX_PATH` is handled throughout, and Greek, Cyrillic and CJK filenames survive both ends of the IRC connection.
 

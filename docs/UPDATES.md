@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The flood ban is described as timed, not as a day-ban (#697)
+
+Audit L33. `FLOOD_BAN_SECONDS` ships as 3600, and its own comment explains that the old midnight expiry was
+replaced precisely because it could be nearly a day - but FUTURE.md still said the flood escalation was "a
+day-ban", and two comments in `security.py` did too; an operator expected a flooder gone for the day and saw
+them back in an hour. The roadmap now says "a timed ban (`FLOOD_BAN_SECONDS`, one hour by default)" and the
+comments name the setting. `tests/test_the_flood_ban_is_described_as_timed.py` pins the default, reads the
+shipped prose and code for the word, and the roadmap for the sentence.
+
 ### 📝 Packing is said to be bounded everywhere (#696)
 
 Audit L32. INSTALL.md's upgrade note justified the `RAR_EXTENSIONS` change with "packing has no size cap and a
