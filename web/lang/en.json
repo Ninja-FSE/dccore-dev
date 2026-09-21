@@ -514,6 +514,7 @@
   "setup.saved.title": "Saved - starting the bot",
   "setup.saved.dashboard": "The bot is starting. This page opens the dashboard's login as soon as it answers - log in with the password you just chose.",
   "setup.saved.no_dashboard": "The bot is starting. You chose no dashboard, so this page has nothing more to show: the bot's window is where it reports from now on. Close this tab.",
+  "setup.saved.shadowed": "{file} also sets ADMIN_PASSWORD_HASH, and it is applied after admin_config.py - so after the next restart the password you just chose will stop working. Remove the ADMIN_PASSWORD_HASH line from {file}, or change the password from the dashboard, which writes to that file.",
   "setup.error.nickname_needed": "A nickname is needed.",
   "setup.error.nickname_invalid": "That is not an IRC nickname: {problem}.",
   "setup.error.server_needed": "An IRC server is needed (irc.undernet.org is the usual one).",

@@ -629,6 +629,7 @@
   "setup.saved.title": "Enregistré - démarrage du bot",
   "setup.saved.dashboard": "Le bot démarre. Cette page ouvrira la connexion au tableau de bord dès qu'il répondra - connectez-vous avec le mot de passe que vous venez de choisir.",
   "setup.saved.no_dashboard": "Le bot démarre. Vous n'avez pas choisi le tableau de bord, cette page n'a donc plus rien à montrer : c'est dans la fenêtre du bot qu'il rend compte désormais. Fermez cet onglet.",
+  "setup.saved.shadowed": "{file} définit aussi ADMIN_PASSWORD_HASH, et il est appliqué après admin_config.py - après le prochain redémarrage, le mot de passe que vous venez de choisir ne fonctionnera donc plus. Retirez la ligne ADMIN_PASSWORD_HASH de {file}, ou changez le mot de passe depuis le tableau de bord, qui écrit dans ce fichier.",
   "setup.error.nickname_needed": "Un pseudo est nécessaire.",
   "setup.error.nickname_invalid": "Ce n'est pas un pseudo IRC : {problem}.",
   "setup.error.server_needed": "Un serveur IRC est nécessaire (irc.undernet.org est le plus courant).",

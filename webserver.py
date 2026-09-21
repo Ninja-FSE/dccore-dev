@@ -4532,14 +4532,21 @@ def apply_setup(changes, password_hash, log=print, settings_path=None, admin_pat
     # back to the form. A hash written before settings.conf hurts nothing:
     # the gate still trips, the page is offered again and the next attempt
     # replaces the line in place (#624).
-    configure.write_admin_config_password(password_hash, path=admin_path)
+    # The writer returns the settings.conf path when THAT file also sets
+    # ADMIN_PASSWORD_HASH (#676, audit L12): defaults.py applies it after
+    # admin_config.py, so after a restart the hash written here loses to
+    # it. The writer prints the warning to the daemon's window; the person
+    # at the form is in a browser and never saw it - so it is returned, and
+    # the saved page says it too.
+    shadow = configure.write_admin_config_password(password_hash, path=admin_path)
     configure.write_settings_conf(changes, path=settings_path)
     settings_file.apply_to(vars(config), path=settings_path, log=log)
     config.ADMIN_PASSWORD_HASH = password_hash
     # apply_to() assigned NICKNAME but did not re-run the derivations that
     # depend on it; the list rebuild is a new process and does (#590).
     config.derive_list_base_name()
-    return {"written": sorted(changes)}
+    return {"written": sorted(changes),
+            "shadowed_by": os.path.basename(shadow) if shadow else None}
 
 
 def _setup_host_ok(host_header):
@@ -4612,16 +4619,28 @@ def render_setup_page(fields, token, lang="en", errors=(), values=None, port=842
         note=_html(strings.get("setup.note", "Only this machine can reach this page, and only until the settings are saved.")))
 
 
-def render_setup_saved_page(changes, lang="en", port=8420):
+def render_setup_saved_page(changes, lang="en", port=8420, shadowed_by=None):
     strings = _setup_strings(lang)
     dashboard = bool(changes.get("WEBUI_ENABLED"))
     from string import Template
+    warning = ""
+    if shadowed_by:
+        # The password just chosen works until the next restart, and then
+        # the hash in settings.conf wins (#676). Said on the page, where the
+        # person who chose it is.
+        text = strings.get("setup.saved.shadowed",
+                           "{file} also sets ADMIN_PASSWORD_HASH, and it is applied after admin_config.py - "
+                           "so after the next restart the password you just chose will stop working. "
+                           "Remove the ADMIN_PASSWORD_HASH line from {file}, or change the password from "
+                           "the dashboard, which writes to that file.")
+        warning = '<p class="warn">%s</p>' % _html(text.replace("{file}", str(shadowed_by)))
     return Template(SETUP_SAVED_PAGE).substitute(
         title=_html(strings.get("setup.saved.title", "Saved - starting the bot")),
         body=_html(strings.get("setup.saved.dashboard" if dashboard else "setup.saved.no_dashboard",
                                "The bot is starting. This page opens the dashboard's login as soon as it answers - log in with the password you just chose."
                                if dashboard else
                                "The bot is starting. You chose no dashboard, so this page has nothing more to show: the bot's window is where it reports from now on. Close this tab.")),
+        warning=warning,
         poll="true" if dashboard else "false", port=str(port))
 
 
@@ -4668,8 +4687,9 @@ SETUP_SAVED_PAGE = """<!doctype html>
   div { background: #131a1f; padding: 2rem 2.25rem; border-radius: 10px; max-width: 30rem; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
   h1 { font-size: 1.05rem; margin: 0 0 0.75rem; font-weight: 600; }
   p { color: #9fb0ba; font-size: 0.9rem; line-height: 1.5; margin: 0; }
+  p.warn { color: #fbbf24; margin-top: 0.9rem; }
 </style></head>
-<body><div><h1>$title</h1><p>$body</p></div>
+<body><div><h1>$title</h1><p>$body</p>$warning</div>
 <script>
   if ($poll) {
     setInterval(function () {
@@ -4698,7 +4718,7 @@ if HAVE_FLASK:
         # the code is accepted only together with that cookie. A second
         # browser with the code from ps is refused, and if it was somehow
         # first, the operator's own is - loudly, with what to do.
-        state = {"done": False, "changes": None, "bound": None}
+        state = {"done": False, "changes": None, "bound": None, "shadowed_by": None}
         SETUP_COOKIE = "dccore-setup"
 
         def refused(why):
@@ -4746,7 +4766,8 @@ if HAVE_FLASK:
             lang = (request.values.get("lang") or "en").lower()
             lang = lang if lang in SETUP_LANGS else "en"
             if state["done"]:
-                return render_setup_saved_page(state["changes"] or {}, lang, port)
+                return render_setup_saved_page(state["changes"] or {}, lang, port,
+                                               shadowed_by=state["shadowed_by"])
             if request.method == "GET":
                 return render_setup_page(build_setup_fields(lang), token, lang, port=port)
             changes, password_hash, errors = validate_setup_form(request.form, lang)
@@ -4755,7 +4776,7 @@ if HAVE_FLASK:
                 return render_setup_page(build_setup_fields(lang, values), token, lang,
                                          errors=errors, values=values, port=port), 400
             try:
-                apply_setup(changes, password_hash)
+                applied = apply_setup(changes, password_hash)
             except Exception as err:  # a full disk, a read-only folder
                 message = _setup_strings(lang).get("setup.error.write", "Could not write the settings: {error}")
                 return render_setup_page(build_setup_fields(lang, dict(request.form)), token, lang,
@@ -4763,8 +4784,9 @@ if HAVE_FLASK:
                                          values=dict(request.form), port=port), 500
             state["done"] = True
             state["changes"] = changes
+            state["shadowed_by"] = (applied or {}).get("shadowed_by")
             on_done(changes)
-            return render_setup_saved_page(changes, lang, port)
+            return render_setup_saved_page(changes, lang, port, shadowed_by=state["shadowed_by"])
 
         @app.route("/login")
         def not_yet():

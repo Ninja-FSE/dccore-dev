@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (first run): the setup page now warns when a password already in `settings.conf` would override the one you just chose after a restart** - and says what to do about it. The terminal setup already said this; the browser one did not.
 - **Fixed (first run): the setup page's one-time link is now good for one browser only.** On a Linux machine shared with other users, the link - and the code in it - could be read from the browser's command line with `ps` while the page was open. The first browser to open the link is the only one the page answers to; if you are told it was already opened elsewhere, restart DCCore for a fresh link.
 - **Fixed (dashboard): a link from another site could log you out.** Logging out now only happens from the dashboard's own button.
 - **Fixed (dashboard): a web page served from another port on the same machine could submit dashboard actions with your login.** Actions that take no form data - start a list rebuild, purge offline lists, mark notices read - relied on the browser's same-site cookie rule, which treats every port on a host as one site. Every dashboard action now has to come from the dashboard's own address.

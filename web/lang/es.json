@@ -629,6 +629,7 @@
   "setup.saved.title": "Guardado - arrancando el bot",
   "setup.saved.dashboard": "El bot está arrancando. Esta página abrirá el inicio de sesión del panel en cuanto responda - entra con la contraseña que acabas de elegir.",
   "setup.saved.no_dashboard": "El bot está arrancando. No elegiste el panel, así que esta página no tiene nada más que mostrar: a partir de ahora el bot informa en su propia ventana. Cierra esta pestaña.",
+  "setup.saved.shadowed": "{file} también define ADMIN_PASSWORD_HASH, y se aplica después de admin_config.py - así que tras el próximo reinicio la contraseña que acabas de elegir dejará de funcionar. Quita la línea ADMIN_PASSWORD_HASH de {file}, o cambia la contraseña desde el panel, que escribe en ese archivo.",
   "setup.error.nickname_needed": "Hace falta un apodo.",
   "setup.error.nickname_invalid": "Eso no es un apodo de IRC: {problem}.",
   "setup.error.server_needed": "Hace falta un servidor IRC (irc.undernet.org es el habitual).",

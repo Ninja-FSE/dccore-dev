@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 The setup page says when settings.conf will shadow the password (#676)
+
+Audit L12. Half of it was closed by #624 (`admin_config.py` is written before `settings.conf`, so a failed
+second write can no longer leave a configured bot with no password and no way back to the page). The other
+half: `defaults.py` applies `admin_config.py` first and `settings.conf` second, so a pre-existing
+`ADMIN_PASSWORD_HASH` in `settings.conf` (the dashboard's own change-password control writes there) overrides
+the hash the setup form writes - the password the operator just chose works until the next restart and then
+stops. `configure.write_admin_config_password()` prints that warning to the daemon's window, where
+`configure.py`'s operator is; the person at the form is in a browser and never saw it.
+
+`apply_setup()` now returns what the writer found (`shadowed_by`), the route keeps it, and
+`render_setup_saved_page()` shows it in amber under the saved text, on the first render and on a reload of
+the saved page: *"settings.conf also sets ADMIN_PASSWORD_HASH, and it is applied after admin_config.py - so
+after the next restart the password you just chose will stop working. Remove the ADMIN_PASSWORD_HASH line
+from settings.conf, or change the password from the dashboard, which writes to that file."* -
+`setup.saved.shadowed` in en/es/fr. `tests/test_the_setup_page_says_when_the_password_is_shadowed.py`:
+`apply_setup()` names the file or None, the saved page warns (and on reload), says nothing otherwise, in
+Spanish and French with the placeholder filled, and every language file carries the key. Six of seven fail
+with the old code.
+
 ### 🔐 The setup-page code is good for one browser (#675)
 
 Audit L11. `run_setup_until_configured()` prints `http://127.0.0.1:8420/setup?token=...` and hands it to
