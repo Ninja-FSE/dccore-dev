@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The heartbeat does not wait on the disk lock either (#712)
+
+Audit L48, test-only. The finding - the console's timer burst computed on the writer thread through
+`status_lines()`, which takes `dcc.queue_lock` and `db._disk_lock`, so a long hold of either silenced the
+console until the script called the link dead - is #614 (audit M12), fixed before this issue was filed: the
+figures are computed on a helper with a deadline and `DCCORE PING` stands in past it.
+`test_status_slot_queue_and_pairing` covers the queue lock; `tests/test_the_heartbeat_does_not_wait_on_the_disk_lock.py`
+pins the disk lock the audit named beside it, with the audit's own probe (the writer running, the lock
+held, the timer due, a reply queued): a PING is heard, the reply gets through, no figures are claimed. With
+the helper's deadline removed (the old shape), it fails.
+
 ### 📝 The Python pin has a freshness step and one guarded copy (#711)
 
 Audit L47. `start-dccore.bat` pins `PY_VERSION` and two SHA-256 hashes for the Python it installs for a
