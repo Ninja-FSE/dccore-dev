@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Added: a warning when an admin hostmask is far wider than one operator.** `*.users.undernet.org` puts the wildcard where your account name goes, so every logged-in user of the network would reach the console's password prompt; `*.org` names a whole top-level domain. Both still work as written, but the bot now says so at start-up, on `!rehash` and in `setup_check`, and tells you to write your own services host in full.
 - **Fixed: a file requested while the bot was reloading its settings was dropped, after telling the user it was "not lost".** The request is now queued and starts by itself once the reload is done, and the message says so.
 - **Fixed (docs, mIRC): the console script and its guide asked for "DCCore 1.13 or later", a version that does not exist yet.** They now say what is actually needed: a bot that answers `hello` - the DCCore the script ships with, or a later one.
 - **Fixed: after a run of dropped connections the bot could stay locked out by the server's reconnect throttle.** It always tried again after exactly ten seconds, which is fast enough to keep Undernet's throttle tripped indefinitely - and the server's own "reconnecting too fast" message never reached the log. The wait now doubles (10 s, 20 s, 40 s ... up to 5 minutes) while connections keep failing to register, and goes back to ten seconds as soon as one succeeds. The server's message is shown.

@@ -322,6 +322,13 @@ def startup(setup_page=None):
         # A panel that cannot be restored is a panel; the bot still serves
         # files. Nothing here is worth refusing to boot over.
         print(f"[STARTUP] Could not restore the notices: {notices_err}")
+    # A hostmask that admits the network's whole logged-in population is
+    # accepted - "*.example.org" is legitimate - but said out loud (#669).
+    try:
+        import adminchat as _adminchat_boot
+        _adminchat_boot.report_broad_host_patterns()
+    except Exception as hostmask_err:
+        print(f"[STARTUP] Could not check ADMIN_HOSTMASKS: {hostmask_err}")
     # #221: a bot that ran for months before retention existed loads all of it
     # back here. Pruning at startup as well as on the persist cycle means an
     # upgrade cleans up once rather than carrying the backlog forever.

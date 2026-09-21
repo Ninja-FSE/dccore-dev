@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 A very broad ADMIN_HOSTMASKS entry is said out loud (#669)
+
+Audit L5. `is_admin_host()` refuses only a pattern that reduces to nothing once wildcards and separators are
+stripped; a wildcard domain is accepted on purpose (`*.example.org` names a real set of hosts; pinned by
+`test_ban_breadth_guard`). But the documented shape is `<account>.users.undernet.org`, and an operator who
+writes `*.users.undernet.org` has put the wildcard where their account name goes: every X-authenticated user of
+the network reaches the console's password prompt, can hold the single pending session against the real
+operator, and costs the bot a dial per CTCP. `*.org` names a top-level domain. The audit's verdict was that at
+most a warning is warranted, and that is the change: what matches is untouched.
+
+`adminchat.broad_host_patterns()` names the two shapes with a reason - a bare wildcard in front of a shared
+account-host suffix (`SHARED_ACCOUNT_HOST_SUFFIXES`: `users.undernet.org`, `users.quakenet.org`; case and the
+`*!*@` form handled by `admin_host_patterns()`), or a literal part of one label - and
+`report_broad_host_patterns()` prints one `[ADMINCHAT] WARNING: ADMIN_HOSTMASKS entry '...' is very broad`
+line per entry, saying what to write instead. Called at boot (`oserve.startup()`), after the reload on
+`!rehash` (which is how the setting changes live), and by `setup_check.py` as a `warn`. ADMIN-CONSOLE.md says
+so next to "Wildcards work". `tests/test_a_very_broad_admin_hostmask_is_said_out_loud.py`: the classifier on
+each shape and on the legitimate ones (`operator.users.undernet.org`, `*.example.org`, `op*.users.undernet.org`
+- silent), the broad pattern still matching a stranger, the report text, the boot log with and without the
+entry, the rehash saying it after the reload, and the pre-flight's `warn`.
+
 ### 📬 A request made during a rehash is queued, not dropped (#668)
 
 Audit L4. While a rehash quiesced (`config.transfers_paused`, up to `REHASH_TRANSFER_WAIT` per rehash - and

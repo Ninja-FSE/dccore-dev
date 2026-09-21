@@ -522,6 +522,17 @@ def main(platform):
              f"will refuse every connection until you run: {platform.python} adminchat.py")
     else:
         ok(f"enabled for {len(patterns)} host pattern(s)")
+        # Accepted, but far wider than one operator (#669): a wildcard where
+        # the account name goes, or a bare top-level domain.
+        try:
+            import adminchat as _adminchat_breadth
+            broad = _adminchat_breadth.broad_host_patterns()
+        except Exception:
+            broad = []
+        for pattern, why in broad:
+            warn(f"ADMIN_HOSTMASKS entry {pattern!r} is very broad - {why}. Anyone "
+                 f"matching it reaches the console's password prompt; write your own "
+                 f"services host in full, e.g. 'operator.users.undernet.org'")
 
     # --- verdict --------------------------------------------------------------
     print()

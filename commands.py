@@ -1322,6 +1322,14 @@ def _handle_rehash_request(user, target_chan):
         clear_or_keep_pack_interlocks(
             config, _pack_still_running and _dcc_pack.a_pack_is_running(), _packing_for)
 
+        # ADMIN_HOSTMASKS may have just changed; a very broad entry is
+        # accepted but said out loud, here as at boot (#669).
+        try:
+            import adminchat as _adminchat_rehash
+            _adminchat_rehash.report_broad_host_patterns()
+        except Exception as hostmask_err:
+            print(f"[REHASH] Could not check ADMIN_HOSTMASKS: {hostmask_err}")
+
         # Take the real, live network socket straight from memory
         oserve_mod = sys.modules.get('oserve')
         live_socket = getattr(oserve_mod, 'irc_connection', None) if oserve_mod else None

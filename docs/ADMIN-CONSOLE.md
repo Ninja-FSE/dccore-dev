@@ -131,7 +131,12 @@ ADMIN_HOSTMASKS = ["operator.users.undernet.org", "operator2.users.undernet.org"
 ```
 
 A pattern that reduces to bare `*` is refused and logged — it would admit the
-whole network and make the gate decorative.
+whole network and make the gate decorative. A pattern that is accepted but
+names far more than one operator is warned about at start-up, on `!rehash` and
+by `setup_check.py`, and still works as written: `*.users.undernet.org` puts
+the wildcard where your account name goes, so every X-authenticated user on
+the network reaches the password prompt; `*.org` names a top-level domain. The
+documented shape is your own services host in full.
 
 ### 4. Restart the daemon
 

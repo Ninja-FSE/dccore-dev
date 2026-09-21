@@ -177,6 +177,63 @@ def admin_host_patterns():
     return patterns
 
 
+# Host suffixes a network hands out to EVERY logged-in user, one label per
+# account in front: "<account>.users.undernet.org". A pattern whose
+# wildcard stands where the account goes does not name one operator, it
+# names the whole logged-in population of the network (#669, audit L5).
+SHARED_ACCOUNT_HOST_SUFFIXES = (
+    "users.undernet.org",
+    "users.quakenet.org",
+)
+
+
+def broad_host_patterns():
+    """The configured patterns that are accepted but name far more than one
+    operator, each with the reason, for a warning at boot and on rehash
+    (#669, audit L5).
+
+    is_admin_host() refuses only a pattern that reduces to nothing once
+    wildcards and separators are stripped. A wildcard domain such as
+    "*.example.org" is deliberately accepted - it names a real, legitimate
+    set of hosts, and the password behind the gate is the second factor.
+    But two shapes are almost always a misreading of the documented
+    "<account>.users.undernet.org": a wildcard where the account goes
+    ("*.users.undernet.org" - every X-authenticated user of the network
+    reaches the password prompt, can hold the single pending session
+    against the real operator, and costs the bot a dial per CTCP), and a
+    literal part of one label ("*.org" - a top-level domain). Both still
+    match exactly as configured; this only says so out loud.
+    """
+    broad = []
+    for pattern in admin_host_patterns():
+        literal = pattern
+        for separator in "*!@":
+            literal = literal.replace(separator, "")
+        labels = [label for label in literal.split(".") if label]
+        if not labels:
+            continue  # refused outright by is_admin_host()
+        if "*" not in pattern:
+            continue  # one host, spelled out
+        if len(labels) == 1:
+            broad.append((pattern, f"it names the whole top-level domain .{labels[0]}"))
+            continue
+        head, _dot, rest = pattern.partition(".")
+        if rest.lower() in SHARED_ACCOUNT_HOST_SUFFIXES and set(head) <= set("*"):
+            broad.append((pattern, f"every logged-in user of the network has a {rest} host; "
+                                   f"the account name goes where the * is"))
+    return broad
+
+
+def report_broad_host_patterns(log=print):
+    """Print one warning per broad pattern; returns how many there were."""
+    broad = broad_host_patterns()
+    for pattern, why in broad:
+        log(f"[ADMINCHAT] WARNING: ADMIN_HOSTMASKS entry {pattern!r} is very broad - {why}. "
+            f"Anyone matching it reaches the console's password prompt. If you meant "
+            f"your own services host, write it in full, e.g. 'operator.users.undernet.org'.")
+    return len(broad)
+
+
 def is_admin_host(prefix_or_line):
     """True only when the line's HOST matches a configured admin pattern.
 
