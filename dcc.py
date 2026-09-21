@@ -1108,6 +1108,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     # thing the interlocks exist to guarantee - so the finally only releases
                     # what this call still owns.
                     handed_off = False
+                    runtime.packer_thread = threading.current_thread()
                     try:
                         handed_off = _inline_rar_packer_body(sock)
                     except Exception as packer_err:
@@ -1119,6 +1120,11 @@ def check_queue_and_send(irc_sock, completed_user):
                         release_queue_entry(completed_user, next_file, delivered=False,
                                             reason="pack failed: " + str(packer_err))
                     finally:
+                        # The pack itself is over either way (#651): what is
+                        # handed off is the SEND, which active_transfers
+                        # already counts.
+                        if runtime.packer_thread is threading.current_thread():
+                            runtime.packer_thread = None
                         if not handed_off:
                             config.rar_inprogress = False
                             # #215: this release is the only moment another user's held pack can
@@ -1853,6 +1859,23 @@ def transfers_are_paused():
     other message less believable.
     """
     return bool(getattr(config, "transfers_paused", False))
+
+
+def a_pack_is_running():
+    """Is the folder packer's thread alive right now?
+
+    The rehash needs this and config.rar_inprogress cannot answer it (#651,
+    audit M49): the flag is True both while `rar` runs and after a packer
+    died without releasing it, and the reload resets it to False either
+    way. A rehash whose quiesce wait timed out under a running pack then
+    cleared both interlocks and woke the queue, and the user's still-queued
+    row could start a second rar on the same archive path - the double-pack
+    the packer's own docstring records fixing. The thread is the difference
+    between "packing" and "wedged": alive, keep the interlocks; gone, they
+    are stale and the rehash is the documented way to clear them.
+    """
+    thread = runtime.packer_thread
+    return thread is not None and thread.is_alive()
 
 
 def wait_for_transfers_to_finish(timeout=None, poll=0.5, sleep=None,

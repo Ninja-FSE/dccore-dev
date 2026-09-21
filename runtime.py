@@ -57,6 +57,14 @@ a rehash is unchanged.
 import threading
 import time
 
+# The thread running the folder packer, while one runs (#651). dcc.py sets
+# it when it starts inline_rar_packer and clears it in that thread's finally;
+# dcc.a_pack_is_running() reads it. Here and not in dcc.py because a !rehash
+# reloads dcc.py, and this is exactly the moment the rehash needs the answer:
+# config.rar_inprogress is a scalar the reload resets to False, so on its own
+# it cannot say whether a pack is still running or merely left a stale flag.
+packer_thread = None
+
 # Per-user bookkeeping -------------------------------------------------------
 failed_transfers = {}    # Failed-transfer counter, per user
 channel_users    = {}    # Users currently seen in the channels

@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A rehash keeps the packer's interlocks while a pack is still running (#651)
+
+Audit M49. `wait_for_transfers_to_finish()` counts a running folder pack as busy, but after REHASH_TRANSFER_WAIT
+(120 s) it returns False and carries on - and the rehash never looked at the value. The reload then reset
+`config.rar_inprogress` to False (defaults.py re-executes) and the rehash rebound `user_processing_lock` to an
+empty set, both while `rar` was still running (RAR_TIMEOUT is half an hour). The user's still-queued row passed
+both interlocks on the next trigger for that nick - a second !rar, a JOIN thaw, the freeze-abort timer - and a
+second packer started on the same archive path, unlinking the file the first was writing: the double-pack the
+packer's own docstring records fixing, reopened by a dashboard Save two minutes into a big box set.
+
+The flags cannot tell packing from wedged; the packer's thread can. `inline_rar_packer` records itself in
+`runtime.packer_thread` (runtime.py is never reloaded) and clears it in its finally; `dcc.a_pack_is_running()`
+reads it. The rehash reads that right after the wait and again after the reload, and
+`commands.clear_or_keep_pack_interlocks()` keeps both interlocks (putting `rar_inprogress` back after the reload's
+reset) and says so in the log while the thread is alive, and clears them - the documented escape hatch for a
+packer that died holding them - when it is not. The packer's own finally still releases them when it finishes.
+`tests/test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` drives a real pack to the point where rar runs.
+
 ### ⏲️ DEBUG_MSG_DELAY says it is floored to MSG_DELAY, and ships as 0 = "the same" (#650)
 
 Audit M48. The debug drain asks the shared clock for `max(MSG_DELAY, DEBUG_MSG_DELAY)` - on purpose since #406 -
