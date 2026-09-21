@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 💾 The stats import holds the disk lock once (#690)
+
+Audit L26. `apply_stats_import()` loaded the 7-column row with `db.load_advanced_stats()`, set the two lifetime
+columns and wrote it with `db.save_advanced_stats()` - two `_disk_lock` acquisitions. A transfer completing
+in the gap (`db.update_stats_on_complete()`, on the send's own thread) had its +1 file and +bytes on Today and
+Total discarded by the import's stale write - the lost update `db.py`'s own header describes for the old
+`dcc.py` code - and a day rotation in the gap was undone; the import still answered 200.
+
+`db.set_lifetime_totals(total_files, total_bytes)` reads, modifies and writes under one acquisition, leaving
+the day columns and the date alone, and returns the row it wrote (None if the write raised, as
+`save_advanced_stats()` swallows). The import calls it and judges the totals by that row rather than by a
+later read: a transfer completing right after the import legitimately moves them on, and that is not a
+failed write. `tests/test_a_transfer_during_a_stats_import_is_not_lost.py` forces the race rather than
+betting on it - the completion thread is started from inside the import's own locked read and shown to be
+waiting on that lock - and the row that lands carries the import's totals plus the transfer, with Today kept;
+the day columns are untouched; the old two-call shape is modelled and shown to lose the transfer; the helper
+sets only what it is given and starts a missing file from the default row; a totals write that raised is
+reported as failed; and the import is read to go through the helper. Four of seven fail with the old code.
+
 ### 🖥️ A first run ends on one dashboard tab (#689)
 
 Audit L25. `run_setup_until_configured()` had already put the browser on the setup page, whose "Saved" screen

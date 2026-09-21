@@ -403,8 +403,8 @@ def build_stats_import_preview(text):
 def apply_stats_import(raw):
     """(http_status, payload) for POST /api/stats/import.
 
-    Writes through db.save_advanced_stats() and db.save_speed_record(), which
-    already take the disk lock and write atomically - a caller, not a second
+    Writes through db.set_lifetime_totals() and db.save_speed_record(),
+    which take the disk lock and write atomically - a caller, not a second
     implementation of either.
 
     Returns the before and after, so the page reports what actually happened
@@ -421,19 +421,14 @@ def apply_stats_import(raw):
 
     before = current_importable_stats()
 
+    written = None
     if "total_files" in clean or "total_bytes" in clean:
-        # The 7-column row read-modify-written as a whole: the day columns and
-        # the date belong to the daemon's own rotation and are not this
-        # feature's to touch. Importing a lifetime total must not reset what
-        # the bot did today.
-        row = list(db.load_advanced_stats() or [0] * 7)
-        while len(row) < 7:
-            row.append(0)
-        if "total_files" in clean:
-            row[0] = clean["total_files"]
-        if "total_bytes" in clean:
-            row[1] = clean["total_bytes"]
-        db.save_advanced_stats(row)
+        # The 7-column row read-modify-written as a whole, under one lock
+        # (#690): the day columns and the date belong to the daemon's own
+        # rotation and are not this feature's to touch, and a transfer that
+        # completes while this runs must not lose its count to a stale row.
+        written = db.set_lifetime_totals(total_files=clean.get("total_files"),
+                                         total_bytes=clean.get("total_bytes"))
 
     if "speed_record" in clean:
         db.save_speed_record(clean["speed_record"])
@@ -445,7 +440,18 @@ def apply_stats_import(raw):
     # disk. The operator would have been told their history came across and
     # found half of it, with nothing to say which half.
     after = current_importable_stats()
-    landed = [name for name in sorted(clean) if after.get(name) == clean[name]]
+
+    def landed_as_asked(name):
+        # The totals are judged by the row the locked write produced, not by
+        # a later read (#690): a transfer completing right after the import
+        # legitimately moves them on, and that is not a failed write.
+        if name == "total_files":
+            return written is not None and written[0] == clean[name]
+        if name == "total_bytes":
+            return written is not None and written[1] == clean[name]
+        return after.get(name) == clean[name]
+
+    landed = [name for name in sorted(clean) if landed_as_asked(name)]
     missing = [name for name in sorted(clean) if name not in landed]
     if missing:
         return 500, {

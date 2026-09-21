@@ -386,6 +386,38 @@ def load_advanced_stats():
     return stats
 
 
+def set_lifetime_totals(total_files=None, total_bytes=None):
+    """Replace the lifetime columns of stats.txt, leaving the day columns
+    and the date as they are - under ONE _disk_lock acquisition (#690,
+    audit L26).
+
+    The stats import did this as load_advanced_stats() then
+    save_advanced_stats(): two acquisitions, and a transfer completing in
+    the gap - update_stats_on_complete() from the send's own thread - had
+    its +1 file and +bytes on Today and Total discarded by the import's
+    stale write (the lost update this file's own header describes for the
+    old dcc.py code), and a day rotation in that gap was undone. Read,
+    modified and written here without letting go, so what the bot did in
+    between is in the row that lands. Returns the row as written.
+    """
+    try:
+        with _disk_lock:
+            row = list(_load_advanced_stats_unlocked() or [])
+            while len(row) < 7:
+                row.append(0)
+            if total_files is not None:
+                row[0] = total_files
+            if total_bytes is not None:
+                row[1] = total_bytes
+            _save_advanced_stats_unlocked(row)
+    except Exception as err:
+        # As save_advanced_stats(): a stats write must not take the caller
+        # down. None tells the import nothing landed.
+        print(f"[DB ERROR] Could not save to stats.txt: {err}")
+        return None
+    return row
+
+
 def save_advanced_stats(stats):
     """Write the 7-column row to stats.txt, atomically.
 
