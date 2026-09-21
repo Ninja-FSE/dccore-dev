@@ -169,8 +169,12 @@ def queue_worker():
             # is empty", while the debug drain, on its own thread, kept up.
             #
             # Strict alternation instead: one VIP line, one standard line. VIP
-            # is then never more than two slots away whatever the load, and the
-            # standard lane keeps its per-user fairness across passes through
+            # is then never more than two of THIS WORKER's slots away whatever
+            # the load - and since the shared clock serves its waiters in
+            # arrival order (#655), never more than one slot per other lane
+            # (the debug drain, a !ping, a DCC ACCEPT) behind that; it used
+            # to lose each of those slots by coin toss. The standard lane
+            # keeps its per-user fairness across passes through
             # the cursor rather than within one pass. Total throughput is the
             # pacer's either way; only the SHARE changes, and only while VIP
             # has a backlog, which it normally does not.

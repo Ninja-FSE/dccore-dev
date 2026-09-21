@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎟️ The shared outbound clock serves its waiters in arrival order (#655)
+
+Audit M53. `OutboundPacer.wait_for_slot()` was sleep-and-retry with no queue: every waiter slept until the same
+instant and whoever woke first took the slot. Four threads share the clock - queue_worker's VIP and standard
+lanes, the debug drain, the !ping and DCC ACCEPT direct waiters - so queue_worker's strict alternation bounded
+VIP to two of its OWN slots while the worker lost each of those to the drain by coin toss: with a drain backlog
+VIP got about a quarter of the slots and gaps of ten to fourteen slots (a minute at MSG_DELAY=5) between
+consecutive VIP lines, long enough to push a "Sending:" notice past the receiver's accept window.
+
+Tickets now, handed out in arrival order and served in that order, on a Condition: only the ticket being served
+sleeps against the clock, the rest wait to be woken, and a waiter that leaves without its slot (its thread torn
+down) marks its ticket abandoned so the line moves on. The combined rate is unchanged - every reservation still
+holds the one clock for its interval - and the queue_mgr comment now states the bound it can actually promise.
+`tests/test_the_outbound_clock_serves_in_arrival_order.py`: the audit's three-lane probe (no lane skipped while
+waiting), a held clock released over four queued waiters served in the order they arrived, an abandoned ticket
+stepped over, and the interval still enforced.
+
 ### 📬 A private `!rar` request is routed by its folder label (#653)
 
 Audit M51. `list_for_request()` answers a target that is not a channel with the primary, on the premise that a PM

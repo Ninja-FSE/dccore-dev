@@ -420,26 +420,61 @@ live_speed_sampled_at = 0.0
 # faster - and every reservation, from either lane, holds the SAME clock for
 # that long before anyone else's next send. The combined rate can never
 # exceed one interval's worth of traffic, however the two lanes interleave.
+#
+# FIRST COME, FIRST SERVED (#655, audit M53). This used to be sleep-and-retry
+# with no queue: every waiter slept until the same instant and whoever woke
+# first took the slot. Four threads share the clock - queue_worker's VIP and
+# standard lanes, the debug drain, the !ping and DCC ACCEPT direct waiters -
+# so queue_worker's strict alternation bounded VIP to two of its OWN slots
+# while the worker lost each of those to the drain by coin toss. Measured
+# with the real threads: a drain backlog gave VIP about a quarter of the
+# slots and gaps of ten to fourteen slots (a minute at MSG_DELAY=5) between
+# consecutive VIP lines. Tickets, handed out in arrival order and served in
+# that order, make every lane's wait bounded by the number of lanes ahead of
+# it; a waiter that leaves without its slot (an exception) is stepped over
+# rather than blocking the line.
 class OutboundPacer:
     def __init__(self):
-        self._lock = threading.Lock()
+        self._cond = threading.Condition()
         self._next_allowed = 0.0
+        self._next_ticket = 0    # the next ticket to hand out
+        self._serving = 0        # the ticket whose turn it is
+        self._abandoned = set()  # tickets whose holder left without a slot
 
     def wait_for_slot(self, min_interval):
-        """Block until the shared clock has a slot free, then take it.
+        """Block until the shared clock has a slot free AND it is this
+        caller's turn, then take it.
 
-        Loops rather than computing the wait once and sleeping outside the
-        lock, because a second thread could otherwise wake at the same
-        moment, both see the slot as free, and both reserve it.
+        The turn is the ticket order. Only the ticket being served sleeps
+        against the clock; everyone behind it waits to be woken, so nothing
+        wakes early and races. A waiter that raises while queued (the
+        thread is being torn down) marks its ticket abandoned on the way out
+        and wakes the others, so the line moves on.
         """
-        while True:
-            with self._lock:
-                now = time.monotonic()
-                if now >= self._next_allowed:
-                    self._next_allowed = now + min_interval
-                    return
-                remaining = self._next_allowed - now
-            time.sleep(remaining)
+        with self._cond:
+            ticket = self._next_ticket
+            self._next_ticket += 1
+            served = False
+            try:
+                while True:
+                    while self._serving in self._abandoned:
+                        self._abandoned.discard(self._serving)
+                        self._serving += 1
+                    now = time.monotonic()
+                    if ticket == self._serving:
+                        if now >= self._next_allowed:
+                            self._next_allowed = now + min_interval
+                            self._serving += 1
+                            served = True
+                            self._cond.notify_all()
+                            return
+                        self._cond.wait(self._next_allowed - now)
+                    else:
+                        self._cond.wait()
+            finally:
+                if not served:
+                    self._abandoned.add(ticket)
+                    self._cond.notify_all()
 
 
 outbound_pacer = OutboundPacer()
