@@ -1038,14 +1038,14 @@ dialog dccore.opt {
   size -1 -1 322 236
   option dbu
   box "Show in @DCCore", 100, 5 3 312 102
-  check "Requests (who asked for what)", 101, 10 13 178 10
-  check "Queue positions", 102, 10 24 178 10
-  check "Sends: starting, resuming, done", 103, 10 35 178 10
-  check "Failed transfers", 104, 10 46 178 10
-  check "Searches and result counts", 105, 10 57 178 10
-  check "Joins, parts, quits of queued users", 106, 10 68 178 10
-  check "Bans, mutes, floods", 107, 10 79 178 10
-  check "Other log lines", 108, 10 90 178 10
+  check "Requests (who asked for what)", 101, 10 13 170 10
+  check "Queue positions", 102, 10 24 170 10
+  check "Sends: starting, resuming, done", 103, 10 35 170 10
+  check "Failed transfers", 104, 10 46 170 10
+  check "Searches and result counts", 105, 10 57 170 10
+  check "Joins, parts, quits of queued users", 106, 10 68 170 10
+  check "Bans, mutes, floods", 107, 10 79 170 10
+  check "Other log lines", 108, 10 90 170 10
   combo 201, 192 12 52 70, drop
   combo 202, 192 23 52 70, drop
   combo 203, 192 34 52 70, drop
@@ -1058,24 +1058,24 @@ dialog dccore.opt {
   combo 211, 248 23 52 70, drop
   text "Console replies", 212, 248 36 66 8
   combo 213, 248 45 52 70, drop
-  text "Status line every", 214, 248 60 66 8
+  text "Status every", 214, 248 60 66 8
   edit "", 215, 248 69 18 11, autohs
-  text "min, 0 = never", 216, 268 71 49 8
+  text "min, 0 = off", 216, 268 71 49 8
   text "Panel headings", 217, 248 83 66 8
   combo 218, 248 91 52 70, drop
   box "Window", 300, 5 108 312 50
-  check "Side panel with slots, queue and today's totals", 301, 10 118 178 10
-  check "Slots, queue and speed in the title bar", 302, 10 129 178 10
-  check "Console replies in a separate window", 303, 10 140 178 10
+  check "Side panel: slots, queue and totals", 301, 10 118 170 10
+  check "Slots, queue and speed in the title bar", 302, 10 129 170 10
+  check "Console replies in a separate window", 303, 10 140 170 10
   check "Beep on a failed transfer", 304, 192 118 118 10
-  check "Fixed-width font, size", 305, 192 129 86 10
-  edit "", 306, 280 128 18 11, autohs
-  text "Background", 307, 192 142 42 8
-  combo 308, 234 140 60 70, drop
+  check "Fixed-width font, size", 305, 192 129 100 10
+  edit "", 306, 294 128 18 11, autohs
+  text "Background", 307, 192 142 48 8
+  combo 308, 242 140 56 70, drop
   box "Connection", 400, 5 161 312 52
-  text "Bot nick", 401, 10 173 28 8
-  edit "", 402, 38 171 60 11, autohs
-  text "", 403, 104 173 210 8
+  text "Bot nick", 401, 10 173 36 8
+  edit "", 402, 48 171 56 11, autohs
+  text "", 403, 110 173 204 8
   check "Reconnect and log in by itself when the bot comes back", 404, 10 186 300 10
   text "The bot's own Settings > Console feed is the ceiling on what is sent at all.", 405, 10 198 300 8
   button "OK", 1, 232 218 40 12, ok default
