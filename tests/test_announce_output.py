@@ -366,8 +366,9 @@ class DebugDrainDeliveryTests(QuietTestCase):
         # Close the gate again for whatever runs next, so a live drain can
         # never swallow another test's queued lines.
         self.addCleanup(self._close_gate)
-        # Speed the pump up; the default pause between lines is 0.5s.
-        self.config.DEBUG_MSG_DELAY = 0.01
+        # Speed the pump up, for this test only (#667). The drain paces at
+        # the larger of the two delays, so both have to be small.
+        self.set_config(MSG_DELAY=0.01, DEBUG_MSG_DELAY=0.01)
         # #424: send_debug() now requires a non-blank DEBUG_CHANNEL before
         # queuing at all, which ships blank - unrelated to what this class
         # tests (the drain thread's own two gates), so a channel is set here

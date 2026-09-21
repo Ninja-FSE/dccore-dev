@@ -149,6 +149,14 @@ SETTINGS_DEFAULTS = {
     # test that set it and did not put it back - two do - changed the answer of
     # every is_admin() call after it.
     "ADMIN_HOSTMASKS": [],
+    # The outbound pace (#667). Six setUps set these to 10-50 ms directly
+    # and nothing put the shipped 5.0 s / 0 back, so every test after them
+    # in the run - alphabetically most of the suite - was paced at 10 ms
+    # and would stall or time out run on its own. They are set through
+    # set_config() now, and the shipped values return here on every reset;
+    # a guard reads defaults.py to keep these two the shipped ones.
+    "MSG_DELAY": 5.0,
+    "DEBUG_MSG_DELAY": 0.0,
 }
 
 RUNTIME_FLAGS = {

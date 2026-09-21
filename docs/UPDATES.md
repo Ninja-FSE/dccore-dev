@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The outbound pace is put back after a test (#667)
+
+Audit L3, test-only. Six setUps - two in `test_a_shared_outbound_pace.py`, one each in `test_reconnect.py`,
+`test_the_vip_lane_gets_one_slot_per_pass.py`, `test_the_pump_waits_for_the_joins_to_land.py` and
+`test_announce_output.py` - assigned `config.MSG_DELAY` (0.01 / 0.05) or `config.DEBUG_MSG_DELAY` (0.01) directly,
+and `reset_config()` did not reset them, so the shipped 5.0 s / 0 never came back for the rest of the process:
+every test after them in the run - alphabetically most of the suite - was paced at 10 ms and would have stalled
+five seconds a line on its own. The comment claiming isolation only replaced the pacer object. Nothing failed
+today (every multi-send test pins its own pace), which is the hole: a later test that did not would pass in the
+full run and time out in isolation.
+
+Both names are in `support.SETTINGS_DEFAULTS` at the shipped values and the six setUps go through
+`set_config()`. `tests/test_the_outbound_pace_is_put_back_after_a_test.py`: `reset_config()` restores both; the
+harness values equal what `defaults.py` ships (a retune must retune both); the audited class's tearDown puts the
+pace back; and no test file assigns either name on `config` directly (mutation-checked both ways). The full
+suite runs in the same time with the shipped pace between tests.
+
 ### 📝 The mIRC docs and script no longer require a bot that does not exist (#666)
 
 Audit L2. `docs/ADMIN-CONSOLE.md` ("a bot of 1.13 or later", "older than 1.13", "before the 1.13 release") and
