@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📝 Packing is said to be bounded everywhere (#696)
+
+Audit L32. INSTALL.md's upgrade note justified the `RAR_EXTENSIONS` change with "packing has no size cap and a
+film folder is a request to compress tens of gigabytes", and the comment above `RAR_EXTENSIONS` in
+`defaults.py` (and so `settings.conf.sample`, generated from it) said "There is no size cap anywhere on
+packing". Both predate `MAX_RAR_FOLDER_SIZE` (10 GB, enforced at request time) and contradicted INSTALL.md's
+own settings paragraph, FUTURE.md, the help text and the Settings page. An upgrading operator read that
+packing was unbounded and either added a workaround or distrusted the earlier paragraph. Both now give the
+real reason - packing a film folder is pointless work for the receiver, and the cap alone still lets a 9 GB
+film through - and the comment dates its history ("at the time there was no size cap ... has bounded it
+since"); the sample is regenerated. `tests/test_packing_is_said_to_be_bounded_everywhere.py` reads the
+shipped prose and the two samples for the claim, the guide for the reason beside the cap, and `defaults.py`
+for the dated history.
+
 ### 📝 WINDOWS.md's "Did it actually start?" says what it means (#695)
 
 Audit L31. The section was written under a since-removed "The seven steps" list. Read top to bottom, a
