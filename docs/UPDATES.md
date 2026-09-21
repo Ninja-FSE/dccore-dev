@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏱️ The freeze box has one clock (#652)
+
+Audit M50. Two things measured an absent user's five minutes. The per-user timer thread counted ten seconds at a
+time and refused to count while the bot was offline; the sweep at the top of `check_queue_and_send()` compared the
+frozen timestamp with wall time and ran the moment `bot_joined_channel` came back - which activation sets as soon
+as ANY channel's NAMES has arrived. So a user who left #b a minute before the bot lost its link for eleven
+minutes had their queue and temp archives deleted by the wake-up sweep on the way back ("frozen for over five
+minutes and never came back") while the timer thread still said sixty seconds - and before #b's NAMES had even
+arrived.
+
+The disconnect epilogue now stops the clock (`dcc.pause_freeze_clock()`, the moment kept in
+`runtime.freeze_clock_paused_at` so a rehash cannot lose it) and activation restarts it
+(`dcc.resume_freeze_clock()`, before the wake-up sweep) by moving every frozen timestamp forward by the outage. The
+sweep, the timer thread - which now reads its elapsed time off that timestamp instead of counting on its own -
+and the console's seconds-left therefore all measure the same thing: time the bot has been online since the
+freeze. And neither deletes a queue whose channel the bot has no member list for yet
+(`frozen_users_channel_is_synced()`): until that channel's NAMES arrives, absence is not an observation.
+`tests/test_the_freeze_box_has_one_clock.py` replays the audit's scenario (kept as the control, it deletes; with
+the outage taken out, it keeps) and parks the timer thread on an Event to show it reads the clock.
+
 ### 📦 A rehash keeps the packer's interlocks while a pack is still running (#651)
 
 Audit M49. `wait_for_transfers_to_finish()` counts a running folder pack as busy, but after REHASH_TRANSFER_WAIT

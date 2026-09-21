@@ -2557,6 +2557,10 @@ def irc_loop():
             # with it empty, every frozen user looks absent and their queue gets reaped.
             if getattr(config, 'channel_users', None):
                 config.bot_joined_channel = True
+                # Before anything below runs the sweep (#652): the frozen
+                # timestamps get the outage added, so wake_restored_queues()
+                # judges them by online time only.
+                dcc.resume_freeze_clock()
                 # #530: queues restored from disk have no trigger of their
                 # own - a JOIN wakes only FROZEN users, and the global sweep
                 # otherwise runs when some other transfer completes. Look
@@ -3605,6 +3609,9 @@ def irc_loop():
         # Reset every flag before the next pass through the reconnect loop
         print("[CONNECT] Lost the connection. Reconnecting to the IRC server in 10 seconds...")
         config.bot_joined_channel = False
+        # The freeze box's clock stops with the link (#652): the seconds the
+        # bot is away count against nobody's queue. Resumed at activation.
+        dcc.pause_freeze_clock()
         
         # FIXED: clears the in-memory channel lists on a crash, so the bot does not block its own nick next time
         with runtime.channel_users_lock():

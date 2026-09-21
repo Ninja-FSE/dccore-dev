@@ -849,6 +849,69 @@ def redispatch_waiting_pack(irc_sock, just_finished=None):
                      daemon=True).start()
     return owner
 
+FREEZE_TIMEOUT = 300.0   # seconds an absent user's queue is kept, counted only while the bot is online
+
+
+def pause_freeze_clock(now=None):
+    """The bot's link is gone: stop the freeze box's clock (#652, audit M50).
+
+    Called from the disconnect epilogue. Idempotent - a second call while
+    already paused keeps the earlier moment, which is the one the outage
+    started at.
+    """
+    if runtime.freeze_clock_paused_at is None:
+        runtime.freeze_clock_paused_at = time.time() if now is None else now
+
+
+def resume_freeze_clock(now=None, log=print):
+    """The bot is channel-synced again: move every frozen timestamp forward by
+    the outage, so the seconds it was away count for nobody. Returns the
+    seconds skipped, 0.0 if the clock was not paused.
+
+    ONE CLOCK. The per-user timer thread already refused to count the bot's
+    own downtime ("the bot's own downtime must NEVER count against a user's
+    queue"), while the sweep in check_queue_and_send() compared the frozen
+    timestamp with wall time - so as soon as bot_joined_channel came back, the
+    sweep deleted queues the timer said had sixty seconds on them. Rebasing
+    the timestamp makes the sweep, the timer and the console's "seconds left"
+    read the same figure: time the bot has been ONLINE since the freeze.
+    """
+    paused_at = runtime.freeze_clock_paused_at
+    if paused_at is None:
+        return 0.0
+    runtime.freeze_clock_paused_at = None
+    skipped = max(0.0, (time.time() if now is None else now) - paused_at)
+    frozen = getattr(config, "frozen_queues", None)
+    if skipped and isinstance(frozen, dict) and frozen:
+        with queue_lock:
+            for key in list(frozen):
+                try:
+                    frozen[key] = float(frozen[key]) + skipped
+                except (TypeError, ValueError):
+                    pass
+        log(f"[DCC FREEZE] The bot was away {int(skipped)}s; that time counts "
+            f"against none of the {len(frozen)} frozen queue(s).")
+    return skipped
+
+
+def frozen_users_channel_is_synced(user_key):
+    """Can the bot see the channel this user's queue belongs to?
+
+    The freeze means "not in any channel we share", and that is only an
+    observation once the channel's NAMES has arrived on this connection -
+    channel_users is cleared on every disconnect and rebuilt per channel.
+    Until then the bot is not in a position to say the user is gone, so
+    the deletion waits (#652). A queue with no channel on its rows is
+    judged as before.
+    """
+    rows = getattr(config, "dcc_queue", {}).get(user_key) or []
+    chan = announce_channel_for(rows[0]) if rows else None
+    if not chan:
+        return True
+    with runtime.channel_users_lock():
+        return str(chan).lower() in getattr(config, "channel_users", {})
+
+
 def freeze_absent_user(irc_sock, user, target_chan):
     """Start the five-minute countdown for a queued user who is not in any
     of our channels. Idempotent: a user already counting down is left alone,
@@ -893,7 +956,14 @@ def freeze_absent_user(irc_sock, user, target_chan):
         t_key = target_user.lower()
         elapsed = 0
 
-        while elapsed < 300:
+        # ONE CLOCK (#652): `elapsed` is read from the frozen timestamp, the
+        # same figure the sweep in check_queue_and_send() and the console's
+        # seconds-left use - not counted here on its own. The bot's outage
+        # is taken out of that timestamp by resume_freeze_clock() when the
+        # link is back, so the pause below is what it always was, and the
+        # sweep can no longer delete what this countdown says has a minute
+        # left.
+        while elapsed < FREEZE_TIMEOUT:
             time.sleep(10)
 
             # A) Something else already thawed the queue (JOIN / NAMES / !rehash)
@@ -915,7 +985,16 @@ def freeze_absent_user(irc_sock, user, target_chan):
                 threading.Thread(target=check_queue_and_send, args=(sock, target_user), daemon=True).start()
                 return
 
-            elapsed += 10
+            # D) The bot is up but has no member list for this user's channel
+            # yet (its NAMES has not arrived, or the rejoin was refused): it
+            # cannot say the user is gone. Wait, without counting.
+            if not frozen_users_channel_is_synced(t_key):
+                continue
+
+            try:
+                elapsed = time.time() - float(config.frozen_queues.get(t_key) or time.time())
+            except (TypeError, ValueError):
+                elapsed += 10
 
         if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
             with queue_lock:
@@ -1008,7 +1087,11 @@ def check_queue_and_send(irc_sock, completed_user):
                     del config.frozen_queues[f_user]
                     print(f"[DCC FREEZE-THAW] {f_user} is back in the channel list. Their queue was saved.")
                     continue
-                if (current_time - freeze_timestamp) > 300.0:
+                # The same clock as the timer thread (#652): the timestamp
+                # has the bot's own downtime taken out of it, and a channel
+                # the bot has no member list for yet is not evidence of
+                # absence - see frozen_users_channel_is_synced().
+                if (current_time - freeze_timestamp) > FREEZE_TIMEOUT and frozen_users_channel_is_synced(f_user):
                     if f_user in config.dcc_queue:
                         for f_obj in config.dcc_queue[f_user]:
                             if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):

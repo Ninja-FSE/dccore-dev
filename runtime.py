@@ -65,6 +65,13 @@ import time
 # it cannot say whether a pack is still running or merely left a stale flag.
 packer_thread = None
 
+# When the bot's own link went down, while it is down (#652). The freeze
+# box's clock - frozen_queues holds the moment each absent user was frozen -
+# must not run during the bot's own outage, so on the way back every frozen
+# timestamp is moved forward by the time spent here. Kept in this module so a
+# !rehash during the outage cannot lose it; None while the bot is up.
+freeze_clock_paused_at = None
+
 # Per-user bookkeeping -------------------------------------------------------
 failed_transfers = {}    # Failed-transfer counter, per user
 channel_users    = {}    # Users currently seen in the channels
