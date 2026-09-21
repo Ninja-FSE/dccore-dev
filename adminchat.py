@@ -809,6 +809,12 @@ class Session:
         if announce_text:
             # Written inline rather than queued: the writer thread is about to
             # stop, so a queued goodbye would never leave the building.
+            # Wrapped as send() wraps (#679, audit L15): "Goodbye." and "Line
+            # too long." went out bare on a structured session, the two lines
+            # that broke "every line starts with DCCORE". A line that already
+            # is one (DCCORE TAKEN) goes as it is.
+            if self.structured and not announce_text.startswith("DCCORE "):
+                announce_text = "DCCORE OUT " + announce_text
             try:
                 with self._lock:
                     self.sock.sendall((announce_text + "\n").encode("utf-8", "replace"))

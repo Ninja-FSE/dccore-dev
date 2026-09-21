@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧩 Every line of a structured session starts with DCCORE (#679)
+
+Audit L15. `Session.close(announce_text=...)` writes its text inline - the writer thread is about to stop, so
+a queued goodbye would never leave - and bypassed `send()`'s `DCCORE OUT` wrapping. After `hello`, `quit`
+("Goodbye.") and the 4096-byte guard ("Line too long.") sent bare lines, against ADMIN-CONSOLE.md's "from then
+on, every line it sends on this session starts with `DCCORE`". `dccore.mrc` merely echoed them; a stricter
+client would have treated them as a protocol error or routed them as plain chat. `close()` wraps as `send()`
+wraps now; a line that already is a DCCORE line (`DCCORE TAKEN <ip>`) goes as it is, and a plain session is
+untouched. `tests/test_every_structured_line_starts_with_dccore.py` runs both of the audit's probes over a
+socket pair, the TAKEN and plain-mode controls, `None`, and reads the guide for the promise; two of six fail
+with the old `close()`.
+
 ### 🔐 DEBUG_TO_CONSOLE off silences the structured feed too (#678)
 
 Audit L14. `send_debug()` honoured `DEBUG_TO_CONSOLE` before fanning prose out to the debug sinks;
