@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📡 The debug-channel line fits the wire (#694)
+
+Audit L30. `send_debug()` wrapped its text in about 170 bytes of colour framing with no line-length budget -
+the one outbound builder without one. A long folder name (`Pack denied for X: <folder> is an artist root
+folder`), a hostmask or an exception's text with an absolute path pushed the PRIVMSG past the 512 bytes a
+server relays, and the server cut it inside the text - possibly inside a colour code or a multibyte character -
+so the debug channel showed a truncated line with the background colour smeared to the end and the closing
+block gone. The console sinks and stdout got the full text. The text and the closing block are rendered
+through `fit_irc_line()` now, as the adverts and the notices are: shrunk with an ellipsis until the whole line
+fits `IRC_LINE_BUDGET`, re-rendered from the template each time so a colour code is never sliced.
+`tests/test_the_debug_line_fits_the_wire.py`: the auditor's 500-byte text fits and ends properly, the closing
+block is on the line with an ellipsis in the text, a multibyte name is measured in bytes and never split, a
+short line is untouched, the console sink still gets the whole text, and `send_debug()` is read to render
+through the shared builder. Four of six fail with the old code.
+
 ### 📡 A part reason cannot name the channel (#693)
 
 Audit L29. The PART handler's `^:([^!]+)!.* PART (\S+)` with `re.search` was greedy: the channel group was

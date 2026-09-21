@@ -1247,12 +1247,23 @@ def send_debug(msg_text, category="INFO", notice=None):
 
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Category: {tag_str} "
     
-    # 3. The text block, stripped of any colour codes that would clash
+    # 3. The text block, stripped of any colour codes that would clash, and
+    # 4. the closing block, ending the line with the colour separators -
+    # rendered together through fit_irc_line() (#694, audit L30), as every
+    # other outbound builder is. The framing is ~170 bytes on its own, and a
+    # long folder name, hostmask or exception text pushed the line past what
+    # the server relays: it was cut at 512 bytes, inside the text, with the
+    # background colour smeared to the end and the closing block gone. The
+    # text is shrunk with an ellipsis until the whole line fits, and a colour
+    # code is never sliced.
     clean_text = msg_text.replace(config.C_BOLD, "").replace(config.C_RESET, "").replace("\x02", "").replace("\x0f", "")
-    msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Log: {clean_text} "
-        
-    # 4. The closing block, ending the line with the colour separators
-    msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {R}\r\n"
+    head = msg
+
+    def _build(text):
+        return (head + f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Log: {text} "
+                + f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {R}\r\n")
+
+    msg = fit_irc_line(_build, clean_text)
     
     # ---------------------------------------------------------------------
     # NON-BLOCKING HAND-OFF. This used to hold config.debug_flood_lock across a
