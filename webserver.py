@@ -3905,6 +3905,21 @@ if HAVE_FLASK:
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "Authentication required."}), 401
                 return redirect("/login")
+            # EVERY POST IS CHECKED AGAINST ITS OWN HOST (#672, audit L8),
+            # the way the login's is (#609). SameSite=Lax was the only
+            # defence for the routes that take no JSON body - update-list,
+            # purge-offline, a source's remove, a fetch's delete, the two
+            # read marks - and "site" does not include the port: a plain
+            # HTML form on any other local port (a dev server, a NAS UI)
+            # submitted them with the operator's cookie attached. A browser
+            # sends Origin on every POST, a form's included; a request with
+            # neither header (curl, a script) is not a page forwarding
+            # another site's form and passes, as at the login.
+            if request.method == "POST" and not _login_origin_ok(
+                    request.headers.get("Origin"), request.headers.get("Referer"),
+                    request.host):
+                return jsonify({"error": "This request was sent by another site "
+                                         "and was ignored."}), 403
             return None
 
         @app.route("/login", methods=["GET", "POST"])

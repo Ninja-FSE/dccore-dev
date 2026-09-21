@@ -15,6 +15,25 @@ packer thread was released but never waited for, and its finally - `config.rar_i
 round now, the join asserts the thread finished, and `TheFixtureLeavesNoPackerBehind` runs one of the class's
 tests on its own and checks no thread of its own is left alive and `runtime.packer_thread` is None - which
 fails with the old order.
+### 🔐 Every dashboard POST is checked against its own host (#672)
+
+Audit L8. `SameSite=Lax` and the JSON content-type were the dashboard's only CSRF defences, and seven mutating
+routes take no JSON body at all: `/api/tools/update-list`, `/api/filelists/purge-offline`,
+`/api/filelists/sources/<nick>/remove`, `/api/filelists/<source>/purge`, `/api/fetch/<id>/delete`,
+`/api/messages/read`, `/api/notices/read`. "Site" does not include the port, so a plain HTML form auto-submitted
+on `http://127.0.0.1:9000` - a dev server, a NAS or media UI that renders attacker-influenced HTML - was sent
+to `http://127.0.0.1:8420` with the operator's session cookie attached: every offline bot's fetched lists
+purged, a full master-list rebuild started (the auditor's probe got `200 {"update":"started"}`).
+
+The login's own check (`_login_origin_ok()`, #609 - Origin, or Referer for an older browser, must name the
+request's own Host) now runs for every POST in the `require_login` before_request hook, after the login check
+and before any route, so a route added later is covered without knowing it: `403 {"error": "This request was
+sent by another site and was ignored."}`. A request with neither header (curl, a script, the test client) is not
+a page forwarding another site's form and passes, as at the login; the page's own `fetch()` calls carry their
+own origin and pass. `tests/test_a_form_on_another_local_port_cannot_drive_the_dashboard.py`: each of the seven
+refused before it acts (the rebuild is not started), Referer-only and `null` origins refused, every POST rule
+in the map covered, and the controls - own origin answered, headerless answered, a cross-port GET untouched,
+an anonymous forgery still 401 first. With `webserver.py` unpatched, five of nine fail.
 
 ### 🤖 A burst of new nicks no longer evicts the real bots from the registry (#671)
 
