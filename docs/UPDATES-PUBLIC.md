@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: temp files a crash or a Ctrl-C left in `data/` are cleaned up at the next start, and on Linux/macOS the state files (`hard_bans.txt`, `dcc_queue.txt`) are no longer made owner-only by the bot's own saves.** The console token store stays owner-only.
 - **Fixed: a bot registry that could not be saved (a full disk, a permission) is tried again at the next advert instead of half a minute later, the List Browser says when a source you added or removed did not reach the disk, and Ctrl-C saves the registry once more before the bot exits.**
 - **Fixed (dashboard): importing lifetime totals while a transfer completed could lose that transfer from the counts.** The import now updates the totals in one step, so a transfer finishing at the same moment is counted.
 - **Fixed (first run): after setting the bot up in the browser, only one dashboard tab opens.** The setup page's own tab already goes to the login by itself; the bot no longer opens a second one.

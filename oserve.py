@@ -345,6 +345,12 @@ def startup(setup_page=None):
         dcc_fetch.prune_fetch_history()
     except Exception as prune_err:
         print(f"[STARTUP] Could not prune the fetch history: {prune_err}")
+    # Temp files a killed run left in data/ (#692). Housekeeping, like the
+    # pruning above, and no reason to refuse to boot.
+    try:
+        db.discard_stale_swaps()
+    except Exception as swap_err:
+        print(f"[STARTUP] Could not sweep leftover temp files: {swap_err}")
     if config.fetch_queue:
         print(f"[STARTUP] Fetch history: {len(config.fetch_queue)} finished fetch(es) remembered.")
 

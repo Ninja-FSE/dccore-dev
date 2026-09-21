@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 💾 Leftover temp files in data/ are swept, and state files are readable again (#692)
+
+Audit L28. `db._atomic_write()` creates `data/.tmp_XXXX.swap` with `mkstemp()` and swaps it into place. A
+hard kill between the two left it behind - and so did a Ctrl-C, because `KeyboardInterrupt` is not an
+`Exception` and the cleanup branch did not run - and nothing at startup or on a later write removed it: every
+crash added a hidden file to `data/`. `mkstemp()` also creates its file 0600, and the replace carried that
+through, so on POSIX `hard_bans.txt` and `dcc_queue.txt` - documented as hand-editable - were owner-only after
+their first save.
+
+`db.discard_stale_swaps()` removes `.tmp_*.swap` files at startup (housekeeping beside the fetch-history
+prune, never a reason to refuse to boot), the way `update_list` sweeps its own staging files; the cleanup in
+`_atomic_write()` catches `BaseException`; and a new file gets 0644 while an existing file keeps the mode it
+has - the console token store asks for 0600, since it holds secrets. `tests/test_leftover_temp_files_are_swept.py`:
+the sweep takes the leftovers and nothing else (a `.conf` temp and the real files stay), is silent with
+nothing to do, tolerates a missing directory and defaults to the queue's directory; a `KeyboardInterrupt`
+between the two steps leaves nothing; the audit's hard-kill probe in a child process leaves one and the sweep
+takes it; on POSIX a new file is 0644, an existing 0664 stays 0664, and the token store is 0600; and
+`startup()` calls the sweep. Seven of ten fail with the old code.
+
 ### 💾 A failed bot-registry save is tried again, and said (#691)
 
 Audit L27. `db.save_known_bots()` caught every exception and returned None; `irc._flush_known_bots()` then

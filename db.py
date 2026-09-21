@@ -35,8 +35,52 @@ PRIVATE_MESSAGES_FILE = getattr(config, "PRIVATE_MESSAGES_FILE",
                                 os.path.join("data", "private_messages.json"))
 
 
-def _atomic_write(path, text):
+# The temp file's name, and how it is swapped in (#692, audit L28). One
+# prefix and suffix, so the sweep below knows exactly what it may remove.
+_SWAP_PREFIX, _SWAP_SUFFIX = ".tmp_", ".swap"
+
+
+def discard_stale_swaps(directory=None):
+    """Remove `.tmp_*.swap` files a previous run was killed in the middle of
+    (#692, audit L28), the way update_list._discard_stale_temps() removes its
+    own staging files. Returns how many went.
+
+    _atomic_write() cleans up after an exception, but a hard kill - or a
+    Ctrl-C, before this file caught BaseException there - between mkstemp
+    and replace left the temp behind, and nothing ever removed it: every
+    crash added a hidden file to data/. Called at startup, where this run
+    has staged nothing yet, so every such file belongs to a run that is no
+    longer alive.
+    """
+    directory = directory or os.path.dirname(os.path.abspath(DCC_QUEUE_FILE)) or "."
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return 0
+    removed = 0
+    for name in entries:
+        if not (name.startswith(_SWAP_PREFIX) and name.endswith(_SWAP_SUFFIX)):
+            continue
+        try:
+            os.remove(os.path.join(directory, name))
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        print(f"[DB] Removed {removed} leftover temp file(s) from an earlier run in {directory}.")
+    return removed
+
+
+def _atomic_write(path, text, mode=None):
     """Write `text` to `path` atomically.
+
+    `mode`: the permission bits for a file that does not exist yet. mkstemp()
+    creates its file 0600 and the replace carries that through, so on POSIX
+    every state file this module writes - hard_bans.txt and dcc_queue.txt,
+    documented as hand-editable - became owner-only after its first save
+    (#692). A file that exists keeps the mode it has (the operator's, if
+    they set one); a new one gets `mode`, 0o644 unless the caller says
+    otherwise - the token store says 0o600, since it holds secrets.
 
     Writes to a temporary file in the SAME directory (so the final step is a rename
     within one filesystem), flushes and fsyncs it, then swaps it into place.
@@ -54,14 +98,21 @@ def _atomic_write(path, text):
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
 
-    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".tmp_", suffix=".swap")
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=_SWAP_PREFIX, suffix=_SWAP_SUFFIX)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
+        try:
+            wanted = os.stat(path).st_mode & 0o777 if os.path.exists(path) else (0o644 if mode is None else mode)
+            os.chmod(tmp_path, wanted)
+        except OSError:
+            pass  # a filesystem without modes; the content is what matters
         platform_compat.replace_with_retry(tmp_path, path)
-    except Exception:
+    except BaseException:
+        # BaseException, not Exception (#692): a Ctrl-C between mkstemp and
+        # the replace is a KeyboardInterrupt, and the temp was left behind.
         try:
             os.remove(tmp_path)
         except OSError:
@@ -947,8 +998,10 @@ def load_admin_tokens():
 def save_admin_tokens(tokens):
     try:
         with _disk_lock:
+            # Secrets: owner-only from the first write (#692).
             _atomic_write(ADMIN_TOKENS_FILE,
-                          json.dumps(tokens, indent=1, sort_keys=True, ensure_ascii=False))
+                          json.dumps(tokens, indent=1, sort_keys=True, ensure_ascii=False),
+                          mode=0o600)
     except Exception as err:
         print(f"[DB ERROR] Could not save the console token store: {err}")
 
