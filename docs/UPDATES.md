@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 A mis-typed row does not kill the console's writer (#681)
+
+Audit L17, test-only. The finding: `_writer_loop()` called `send_status()` -> `status_lines()` with no guard
+but the one around the stats block, so a `dcc_queue` value with no `len()` or a transfer row with a string
+`started_at` raised out of the writer thread and left the session a black hole - commands accepted, nothing
+ever written, `dccore.mrc` reconnecting into the same wall every 90 s. Reachable only through a hand-edited or
+future mis-typed row. Already closed in the tree by #614, which moved the figures onto a helper thread whose
+body catches and prints `Status burst failed: ...` - the writer goes on draining. Pinned now with the
+verifier's own two rows in `tests/test_a_bad_row_does_not_kill_the_console_writer.py`: the writer still
+delivers the next line, the failure is reported, the session stays open, and the burst is back once the row
+is gone. Without the helper's guard, two of the three fail.
+
 ### 🔐 The console listener takes only the operator's connection (#680)
 
 Audit L16. The host check gates who can make the bot OPEN a listener; `accept()` then took whoever reached the
