@@ -2680,8 +2680,16 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # Outside the lock the hang is confined to this request's thread.
         if sends_now:
             if oserve: oserve.active_downloads = len(config.active_transfers)
-            announce.send_dcc_sending_notice(user, file_name, path=full_path, channel=target_chan)
-            threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, target_chan, next_file_fake), daemon=True).start()
+            # Where "Sent:" goes, resolved the way the queued paths resolve
+            # it (#658, audit M56). target_chan is the raw wire target, and
+            # for a private request that is the bot's own nick: the
+            # completion line went out as PRIVMSG <ournick>, cost a VIP slot,
+            # and the read loop dropped it as our own message. #530 fixed
+            # this for rows picked up from the queue via
+            # announce_channel_for(); this path never went through it.
+            announce_chan = announce_channel_for(next_file_fake)
+            announce.send_dcc_sending_notice(user, file_name, path=full_path, channel=announce_chan)
+            threading.Thread(target=start_dcc_send, args=(irc_sock, user, full_path, file_name, announce_chan, next_file_fake), daemon=True).start()
             return
 
         # Save and update dcc_queue.txt on disk straight away

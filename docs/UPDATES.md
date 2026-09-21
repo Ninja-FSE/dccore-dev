@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📢 "Sent:" for a private request on the direct path goes to a channel (#658)
+
+Audit M56. `handle_download_request()` handed the raw wire target to `start_dcc_send()` as the announce channel on
+the direct-send path (a slot free, no queue - the common first request). For a private request that target is the
+bot's own nick, so `send_transfer_complete()` built `PRIVMSG <ournick> :Sent ...`: queued into the VIP lane, a
+pacer slot spent, dropped by the read loop as our own message. The transfer completed and the feed's SENT event
+fired; only the public advert was lost. #530 fixed exactly this for rows picked up from the queue via
+`announce_channel_for()`; the direct path never went through it, and a PM `!list` takes the same path.
+
+The direct path now resolves `announce_channel_for(next_file_fake)` - the request's channel if it is one, the
+configured default otherwise - and hands that to both the SENDING notice and `start_dcc_send()`, as the queued
+paths do. `tests/test_a_private_requests_sent_line_goes_to_a_channel.py` drives a PM request through the real
+path with the send captured, and checks the line `send_transfer_complete()` builds from it at the wire.
+
 ### 🔁 A packed archive whose send fails is retried, not deleted (#657)
 
 Audit M55. On any failed send of a packed .rar - the 30 s accept timeout with the user away from the keyboard, a
