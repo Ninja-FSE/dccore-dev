@@ -1715,6 +1715,10 @@ def _record_bot(key, user, target, advert, now):
         "nick": user,
         "channel": target,
         "last_seen": now,
+        # How many adverts this entry is built from (#671): what the size
+        # cap evicts by. A bot advertises every few minutes; a nick that
+        # said it once is a nick that said it once.
+        "adverts": int(entry.get("adverts") or 0) + 1,
     })
     for field in _ADVERT_FIELDS.get(advert.get("family"), ()):
         if field in advert:
@@ -1846,9 +1850,17 @@ def _capture_channel_advert(user, target, msg, now=None):
 def _prune_known_bots(now):
     """Forget bots not seen inside the TTL, then cap what is left.
 
-    Eviction is by last_seen ascending, so a burst of one-off nicks is what
-    goes and the bots that actually advertise are what stays - the opposite of
-    dropping whatever the dict happened to hold last.
+    Eviction is by how many adverts the entry is built from, then by
+    last_seen, both ascending: a burst of one-off nicks is what goes and the
+    bots that actually advertise are what stays. By last_seen ALONE (#671,
+    audit L7) it was the reverse for exactly the burst the cap exists for -
+    any channel member can register a "bot" with one unauthenticated line,
+    2001 fresh nicks carried the newest last_seen of all, and the genuine
+    bots that had advertised minutes earlier were the ones dropped, out of
+    the List Browser until their next advert while the junk sat there for
+    up to a week. A real bot has advertised more than once by the time a
+    flood of that size can arrive; an entry with no count (an older file)
+    counts as one.
 
     An entry with no last_seen at all (an older file, a hand edit) is treated
     as infinitely old rather than kept for ever: the field is written on every
@@ -1872,7 +1884,8 @@ def _prune_known_bots(now):
         # would sort as the oldest of all and be the first to go.
         by_age = sorted(((k, e) for k, e in registry.items()
                          if not (e or {}).get("hand_entered")),
-                        key=lambda kv: float((kv[1] or {}).get("last_seen") or 0))
+                        key=lambda kv: (int((kv[1] or {}).get("adverts") or 1),
+                                        float((kv[1] or {}).get("last_seen") or 0)))
         for key, _entry in by_age[:len(registry) - KNOWN_BOTS_MAX]:
             del registry[key]
 

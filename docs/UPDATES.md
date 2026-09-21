@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🤖 A burst of new nicks no longer evicts the real bots from the registry (#671)
+
+Audit L7. Any channel member can register a "bot" in `runtime.known_bots` with one unauthenticated line
+(`Type: @<theirnick> For My List Of: 1 Files`; the RAR wording needs no identity claim at all).
+`_prune_known_bots()` evicted by `last_seen` ascending once the registry passed `KNOWN_BOTS_MAX` (2000), and
+2001 fresh nicks carried the newest `last_seen` of all - so the genuine bots that had advertised minutes
+earlier were the ones dropped, gone from the List Browser until their next advert, while the junk sat there for
+up to a week. The docstring claimed the opposite, for exactly the burst the cap was added for.
+
+`_record_bot()` now counts the adverts an entry is built from (`adverts`), and eviction goes by that count
+first, then by `last_seen`: a nick that said it once is what goes; a bot that advertises every few minutes has
+said it more than once by the time a flood of that size can arrive. An entry with no count (an older file)
+counts as one; hand-entered bots are still never candidates.
+`tests/test_a_burst_of_new_nicks_does_not_evict_the_real_bots.py` runs the auditor's recipe through the
+capture path in both wordings, keeps the least-recently-seen-goes-first order among one-offs, checks the
+older-file case, the count and the hand-entered exemption; with `irc.py` unpatched, three of six fail.
+
 ### 🧹 What a user typed reaches the log as printable text (#670)
 
 Audit L6. `!DCCore !rar ]0;pwned4,4 SENT: admin.rar to victim` from any channel member: the
