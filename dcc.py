@@ -1005,17 +1005,32 @@ def freeze_absent_user(irc_sock, user, target_chan):
             except (TypeError, ValueError):
                 elapsed += 10
 
-        if hasattr(config, 'frozen_queues') and t_key in config.frozen_queues:
-            with queue_lock:
-                if t_key in config.dcc_queue:
-                    for f_obj in config.dcc_queue[t_key]:
-                        if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
-                            try: os.remove(f_obj['path'])
-                            except: pass
-                    del config.dcc_queue[t_key]
-                    db.save_dcc_queue()
-                del config.frozen_queues[t_key]
+        # THE FREEZE IS TESTED AND TAKEN UNDER THE LOCK, IN ONE MOVE (#659,
+        # audit M57). This used to test `t_key in frozen_queues` outside
+        # queue_lock and then, inside it, delete the queue and `del` the key
+        # without looking again. The JOIN thaw and the sweep thaw both remove
+        # that key; one landing in the gap meant the timer erased the queue
+        # of a user who was verifiably back and then died on the KeyError -
+        # the freezer destroying the queue it exists to preserve, and no
+        # "Timer expired" line to say so. pop() under the lock answers
+        # "was it still frozen" and takes it in the same step; only a real
+        # answer erases anything.
+        still_frozen = False
+        with queue_lock:
+            frozen = getattr(config, 'frozen_queues', None)
+            if isinstance(frozen, dict):
+                still_frozen = frozen.pop(t_key, None) is not None
+            if still_frozen and t_key in config.dcc_queue:
+                for f_obj in config.dcc_queue[t_key]:
+                    if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
+                        try: os.remove(f_obj['path'])
+                        except: pass
+                del config.dcc_queue[t_key]
+                db.save_dcc_queue()
+        if still_frozen:
             announce_mod.send_debug(f"Timer expired for {target_user} in {original_chan}. Personal queue has been erased.", category="PART")
+        else:
+            print(f"[DCC FREEZE-ABORT] {target_user} was thawed as the countdown ended. The queue is safe.")
 
     threading.Thread(target=user_queue_timer, args=(irc_sock, user, target_chan), daemon=True).start()
 

@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 The freeze timer tests and takes the freeze under the lock, in one move (#659)
+
+Audit M57. `user_queue_timer`'s expiry read `t_key in config.frozen_queues` outside `queue_lock`, then under the
+lock deleted the user's queue and did an unconditional `del config.frozen_queues[t_key]` without looking again.
+The JOIN thaw (an unlocked pop) and the sweep thaw (under the lock) both remove that key; one landing in the gap -
+the user back at the 300 s mark - meant the timer erased the queue of someone who was verifiably present and then
+died on the KeyError, with no "Timer expired" line. Rare, silent.
+
+The expiry now does one `frozen_queues.pop(t_key, None)` under the lock and erases the queue only when that
+returned a value; a thaw in the gap leaves the queue alone and says so.
+`tests/test_the_freeze_timer_takes_the_freeze_under_the_lock.py` makes the race deterministic - the test holds
+`queue_lock`, waits until the countdown is blocked on it, thaws the user, lets go - for the JOIN thaw and the
+sweep thaw, with the plain expiry as the control; both race cases fail against the old code exactly as the audit
+described.
+
 ### 📢 "Sent:" for a private request on the direct path goes to a channel (#658)
 
 Audit M56. `handle_download_request()` handed the raw wire target to `start_dcc_send()` as the announce channel on
