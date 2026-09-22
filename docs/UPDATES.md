@@ -76,6 +76,16 @@ path, deliberately, so it asserts instead that every dispatched message is meter
 exemption, that the exemption covers the file requests, and that it covers nothing else - a second unmetered
 path added later still fails there.
 
+Completed afterwards. #896: what the operator is told `MAX_REQUESTS` counts still said file requests - its
+`defaults.py` comment, the dashboard help in three languages, the *Max requests per window* label (now *Max
+commands per window*: "requests" read as exactly the thing no longer counted), FUTURE.md's anti-flood line and
+the sample. #897: nothing executed the gate's own `if` - with `not is_file_request` taken back out of it the
+whole suite stayed green (6414 OK), since the tests above read the exemption expression and the wording rather
+than run a paste. `tests/test_a_pasted_album_is_taken_through_the_real_loop.py` (5) drives `irc_loop()` with
+one - thirty file rows and fifteen `!rar` rows all dispatched with no mute or ban, searches still muted then
+banned, rows during a search-earned mute served without escalating it, a ban still refusing them - and three of
+the five fail with the exemption removed.
+
 ### 📋 A batch of requests pasted from the list is served, not refused (#886)
 
 Reported live, from the same evening as #879/#884: a user pasted nine request lines in about seven seconds -
