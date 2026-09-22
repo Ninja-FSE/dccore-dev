@@ -21,6 +21,9 @@ import unittest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from exported_tree import internal_file_or_skip  # noqa: E402
 
 SHIPPED = ["README.md", "docs/INSTALL.md", "docs/WINDOWS.md", "docs/MACOS.md", "docs/ADMIN-CONSOLE.md",
            "docs/CONVENTIONS.md", "docs/FUTURE.md"]
@@ -68,7 +71,11 @@ class OneNumberOnePlace(unittest.TestCase):
                              "FUTURE.md says %d tests; the loader finds %d" % (claimed, actual))
 
     def test_the_release_workflow_names_the_one_place(self):
-        workflow = read("docs/PUBLIC-REPO-WORKFLOW.md")
+        """docs/PUBLIC-REPO-WORKFLOW.md is dev-only and does not ship - see
+        exported_tree.py - so this is a no-op in an extracted public tree."""
+        path = internal_file_or_skip(self, "docs/PUBLIC-REPO-WORKFLOW.md")
+        with io.open(path, encoding="utf-8") as handle:
+            workflow = handle.read()
 
         self.assertIn("the one place it lives", workflow)
         self.assertNotIn("AND in `README.md`'s own Tests", workflow)
