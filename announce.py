@@ -842,7 +842,11 @@ def _already_told_queue_full(user, error_type):
         _told_queue_full[key] = now
         excess = len(_told_queue_full) - QUEUE_FULL_MEMORY
         if excess > 0:
-            for stale in list(_told_queue_full)[:excess]:
+            # A comprehension, not list(). announce.py imports the project's
+            # own list module, which shadows the builtin here - list(...)
+            # calls the MODULE. Same trap as _debug_sinks[:] above.
+            oldest = [key for key in _told_queue_full][:excess]
+            for stale in oldest:
                 _told_queue_full.pop(stale, None)
     return False
 
