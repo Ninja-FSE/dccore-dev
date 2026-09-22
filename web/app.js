@@ -3796,6 +3796,7 @@
     REQUEST_WINDOW: "settings.field.REQUEST_WINDOW",
     MUTE_TIME: "settings.field.MUTE_TIME",
     FLOOD_BAN_SECONDS: "settings.field.FLOOD_BAN_SECONDS",
+    DCC_ACCEPT_TIMEOUT: "settings.field.DCC_ACCEPT_TIMEOUT",
     MAX_SEND_FAILS: "settings.field.MAX_SEND_FAILS",
     RAR_TIMEOUT: "settings.field.RAR_TIMEOUT",
     LIST_UPDATE_TIMEOUT: "settings.field.LIST_UPDATE_TIMEOUT",

@@ -1214,6 +1214,20 @@
 # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
 #MAX_SEND_FAILS = 3
 
+# How many seconds the bot waits for someone to accept a file it has offered
+# before withdrawing the offer and counting one failed attempt. A person who
+# has to click Accept in a dialog often needs more than the default 30.
+#
+# HOW LONG AN OFFER STANDS. After the DCC SEND handshake the bot listens for
+# the receiver to connect; when nobody has by this deadline the offer is
+# withdrawn and counted as one failed attempt against MAX_SEND_FAILS. This
+# was a fixed 30 s, and a night's feed showed what that costs (#879): a
+# person who has to click Accept in a dialog often needs longer, and every
+# miss was a strike. It is not the transfer's own clock - once bytes are
+# moving, the acknowledgement stall check is what decides a dead link.
+# Seconds the bot waits for the receiver to connect after offering a file
+#DCC_ACCEPT_TIMEOUT = 30
+
 # How many seconds a folder may take to pack before the bot gives up on it.
 #
 # Longest a rar packing run may take, in seconds, before it is abandoned

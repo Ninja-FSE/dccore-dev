@@ -528,6 +528,33 @@ def _report_transfer_failure(user, file_name, reason, acked=None, total=None, ch
         print(f"[DEBUG-FAIL ERROR] Could not report the failed transfer: {debug_err}")
 
 
+def accept_timeout():
+    """Seconds the listener waits for the receiver after the offer (#879).
+
+    DCC_ACCEPT_TIMEOUT, floored at one second so a zero or a typo cannot
+    make every offer fail the instant it is made.
+    """
+    try:
+        seconds = float(getattr(config, "DCC_ACCEPT_TIMEOUT", 30))
+    except (TypeError, ValueError):
+        seconds = 30.0
+    return max(1.0, seconds)
+
+
+def never_connected_reason(seconds):
+    """What a failed accept() is: nobody came, not a link that stopped.
+
+    Before #879 the accept() timeout fell into the send loop's own
+    `except socket.timeout` and was reported as "the send blocked for the
+    whole socket timeout with the receiver not draining it (0B of 0B)" -
+    which sends an operator looking for a network fault when the receiver
+    simply never clicked Accept, or their client's DCC filter dropped the
+    file type.
+    """
+    return (f"the receiver never connected within {seconds:.0f}s - the offer "
+            f"was not accepted, or their client ignored it.")
+
+
 class _ReceiverGone(Exception):
     """The peer closed the data connection with bytes still unacknowledged."""
 
@@ -3182,7 +3209,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # tells the peer to connect, and a peer dialling before we listen gets
         # a refusal - so the whole block moved inside the try rather than the
         # two calls moving down past it.
-        dcc_sock.settimeout(30.0)
+        accept_window = accept_timeout()
+        dcc_sock.settimeout(accept_window)
         dcc_sock.listen(1)
     
         safe_file_name = file_name.replace(" ", "_")
@@ -3228,7 +3256,21 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             print(f"[DCC ERROR] Failed to send the handshake: {e}")
             return
 
-        conn, addr = dcc_sock.accept()
+        try:
+            conn, addr = dcc_sock.accept()
+        except socket.timeout:
+            # Nobody connected inside the window. Its own branch, because the
+            # `except socket.timeout` at the bottom of this try belongs to the
+            # send loop and described this as the receiver "not draining"
+            # a send that never started (#879). Said as what it is, with the
+            # file size so the feed reads "0B of 626MB" rather than "0B of
+            # 0B"; the enclosing finally settles the row and the slot as for
+            # any other failure.
+            report_failure(user, file_name, never_connected_reason(accept_window),
+                           acked=0, total=file_size)
+            oserve = sys.modules.get('oserve')
+            if oserve: oserve.send_fails_count += 1
+            return
         conn.settimeout(60.0)
         dcc_sock.settimeout(None)
         
@@ -3467,7 +3509,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # ack-based stall above is that check; this one is the write stalling.
         report_failure(user, file_name,
             "the send blocked for the whole socket timeout with the receiver "
-            "not draining it.")
+            "not draining it.", acked=acks.acked, total=file_size)
         oserve = sys.modules.get('oserve')
         if oserve: oserve.send_fails_count += 1
     except Exception as e:

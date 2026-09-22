@@ -186,6 +186,7 @@ PLAIN_HELP = {
     'DCC_SEND_BUFFER': 'How much data the operating system may hold in flight for one send, in bytes. Leave at 0 to let Windows or Linux decide - that is right for nearly every connection. Only worth experimenting with on a very fast link to a distant downloader.',
     'DCC_PORT_START': 'The first port the bot listens on when sending a file. If you are behind a router, forward this whole range (start to end) to the machine running the bot, or nobody can download from you.',
     'DCC_PORT_END': 'The last port of that range. Each transfer running at the same time needs its own port, so keep at least as many ports as you have send slots.',
+    'DCC_ACCEPT_TIMEOUT': 'How many seconds the bot waits for someone to accept a file it has offered before withdrawing the offer and counting one failed attempt. A person who has to click Accept in a dialog often needs more than the default 30.',
     'MAX_SEND_FAILS': 'How many times the bot retries sending one queued file if the download does not connect or fails, before dropping it from the queue and telling the person.',
     'FILE_DIRECTORY': 'The folder with the files you share. Used only if you have not added folders on the Library page - if you have, those are used instead and this is ignored.',
     'LIST_BASE_NAME': "The name your list files start with (for example DCCore-2026-09-18.txt). Normally the same as the bot's nickname, which is what happens if you leave it alone.",

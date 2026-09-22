@@ -2371,7 +2371,7 @@ SETTINGS_CATEGORIES = (
     # other in front of them.
     ("transfers",     "Transfers",             ["DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
                                                 "DCC_PORT_START", "DCC_PORT_END",
-                                                "MAX_SEND_FAILS"]),
+                                                "DCC_ACCEPT_TIMEOUT", "MAX_SEND_FAILS"]),
     ("your-list",     "Your list",             ["FILE_DIRECTORY", "LIST_BASE_NAME",
                                                 "LIST_FORMAT", "LIST_IGNORED_EXTENSIONS",
                                                 "SEPARATE_VIDEO_LIST", "LIST_VIDEO_EXTENSIONS",
@@ -2558,6 +2558,7 @@ SETTINGS_LABELS = {
     "REQUEST_WINDOW": "Request window (seconds)",
     "MUTE_TIME": "Mute duration (seconds)",
     "FLOOD_BAN_SECONDS": "Ban after flooding while muted (seconds)",
+    "DCC_ACCEPT_TIMEOUT": "Wait for the receiver to connect (seconds)",
     "MAX_SEND_FAILS": "Max send failures",
     "RAR_TIMEOUT": "RAR pack timeout (seconds)",
     "LIST_UPDATE_TIMEOUT": "List rebuild hard cap (seconds, 0 = none)",
