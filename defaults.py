@@ -269,6 +269,12 @@ FETCHED_FILES_DIR: str = "./data/fetched"
 BANS_FILE: str      = "./data/bans.txt"
 STATS_FILE: str     = "./data/stats.txt"       # Lifetime totals, the speed record and the daily figures the advert and Stats page show
 HARD_BANS_FILE: str = "./data/hard_bans.txt"   # Permanent hostmask patterns added with !ban; timed bans live in BANS_FILE
+# db.py has always read this one through getattr(config, "DCC_QUEUE_FILE", ...)
+# rather than importing it directly, so nothing shipped noticed it was never
+# actually defined here - until #710's instance lock (oserve.startup())
+# referenced config.DCC_QUEUE_FILE directly and a real, unconfigured install
+# crashed with AttributeError on the very first line of startup.
+DCC_QUEUE_FILE: str = "./data/dcc_queue.txt"
 
 # The ordered set of folders served, once there is more than one of them
 # (#164). JSON rather than a settings.conf list for the reason KNOWN_BOTS_FILE

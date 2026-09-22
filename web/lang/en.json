@@ -433,6 +433,7 @@
   "settings.field.BANS_FILE": "Bans file",
   "settings.field.STATS_FILE": "Stats file",
   "settings.field.HARD_BANS_FILE": "Hard bans file",
+  "settings.field.DCC_QUEUE_FILE": "DCC queue file",
   "settings.field.KNOWN_BOTS_FILE": "Known bots file",
   "settings.field.LIST_INDEX_FILE": "Cross-list search index",
   "settings.field.DOWNLOAD_COUNTS_FILE": "Download counts file",
