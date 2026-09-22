@@ -149,6 +149,20 @@ the omissions surface, because it is the last point at which they are cheap.
    `tests/uncovered_functions.txt`. Keep anything a shipped file's tests
    depend on (`scripts/gen_settings_sample.py`, `docs/CONVENTIONS.md`).
 
+   **Also strip the tests that exist only to cover `scripts/preflight.py`:**
+   `tests/test_preflight_checks_every_pass_for_state_writes.py`,
+   `tests/test_preflight_counts_what_was_skipped.py`,
+   `tests/test_preflight_reads_its_children_in_utf8.py`,
+   `tests/test_preflights_note_names_the_pass_that_failed.py`. Removing the
+   script and not these left four test files importing a module that no
+   longer exists - invisible until step "run the full suite in the scratch
+   tree itself" (below) actually caught it, at the v1.13.0 release, the
+   first time that step was followed to the letter. A test file that covers
+   both a dev-only tool and a shipped one (`tests/test_a_filename_your_code_page_cannot_spell.py`
+   covers `preflight.py` alongside `commands.py`/`dcc.py`/`update_list.py`)
+   is not on this list - it stays, and filters the dev-only entry out of its
+   own list at runtime instead, by checking the file still exists.
+
    **Also strip the one internal-only line from `.gitattributes` that is
    wrong in the public repo:**
 

@@ -200,8 +200,15 @@ class TheGuardSurvivesAPathItCannotSpell(unittest.TestCase):
 # with text=True, and on a Greek Windows the reader thread died on the first
 # emoji a test printed - stdout came back as None, and a red run's count was
 # reported as "only 0 collected".
-PARENTS = ("commands.py", "dcc.py", "update_list.py",
-           os.path.join("scripts", "preflight.py"))
+#
+# preflight.py is dev-only tooling, stripped at extraction (see
+# docs/PUBLIC-REPO-WORKFLOW.md) - filtered out here rather than assumed
+# present, so this same file keeps covering commands.py/dcc.py/update_list.py
+# (which do ship) on both sides of that split instead of erroring on one.
+PARENTS = tuple(name for name in (
+    "commands.py", "dcc.py", "update_list.py",
+    os.path.join("scripts", "preflight.py"),
+) if os.path.exists(os.path.join(REPO_ROOT, name)))
 
 
 class NoParentDecodesWithTheLocaleCodePage(unittest.TestCase):
