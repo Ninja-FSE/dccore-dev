@@ -132,6 +132,16 @@ debug_sinks_lock   = threading.Lock()  # announce.py's admin-console debug sink 
 disk_lock          = threading.Lock()  # db.py's serialised on-disk writes
 told_queue_full_lock = threading.Lock()  # announce.py's queue-full notice memory (#888)
 
+# dcc.py's library lookup (#580, #886), moved here in #749. They were built in
+# dcc.py as `x = globals().get("x") or threading.Lock()` - kept across a reload
+# only for as long as the old object is found - and the lock guard could not
+# see the `or` form (it now can). The memories they protect stay in dcc.py:
+# they are that module's own cache, not the configuration state the
+# containers in this file are.
+MAX_CONCURRENT_LIBRARY_SCANS = 2
+library_scans      = threading.BoundedSemaphore(MAX_CONCURRENT_LIBRARY_SCANS)  # library scans at once
+lookup_memory_lock = threading.Lock()  # dcc.py's lookup memories - misses, hits, folders
+
 # The reload window, which is not only about rebinding.
 #
 # importlib.reload(defaults) re-executes defaults.py from the top, and that

@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔒 The library-scan locks live in runtime.py, and the lock guard sees the `or` form (#749)
+
+Follow-up to #731 (#580). `dcc.py` built its scan semaphore and its lookup-memory lock at module level as
+`x = globals().get("x") or threading.Lock()` - kept across a `!rehash` only for as long as the old object is
+found - while the repository's rule (#235) is that a module `!rehash` reloads never constructs its own lock:
+`runtime.py`, which nothing reloads, owns them and the module binds the name. `tests/test_no_reloaded_module_owns_a_lock.py`
+could not see the pair: it looked for a factory call as the *whole* right-hand side, and here the call sits
+inside a `BoolOp`. Every lock test stayed green.
+
+`runtime.library_scans` (with `MAX_CONCURRENT_LIBRARY_SCANS`) and `runtime.lookup_memory_lock` now, bound by
+name in `dcc.py` like `queue_lock`. The memories they protect stay in `dcc.py` - that module's own cache, not the
+configuration state `runtime.py`'s containers are (`test_runtime_state` binds and resets those). The guard walks the
+whole value (`constructs_a_lock()`), so a factory called inside `or`, a conditional or an argument is caught; its
+synthetic control gains the `or` and conditional forms and a plain `or {}`, which must not be flagged. Run before
+the move, the extended guard names exactly the two; `TheLookupLocksAreBoundFromRuntime` checks the binding and that
+the semaphore admits exactly the scans `dcc` says. No behaviour change.
+
 ### 🔧 Re-running setup no longer collapses more than one services host to just the first (#891)
 
 Found reviewing #811's merged change. A blank answer at the services-host prompt showed the first configured
