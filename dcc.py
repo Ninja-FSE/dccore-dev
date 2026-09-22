@@ -2609,9 +2609,25 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # path found here goes through the same containment check below
             # as one the scan produces.
             remembered_key = (str(wanted_list), str(requested_file).lower().strip())
-            remembered = (_remembered_path(remembered_key)
-                          or _in_a_recent_folder(str(wanted_list), requested_file))
-            if remembered:
+
+            # UNDER A ROOT THAT IS CONFIGURED NOW (#901). The memories re-check
+            # that the file is still on disk, but a folder the operator has
+            # just removed from the library is still on disk too - so a path
+            # remembered under it passed, and is_safe_path() below then refused
+            # it: "invalid path" for a file the new configuration serves. #889
+            # drops the memories on !rehash, but the dashboard's Folders and
+            # Lists pages change the roots WITHOUT one (the folder set is read
+            # from its file on every call). Checked here, against the same roots the
+            # request is about to be judged by, it cannot outlive a root however
+            # the roots change; a hint outside them falls through to the next
+            # memory, and then to the scan.
+            def _under_a_current_root(path):
+                return bool(path) and any(is_safe_path(root, path) for root in search_roots)
+
+            remembered = _remembered_path(remembered_key)
+            if not _under_a_current_root(remembered):
+                remembered = _in_a_recent_folder(str(wanted_list), requested_file)
+            if _under_a_current_root(remembered):
                 full_path = remembered
 
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):

@@ -53,7 +53,13 @@ class ARememberedPathOutlivesTheRootItCameFrom(LookupBase):
         """What the reload does to search_roots, without reloading."""
         config.FILE_DIRECTORY = root
 
-    def test_a_path_from_a_root_that_is_gone_is_refused_rather_than_served(self):
+    def test_a_path_from_a_root_that_is_gone_is_not_used_even_without_a_forget(self):
+        """#901. This used to assert the bug - "invalid_path" with the
+        memories kept - because #889's rehash call was the only thing that
+        dropped them, and the dashboard's Folders and Lists pages change the
+        roots without a rehash. A remembered path is now trusted only under a
+        root that is configured at the moment of the request, so no forget is
+        needed for the right answer; the rehash still calls it to free them."""
         name = self.a_track()
         self.ask(name)
         self.assertEqual(self.errors(), [], "the first request should have been served")
@@ -61,8 +67,8 @@ class ARememberedPathOutlivesTheRootItCameFrom(LookupBase):
         self.point_the_library_at(self.moved_root)
         self.ask(name)
 
-        self.assertEqual(self.errors(), ["invalid_path"],
-                         "the remembered path survived the root it came from")
+        self.assertEqual(self.errors(), [],
+                         "a path remembered under a removed root was used")
 
     def test_forgetting_them_is_what_serves_it_from_the_new_root(self):
         name = self.a_track()

@@ -111,6 +111,18 @@ path* for a name the new configuration serves perfectly well. Nothing about the 
 self-heals it, and without the call the wrong answer lasts `LOOKUP_HIT_TTL_SECONDS`. A rebuild (`!update`)
 needs no such call - it changes the lists, not where the files are.
 
+**And the call was not enough on its own (#901).** The dashboard's Folders and Lists pages change the library
+*without* a rehash - they save the file and return, and `library.folders()` reads it on every call - so a folder
+removed there still left *invalid path* for five minutes. A remembered path is now trusted only under a root
+configured at the moment of the request (`is_safe_path()` against that request's own `search_roots`, the check
+it is judged by afterwards anyway); outside them it falls through to the folder memory and then the scan. That
+covers the dashboard, a hand-edited `lists.json`, and a scan still in flight across a rehash that records its
+hit after the forget. The rehash call stays - it frees the memory. `test_a_path_from_a_root_that_is_gone_is_...`
+used to assert the wrong answer as the documented cost of not forgetting; it now asserts the right one with no
+forget at all. `tests/test_a_folder_removed_on_the_dashboard_is_not_served_from_memory.py` (3) changes
+`library.folders` the way the page's save does: the name memory and the folder memory both fall through to the
+new root, and with the folders unchanged the memory still saves the scan.
+
 `tests/test_a_batch_of_requests_is_not_refused.py` (10): one scan
 for a whole pasted batch, a repeat costs nothing, a sibling costs nothing, a file that has since gone is not
 served from memory, the TTL and both caps, the slot is waited for rather than bounced, "busy" still arrives
