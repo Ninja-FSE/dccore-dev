@@ -115,6 +115,14 @@ def handle_help_request(s, user, target):
         f"{bold}{red}@{nick}-remove{reset} to cancel it. "
         f"To search every bot at once, type: {bold}{red}@find <words>{reset}")
 
+    # #774: a band or title made of common words - "Metal Church" matched
+    # every file with both words anywhere. Said as this bot's own rule: the
+    # same @find reaches every bot, and one that does not know quotes simply
+    # answers nothing to a quoted term.
+    lines.append(
+        f"Words in quotes must appear together, in that order, in my list: "
+        f'{bold}{red}@find "metal church"{reset}')
+
     for line in lines:
         # #426: NOT is_vip=True. The VIP lane is strict-priority with no
         # aging - a channel advert waiting behind it is the reason it

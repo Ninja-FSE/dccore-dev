@@ -575,6 +575,53 @@ def _split_entry_line(line_strip):
     return strip_info_suffix(rest)
 
 
+# What may sit between the words of a quoted phrase (#774): the same four
+# characters an unquoted term is split on, plus the space - so "Metal Church"
+# finds Metal Church, Metal_Church, Metal-Church and metal.church, and not
+# Metallica ... Church.
+_PHRASE_GAP = r"[ _.*\-]+"
+_QUOTED = re.compile(r'"([^"]*)"')
+
+
+def split_search_term(term):
+    """A search term as the list find_matching_entries() takes (#774).
+
+    Unquoted, exactly the rule @find has always used: `-`, `*`, `_` and `.`
+    become spaces, the rest is split into lower-cased words, and a row
+    matches when every word appears on it somewhere, in any order. That is
+    right for "vivaldi winter" and wrong for a band whose name is two common
+    words - `@find Metal Church` matched 6516 rows, every file with both
+    "metal" and "church" in it anywhere.
+
+    A part in double quotes is a PHRASE: its words must appear together, in
+    that order, with only separators between them. It comes back as a tuple
+    inside the same list, so every caller that passes the list through gets
+    phrases without changing, and a term with no quotes returns exactly the
+    list it always did. A one-word "phrase" is just a word, and a stray,
+    unpaired quote is dropped rather than searched for - a literal quote was
+    never in a filename anyone searched for, and today it made the whole
+    search come back empty.
+
+    Shared by execute_search() (@find) and webserver.split_list_search_words()
+    (the dashboard's Search tab and a list's own search), so the two cannot
+    drift apart - their docstrings have always said they use one rule.
+    """
+    text = str(term or "")
+    phrases = []
+
+    def _take(match):
+        words = [word for word in re.split(r"[-*_.\s]+", match.group(1).lower()) if word]
+        if len(words) > 1:
+            phrases.append(tuple(words))
+        elif words:
+            phrases.append(words[0])
+        return " "
+
+    rest = _QUOTED.sub(_take, text).replace('"', " ")
+    clean_term = re.sub(r'[-*_.]', ' ', rest)
+    return [w.strip().lower() for w in clean_term.split() if w.strip()] + phrases
+
+
 def find_matching_entries(search_words, limit=None, list_path=None, name=None):
     """IRC-agnostic core of the master-list search, extracted from execute_search().
 
@@ -633,6 +680,12 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
     entries = []
     total_matches = 0
 
+    # A tuple in the list is a quoted phrase (#774), compiled once per list
+    # rather than once per line; a string is a word, matched as it always was.
+    plain_words = [item for item in search_words if not isinstance(item, tuple)]
+    phrase_patterns = [re.compile(_PHRASE_GAP.join(re.escape(word) for word in item))
+                       for item in search_words if isinstance(item, tuple)]
+
     current_list_path = list_path
     if not current_list_path or not os.path.exists(current_list_path):
         return entries, total_matches
@@ -689,7 +742,9 @@ def find_matching_entries(search_words, limit=None, list_path=None, name=None):
                 continue
 
             line_lower = line_strip.lower()
-            if search_words and not all(word in line_lower for word in search_words):
+            if plain_words and not all(word in line_lower for word in plain_words):
+                continue
+            if phrase_patterns and not all(pattern.search(line_lower) for pattern in phrase_patterns):
                 continue
 
             total_matches += 1
@@ -1231,9 +1286,8 @@ def execute_search(irc_sock, user, search_term, channel):
         # Strip mIRC colour codes and control characters from the search terms
         raw_clean = strip_control_codes(search_term)
         
-        # Split the search terms
-        clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
-        search_words = [w.strip().lower() for w in clean_term.split() if w.strip()]
+        # Split the search terms - words, and "quoted phrases" (#774)
+        search_words = split_search_term(raw_clean)
         
         # ---------------------------------------------------------------------
         # Straight copy: no reformatting, the file row is sent raw
