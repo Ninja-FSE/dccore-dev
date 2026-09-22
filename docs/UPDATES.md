@@ -4,6 +4,58 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🚦 A pasted album is not a flood, and the mute notice no longer says the queue was cleared (#888)
+
+Follow-up to #886, with the operator's decision. Every line to the bot counted toward the flood gate -
+`MAX_REQUESTS` (10) per `REQUEST_WINDOW` (5 s) - and a file request counted exactly like a search. So a user
+pasting fifteen rows from the list, one album and the ordinary way these lists are used, got lines 1-10
+queued, a **mute** on line 11, and a **one-hour ban** (`FLOOD_BAN_SECONDS`) on line 12, whenever their client
+sent the paste faster than two lines a second. Undernet paces a paste itself - a burst, then roughly one line
+every two seconds - which is the only reason this was rare rather than routine; any client, bouncer or network
+that sends faster turned asking for an album into a ban.
+
+**And the mute notice made it worse, which is the part that actually bit.** It said *"You are moving too fast!
+Ignored and queue cleared for 30 seconds."* What `is_flooding()` drops is `config.send_queue` - the user's
+pending outbound **replies**. `config.dcc_queue`, their file queue, is untouched and still sent. So a user was
+told their queue had gone, asked again because of it, and asking again during a mute is the one action that
+escalates to the hour. The notice was not merely inaccurate; it was the instruction that earned the ban.
+
+The operator's decision, quoted: *"fix the misleading queue cleared for sure and i think requesting should be
+handled more gently. i dont care if they paste a lot of lines at channel at once as long as the channel
+accepts it. bot should just add them to queue one by one as he requests."*
+
+- **File requests are not metered.** `irc.py` keeps `is_bot_command` exactly as it was - it is the dispatch
+  set, and `tests/test_irc_dispatch.py` lifts it out of the source and evaluates it, so it may not lean on a
+  local computed outside itself - and adds `is_file_request` as its own self-contained expression beside it.
+  A file request never mutes, never escalates a mute into a ban, and is served during a mute earned by other
+  commands. Searches, `-que`, `-remove`, list requests and the CTCPs are metered exactly as before, and
+  `check_user_status()` still runs first, so a banned user's requests are refused as they always were.
+- **The bound is the queue**, which already existed and is already a setting: `MAX_USER_QUEUE` (100) per
+  person, `MAX_GLOBAL_QUEUE` (1000) overall. What else bounds the cost, none of it the gate: the library
+  lookup is bounded by #580/#886, packing by the packer's one-at-a-time interlock, and how fast the lines may
+  arrive at all by the server's own flood control - which is what the operator is relying on.
+- **Past the cap the user is told once.** With the gate gone a 150-row paste against a 100-file cap would send
+  fifty identical refusals, one per refused row, each costing the outbound pace every other user's replies are
+  waiting on. `announce.send_dcc_error()` suppresses a repeat of `user_full`/`global_full` only - every other
+  error names something about *that* request, so repeating one answers a different question. The memory is
+  dropped the moment one of that user's requests succeeds (`forget_queue_full_notice()`, called from both
+  success notices), so a refusal never goes silent once their queue drains; `QUEUE_FULL_REPEAT_SECONDS` is a
+  backstop rather than the mechanism, and the memory is capped like every other one on this path.
+- **The mute notice says what is true:** *"You are moving too fast! Other commands are ignored for 30 seconds
+  - any files you have queued are safe and still on their way."* The operator's log line and the debug feed
+  said "Queue cleared" too, and now say which queue was dropped and which was not.
+
+`tests/test_a_pasted_album_is_not_a_flood.py` (11): the notice no longer claims the queue was cleared and says
+what was actually ignored, the file queue is checked untouched while `send_queue` is checked dropped, the
+meter still mutes and still escalates for everything else, and the told-once behaviour - one notice for a
+whole refused batch, the two caps counted separately, per user rather than one global latch, every other error
+still repeating, a success making the next refusal news again, and the memory bounded. `FloodGateCoverageTests`
+in the dispatch tests changed shape but not strength: it used to assert the gate is never narrower than the
+dispatch, since a gate narrower than the dispatch is an unmetered command path. There is now exactly one such
+path, deliberately, so it asserts instead that every dispatched message is metered *or* is the file-request
+exemption, that the exemption covers the file requests, and that it covers nothing else - a second unmetered
+path added later still fails there.
+
 ### 📋 A batch of requests pasted from the list is served, not refused (#886)
 
 Reported live, from the same evening as #879/#884: a user pasted nine request lines in about seven seconds -
