@@ -30,11 +30,23 @@ Three memories now, each verified before it is trusted, none of them deciding wh
 - `LOOKUP_SCAN_WAIT_SECONDS` (5) - the scan slot is waited for instead of refused at once. "Busy" is still the
   answer when the wait itself runs out.
 
-`forget_library_lookups()` drops all three. `tests/test_a_batch_of_requests_is_not_refused.py` (10): one scan
+`forget_library_lookups()` drops all three, **and `!rehash` calls it.** That one is not housekeeping: every
+memory re-checks the file on disk before it is trusted, which is what makes a moved or deleted file cost a
+stale check rather than a wrong answer - and it is exactly why a reconfiguration has to be told explicitly. A
+path remembered under a folder the operator has just removed from the library is still on disk, so that check
+passes, the remembered path is used, and `is_safe_path()` then refuses it against the new roots: *invalid
+path* for a name the new configuration serves perfectly well. Nothing about the entry is stale, so nothing
+self-heals it, and without the call the wrong answer lasts `LOOKUP_HIT_TTL_SECONDS`. A rebuild (`!update`)
+needs no such call - it changes the lists, not where the files are.
+
+`tests/test_a_batch_of_requests_is_not_refused.py` (10): one scan
 for a whole pasted batch, a repeat costs nothing, a sibling costs nothing, a file that has since gone is not
 served from memory, the TTL and both caps, the slot is waited for rather than bounced, "busy" still arrives
 when the wait expires, and #580's miss memory is untouched. All ten fail on the old code. `OnlyAFewScansRunAtOnce`
-in the #580 tests now shortens the wait and says why.
+in the #580 tests now shortens the wait and says why. `tests/test_a_rehash_forgets_where_files_were.py` (5)
+drives the wrong answer through the real request path, both with the memories kept and with them dropped, and
+reads the rehash's own wiring - the reload cannot be run in a test, the same reason
+`test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` reads its own.
 
 ### 🗣️ The person downloading is told their own client never accepted it (#884)
 
