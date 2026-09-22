@@ -59,7 +59,7 @@ MAY_BE_ABSENT = {
                  "not one expected to already exist",
 }
 
-# Absent by design too, but only on one side of the dccore-dev / dccore
+# Absent by design too, but only on one side of the development/public
 # split (docs/PUBLIC-REPO-WORKFLOW.md) - present and required here, in the
 # development repository, and deliberately stripped at extraction along
 # with the file it names. A plain MAY_BE_ABSENT entry would defeat its own
