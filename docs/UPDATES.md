@@ -2,6 +2,61 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
+## 🟨 Unreleased
+
+### 📋 A batch of requests pasted from the list is served, not refused (#886)
+
+Reported live, from the same evening as #879/#884: a user pasted nine request lines in about seven seconds -
+the ordinary way these lists are used - and was answered `Error: Busy looking up other files - try again in a
+moment`, which is also the one piece of advice that walks a novice into the flood gate (ten messages per five
+seconds).
+
+Three things made that the normal outcome rather than an unlucky one. Every row in a list is a bare filename
+while the files live in subfolders, so `os.path.join(base_directory, requested_file)` never exists and *every*
+request took #580's library scan - stream every published list, then walk every configured folder. Only
+*misses* were remembered (`_lookup_misses`), so nothing a successful scan learned was ever reused: the same
+file asked for twice was scanned twice. And the two scan slots were taken with a **non-blocking**
+`acquire()`, so seven of those nine bounced instantly.
+
+Three memories now, each verified before it is trusted, none of them deciding what may be sent -
+`is_safe_path()` still checks every resolved path against every configured root afterwards, unchanged:
+
+- `_remembered_path()` - the path a recent scan resolved a name to (`LOOKUP_HIT_TTL_SECONDS`, 5 minutes,
+  `LOOKUP_HIT_MEMORY` entries). Re-checked on disk before it is used, so a library reorganised between two
+  requests costs one stale check rather than a wrong answer.
+- `_in_a_recent_folder()` - the folders recent lookups landed in (`LOOKUP_FOLDER_MEMORY`, newest first). A
+  batch is nearly always siblings in one album, so the second row onwards is one `os.path.exists` instead of
+  a scan. This is what the reported case needed: the hit memory alone does nothing for nine *distinct* names.
+- `LOOKUP_SCAN_WAIT_SECONDS` (5) - the scan slot is waited for instead of refused at once. "Busy" is still the
+  answer when the wait itself runs out.
+
+`forget_library_lookups()` drops all three. `tests/test_a_batch_of_requests_is_not_refused.py` (10): one scan
+for a whole pasted batch, a repeat costs nothing, a sibling costs nothing, a file that has since gone is not
+served from memory, the TTL and both caps, the slot is waited for rather than bounced, "busy" still arrives
+when the wait expires, and #580's miss memory is untouched. All ten fail on the old code. `OnlyAFewScansRunAtOnce`
+in the #580 tests now shortens the wait and says why.
+
+### 🗣️ The person downloading is told their own client never accepted it (#884)
+
+Follow-up to #879, from the same operator, with the user's words this time: *"it says active transfer started
+then gives error"* - and the bot's answer to them, `Error: Could not send 00-<release>-ELITE.nfo (transfer did
+not complete). Ask for it again when you are ready.` #879 fixed what the operator sees; the user still got a
+line that names no cause and suggests no action, for a failure that is entirely theirs to fix - a DCC prompt
+nobody answered inside the window, or a client set to ignore that file type (this one could take a `.jpg` and
+never a `.nfo`, which is a DCC ignore list almost every time). The one person who could fix it was the only
+one not told what was wrong.
+
+`dcc.never_connected_advice()` is the user-facing half of `never_connected_reason()`: the accept branch sets a
+flag the `finally` reads, so the notice says *"Could not send &lt;file&gt; - your client never accepted it. Look
+for a DCC prompt and accept it, and check your client is not set to ignore this kind of file. Ask for it again
+when you are ready."* Every other failure keeps its old wording. The notice is rendered through
+`announce.fit_irc_line()` like the other outbound lines that carry a filename (#162 finding #31) - with the
+reason now a sentence, a long name pushed it past 512 bytes, where the server's cut takes the tail that says
+what to do. `tests/test_the_user_is_told_their_client_never_accepted_it.py`: the advice itself, the notice
+through the real send path with nobody on the other end, the trimming (driven at the settling, since a name
+that overflows an IRC line is longer than Windows will create on disk), and the control that every other
+failure reads as before. Three of five fail on the old code.
+
 ## 🟩 v1.13.0 (2026-09-22) - "The Audit Release"
 
 ### 🔐 Setup can ask for the operator's services host (#811)

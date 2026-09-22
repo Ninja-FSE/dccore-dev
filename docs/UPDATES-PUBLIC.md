@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: pasting several lines from the list at once could be answered "Busy looking up other files - try again in a moment".** Requesting a file meant searching the library for it every single time - even for a file just sent, and even for the file next to it in the same album - and only two of those searches could run at once, so most of a pasted batch was refused outright (and "try again in a moment" is the one thing that risks tripping the flood protection). The bot now remembers where it found a file and which folders it has been finding them in, so a batch from one album costs one search instead of nine, and a request that arrives while the library is busy waits its turn instead of being turned away.
+- **A download that fails because your client never answered now says so, to the person downloading.** They used to be told only "transfer did not complete", which names nothing they can act on - while the two causes are both on their side: a DCC prompt nobody accepted in time, or a client set to ignore that kind of file (a user who could take a `.jpg` but never a `.nfo` is the usual shape). The notice now says *your client never accepted it*, and what to try.
+
 ## v1.13.0 — The Audit Release
 
 - **Added: setup now offers to lock the admin console to your services account, not just your nick.** Right after the admin nick question, both the terminal and browser setup ask for your services host - optional, blank skips it as before - and write it as `ADMIN_HOSTMASKS` for you. A stolen nick then cannot run admin commands on its own.
