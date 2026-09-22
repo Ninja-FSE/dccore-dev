@@ -424,6 +424,14 @@ def startup(setup_page=None):
         print(f"[LIST-FETCH] Could not start the automatic refresh: "
               f"{refetch_err}")
 
+    # The list rebuild schedule (#776): started the same way, also re-armed by
+    # every rehash, so setting it on the dashboard needs no restart.
+    try:
+        import commands
+        commands.ensure_rebuild_schedule_worker()
+    except Exception as schedule_err:
+        print(f"[SCHEDULE] Could not start the rebuild schedule: {schedule_err}")
+
     # Optional web dashboard (mostly read-only status views, plus the
     # cross-bot search/fetch routes - see webserver.py's module docstring).
     # Lazy import (not at module top) so a missing Flask install - the normal

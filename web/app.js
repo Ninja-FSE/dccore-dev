@@ -234,6 +234,7 @@
     langSelect:   document.getElementById("lang-select"),
     updateListRunBtn:     document.getElementById("update-list-run-btn"),
     updateListStatus:     document.getElementById("update-list-status"),
+    updateListSchedule:   document.getElementById("update-list-schedule"),
     updateListBar:        document.getElementById("update-list-bar"),
     updateListBarFill:    document.getElementById("update-list-bar-fill"),
     verifyRunBtn:         document.getElementById("verify-run-btn"),
@@ -341,6 +342,7 @@
     }
     if (name === "settings" && !state.settingsLoaded) { loadSettings(); }
     if (name === "stats") { loadStats(); }
+    if (name === "tools") { loadUpdateListSchedule(); }
     // Loaded here rather than in the badge's own handler, so every way into
     // this view draws it - the badge is the usual one, not the only one.
     if (name === "notices") { loadNotices(true); }
@@ -3231,6 +3233,28 @@
     el.updateListBarFill.style.width = known ? (progress.percent + "%") : "";
   }
 
+  // #776: when LIST_REBUILD_SCHEDULE will next rebuild, or that none is set.
+  // Read each time the Tools view opens - the same status payload the Run
+  // button polls, which carries the schedule and its next time.
+  function loadUpdateListSchedule() {
+    if (!el.updateListSchedule) { return; }
+    fetchJson("/api/tools/update-list/status").then(function (payload) {
+      var schedule = payload && payload.schedule;
+      var text;
+      if (!schedule) {
+        text = t("tools.scheduleOff");
+      } else if (!payload.next_scheduled || payload.next_scheduled * 1000 <= Date.now()) {
+        text = t("tools.scheduleDue").replace("{schedule}", schedule);
+      } else {
+        text = t("tools.scheduleOn").replace("{schedule}", schedule)
+          .replace("{when}", new Date(payload.next_scheduled * 1000).toLocaleString());
+      }
+      el.updateListSchedule.textContent = text;
+    }).catch(function () {
+      el.updateListSchedule.textContent = "";
+    });
+  }
+
   function startUpdateListPolling() {
     if (updateList.pollTimer) { clearInterval(updateList.pollTimer); }
     pollUpdateListStatus();
@@ -3692,6 +3716,7 @@
     "sharing": "settings.category.sharing",
     "transfers": "settings.category.transfers",
     "your-list": "settings.category.yourList",
+    "list-rebuild": "settings.category.listRebuild",
     "fetching": "settings.category.fetching",
     "advertising": "settings.category.advertising",
     "appearance": "settings.category.appearance",
@@ -3801,6 +3826,7 @@
     RAR_TIMEOUT: "settings.field.RAR_TIMEOUT",
     LIST_UPDATE_TIMEOUT: "settings.field.LIST_UPDATE_TIMEOUT",
     LIST_UPDATE_STALL_SECONDS: "settings.field.LIST_UPDATE_STALL_SECONDS",
+    LIST_REBUILD_SCHEDULE: "settings.field.LIST_REBUILD_SCHEDULE",
     ADMIN_HOSTMASKS: "settings.field.ADMIN_HOSTMASKS",
     ADMIN_CHAT_MODE: "settings.field.ADMIN_CHAT_MODE",
     ADMIN_CHANNEL_COMMANDS: "settings.field.ADMIN_CHANNEL_COMMANDS",

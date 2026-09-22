@@ -849,6 +849,16 @@ LIST_UPDATE_TIMEOUT: int = 0  # Absolute cap on a !update run, in seconds. 0 = n
 # of a rebuild that is stuck, so it is never killed for it - see
 # commands.handle_list_update_request().
 LIST_UPDATE_STALL_SECONDS: int = 900
+# REBUILD THE LIST ON A SCHEDULE (#776), with exactly what !update runs - so
+# PAUSE_ON_UPDATE, the one-scan-at-a-time guard and the atomic publish all
+# apply. One of four shapes, local time on the bot's clock: "daily 04:00",
+# "weekly sun 04:00", "monthly 1 03:30" (a day past the month's end means its
+# last day) or "every 12h" (hours since the last rebuild of any kind, manual
+# included). Empty is off. A bot that was down at the scheduled time rebuilds
+# when it comes back, once; a rebuild that fails is reported like a manual
+# one and tried again at the next scheduled time, not every minute. Turned on
+# with a list older than the last scheduled time, it rebuilds within a minute.
+LIST_REBUILD_SCHEDULE: str = ""  # When to rebuild the list by itself - daily 04:00 / weekly sun 04:00 / monthly 1 03:30 / every 12h, empty = never
 
 # ---------------------------------------------------------------------
 # 7. MIRC COLOUR CODES AND CONTROL CHARACTERS (IRC STANDARD)

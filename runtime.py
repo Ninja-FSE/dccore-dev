@@ -230,6 +230,15 @@ list_count_lock = threading.Lock()
 auto_refetch_guard   = threading.Lock()
 auto_refetch_started = False
 
+# The list rebuild schedule (#776), for the same reasons as the two above -
+# a start guard a rehash cannot reset - plus the time the schedule last
+# STARTED a rebuild. The list file's age says when one last finished; this is
+# what stops a rebuild that fails (a folder whose disk is not mounted) from
+# being started again every minute: it is retried at the next slot instead.
+rebuild_schedule_guard        = threading.Lock()
+rebuild_schedule_started      = False
+rebuild_schedule_last_attempt = None
+
 # Other bots advertising in our channels ------------------------------------
 # nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",
 #                  "last_seen"}, built from the periodic advert every

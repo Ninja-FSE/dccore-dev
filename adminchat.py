@@ -1014,6 +1014,11 @@ def _cmd_status(session, args):
         session.send(f"MasterList  : {count:,} files, {size_str}, dated {date_str}")
     except Exception as err:
         session.send(f"MasterList  : unavailable ({err})")
+    try:
+        import commands as _commands
+        session.send(f"Rebuild     : {_commands.describe_rebuild_schedule()}")
+    except Exception as err:
+        session.send(f"Rebuild     : unavailable ({err})")
 
 
 # --------------------------------------------------------------------------

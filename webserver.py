@@ -2210,6 +2210,13 @@ def build_update_list_status_payload():
         # claim about the last run" rule `ok` follows just above.
         "seconds": getattr(config, "last_list_update_seconds", None),
     }
+    # #776: the Tools page says when the schedule next rebuilds.
+    try:
+        import commands as _commands
+        payload["schedule"] = str(getattr(config, "LIST_REBUILD_SCHEDULE", "") or "").strip()
+        payload["next_scheduled"] = _commands.next_scheduled_rebuild()
+    except Exception:
+        payload["schedule"], payload["next_scheduled"] = "", None
     progress = read_list_progress()
     if progress:
         payload["progress"] = progress
@@ -2377,10 +2384,14 @@ SETTINGS_CATEGORIES = (
                                                 "LIST_VIDEO_COMPANION_EXTENSIONS",
                                                 "RAR_ENABLED", "RAR_EXTENSIONS", "RAR_BINARY",
                                                 "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT",
-                                                "LIST_UPDATE_TIMEOUT",
-                                                "LIST_UPDATE_STALL_SECONDS",
                                                 "LIST_HEADER_FILE",
                                                 "LIST_HEADER_MAX_BYTES"]),
+    # #776: when the list rebuilds by itself, beside the two limits every
+    # rebuild runs under. Its own category because "Your list" had reached
+    # the sixteen the grouping test allows before one becomes a dumping ground.
+    ("list-rebuild",  "List rebuild",          ["LIST_REBUILD_SCHEDULE",
+                                                "LIST_UPDATE_TIMEOUT",
+                                                "LIST_UPDATE_STALL_SECONDS"]),
     ("fetching",      "Fetching from bots",    ["MAX_FETCH_SLOTS", "AUTO_REFETCH_LISTS",
                                                 "AUTO_REFETCH_INTERVAL_HOURS",
                                                 "AUTO_REFETCH_MAX_PER_RUN",
@@ -2562,6 +2573,7 @@ SETTINGS_LABELS = {
     "RAR_TIMEOUT": "RAR pack timeout (seconds)",
     "LIST_UPDATE_TIMEOUT": "List rebuild hard cap (seconds, 0 = none)",
     "LIST_UPDATE_STALL_SECONDS": "Give up if a rebuild reports nothing for (seconds)",
+    "LIST_REBUILD_SCHEDULE": "Rebuild the list automatically",
 
     "ADMIN_HOSTMASKS": "Admin hostmasks",
     "ADMIN_CHAT_MODE": "DCC chat connection mode",

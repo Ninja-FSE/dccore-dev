@@ -201,6 +201,7 @@ PLAIN_HELP = {
     'MAX_RAR_FOLDER_SIZE': 'The biggest folder the bot will pack as a .rar, in bytes. Stops somebody asking for a folder of hundreds of gigabytes. 10 GB fits any album or box set; 0 means no limit.',
     'RAR_TIMEOUT': 'How many seconds a folder may take to pack before the bot gives up on it.',
     'LIST_UPDATE_TIMEOUT': 'A hard limit in seconds on how long a list rebuild may run. 0 means no limit, which is the right choice: a huge library can genuinely take hours, and the setting below already catches a rebuild that has stopped doing anything.',
+    'LIST_REBUILD_SCHEDULE': "Rebuild the list by itself, the same way !update does. Write daily 04:00, weekly sun 04:00, monthly 1 03:30 or every 12h (hours since the last rebuild, including yours). Empty: only when you ask. The bot's own clock; if it was off at that time, it rebuilds when it starts again.",
     'LIST_UPDATE_STALL_SECONDS': 'If a list rebuild reports no progress for this many seconds, it is treated as stuck and stopped. 15 minutes is generous on purpose so a slow network drive is not cut off.',
     'LIST_HEADER_FILE': 'A text file whose contents are printed at the top of your list - a greeting, your channel name, some ASCII art. If the file does not exist, nothing is added.',
     'LIST_HEADER_MAX_BYTES': 'The most of that file that will be used, in bytes, so a wrong file cannot bloat every list.',

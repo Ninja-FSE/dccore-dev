@@ -19,7 +19,7 @@ What DCCore does today, and what it does not do yet.
 
 ### The file list
 
-- **One master list**, rebuilt by `!update` or on a schedule, published atomically so a failed scan never overwrites a good index.
+- **One master list**, rebuilt by `!update`, from the dashboard, or by itself on a schedule (`LIST_REBUILD_SCHEDULE`: daily, weekly, monthly or every N hours), published atomically so a failed scan never overwrites a good index.
 - **Three formats** — `.txt`, `.zip` and `.rar`, all built every time; `LIST_FORMAT` picks which one is offered.
 - **Search** — `@find <words>` against the master list, with results fitted to the IRC line limit.
 - **Every folder heading says what it holds** — `14 files, 1.20GB` on its own line under the heading, placed so that every program that reads these lists (other DCCore bots, AutoQ, DCCore's own request handling) ignores it. Companion files (`.srt`, `.nfo`, `.sfv`…) travel with the film they belong to when the video list is split out, and stay with an album otherwise.
