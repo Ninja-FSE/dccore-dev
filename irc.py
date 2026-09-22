@@ -3456,7 +3456,49 @@ def irc_loop():
                                 and msg.strip("\x01").strip().upper().startswith("DCC RESUME ")
                                 and target_chan.lower() == config.NICKNAME.lower())
                         )
-                        if is_bot_command and security.is_flooding(user):
+                        # ASKING FOR FILES IS NOT FLOODING (#888). Its own
+                        # expression, self-contained for the same reason the
+                        # one above is - tests/test_irc_dispatch.py lifts
+                        # each of them out of this file's source text and
+                        # evaluates it, so neither may lean on a local
+                        # computed outside itself.
+                        #
+                        # A user pasting fifteen rows from the list - one
+                        # album, the ordinary way these lists are used - sent
+                        # ten requests, was muted on the eleventh and BANNED
+                        # FOR AN HOUR on the twelfth. Undernet's own paste
+                        # pacing is the only reason that was rare rather than
+                        # routine; any client or bouncer that sends faster
+                        # turned asking for an album into a ban.
+                        #
+                        # So a file request never meters, never mutes, never
+                        # escalates a mute into a ban, and is served during a
+                        # mute earned by other commands. The operator's
+                        # decision (#888): "i dont care if they paste a lot
+                        # of lines at channel at once as long as the channel
+                        # accepts it. bot should just add them to queue one
+                        # by one as he requests."
+                        #
+                        # WHAT STILL BOUNDS IT, none of it the flood gate:
+                        # the queue caps (MAX_USER_QUEUE per person,
+                        # MAX_GLOBAL_QUEUE overall) are the real limit and
+                        # refuse past it; the library lookup each request
+                        # costs is bounded by #580/#886 (a few scans at a
+                        # time, and three memories so a pasted album is one
+                        # scan); packing is one at a time by the packer's own
+                        # interlock; and the server's own flood control
+                        # decides how fast the lines may arrive in the first
+                        # place, which is what the operator is relying on.
+                        #
+                        # Bans are untouched: check_user_status() runs above
+                        # and still refuses a banned user's requests. Every
+                        # other trigger in is_bot_command - searches, -que,
+                        # -remove, list requests, the CTCPs - is metered
+                        # exactly as before.
+                        is_file_request = (
+                            any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
+                        )
+                        if is_bot_command and not is_file_request and security.is_flooding(user):
                             continue
 
                         # SOMEBODY SPOKE TO THE BOT AND IT WILL SAY NOTHING
