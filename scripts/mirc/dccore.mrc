@@ -79,7 +79,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.1 }
+alias dccore.ver { return 1.2 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -565,7 +565,7 @@ alias dccore.structured {
   if (%type == LISTFETCH) {
     ; <bot> <auto|arrived|unusable> <text>: a held bot list asked for again,
     ; arrived, or not usable. The text already names the bot.
-    dccore.echo $dccore.tag(LISTS,search) $4-
+    dccore.msg $dccore.tag(LISTS,search) $4-
     return
   }
   if (%type == TAKEN) {
@@ -574,7 +574,7 @@ alias dccore.structured {
     return
   }
   if (%type == DROPPED) {
-    dccore.echo $dccore.tag(DROPPED,fail) $2 line(s) were dropped by the bot: this client fell behind.
+    dccore.alert $dccore.tag(DROPPED,fail) $2 line(s) were dropped by the bot: this client fell behind.
     return
   }
   if (%type == TOKEN) {
@@ -589,27 +589,27 @@ alias dccore.structured {
   }
   if (%type == REQUEST) {
     if (!$dccore.opt(show.request)) { return }
-    dccore.echo $dccore.tag(REQUEST,request) $2 $+ $dccore.in($3) asked for $iif($4 == folder,the folder) $dccore.name($5-)
+    dccore.msg $dccore.tag(REQUEST,request) $2 $+ $dccore.in($3) asked for $iif($4 == folder,the folder) $dccore.name($5-)
     return
   }
   if (%type == QUEUED) {
     if (!$dccore.opt(show.queued)) { return }
-    dccore.echo $dccore.tag(QUEUED,queued) $dccore.name($7-) for $2 $+ $dccore.in($3) at # $+ $4 ( $+ $5 $+ / $+ $6 slots busy)
+    dccore.msg $dccore.tag(QUEUED,queued) $dccore.name($7-) for $2 $+ $dccore.in($3) at # $+ $4 ( $+ $5 $+ / $+ $6 slots busy)
     return
   }
   if (%type == SENDING) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(SENDING,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) (slot $4 $+ / $+ $5 $+ , $dccore.bytes($6) $+ )
+    dccore.msg $dccore.tag(SENDING,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) (slot $4 $+ / $+ $5 $+ , $dccore.bytes($6) $+ )
     return
   }
   if (%type == RESUMED) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(RESUMED,sends) $dccore.name($6-) for $2 $+ $dccore.in($3) at $dccore.bytes($4) of $dccore.bytes($5)
+    dccore.msg $dccore.tag(RESUMED,sends) $dccore.name($6-) for $2 $+ $dccore.in($3) at $dccore.bytes($4) of $dccore.bytes($5)
     return
   }
   if (%type == SENT) {
     if (!$dccore.opt(show.sends)) { return }
-    dccore.echo $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) $iif($6 > 0,at $dccore.speed($6),at n/a)
+    dccore.msg $dccore.tag(SENT,sends) $dccore.name($7-) to $2 $+ $dccore.in($3) $+ : $dccore.bytes($4) in $dccore.dur($5) $iif($6 > 0,at $dccore.speed($6),at n/a)
     return
   }
   if (%type == FAIL) {
@@ -623,14 +623,14 @@ alias dccore.structured {
       %name = $left(%rest,$calc(%p - 1))
       %why = $mid(%rest,$calc(%p + 4))
     }
-    dccore.echo $dccore.tag(FAILED,fail) $dccore.name(%name) to $2 $+ $dccore.in($3) - %why ( $+ $dccore.bytes($4) of $dccore.bytes($5) arrived)
+    dccore.alert $dccore.tag(FAILED,fail) $dccore.name(%name) to $2 $+ $dccore.in($3) - %why ( $+ $dccore.bytes($4) of $dccore.bytes($5) arrived)
     if ($dccore.opt(beep)) { beep 2 200 }
     return
   }
   if (%type == SEARCH) {
     hinc dccore.live searches
     if (!$dccore.opt(show.search)) { return }
-    dccore.echo $dccore.tag(SEARCH,search) $2 $+ $dccore.in($3) searched $dccore.name($5-) -> $4 result(s)
+    dccore.msg $dccore.tag(SEARCH,search) $2 $+ $dccore.in($3) searched $dccore.name($5-) -> $4 result(s)
     return
   }
   if (%type == LOG) {
@@ -805,6 +805,29 @@ alias dccore.rfit { return $right($+($str($dccore.nbsp,$2),$1),$2) }
 alias dccore.echo {
   dccore.window
   echo -ti2 $dccore.win $iif($1- == $null,$dccore.nbsp,$1-)
+}
+; Activity - somebody asked for, got or searched for something. The
+; window's button takes the MESSAGE colour, as a channel's does when
+; somebody speaks (#892). A plain /echo is an EVENT line, which is why
+; @DCCore never turned red however much happened in it; -m makes it a
+; message. dccore.echo above stays the event line, for what a channel
+; would also treat as one: the STATUS heartbeat (every few minutes -
+; red for that would mean red always), joins, parts and bans.
+; mIRC's help does not date -m or /window -g, so both are gated on mIRC 7
+; per the note at the top: an older mIRC shows the line exactly as before.
+alias dccore.msg {
+  dccore.window
+  if ($version >= 7) { echo -mti2 $dccore.win $iif($1- == $null,$dccore.nbsp,$1-) }
+  else { echo -ti2 $dccore.win $iif($1- == $null,$dccore.nbsp,$1-) }
+}
+; A failure: the same, and the button in the HIGHLIGHT colour - the one a
+; channel takes when somebody says your nick - so it stands out from
+; ordinary activity (/window -g2). Not while you are looking at the
+; window: mIRC does not colour the active window's button, and setting it
+; there would leave it lit after you had already read the line.
+alias dccore.alert {
+  dccore.msg $1-
+  if (($version >= 7) && ($active != $dccore.win)) { window -g2 $dccore.win }
 }
 ; the script's own remarks, in grey
 alias dccore.sys {
