@@ -233,7 +233,7 @@ PLAIN_HELP = {
     'CUSTOM_THEME_VALUE': 'Override one colour of the chosen theme: the numbers and names in a message, like a file count or a speed.',
     'CUSTOM_THEME_ALERT': 'Override one colour of the chosen theme: the parts meant to stand out.',
     'CUSTOM_THEME_ACCENT': 'Override one colour of the chosen theme: timestamps and secondary text.',
-    'MAX_REQUESTS': 'How many commands (searches or file requests) one person may send within the time window below before they are muted.',
+    'MAX_REQUESTS': 'How many commands - searches, queue checks and the like - one person may send within the time window below before they are muted. File requests are not counted: a pasted list is taken one by one, up to the queue limits.',
     'REQUEST_WINDOW': 'The length of that time window, in seconds.',
     'MUTE_TIME': 'How many seconds somebody is ignored after their first flood.',
     'FLOOD_BAN_SECONDS': 'How many seconds somebody is banned if they keep flooding while already muted.',

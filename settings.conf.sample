@@ -1178,10 +1178,11 @@
 
 
 [anti-flood and automatic protection]
-# How many commands (searches or file requests) one person may send within the
-# time window below before they are muted.
+# How many commands - searches, queue checks and the like - one person may
+# send within the time window below before they are muted. File requests are
+# not counted: a pasted list is taken one by one, up to the queue limits.
 #
-# Most commands (search or file) per time window
+# Most commands (searches and the like - not file requests) per time window
 #MAX_REQUESTS = 10
 
 # The length of that time window, in seconds.

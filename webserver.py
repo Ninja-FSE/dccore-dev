@@ -2554,7 +2554,7 @@ SETTINGS_LABELS = {
     "BROADCAST_SEARCH_COOLDOWN": "Broadcast search cooldown (seconds)",
     "CTCP_VERSION_REPLY": "Answer CTCP VERSION",
 
-    "MAX_REQUESTS": "Max requests per window",
+    "MAX_REQUESTS": "Max commands per window",
     "REQUEST_WINDOW": "Request window (seconds)",
     "MUTE_TIME": "Mute duration (seconds)",
     "FLOOD_BAN_SECONDS": "Ban after flooding while muted (seconds)",

@@ -798,7 +798,7 @@ BROADCAST_SEARCH_COOLDOWN: int = 30     # Seconds
 # ---------------------------------------------------------------------
 # 6. ANTI-FLOOD AND AUTOMATIC PROTECTION
 # ---------------------------------------------------------------------
-MAX_REQUESTS: int   = 10       # Most commands (search or file) per time window
+MAX_REQUESTS: int   = 10       # Most commands (searches and the like - not file requests) per time window
 REQUEST_WINDOW: int = 5       # Size of the rolling time window, in seconds
 MUTE_TIME: int      = 30       # Mute in seconds on the first flood violation
 # Escalation ban, in seconds, for someone who keeps flooding while already
