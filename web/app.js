@@ -3756,6 +3756,7 @@
     BANS_FILE: "settings.field.BANS_FILE",
     STATS_FILE: "settings.field.STATS_FILE",
     HARD_BANS_FILE: "settings.field.HARD_BANS_FILE",
+    DCC_QUEUE_FILE: "settings.field.DCC_QUEUE_FILE",
     KNOWN_BOTS_FILE: "settings.field.KNOWN_BOTS_FILE",
     LIST_INDEX_FILE: "settings.field.LIST_INDEX_FILE",
     DOWNLOAD_COUNTS_FILE: "settings.field.DOWNLOAD_COUNTS_FILE",

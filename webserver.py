@@ -2443,7 +2443,7 @@ SETTINGS_CATEGORIES = (
                                                 "LIST_PROGRESS_FILE", "LIBRARY_FOLDERS_FILE",
                                                 "LISTS_FILE", "ADMIN_TOKENS_FILE", "ON_CONNECT_FILE",
                                                 "NOTICES_FILE",
-                                                "PRIVATE_MESSAGES_FILE"]),
+                                                "PRIVATE_MESSAGES_FILE", "DCC_QUEUE_FILE"]),
 )
 
 # A human-readable label per setting, since the raw config.py name
@@ -2516,6 +2516,7 @@ SETTINGS_LABELS = {
     "BANS_FILE": "Bans file",
     "STATS_FILE": "Stats file",
     "HARD_BANS_FILE": "Hard bans file",
+    "DCC_QUEUE_FILE": "DCC queue file",
     "KNOWN_BOTS_FILE": "Known bots file",
     "LIST_INDEX_FILE": "Cross-list search index",
     "DOWNLOAD_COUNTS_FILE": "Download counts file",

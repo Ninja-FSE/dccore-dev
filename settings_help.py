@@ -268,6 +268,7 @@ PLAIN_HELP = {
     'FETCHED_FILES_DIR': 'Where files you download from other bots are saved. Kept separate from your shared folders so they are not offered to others.',
     'BANS_FILE': 'Where timed bans are saved.',
     'HARD_BANS_FILE': 'Where permanent bans (from !ban) are saved.',
+    'DCC_QUEUE_FILE': 'Where the per-user send queue is saved. The single-instance lock lives beside it.',
     'STATS_FILE': 'Where the lifetime totals, the speed record and the daily figures are saved.',
     'KNOWN_BOTS_FILE': 'Where the bot remembers the other bots it has seen advertising.',
     'FETCHED_BOT_LISTS_FILE': "Where the bot remembers which other bots' lists it holds.",
