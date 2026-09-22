@@ -4,6 +4,38 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📋 A batch of requests pasted from the list is served, not refused (#886)
+
+Reported live, from the same evening as #879/#884: a user pasted nine request lines in about seven seconds -
+the ordinary way these lists are used - and was answered `Error: Busy looking up other files - try again in a
+moment`, which is also the one piece of advice that walks a novice into the flood gate (ten messages per five
+seconds).
+
+Three things made that the normal outcome rather than an unlucky one. Every row in a list is a bare filename
+while the files live in subfolders, so `os.path.join(base_directory, requested_file)` never exists and *every*
+request took #580's library scan - stream every published list, then walk every configured folder. Only
+*misses* were remembered (`_lookup_misses`), so nothing a successful scan learned was ever reused: the same
+file asked for twice was scanned twice. And the two scan slots were taken with a **non-blocking**
+`acquire()`, so seven of those nine bounced instantly.
+
+Three memories now, each verified before it is trusted, none of them deciding what may be sent -
+`is_safe_path()` still checks every resolved path against every configured root afterwards, unchanged:
+
+- `_remembered_path()` - the path a recent scan resolved a name to (`LOOKUP_HIT_TTL_SECONDS`, 5 minutes,
+  `LOOKUP_HIT_MEMORY` entries). Re-checked on disk before it is used, so a library reorganised between two
+  requests costs one stale check rather than a wrong answer.
+- `_in_a_recent_folder()` - the folders recent lookups landed in (`LOOKUP_FOLDER_MEMORY`, newest first). A
+  batch is nearly always siblings in one album, so the second row onwards is one `os.path.exists` instead of
+  a scan. This is what the reported case needed: the hit memory alone does nothing for nine *distinct* names.
+- `LOOKUP_SCAN_WAIT_SECONDS` (5) - the scan slot is waited for instead of refused at once. "Busy" is still the
+  answer when the wait itself runs out.
+
+`forget_library_lookups()` drops all three. `tests/test_a_batch_of_requests_is_not_refused.py` (10): one scan
+for a whole pasted batch, a repeat costs nothing, a sibling costs nothing, a file that has since gone is not
+served from memory, the TTL and both caps, the slot is waited for rather than bounced, "busy" still arrives
+when the wait expires, and #580's miss memory is untouched. All ten fail on the old code. `OnlyAFewScansRunAtOnce`
+in the #580 tests now shortens the wait and says why.
+
 ### 🗣️ The person downloading is told their own client never accepted it (#884)
 
 Follow-up to #879, from the same operator, with the user's words this time: *"it says active transfer started
