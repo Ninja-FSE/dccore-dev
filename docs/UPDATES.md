@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📵 A receiver that never connects is said to be that, and the wait is a setting (#879)
+
+Reported from a night's console feed: a run of `Failed: "<file>" to <nick> - the send blocked for the whole
+socket timeout with the receiver not draining it. (0B of 0B arrived)` between transfers completing at 3 MB/s
+to other people in the same minutes; one user's two `.nfo` offers failed that way and their `.jpg` went
+through a minute later. Nothing was wrong with the link. `start_dcc_send()` listened with a fixed 30 s timeout
+and its `accept()` raised `socket.timeout` into the send loop's own `except socket.timeout`, whose wording
+describes a send that stalled - and `report_failure()` was called without the byte counts, so the feed said
+`0B of 0B`. What those lines were: nobody connected - the receiver did not click Accept in time, or their
+client's DCC filter dropped the file type - and every one cost the user a `MAX_SEND_FAILS` strike.
+
+The accept timeout has its own branch now: `the receiver never connected within 30s - the offer was not
+accepted, or their client ignored it.`, with `acked=0, total=file_size` so the feed reads `0B of 626MB`. The
+send-loop timeout passes its counts too. The window is `DCC_ACCEPT_TIMEOUT` (default 30, floored at 1;
+`dcc.accept_timeout()`), on the dashboard's Transfers page with help in three languages; a channel of people on
+mIRC is better served by 60-90. `tests/test_a_receiver_that_never_connects_is_said_so.py`: the helpers, the
+whole send path against a fake socket whose `accept()` times out (every runner), and a real loopback listener
+nobody dials (where one can be bound). Six of eight fail on the old code - the loopback one after its full
+30 s.
+
 ### 📊 The rebuild report counts every list, by the operator's names (#873)
 
 Reported by an operator with a music list and a film/series list: `!update` (and the dashboard's Rebuild, which

@@ -810,6 +810,14 @@ MUTE_TIME: int      = 30       # Mute in seconds on the first flood violation
 # midnight accidentally did - repeat offenders are a hard-ban case (!ban).
 FLOOD_BAN_SECONDS: int = 3600  # Ban in seconds when someone floods while muted
 MAX_SEND_FAILS: int = 3        # Attempts per queued file before it is dropped (see dcc.release_queue_entry)
+# HOW LONG AN OFFER STANDS. After the DCC SEND handshake the bot listens for
+# the receiver to connect; when nobody has by this deadline the offer is
+# withdrawn and counted as one failed attempt against MAX_SEND_FAILS. This
+# was a fixed 30 s, and a night's feed showed what that costs (#879): a
+# person who has to click Accept in a dialog often needs longer, and every
+# miss was a strike. It is not the transfer's own clock - once bytes are
+# moving, the acknowledgement stall check is what decides a dead link.
+DCC_ACCEPT_TIMEOUT: int = 30   # Seconds the bot waits for the receiver to connect after offering a file
 RAR_TIMEOUT: int    = 1800     # Longest a rar packing run may take, in seconds, before it is abandoned
 # A REBUILD THAT IS STILL WORKING IS NOT HUNG, and a wall clock cannot tell
 # the two apart. This used to be a flat 1800s, which is a bet that no library

@@ -473,6 +473,7 @@
   "settings.field.REQUEST_WINDOW": "Request window (seconds)",
   "settings.field.MUTE_TIME": "Mute duration (seconds)",
   "settings.field.FLOOD_BAN_SECONDS": "Ban after flooding while muted (seconds)",
+  "settings.field.DCC_ACCEPT_TIMEOUT": "Wait for the receiver to connect (seconds)",
   "settings.field.MAX_SEND_FAILS": "Max send failures",
   "settings.field.RAR_TIMEOUT": "RAR pack timeout (seconds)",
   "settings.field.LIST_UPDATE_TIMEOUT": "List rebuild hard cap (seconds, 0 = none)",
