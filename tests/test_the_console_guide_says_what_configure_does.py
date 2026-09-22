@@ -45,8 +45,12 @@ class TheSetupReallyDoesOfferStepThreeNowOptionally(unittest.TestCase):
         self.assertIn('changes["ADMIN_HOSTMASKS"]', between)
 
     def test_a_blank_answer_writes_nothing(self):
+        """The write is guarded on a typed answer. Since #891 it is also
+        skipped for a host already configured, and a blank answer on a
+        re-run keeps every configured host - that is executed, not read, in
+        test_a_rerun_of_configure_keeps_every_admin_host.py."""
         code = read("configure.py")
-        self.assertIn('if admin_host:\n        changes["ADMIN_HOSTMASKS"]', code)
+        self.assertIn('if admin_host and admin_host.lower() not in current_hosts:', code)
 
 
 class TheGuideSaysSo(unittest.TestCase):

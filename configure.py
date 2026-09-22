@@ -178,19 +178,41 @@ def collect_answers():
     print("your nick, which anyone can take while you are offline. Log into")
     print("services and set +x, then /whois yourself - you want the host it")
     print("shows, ending in something like .users.undernet.org.")
-    current_hostmasks = _current("ADMIN_HOSTMASKS")
-    default_host = (current_hostmasks[0].rsplit("@", 1)[-1]
-                    if current_hostmasks and current_hostmasks[0] else "")
-    suffix = f" [{default_host}]" if default_host else ""
-    admin_host = input(f"Your services host (blank to skip){suffix}: ").strip() or default_host
-    while admin_host:
+    # A RE-RUN KEEPS WHAT IS THERE (#891). This used to take the first
+    # configured entry as the prompt's default and, on a blank answer,
+    # write [that one] back - so an operator with two hosts (home and
+    # phone) who pressed Enter here lost the second, silently: _current()'s
+    # own promise is that re-running never does that. It also indexed the
+    # value directly, so a comma-separated string setting offered its first
+    # CHARACTER, and a wildcard first entry was run through the validator
+    # below as if the operator had just typed it. The hosts are read the
+    # way the console itself reads them (either form, deduplicated, host
+    # part only), a blank answer writes nothing, and only a typed host is
+    # written.
+    current_hosts = adminchat.admin_host_patterns()
+    if current_hosts:
+        print(f"  Configured now: {', '.join(current_hosts)}")
+        prompt = "Your services host (blank keeps what is configured): "
+    else:
+        prompt = "Your services host (blank to skip): "
+    while True:
+        admin_host = input(prompt).strip()
+        if not admin_host:
+            break
         problem = settings_file.admin_host_problem(admin_host)
         if not problem:
             break
         print(f"  That will not do: {problem}.")
-        admin_host = input("Your services host (blank to skip): ").strip()
-    if admin_host:
-        changes["ADMIN_HOSTMASKS"] = [f"*!*@{admin_host}"]
+    if admin_host and admin_host.lower() not in current_hosts:
+        if len(current_hosts) > 1:
+            # Several were set up by hand; one question cannot know which of
+            # them a new host replaces, so it is added and the others stay.
+            changes["ADMIN_HOSTMASKS"] = ([f"*!*@{host}" for host in current_hosts]
+                                          + [f"*!*@{admin_host}"])
+            print(f"  Added beside the {len(current_hosts)} already configured. To remove "
+                  f"one, edit ADMIN_HOSTMASKS in settings.conf.")
+        else:
+            changes["ADMIN_HOSTMASKS"] = [f"*!*@{admin_host}"]
 
     print()
     print("Admin console password (for the DCC CHAT console - see")

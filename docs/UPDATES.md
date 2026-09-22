@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔑 Re-running configure.py keeps every admin host (#891)
+
+Found reviewing #811. The services-host question took the **first** configured `ADMIN_HOSTMASKS` entry as its
+default and, on a blank answer, wrote `[that one]` back - so an operator with two hosts (home and phone) who
+re-ran `configure.py` and pressed Enter lost the second, silently, and the phone could no longer run admin
+commands. `configure._current()`'s own promise is that re-running never does that. It also indexed the value
+directly, so a comma-separated string setting offered its first *character*, and a wildcard first entry was put
+through the validator as if just typed (*"That will not do: '\*.home.net' has a '\*' in it"* about a value
+nobody entered).
+
+The hosts are now read the way the console reads them - `adminchat.admin_host_patterns()`, either form,
+deduplicated, host part only - and shown (*Configured now: ...*). A blank answer writes nothing; a host already
+there changes nothing; a new host replaces a single configured one, as before, or is **added** beside several,
+since one question cannot know which of several a new host replaces - and says how to remove one.
+`tests/test_a_rerun_of_configure_keeps_every_admin_host.py` (8), through `collect_answers()` with canned input;
+six fail on the old code, the other two are the unchanged cases. INSTALL.md's question list says what a re-run
+does.
+
 ### 🔴 The @DCCore window lights up like a channel: red on activity, highlight on a failure (#892)
 
 Asked by the operator: every other mIRC window's button turns red when something new is said in it, and `@DCCore`
