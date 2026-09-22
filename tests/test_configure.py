@@ -215,6 +215,7 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
             "",                # server (accept default)
             "#my-channel",     # channel
             "MyAdmin",         # admin nick
+            "",                # services host: skip (#811)
             self.tree.music,   # file directory (exists already via make_tree)
             "n",               # web dashboard: skip
         ])
@@ -231,6 +232,25 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
         self.assertTrue(password_hash)
         self.assertTrue(adminchat.verify_password(password_hash, "secret123"))
 
+    def test_a_services_host_is_wrapped_into_admin_hostmasks(self):
+        answers, _hash = self._run_with_answers([
+            "MyBot", "", "#my-channel", "MyAdmin",
+            "myaccount.users.undernet.org",  # services host (#811)
+            self.tree.music, "n",
+        ])
+
+        self.assertEqual(answers["ADMIN_HOSTMASKS"], ["*!*@myaccount.users.undernet.org"])
+
+    def test_a_bad_services_host_is_reprompted_not_accepted(self):
+        answers, _hash = self._run_with_answers([
+            "MyBot", "", "#my-channel", "MyAdmin",
+            "*.users.undernet.org",           # a wildcard: refused
+            "myaccount.users.undernet.org",   # the real thing, second try
+            self.tree.music, "n",
+        ])
+
+        self.assertEqual(answers["ADMIN_HOSTMASKS"], ["*!*@myaccount.users.undernet.org"])
+
     def test_a_blank_required_field_is_reprompted_not_accepted(self):
         """A genuinely fresh install (NICKNAME still unset - DCCoreTestCase's
         own baseline sets it to "DCCore" for every OTHER test, so this one
@@ -244,6 +264,7 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
             "",
             "#chan",
             "Admin",
+            "",                # services host: skip (#811)
             self.tree.music,
             "n",
         ])
@@ -251,7 +272,7 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
 
     def test_mismatched_passwords_are_reprompted(self):
         answers, password_hash = self._run_with_answers(
-            ["MyBot", "", "#chan", "Admin", self.tree.music, "n"],
+            ["MyBot", "", "#chan", "Admin", "", self.tree.music, "n"],
             passwords=("first-password", "different-password", "matched", "matched"))
 
         self.assertTrue(adminchat.verify_password(password_hash, "matched"))
@@ -259,7 +280,7 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
 
     def test_enabling_the_dashboard_asks_about_lan_access(self):
         answers, _hash = self._run_with_answers([
-            "MyBot", "", "#chan", "Admin", self.tree.music,
+            "MyBot", "", "#chan", "Admin", "", self.tree.music,
             "y",   # enable the dashboard
             "n",   # localhost only
         ])
@@ -268,7 +289,7 @@ class CollectAnswersEndToEndTests(DCCoreTestCase):
 
     def test_enabling_lan_access_sets_the_lan_host(self):
         answers, _hash = self._run_with_answers([
-            "MyBot", "", "#chan", "Admin", self.tree.music,
+            "MyBot", "", "#chan", "Admin", "", self.tree.music,
             "y",   # enable the dashboard
             "y",   # reachable from the LAN
         ])

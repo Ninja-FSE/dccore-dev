@@ -1,17 +1,17 @@
 """ADMIN-CONSOLE.md said configure.py "does steps 2 and 3 together" (audit
-M36, #638).
+M36, #638) - later corrected to "does not do step 3" once configure.py
+really did not ask for ADMIN_HOSTMASKS at all.
 
-Step 3 is ADMIN_HOSTMASKS. configure.py prompts for the password only - its
-own intro says hostmasks are configured afterwards - and a file with no
-usable hostmask pattern makes adminchat ignore every DCC CHAT in silence, by
-design. So a novice who took the guide at its word skipped step 3, got no
-reply at all, and was sent by "When it does not work" to check +x and typos
-rather than the step they had been told was done.
+#811 changed the premise again: configure.py now offers step 3 too, right
+after the admin nick question - optionally, blank to skip - and writes
+ADMIN_HOSTMASKS to settings.conf when answered. The guide has to say what
+actually happens on each branch: answered, it is done; left blank, the
+operator is exactly where the "does not do step 3" wording described, and
+the troubleshooting entry for a console that answers nobody still applies.
 
-The guide now says configure.py does step 2 only and that step 3 is still
-theirs, and the troubleshooting entry names that case. The audit found this
-by reading the guide against configure.py, so this reads both: the claim
-must keep matching what the setup actually asks.
+The first class below is the same kind of guard as the M36 fix's own: it
+reads configure.py's real prompts, so a further change to what is asked
+fails this file first rather than leaving the guide to drift again.
 """
 
 import io
@@ -30,15 +30,23 @@ def read(*parts):
         return handle.read()
 
 
-class TheSetupReallyDoesNotAskForHostmasks(unittest.TestCase):
-    """The premise. If configure.py ever grows a hostmask prompt, the guide's
-    wording below is wrong the other way round and this says so first."""
+class TheSetupReallyDoesOfferStepThreeNowOptionally(unittest.TestCase):
+    """The premise. If configure.py's services-host question is ever
+    renamed or removed, the guide's wording below is wrong and this says
+    so first."""
 
-    def test_no_prompt_mentions_hostmasks(self):
-        prompts = re.findall(r'input\((?:\s*")([^"]*)"', read("configure.py"))
+    def test_a_prompt_asks_for_the_services_host_right_after_admin_nick(self):
+        code = read("configure.py")
+        admin_nick_at = code.index('_ask("Admin nick')
+        password_at = code.index('_read_password("Password: ")')
+        between = code[admin_nick_at:password_at]
 
-        self.assertGreater(len(prompts), 3, "the prompt sweep found nothing")
-        self.assertEqual([p for p in prompts if "hostmask" in p.lower()], [])
+        self.assertIn("Your services host", between)
+        self.assertIn('changes["ADMIN_HOSTMASKS"]', between)
+
+    def test_a_blank_answer_writes_nothing(self):
+        code = read("configure.py")
+        self.assertIn('if admin_host:\n        changes["ADMIN_HOSTMASKS"]', code)
 
 
 class TheGuideSaysSo(unittest.TestCase):
@@ -47,19 +55,30 @@ class TheGuideSaysSo(unittest.TestCase):
         guide = read("docs", "ADMIN-CONSOLE.md")
         return guide.split("### 2. Generate a password hash", 1)[1].split("### 3.", 1)[0]
 
-    def test_configure_is_no_longer_credited_with_step_three(self):
-        self.assertNotIn("steps 2 and 3", self.step_two())
-
-    def test_it_says_step_three_is_still_the_operators(self):
+    def test_configure_is_not_credited_with_doing_step_three_unconditionally(self):
         passage = self.step_two()
 
-        self.assertIn("does not do step 3", passage)
+        self.assertNotIn("steps 2 and 3", passage)
+        self.assertNotIn("does not do step 3", passage,
+                         "stale - #811 made step 3 optional here, not absent")
+
+    def test_it_says_the_question_is_optional_and_names_811(self):
+        passage = self.step_two()
+
+        self.assertIn("optionally", passage)
+        self.assertIn("blank to skip", passage)
+        self.assertIn("#811", passage)
+
+    def test_it_says_what_a_blank_answer_leaves_undone(self):
+        passage = self.step_two()
+
         self.assertIn("`ADMIN_HOSTMASKS`", passage)
+        self.assertIn("ignores every DCC CHAT without a word", passage)
 
-    def test_and_names_both_places_to_put_it(self):
+    def test_and_names_both_places_to_finish_it_by_hand(self):
         passage = self.step_two()
 
-        self.assertIn("`admin_config.py` by hand", passage)
+        self.assertIn("by hand as\nstep 3 shows", passage)
         self.assertIn("Settings → Admin console", passage)
 
     def test_the_troubleshooting_entry_names_the_missing_step(self):
@@ -68,6 +87,7 @@ class TheGuideSaysSo(unittest.TestCase):
 
         self.assertIn("was never set at all", entry)
         self.assertIn("configure.py", entry)
+        self.assertIn("optional", entry)
         self.assertIn("step 3", entry)
 
 

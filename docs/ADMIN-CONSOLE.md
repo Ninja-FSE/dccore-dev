@@ -75,10 +75,12 @@ ISP hostname, `+x` did not take and the console will not let you in.
 
 `python3 configure.py` does this step for you - the same password prompt as
 below, writing the resulting hash straight into `admin_config.py` - if you
-have not already run it. **It does not do step 3**: it never asks for
-`ADMIN_HOSTMASKS`, and until that is set the console ignores every DCC CHAT
-without a word. Put it in `admin_config.py` by hand as step 3 shows, or on the
-dashboard's **Settings → Admin console** page. To do the hash by hand instead:
+have not already run it. **It also offers step 3**, optionally: your services
+host, straight after the admin nick question, blank to skip (#811). Answer it
+and `ADMIN_HOSTMASKS` is set for you, in `settings.conf`; leave it blank and
+the console ignores every DCC CHAT without a word until you set it by hand as
+step 3 shows, or on the dashboard's **Settings → Admin console** page. To do
+the hash by hand instead:
 
 From the DCCore directory, on either platform:
 
@@ -206,7 +208,7 @@ Waiting for acknowledgement...
 DCC Chat connection established
 
 Welcome to DCCore
-DCCore v1.12.2 - platform=posix python=3.10 rar=/usr/bin/rar
+DCCore v1.13.0 - platform=posix python=3.10 rar=/usr/bin/rar
 
 Enter Your Password:
 ```
@@ -809,9 +811,9 @@ looks identical to a broken bot. Check the daemon log:
 ```
 
 That line tells you the host the server actually saw. Usually it means `+x` is not
-set, or `ADMIN_HOSTMASKS` has a typo - or was never set at all: `configure.py`
-writes the password hash but does not ask for hostmasks, so an install set up
-that way is still missing step 3.
+set, or `ADMIN_HOSTMASKS` has a typo - or was never set at all: `configure.py`'s
+services-host question is optional, and an install where it was left blank at
+setup is still missing step 3.
 
 **The log says the password is not set.**
 

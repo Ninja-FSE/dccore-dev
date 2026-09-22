@@ -106,9 +106,10 @@ On Windows that command is **`py configure.py`**. A python.org install gives you
 2. **IRC server** (`irc.undernet.org` unless you say otherwise).
 3. **Channel(s)**, comma-separated.
 4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
-5. **Admin console password**, typed twice and never shown; only its hash is written.
-6. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
-7. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
+5. **Your services host**, optional - blank skips it. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
+6. **Admin console password**, typed twice and never shown; only its hash is written.
+7. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
+8. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
 
 Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe totals** from its `vars.ini` if you are coming from there. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
 

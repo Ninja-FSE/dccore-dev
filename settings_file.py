@@ -513,6 +513,32 @@ def server_problem(value):
     return None
 
 
+def admin_host_problem(value):
+    """Why `value` cannot be the host half of an ADMIN_HOSTMASKS entry, or
+    None if it can (#811, follow-up to audit M52/H4, #654/#579).
+
+    Setup asks for the host alone - what `/whois yourself` shows once you
+    are logged into services and set +x, e.g. "yourname.users.undernet.org"
+    - and wraps it as "*!*@<value>" itself; this checks the part the
+    operator actually typed. A "*" is refused outright: a real host from
+    /whois never has one, and the one way to end up with one here is
+    pasting the wildcard-breadth mistake audit L5 (#669) warns about
+    instead of an actual host - refusing it at the source is cheaper than
+    warning about it after it is written.
+    """
+    text = str(value).strip()
+    if not text:
+        return "a host cannot be empty"
+    if "://" in text:
+        return f"{text!r} looks like a URL; give the host alone, e.g. yourname.users.undernet.org"
+    for character in " /@!*":
+        if character in text:
+            return f"{text!r} has a {character!r} in it; give the host alone, without the nick, ident or a wildcard"
+    if "." not in text:
+        return f"{text!r} does not look like a host - it should end in something like .users.undernet.org"
+    return None
+
+
 def nicks_problem(value):
     """The same for a comma-separated list (ADMIN_NICK)."""
     parts = [part.strip() for part in str(value).split(",")]

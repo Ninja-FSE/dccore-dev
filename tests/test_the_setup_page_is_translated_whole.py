@@ -46,6 +46,7 @@ REFUSALS = {
     "blank server": dict(SERVER=""), "server with a space": dict(SERVER="irc example"),
     "no channel": dict(CHANNEL=""), "channel without #": dict(CHANNEL="example"),
     "blank admin": dict(ADMIN_NICK=""), "admin with a space": dict(ADMIN_NICK="Sys Op"),
+    "admin host with a wildcard": dict(ADMIN_HOST="*.users.undernet.org"),
     "blank password": dict(password="", password_confirm=""),
     "mismatch": dict(password_confirm="something else"),
     "missing folder": dict(FILE_DIRECTORY=os.path.join(tempfile.gettempdir(), "no-such-dccore-folder-621")),
@@ -64,9 +65,15 @@ def english_errors():
             for _, message in webserver.validate_setup_form(dict(GOOD, **overrides))[2]}
 
 
-# The two refusals whose message carries settings_file.nick_problem()'s
-# English explanation after the translated prefix.
-NICK_PROBLEMS = ("nick with a space", "admin with a space")
+# Refusals whose message carries an English explanation (from
+# settings_file.nick_problem()/admin_host_problem()) after the translated
+# prefix - a different piece of work than translating the setup page itself,
+# same as the nickname problem the module docstring already excepts.
+PREFIX_PROBLEMS = {
+    "nick with a space": "setup.error.nickname_invalid",
+    "admin with a space": "setup.error.nickname_invalid",
+    "admin host with a wildcard": "setup.error.admin_host_shape",
+}
 
 
 class TheForm(DCCoreTestCase):
@@ -103,8 +110,8 @@ class TheErrors(DCCoreTestCase):
                     self.assertEqual(len(errors), 1, errors)
                     message = errors[0][1]
                     self.assertNotIn(message, english, message)
-                    if label in NICK_PROBLEMS:
-                        prefix = words["setup.error.nickname_invalid"].split("{problem}")[0]
+                    if label in PREFIX_PROBLEMS:
+                        prefix = words[PREFIX_PROBLEMS[label]].split("{problem}")[0]
                         self.assertTrue(message.startswith(prefix), message)
                     else:
                         self.assertIn(message, translated, message)

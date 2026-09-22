@@ -45,7 +45,7 @@ LOOPBACK_LONG = struct.unpack("!I", socket.inet_aton("127.0.0.1"))[0]
 class TheHelperOnItsOwn(unittest.TestCase):
 
     def test_rfc1918_and_link_local_are_private(self):
-        for ip in ("192.168.35.8", "10.0.0.5", "172.16.5.5", "169.254.1.1"):
+        for ip in ("192.168.50.23", "10.0.0.5", "172.16.5.5", "169.254.1.1"):
             self.assertTrue(adminchat._is_private_address(ip), ip)
 
     def test_a_public_address_is_not(self):
@@ -144,12 +144,12 @@ class TheListenerOverARealSocket(DCCoreTestCase):
         """The audit's report: the CTCP advertised the shared public IP,
         and the connection arrived from the operator's private one."""
         port, done = self.listen_reporting(expected_ip="203.0.113.50",
-                                           reported_peer_ip="192.168.35.8")
+                                           reported_peer_ip="192.168.50.23")
 
         self.connect(port)
         self.assertTrue(done.wait(5))
 
-        self.assertEqual(self.served, [("192.168.35.8", "operator")])
+        self.assertEqual(self.served, [("192.168.50.23", "operator")])
 
     def test_a_public_address_that_does_not_match_is_still_dropped(self):
         """The control: widening to private addresses must not widen to

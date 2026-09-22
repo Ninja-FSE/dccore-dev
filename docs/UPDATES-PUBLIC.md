@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## v1.13.0 — The Audit Release
 
+- **Added: setup now offers to lock the admin console to your services account, not just your nick.** Right after the admin nick question, both the terminal and browser setup ask for your services host - optional, blank skips it as before - and write it as `ADMIN_HOSTMASKS` for you. A stolen nick then cannot run admin commands on its own.
 - **Fixed: the admin console's `listen` mode rejected the operator's own connection when the operator and the bot share one home router.** The client can only advertise the router's shared public IP, but the operator's own connection arrives with a private address instead - it is now accepted too, without accepting a stranger from the public internet.
 - **Fixed: a download nobody accepted was reported as "the send blocked ... with the receiver not draining it (0B of 0B arrived)".** That line sent you looking for a network problem when the other person had simply not clicked Accept within 30 seconds, or their client had ignored the file type. It now says so: *the receiver never connected within 30s - the offer was not accepted, or their client ignored it*, with the real file size. And the 30 seconds is now a setting, **Wait for the receiver to connect** on the Transfers page (`DCC_ACCEPT_TIMEOUT`): people who have to click Accept in a dialog often need longer, and every miss counted as a failed attempt against their queue.
 - **Fixed: on a bot serving more than one list, the "List update completed" line counted only the first.** With a music list and a film list, the report gave the music's total and said nothing of the films, and a film folder that lost its mount went unnoticed. Every list is now reported by the name you gave it - `Main: 64,136 files (+0 new); video: 18,204 files (+12 new).` - and a list that shrank is warned about by name. A bot with one list reads exactly as before.
