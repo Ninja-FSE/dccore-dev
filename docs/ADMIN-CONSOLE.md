@@ -846,8 +846,12 @@ listener.
 
 You do not have to work out which it is. Set `ADMIN_CHAT_MODE = "listen"` and the
 bot stops dialling you altogether. The listener it opens answers only a connection
-from the address your client advertised in its CTCP; anything else that reaches
-the port during the window is dropped without a banner, logged as
+from the address your client advertised in its CTCP, or from any private-network
+address (#881) - if you and the bot share one home router, your client advertises
+that router's public IP, but your own connection can arrive at the bot with a
+private LAN address instead (a NAT hairpin), which the exact match alone would
+reject as a stranger. Anything else that reaches the port during the window - a
+public address that is neither one - is dropped without a banner, logged as
 `Dropped a connection from <ip> ... Still waiting.`, and the port stays open for
 you. (A passive request advertises no address, so there the first connection is
 taken.)

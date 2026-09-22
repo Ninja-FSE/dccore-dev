@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔐 The console listener also answers a LAN hairpin (#881)
+
+Reported directly by the operator: `ADMIN_CHAT_MODE = "listen"` (#680) accepts a connection only from the
+address the client's CTCP advertised. When the operator and the bot share one home router, the CTCP advertises
+the router's public IP - the only address the client knows for itself - but the operator's own connection to
+the bot's listener comes out the LAN side and arrives with a private source address instead, which the exact
+match rejected as a stranger. `ADMIN_CHAT_MODE = "connect"` does not help either: dialling the same shared
+public IP back in depends on the router supporting NAT hairpin/loopback for an arbitrary DCC port, which most
+home routers do not, and the dial just times out.
+
+`adminchat._is_private_address()` widens the listener's match: a peer is also accepted when its source address
+is private (RFC1918) or link-local - never loopback, which is not a LAN-sharing case and is what every
+same-machine test connection in this suite necessarily arrives over. A peer reaching the port from the public
+internet can never present a private source address unless it is already inside the trusted network, so this
+does not reopen the scanner risk #680 closed. `tests/test_a_lan_hairpin_reaches_the_console.py`: the helper on
+its own (RFC1918, link-local, a documentation range, loopback excluded, garbage input), and the listener over a
+real socket with the reported peer address patched to the operator's LAN address - served despite not matching
+the advertised one - and the control, a public stranger, still dropped. ADMIN-CONSOLE.md says so.
+
 ### 📵 A receiver that never connects is said to be that, and the wait is a setting (#879)
 
 Reported from a night's console feed: a run of `Failed: "<file>" to <nick> - the send blocked for the whole
