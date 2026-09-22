@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: on a bot serving more than one list, the "List update completed" line counted only the first.** With a music list and a film list, the report gave the music's total and said nothing of the films, and a film folder that lost its mount went unnoticed. Every list is now reported by the name you gave it - `Main: 64,136 files (+0 new); video: 18,204 files (+12 new).` - and a list that shrank is warned about by name. A bot with one list reads exactly as before.
 - **Fixed: a `!rar` pack that failed or timed out no longer leaves a partial archive behind in the temp folder.**
 - **Fixed: a rare timing where one packed album finishing while another user's was waiting could let two `rar` runs start on the same archive.** The packer's interlocks are now released exactly once.
 - **Added: only one DCCore runs from a folder.** Starting a second copy - the Windows logon task and a double-click, say - is refused with "already running" instead of two bots sharing one queue, one stats file and one set of ports. The logon task also no longer stops at a question nobody is there to answer.

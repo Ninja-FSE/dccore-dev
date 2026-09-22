@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📊 The rebuild report counts every list, by the operator's names (#873)
+
+Reported by an operator with a music list and a film/series list: `!update` (and the dashboard's Rebuild, which
+goes through the same handler) ended with `MasterList now contains 64,136 files. Added 0 new file(s)` - the
+music alone. `count_from_master_list()` read the count with no list name, which means the primary; its docstring
+said "across every list", which was true before a bot could serve several separate lists (#26). So a second
+list's total and its gain were never reported, and the #230 shrink guard watched the primary only - a film
+folder that lost its mount was not noticed.
+
+`commands.count_by_list()` returns `[(name, files)]` for every entry of `library.lists()`, by the name the
+operator gave it in `lists.json`; a list that cannot be read counts 0 and the rest are still counted.
+`describe_list_counts(old, new)` gives the sentence and the `[(name, was, now)]` that shrank. One list keeps the
+wording it always had; several read `Main: 64,136 files (+0 new); video: 18,204 files (+12 new).` (signed, so a
+shrink reads `-6`). The DROPPED warning is per list, names it (`of the list 'video'`) and points at *that list's*
+folder/mount rather than "the music directory"; with several lists the summary still follows a warning so a
+list that grew is not hidden behind one that shrank. `count_from_master_list()` is untouched.
+`tests/test_the_rebuild_report_counts_every_list.py` (14): the counting, the sentence, and the report through
+the real `!update` handler with the rebuild stubbed. Fix by Neo; wording of the warning and the changelogs here.
+
 ### 📦 A failed pack's partial archive is removed (#717)
 
 Audit L53. `subprocess.run(timeout=RAR_TIMEOUT)` kills rar mid-write, and a non-zero exit leaves whatever it
