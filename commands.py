@@ -1322,6 +1322,23 @@ def _handle_rehash_request(user, target_chan):
         clear_or_keep_pack_interlocks(
             config, _pack_still_running and _dcc_pack.a_pack_is_running(), _packing_for)
 
+        # WHERE FILES WERE IS ONLY TRUE FOR THE ROOTS THAT WERE CONFIGURED
+        # WHEN IT WAS LEARNED (#886). The lookup memories are hints, and each
+        # one re-checks the file on disk before it is trusted - which is
+        # exactly why a rehash has to be told. A path remembered under a
+        # folder the operator has just removed from the library is STILL
+        # THERE on disk, so that check passes, and the request is then
+        # refused by is_safe_path() against the new roots: "invalid path"
+        # for a name that the new configuration can serve perfectly well.
+        # Self-healing does not reach this one, because nothing about the
+        # entry is stale - the library moved out from under it. Without this
+        # the wrong answer lasts LOOKUP_HIT_TTL_SECONDS.
+        #
+        # A rebuild (!update) needs no such call: it changes the lists, not
+        # where the files are, and anything it does move fails the on-disk
+        # check and is dropped on the spot.
+        _dcc_pack.forget_library_lookups()
+
         # ADMIN_HOSTMASKS may have just changed; a very broad entry is
         # accepted but said out loud, here as at boot (#669).
         try:
