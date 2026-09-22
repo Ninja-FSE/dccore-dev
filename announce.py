@@ -227,8 +227,10 @@ def remove_event_sink(sink):
 def feed_event(_kind, _text, **fields):
     """One feed event, told twice: the prose to send_debug() under the kind
     as its category, and the fields to every event sink. The console
-    tickboxes (console_wants) gate the fields exactly as they gate the
-    prose, so a kind the operator unticked reaches no client either way.
+    tickboxes (console_wants) and the console switch itself
+    (DEBUG_TO_CONSOLE) gate the fields exactly as they gate the prose, so
+    a kind the operator unticked - or a console they switched off -
+    reaches no client either way.
 
     The two positionals are underscored so no field can collide with them:
     REQUEST carries a field called `kind` ("file" or "folder"), and a plain
@@ -244,7 +246,12 @@ def feed_event(_kind, _text, **fields):
     except Exception:
         pass
     send_debug(_text, category=_kind)
-    if not console_wants(_kind):
+    # DEBUG_TO_CONSOLE was checked on the prose path alone (#678, audit
+    # L14): with it off the plain console went quiet as documented, while
+    # a structured session kept getting every REQUEST/QUEUED/SENDING/SENT/
+    # FAIL/SEARCH line - only LOG stopped - and the stdout floor printed
+    # the same event as undelivered at the same time.
+    if not getattr(config, "DEBUG_TO_CONSOLE", True) or not console_wants(_kind):
         return
     with _debug_sinks_lock:
         sinks = _event_sinks[:]
@@ -856,6 +863,27 @@ def send_dcc_queue_notice(user, file_name, position, channel=None):
 # glance, which is the only moment a badge gets read.
 NOTICE_SEVERITIES = ("warning", "error")
 
+# WHAT EARNS A NOTICE, written down once (#708, audit L44). record_notice()
+# is reached only through send_debug(notice=...), by the call sites that
+# know they are one - and that relied on every author remembering, with no
+# list of the intended events anywhere and a help text that promised
+# "disconnects" when no code path raised one. Each entry names the event,
+# the module that emits it and a piece of the line it emits, so a test can
+# find the emitter and check it passes notice=; a new kind of notice is
+# added here and there together.
+NOTICE_EVENTS = (
+    ("a list rebuild failed",           "commands.py", "External update_list.py failed",   "error"),
+    ("a list rebuild stalled",          "commands.py", "The library it",                    "error"),
+    ("a list rebuild timed out",        "commands.py", "Script execution timed out",       "error"),
+    ("activated with channels missing", "irc.py",      "channel(s) never confirmed via NAMES", "error"),
+    ("rejoined after a kick",           "irc.py",      "Rejoined {back.group(1)}",         "warning"),
+    ("kicked from a channel",           "irc.py",      "Kicked from {kicked_chan}",        "warning"),
+    ("the server allows fewer channels", "irc.py",     "more than the server",             "error"),
+    ("a join was refused",              "irc.py",      "Attempt {count}/{limit}",          "error"),
+    ("gave up rejoining",               "irc.py",      "gave up after {count} attempt(s)", "error"),
+    ("the connection was lost",         "irc.py",      "Lost the connection to the IRC server", "warning"),
+)
+
 NOTICES_MAX = 200
 
 
@@ -1240,12 +1268,23 @@ def send_debug(msg_text, category="INFO", notice=None):
 
     msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Category: {tag_str} "
     
-    # 3. The text block, stripped of any colour codes that would clash
+    # 3. The text block, stripped of any colour codes that would clash, and
+    # 4. the closing block, ending the line with the colour separators -
+    # rendered together through fit_irc_line() (#694, audit L30), as every
+    # other outbound builder is. The framing is ~170 bytes on its own, and a
+    # long folder name, hostmask or exception text pushed the line past what
+    # the server relays: it was cut at 512 bytes, inside the text, with the
+    # background colour smeared to the end and the closing block gone. The
+    # text is shrunk with an ellipsis until the whole line fits, and a colour
+    # code is never sliced.
     clean_text = msg_text.replace(config.C_BOLD, "").replace(config.C_RESET, "").replace("\x02", "").replace("\x0f", "")
-    msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Log: {clean_text} "
-        
-    # 4. The closing block, ending the line with the colour separators
-    msg += f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {R}\r\n"
+    head = msg
+
+    def _build(text):
+        return (head + f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {BG_TEXT_BOX} Log: {text} "
+                + f"{BG_CYAN_BLOCK} {BG_RED_BLOCK} {R}\r\n")
+
+    msg = fit_irc_line(_build, clean_text)
     
     # ---------------------------------------------------------------------
     # NON-BLOCKING HAND-OFF. This used to hold config.debug_flood_lock across a

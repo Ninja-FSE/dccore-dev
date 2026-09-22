@@ -1280,14 +1280,14 @@ def check_queue_and_send(irc_sock, completed_user):
                                 if not config.dcc_queue[completed_user.lower()]:
                                     del config.dcc_queue[completed_user.lower()]
                         db.save_dcc_queue()
-                        config.rar_inprogress = False
-                        # #215: this release is the only moment another user's held pack can
-                        # start. Nothing else revisits them - every check_queue_and_send()
-                        # caller passes the user who just finished, never the one turned
-                        # away at [RAR-HOLD].
-                        redispatch_waiting_pack(irc_sock, just_finished=completed_user)
-                        if hasattr(config, 'user_processing_lock'):
-                            config.user_processing_lock.discard(completed_user.lower())
+                        # The interlocks are released ONCE, by the wrapper's
+                        # finally (#714, audit L50): this exit used to clear
+                        # rar_inprogress, wake the next waiting pack and drop
+                        # the lock itself, and then return None - on which the
+                        # finally did all three again. The second, unconditional
+                        # `rar_inprogress = False` could clear a claim the first
+                        # wake had just handed to another user's pack, leaving
+                        # two rar processes on one archive path.
                         announce_mod.send_debug(
                             f"Poisoned queue entry discarded for {config.C_BOLD}{completed_user}{config.C_RESET}: path outside the music root.",
                             category="HARDBAN")
@@ -1359,10 +1359,18 @@ def check_queue_and_send(irc_sock, completed_user):
                     # filename in its error output is decoded here or
                     # nowhere, and a pack that failed for a nameable
                     # reason must not become a pack that failed silently.
-                    process = subprocess.run(cmd, capture_output=True,
-                                             text=True, encoding="utf-8",
-                                             errors="replace",
-                                             timeout=rar_timeout)
+                    try:
+                        process = subprocess.run(cmd, capture_output=True,
+                                                 text=True, encoding="utf-8",
+                                                 errors="replace",
+                                                 timeout=rar_timeout)
+                    except subprocess.TimeoutExpired:
+                        # rar was killed mid-write: whatever it wrote sits at
+                        # the target path, and nothing else ever names that
+                        # file (#717). Removed here; the wrapper's handling of
+                        # the failure is unchanged.
+                        _discard_partial_archive(target_rar_path, "timed out")
+                        raise
                     
                     if process.returncode == 0 and os.path.exists(target_rar_path):
                         print(f"[LINEAR RAR] Compression succeeded. Waiting 2.0s for the disk to sync...")
@@ -1396,10 +1404,7 @@ def check_queue_and_send(irc_sock, completed_user):
                         if not room:
                             print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, "
                                   f"the packed archive stays queued for the next trigger.")
-                            config.rar_inprogress = False
-                            redispatch_waiting_pack(irc_sock, just_finished=completed_user)
-                            if hasattr(config, 'user_processing_lock'):
-                                config.user_processing_lock.discard(completed_user.lower())
+                            # Released by the wrapper's finally, once (#714).
                             return
                         if oserve: oserve.active_downloads = len(config.active_transfers)
 
@@ -1416,6 +1421,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     else:
                         error_msg = process.stderr.strip() if process.stderr else "Unknown RAR engine issue"
                         print(f"[LINJAR RAR ERROR] {error_msg}")
+                        _discard_partial_archive(target_rar_path, "rar exited " + str(process.returncode))
                         announce_mod.send_debug(f"Pack FAILED in queue slot for {completed_user}: {error_msg}", category="PART")
                         # Charge the failure to the retry budget instead of recursing. The old
                         # code cleared the interlocks and called check_queue_and_send inline,
@@ -1968,6 +1974,27 @@ def transfers_are_paused():
     return bool(getattr(config, "transfers_paused", False))
 
 
+def _discard_partial_archive(target_rar_path, why):
+    """Remove what a failed rar run left at its output path (#717, audit L53).
+
+    A run that timed out (killed mid-write) or exited non-zero left the
+    partial archive at target_rar_path. The queue row points at the SOURCE
+    folder, so neither discard_orphaned_temp_archives() nor the send's own
+    finally ever named that file; the row was retried, and after
+    MAX_SEND_FAILS dropped, with a multi-GB partial left in TMP_ZIP_DIR until
+    the same folder was packed again or an operator found it. The path is
+    exclusively this pack's output, so removing it is safe.
+    """
+    try:
+        if os.path.exists(target_rar_path):
+            size = os.path.getsize(target_rar_path)
+            os.remove(target_rar_path)
+            print(f"[LINEAR RAR] Removed the partial archive a run that {why} left behind "
+                  f"({size:,} bytes): {os.path.basename(target_rar_path)}")
+    except OSError as err:
+        print(f"[LINEAR RAR] Could not remove the partial archive {target_rar_path}: {err}")
+
+
 def a_pack_is_running():
     """Is the folder packer's thread alive right now?
 
@@ -2121,14 +2148,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
     # so gating on update_inprogress behind the same switch refuses exactly
     # what it refused before.
     # A rehash is quiescing: new sends wait, in-flight ones finish. Its own
-    # message, because "the list is rebuilding" would not be true.
+    # message, because "the list is rebuilding" would not be true. The
+    # request itself goes on (#668, audit L4): it used to be refused here
+    # with "Your request is not lost - try again in a moment", and nothing
+    # replayed it, so it was lost unless the user typed it again. Only the
+    # dispatch has to wait - check_queue_and_send() is gated, and the direct
+    # send below checks the pause under queue_lock - and the rehash wakes
+    # the queue once the reload is done, so a request queued now is served
+    # then. The notice says that.
     if transfers_are_paused():
         oserve = sys.modules.get('oserve')
         if oserve:
-            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: The bot is reloading its configuration. Your request is not lost - try again in a moment.\r\n")
-        print(f"[MAINTENANCE BLOCK] Held a file request from {user}: a rehash "
-              f"is waiting for transfers to finish.")
-        return
+            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: The bot is reloading its configuration. Your request is queued and starts when the reload is done.\r\n")
+        print(f"[MAINTENANCE] Queued a file request from {user} for after the "
+              f"rehash: it is waiting for transfers to finish.")
 
     if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'update_inprogress', False) is True:
         oserve = sys.modules.get('oserve')
@@ -2668,8 +2701,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             user_has_queue = len(config.dcc_queue.get(user_key, [])) > 0
 
             # Only a user who is clear in transfers, the queue AND the memory lock sends immediately
+            # - and not while a rehash is quiescing (#668): this path does
+            # not go through check_queue_and_send()'s gate, so a request
+            # that reached here during the pause would have started a send
+            # the reload then landed in the middle of. Read under the lock.
             sends_now = (not user_already_transferring and not user_is_processing
-                         and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS)
+                         and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS
+                         and not transfers_are_paused())
             if sends_now:
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)

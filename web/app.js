@@ -1276,7 +1276,13 @@
         return;
       }
       var key = res.data.already_known ? "filelists.sourceAlreadyKnown" : "filelists.sourceAdded";
-      showFilelistsSourceStatus(t(key).replace("{nick}", res.data.added), false);
+      // A 200 with a warning (#691): the row is on the page, and not on
+      // the disk. Said as the error it is, not swallowed into "added".
+      if (res.data.warning) {
+        showFilelistsSourceStatus(t(key).replace("{nick}", res.data.added) + " " + t("filelists.sourceNotOnDisk"), true);
+      } else {
+        showFilelistsSourceStatus(t(key).replace("{nick}", res.data.added), false);
+      }
       el.filelistsAddSourceInput.value = "";
       pollFilelistsBots();
     }).finally(function () {
@@ -1297,7 +1303,11 @@
           t("filelists.couldNotForgetSource").replace("{error}", (res.data && res.data.error) || ("HTTP " + res.status)), true);
         return;
       }
-      showFilelistsSourceStatus(t("filelists.sourceForgotten").replace("{nick}", res.data.removed), false);
+      if (res.data.warning) {
+        showFilelistsSourceStatus(t("filelists.sourceForgotten").replace("{nick}", res.data.removed) + " " + t("filelists.sourceNotOnDisk"), true);
+      } else {
+        showFilelistsSourceStatus(t("filelists.sourceForgotten").replace("{nick}", res.data.removed), false);
+      }
       el.filelistsAddSourceInput.value = "";
       pollFilelistsBots();
     }).finally(function () {
@@ -3865,6 +3875,13 @@
   function settingsHelpHtml(field) {
     var help = fieldHelp(field);
     if (!help) { return ""; }
+    // The help is one text for two readers (#686): settings.conf.sample,
+    // where the value IS bytes, and this page, where a size field is typed
+    // and shown in the unit on its chip. So the page says which, after the
+    // shared text, or "in bytes" in the tooltip contradicts the MB beside it.
+    if (field.unit) {
+      help += " " + t("settings.help.shownIn").replace("{unit}", field.unit);
+    }
     return '<span class="settings-help" tabindex="0">' +
       '<span class="settings-help-mark" aria-hidden="true">?</span>' +
       '<span class="visually-hidden">' + escapeHtml(t("settings.whatThisDoes")) + "</span>" +

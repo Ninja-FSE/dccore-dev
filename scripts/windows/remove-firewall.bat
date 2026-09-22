@@ -13,7 +13,10 @@ if errorlevel 1 (
     echo   Removing a firewall rule needs an administrator's yes - Windows
     echo   will ask now.
     echo.
-    call powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    rem  Through the environment (#684): a folder with an apostrophe in its
+    rem  name ended the PowerShell string early and the relaunch never came.
+    set "DCCORE_SELF=%~f0"
+    call powershell -NoProfile -Command "Start-Process -FilePath $env:DCCORE_SELF -Verb RunAs"
     exit /b
 )
 

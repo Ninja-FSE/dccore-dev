@@ -10,16 +10,27 @@ import os
 # print() raises UnicodeEncodeError and takes the thread down with it. See
 # platform_compat.install_console_encoding_guard for the full explanation.
 import platform_compat
-platform_compat.install_console_encoding_guard()
-# Timestamps go on at the same moment, with the built-in format, so the
-# config-loading lines that print next are stamped too. The operator's own
-# format is applied the line after config exists.
-platform_compat.install_console_timestamps()
+# ONLY WHEN THIS FILE IS THE PROGRAM (#707, audit L43). list.py imports
+# oserve, so every test process - and every script that imports announce -
+# used to run these two installs at import time and wrap the runner's own
+# stdout and stderr for the rest of the run: unittest's summaries came out
+# timestamped, and a test asserting an exact printed line saw a prefix that
+# depended on which module was imported first. `__name__` is "__main__"
+# here, at the top of the file, exactly when `python oserve.py` is what is
+# running - so the daemon's first lines are still stamped and guarded, and
+# an import of this module touches nothing.
+if __name__ == "__main__":
+    platform_compat.install_console_encoding_guard()
+    # Timestamps go on at the same moment, with the built-in format, so the
+    # config-loading lines that print next are stamped too. The operator's
+    # own format is applied the line after config exists.
+    platform_compat.install_console_timestamps()
 
 # Load the bot's modules
 import defaults as config
-platform_compat.set_console_timestamp_format(
-    getattr(config, "CONSOLE_TIMESTAMP_FORMAT", "%H:%M:%S"))
+if __name__ == "__main__":
+    platform_compat.set_console_timestamp_format(
+        getattr(config, "CONSOLE_TIMESTAMP_FORMAT", "%H:%M:%S"))
 
 # Allocate the locks at startup, in memory. This keeps config.py free of
 # function calls and imports.
@@ -78,6 +89,9 @@ total_sent_bytes = 0
 # launchers can tell "ask the questions in the terminal instead" from "stop",
 # which is the one road out of a tree that has no config and a taken port.
 EXIT_SETUP_IN_THE_TERMINAL = 3
+# Another DCCore already holds this data folder (#710). Its own number, so
+# a launcher can say "already running" rather than "failed".
+EXIT_ALREADY_RUNNING = 4
 
 def queue_message(user, message, is_vip=False):
     """The queue's entry point, with a strictly isolated VIP express lane."""
@@ -124,6 +138,21 @@ def startup(setup_page=None):
     """
     print(f"--- {config.SCRIPT_VERSION} is starting up ---")
 
+    # ONE INSTANCE PER DATA FOLDER, before anything is read or written
+    # (#710). The lock lives beside the queue file, so two trees with two
+    # data folders are two bots, as they should be, and two starts of one
+    # tree are refused. Held until the process ends.
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(config.DCC_QUEUE_FILE)), "dccore.lock")
+    try:
+        platform_compat.take_instance_lock(lock_path)
+    except platform_compat.AlreadyRunning as running:
+        who = f" (pid {running.pid})" if running.pid else ""
+        print(f"[CRITICAL] DCCore is already running on this folder{who} - "
+              f"a second copy would share its queue, its stats file and its DCC ports.")
+        print("[CRITICAL] Stop the other one first (its own window, or the autostart task), "
+              "or run a second bot from a second folder.")
+        sys.exit(EXIT_ALREADY_RUNNING)
+
     # The hard backstop for #170's RFC: scripts/setup_check.py's pre-flight
     # report is a friendlier, EARLIER warning an operator can choose to run
     # (or a launcher runs for them) - this is what actually stops the daemon
@@ -166,8 +195,11 @@ def startup(setup_page=None):
               "(blank, or still the shipped default):")
         for name in unconfigured:
             print(f"[CRITICAL]   {name}")
-        print("[CRITICAL] Set them in admin_config.py or settings.conf before starting - "
-              "see admin_config.py.sample / settings.conf.sample.")
+        # The launcher or configure.py, not "see the sample" (#685): copying
+        # the sample by hand is the step both exist to spare a first-timer.
+        print("[CRITICAL] Run the launcher (start-dccore - it asks the questions, or opens "
+              "the setup page in your browser), or python3 configure.py, or set them in "
+              "settings.conf or admin_config.py by hand before starting.")
         sys.exit(1)
 
     # FILE_DIRECTORY is deliberately NOT in settings_file.REQUIRED (see its
@@ -322,6 +354,13 @@ def startup(setup_page=None):
         # A panel that cannot be restored is a panel; the bot still serves
         # files. Nothing here is worth refusing to boot over.
         print(f"[STARTUP] Could not restore the notices: {notices_err}")
+    # A hostmask that admits the network's whole logged-in population is
+    # accepted - "*.example.org" is legitimate - but said out loud (#669).
+    try:
+        import adminchat as _adminchat_boot
+        _adminchat_boot.report_broad_host_patterns()
+    except Exception as hostmask_err:
+        print(f"[STARTUP] Could not check ADMIN_HOSTMASKS: {hostmask_err}")
     # #221: a bot that ran for months before retention existed loads all of it
     # back here. Pruning at startup as well as on the persist cycle means an
     # upgrade cleans up once rather than carrying the backlog forever.
@@ -335,6 +374,12 @@ def startup(setup_page=None):
         dcc_fetch.prune_fetch_history()
     except Exception as prune_err:
         print(f"[STARTUP] Could not prune the fetch history: {prune_err}")
+    # Temp files a killed run left in data/ (#692). Housekeeping, like the
+    # pruning above, and no reason to refuse to boot.
+    try:
+        db.discard_stale_swaps()
+    except Exception as swap_err:
+        print(f"[STARTUP] Could not sweep leftover temp files: {swap_err}")
     if config.fetch_queue:
         print(f"[STARTUP] Fetch history: {len(config.fetch_queue)} finished fetch(es) remembered.")
 
@@ -419,6 +464,15 @@ def run_forever():
             irc.irc_loop()
         except KeyboardInterrupt:
             print("\nShutting down...")
+            # One last flush of the bot registry (#691): it is written on a
+            # 30 s interval, and a Ctrl-C inside that window lost the last
+            # adverts and a source the dashboard had just added. Never
+            # fatal on the way out.
+            try:
+                import irc as _irc_flush
+                _irc_flush._flush_known_bots(force=True)
+            except Exception:
+                pass
             sys.exit(0)
         except Exception as main_err:
             print(f"[CRITICAL MAIN ERROR] The main loop stopped: {main_err}")

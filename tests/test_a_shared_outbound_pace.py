@@ -150,8 +150,10 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
 
     def setUp(self):
         super().setUp()
-        config.MSG_DELAY = 0.05
-        config.DEBUG_MSG_DELAY = 0.01  # deliberately far below MSG_DELAY
+        # Through set_config() (#667): set directly, the tiny pace outlived
+        # the test and every later one ran at it.
+        self.set_config(MSG_DELAY=0.05,
+                        DEBUG_MSG_DELAY=0.01)  # deliberately far below MSG_DELAY
         config.vip_queue = []
         config.send_queue = {}
         config.bot_joined_channel = True
@@ -160,7 +162,8 @@ class TheCombinedOutboundRateIsCapped(DCCoreTestCase):
         config.activation_triggered = True
 
         # A fresh clock per test - the real one is a process-wide singleton
-        # and other tests must not see this test's tiny MSG_DELAY.
+        # and other tests must not inherit the moment this one's last line
+        # left (the value itself is restored by set_config above).
         runtime.outbound_pacer = runtime.OutboundPacer()
 
         self.sock = TimestampedSocket()
@@ -256,7 +259,7 @@ class TheStandardLaneIsNoLongerStarvedByVip(DCCoreTestCase):
 
     def setUp(self):
         super().setUp()
-        config.MSG_DELAY = 0.01
+        self.set_config(MSG_DELAY=0.01)
         config.vip_queue = []
         config.send_queue = {}
         config.bot_joined_channel = True

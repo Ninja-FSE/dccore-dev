@@ -75,7 +75,7 @@ import platform_compat
 import runtime
 
 try:
-    from flask import (Flask, jsonify, redirect, request, send_file,
+    from flask import (Flask, g, jsonify, redirect, request, send_file,
                        send_from_directory, session)
     HAVE_FLASK = True
 except ImportError:
@@ -403,8 +403,8 @@ def build_stats_import_preview(text):
 def apply_stats_import(raw):
     """(http_status, payload) for POST /api/stats/import.
 
-    Writes through db.save_advanced_stats() and db.save_speed_record(), which
-    already take the disk lock and write atomically - a caller, not a second
+    Writes through db.set_lifetime_totals() and db.save_speed_record(),
+    which take the disk lock and write atomically - a caller, not a second
     implementation of either.
 
     Returns the before and after, so the page reports what actually happened
@@ -421,19 +421,14 @@ def apply_stats_import(raw):
 
     before = current_importable_stats()
 
+    written = None
     if "total_files" in clean or "total_bytes" in clean:
-        # The 7-column row read-modify-written as a whole: the day columns and
-        # the date belong to the daemon's own rotation and are not this
-        # feature's to touch. Importing a lifetime total must not reset what
-        # the bot did today.
-        row = list(db.load_advanced_stats() or [0] * 7)
-        while len(row) < 7:
-            row.append(0)
-        if "total_files" in clean:
-            row[0] = clean["total_files"]
-        if "total_bytes" in clean:
-            row[1] = clean["total_bytes"]
-        db.save_advanced_stats(row)
+        # The 7-column row read-modify-written as a whole, under one lock
+        # (#690): the day columns and the date belong to the daemon's own
+        # rotation and are not this feature's to touch, and a transfer that
+        # completes while this runs must not lose its count to a stale row.
+        written = db.set_lifetime_totals(total_files=clean.get("total_files"),
+                                         total_bytes=clean.get("total_bytes"))
 
     if "speed_record" in clean:
         db.save_speed_record(clean["speed_record"])
@@ -445,7 +440,18 @@ def apply_stats_import(raw):
     # disk. The operator would have been told their history came across and
     # found half of it, with nothing to say which half.
     after = current_importable_stats()
-    landed = [name for name in sorted(clean) if after.get(name) == clean[name]]
+
+    def landed_as_asked(name):
+        # The totals are judged by the row the locked write produced, not by
+        # a later read (#690): a transfer completing right after the import
+        # legitimately moves them on, and that is not a failed write.
+        if name == "total_files":
+            return written is not None and written[0] == clean[name]
+        if name == "total_bytes":
+            return written is not None and written[1] == clean[name]
+        return after.get(name) == clean[name]
+
+    landed = [name for name in sorted(clean) if landed_as_asked(name)]
     missing = [name for name in sorted(clean) if name not in landed]
     if missing:
         return 500, {
@@ -1538,7 +1544,14 @@ def build_add_source_result(bot_raw):
     entry.setdefault("last_seen", 0)
     entry["hand_entered"] = True
     runtime.known_bots[key] = entry
-    irc._flush_known_bots(force=True)
+    # Said when the row did not reach the disk (#691): it is in the registry
+    # and on the page, and gone at the next restart unless a later flush
+    # lands - a 200 that said nothing left the operator believing otherwise.
+    if not irc._flush_known_bots(force=True):
+        return 200, {"added": entry["nick"], "already_known": already,
+                     "warning": "Added, but the bot registry could not be written to disk "
+                                "- the row is kept until the next restart unless a later "
+                                "save succeeds. Check the daemon log and the data directory."}
     return 200, {"added": entry["nick"], "already_known": already}
 
 
@@ -1569,7 +1582,11 @@ def build_remove_source_result(bot_raw):
         return 409, {"error": f"{bot} is here because it advertises; it "
                               "would be back at its next advert."}
     runtime.known_bots.pop(key, None)
-    irc._flush_known_bots(force=True)
+    if not irc._flush_known_bots(force=True):
+        return 200, {"removed": bot,
+                     "warning": "Removed, but the bot registry could not be written to disk "
+                                "- the row is back at the next restart unless a later save "
+                                "succeeds. Check the daemon log and the data directory."}
     return 200, {"removed": bot}
 
 
@@ -3531,10 +3548,16 @@ def _note_bad_web_login(ip):
     if not ip:
         return
     with _web_bad_ips_lock:
-        entry = _web_bad_ips.get(ip) or [0, 0.0]
+        now = time.time()
+        # The addresses that never reached a block are forgotten after the
+        # block window (#677): the expiry below only ever saw blocked ones,
+        # and on an internet-exposed bind the rest stayed for ever.
+        adminchat.forget_stale_failures(_web_bad_ips, now)
+        entry = _web_bad_ips.get(ip) or [0, 0.0, now]
         entry[0] += 1
+        entry[2] = now
         if entry[0] >= adminchat.MAX_PASSWORD_ATTEMPTS:
-            entry[1] = time.time() + adminchat.BAD_IP_BLOCK_SECONDS
+            entry[1] = now + adminchat.BAD_IP_BLOCK_SECONDS
         _web_bad_ips[ip] = entry
 
 
@@ -3654,8 +3677,20 @@ def _console_debug_sink(msg_text, category="INFO"):
         _console_next_id += 1
 
 
+# The browser is already on the dashboard's login (#689, audit L25): the
+# setup page's "Saved" screen polls /login and navigates there by itself
+# as soon as the real app answers, so start() opening the dashboard as well
+# gave a first run two tabs, one on /login and one on / (which redirects to
+# /login). Set by run_setup_until_configured() when the page it served is
+# going to do that; read and cleared by _open_in_browser(), once.
+_browser_is_on_the_saved_page = False
+
+
 def _open_in_browser(host, port, opener=None, log=print):
     """Open the dashboard in the default browser, if that was asked for.
+
+    Not when the setup page's own browser tab is about to arrive here on
+    its own (#689): a first run ends on one dashboard tab, not two.
 
     LOOPBACK ONLY, and not because of security - because of what the machine
     probably is. A dashboard bound to the LAN is as likely to be running on a
@@ -3666,6 +3701,11 @@ def _open_in_browser(host, port, opener=None, log=print):
     BROWSER variable is not a reason to stop the bot starting - the address
     was printed a line above either way.
     """
+    global _browser_is_on_the_saved_page
+    if _browser_is_on_the_saved_page:
+        _browser_is_on_the_saved_page = False
+        log("[WEBUI] The setup page's tab opens the login by itself; not opening another.")
+        return False
     if not getattr(config, "WEBUI_OPEN_BROWSER", True):
         return False
     if not dashboard_is_loopback_only(host):
@@ -3905,6 +3945,21 @@ if HAVE_FLASK:
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "Authentication required."}), 401
                 return redirect("/login")
+            # EVERY POST IS CHECKED AGAINST ITS OWN HOST (#672, audit L8),
+            # the way the login's is (#609). SameSite=Lax was the only
+            # defence for the routes that take no JSON body - update-list,
+            # purge-offline, a source's remove, a fetch's delete, the two
+            # read marks - and "site" does not include the port: a plain
+            # HTML form on any other local port (a dev server, a NAS UI)
+            # submitted them with the operator's cookie attached. A browser
+            # sends Origin on every POST, a form's included; a request with
+            # neither header (curl, a script) is not a page forwarding
+            # another site's form and passes, as at the login.
+            if request.method == "POST" and not _login_origin_ok(
+                    request.headers.get("Origin"), request.headers.get("Referer"),
+                    request.host):
+                return jsonify({"error": "This request was sent by another site "
+                                         "and was ignored."}), 403
             return None
 
         @app.route("/login", methods=["GET", "POST"])
@@ -3937,7 +3992,11 @@ if HAVE_FLASK:
             status = 401 if error else 200
             return LOGIN_PAGE.format(error_html=error_html), status
 
-        @app.route("/logout", methods=["GET", "POST"])
+        # POST only (#673, audit L9): the page's own button is a form, and a
+        # GET that changes state is a link any other site can make the
+        # operator's browser follow with the Lax cookie attached - a cross-
+        # site navigation to /logout dropped the dashboard to the login form.
+        @app.route("/logout", methods=["POST"])
         def logout():
             session.clear()
             return redirect("/login")
@@ -4428,8 +4487,14 @@ def validate_setup_form(form, lang="en"):
         errors.append(("SERVER", say("setup.error.server_needed",
                                      "An IRC server is needed (irc.undernet.org is "
                                      "the usual one).")))
-    elif " " in server:
-        errors.append(("SERVER", say("setup.error.server_spaces", "A server name has no spaces.")))
+    elif settings_file.server_problem(server):
+        # ":" and "/" as well as a space (#687): "irc.undernet.org:6667" and
+        # a pasted irc:// URL were accepted and the bot looped on
+        # getaddrinfo every ten seconds with nothing saying why.
+        errors.append(("SERVER", say("setup.error.server_shape",
+                                     "A server name has no spaces, no port and no irc:// - "
+                                     "just the host, e.g. irc.undernet.org (the port is a "
+                                     "separate setting).")))
     else:
         changes["SERVER"] = server
 
@@ -4513,14 +4578,21 @@ def apply_setup(changes, password_hash, log=print, settings_path=None, admin_pat
     # back to the form. A hash written before settings.conf hurts nothing:
     # the gate still trips, the page is offered again and the next attempt
     # replaces the line in place (#624).
-    configure.write_admin_config_password(password_hash, path=admin_path)
+    # The writer returns the settings.conf path when THAT file also sets
+    # ADMIN_PASSWORD_HASH (#676, audit L12): defaults.py applies it after
+    # admin_config.py, so after a restart the hash written here loses to
+    # it. The writer prints the warning to the daemon's window; the person
+    # at the form is in a browser and never saw it - so it is returned, and
+    # the saved page says it too.
+    shadow = configure.write_admin_config_password(password_hash, path=admin_path)
     configure.write_settings_conf(changes, path=settings_path)
     settings_file.apply_to(vars(config), path=settings_path, log=log)
     config.ADMIN_PASSWORD_HASH = password_hash
     # apply_to() assigned NICKNAME but did not re-run the derivations that
     # depend on it; the list rebuild is a new process and does (#590).
     config.derive_list_base_name()
-    return {"written": sorted(changes)}
+    return {"written": sorted(changes),
+            "shadowed_by": os.path.basename(shadow) if shadow else None}
 
 
 def _setup_host_ok(host_header):
@@ -4593,16 +4665,28 @@ def render_setup_page(fields, token, lang="en", errors=(), values=None, port=842
         note=_html(strings.get("setup.note", "Only this machine can reach this page, and only until the settings are saved.")))
 
 
-def render_setup_saved_page(changes, lang="en", port=8420):
+def render_setup_saved_page(changes, lang="en", port=8420, shadowed_by=None):
     strings = _setup_strings(lang)
     dashboard = bool(changes.get("WEBUI_ENABLED"))
     from string import Template
+    warning = ""
+    if shadowed_by:
+        # The password just chosen works until the next restart, and then
+        # the hash in settings.conf wins (#676). Said on the page, where the
+        # person who chose it is.
+        text = strings.get("setup.saved.shadowed",
+                           "{file} also sets ADMIN_PASSWORD_HASH, and it is applied after admin_config.py - "
+                           "so after the next restart the password you just chose will stop working. "
+                           "Remove the ADMIN_PASSWORD_HASH line from {file}, or change the password from "
+                           "the dashboard, which writes to that file.")
+        warning = '<p class="warn">%s</p>' % _html(text.replace("{file}", str(shadowed_by)))
     return Template(SETUP_SAVED_PAGE).substitute(
         title=_html(strings.get("setup.saved.title", "Saved - starting the bot")),
         body=_html(strings.get("setup.saved.dashboard" if dashboard else "setup.saved.no_dashboard",
                                "The bot is starting. This page opens the dashboard's login as soon as it answers - log in with the password you just chose."
                                if dashboard else
                                "The bot is starting. You chose no dashboard, so this page has nothing more to show: the bot's window is where it reports from now on. Close this tab.")),
+        warning=warning,
         poll="true" if dashboard else "false", port=str(port))
 
 
@@ -4649,8 +4733,9 @@ SETUP_SAVED_PAGE = """<!doctype html>
   div { background: #131a1f; padding: 2rem 2.25rem; border-radius: 10px; max-width: 30rem; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
   h1 { font-size: 1.05rem; margin: 0 0 0.75rem; font-weight: 600; }
   p { color: #9fb0ba; font-size: 0.9rem; line-height: 1.5; margin: 0; }
+  p.warn { color: #fbbf24; margin-top: 0.9rem; }
 </style></head>
-<body><div><h1>$title</h1><p>$body</p></div>
+<body><div><h1>$title</h1><p>$body</p>$warning</div>
 <script>
   if ($poll) {
     setInterval(function () {
@@ -4669,7 +4754,18 @@ if HAVE_FLASK:
         """The setup-only app: /setup, and nothing the real app has."""
         app = Flask("dccore-setup", static_folder=None)
         app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
-        state = {"done": False, "changes": None}
+        # `bound`: the browser the code was first presented from (#675,
+        # audit L11). The link is handed to the OS opener, and on Linux
+        # that is xdg-open with the URL in argv, which the browser keeps in
+        # its own argv for as long as it runs - readable by any other local
+        # user via ps, for the whole setup window, on a host where 127.0.0.1
+        # is reachable by everyone. So the code is good for one browser:
+        # the first request that carries it gets a cookie, and from then on
+        # the code is accepted only together with that cookie. A second
+        # browser with the code from ps is refused, and if it was somehow
+        # first, the operator's own is - loudly, with what to do.
+        state = {"done": False, "changes": None, "bound": None, "shadowed_by": None}
+        SETUP_COOKIE = "dccore-setup"
 
         def refused(why):
             return (f"<!doctype html><meta charset='utf-8'><p style='font-family:sans-serif'>"
@@ -4687,7 +4783,25 @@ if HAVE_FLASK:
                 return refused("Open the exact link printed in DCCore's window - it "
                                "carries a one-time code, so that only the person at "
                                "this machine can set the bot up.")
+            if state["bound"] is None:
+                import secrets
+                state["bound"] = secrets.token_urlsafe(24)
+                g.setup_cookie_to_set = state["bound"]
+                return None
+            held = request.cookies.get(SETUP_COOKIE, "")
+            if not hmac.compare_digest(held.encode("utf-8"), state["bound"].encode("utf-8")):
+                return refused("This link has already been opened in another browser, "
+                               "and the code in it is good for one. If that was not "
+                               "you, stop DCCore and start it again: it prints a new "
+                               "link with a new code.")
             return None
+
+        @app.after_request
+        def bind_the_first_browser(response):
+            value = getattr(g, "setup_cookie_to_set", None)
+            if value:
+                response.set_cookie(SETUP_COOKIE, value, httponly=True, samesite="Lax", path="/")
+            return response
 
         @app.route("/")
         def root():
@@ -4698,7 +4812,8 @@ if HAVE_FLASK:
             lang = (request.values.get("lang") or "en").lower()
             lang = lang if lang in SETUP_LANGS else "en"
             if state["done"]:
-                return render_setup_saved_page(state["changes"] or {}, lang, port)
+                return render_setup_saved_page(state["changes"] or {}, lang, port,
+                                               shadowed_by=state["shadowed_by"])
             if request.method == "GET":
                 return render_setup_page(build_setup_fields(lang), token, lang, port=port)
             changes, password_hash, errors = validate_setup_form(request.form, lang)
@@ -4707,7 +4822,7 @@ if HAVE_FLASK:
                 return render_setup_page(build_setup_fields(lang, values), token, lang,
                                          errors=errors, values=values, port=port), 400
             try:
-                apply_setup(changes, password_hash)
+                applied = apply_setup(changes, password_hash)
             except Exception as err:  # a full disk, a read-only folder
                 message = _setup_strings(lang).get("setup.error.write", "Could not write the settings: {error}")
                 return render_setup_page(build_setup_fields(lang, dict(request.form)), token, lang,
@@ -4715,8 +4830,9 @@ if HAVE_FLASK:
                                          values=dict(request.form), port=port), 500
             state["done"] = True
             state["changes"] = changes
+            state["shadowed_by"] = (applied or {}).get("shadowed_by")
             on_done(changes)
-            return render_setup_saved_page(changes, lang, port)
+            return render_setup_saved_page(changes, lang, port, shadowed_by=state["shadowed_by"])
 
         @app.route("/login")
         def not_yet():
@@ -4806,6 +4922,11 @@ if HAVE_FLASK:
             server.server_close()
         if not done.is_set():
             return None
+        # The saved page in the browser polls /login and goes there when the
+        # dashboard answers (#689) - exactly when the dashboard was chosen
+        # and a browser was opened here. start() must not open a second tab.
+        global _browser_is_on_the_saved_page
+        _browser_is_on_the_saved_page = bool(opened and result["changes"].get("WEBUI_ENABLED"))
         log(f"[SETUP] Settings written: {', '.join(result['changes'])}. Starting.")
         return result["changes"]
 

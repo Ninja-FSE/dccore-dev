@@ -15,7 +15,7 @@ scripts/linux/check-setup.py and scripts/windows/check-setup.py were the same
 file twice - 151 identical lines out of ~220, checking the same ten settings,
 differing only in a docstring, os.name, a rar hint and a few command names.
 
-Two hand-maintained copies of the same knowledge about config.py is the shape
+Two hand-maintained copies of the same knowledge about defaults.py is the shape
 PRESERVE_RUNTIME already was here: a second list that had to be kept in step
 with the first, drifted, and stopped matching reality without saying anything.
 
@@ -297,7 +297,7 @@ def main(platform):
     print()
     print("Configuration")
 
-    # #162 finding #19: settings.conf is fully first-class - config.py applies
+    # #162 finding #19: settings.conf is fully first-class - defaults.py applies
     # it SECOND (so it wins over admin_config.py on a shared key), the daemon
     # starts fine from it alone, and every setting an operator would otherwise
     # put in admin_config.py (including ADMIN_HOSTMASKS/ADMIN_PASSWORD_HASH -
@@ -331,9 +331,15 @@ def main(platform):
         ok("migrated local_config.py to admin_config.py (renamed in #170; the "
            "file is gitignored, so the upgrade could not rename it for you)")
     elif not admin_config_present and not settings_conf_present:
-        fail("no admin_config.py and no settings.conf - copy admin_config.py.sample "
-             "to admin_config.py, or settings.conf.sample to settings.conf, and fill "
-             "one of them in, or the daemon will use the upstream defaults")
+        # Not "copy the sample" (#685, audit L21): that is the manual step
+        # the launchers replaced (#547), and a novice who followed it
+        # created admin_config.py by hand - which is the launcher's
+        # first-run gate - so the questions and the browser page were never
+        # offered, and the copied sample turned the dashboard and the debug
+        # channel on for them.
+        fail("no admin_config.py and no settings.conf - nothing is configured yet. "
+             f"Run {platform.start_cmd} (it asks the questions, or opens the setup page "
+             f"in your browser), or {platform.python} configure.py")
     elif not admin_config_present:
         ok("configured via settings.conf (no admin_config.py)")
     elif not settings_conf_present:
@@ -344,7 +350,10 @@ def main(platform):
     try:
         import defaults as config
     except Exception as err:
-        fail(f"config.py did not load: {err}")
+        # defaults.py, the module's name since the rename the guides
+        # describe (#699): the message said "config.py", a file that does
+        # not exist, and sent an operator looking for it.
+        fail(f"defaults.py did not load (it reads admin_config.py and settings.conf): {err}")
         print()
         print("  Cannot continue without a config.")
         return 1
@@ -522,6 +531,17 @@ def main(platform):
              f"will refuse every connection until you run: {platform.python} adminchat.py")
     else:
         ok(f"enabled for {len(patterns)} host pattern(s)")
+        # Accepted, but far wider than one operator (#669): a wildcard where
+        # the account name goes, or a bare top-level domain.
+        try:
+            import adminchat as _adminchat_breadth
+            broad = _adminchat_breadth.broad_host_patterns()
+        except Exception:
+            broad = []
+        for pattern, why in broad:
+            warn(f"ADMIN_HOSTMASKS entry {pattern!r} is very broad - {why}. Anyone "
+                 f"matching it reaches the console's password prompt; write your own "
+                 f"services host in full, e.g. 'operator.users.undernet.org'")
 
     # --- verdict --------------------------------------------------------------
     print()

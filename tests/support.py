@@ -149,6 +149,14 @@ SETTINGS_DEFAULTS = {
     # test that set it and did not put it back - two do - changed the answer of
     # every is_admin() call after it.
     "ADMIN_HOSTMASKS": [],
+    # The outbound pace (#667). Six setUps set these to 10-50 ms directly
+    # and nothing put the shipped 5.0 s / 0 back, so every test after them
+    # in the run - alphabetically most of the suite - was paced at 10 ms
+    # and would stall or time out run on its own. They are set through
+    # set_config() now, and the shipped values return here on every reset;
+    # a guard reads defaults.py to keep these two the shipped ones.
+    "MSG_DELAY": 5.0,
+    "DEBUG_MSG_DELAY": 0.0,
 }
 
 RUNTIME_FLAGS = {
@@ -314,9 +322,12 @@ class DeadSocket:
 def install_fake_oserve(irc_connection=None):
     """Install a stub ``oserve`` module and return it.
 
-    Real oserve is the process entry point; importing it would start worker
-    threads. Everything else reaches it via sys.modules.get('oserve'), so a stub
-    is enough and keeps the tests single-threaded unless a case asks otherwise.
+    The real oserve is the process entry point, and it IS imported here -
+    list.py imports it, and announce imports list - but importing it runs
+    nothing (startup() runs only under __main__, and since #707 so do the
+    console installs). Everything else reaches oserve through
+    sys.modules.get('oserve'), so a stub in its place is what the tests
+    talk to, and what they observe.
     """
     stub = types.ModuleType("oserve")
     stub.irc_connection = irc_connection
@@ -588,6 +599,24 @@ class DCCoreTestCase(unittest.TestCase):
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
                                           "known_bots.json")
 
+        # The console's token store (#704, audit L40). Every password check
+        # goes through db.load_admin_tokens() on this path, so every login
+        # test read the OPERATOR'S data/adminchat_tokens.json from the cwd
+        # - each wrong-password test verified PBKDF2 against every real
+        # token - and a `pair` reached from any test but the two that
+        # redirected it themselves would have written the live store.
+        self._real_admin_tokens_file = db.ADMIN_TOKENS_FILE
+        db.ADMIN_TOKENS_FILE = os.path.join(self._fetch_history_dir,
+                                            "adminchat_tokens.json")
+        self.set_config(ADMIN_TOKENS_FILE=db.ADMIN_TOKENS_FILE)
+
+        # The single-instance lock (#710): oserve.startup() takes it beside
+        # the queue file - in this test's temp tree, since DCC_QUEUE_FILE is
+        # redirected above - and holds it for the process. Released here so
+        # the next test that boots is not refused as a second instance.
+        import platform_compat as _platform_compat
+        self.addCleanup(_platform_compat.release_instance_lock)
+
         # Same shape, found the same way: the state guard caught it the first
         # time a test drove a transfer all the way to completion, because
         # db.record_download() is only reached on the success path and
@@ -688,6 +717,7 @@ class DCCoreTestCase(unittest.TestCase):
         db.NOTICES_FILE = self._real_notices_file
         db.PRIVATE_MESSAGES_FILE = self._real_pm_file
         db.KNOWN_BOTS_FILE = self._real_known_bots_file
+        db.ADMIN_TOKENS_FILE = self._real_admin_tokens_file
         # NOT self._real_download_counts_file / self._real_speed_record_file
         # / self._real_dcc_queue_file - see the three _ORPHANED_*_SINK
         # constants above. A start_dcc_send() thread still settling its

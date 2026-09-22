@@ -758,6 +758,35 @@ def parse_kick(line):
     return match.group(1), match.group(2), match.group(3)
 
 
+def parse_part(line):
+    r"""(nick, channel) for a well-formed PART, or None.
+
+    The channel is the FIRST token after the command, not the last " PART
+    <token>" in the line (#693, audit L29): the old `^:([^!]+)!.* PART
+    (\S+)` search was greedy, and a part reason of "I PART #rock now" put
+    bob in the wrong channel - kept in the one he left (his queue never
+    frozen, a later send to a channel he was gone from) and removed from
+    #rock while he sat there. Anchored on the prefix and `\S*\s+` after the
+    bang, as parse_kick() is.
+    """
+    match = re.match(r"^:([^!\s]+)!\S*\s+PART\s+(\S+)", line)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def parse_join(line):
+    r"""(nick, channel) for a well-formed JOIN, or None. Same shape as
+    parse_part() (#693): the old search's greedy `.*` took the last " JOIN
+    <token>", and an extended-join line (":n!u@h JOIN #c account :Real
+    Name") carries free text after the channel too. A leading ":" on the
+    channel is tolerated, as before."""
+    match = re.match(r"^:([^!\s]+)!\S*\s+JOIN\s+:?(\S+)", line)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
 def parse_join_refusal(line):
     """(channel, numeric) when the server refuses a JOIN, or None.
 
@@ -1715,6 +1744,10 @@ def _record_bot(key, user, target, advert, now):
         "nick": user,
         "channel": target,
         "last_seen": now,
+        # How many adverts this entry is built from (#671): what the size
+        # cap evicts by. A bot advertises every few minutes; a nick that
+        # said it once is a nick that said it once.
+        "adverts": int(entry.get("adverts") or 0) + 1,
     })
     for field in _ADVERT_FIELDS.get(advert.get("family"), ()):
         if field in advert:
@@ -1846,9 +1879,17 @@ def _capture_channel_advert(user, target, msg, now=None):
 def _prune_known_bots(now):
     """Forget bots not seen inside the TTL, then cap what is left.
 
-    Eviction is by last_seen ascending, so a burst of one-off nicks is what
-    goes and the bots that actually advertise are what stays - the opposite of
-    dropping whatever the dict happened to hold last.
+    Eviction is by how many adverts the entry is built from, then by
+    last_seen, both ascending: a burst of one-off nicks is what goes and the
+    bots that actually advertise are what stays. By last_seen ALONE (#671,
+    audit L7) it was the reverse for exactly the burst the cap exists for -
+    any channel member can register a "bot" with one unauthenticated line,
+    2001 fresh nicks carried the newest last_seen of all, and the genuine
+    bots that had advertised minutes earlier were the ones dropped, out of
+    the List Browser until their next advert while the junk sat there for
+    up to a week. A real bot has advertised more than once by the time a
+    flood of that size can arrive; an entry with no count (an older file)
+    counts as one.
 
     An entry with no last_seen at all (an older file, a hand edit) is treated
     as infinitely old rather than kept for ever: the field is written on every
@@ -1872,7 +1913,8 @@ def _prune_known_bots(now):
         # would sort as the oldest of all and be the first to go.
         by_age = sorted(((k, e) for k, e in registry.items()
                          if not (e or {}).get("hand_entered")),
-                        key=lambda kv: float((kv[1] or {}).get("last_seen") or 0))
+                        key=lambda kv: (int((kv[1] or {}).get("adverts") or 1),
+                                        float((kv[1] or {}).get("last_seen") or 0)))
         for key, _entry in by_age[:len(registry) - KNOWN_BOTS_MAX]:
             del registry[key]
 
@@ -1936,7 +1978,12 @@ def _flush_known_bots(now=None, force=False):
         return False
     try:
         import db
-        db.save_known_bots(runtime.known_bots)
+        # Stamped only when the write landed (#691): save_known_bots()
+        # swallows its own error, and a flush recorded regardless meant a
+        # failed save was not tried again for KNOWN_BOTS_FLUSH_SECONDS, and
+        # a restart in that window lost what the dashboard had just added.
+        if not db.save_known_bots(runtime.known_bots):
+            return False
         runtime.known_bots_flushed_at = now
         return True
     except Exception as err:
@@ -3153,10 +3200,10 @@ def irc_loop():
                     # themselves into config.channel_users for a channel they are not in -
                     # which dcc.py reads as proof of presence before it dispatches.
                     elif is_user_event(line, "JOIN") and event_source_nick(line) != config.NICKNAME.lower():
-                        join_match = re.search(r"^:([^!]+)!.* JOIN :?(\S+)", line)
-                        if join_match and is_valid_irc_target(join_match.group(2)):
-                            joined_user = join_match.group(1)
-                            joined_chan = join_match.group(2)
+                        join_match = parse_join(line)
+                        if join_match and is_valid_irc_target(join_match[1]):
+                            joined_user = join_match[0]
+                            joined_chan = join_match[1]
                             j_key = joined_user.lower()
                             
                             with runtime.channel_users_lock():
@@ -3187,10 +3234,10 @@ def irc_loop():
                     # Anchored: as JOIN. This one removes people from channel_users, which
                     # freezes their queue and starts the five-minute delete timer.
                     elif is_user_event(line, "PART"):
-                        part_match = re.search(r"^:([^!]+)!.* PART (\S+)", line)
-                        if part_match and is_valid_irc_target(part_match.group(2)):
-                            p_user = part_match.group(1).lower()
-                            p_chan = part_match.group(2).lower()
+                        part_match = parse_part(line)
+                        if part_match and is_valid_irc_target(part_match[1]):
+                            p_user = part_match[0].lower()
+                            p_chan = part_match[1].lower()
                             with runtime.channel_users_lock():
                                 if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
                                     config.channel_users[p_chan].remove(p_user)
@@ -3560,7 +3607,10 @@ def irc_loop():
                             elif msg.startswith("@find ") or msg.startswith("@locator "):
                                 parts = msg.split(" ", 1)
                                 if len(parts) > 1:
-                                    search_term = parts[1].strip()
+                                    # Formatting and control characters come
+                                    # off here, before the text is printed,
+                                    # logged or fed to the console (#670).
+                                    search_term = list.printable_text(parts[1]).strip()
                                     if search_term:
                                         threading.Thread(target=list.execute_search, args=(s, user, search_term, target_chan), daemon=True).start()
                             elif msg_lower == "!list":
@@ -3632,7 +3682,10 @@ def irc_loop():
                                 # still hands "!rar Artist/Album" to the download handler.
                                 parts = msg.split(" ", 1)
                                 if len(parts) > 1:
-                                    requested_file = parts[1].strip()
+                                    # As for a search (#670): what reaches the
+                                    # handler is what the terminal, the debug
+                                    # channel and the admin chat will show.
+                                    requested_file = list.printable_text(parts[1]).strip()
                                     threading.Thread(target=dcc.handle_download_request,
                                                     args=(s, user, requested_file, target_chan),
                                                     daemon=True).start()
@@ -3661,6 +3714,18 @@ def irc_loop():
         # The freeze box's clock stops with the link (#652): the seconds the
         # bot is away count against nobody's queue. Resumed at activation.
         dcc.pause_freeze_clock()
+        # A notice, not only a log line (#708): the dashboard's badge stayed
+        # clear through a link that dropped every night, while the help
+        # text for NOTICES_FILE promised disconnects among what it records.
+        # Queued through send_debug like the others; the channel line waits
+        # for the reconnect, the sinks and the badge do not.
+        try:
+            announce.send_debug(
+                f"Lost the connection to the IRC server; reconnecting in "
+                f"{reconnect_wait:.0f} seconds.",
+                category="INFO", notice="warning")
+        except Exception as notice_err:
+            print(f"[CONNECT] Could not record the disconnect: {notice_err}")
         
         # FIXED: clears the in-memory channel lists on a crash, so the bot does not block its own nick next time
         with runtime.channel_users_lock():

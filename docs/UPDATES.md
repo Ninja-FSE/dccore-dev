@@ -4,6 +4,779 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A failed pack's partial archive is removed (#717)
+
+Audit L53. `subprocess.run(timeout=RAR_TIMEOUT)` kills rar mid-write, and a non-zero exit leaves whatever it
+wrote, at `target_rar_path` either way. The queue row points at the SOURCE folder, so neither
+`discard_orphaned_temp_archives()` nor the send's own finally ever named that file; the row was retried and
+after `MAX_SEND_FAILS` dropped, with a multi-GB partial left in `TMP_ZIP_DIR` until the same folder was packed
+again or an operator found it (the auditor measured a 7 MB partial from a 0.4 s timeout with the real rar).
+`dcc._discard_partial_archive()` removes it in both failure branches - the path is exclusively this pack's
+output - and says what it removed and why; the timeout is re-raised afterwards, so the wrapper's handling of
+the failure (the retry budget, the interlocks) is unchanged.
+`tests/test_a_failed_packs_partial_archive_is_removed.py` runs the real packer path with rar stubbed to write a
+partial and then exit 255 or time out: the file is gone, the log says so, `TMP_ZIP_DIR` is empty, and the row
+is still charged and kept for a retry with the interlocks released. Three of four fail with the old code.
+
+### 📦 The pack interlocks are released once (#714)
+
+Audit L50. `_inline_rar_packer_body()`'s poisoned-row exit and no-room exit each cleared `rar_inprogress`,
+woke the next waiting pack (`redispatch_waiting_pack`) and dropped the user lock, then returned None - on
+which `inline_rar_packer()`'s finally did all three again. The second wake re-targeted the same waiting user
+(harmlessly RAR-BLOCKed), but if that user's dispatch had claimed the interlocks in the microseconds between
+the two releases, the wrapper's unconditional `rar_inprogress = False` cleared the claim while their rar ran -
+leaving the packer interlock open for any later trigger (a JOIN thaw, a freeze-abort, a restored-queue wake)
+to start a second rar on the same archive path, the corruption `wait_for_transfers_to_finish()`'s own comment
+describes. The two exits now return to the wrapper without releasing; the finally is the one place.
+`tests/test_the_pack_interlocks_are_released_once.py` drives both exits with the audit's own model - the
+first wake claims the interlocks for the woken user - and checks one wake and a standing claim; both fail with
+the old double release. `test_audit_rar_pack_and_slots`' two source-reading tests now read the property
+(released once, by the wrapper) rather than the duplicated lines.
+
+### 🧪 The VIP-lane drop on disconnect is executed, not read (#713)
+
+Audit L49, test-only. The finding - the disconnect epilogue reset `send_queue["channel_announce"]`, a key
+nothing writes, while the VIP lane kept stale adverts and "Sending:" notices across a reconnect - was closed
+by #630 before this issue was filed: the dead reset is gone and the epilogue empties `config.vip_queue`, the
+lane those lines actually use. #630 pinned it by reading the epilogue's text; since #663 the reconnect loop
+runs for real against scripted connections, so `tests/test_a_dead_connections_vip_lines_are_dropped_for_real.py`
+executes it: two VIP lines queued before a drop are gone after it and the epilogue says "Dropped 2 queued
+VIP line(s)", an empty lane says nothing, and a user's standard lane - held across a reconnect on purpose -
+is left alone with no `channel_announce` key touched. With the drop disabled, it fails.
+
+### 🧪 The heartbeat does not wait on the disk lock either (#712)
+
+Audit L48, test-only. The finding - the console's timer burst computed on the writer thread through
+`status_lines()`, which takes `dcc.queue_lock` and `db._disk_lock`, so a long hold of either silenced the
+console until the script called the link dead - is #614 (audit M12), fixed before this issue was filed: the
+figures are computed on a helper with a deadline and `DCCORE PING` stands in past it.
+`test_status_slot_queue_and_pairing` covers the queue lock; `tests/test_the_heartbeat_does_not_wait_on_the_disk_lock.py`
+pins the disk lock the audit named beside it, with the audit's own probe (the writer running, the lock
+held, the timer due, a reply queued): a PING is heard, the reply gets through, no figures are claimed. With
+the helper's deadline removed (the old shape), it fails.
+
+### 📝 The Python pin has a freshness step and one guarded copy (#711)
+
+Audit L47. `start-dccore.bat` pins `PY_VERSION` and two SHA-256 hashes for the Python it installs for a
+first-timer; the pin fails safe and is tested, but nothing in the release workflow said to look at it - a
+3.x.y security release lands and the launcher keeps installing the old one until somebody remembers - and
+WINDOWS.md's sample transcript repeated the literal number with nothing tying it to the launcher, so the
+first bump would leave the guide naming a version the launcher no longer prints. PUBLIC-REPO-WORKFLOW.md's
+release checklist now has the step (look at python.org's current release in the pinned minor; bump the three
+lines; run the opt-in `DCCORE_VERIFY_PYTHON_PIN=1` check), and `tests/test_the_python_pin_has_one_home.py`
+keeps the transcript's number equal to the launcher's - saying which to bump - and refuses the version in
+any other prose.
+
+### 🔒 One daemon per data folder, and the logon task asks nothing (#710)
+
+Audit L46. Nothing checked for an already-running instance - not the daemon, not the launchers - so a
+logon-task start plus a double-click (or a second logon session of the same account) ran two bots on one
+data folder: the second took `ALT_NICKNAME`, both wrote `dcc_queue.txt` and `stats.txt` whole, and their DCC
+listeners shared the eleven-port range; `install-autostart.bat`'s own closing text invited the second start.
+And with the dashboard on and Flask missing, the task's launcher window stopped at `configure.py --flask`'s
+`input()` until somebody answered it.
+
+`platform_compat.take_instance_lock()` holds an OS lock on `data/dccore.lock` (`msvcrt.locking` on Windows,
+`fcntl.flock` elsewhere; the lock, not the file, is the guard, so a crash leaves nothing stale) and writes the
+pid for the message; `oserve.startup()` takes it before it reads or writes anything and refuses a second copy
+with `[CRITICAL] DCCore is already running on this folder (pid N)` and `EXIT_ALREADY_RUNNING = 4`, which
+`start-dccore.bat` names. The task runs `start-dccore.bat autostart`, which sets `DCCORE_AUTOSTART`, and
+under it the Flask offer prints its command instead of asking. On Windows the locked byte sits past the pid,
+because a locked byte cannot be read by anyone, the holder included. The test harness releases the lock
+after every test, so a boot in one test is not the next test's second instance. WINDOWS.md and the installer
+say so. `tests/test_one_daemon_per_data_folder.py`: a second process is refused and told the holder's pid,
+the lock dies with its process, the same process may take it twice, a released lock can be taken; the daemon
+exits with its code and message and a first start takes the lock beside the queue file; the task passes
+`autostart`, the launcher reads it and names an already-running bot; and the Flask offer under the flag asks
+nothing. With the code stashed, all nine fail.
+
+### 🧩 The bot checks the script's version in hello (#709)
+
+Audit L45. The channel field went into every event line without a number moving; #795 gave `HELLO` a minor
+and taught `dccore.mrc` to check it. The other direction was still missing: `hello <client> <version>` carries
+the script's own version and the bot logged it and nothing more, so an operator who pulled the bot but not
+the script (a file copied into mIRC's folder by hand) got REQUEST lines reading "bob asked for file
+Artist/Album" and SENDING slot numbers showing the channel, with nothing saying why.
+`adminchat.MIN_SCRIPT_VERSION = "1.1"` names the oldest script that reads this bot's lines right, and
+`_cmd_hello()` answers an older one - or one with no version it can read - with a plain `DCCORE OUT` line
+right after `HELLO`: *"This dccore.mrc is version 1.0; this bot's lines are for 1.1 or later. Update the
+script ... or the panel will read a field wrong."* Structured mode still switches on: the major is the same
+and the script keeps parsing. Versions compare as tuples ("1.10" is ten, not one). ADMIN-CONSOLE.md's
+example says `hello dccore.mrc 1.1` and both version notes mention the check.
+`tests/test_the_bot_checks_the_scripts_version.py`: the comparison (older, equal, newer, "1.10", junk and
+none), the pre-field script told right after HELLO with the feed still on, the current one not nagged, a
+hello with no version told, the console log, and the shipped script not being too old for its own bot.
+
+### 🔔 A lost connection is a notice, and what earns one is written down (#708)
+
+Audit L44. `record_notice()` is reached only through `send_debug(notice=...)`, by the nine call sites that
+know they are one - list-rebuild failures, kick and rejoin, join refusals. The help for `NOTICES_FILE` said
+"kicks, failed rebuilds, disconnects", and the reconnect block only `print()`ed: a link that dropped every
+night left the dashboard's badge clear, and an operator reading the help assumed no disconnect had happened.
+The split relied on every future author remembering `notice=`, with no list of the intended events anywhere.
+
+`announce.NOTICE_EVENTS` is that list now - the event, the module, a piece of the line it emits, the severity
+- and the reconnect block raises a warning ("Lost the connection to the IRC server; reconnecting in N
+seconds.") through `send_debug` like the others, so the sinks and the badge see it at once and the channel
+line waits for the link. The help text (en, es, fr) names what is recorded: a lost connection, a kick or a
+refused join, a failed list rebuild. `tests/test_what_earns_a_notice_is_written_down.py` finds each named
+event's emitter by its line and checks it passes `notice=` with that severity; sweeps the tree for a
+`notice=` the list does not name (comments excepted); pins the severities; reads the help; and records the
+disconnect line through the real `send_debug` to see the warning land. Removing the disconnect notice, or
+adding a `notice=` without a list entry, each fail one test.
+
+### 🧪 Importing oserve touches nothing (#707)
+
+Audit L43. `list.py` imports `oserve`, `announce` imports `list`, and `tests/support.py` imports `announce` -
+so `oserve.py`'s two module-level installs (the console encoding guard and the `_TimestampedStream` proxy)
+ran in every test process and wrapped the runner's `sys.stdout` and `sys.stderr` for the rest of the run:
+unittest's summaries came out timestamped, and a test asserting an exact printed line saw a prefix that
+depended on which module was imported first. `install_fake_oserve()`'s docstring said the real import was
+avoided and would start worker threads; neither was true. The installs (and the operator's timestamp
+format) sit under `if __name__ == "__main__":` at the top of `oserve.py` now - true exactly when
+`python oserve.py` is the program, so the daemon's first lines are still stamped and guarded and the
+"before config loads" order is kept - and an import touches nothing; the docstring says what happens.
+`tests/test_importing_oserve_touches_nothing.py` checks in child processes, where the streams start clean:
+`import announce; print('x')` prints a bare `x`, importing `oserve` wraps nothing and starts no thread, and
+the file run as `__main__` (its entry point replaced by a print) stamps that line. `test_startup`'s
+entry-point test splits on the last `__main__` guard now. The suite's own output loses its stamps.
+
+### 🧪 A wait, not a sleep; and preflight's note names the pass that failed (#706)
+
+Audit L42, test-only. `test_the_window_closes_itself_after_the_duration` slept 0.4 s for a 0.15 s window and
+asserted the raw flag the closer thread sets - a bet on the scheduler that a loaded runner loses; it waits
+for the condition with a deadline now (`wait_for`, from test_adminchat). `scripts/preflight.py`'s "only the
+hidden-tooling pass failed" note fired whenever the LAST result was False and all earlier ones True - and with
+the hostile pass SKIPPED (rar reachable regardless) the last result is the test-count floor, so an operator
+whose count had dropped was told to fix a hidden-tooling dependency that does not exist. The condition is
+`only_the_hidden_pass_failed(results, hostile_ran)` now: it knows whether the hidden pass ran and which of
+its two results is the run, and says nothing for the state check or an earlier failure.
+`tests/test_preflights_note_names_the_pass_that_failed.py` runs the audit's case and the three others, reads
+the tail for the call and the flag, and the window test for the wait.
+
+### 🧪 Three tests that could not fail (#705)
+
+Audit L41, test-only. `test_the_old_shape_would_have_grown_without_limit` added 20,000 items to a plain
+`set()` and asserted 20,000 - a test of Python's set - while the regression its class documents (a
+`security._ban_notified` reverted to a plain set) left all seven of its neighbours green, because they build
+their own `_NotifiedNicks`. `test_what_the_old_arithmetic_did_to_a_real_file` divided literals.
+`test_every_emitter_goes_through_it` substring-matched the source for `feed_event("KIND"`, which a
+commented-out or `if False:`-wrapped call satisfied, and its `category="KIND"` guard named a string that
+exists nowhere. The first is replaced by a guard on the module global's type; the second is deleted; the
+third now drives each emitter the way the daemon calls it - `send_dcc_sending_notice`,
+`send_dcc_queue_notice`, `send_transfer_complete`, `_report_transfer_failure`, a registered offer resumed -
+and reads the kinds off the event sink (REQUEST and SEARCH, which need a library, are driven in
+`test_the_feed_says_which_channel`). The audit's two mutants - the SENDING call wrapped in `if False:`, the
+registry reverted to `set()` - each fail one of the new tests.
+
+### 🧪 The harness redirects the console's token store (#704)
+
+Audit L40, test-only. `DCCoreTestCase` redirected sixteen state files but not `db.ADMIN_TOKENS_FILE`, and
+every `_check_password()` path goes through `db.load_admin_tokens()` on it: `test_adminchat`'s login tests
+read the operator's `data/adminchat_tokens.json` from the cwd - on a machine whose bot has paired
+`dccore.mrc`, each wrong-password test verified PBKDF2 against every real token - and a `pair` reached from
+any test but the two that redirected the path themselves would have written the live store (preflight's
+`data/` walk would have caught the write, nothing the read). `FETCHED_FILES_DIR`, the audit's other name, was
+redirected by #643. The harness now points `db.ADMIN_TOKENS_FILE` and `config.ADMIN_TOKENS_FILE` at a file in
+its temp directory beside `known_bots.json`, and restores the constant on teardown.
+`tests/test_a_login_test_never_reads_the_operators_token_store.py` runs the audit's probe (`os.path.exists`
+recorded through a wrong-password check: only the temp store is probed), writes a pairing and checks the real
+store is untouched, and runs a harness test from a plain `TestCase` to see the constant put back. Three of
+four fail with the old harness.
+
+### 🧪 The diagnostic gates in the read loop are executed, not read (#703)
+
+Audit L39, test-only. `irc_loop()`'s inline dispatch - the admin gates on `!ping` and `!debugnames` and
+the CTCP VERSION reply - was guarded by source-substring tests alone. They catch a gate moved after its
+action, but the verifier's mutant - the gate kept in place and neutralised with `and False` - passed all
+nine. `!ping` has an executed backstop inside `handle_ping_request()`; `!debugnames` does not (its RAM-CHECK
+notice is built and queued inline), and neither does VERSION's reply. Since #789 the loop is driven for real
+against a scripted server, so `tests/test_the_diagnostic_gates_are_executed_not_read.py` runs the lines
+through it after 001, with the loop's threads recorded and the fake `oserve`'s queue watched: a stranger's
+`!debugnames` queues nothing and the admin's gets the RAM-CHECK; a stranger's `!ping` starts no thread and
+the admin's starts `handle_ping_request` for them; a CTCP VERSION is answered through the paced VIP queue and
+not at all with the reply off. The audit's mutant fails two of the six. (The audit's other suggestion - lifting
+the dispatch out of the loop into a function - is not needed for the coverage and is left as it is.)
+
+### 📝 Stale phrasing and module names are gone from operator-facing text (#701)
+
+Audit L37. Remnants of earlier phases and of the `config.py` rename sat where a novice reads them:
+ADMIN-CONSOLE.md's "Until phase 2 flips the switch" (the switch is `ADMIN_CHANNEL_COMMANDS`; no phase
+numbering exists in the doc), a dangling "Phase 4" bullet duplicating the prose above it, an example banner
+from v1.10.0-RC1; "produced from config.py" in `settings.conf.sample` and its generator; "Every data path in
+config.py" in both launchers' headers; the Windows launcher's first-run hint saying `python oserve.py` where
+every guide says `py`; `requirements.txt` pointing at `docs/README.md`, which is at the root; and FUTURE.md
+filing the finished multi-list work (all five stages "in", #26 complete) under "Planned", right under the
+sentence that says everything there is not working. Each is fixed: the lockout names the switch, the bullet
+is gone, the banner is this tree's version, the generator (and so the regenerated sample) and the launchers
+say `defaults.py`, the hint says `py`, `requirements.txt` says `README.md`, and the multi-list section moved
+under "Implemented" with its design narrative intact. `tests/test_no_stale_phrasing_in_operator_text.py` reads
+for the class: no phase numbers in the console guide, the banner matches `SCRIPT_VERSION`, no bare
+`config.py` in the operator files (the rename heading excepted), the launcher's `py`, the README the
+requirements point at exists, and nothing under "Planned" reports a stage "in".
+
+### 📝 The guide lists what configure.py asks (#700)
+
+Audit L36. INSTALL.md said `configure.py` asks "six questions" and omitted the dashboard yes/no; WINDOWS.md
+listed a different set; neither mentioned the two offers `main()` makes afterwards - generate the list now,
+import OmenServe totals - so a novice expecting six was surprised by "Import them now?" with nothing
+explaining it. INSTALL.md now carries the list in the order asked (the seven questions, the dashboard's LAN
+and Flask follow-ups, the music folder's create-it offer, then the two offers) under an anchor, and WINDOWS.md
+summarises and points at it. `tests/test_the_guide_lists_what_configure_asks.py` reads the prompts out of
+`configure.py` in source order and requires the guide's numbered items to follow them one each, the
+follow-ups and offers to be named, "six questions" to be gone, and the pointer to exist - so a prompt added
+to `configure.py` without a line in the guide fails the suite.
+
+### 📝 The setup check names the module that exists (#699)
+
+Audit L35. Half of it is #685 (the check on an empty tree said "copy the samples"). The other half: the
+check's `import defaults` failure was reported as *"config.py did not load"* - a file that has not existed
+since the rename the guides describe - and sent an operator looking for it. It says *"defaults.py did not
+load (it reads admin_config.py and settings.conf)"* now, and the two comments that still said `config.py`
+say `defaults.py`. `tests/test_the_check_names_the_module_that_exists.py` reads the message, refuses any
+other bare `config.py` in the check, and pins that the tree has `defaults.py` and no `config.py`.
+
+### 📝 The test count is kept in one place (#698)
+
+Audit L34. README.md said 4994 tests and FUTURE.md said 5237 on the same commit; the loader found 5287. Two
+sentences in two files said the same number and drifted independently, and a reader comparing them saw a
+project that could not count its own tests. The count lives in FUTURE.md's Quality section alone now (6266
+on this tree, measured by the loader); README's Tests section says "thousands of them" and points there;
+PUBLIC-REPO-WORKFLOW.md's release checklist names the one place. `tests/test_the_test_count_is_kept_in_one_place.py`
+reads the shipped prose for any other four-digit "N tests" claim, checks README points at the roadmap, refuses
+a FUTURE.md figure more than a tenth off what the loader discovers - so a roll that forgets the line fails the
+suite while an ordinary PR need not touch it - and reads the checklist.
+
+### 📝 The flood ban is described as timed, not as a day-ban (#697)
+
+Audit L33. `FLOOD_BAN_SECONDS` ships as 3600, and its own comment explains that the old midnight expiry was
+replaced precisely because it could be nearly a day - but FUTURE.md still said the flood escalation was "a
+day-ban", and two comments in `security.py` did too; an operator expected a flooder gone for the day and saw
+them back in an hour. The roadmap now says "a timed ban (`FLOOD_BAN_SECONDS`, one hour by default)" and the
+comments name the setting. `tests/test_the_flood_ban_is_described_as_timed.py` pins the default, reads the
+shipped prose and code for the word, and the roadmap for the sentence.
+
+### 📝 Packing is said to be bounded everywhere (#696)
+
+Audit L32. INSTALL.md's upgrade note justified the `RAR_EXTENSIONS` change with "packing has no size cap and a
+film folder is a request to compress tens of gigabytes", and the comment above `RAR_EXTENSIONS` in
+`defaults.py` (and so `settings.conf.sample`, generated from it) said "There is no size cap anywhere on
+packing". Both predate `MAX_RAR_FOLDER_SIZE` (10 GB, enforced at request time) and contradicted INSTALL.md's
+own settings paragraph, FUTURE.md, the help text and the Settings page. An upgrading operator read that
+packing was unbounded and either added a workaround or distrusted the earlier paragraph. Both now give the
+real reason - packing a film folder is pointless work for the receiver, and the cap alone still lets a 9 GB
+film through - and the comment dates its history ("at the time there was no size cap ... has bounded it
+since"); the sample is regenerated. `tests/test_packing_is_said_to_be_bounded_everywhere.py` reads the
+shipped prose and the two samples for the claim, the guide for the reason beside the cap, and `defaults.py`
+for the dated history.
+
+### 📝 WINDOWS.md's "Did it actually start?" says what it means (#695)
+
+Audit L31. The section was written under a since-removed "The seven steps" list. Read top to bottom, a
+first-timer met "Step 7 prints a lot" right after "The two steps" (steps 1 and 2) and "That is step 4" with
+no referent - the list meant is "Before you start", fifty lines further down - and either hunted through the
+guide or assumed they had skipped something; the Setup section's "skipped step 4" had the same problem with
+its three-step list. The three now say what they mean: the launcher's window; the optional Flask install,
+with the command and where the item lives; "Flask was never installed".
+`tests/test_the_windows_guide_names_what_a_step_means.py` guards the property rather than the wording: every
+"step N" in the guide is preceded by a numbered item N above it - the old text reads as dangling at lines 70
+and 104 - and reads the three places.
+
+### 📡 The debug-channel line fits the wire (#694)
+
+Audit L30. `send_debug()` wrapped its text in about 170 bytes of colour framing with no line-length budget -
+the one outbound builder without one. A long folder name (`Pack denied for X: <folder> is an artist root
+folder`), a hostmask or an exception's text with an absolute path pushed the PRIVMSG past the 512 bytes a
+server relays, and the server cut it inside the text - possibly inside a colour code or a multibyte character -
+so the debug channel showed a truncated line with the background colour smeared to the end and the closing
+block gone. The console sinks and stdout got the full text. The text and the closing block are rendered
+through `fit_irc_line()` now, as the adverts and the notices are: shrunk with an ellipsis until the whole line
+fits `IRC_LINE_BUDGET`, re-rendered from the template each time so a colour code is never sliced.
+`tests/test_the_debug_line_fits_the_wire.py`: the auditor's 500-byte text fits and ends properly, the closing
+block is on the line with an ellipsis in the text, a multibyte name is measured in bytes and never split, a
+short line is untouched, the console sink still gets the whole text, and `send_debug()` is read to render
+through the shared builder. Four of six fail with the old code.
+
+### 📡 A part reason cannot name the channel (#693)
+
+Audit L29. The PART handler's `^:([^!]+)!.* PART (\S+)` with `re.search` was greedy: the channel group was
+whatever followed the LAST ` PART <token>` in the line, which may sit inside the user-typed reason. bob
+parting `#music` with reason "I PART #rock now" while also in `#rock` was kept in `#music` (his queue never
+frozen while absent; a later send to a channel he had left) and wrongly removed from `#rock` (frozen while he
+sat there). The JOIN handler shared the greedy `.*`, and an extended-join line carries an account and a real
+name after the channel. `irc.parse_part()` and `irc.parse_join()` take the first token after the command,
+anchored on the prefix with `\S*\s+` after the bang as `parse_kick()` is, and the two handlers go through
+them. `tests/test_a_part_reason_cannot_name_the_channel.py`: the audit's line names the channel actually
+left, the ordinary shapes, a PART or JOIN typed into a channel is neither, the verifier's `#music,#rock`
+control is left to `is_valid_irc_target()` as before, the extended-join line, and the handlers read to go
+through the named parsers. The membership-guard tests' anchors follow the handlers' new lines.
+
+### 💾 Leftover temp files in data/ are swept, and state files are readable again (#692)
+
+Audit L28. `db._atomic_write()` creates `data/.tmp_XXXX.swap` with `mkstemp()` and swaps it into place. A
+hard kill between the two left it behind - and so did a Ctrl-C, because `KeyboardInterrupt` is not an
+`Exception` and the cleanup branch did not run - and nothing at startup or on a later write removed it: every
+crash added a hidden file to `data/`. `mkstemp()` also creates its file 0600, and the replace carried that
+through, so on POSIX `hard_bans.txt` and `dcc_queue.txt` - documented as hand-editable - were owner-only after
+their first save.
+
+`db.discard_stale_swaps()` removes `.tmp_*.swap` files at startup (housekeeping beside the fetch-history
+prune, never a reason to refuse to boot), the way `update_list` sweeps its own staging files; the cleanup in
+`_atomic_write()` catches `BaseException`; and a new file gets 0644 while an existing file keeps the mode it
+has - the console token store asks for 0600, since it holds secrets. `tests/test_leftover_temp_files_are_swept.py`:
+the sweep takes the leftovers and nothing else (a `.conf` temp and the real files stay), is silent with
+nothing to do, tolerates a missing directory and defaults to the queue's directory; a `KeyboardInterrupt`
+between the two steps leaves nothing; the audit's hard-kill probe in a child process leaves one and the sweep
+takes it; on POSIX a new file is 0644, an existing 0664 stays 0664, and the token store is 0600; and
+`startup()` calls the sweep. Seven of ten fail with the old code.
+
+### 💾 A failed bot-registry save is tried again, and said (#691)
+
+Audit L27. `db.save_known_bots()` caught every exception and returned None; `irc._flush_known_bots()` then
+stamped `runtime.known_bots_flushed_at` regardless and returned True. A failed write - disk full, a
+permission, a replace that outlasted its retries - was not tried again for `KNOWN_BOTS_FLUSH_SECONDS` (30 s);
+the dashboard's add-source and remove-source routes answered a plain 200 for a row that was not on disk; and
+shutdown did no final flush, so a Ctrl-C inside the window lost the last adverts and a source just added.
+
+`save_known_bots()` answers True or False and serialises a snapshot (the IRC thread inserts a bot in place
+while a dashboard request flushes, and `json.dumps()` over a dict changing size is a RuntimeError);
+`_flush_known_bots()` stamps the flush time only on True, so the next advert tries again; the two dashboard
+routes carry a `warning` when the write did not land, and the page shows it as the error it is
+(`filelists.sourceNotOnDisk`, en/es/fr); and the Ctrl-C path flushes once more on the way out, never fatally.
+`tests/test_a_failed_registry_save_is_tried_again.py`: True/False from the saver, the audit's probe (the disk
+refuses, the stamp stays and the next unforced call tries again), a landed flush recorded and on disk, a
+registry that grows under the writer, both routes warning and neither when it landed, the page's two handlers
+and three strings, and the shutdown flush. Six of nine fail with the old code.
+
+### 💾 The stats import holds the disk lock once (#690)
+
+Audit L26. `apply_stats_import()` loaded the 7-column row with `db.load_advanced_stats()`, set the two lifetime
+columns and wrote it with `db.save_advanced_stats()` - two `_disk_lock` acquisitions. A transfer completing
+in the gap (`db.update_stats_on_complete()`, on the send's own thread) had its +1 file and +bytes on Today and
+Total discarded by the import's stale write - the lost update `db.py`'s own header describes for the old
+`dcc.py` code - and a day rotation in the gap was undone; the import still answered 200.
+
+`db.set_lifetime_totals(total_files, total_bytes)` reads, modifies and writes under one acquisition, leaving
+the day columns and the date alone, and returns the row it wrote (None if the write raised, as
+`save_advanced_stats()` swallows). The import calls it and judges the totals by that row rather than by a
+later read: a transfer completing right after the import legitimately moves them on, and that is not a
+failed write. `tests/test_a_transfer_during_a_stats_import_is_not_lost.py` forces the race rather than
+betting on it - the completion thread is started from inside the import's own locked read and shown to be
+waiting on that lock - and the row that lands carries the import's totals plus the transfer, with Today kept;
+the day columns are untouched; the old two-call shape is modelled and shown to lose the transfer; the helper
+sets only what it is given and starts a missing file from the default row; a totals write that raised is
+reported as failed; and the import is read to go through the helper. Four of seven fail with the old code.
+
+### 🖥️ A first run ends on one dashboard tab (#689)
+
+Audit L25. `run_setup_until_configured()` had already put the browser on the setup page, whose "Saved" screen
+polls `/login` and navigates there the moment the real app answers. `webserver.start()` then called
+`_open_in_browser()` with no knowledge the setup page had just run, and opened `http://127.0.0.1:8420/` as
+well: a first run with the dashboard on loopback (the form's default) ended on two dashboard tabs, one on
+`/login` and one on `/` (which redirects to `/login`). `run_setup_until_configured()` now sets
+`_browser_is_on_the_saved_page` when the tab it opened is going to arrive at the login by itself - a browser
+was opened AND the dashboard was chosen - and `_open_in_browser()` stands down once, logging *"The setup
+page's tab opens the login by itself; not opening another."*; the next start opens as it always did.
+`tests/test_a_first_run_ends_on_one_dashboard_tab.py`: the flag on its own (stands down, once, and not
+without it), and the audit's reproduction against the real setup server - a browser "opened" by the recorder,
+the form saved with the dashboard on, then start()'s call opens nothing; with no dashboard chosen the flag
+is not left set. Four of five fail with the old code.
+
+### 📝 A legacy SCRIPT_VERSION line in settings.conf is explained, not called a misspelling (#688)
+
+Audit L24. An older dashboard's Settings page offered `SCRIPT_VERSION` and wrote it into `settings.conf`;
+nothing ever removed the line. `NOT_SETTINGS` rightly keeps the name out of the overridable set, so the line
+is ignored - but the explanation table `RUNTIME_ASSIGNED` (#465) covered only `MY_IP_OR_DOCK` and
+`ORIGINAL_NICK`, so every boot and every `!rehash` said *"not a setting this version recognises. Check the
+spelling against settings.conf.sample"* of a name DCCore itself had written, spelled perfectly. The table now
+carries it: *"the code's own version, which an older Settings page wrote here; it is no longer configurable.
+Delete this line."* `tests/test_a_legacy_script_version_line_is_explained.py` applies such a file for real:
+the line is still ignored, the operator is told what it is and what to do, a real misspelling still gets the
+spelling hint, and every member of `NOT_SETTINGS` has an explanation. Two of four fail with the old table.
+
+### 🔌 SERVER is a host name, and says so when it is not (#687)
+
+Audit L23. The setup form refused only a space in SERVER, and PORT is not on the form, so the natural
+first-timer spelling `irc.undernet.org:6667` - or a pasted `irc://irc.undernet.org` - was accepted and
+written, and `connect()` failed on name resolution every ten seconds for ever: `[ERROR] Connection failed:
+[Errno 11001] getaddrinfo failed. Reconnecting in 10 seconds...`, with nothing saying the colon or the scheme
+was the problem. `configure.py`'s prompt and a hand-edited `settings.conf` took the same values.
+
+`settings_file.server_problem()` names what is wrong and what to write instead - a URL ("SERVER is the host
+name alone, e.g. irc.undernet.org"), `host:port` ("put 'irc.undernet.org' in SERVER and 6667 in PORT"), a `/`,
+a `:` without a port, a space, a blank - and all three doors refuse through it: the setup form
+(`setup.error.server_shape` in en/es/fr, replacing `server_spaces`, whose case it covers), `configure.py`'s
+`_ask(..., check=server_problem)`, and `_check_writable()` for `settings.conf` and the dashboard's Settings
+page. `tests/test_server_is_a_host_name.py`: the audit's three spellings and the other shapes, real hosts
+passing, the form in three languages, the reader raising with the fix named, and the prompt wired. Seven of
+nine fail with the old code.
+
+### 🖥️ A size setting's help says the unit the page shows (#686)
+
+Audit L22. `settings_help.PLAIN_HELP` is one text for two readers: `settings.conf.sample`, where the value IS
+bytes, and the dashboard's "?", where `SETTINGS_UNITS` types and shows `MAX_RAR_FOLDER_SIZE`,
+`MAX_FETCH_FILE_SIZE`, `MAX_LIST_TEXT_SIZE`, `MAX_FETCH_FOLDER_FILE_SIZE` and `MAX_FETCH_LIST_FILE_SIZE` in MB
+and `DCC_SEND_BUFFER` and `LIST_HEADER_MAX_BYTES` in KB. The tooltip said "in bytes" beside an MB chip; an
+operator who read it and typed 10737418240 into the MB box set a 10 PB limit. `settingsHelpHtml()` in
+`web/app.js` now appends, for a field with a unit, *"On this page the value is typed and shown in {unit}; the
+file keeps bytes."* after the shared text (`settings.help.shownIn`, in en/es/fr, through `t()` so it follows
+the language picker). The shared text is untouched, so the sample stays right.
+`tests/test_a_size_help_says_the_unit_the_page_shows.py` lifts `t()`, `fieldHelp()` and `settingsHelpHtml()`
+out of app.js and renders them in node with the page's real dictionaries and `_settings_field()`'s real
+fields: every unit field's tooltip ends with the sentence and its unit, in Spanish and French too, a field
+without a unit gets nothing added, the sample's text still says bytes, and every language carries the
+placeholder. Two of five fail with the old app.js.
+
+### 📝 Nothing configured says "run the launcher", not "copy the sample" (#685)
+
+Audit L21. `start-dccore check` is the documented pre-flight, and on a tree with neither `admin_config.py`
+nor `settings.conf` it FAILed with "copy admin_config.py.sample to admin_config.py, or settings.conf.sample to
+settings.conf, and fill one of them in" - exactly the manual step the launchers (#547) replaced, while the
+next three FAILs on the same screen already said "Run configure.py". A novice who followed the stale line
+created `admin_config.py` by hand, which is the launcher's first-run gate: the questions and the browser
+setup page were never offered, and the copied sample turned the dashboard and the debug channel on for
+them. `oserve.py`'s own refusal ("see admin_config.py.sample / settings.conf.sample") said the same.
+
+Both say the same thing now: `nothing is configured yet. Run <the platform's launcher> (it asks the
+questions, or opens the setup page in your browser), or <python> configure.py` - the check through
+`Platform.start_cmd`, so Windows names the `.bat` and Linux the `.sh`. Still a FAIL; only the advice changed.
+`tests/test_nothing_configured_says_run_the_launcher.py` runs `check-setup.py` for real against an empty
+configuration and the daemon's own refusal through `startup()`, and checks neither names a sample any more.
+Four of five fail with the old text.
+
+### 🪟 The elevated firewall copy only runs netsh (#684)
+
+Audit L20. After `Start-Process -Verb RunAs`, `allow-firewall.bat` ran under whichever account answered UAC
+and searched for Python again with THAT account's `%LOCALAPPDATA%` and `py -3`. A standard-user operator whose
+parent typed the admin password got "Python was not found - run start-dccore.bat first" on a machine where the
+launcher works (the launcher's Python is per-user, `InstallAllUsers=0`), and no rule was added. Separately,
+a folder with an apostrophe in its name (`C:\Users\O'Brien\...`) ended the PowerShell string in the relaunch
+line early, so the script never elevated at all.
+
+The unelevated half now finds the interpreter, reads the ports and learns `sys.executable` as the operator,
+and hands them to the elevated copy as arguments - `elevated <dcc start> <dcc end> <web port> <web on>
+"<python.exe>"` - through `$env:DCCORE_SELF` / `$env:DCCORE_ARGS`, never inside a quoted PowerShell string.
+The copy takes its arguments at the top, skips the search and the ports, and runs the Block-rule step (its
+interpreter path through `$env:DCCORE_PYEXE`, for the same apostrophe reason) and netsh. `remove-firewall.bat`'s
+relaunch goes through `$env:` too. WINDOWS.md says so. `tests/test_the_elevated_firewall_copy_only_runs_netsh.py`
+runs the .bat for real on Windows: the relaunch carries the operator's ports and interpreter; the elevated
+half with NO Python on PATH adds both rules from its arguments and never relaunches; a folder named `O'Brien`
+reaches PowerShell whole; and three source-reading checks for the other platforms. The #589 tests are
+updated to the new shape (the path is read into `%PYEXE%` at once; nothing of cmd's is expanded inside the
+PowerShell text now).
+
+### 📝 The token file is said to be clear text (#683)
+
+Audit L19, wording only. `hsave` writes mIRC's hash table as plain item/value text, so the console token
+sits readable in `dccore.ini` beside the script. The script header and ADMIN-CONSOLE.md said where it was
+kept but never that it was clear text, and the guide's pairing section named "a stolen `.mrc`" as the cost
+when the `.mrc` carries nothing - the file that matters is `dccore.ini`; an operator who zipped their mIRC
+folder to share the script shipped the token with it, pointed at the wrong file. The header now says
+`dccore.ini is CLEAR TEXT`, treat it as a password file, and `/dccore unpair` the moment it may have travelled;
+the "Paired as" message says so at the moment the token is stored; the guide names the right file and its
+nature in "What a token does not do" and in the pairing walkthrough. No code change; `.gitignore` already
+keeps the file out (#575). `tests/test_the_token_file_is_said_to_be_clear_text.py` reads all three, pins the
+store as a plain `hsave` (so wording and code change together), and the `.gitignore` entry. Not verified in
+mIRC: comment and message text only.
+
+### 🧩 A FAIL line always parses in the script (#682)
+
+Audit L18. `DCCORE FAIL <nick> <chan> <acked> <total> <name> :: <reason>`: only a ` :: ` INSIDE the name was
+defused (to ` : : `). An empty name gave `... 0 0  :: reason` - two spaces - and `dccore.mrc` collapses runs of
+spaces, so `$6-` was `:: reason`, `$pos` found no ` :: `, and the window showed the file as `:: reason` and
+the reason as `failed`. A name ending in ` ::` gave `name :: :: reason`: the name parsed, the reason showed as
+`:: reason`. An empty name needs a queue row without a file, a trailing ` ::` a non-Windows filesystem - real
+but rare. `adminchat._name()` now defuses every standalone `::` in a name wherever it sits (`foo ::` ->
+`foo : :`, `::` -> `: :`), leaves `a::b` and `Song: Part II` alone, and renders an empty name as `?` on every
+kind. `tests/test_a_fail_line_always_parses_in_the_script.py` asserts through a model of the script's own
+split - `DCCORE` stripped, spaces collapsed, `$6-`, the first ` :: ` - so the property is what the window
+shows: name and reason come back right for every shape the audit listed, the model reads the OLD lines the
+way the audit traced them, and every kind's empty name is `?`. Four of eight fail with the old code.
+
+### 🧪 A mis-typed row does not kill the console's writer (#681)
+
+Audit L17, test-only. The finding: `_writer_loop()` called `send_status()` -> `status_lines()` with no guard
+but the one around the stats block, so a `dcc_queue` value with no `len()` or a transfer row with a string
+`started_at` raised out of the writer thread and left the session a black hole - commands accepted, nothing
+ever written, `dccore.mrc` reconnecting into the same wall every 90 s. Reachable only through a hand-edited or
+future mis-typed row. Already closed in the tree by #614, which moved the figures onto a helper thread whose
+body catches and prints `Status burst failed: ...` - the writer goes on draining. Pinned now with the
+verifier's own two rows in `tests/test_a_bad_row_does_not_kill_the_console_writer.py`: the writer still
+delivers the next line, the failure is reported, the session stays open, and the burst is back once the row
+is gone. Without the helper's guard, two of the three fail.
+
+### 🔐 The console listener takes only the operator's connection (#680)
+
+Audit L16. The host check gates who can make the bot OPEN a listener; `accept()` then took whoever reached the
+port first inside `LISTEN_TIMEOUT`, and the only check after it was `is_bad_ip()`. The DCC port range is
+public and scanned: a scanner that connected in the window got the banner (nick, version, platform, the rar
+binary's path) and three password prompts, the single listener was gone with it, the operator's own connect
+found the port closed, and the scanner's failed attempts were logged under the operator's nick and host.
+
+`handle_dcc_chat()`'s listen-mode branch now hands the address the CTCP advertised to
+`_listen_and_serve_locked(..., expected_ip)`, and the listener loops on `accept()` until the window's
+deadline: a peer from any other address is closed without a word - no banner, no prompt - and logged as
+`Dropped a connection from <ip> on port <n>: the DCC CHAT was offered to <nick> at <ip>. Still waiting.`; the
+operator's own connection is served when it arrives. A passive offer advertises no address, so there the first
+peer is taken as before. The module docstring and ADMIN-CONSOLE.md say so.
+`tests/test_the_listener_takes_only_the_operator.py` runs the real listener over loopback with `_serve()`
+recorded and the window cut to 1.5 s: the operator at the advertised address is served; a stranger gets EOF
+and no banner, the listener is still there for a second peer and closes on the timeout with nobody served;
+a passive offer takes the first peer; and the listen-mode branch is read for the argument. All four fail with
+the old listener. `test_one_passive_listener`'s stubs take the new argument.
+
+### 🧩 Every line of a structured session starts with DCCORE (#679)
+
+Audit L15. `Session.close(announce_text=...)` writes its text inline - the writer thread is about to stop, so
+a queued goodbye would never leave - and bypassed `send()`'s `DCCORE OUT` wrapping. After `hello`, `quit`
+("Goodbye.") and the 4096-byte guard ("Line too long.") sent bare lines, against ADMIN-CONSOLE.md's "from then
+on, every line it sends on this session starts with `DCCORE`". `dccore.mrc` merely echoed them; a stricter
+client would have treated them as a protocol error or routed them as plain chat. `close()` wraps as `send()`
+wraps now; a line that already is a DCCORE line (`DCCORE TAKEN <ip>`) goes as it is, and a plain session is
+untouched. `tests/test_every_structured_line_starts_with_dccore.py` runs both of the audit's probes over a
+socket pair, the TAKEN and plain-mode controls, `None`, and reads the guide for the promise; two of six fail
+with the old `close()`.
+
+### 🔐 DEBUG_TO_CONSOLE off silences the structured feed too (#678)
+
+Audit L14. `send_debug()` honoured `DEBUG_TO_CONSOLE` before fanning prose out to the debug sinks;
+`feed_event()` handed the fields to the event sinks gated only by the per-kind tickboxes. A structured
+`dccore.mrc` session drops the prose of feed kinds and lives on the fields, so after the operator unticked
+"Send debug lines to admin console" the plain console went quiet as documented while the mIRC window kept
+showing every REQUEST/QUEUED/SENDING/SENT/FAIL/SEARCH line - only `LOG` stopped - and the stdout floor printed
+the same event as undelivered at the same moment. `feed_event()` now returns before the event fan-out when
+the switch is off, exactly as it does for an unticked kind; the counts (#754) are still kept, and the prose
+still goes to the channel and the floor. ADMIN-CONSOLE.md's routing table says so.
+`tests/test_the_console_switch_gates_the_structured_feed.py`: no sink gets the event with the switch off, the
+sink gets it with it on, the tickbox still gates on its own, the count is kept; and the audit's own probe - a
+real `Session` in structured mode with both sinks attached - gets both lines with the console on and neither
+with it off, with the floor still saying so. Two of six fail with the old `feed_event()`.
+
+### 🔐 An address that failed to log in once or twice is forgotten (#677)
+
+Audit L13. `webserver._web_bad_ips` (the dashboard's failed-login pool) deleted an entry only on a successful
+login from that address or when a block expired - and a block was only set at `MAX_PASSWORD_ATTEMPTS`. An
+address with one or two failures had `blocked_until == 0.0`, never met the expiry, and stayed for the life of
+the process: on an internet-exposed `WEBUI_HOST` bind, one entry per scanner that ever sent a `POST /login`,
+for ever (the auditor measured 100,000 entries that no amount of time removed). `adminchat._bad_ips`, the DCC
+console's pool with the same policy, had the same shape.
+
+Both entries carry when the address last failed, and `adminchat.forget_stale_failures()` runs under the lock
+on every new failure: an address that never reached a block and has not failed inside `BAD_IP_BLOCK_SECONDS`
+is dropped. A failure that old does not count towards a block either - two typos a day apart are not an
+attack - and blocked addresses are left to the expiry that already forgets them. An older two-field entry is
+treated as fresh by the first sweep. `tests/test_an_address_that_failed_once_is_forgotten.py` runs the same
+cases against both pools with a stubbed clock: the audit's scan of 2,000 addresses is gone after the window,
+forgotten at the window and kept just inside it, old failures do not add up to a block, three inside the
+window still block and expire as before, a blocked address is not swept, and the sweep on its own.
+
+### 📝 The setup page says when settings.conf will shadow the password (#676)
+
+Audit L12. Half of it was closed by #624 (`admin_config.py` is written before `settings.conf`, so a failed
+second write can no longer leave a configured bot with no password and no way back to the page). The other
+half: `defaults.py` applies `admin_config.py` first and `settings.conf` second, so a pre-existing
+`ADMIN_PASSWORD_HASH` in `settings.conf` (the dashboard's own change-password control writes there) overrides
+the hash the setup form writes - the password the operator just chose works until the next restart and then
+stops. `configure.write_admin_config_password()` prints that warning to the daemon's window, where
+`configure.py`'s operator is; the person at the form is in a browser and never saw it.
+
+`apply_setup()` now returns what the writer found (`shadowed_by`), the route keeps it, and
+`render_setup_saved_page()` shows it in amber under the saved text, on the first render and on a reload of
+the saved page: *"settings.conf also sets ADMIN_PASSWORD_HASH, and it is applied after admin_config.py - so
+after the next restart the password you just chose will stop working. Remove the ADMIN_PASSWORD_HASH line
+from settings.conf, or change the password from the dashboard, which writes to that file."* -
+`setup.saved.shadowed` in en/es/fr. `tests/test_the_setup_page_says_when_the_password_is_shadowed.py`:
+`apply_setup()` names the file or None, the saved page warns (and on reload), says nothing otherwise, in
+Spanish and French with the placeholder filled, and every language file carries the key. Six of seven fail
+with the old code.
+
+### 🔐 The setup-page code is good for one browser (#675)
+
+Audit L11. `run_setup_until_configured()` prints `http://127.0.0.1:8420/setup?token=...` and hands it to
+`webbrowser.open()`. On Linux that is `xdg-open` with the URL in argv, and the browser it starts keeps the URL
+in its own argv for as long as it runs - so on a host shared with other users, `ps aux | grep token=` during
+the setup window gave a second user the code, and the page binds 127.0.0.1, which every local user reaches:
+they could submit the form first with a password of their own. Single-user desktops (the target install),
+macOS (the URL goes to osascript over a pipe) and Windows are unaffected.
+
+The code is bound to the first browser that presents it: `create_setup_app()`'s gate gives that request an
+HttpOnly `dccore-setup` cookie (`after_request`), and from then on the code is accepted only together with it.
+A second browser with the code is refused with *"This link has already been opened in another browser, and
+the code in it is good for one. If that was not you, stop DCCore and start it again: it prints a new link with
+a new code."* - and if the other user was somehow first, that is what the operator sees, which is the alarm.
+The cookie alone is not the code; once the form is saved the saved page and its `/login` poll need neither, as
+before. INSTALL.md says so next to the one-time code.
+
+`tests/test_the_setup_code_is_good_for_one_browser.py`: the first browser gets the cookie, a second is refused
+on GET and on POST (nothing applied), the bound one saves, cookie-without-code and wrong-cookie-with-code are
+refused, the saved page is open to all, and `/?token=` binds too; the guide is read. Six of nine fail with the
+old gate. `test_set_it_up_in_the_browser`'s real-server test drives one cookie-keeping browser now and adds
+the second-browser refusal over a real socket.
+
+### 🧪 The setup app's routes are walked like the dashboard's (#674)
+
+Audit L10, test-only. `tests/test_every_route_is_behind_the_login.py` walks `create_app()`'s `url_map` so a
+route added tomorrow is gated without anybody remembering the file - and its own docstring warned that a
+second Flask app would escape the walk. `create_setup_app()` is that app: its own `before_request` gate, three
+routes, each pinned by hand in `test_set_it_up_in_the_browser.py`, none walked. A route or an exemption added
+to it later would have passed the suite unnoticed. `EverySetupRouteIsBehindTheToken` now walks it the same
+way: every rule and method answers 403 without the token and 403 with the token from a foreign Host, the walk
+is checked to see the three routes it is meant to, and nothing is applied by any of it. Mutation-checked with
+an ungated `/lang` route plus a gate exemption for it: both walks catch it.
+
+### 🔐 /logout answers POST alone (#673)
+
+Audit L9. The route accepted GET (and HEAD) and cleared the session: with the cookie `SameSite=Lax`, a
+top-level navigation from any site - a link, a redirect - to `http://127.0.0.1:8420/logout` carried the cookie
+and logged the operator out; the dashboard's next poll answered 401 and the page dropped to the login form. A
+nuisance, not a breach. The page's own button has always been a POST form (`web/index.html`), so GET was unused
+by the app. `methods=["POST"]` now; `tests/test_a_link_cannot_log_the_operator_out.py` runs the audit's
+navigation and checks the session survives it (a GET lands on the static route's 404 rather than a 405, and
+either way nothing happens), refuses HEAD/PUT/DELETE, keeps the page's own form working, reads the rule's
+methods, and reads the page for the form. Three of five fail with the old route.
+
+### 🧪 The running-pack fixture joins its packer before it ends (#828)
+
+Test-only. `TheThreadIsTheAnswer` in `tests/test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` (#651)
+registered `addCleanup(self._let_everything_finish)` and then `addCleanup(setattr, runtime, "packer_thread",
+None)`. Cleanups run last-in-first-out, so the reference was nulled first and the join found nothing: the
+packer thread was released but never waited for, and its finally - `config.rar_inprogress = False`,
+`redispatch_waiting_pack()` - ran into the next test's own pack. Seen on #827 (ubuntu / 3.14):
+`test_while_rar_runs_the_pack_is_running` found the flag cleared under it. The cleanups are the other way
+round now, the join asserts the thread finished, and `TheFixtureLeavesNoPackerBehind` runs one of the class's
+tests on its own and checks no thread of its own is left alive and `runtime.packer_thread` is None - which
+fails with the old order.
+### 🔐 Every dashboard POST is checked against its own host (#672)
+
+Audit L8. `SameSite=Lax` and the JSON content-type were the dashboard's only CSRF defences, and seven mutating
+routes take no JSON body at all: `/api/tools/update-list`, `/api/filelists/purge-offline`,
+`/api/filelists/sources/<nick>/remove`, `/api/filelists/<source>/purge`, `/api/fetch/<id>/delete`,
+`/api/messages/read`, `/api/notices/read`. "Site" does not include the port, so a plain HTML form auto-submitted
+on `http://127.0.0.1:9000` - a dev server, a NAS or media UI that renders attacker-influenced HTML - was sent
+to `http://127.0.0.1:8420` with the operator's session cookie attached: every offline bot's fetched lists
+purged, a full master-list rebuild started (the auditor's probe got `200 {"update":"started"}`).
+
+The login's own check (`_login_origin_ok()`, #609 - Origin, or Referer for an older browser, must name the
+request's own Host) now runs for every POST in the `require_login` before_request hook, after the login check
+and before any route, so a route added later is covered without knowing it: `403 {"error": "This request was
+sent by another site and was ignored."}`. A request with neither header (curl, a script, the test client) is not
+a page forwarding another site's form and passes, as at the login; the page's own `fetch()` calls carry their
+own origin and pass. `tests/test_a_form_on_another_local_port_cannot_drive_the_dashboard.py`: each of the seven
+refused before it acts (the rebuild is not started), Referer-only and `null` origins refused, every POST rule
+in the map covered, and the controls - own origin answered, headerless answered, a cross-port GET untouched,
+an anonymous forgery still 401 first. With `webserver.py` unpatched, five of nine fail.
+
+### 🤖 A burst of new nicks no longer evicts the real bots from the registry (#671)
+
+Audit L7. Any channel member can register a "bot" in `runtime.known_bots` with one unauthenticated line
+(`Type: @<theirnick> For My List Of: 1 Files`; the RAR wording needs no identity claim at all).
+`_prune_known_bots()` evicted by `last_seen` ascending once the registry passed `KNOWN_BOTS_MAX` (2000), and
+2001 fresh nicks carried the newest `last_seen` of all - so the genuine bots that had advertised minutes
+earlier were the ones dropped, gone from the List Browser until their next advert, while the junk sat there for
+up to a week. The docstring claimed the opposite, for exactly the burst the cap was added for.
+
+`_record_bot()` now counts the adverts an entry is built from (`adverts`), and eviction goes by that count
+first, then by `last_seen`: a nick that said it once is what goes; a bot that advertises every few minutes has
+said it more than once by the time a flood of that size can arrive. An entry with no count (an older file)
+counts as one; hand-entered bots are still never candidates.
+`tests/test_a_burst_of_new_nicks_does_not_evict_the_real_bots.py` runs the auditor's recipe through the
+capture path in both wordings, keeps the least-recently-seen-goes-first order among one-offs, checks the
+older-file case, the count and the hand-entered exemption; with `irc.py` unpatched, three of six fail.
+
+### 🧹 What a user typed reaches the log as printable text (#670)
+
+Audit L6. `!DCCore !rar ]0;pwned4,4 SENT: admin.rar to victim` from any channel member: the
+artist-root refusal printed the text to stdout (a Windows Terminal window was retitled by the ESC sequence) and
+sent it through `send_debug()`, which strips only bold, reset and the mIRC colour byte, so the debug channel
+and the colour-rendering admin chat showed a red block that read like a fake SENT line inside the PART line. A
+search term took the same route through `execute_search()`'s own print and `feed_event()`. CR and LF cannot be
+injected (the reader splits on them), so no IRC command can be forged: cosmetic and misleading, not a takeover.
+
+`list.printable_text()` - `strip_control_codes()` and then every remaining C0 control, DEL and the C1 range -
+is applied where `irc.py` takes the request and the search text off the wire, so what every handler prints,
+logs and feeds is what the operator sees. NBSP and everything above U+009F are untouched; a search that is
+nothing but control characters is not run. `tests/test_what_a_user_typed_reaches_the_log_printable.py`: the
+cleaner on the audit's probe, on every control character, on real request text and on mIRC formatting; and
+`irc_loop()` driven for real (the ladder harness, threads recorded) - the request and the search handlers are
+handed the plain text, an all-control search is not started, an ordinary request arrives as typed. With
+`irc.py` unpatched, three of the eight fail.
+
+### 🔐 A very broad ADMIN_HOSTMASKS entry is said out loud (#669)
+
+Audit L5. `is_admin_host()` refuses only a pattern that reduces to nothing once wildcards and separators are
+stripped; a wildcard domain is accepted on purpose (`*.example.org` names a real set of hosts; pinned by
+`test_ban_breadth_guard`). But the documented shape is `<account>.users.undernet.org`, and an operator who
+writes `*.users.undernet.org` has put the wildcard where their account name goes: every X-authenticated user of
+the network reaches the console's password prompt, can hold the single pending session against the real
+operator, and costs the bot a dial per CTCP. `*.org` names a top-level domain. The audit's verdict was that at
+most a warning is warranted, and that is the change: what matches is untouched.
+
+`adminchat.broad_host_patterns()` names the two shapes with a reason - a bare wildcard in front of a shared
+account-host suffix (`SHARED_ACCOUNT_HOST_SUFFIXES`: `users.undernet.org`, `users.quakenet.org`; case and the
+`*!*@` form handled by `admin_host_patterns()`), or a literal part of one label - and
+`report_broad_host_patterns()` prints one `[ADMINCHAT] WARNING: ADMIN_HOSTMASKS entry '...' is very broad`
+line per entry, saying what to write instead. Called at boot (`oserve.startup()`), after the reload on
+`!rehash` (which is how the setting changes live), and by `setup_check.py` as a `warn`. ADMIN-CONSOLE.md says
+so next to "Wildcards work". `tests/test_a_very_broad_admin_hostmask_is_said_out_loud.py`: the classifier on
+each shape and on the legitimate ones (`operator.users.undernet.org`, `*.example.org`, `op*.users.undernet.org`
+- silent), the broad pattern still matching a stranger, the report text, the boot log with and without the
+entry, the rehash saying it after the reload, and the pre-flight's `warn`.
+
+### 📬 A request made during a rehash is queued, not dropped (#668)
+
+Audit L4. While a rehash quiesced (`config.transfers_paused`, up to `REHASH_TRANSFER_WAIT` per rehash - and
+several dashboard saves queue several waits back to back) `dcc.handle_download_request()` sent *"The bot is
+reloading its configuration. Your request is not lost - try again in a moment."* and returned without queuing
+anything; nothing replayed it after `resume_transfers()`. The request was lost unless the user typed it again,
+and they had been told to wait. The console said "Held a file request", which it had not.
+
+Only the dispatch has to wait. The request now goes on to the queue: the direct-send decision under
+`queue_lock` also requires `not transfers_are_paused()` (that path never went through
+`check_queue_and_send()`'s gate, so without it a request would have started a send the reload landed in the
+middle of), a `!rar` row queues as before with its dispatch gated, and the notice says *"Your request is queued
+and starts when the reload is done."* The rehash's wake after the reload runs `dcc.wake_restored_queues()` -
+one look per free slot - instead of one `check_queue_and_send()` pass, which dispatches one user and breaks:
+with requests queued rather than refused, several users can be waiting on that wake with nothing else due to
+wake them.
+
+`tests/test_a_request_during_a_rehash_is_queued_not_lost.py` drives `handle_download_request()` for real
+during the pause: a file request with free slots is queued and no send starts; a `!rar` request is queued; the
+notice says queued, not "try again"; after `resume_transfers()` the wake starts the send for dave, and for two
+held users starts both; the console line says queued; and `commands.py`'s wake targets
+`wake_restored_queues`. With the old gate restored, six of the seven fail.
+
+### 🧪 The outbound pace is put back after a test (#667)
+
+Audit L3, test-only. Six setUps - two in `test_a_shared_outbound_pace.py`, one each in `test_reconnect.py`,
+`test_the_vip_lane_gets_one_slot_per_pass.py`, `test_the_pump_waits_for_the_joins_to_land.py` and
+`test_announce_output.py` - assigned `config.MSG_DELAY` (0.01 / 0.05) or `config.DEBUG_MSG_DELAY` (0.01) directly,
+and `reset_config()` did not reset them, so the shipped 5.0 s / 0 never came back for the rest of the process:
+every test after them in the run - alphabetically most of the suite - was paced at 10 ms and would have stalled
+five seconds a line on its own. The comment claiming isolation only replaced the pacer object. Nothing failed
+today (every multi-send test pins its own pace), which is the hole: a later test that did not would pass in the
+full run and time out in isolation.
+
+Both names are in `support.SETTINGS_DEFAULTS` at the shipped values and the six setUps go through
+`set_config()`. `tests/test_the_outbound_pace_is_put_back_after_a_test.py`: `reset_config()` restores both; the
+harness values equal what `defaults.py` ships (a retune must retune both); the audited class's tearDown puts the
+pace back; and no test file assigns either name on `config` directly (mutation-checked both ways). The full
+suite runs in the same time with the shipped pace between tests.
+
+### 📝 The mIRC docs and script no longer require a bot that does not exist (#666)
+
+Audit L2. `docs/ADMIN-CONSOLE.md` ("a bot of 1.13 or later", "older than 1.13", "before the 1.13 release") and
+`scripts/mirc/dccore.mrc` (its header, the `/dccore version` text and two comments) named 1.13 as the bot the
+script needs, from a tree whose `SCRIPT_VERSION` is v1.12.2 - a release that has not been cut. An operator who
+read the requirement against their bot's version would conclude the script could not work with it. The claims
+now say what they mean: a bot that answers `hello`, the DCCore the script ships with or a later one; the bare
+`1` in `HELLO` is "a bot from before the minor was added". The release roll is where a number may be named.
+
+`tests/test_the_docs_do_not_require_a_bot_that_does_not_exist.py` reads the shipped operator docs and the
+script: no "DCCore x.y", "bot of x.y", "older than x.y", "before x.y", "since x.y" or "from x.y" may name a
+version above `SCRIPT_VERSION` (the changelogs and the roadmap are outside the sweep; they may name what is to
+come). The regex is itself tested against the six phrases the audit found and against "protocol 1.1" and
+"mIRC 6.10". Not verified in mIRC: the script change is comment and message text only.
+
 ### 🔐 config.send_queue has a lock (#665)
 
 Audit L1. The per-user text lanes are written by every request, search and reply thread

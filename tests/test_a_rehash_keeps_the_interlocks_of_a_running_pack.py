@@ -146,14 +146,20 @@ class TheThreadIsTheAnswer(DCCoreTestCase):
         self._real_rar = platform_compat.rar_command
         platform_compat.rar_command = lambda configured=None: "rar-for-the-test"
         self.addCleanup(setattr, platform_compat, "rar_command", self._real_rar)
-        self.addCleanup(self._let_everything_finish)
+        # Cleanups run last-in-first-out (#828): the thread has to be JOINED
+        # before the reference to it is dropped, or the join finds None, the
+        # packer runs on into the next test, and its finally clears
+        # rar_inprogress under that test's own pack. The reset is registered
+        # first so it runs last.
         self.addCleanup(setattr, runtime, "packer_thread", None)
+        self.addCleanup(self._let_everything_finish)
 
     def _let_everything_finish(self):
         self.let_rar_finish.set()
         thread = runtime.packer_thread
         if thread is not None:
             thread.join(10)
+            self.assertFalse(thread.is_alive(), "the packer thread did not finish")
 
     def start_a_pack(self):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -210,3 +216,22 @@ class TheThreadIsTheAnswer(DCCoreTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheFixtureLeavesNoPackerBehind(unittest.TestCase):
+    """The guard for #828: one of the tests above, run on its own, leaves
+    no thread of its own alive. With the cleanups the wrong way round the
+    packer thread was released but never joined, and ran its finally into
+    the next test."""
+
+    def test_a_pack_test_joins_its_packer_before_it_ends(self):
+        before = set(threading.enumerate())
+        case = TheThreadIsTheAnswer("test_while_rar_runs_the_pack_is_running")
+        result = unittest.TestResult()
+
+        case.run(result)
+
+        self.assertEqual((result.failures, result.errors), ([], []))
+        leaked = [t for t in threading.enumerate() if t not in before and t.is_alive()]
+        self.assertEqual(leaked, [], "the fixture's packer thread outlived the test")
+        self.assertIsNone(runtime.packer_thread)
