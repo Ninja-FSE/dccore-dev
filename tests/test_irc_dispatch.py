@@ -336,7 +336,12 @@ class TriggerExpressionTests(DCCoreTestCase):
 
 
 class FloodGateCoverageTests(DCCoreTestCase):
-    """The is_bot_command gate must meter every request trigger it dispatches."""
+    """The is_bot_command gate must CLASSIFY every trigger it dispatches.
+
+    Everything it covers is metered by the flood gate except file requests
+    (`!<bot> ...`), which since #888 are classified here but deliberately not
+    metered - see test_a_pasted_request_list_is_not_punished.py. Their bound
+    is the queue cap and the lookup limits, not the mute."""
 
     def _gate(self, msg):
         return _evaluate(FLOOD_GATE_SOURCE, msg)

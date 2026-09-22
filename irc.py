@@ -3456,7 +3456,19 @@ def irc_loop():
                                 and msg.strip("\x01").strip().upper().startswith("DCC RESUME ")
                                 and target_chan.lower() == config.NICKNAME.lower())
                         )
-                        if is_bot_command and security.is_flooding(user):
+                        # FILE REQUESTS ARE NOT FLOOD-METERED (#888). A user
+                        # pasting fifteen rows of one album - the ordinary way
+                        # these lists are used - had lines 1-10 queued, line 11
+                        # muted, and line 12 escalated to a one-hour ban,
+                        # whenever their client sent faster than two lines a
+                        # second. The operator's call: take them one by one,
+                        # as fast as the IRC server lets them through. What
+                        # bounds a request instead is what it costs: the queue
+                        # cap (MAX_USER_QUEUE / MAX_GLOBAL_QUEUE), two library
+                        # scans at a time (#580/#886), and one pack at a time.
+                        # A ban still refuses them - check_user_status() above.
+                        is_file_request = any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
+                        if is_bot_command and not is_file_request and security.is_flooding(user):
                             continue
 
                         # SOMEBODY SPOKE TO THE BOT AND IT WILL SAY NOTHING

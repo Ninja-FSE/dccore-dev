@@ -469,7 +469,7 @@
   "settings.field.BROADCAST_SEARCH_CHANNEL": "Broadcast search channel",
   "settings.field.BROADCAST_SEARCH_COOLDOWN": "Broadcast search cooldown (seconds)",
   "settings.field.CTCP_VERSION_REPLY": "Answer CTCP VERSION",
-  "settings.field.MAX_REQUESTS": "Max requests per window",
+  "settings.field.MAX_REQUESTS": "Max commands per window",
   "settings.field.REQUEST_WINDOW": "Request window (seconds)",
   "settings.field.MUTE_TIME": "Mute duration (seconds)",
   "settings.field.FLOOD_BAN_SECONDS": "Ban after flooding while muted (seconds)",

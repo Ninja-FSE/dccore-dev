@@ -4,6 +4,37 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧾 A pasted list of requests is taken one by one, and the mute says what is true (#888)
+
+Every line to the bot counted toward the flood gate - `MAX_REQUESTS` (10) per `REQUEST_WINDOW` (5 s) - file
+requests exactly like searches. A user pasting fifteen rows of one album had lines 1-10 queued, line 11 muted them
+for 30 s, and line 12 escalated the mute into a **one-hour ban**, whenever their client sent faster than two lines
+a second. On Undernet the server paces a paste itself (a burst, then about one line every two seconds - visible in
+the reporting user's own screenshot), which is why it had mostly not bitten; any client, bouncer or network that
+sends faster turned asking for an album into a ban. And the mute notice said *"Ignored and queue cleared"* when
+what was cleared was their pending replies (`send_queue`, the outbound lane) - their file queue was untouched and
+still sent - so a user who believed it asked again, which during a mute is the one thing that earns the ban.
+
+The operator's decision: take requests one by one, as fast as the IRC server lets them through; the queue is the
+limit. `irc.py` still *classifies* `!<bot> ...` lines as commands (so they are never recorded as a private
+message) but no longer passes them to `security.is_flooding()`: they cannot mute, cannot escalate a mute, and are
+served during a mute earned by other commands. Bans are untouched - `check_user_status()` runs first. Searches,
+`-que`, `-remove`, list requests and the CTCPs stay metered exactly as before. What bounds a request now is what
+it costs: `MAX_USER_QUEUE` / `MAX_GLOBAL_QUEUE`, two library scans at a time (#580/#886), one pack at a time.
+Past the cap the user is told **once** per minute (`announce.QUEUE_FULL_REPEAT_SECONDS`) rather than once per
+extra line - with the gate gone a 150-row paste would otherwise queue 50 identical refusals - and told the rest
+were not queued.
+
+The mute notice now reads *"Searches and other commands are ignored for 30 seconds. Your queued files are kept."*,
+and the operator's line says the same. `MAX_REQUESTS`'s comment, help text (three languages) and dashboard label
+("Max commands per window") and FUTURE.md's anti-flood line say file requests are not counted; sample regenerated.
+`tests/test_a_pasted_request_list_is_not_punished.py` (12) drives the real `irc_loop()`: thirty request rows all
+dispatched with no mute or ban, fifteen `!rar` rows likewise, searches still muted then banned, requests during a
+mute served and never escalating it, a ban still refusing them; the mute wording for user and operator, and that
+the file queue really is kept; queue-full said once per user and window. Each of the three code changes is guarded
+by its own failing tests. Two source guards that anchored on the gate line follow it, and `FloodGateCoverageTests`
+says it now guards classification.
+
 ### 📋 A batch of requests pasted from the list is served, not refused (#886)
 
 Reported live, from the same evening as #879/#884: a user pasted nine request lines in about seven seconds -

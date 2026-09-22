@@ -802,15 +802,44 @@ def send_search_result_header(user, search_term, match_count, channel):
         oserve.queue_message(user, msg)
     print(f"[SEARCH RESULTS] Found {match_count} sending {sending_count} to {user} in {channel} for '{search_term}'")
 
+# ONCE, NOT ONCE PER LINE (#888). File requests are no longer flood-metered,
+# so the queue cap is what bounds a paste - and a user pasting 150 rows past a
+# 100-file cap would otherwise be sent 50 identical refusals, one per line,
+# each paced through their own lane. The first says it; repeats inside the
+# window are dropped. A dict keyed by (nick, error), carried across a rehash
+# like the other module state that must survive one.
+QUEUE_FULL_REPEAT_SECONDS = 60.0
+_queue_full_told = globals().get("_queue_full_told") or {}
+
+
+def _already_told_queue_full(user, error_type):
+    """True when this user was told this queue-full error moments ago."""
+    now = time.time()
+    key = (str(user).lower(), error_type)
+    last = _queue_full_told.get(key)
+    if last is not None and now - last < QUEUE_FULL_REPEAT_SECONDS:
+        return True
+    _queue_full_told[key] = now
+    if len(_queue_full_told) > 512:
+        for stale in [k for k, when in _queue_full_told.items()
+                      if now - when >= QUEUE_FULL_REPEAT_SECONDS]:
+            _queue_full_told.pop(stale, None)
+    return False
+
+
 def send_dcc_error(user, error_type):
     """Send the standard DCC error messages to the user."""
+    if error_type in ("user_full", "global_full") and _already_told_queue_full(user, error_type):
+        return
     oserve = sys.modules.get('oserve')
     errors = {
         "invalid_path": "Error: Invalid path.",
         "file_not_found": "Error: File not found.",
         "busy": "Error: Busy looking up other files - try again in a moment.",
-        "global_full": f"Error: The server's global queue is full ({config.MAX_GLOBAL_QUEUE} max).",
-        "user_full": f"Error: You have reached your personal queue limit of {config.MAX_USER_QUEUE} files.",
+        "global_full": f"Error: The server's global queue is full ({config.MAX_GLOBAL_QUEUE} max). "
+                       f"Requests past it were not queued - ask again in a while.",
+        "user_full": f"Error: You have reached your personal queue limit of {config.MAX_USER_QUEUE} files. "
+                     f"Requests past it were not queued - ask again once some have been sent.",
         "rar_disabled": "Error: Folder packing (!rar) is disabled on this bot.",
         "not_configured": "Error: This bot's music library is not configured yet - ask the operator to set it up.",
         "ambiguous_list": "Error: That folder name is served by more than one of this bot's lists - request it in the channel it was advertised in.",

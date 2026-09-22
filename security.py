@@ -526,16 +526,27 @@ def is_flooding(user):
         if user_key in config.send_queue:
             del config.send_queue[user_key]
             
-        print(f"[FLOOD CONTROL] Temporarily muted {user} for {config.MUTE_TIME} seconds. Queue cleared.")
+        # WHAT IS CLEARED is the user's pending REPLIES - send_queue is the
+        # outbound notice lane - not their file queue (dcc_queue), which is
+        # untouched and still sent. The old wording said "queue cleared" to
+        # both the user and the operator (#888); a user told their files were
+        # gone asks again, and asking again during the mute is the one thing
+        # that escalates it to a ban. File requests are not metered at all
+        # (irc.py), so only other commands are ignored for the mute.
+        print(f"[FLOOD CONTROL] Temporarily muted {user} for {config.MUTE_TIME} seconds. "
+              f"Their pending replies were dropped; their queued files are kept.")
         
         # VIP log: send the warning notice straight out, with no queue delay
         announce.send_debug(
-            f"User {user} moving too fast! Triggered temporary mute for {config.MUTE_TIME} seconds. Queue cleared.", 
+            f"User {user} moving too fast! Muted for {config.MUTE_TIME} seconds - other "
+            f"commands ignored, pending replies dropped, queued files kept.",
             category="MUTE"
         )
         
         if oserve:
-            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}[WARNING]{config.C_RESET} You are moving too fast! Ignored and queue cleared for {config.MUTE_TIME} seconds.\r\n")
+            oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}[WARNING]{config.C_RESET} You are moving too fast! "
+                                       f"Searches and other commands are ignored for {config.MUTE_TIME} seconds. "
+                                       f"Your queued files are kept.\r\n")
         return True
         
     return False

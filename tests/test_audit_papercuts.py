@@ -58,7 +58,7 @@ class AMuteIsNotLabelledAsABan(unittest.TestCase):
             lines = handle.read().split("\n")
 
         mute_line = next(n for n, l in enumerate(lines)
-                         if "Triggered temporary mute" in l)
+                         if "moving too fast! Muted for" in l)   # reworded in #888
         following = "\n".join(lines[mute_line:mute_line + 3])
 
         self.assertIn('category="MUTE"', following)

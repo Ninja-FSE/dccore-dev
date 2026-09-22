@@ -285,7 +285,7 @@ class WhatTheCaptureDecides(unittest.TestCase):
             body = f.read()
         block = body.split("announce.record_private_message(user, msg)", 1)[0]
         block = block.rsplit(
-            "if is_bot_command and security.is_flooding(user):", 1)[1]
+            "security.is_flooding(user):", 1)[1]
         # chr(35) is "#": written this way so no editing tool can mangle
         # the escape out of the pattern, which has happened before.
         return _re.sub(chr(35) + "[^" + chr(10) + "]*", "", block)
@@ -311,7 +311,7 @@ class WhatTheCaptureDecides(unittest.TestCase):
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as f:
             body = f.read()
 
-        self.assertLess(body.index("if is_bot_command and security.is_flooding"),
+        self.assertLess(body.index("security.is_flooding(user):"),
                         body.index("record_private_message("))
 
     def test_it_happens_after_the_ban_check(self):
