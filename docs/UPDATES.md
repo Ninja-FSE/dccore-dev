@@ -2,7 +2,25 @@
 
 All version changes, optimizations, and bug fixes made over time in the DCCore project are logged here.
 
-## 🟨 Unreleased
+## 🟩 v1.13.0 (2026-09-22) - "The Audit Release"
+
+### 🔐 Setup can ask for the operator's services host (#811)
+
+Follow-up to audit M52/H4 (#654/#579): `is_admin(user, host)` already refuses a channel admin command or a
+diagnostic whose sender cannot be matched against `ADMIN_HOSTMASKS`, but a fresh install had no way to set that
+pattern from setup - the browser page and `configure.py` asked for `ADMIN_NICK` alone, and a first-timer stayed
+nick-gated until they found `ADMIN_HOSTMASKS` on the Settings page or in `admin_config.py` by hand.
+
+Both setup paths now ask for the operator's services host right after the admin nick, optionally - blank skips
+it exactly as before. `configure.py` prompts in the terminal (`settings_file.admin_host_problem()` validates
+the shape and refuses a wildcard outright, so the L5/#669 breadth mistake cannot be typed in here in the first
+place); the browser setup page adds the same field with its own "?" help, in English, French and Spanish.
+Either way, an answer is wrapped as `ADMIN_HOSTMASKS = ["*!*@<host>"]` and written to `settings.conf`, the same
+file the dashboard's own edit of the setting already writes to. ADMIN-CONSOLE.md's step 3 and its
+troubleshooting entry say what happens on both branches - answered, or left for later.
+`tests/test_configure.py`, `tests/test_set_it_up_in_the_browser.py` and
+`tests/test_the_console_guide_says_what_configure_does.py` cover the terminal path, the browser path and the
+guide's wording against the real prompts.
 
 ### 🔐 The console listener also answers a LAN hairpin (#881)
 

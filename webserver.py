@@ -4522,6 +4522,18 @@ def validate_setup_form(form, lang="en"):
     else:
         changes["ADMIN_NICK"] = admin_nick
 
+    # Optional (#811): not a real setting name, wrapped into ADMIN_HOSTMASKS
+    # below. Blank is a supported, unremarkable answer - it leaves the
+    # console exactly as unconfigured as it always shipped.
+    admin_host = text("ADMIN_HOST")
+    if admin_host:
+        problem = settings_file.admin_host_problem(admin_host)
+        if problem:
+            errors.append(("ADMIN_HOST", say("setup.error.admin_host_shape",
+                                             "That is not a services host: {problem}.").replace("{problem}", problem)))
+        else:
+            changes["ADMIN_HOSTMASKS"] = [f"*!*@{admin_host}"]
+
     password = str(form.get("password", "") or "")
     confirm = str(form.get("password_confirm", "") or "")
     password_hash = None
@@ -4649,6 +4661,20 @@ def render_setup_page(fields, token, lang="en", errors=(), values=None, port=842
             placeholder = ' placeholder="' + _html(strings.get("setup.folder_placeholder", "optional - can be chosen later on the Settings page")) + '"'
         rows.append(f'<label>{label}{help_html}<input type="text" name="{name}" '
                     f'value="{_html(value or "")}"{placeholder} autocomplete="off"></label>{error_html}')
+        if name == "ADMIN_NICK":
+            # Not a real setting field (#811): the operator types the host
+            # alone, and validate_setup_form() wraps it as ADMIN_HOSTMASKS =
+            # ["*!*@<host>"]. Optional, so no placeholder value is offered -
+            # a blank here is a real, supported "skip it" answer, not an
+            # unanswered required field.
+            admin_host_error = (f'<div class="error">{_html(errors["ADMIN_HOST"])}</div>'
+                                if "ADMIN_HOST" in errors else "")
+            rows.append(
+                f'<label>{_html(strings.get("setup.admin_host", "Your services host (optional)"))}'
+                f' <span class="help" title="{_html(strings.get("setup.admin_host_help", "Locks the admin console, and the in-channel admin commands once this is set, to your account rather than just your nick. Log into services, set +x, then /whois yourself for the host - looks like yourname.users.undernet.org."))}">?</span>'
+                f'<input type="text" name="ADMIN_HOST" value="{_html(values.get("ADMIN_HOST", ""))}" '
+                f'placeholder="{_html(strings.get("setup.admin_host_placeholder", "optional - blank leaves the console open to the nick alone"))}" '
+                f'autocomplete="off"></label>{admin_host_error}')
     password_error = f'<div class="error">{_html(errors["password"])}</div>' if "password" in errors else ""
     rows.append(f'<label>{_html(strings.get("setup.password", "Admin password"))}'
                 f' <span class="help" title="{_html(strings.get("setup.password_help", "Opens the admin console and this dashboard. Kept as a hash, never in clear."))}">?</span>'

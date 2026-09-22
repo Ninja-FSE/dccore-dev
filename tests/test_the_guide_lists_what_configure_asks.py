@@ -35,6 +35,7 @@ ASKED = [
     ('_ask("IRC server"', "IRC server"),
     ('_ask("Channel(s), comma-separated"', "Channel(s)"),
     ('_ask("Admin nick', "Admin nick"),
+    ('input(f"Your services host (blank to skip){suffix}: ")', "services host"),
     ('_read_password("Password: ")', "password"),
     ('input(f"Music directory (full path)', "Music directory"),
     ('input("Enable it? [y/N]: ")', "Web dashboard"),

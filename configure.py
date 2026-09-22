@@ -35,7 +35,8 @@ settings.conf.sample entries, the rest of the dashboard's own Settings page
 WHERE EACH ANSWER GOES
 
     NICKNAME, SERVER, CHANNEL, ADMIN_NICK, WEBUI_ENABLED,
-    WEBUI_HOST, FILE_DIRECTORY (if given)                    -> settings.conf
+    WEBUI_HOST, FILE_DIRECTORY (if given),
+    ADMIN_HOSTMASKS (if a services host is given, #811)      -> settings.conf
     ADMIN_PASSWORD_HASH                                      -> admin_config.py
 
 The first five are ordinary operational settings - settings_file.py already
@@ -170,6 +171,26 @@ def collect_answers():
     admin_nick = _ask("Admin nick (who may run !ban/!rehash/!update/!clearqueue)",
                       default=_current("ADMIN_NICK"), check=settings_file.nicks_problem)
     changes["ADMIN_NICK"] = admin_nick
+
+    print()
+    print("Optional: your services host locks the admin console (and, with it")
+    print("set, the in-channel admin commands) to your account rather than")
+    print("your nick, which anyone can take while you are offline. Log into")
+    print("services and set +x, then /whois yourself - you want the host it")
+    print("shows, ending in something like .users.undernet.org.")
+    current_hostmasks = _current("ADMIN_HOSTMASKS")
+    default_host = (current_hostmasks[0].rsplit("@", 1)[-1]
+                    if current_hostmasks and current_hostmasks[0] else "")
+    suffix = f" [{default_host}]" if default_host else ""
+    admin_host = input(f"Your services host (blank to skip){suffix}: ").strip() or default_host
+    while admin_host:
+        problem = settings_file.admin_host_problem(admin_host)
+        if not problem:
+            break
+        print(f"  That will not do: {problem}.")
+        admin_host = input("Your services host (blank to skip): ").strip()
+    if admin_host:
+        changes["ADMIN_HOSTMASKS"] = [f"*!*@{admin_host}"]
 
     print()
     print("Admin console password (for the DCC CHAT console - see")
