@@ -1852,6 +1852,37 @@ def _listen_and_serve(irc_sock, nick, host, token=None, expected_ip=None):
             _listening = False
 
 
+def _is_private_address(ip):
+    """True for a private-network or link-local address - NOT loopback
+    (#881).
+
+    The operator and the bot sharing one home router is a NAT hairpin the
+    CTCP's self-reported address cannot describe: the client advertises the
+    router's public IP (the only address it knows for itself), but the TCP
+    connection that actually arrives came out the LAN side and carries a
+    private source address instead - the exact-match check below rejected
+    it as a stranger, blocking the operator's own console on the very setup
+    #680 was meant to protect. A peer reaching the port from the public
+    internet can never present a private source address unless it is
+    already inside the trusted network, so widening the match to private
+    addresses does not reopen the scanner risk #680 closed - it only
+    widens who counts as "close enough to be trusted" from one exact
+    address to the whole LAN, the boundary ADMIN_HOSTMASKS and the DCC
+    port-forwarding guide already treat as trusted everywhere else.
+
+    Loopback is deliberately excluded: it is not a LAN-sharing case (traffic
+    on 127.0.0.0/8 never left the machine it originated on), and every real
+    test connection in this suite necessarily arrives over loopback -
+    counting it as "private" would make a same-machine test unable to model
+    a stranger at all.
+    """
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return address.is_private and not address.is_loopback
+
+
 def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None):
     """The listener itself. Only ever called with _listening set, so at most
     one of these holds a port at a time.
@@ -1863,9 +1894,14 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None)
     banner (nick, version, platform) and three password prompts, the single
     listener was gone, and the operator's own connect found the port closed.
     A peer from any other address is dropped without a word and the listener
-    keeps waiting for the rest of the window. A passive offer carries no
-    address, so there is nothing to compare and the first peer is taken as
-    before.
+    keeps waiting for the rest of the window - UNLESS it is a private
+    address (#881): the operator and the bot behind the same home router
+    both show that router's public IP, so the operator's own connection can
+    arrive with a private source address that does not match what the CTCP
+    advertised, and _is_private_address() covers that hairpin without
+    admitting a stranger from the public internet. A passive offer carries
+    no address at all, so there is nothing to compare and the first peer is
+    taken as before.
     """
     import dcc
 
@@ -1908,7 +1944,7 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None)
             listener.settimeout(max(0.001, deadline - time.monotonic()))
             sock, addr = listener.accept()
             peer_ip = addr[0]
-            if not expected_ip or peer_ip == expected_ip:
+            if not expected_ip or peer_ip == expected_ip or _is_private_address(peer_ip):
                 break
             # Not the operator (#680): no banner, no prompt, and the window
             # is still open for the address the offer was made to.
