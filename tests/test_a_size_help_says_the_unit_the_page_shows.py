@@ -54,27 +54,59 @@ def lifted(name, source):
         i += 1
 
 
+def the_cases():
+    """Every (language, field) the tests below look at, rendered together."""
+    fields = [("en", name, webserver._settings_field(name, int, 0)) for name in webserver.SETTINGS_UNITS]
+    fields += [(lang, "MAX_RAR_FOLDER_SIZE", webserver._settings_field("MAX_RAR_FOLDER_SIZE", int, 0))
+               for lang in ("es", "fr")]
+    fields.append(("en", "MAX_DCC_SLOTS", webserver._settings_field("MAX_DCC_SLOTS", int, 3)))
+    return fields
+
+
 @unittest.skipUnless(NODE, "no node on PATH")
 class TheTooltipInARealEngine(unittest.TestCase):
+    """ONE node process for every render in this class (#898). It used to be
+    one per render - about ten - each with a 30-second timeout, and on a slow
+    Windows runner a cold node start took longer than that: #896, a text-only
+    change, went red on this file. One start, a timeout matching the other
+    real-engine test's order of magnitude, and nothing about what is asserted
+    changes: the same functions lifted out of app.js, the same dictionaries."""
 
-    def render(self, lang, field):
+    @classmethod
+    def setUpClass(cls):
         app = read("web", "app.js")
+        cases = the_cases()
         script = "\n".join([
             "var SETTINGS_FIELD_LABEL_KEYS = {};",
-            "var state = { lang: %s, langFallback: %s };" % (read("web", "lang", lang + ".json"), read("web", "lang", "en.json")),
+            "var LANGS = { en: %s, es: %s, fr: %s };" % (
+                read("web", "lang", "en.json"), read("web", "lang", "es.json"), read("web", "lang", "fr.json")),
+            "var state = { lang: LANGS.en, langFallback: LANGS.en };",
             "function escapeHtml(s) { return String(s); }",
             lifted("t", app), lifted("fieldHelp", app), lifted("settingsHelpHtml", app),
-            "process.stdout.write(settingsHelpHtml(%s));" % json.dumps(field),
+            "var CASES = %s;" % json.dumps([[lang, name, field] for lang, name, field in cases]),
+            "var out = {};",
+            "CASES.forEach(function (c) { state.lang = LANGS[c[0]]; out[c[0] + '/' + c[1]] = settingsHelpHtml(c[2]); });",
+            "process.stdout.write(JSON.stringify(out));",
         ])
-        # A file, not `node -e`: with two dictionaries inlined the script is
+        # A file, not `node -e`: with three dictionaries inlined the script is
         # past what a Windows command line can carry.
         import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as handle:
             handle.write(script)
-        self.addCleanup(os.remove, handle.name)
-        done = subprocess.run([NODE, handle.name], capture_output=True, text=True, encoding="utf-8", timeout=30)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        tooltip = re.search(r'role="tooltip">(.*?)</span>', done.stdout, re.S)
+        try:
+            done = subprocess.run([NODE, handle.name], capture_output=True, text=True,
+                                  encoding="utf-8", timeout=120)
+        finally:
+            os.remove(handle.name)
+        if done.returncode != 0:
+            raise AssertionError("node could not render the tooltips: %s" % done.stderr)
+        cls.rendered = json.loads(done.stdout)
+        cls.fields = {(lang, name): field for lang, name, field in cases}
+
+    def render(self, lang, field):
+        """The tooltip's text for `field` in `lang`, from the one node run."""
+        html = self.rendered["%s/%s" % (lang, field["name"])]
+        tooltip = re.search(r'role="tooltip">(.*?)</span>', html, re.S)
         return tooltip.group(1) if tooltip else ""
 
     def test_every_size_field_says_which_unit_the_page_uses(self):
