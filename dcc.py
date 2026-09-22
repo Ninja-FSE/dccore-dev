@@ -541,6 +541,21 @@ def accept_timeout():
     return max(1.0, seconds)
 
 
+def never_connected_advice():
+    """What the person downloading can actually do about it.
+
+    The operator's line says the receiver never connected (#879). The
+    person on the other end was told only "transfer did not complete",
+    which names no cause and suggests no action - and the two things that
+    cause this are both theirs to fix: a DCC prompt nobody answered, and a
+    client set to ignore the file's type. Reported live by an operator
+    whose user could take a .jpg and never a .nfo and wrote "it says
+    active transfer started then gives error".
+    """
+    return ("your client never accepted it. Look for a DCC prompt and accept "
+            "it, and check your client is not set to ignore this kind of file")
+
+
 def never_connected_reason(seconds):
     """What a failed accept() is: nobody came, not a link that stopped.
 
@@ -732,11 +747,19 @@ def release_queue_entry(user, next_file, delivered, reason=""):
             dropped = next_file.get("file", "your file") if is_row else str(next_file)
             # "Removed from your queue" is only true of a row that was in one.
             tail = "Removed from your queue." if (in_a_queue or not is_row) else "Ask for it again when you are ready."
+            # Through fit_irc_line like the other notices that carry a
+            # filename (#162 finding #31): the name comes off the operator's
+            # own disk and a long one - plus a reason that is now a sentence
+            # of advice - pushes this past 512 bytes, where the server's cut
+            # lands mid-colour-code and the reader loses the tail that says
+            # what to do.
+            def _build(shown_name):
+                return ("NOTICE " + str(user) + " :" + config.C_BOLD + "Error" + config.C_RESET +
+                        ": Could not send " + shown_name + " - " + str(reason) + ". " + tail + "\r\n")
+
             if oserve_mod:
-                oserve_mod.queue_message(
-                    user,
-                    "NOTICE " + str(user) + " :" + config.C_BOLD + "Error" + config.C_RESET +
-                    ": Could not send " + str(dropped) + " (" + str(reason) + "). " + tail + "\r\n")
+                import announce as announce_mod
+                oserve_mod.queue_message(user, announce_mod.fit_irc_line(_build, str(dropped)))
         except Exception as notify_err:
             print("[DCC QUEUE] Could not notify " + str(user) + ": " + str(notify_err))
 
@@ -3189,6 +3212,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         return
 
     conn = None
+    # Set by the accept branch below and read by the finally, so the notice
+    # the user gets can say what happened rather than "did not complete".
+    never_connected = False
     try:
         # settimeout() and listen() USED TO SIT ABOVE this try - the one whose
         # finally is the only thing that releases the slot and closes this
@@ -3268,6 +3294,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             # any other failure.
             report_failure(user, file_name, never_connected_reason(accept_window),
                            acked=0, total=file_size)
+            never_connected = True
             oserve = sys.modules.get('oserve')
             if oserve: oserve.send_fails_count += 1
             return
@@ -3632,9 +3659,15 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         #    below keeps the archive for a row that was kept.
         row_retained = False
         try:
+            if transfer_completed:
+                settled_reason = "transfer complete"
+            elif never_connected:
+                settled_reason = never_connected_advice()
+            else:
+                settled_reason = "transfer did not complete"
             row_retained = release_queue_entry(
                 user, next_file, delivered=transfer_completed,
-                reason="transfer complete" if transfer_completed else "transfer did not complete")
+                reason=settled_reason)
         except Exception as pop_err:
             print("[DCC CLEANUP ERROR] Could not settle the queue row: " + str(pop_err))
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A download that fails because your client never answered now says so, to the person downloading.** They used to be told only "transfer did not complete", which names nothing they can act on - while the two causes are both on their side: a DCC prompt nobody accepted in time, or a client set to ignore that kind of file (a user who could take a `.jpg` but never a `.nfo` is the usual shape). The notice now says *your client never accepted it*, and what to try.
+
 ## v1.13.0 — The Audit Release
 
 - **Added: setup now offers to lock the admin console to your services account, not just your nick.** Right after the admin nick question, both the terminal and browser setup ask for your services host - optional, blank skips it as before - and write it as `ADMIN_HOSTMASKS` for you. A stolen nick then cannot run admin commands on its own.
