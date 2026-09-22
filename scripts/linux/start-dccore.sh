@@ -2,7 +2,7 @@
 #
 # DCCore launcher for Linux.
 #
-# The important line is the cd below. Every data path in config.py is
+# The important line is the cd below. Every data path in defaults.py is
 # relative - ./data/bans.txt, ./lists - so they resolve against the
 # working directory. Running this from a cron job, a systemd unit with
 # no WorkingDirectory set, or a symlink on PATH would otherwise start

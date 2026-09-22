@@ -42,7 +42,10 @@ and uptime, and prompts.
 
 This one screens the host on the incoming CTCP, before replying at all. A stranger
 gets no banner, no connection, no reply of any kind, and no way to learn whether
-the mask was wrong. The cost of an unauthorised attempt is one regex.
+the mask was wrong. The cost of an unauthorised attempt is one regex. When the
+bot listens instead of dialling, the listener takes a connection only from the
+address the operator's CTCP advertised (#680) - a scanner that reaches the port
+first is dropped without a word and the window stays open for the operator.
 
 CONNECTION DIRECTION, AND THE INBOUND SURFACE
 ---------------------------------------------
@@ -111,8 +114,28 @@ _pending = None               # at most one connected-but-unauthenticated sessio
 _listening = False            # at most one passive listener WAITING to be dialled
 _state_lock = threading.Lock()
 
-_bad_ips = {}                 # ip -> [failure_count, blocked_until]
+_bad_ips = {}                 # ip -> [failure_count, blocked_until, last_failure]
 _bad_lock = threading.Lock()
+
+
+def forget_stale_failures(pool, now, window=None):
+    """Drop the addresses in `pool` that failed fewer than
+    MAX_PASSWORD_ATTEMPTS times and not within `window` seconds (#677,
+    audit L13). Called under the pool's own lock; returns how many went.
+
+    An address with one or two failures never reached a block, so the
+    expiry in is_bad_ip() never deleted it, and it stayed for the life of
+    the process - on an internet-exposed bind, one entry per scanner that
+    ever tried, for ever. A failure older than the block window does not
+    count towards a block either: two typos a day apart are not an attack.
+    Blocked addresses are left to the expiry that already forgets them.
+    """
+    window = BAD_IP_BLOCK_SECONDS if window is None else window
+    stale = [ip for ip, entry in pool.items()
+             if not entry[1] and now - (entry[2] if len(entry) > 2 else now) >= window]
+    for ip in stale:
+        del pool[ip]
+    return len(stale)
 
 
 # ==========================================================================
@@ -175,6 +198,63 @@ def admin_host_patterns():
         if pattern and pattern not in patterns:
             patterns.append(pattern)
     return patterns
+
+
+# Host suffixes a network hands out to EVERY logged-in user, one label per
+# account in front: "<account>.users.undernet.org". A pattern whose
+# wildcard stands where the account goes does not name one operator, it
+# names the whole logged-in population of the network (#669, audit L5).
+SHARED_ACCOUNT_HOST_SUFFIXES = (
+    "users.undernet.org",
+    "users.quakenet.org",
+)
+
+
+def broad_host_patterns():
+    """The configured patterns that are accepted but name far more than one
+    operator, each with the reason, for a warning at boot and on rehash
+    (#669, audit L5).
+
+    is_admin_host() refuses only a pattern that reduces to nothing once
+    wildcards and separators are stripped. A wildcard domain such as
+    "*.example.org" is deliberately accepted - it names a real, legitimate
+    set of hosts, and the password behind the gate is the second factor.
+    But two shapes are almost always a misreading of the documented
+    "<account>.users.undernet.org": a wildcard where the account goes
+    ("*.users.undernet.org" - every X-authenticated user of the network
+    reaches the password prompt, can hold the single pending session
+    against the real operator, and costs the bot a dial per CTCP), and a
+    literal part of one label ("*.org" - a top-level domain). Both still
+    match exactly as configured; this only says so out loud.
+    """
+    broad = []
+    for pattern in admin_host_patterns():
+        literal = pattern
+        for separator in "*!@":
+            literal = literal.replace(separator, "")
+        labels = [label for label in literal.split(".") if label]
+        if not labels:
+            continue  # refused outright by is_admin_host()
+        if "*" not in pattern:
+            continue  # one host, spelled out
+        if len(labels) == 1:
+            broad.append((pattern, f"it names the whole top-level domain .{labels[0]}"))
+            continue
+        head, _dot, rest = pattern.partition(".")
+        if rest.lower() in SHARED_ACCOUNT_HOST_SUFFIXES and set(head) <= set("*"):
+            broad.append((pattern, f"every logged-in user of the network has a {rest} host; "
+                                   f"the account name goes where the * is"))
+    return broad
+
+
+def report_broad_host_patterns(log=print):
+    """Print one warning per broad pattern; returns how many there were."""
+    broad = broad_host_patterns()
+    for pattern, why in broad:
+        log(f"[ADMINCHAT] WARNING: ADMIN_HOSTMASKS entry {pattern!r} is very broad - {why}. "
+            f"Anyone matching it reaches the console's password prompt. If you meant "
+            f"your own services host, write it in full, e.g. 'operator.users.undernet.org'.")
+    return len(broad)
 
 
 def is_admin_host(prefix_or_line):
@@ -263,10 +343,13 @@ def note_bad_ip(ip):
     if not ip:
         return
     with _bad_lock:
-        entry = _bad_ips.get(ip) or [0, 0.0]
+        now = time.time()
+        forget_stale_failures(_bad_ips, now)
+        entry = _bad_ips.get(ip) or [0, 0.0, now]
         entry[0] += 1
+        entry[2] = now
         if entry[0] >= MAX_PASSWORD_ATTEMPTS:
-            entry[1] = time.time() + BAD_IP_BLOCK_SECONDS
+            entry[1] = now + BAD_IP_BLOCK_SECONDS
             print(f"[ADMINCHAT] {ip} blocked for {int(BAD_IP_BLOCK_SECONDS)}s "
                   f"after {entry[0]} failed password attempt(s).")
         _bad_ips[ip] = entry
@@ -336,7 +419,31 @@ PROTOCOL_MAJOR = 1
 # missing. The number is a string on the wire, never arithmetic: "1.10"
 # must not read as 1.1.
 PROTOCOL_MINOR = 1
+# The oldest dccore.mrc that reads this bot's lines right (#709, audit L45):
+# the one that knows HELLO carries major.minor and that a channel field
+# follows the nick. `hello <client> <version>` carries the script's own
+# version and the bot used to log it and nothing more, so an operator who
+# pulled the bot but not the script got every event line shifted by one
+# field with nothing saying why. The script checks the bot's number; this
+# is the bot checking the script's, and saying so in the window.
+MIN_SCRIPT_VERSION = "1.1"
 FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH", "LISTFETCH")
+
+
+def _version_tuple(text):
+    """"1.10" -> (1, 10); anything that is not digits and dots -> None."""
+    parts = str(text or "").strip().split(".")
+    if not parts or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def script_is_too_old(version):
+    """Whether a client that said `hello <client> <version>` predates
+    MIN_SCRIPT_VERSION - or gave no version this bot can read."""
+    ours = _version_tuple(MIN_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is None or theirs < ours
 
 
 def _clean(value, token=False):
@@ -347,6 +454,23 @@ def _clean(value, token=False):
     if token:
         text = text.strip().replace(" ", "_") or "?"
     return text.strip()
+
+
+# A "::" standing on its own - bounded by whitespace or the ends of the name.
+_MARKER_TOKEN = re.compile(r"(?<!\S)::(?!\S)")
+
+
+def _name(value):
+    """A filename field: the last field of most lines, and on FAIL the one
+    before the ` :: ` that separates it from the reason. A `::` of its own
+    inside the name used to be defused (` :: ` -> ` : : `) but one at the
+    END was not (#682, audit L18): "name ::" gave "name :: :: reason" and the
+    script read the reason as ":: reason". An empty name gave "0 0  ::
+    reason", and the script - which collapses runs of spaces - read the name
+    as ":: reason" and the reason as nothing. Every standalone `::` is
+    defused now, wherever it sits, and an empty name is "?"."""
+    text = _MARKER_TOKEN.sub(": :", _clean(value))
+    return text or "?"
 
 
 def _num(value):
@@ -379,7 +503,7 @@ def structured_line(kind, fields):
     f = fields or {}
     nick = _clean(f.get("nick"), token=True)
     chan = _channel_token(f.get("channel"))
-    name = _clean(f.get("name")).replace(" :: ", " : : ")
+    name = _name(f.get("name"))
     kind = str(kind or "").upper()
     if kind == "REQUEST":
         return f"DCCORE REQUEST {nick} {chan} {_clean(f.get('kind') or 'file', token=True)} {name}"
@@ -729,6 +853,12 @@ class Session:
         if announce_text:
             # Written inline rather than queued: the writer thread is about to
             # stop, so a queued goodbye would never leave the building.
+            # Wrapped as send() wraps (#679, audit L15): "Goodbye." and "Line
+            # too long." went out bare on a structured session, the two lines
+            # that broke "every line starts with DCCORE". A line that already
+            # is one (DCCORE TAKEN) goes as it is.
+            if self.structured and not announce_text.startswith("DCCORE "):
+                announce_text = "DCCORE OUT " + announce_text
             try:
                 with self._lock:
                     self.sock.sendall((announce_text + "\n").encode("utf-8", "replace"))
@@ -1127,8 +1257,19 @@ def _cmd_hello(session, args):
     """
     parts = args.split()
     session.client = parts[0] if parts else "unknown"
+    version = parts[1] if len(parts) > 1 else ""
     session.structured = True
     session.send(hello_line())
+    if script_is_too_old(version):
+        # After HELLO, as a plain OUT line the window shows (#709): the
+        # script keeps parsing - the major is the same - but a field it
+        # does not know about sits in every event line.
+        session.send(f"This {session.client} is version {version or 'unknown'}; this bot's "
+                     f"lines are for {MIN_SCRIPT_VERSION} or later. Update the script "
+                     f"(scripts/mirc/dccore.mrc in the bot's folder), or the panel will "
+                     f"read a field wrong.")
+        print(f"[ADMINCHAT] {session.nick}'s {session.client} is {version or 'unknown'}; "
+              f"{MIN_SCRIPT_VERSION} or later reads this bot's lines. Told them.")
     session.send_status()
     print(f"[ADMINCHAT] {session.nick}'s session switched to the structured feed "
           f"({session.client} {' '.join(parts[1:]) or '?'}).")
@@ -1528,7 +1669,10 @@ def handle_dcc_chat(irc_sock, line, nick, ctcp_text):
         # pay CONNECT_TIMEOUT discovering it again on every single login.
         print(f"[ADMINCHAT] ADMIN_CHAT_MODE is 'listen'; offering the connection to {nick} "
               f"rather than dialling {ip}:{port}.")
-        threading.Thread(target=_listen_and_serve, args=(irc_sock, nick, host, token),
+        # The address the CTCP advertised is the one the connection has to
+        # come from (#680): the listener would otherwise take whoever reached
+        # the port first.
+        threading.Thread(target=_listen_and_serve, args=(irc_sock, nick, host, token, ip),
                          daemon=True).start()
         return True
 
@@ -1653,7 +1797,7 @@ def _connect_and_serve(irc_sock, nick, host, ip, port, token=None):
     _serve(sock, ip, nick, host, f"opened to {ip}:{port}")
 
 
-def _listen_and_serve(irc_sock, nick, host, token=None):
+def _listen_and_serve(irc_sock, nick, host, token=None, expected_ip=None):
     """Listen on the configured range and offer the connection back.
 
     Used when the client's own offer cannot be dialled - it asked for passive
@@ -1695,7 +1839,7 @@ def _listen_and_serve(irc_sock, nick, host, token=None):
             return
         _listening = True
     try:
-        _listen_and_serve_locked(irc_sock, nick, host, token)
+        _listen_and_serve_locked(irc_sock, nick, host, token, expected_ip)
     finally:
         # #423: a safety net now, not the release point. The two return paths
         # in _listen_and_serve_locked before it ever opens a listener land
@@ -1708,9 +1852,21 @@ def _listen_and_serve(irc_sock, nick, host, token=None):
             _listening = False
 
 
-def _listen_and_serve_locked(irc_sock, nick, host, token=None):
+def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None):
     """The listener itself. Only ever called with _listening set, so at most
-    one of these holds a port at a time."""
+    one of these holds a port at a time.
+
+    `expected_ip` is the address the operator's CTCP advertised, when it
+    advertised one (#680, audit L16): the host check gates who can make the
+    bot OPEN a listener, but accept() took whoever reached the port first
+    in the LISTEN_TIMEOUT window - a scanner on the public DCC range got the
+    banner (nick, version, platform) and three password prompts, the single
+    listener was gone, and the operator's own connect found the port closed.
+    A peer from any other address is dropped without a word and the listener
+    keeps waiting for the rest of the window. A passive offer carries no
+    address, so there is nothing to compare and the first peer is taken as
+    before.
+    """
     import dcc
 
     global _listening
@@ -1747,8 +1903,22 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None):
         irc_sock.sendall(offer.encode("utf-8", errors="ignore"))
         print(f"[ADMINCHAT] Offered DCC CHAT to {nick} on "
               f"{getattr(config, 'MY_IP_OR_DOCK', '?')}:{port}; waiting for the connection.")
-        sock, addr = listener.accept()
-        peer_ip = addr[0]
+        deadline = time.monotonic() + LISTEN_TIMEOUT
+        while True:
+            listener.settimeout(max(0.001, deadline - time.monotonic()))
+            sock, addr = listener.accept()
+            peer_ip = addr[0]
+            if not expected_ip or peer_ip == expected_ip:
+                break
+            # Not the operator (#680): no banner, no prompt, and the window
+            # is still open for the address the offer was made to.
+            print(f"[ADMINCHAT] Dropped a connection from {peer_ip} on port {port}: "
+                  f"the DCC CHAT was offered to {nick} at {expected_ip}. Still waiting.")
+            try:
+                sock.close()
+            except OSError:
+                pass
+            sock = None
     except socket.timeout:
         print(f"[ADMINCHAT] {nick} did not accept the DCC CHAT offer within "
               f"{int(LISTEN_TIMEOUT)}s; giving the port back.")

@@ -281,6 +281,6 @@ PLAIN_HELP = {
     'LISTS_FILE': 'Where your list definitions are saved, if you serve more than one list.',
     'ADMIN_TOKENS_FILE': "Where the login tokens of scripts paired with the admin console are kept (hashed, like the password). Made by the console's pair command; remove one with unpair.",
     'ON_CONNECT_FILE': 'Where the commands sent on connect (such as your X login) are saved.',
-    'NOTICES_FILE': 'Where the notices shown on the dashboard - kicks, failed rebuilds, disconnects - are saved.',
+    'NOTICES_FILE': 'Where the notices shown on the dashboard - a lost connection, a kick or a refused join, a failed list rebuild - are saved.',
     'PRIVATE_MESSAGES_FILE': 'Where private messages to the bot are saved.',
 }

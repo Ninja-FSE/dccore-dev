@@ -61,7 +61,11 @@ class TheBlockRuleIsRemoved(unittest.TestCase):
         self.assertIn('%PY% -c "import sys; open(sys.argv[1], \'w\').write(sys.executable)" "%PYEXE_FILE%"', self.text)
 
     def test_the_file_is_cleaned_up_and_a_missing_one_skips_the_step(self):
-        self.assertIn('if not exist "%PYEXE_FILE%" goto :rules', self.text)
+        """The path is read out of the file into %PYEXE% as soon as it is
+        written (#684: the elevated copy is handed it), and a run that could
+        not learn it skips the step."""
+        self.assertIn('if exist "%PYEXE_FILE%" for /f "usebackq delims=" %%P in ("%PYEXE_FILE%") do set "PYEXE=%%P"', self.text)
+        self.assertIn("if not defined PYEXE goto :rules", self.text)
         self.assertGreaterEqual(self.text.count('del /q "%PYEXE_FILE%"'), 2)
         self.assertIn(":rules", self.text)
 
@@ -75,11 +79,15 @@ class TheBlockRuleIsRemoved(unittest.TestCase):
         self.assertIn("inbound Block rule(s) for", self.ps)
 
     def test_the_command_is_one_quoted_argument_with_nothing_for_cmd_to_read(self):
+        """Nothing of cmd's is expanded inside the PowerShell text at all
+        since #684: the interpreter's path reaches it as $env:DCCORE_PYEXE,
+        so an apostrophe in it cannot end a PowerShell string."""
         quoted = re.search(r'-Command "(.*)"$', self.ps.strip())
         self.assertIsNotNone(quoted)
         body = quoted.group(1)
         self.assertNotIn('"', body)
-        self.assertEqual(re.findall(r"%[^%]*%", body), ["%PYEXE_FILE%"])
+        self.assertEqual(re.findall(r"%[^%]*%", body), [])
+        self.assertIn("$exe = $env:DCCORE_PYEXE", body)
 
     def test_no_rule_of_the_ports_is_changed(self):
         self.assertIn('add rule name="DCCore DCC sends" dir=in action=allow protocol=TCP', self.text)

@@ -378,6 +378,22 @@ def strip_control_codes(text):
     return _CONTROL_CODE_RE.sub('', clean)
 
 
+# Every C0 control, DEL and the C1 range (#670, audit L6). What a user typed
+# in a request or a search is printed to the operator's terminal, sent to
+# the debug channel and rendered by the admin chat, and strip_control_codes()
+# leaves reverse (\x16), italics (\x1d), a mid-line \x01, an ESC and a BEL in
+# it: "!rar \x1b]0;pwned\x07\x034,4 SENT: admin.rar to victim" retitled a
+# Windows Terminal window and drew a red block that read like a fake SENT
+# line inside the PART line. CR and LF never get this far (the reader splits
+# on them); nothing else below a space belongs in a filename or a search.
+_UNPRINTABLE_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
+
+
+def printable_text(text):
+    """strip_control_codes(), then every remaining control character."""
+    return _UNPRINTABLE_RE.sub('', strip_control_codes(text))
+
+
 def _has_marker(path, marker):
     """True if the builder's `marker` appears in the part of the name it owns.
 

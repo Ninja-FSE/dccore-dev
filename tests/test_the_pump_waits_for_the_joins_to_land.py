@@ -72,7 +72,7 @@ class TheBacklogWaitsForActivation(DCCoreTestCase):
 
     def setUp(self):
         super().setUp()
-        config.MSG_DELAY = 0.01
+        self.set_config(MSG_DELAY=0.01)
         config.vip_queue = []
         config.send_queue = {}
         # The window under test: a socket, and nothing else yet.

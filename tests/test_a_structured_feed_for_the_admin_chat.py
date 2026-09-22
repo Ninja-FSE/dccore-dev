@@ -17,6 +17,7 @@ command", and the client stays in prose mode - the switch is opt-in for
 exactly that reason.
 """
 
+import contextlib
 import io
 import os
 import socket
@@ -177,22 +178,33 @@ class FeedEventTellsItTwice(DCCoreTestCase):
         self.assertEqual(len(self.events), 1, "the good sink still got it")
 
     def test_every_emitter_goes_through_it(self):
-        """The seven feed kinds each have one site; each must call
-        feed_event with its fields, not send_debug with prose only."""
-        sources = {}
-        for name in ("announce.py", "dcc.py", "list.py"):
-            with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
-                sources[name] = handle.read()
-        self.assertIn('feed_event("SENDING"', sources["announce.py"])
-        self.assertIn('feed_event("QUEUED"', sources["announce.py"])
-        self.assertIn('feed_event("SENT"', sources["announce.py"])
-        self.assertIn('feed_event("FAIL"', sources["dcc.py"])
-        self.assertIn('feed_event("REQUEST"', sources["dcc.py"])
-        self.assertIn('feed_event(\n        "RESUMED"', sources["dcc.py"])
-        self.assertIn('feed_event(\n            "SEARCH"', sources["list.py"])
-        for name, src in sources.items():
-            for kind in ("SENDING", "QUEUED", "SENT", "FAIL", "REQUEST", "RESUMED", "SEARCH"):
-                self.assertNotIn(f'category="{kind}"', src, f"{name} still sends {kind} as prose only")
+        """The feed kinds each have one site; each must reach the event sink
+        with its fields, not send_debug() with prose only. DRIVEN, not read
+        (#705, audit L41): the substring version was satisfied by a
+        commented-out or `if False:`-wrapped call, and its `category="KIND"`
+        guard named a string that exists nowhere. Each emitter is called the
+        way the daemon calls it and the sink records the kind. REQUEST and
+        SEARCH need a library and a list, and are driven in
+        test_the_feed_says_which_channel.py (test_a_file_request,
+        test_a_search_with_a_hit)."""
+        import dcc
+        import runtime
+        from tests.support import RecordingSocket
+        self.set_config(CONSOLE_SHOW_QUEUE=True, CONSOLE_SHOW_SENDS=True, CONSOLE_SHOW_FAILS=True,
+                        ANNOUNCE_TRANSFERS=False, MAX_DCC_SLOTS=3)
+        runtime.dcc_send_offers.clear()
+        self.addCleanup(runtime.dcc_send_offers.clear)
+
+        announce.send_dcc_sending_notice("dave", "A.flac", path=None, channel="#c")
+        announce.send_dcc_queue_notice("dave", "A.flac", 2, channel="#c")
+        announce.send_transfer_complete("#c", "dave", "A.flac", 1000, time.time() - 5, 200, duration=5.0)
+        dcc._report_transfer_failure("dave", "A.flac", "socket died", acked=0, total=1000, channel="#c")
+        dcc.register_send_offer("dave", 5000, "A.flac", 1000)
+        with contextlib.redirect_stdout(io.StringIO()):
+            dcc.handle_resume_request(RecordingSocket(), "dave", "DCC RESUME A.flac 5000 10")
+
+        seen = [kind for kind, _fields, _text in self.events]
+        self.assertEqual(seen, ["SENDING", "QUEUED", "SENT", "FAIL", "RESUMED"])
 
     def test_sent_is_finally_sent(self):
         """Sent: went out as INFO from the day it was written, so the [SENT]

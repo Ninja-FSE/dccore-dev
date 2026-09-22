@@ -1322,6 +1322,14 @@ def _handle_rehash_request(user, target_chan):
         clear_or_keep_pack_interlocks(
             config, _pack_still_running and _dcc_pack.a_pack_is_running(), _packing_for)
 
+        # ADMIN_HOSTMASKS may have just changed; a very broad entry is
+        # accepted but said out loud, here as at boot (#669).
+        try:
+            import adminchat as _adminchat_rehash
+            _adminchat_rehash.report_broad_host_patterns()
+        except Exception as hostmask_err:
+            print(f"[REHASH] Could not check ADMIN_HOSTMASKS: {hostmask_err}")
+
         # Take the real, live network socket straight from memory
         oserve_mod = sys.modules.get('oserve')
         live_socket = getattr(oserve_mod, 'irc_connection', None) if oserve_mod else None
@@ -1337,9 +1345,13 @@ def _handle_rehash_request(user, target_chan):
             import dcc
             import threading
             print("[REHASH-WAKE] Letting queued users into the free slots...")
+            # One look per free slot, not one pass (#668): a pass dispatches
+            # at most one user, and requests made during the quiesce are
+            # queued now rather than refused, so several users may be
+            # waiting on this wake with nothing else due to wake them.
             threading.Thread(
-                target=dcc.check_queue_and_send, 
-                args=(live_socket, "system_next_trigger_fallback"), 
+                target=dcc.wake_restored_queues,
+                args=(live_socket,),
                 daemon=True
             ).start()
         else:

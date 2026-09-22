@@ -347,8 +347,9 @@ class QueueWorkerReconnectTests(DCCoreTestCase):
         # so _SleepShim's cap on queue_mgr.time.sleep() below no longer
         # shortens it at all, it only makes the loop check more often over
         # the SAME real wall-clock span. The value itself is what has to be
-        # small now.
-        config.MSG_DELAY = 0.01
+        # small now - and set through set_config() (#667), so it is put
+        # back for the tests that run after this one.
+        self.set_config(MSG_DELAY=0.01)
         config.vip_queue = []
         config.send_queue = {}
         self._real_time = queue_mgr.time

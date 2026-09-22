@@ -35,8 +35,52 @@ PRIVATE_MESSAGES_FILE = getattr(config, "PRIVATE_MESSAGES_FILE",
                                 os.path.join("data", "private_messages.json"))
 
 
-def _atomic_write(path, text):
+# The temp file's name, and how it is swapped in (#692, audit L28). One
+# prefix and suffix, so the sweep below knows exactly what it may remove.
+_SWAP_PREFIX, _SWAP_SUFFIX = ".tmp_", ".swap"
+
+
+def discard_stale_swaps(directory=None):
+    """Remove `.tmp_*.swap` files a previous run was killed in the middle of
+    (#692, audit L28), the way update_list._discard_stale_temps() removes its
+    own staging files. Returns how many went.
+
+    _atomic_write() cleans up after an exception, but a hard kill - or a
+    Ctrl-C, before this file caught BaseException there - between mkstemp
+    and replace left the temp behind, and nothing ever removed it: every
+    crash added a hidden file to data/. Called at startup, where this run
+    has staged nothing yet, so every such file belongs to a run that is no
+    longer alive.
+    """
+    directory = directory or os.path.dirname(os.path.abspath(DCC_QUEUE_FILE)) or "."
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return 0
+    removed = 0
+    for name in entries:
+        if not (name.startswith(_SWAP_PREFIX) and name.endswith(_SWAP_SUFFIX)):
+            continue
+        try:
+            os.remove(os.path.join(directory, name))
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        print(f"[DB] Removed {removed} leftover temp file(s) from an earlier run in {directory}.")
+    return removed
+
+
+def _atomic_write(path, text, mode=None):
     """Write `text` to `path` atomically.
+
+    `mode`: the permission bits for a file that does not exist yet. mkstemp()
+    creates its file 0600 and the replace carries that through, so on POSIX
+    every state file this module writes - hard_bans.txt and dcc_queue.txt,
+    documented as hand-editable - became owner-only after its first save
+    (#692). A file that exists keeps the mode it has (the operator's, if
+    they set one); a new one gets `mode`, 0o644 unless the caller says
+    otherwise - the token store says 0o600, since it holds secrets.
 
     Writes to a temporary file in the SAME directory (so the final step is a rename
     within one filesystem), flushes and fsyncs it, then swaps it into place.
@@ -54,14 +98,21 @@ def _atomic_write(path, text):
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
 
-    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".tmp_", suffix=".swap")
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=_SWAP_PREFIX, suffix=_SWAP_SUFFIX)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
+        try:
+            wanted = os.stat(path).st_mode & 0o777 if os.path.exists(path) else (0o644 if mode is None else mode)
+            os.chmod(tmp_path, wanted)
+        except OSError:
+            pass  # a filesystem without modes; the content is what matters
         platform_compat.replace_with_retry(tmp_path, path)
-    except Exception:
+    except BaseException:
+        # BaseException, not Exception (#692): a Ctrl-C between mkstemp and
+        # the replace is a KeyboardInterrupt, and the temp was left behind.
         try:
             os.remove(tmp_path)
         except OSError:
@@ -384,6 +435,38 @@ def load_advanced_stats():
     if unreadable is not None:
         print(f"[DB ERROR] Could not read stats.txt, using defaults: {unreadable}")
     return stats
+
+
+def set_lifetime_totals(total_files=None, total_bytes=None):
+    """Replace the lifetime columns of stats.txt, leaving the day columns
+    and the date as they are - under ONE _disk_lock acquisition (#690,
+    audit L26).
+
+    The stats import did this as load_advanced_stats() then
+    save_advanced_stats(): two acquisitions, and a transfer completing in
+    the gap - update_stats_on_complete() from the send's own thread - had
+    its +1 file and +bytes on Today and Total discarded by the import's
+    stale write (the lost update this file's own header describes for the
+    old dcc.py code), and a day rotation in that gap was undone. Read,
+    modified and written here without letting go, so what the bot did in
+    between is in the row that lands. Returns the row as written.
+    """
+    try:
+        with _disk_lock:
+            row = list(_load_advanced_stats_unlocked() or [])
+            while len(row) < 7:
+                row.append(0)
+            if total_files is not None:
+                row[0] = total_files
+            if total_bytes is not None:
+                row[1] = total_bytes
+            _save_advanced_stats_unlocked(row)
+    except Exception as err:
+        # As save_advanced_stats(): a stats write must not take the caller
+        # down. None tells the import nothing landed.
+        print(f"[DB ERROR] Could not save to stats.txt: {err}")
+        return None
+    return row
 
 
 def save_advanced_stats(stats):
@@ -915,21 +998,35 @@ def load_admin_tokens():
 def save_admin_tokens(tokens):
     try:
         with _disk_lock:
+            # Secrets: owner-only from the first write (#692).
             _atomic_write(ADMIN_TOKENS_FILE,
-                          json.dumps(tokens, indent=1, sort_keys=True, ensure_ascii=False))
+                          json.dumps(tokens, indent=1, sort_keys=True, ensure_ascii=False),
+                          mode=0o600)
     except Exception as err:
         print(f"[DB ERROR] Could not save the console token store: {err}")
 
 
 def save_known_bots(registry):
     """Write the bot registry, atomically, through the same lock and the same
-    temp-file-then-replace the other state files use."""
+    temp-file-then-replace the other state files use. True when it landed,
+    False when it did not (#691, audit L27): the caller stamps its flush
+    time by this, so a failed write is tried again on the next advert
+    rather than in KNOWN_BOTS_FLUSH_SECONDS.
+
+    Serialised from a snapshot, not the live dict: the IRC thread inserts a
+    bot in place while a dashboard request flushes, and json.dumps() over a
+    dict that changes size mid-iteration is a RuntimeError.
+    """
     try:
+        snapshot = {key: (dict(entry) if isinstance(entry, dict) else entry)
+                    for key, entry in dict(registry).items()}
         with _disk_lock:
             _atomic_write(KNOWN_BOTS_FILE,
-                          json.dumps(registry, indent=1, sort_keys=True, ensure_ascii=False))
+                          json.dumps(snapshot, indent=1, sort_keys=True, ensure_ascii=False))
+        return True
     except Exception as err:
         print(f"[DB ERROR] Could not save the bot registry: {err}")
+        return False
 
 
 def load_fetched_bot_lists():

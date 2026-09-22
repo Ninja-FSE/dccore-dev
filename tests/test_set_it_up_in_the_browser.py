@@ -327,17 +327,25 @@ class TheServer(DCCoreTestCase):
         self.assertEqual(opened, [f"http://127.0.0.1:{port}/setup?token=tok"], "the browser is pointed at the token URL")
         self.assertTrue(any("/setup?token=tok" in line for line in logs), "and the URL is printed")
 
+        # One browser, which keeps its cookies: the code is bound to the
+        # first browser that presents it (#675), and a bare urlopen() per
+        # request would look like a new browser each time.
+        browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
         # the page is up
-        page = urllib.request.urlopen(f"http://127.0.0.1:{port}/setup?token=tok", timeout=5).read().decode()
+        page = browser.open(f"http://127.0.0.1:{port}/setup?token=tok", timeout=5).read().decode()
         self.assertIn('name="NICKNAME"', page)
         # a post without the token: refused
         with self.assertRaises(urllib.error.HTTPError) as caught:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/setup",
-                                   data=urllib.parse.urlencode(GOOD).encode(), timeout=5)
+            browser.open(f"http://127.0.0.1:{port}/setup",
+                         data=urllib.parse.urlencode(GOOD).encode(), timeout=5)
+        self.assertEqual(caught.exception.code, 403)
+        # the code from ps, in another browser: refused too
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/setup?token=tok", timeout=5)
         self.assertEqual(caught.exception.code, 403)
         # the real thing
         body = urllib.parse.urlencode(dict(GOOD, token="tok")).encode()
-        saved = urllib.request.urlopen(f"http://127.0.0.1:{port}/setup", data=body, timeout=5).read().decode()
+        saved = browser.open(f"http://127.0.0.1:{port}/setup", data=body, timeout=5).read().decode()
         self.assertIn("Saved", saved)
 
         thread.join(10)
@@ -517,14 +525,16 @@ class StartupUsesIt(DCCoreTestCase):
         self.assertNotIn(".sample", output)
 
     def test_setup_page_false_is_the_old_refusal(self):
-        """No page was tried (no Flask): exit 1 and the sample files, as
-        before - that code means "stop" to the launchers, not "ask"."""
+        """No page was tried (no Flask): exit 1 and the refusal, as before -
+        that code means "stop" to the launchers, not "ask". The refusal
+        names the launcher and configure.py, not the sample files (#685)."""
         buffer = io.StringIO()
         import contextlib
         with self.assertRaises(SystemExit) as caught, contextlib.redirect_stdout(buffer):
             self.oserve.startup(setup_page=False)
         self.assertEqual(caught.exception.code, 1)
-        self.assertIn("settings.conf.sample", buffer.getvalue())
+        self.assertIn("[CRITICAL] Run the launcher (start-dccore", buffer.getvalue())
+        self.assertIn("configure.py", buffer.getvalue())
 
     def test_the_page_is_possible_exactly_when_flask_is(self):
         """No setting turns it off: loopback and one-shot by design."""

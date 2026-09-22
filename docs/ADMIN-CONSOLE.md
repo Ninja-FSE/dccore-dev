@@ -131,7 +131,12 @@ ADMIN_HOSTMASKS = ["operator.users.undernet.org", "operator2.users.undernet.org"
 ```
 
 A pattern that reduces to bare `*` is refused and logged — it would admit the
-whole network and make the gate decorative.
+whole network and make the gate decorative. A pattern that is accepted but
+names far more than one operator is warned about at start-up, on `!rehash` and
+by `setup_check.py`, and still works as written: `*.users.undernet.org` puts
+the wildcard where your account name goes, so every X-authenticated user on
+the network reaches the password prompt; `*.org` names a top-level domain. The
+documented shape is your own services host in full.
 
 ### 4. Restart the daemon
 
@@ -201,7 +206,7 @@ Waiting for acknowledgement...
 DCC Chat connection established
 
 Welcome to DCCore
-DCCore v1.10.0-RC1 - platform=posix python=3.10 rar=/usr/bin/rar
+DCCore v1.12.2 - platform=posix python=3.10 rar=/usr/bin/rar
 
 Enter Your Password:
 ```
@@ -275,7 +280,7 @@ failures. It has two destinations, both on by default:
 | | |
 |---|---|
 | `DEBUG_TO_CHANNEL` | the coloured line in `DEBUG_CHANNEL`, as always |
-| `DEBUG_TO_CONSOLE` | the plain text in an attached admin console |
+| `DEBUG_TO_CONSOLE` | the plain text in an attached admin console - and, for `dccore.mrc`, the structured feed's event lines too: off means the window goes quiet, not just its `LOG` lines |
 
 Once the console is doing the job, in `admin_config.py`:
 
@@ -468,14 +473,19 @@ A client that draws a window - `dccore.mrc` is the one this exists for - wants
 fields, not prose. After logging in, send one console command:
 
 ```
-hello dccore.mrc 1.0
+hello dccore.mrc 1.1
 ```
 
 The bot answers `DCCORE HELLO 1.1 <botnick> <version>` and, from then on, every
-line it sends on this session starts with `DCCORE`. A bot without this feature
+line it sends on this session starts with `DCCORE`. The second word of your
+`hello` is your client's own version, and the bot reads it: one older than
+the oldest script that reads this bot's lines right (`1.1`, the first to know
+the channel field) is answered, right after `HELLO`, with a plain line saying
+to update the script - the feed still switches on, since the major is the
+same, but a field will read wrong until you do. A bot without this feature
 answers `Unknown command: hello` instead - stay in prose mode. The number in
-`HELLO` is the protocol version as `major.minor` (a bot from before the 1.13
-release says a bare `1`): refuse a major you do not know; a minor you do not
+`HELLO` is the protocol version as `major.minor` (a bot from before the minor
+was added says a bare `1`): refuse a major you do not know; a minor you do not
 know means a fixed field has been inserted on one side - the lines still
 parse, but a field is not where you expect it - so warn, and update whichever
 side is older. The minor goes up every time a field is inserted; the free-text
@@ -582,8 +592,12 @@ script stops reconnecting until you `/dccore connect`. A script with no
 
 What a token does **not** do is open the dashboard. The web login checks the
 admin password hash and nothing else - the token store is never read there -
-so a stolen `.mrc` costs you a console session and nothing more, and one
-`unpair` ends even that. Pairing the same name again replaces the old token -
+so a stolen token costs you a console session and nothing more, and one
+`unpair` ends even that. For `dccore.mrc` the file that holds it is
+`dccore.ini` beside the script, and it is clear text: mIRC's hash-table save
+writes the token readable. The `.mrc` itself carries nothing. Keep `dccore.ini`
+as you would a password file - a copied mIRC folder or a shared PC is where it
+travels - and `/dccore unpair` the moment you think it has. Pairing the same name again replaces the old token -
 which is why the script does not pair as the literal `dccore.mrc`: it pairs as
 `dccore.mrc-<8 hex>`, the tail derived from the mIRC folder it is loaded from,
 so a second machine (or a second mIRC on the same one) gets a name and a token
@@ -614,9 +628,9 @@ the password or with a token - to mint or revoke one. The file lives where
 `scripts/mirc/dccore.mrc` is the client the feed above was designed for:
 the bot's whole life in one mIRC window, so that running DCCore feels no
 different from running a script inside mIRC. It needs **mIRC 6.10 or
-later** - everything it uses dates from mIRC 6.x - and a bot of 1.13 or
-later. On an older bot it still works as a plain console, without the
-panel.
+later** - everything it uses dates from mIRC 6.x - and a bot that answers
+`hello`: the DCCore this script ships with, or a later one. On an older bot
+it still works as a plain console, without the panel.
 
 ### First time
 
@@ -632,11 +646,11 @@ the chat is offered exactly as `/dcc chat` would (path 1 or 2 above, as
 the bot decides), and when the bot asks for the password you **type it in
 the window, once**. The script then sends `pair dccore.mrc-<id> 1.1` - the
 id is this mIRC install's own, see "What a token does not do" above - keeps the
-token the bot answers with in `dccore.ini` beside the script, and from
-then on connects and logs in without you: on `/dccore connect`, when mIRC
-connects to IRC, and whenever the bot's nick joins a channel you share.
-The token opens the console and nothing else; the password never touches
-the disk.
+token the bot answers with in `dccore.ini` beside the script (in clear
+text - see "What a token does not do" above), and from then on connects
+and logs in without you: on `/dccore connect`, when mIRC connects to IRC,
+and whenever the bot's nick joins a channel you share. The token opens the
+console and nothing else; the password never touches the disk.
 
 If your client cannot be dialled and the bot offers the chat back (path
 2), mIRC shows its usual incoming-chat dialog the first time - accept it,
@@ -718,7 +732,9 @@ about. Save the new `dccore.mrc` over the old one, then in mIRC:
 token (they live in `dccore.ini` beside it); `/load` would add a second copy.
 The window says so itself when the two sides disagree: *"speaks feed 1.2 and
 this script was written for 1.1"* means update the script; the same line the
-other way round means update the bot.
+other way round means update the bot. The bot checks in the other direction
+too: a script older than the one its lines were written for is told
+*"Update the script"* right after `hello`.
 
 ### If something is off
 
@@ -731,8 +747,8 @@ other way round means update the bot.
 - **Non-ASCII file names look garbled** - mIRC 6 shows text in your
   Windows code page and the bot sends UTF-8. mIRC 7 decodes the chat as
   UTF-8 and shows them correctly; the script is the same file on both.
-- **"Plain mode" in the window** - the bot is older than 1.13 and does
-  not answer `hello`; the window shows the chat as it comes, with no
+- **"Plain mode" in the window** - the bot is from before `hello` and
+  does not answer it; the window shows the chat as it comes, with no
   panel. Or the bot speaks a newer protocol than the script - a script
   from before the version carried a minor refuses `1.1` this way and says
   "Update the script": do that (see "Updating the script" above).
@@ -829,7 +845,12 @@ moment is testing something else — usually a forwarding rule rather than a liv
 listener.
 
 You do not have to work out which it is. Set `ADMIN_CHAT_MODE = "listen"` and the
-bot stops dialling you altogether.
+bot stops dialling you altogether. The listener it opens answers only a connection
+from the address your client advertised in its CTCP; anything else that reaches
+the port during the window is dropped without a banner, logged as
+`Dropped a connection from <ip> ... Still waiting.`, and the port stays open for
+you. (A passive request advertises no address, so there the first connection is
+taken.)
 
 **The log says it could not connect to you at `0.0.0.0`.**
 
@@ -864,8 +885,8 @@ Three wrong passwords from that IP. Wait 15 minutes, or restart the daemon — t
 block lives in memory only.
 
 **Locked out entirely.**
-Edit `admin_config.py` and restart. Until phase 2 flips the switch, the channel
-commands still work, so you are never without a way in.
+Edit `admin_config.py` and restart. While `ADMIN_CHANNEL_COMMANDS` is on (it
+ships on), the channel commands still work, so you are never without a way in.
 
 ---
 
@@ -886,4 +907,3 @@ depth behind it. Optional TLS is on the list for a later phase.
 
 Optional, and not built: TLS on the chat (Python's `ssl` is stdlib, and iroffer
 supports it), and iroffer's second restricted admin tier (`hadminhost`).
-- **Phase 4, optional** — TLS on the chat, and a second restricted admin tier.

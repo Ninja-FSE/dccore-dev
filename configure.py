@@ -160,7 +160,8 @@ def collect_answers():
     nickname = _ask("Nickname", default=_current("NICKNAME"), check=settings_file.nick_problem)
     changes["NICKNAME"] = nickname
 
-    server = _ask("IRC server", default=_current("SERVER", "irc.undernet.org"))
+    server = _ask("IRC server", default=_current("SERVER", "irc.undernet.org"),
+                  check=settings_file.server_problem)
     changes["SERVER"] = server
 
     channel = _ask("Channel(s), comma-separated", default=_current("CHANNEL"))
@@ -284,6 +285,12 @@ def offer_to_install_web_requirements():
               "stay off until you install it.")
         return
 
+    if os.environ.get("DCCORE_AUTOSTART"):
+        # The logon task's window (#710): an input() here waited for a key
+        # nobody was going to press, with the bot not yet started behind it.
+        print("  Started by the autostart task, so not asking. To have the dashboard, run")
+        print("  once by hand: pip install -r requirements-web.txt")
+        return
     install = input("  Install it now (pip install -r requirements-web.txt)? "
                     "[Y/n]: ").strip().lower() in ("", "y", "yes")
     if not install:

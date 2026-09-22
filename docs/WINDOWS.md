@@ -67,9 +67,9 @@ requirements-web.txt` installs the dashboard's one dependency,
 
 ## Did it actually start?
 
-Step 7 prints a lot. Three lines tell you whether the **web dashboard** came
-up, and they are worth knowing apart because they send you to different
-places.
+The launcher's window prints a lot. Three lines tell you whether the **web
+dashboard** came up, and they are worth knowing apart because they send you to
+different places.
 
 **It is running:**
 
@@ -101,8 +101,10 @@ tells you so at startup (`[CONFIG] settings.conf overrides WEBUI_ENABLED
 [WEBUI] Flask not installed; dashboard disabled.
 ```
 
-That is step 4. The daemon itself needs nothing beyond the standard library
-and carries on serving files perfectly well - only the dashboard is
+That is the optional Flask install - the launcher offers it, or
+`py -3 -m pip install -r requirements-web.txt` by hand (item 4 under "Before
+you start", below). The daemon itself needs nothing beyond the standard
+library and carries on serving files perfectly well - only the dashboard is
 unavailable, which is why a missing Flask is a message rather than a failure.
 
 (A different line, `[WEBUI] Could not import webserver: ...`, means
@@ -217,8 +219,10 @@ on PATH, because WinRAR does not add itself to PATH.
 
 Asks nickname, IRC server, channel(s), admin nick, the admin console
 password, the music directory (optional - easier to set from the web
-dashboard once the daemon is running, if you would rather do it there),
-and whether to enable the web dashboard - and writes them to
+dashboard once the daemon is running, if you would rather do it there)
+and whether to enable the web dashboard, then offers to build the file
+list and to import OmenServe totals - the full list, in the order asked,
+is in [INSTALL.md](INSTALL.md#what-configure-asks) - and writes them to
 `settings.conf` itself, with the password hash (and nothing else) in
 `admin_config.py`. Covers everything below;
 skip to step 2 if you use it. The rest of this section is the manual
@@ -287,8 +291,8 @@ Ctrl-C in that window stops it. The launcher runs the setup check first and
 refuses to start if it fails.
 
 Then read the first few lines it prints - see [Did it actually
-start?](#did-it-actually-start) above for the four that tell you whether the
-dashboard came up, and which of them means you skipped step 4.
+start?](#did-it-actually-start) above for the lines that tell you whether the
+dashboard came up, and which of them means Flask was never installed.
 
 ---
 
@@ -344,7 +348,10 @@ It adds one inbound rule for TCP `DCC_PORT_START`–`DCC_PORT_END` (55000–5501
 unless you changed them) and, if the dashboard is on, one for its port; both
 read from your settings, not typed in. Adding a firewall rule needs an
 administrator's yes, so the script re-opens itself elevated - the usual
-prompt. `remove-firewall.bat` takes both rules out again.
+prompt. The ports and the interpreter are worked out before that, as you, and
+handed to the elevated copy, so it works when the account that answers the
+prompt is not yours (a standard user with a parent's password) and has no
+Python of its own. `remove-firewall.bat` takes both rules out again.
 
 Cancel does more than decline: Windows also creates an inbound **Block** rule
 for that `python.exe`, and a Block rule wins over any Allow rule, so a port rule
@@ -396,6 +403,12 @@ bot's window opens as usual (closing it still stops the bot). For your user
 only: no administrator, no stored password. `remove-autostart.bat` deletes
 the entry. It refuses a tree that has never been set up, since the setup
 questions need someone at the keyboard - run the launcher once first.
+
+Only one bot runs from a folder: a second start - the task and a
+double-click, or two logon sessions - is refused with "DCCore is already
+running from this folder", and does nothing. Under the task the launcher
+does not ask questions (the Flask offer prints its command instead), so a
+window nobody is watching never waits for a key.
 
 ## The admin console
 

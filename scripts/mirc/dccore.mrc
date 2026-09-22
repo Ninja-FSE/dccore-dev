@@ -24,6 +24,12 @@
 ;    nothing else - it cannot open the web dashboard - and
 ;    /dccore unpair revokes it at any time.
 ;
+;    dccore.ini is CLEAR TEXT (#683): mIRC's hash-table save writes the
+;    token readable, beside this file. Treat that file as you would a
+;    password file - it is what a copied mIRC folder or a shared PC
+;    gives away, not the .mrc - and /dccore unpair the moment you think
+;    it has travelled: the bot then refuses that token for good.
+;
 ;    Then:   /dccore              the command list
 ;            /dccore options      what to show, in which colour
 ;
@@ -42,8 +48,8 @@
 ;    characters above 127 this script draws are the middle dot and the
 ;    non-breaking space, which every Windows ANSI code page has.
 ;
-;    DCCore 1.13 or later on the bot: it has to answer `hello`. An older
-;    bot answers "Unknown command" and the script drops to plain mode,
+;    A bot that answers `hello` - the DCCore this script ships with, or a
+;    later one. An older bot answers "Unknown command" and the script drops to plain mode,
 ;    where the window simply shows the chat as it comes - still coloured
 ;    by the bot's own theme, still a console, just no panel.
 ;
@@ -210,7 +216,7 @@ alias dccore {
   if (%cmd == status) { dccore.send status | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
-  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for DCCore 1.13 and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }
+  if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for the DCCore it ships with and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }
   if (%cmd == font) {
     if ($2 !isnum) || ($2 < 6) { dccore.sys Give a size, like /dccore font 14 (now: $dccore.fontsize $+ ). | return }
     dccore.set fontsize $2
@@ -472,7 +478,7 @@ alias dccore.line {
   dccore.echo $1-
 }
 
-; A bot without the structured feed (older than 1.13), or one whose
+; A bot without the structured feed (from before `hello`), or one whose
 ; protocol we do not know: the window shows the chat as it comes.
 ; Is the one on the other end of the chat the bot we paired with? The host
 ; the bot had when the token was stored is kept (bothost) and compared with
@@ -527,7 +533,7 @@ alias dccore.structured {
   var %type = $1
   if (%type == HELLO) {
     .timerdccoreHello off
-    ; $2 is major.minor (a bot before 1.13's release says a bare 1).
+    ; $2 is major.minor (a bot from before the minor was added says a bare 1).
     ; A major we do not know: plain mode. A minor we do not know: the
     ; lines still parse, but a field was inserted on one side, so say so.
     var %major = $gettok($2,1,46)
@@ -577,7 +583,7 @@ alias dccore.structured {
     hdel dccore.live tokenbad
     if ($address($dccore.bot,2) != $null) { dccore.set bothost $address($dccore.bot,2) }
     hadd dccore.live pairing 0
-    dccore.sys Paired as $2 $+ . The token is kept in dccore.ini; from now on the script logs in by itself. /dccore unpair revokes it.
+    dccore.sys Paired as $2 $+ . The token is kept in dccore.ini beside the script, in clear text - keep that file as you would a password; from now on the script logs in by itself. /dccore unpair revokes it.
     dccore.title
     return
   }

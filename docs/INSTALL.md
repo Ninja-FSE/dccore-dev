@@ -71,7 +71,12 @@ the daemon serves one page, `http://127.0.0.1:8420/setup`, and waits. The
 link it prints - and opens in your browser - carries a one-time code, so
 that only the person at this machine can use the page: it is loopback-only,
 it exists only until the form is saved, and any website open in the same
-browser would otherwise be able to submit a password of its own. Save, and
+browser would otherwise be able to submit a password of its own. The code is
+good for one browser - the first one it is opened in - so on a Linux box
+shared with other users, where the browser's command line (and the link in
+it) is readable with `ps`, nobody else can open the page after you have; if
+you are told the link was already opened elsewhere, stop DCCore and start it
+again for a fresh code. Save, and
 the bot starts in the same window; if you left the dashboard on, the page
 takes you to its login with the password you just chose. The dashboard box
 starts ticked (reachable from this machine only, unless you tick the
@@ -95,7 +100,17 @@ python3 configure.py
 
 On Windows that command is **`py configure.py`**. A python.org install gives you `py` and `python`, not `python3` — and Windows 10 and 11 ship an App Execution Alias for that exact name, so `python3` opens the Microsoft Store or reports *"Python was not found"* even when Python is installed and working. Every `python3` below has the same Windows form; [WINDOWS.md](WINDOWS.md) uses it throughout.
 
-Six questions — nickname, IRC server, channel(s), admin nick, admin console password, and the music directory — written to `settings.conf` for you, with the password hash (and nothing else) in `admin_config.py`.
+<a id="what-configure-asks"></a>What it asks, in order:
+
+1. **Nickname.**
+2. **IRC server** (`irc.undernet.org` unless you say otherwise).
+3. **Channel(s)**, comma-separated.
+4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
+5. **Admin console password**, typed twice and never shown; only its hash is written.
+6. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
+7. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
+
+Then two offers, either of which you can decline: **generate the file list now** (when a music directory was given; a first start does it anyway), and **import your OmenServe totals** from its `vars.ini` if you are coming from there. The answers are written to `settings.conf`, with the password hash (and nothing else) in `admin_config.py`.
 
 The music directory is optional here. It is usually easier to browse and confirm it from the dashboard's Settings page once the bot is running than to type a path blind. Everything else stays changeable afterwards.
 
@@ -395,7 +410,7 @@ The list build changed what it puts in the list, so three things are worth knowi
 
 **It will then contain everything under `FILE_DIRECTORY`, not just `.mp3` and `.flac`.** Video, `.m4a`, artwork, cue sheets, text files — all of it. Check what is actually in that directory first: anything sitting there is offered to anyone who asks. `LIST_IGNORED_EXTENSIONS` names what to leave out, and ships skipping only what is never a real file (`.db`, `.ini`, `.lnk`, `.url`, and half-finished downloads).
 
-**Some folders will stop being `!rar`-packable.** A folder used to become packable by containing anything in the list; now it needs a file in `RAR_EXTENSIONS`, which ships as the audio formats. So a folder of video or documents no longer gets a row in the album list — deliberately, since packing has no size cap and a film folder is a request to compress tens of gigabytes. Individual files in those folders are still listed and still requestable by name.
+**Some folders will stop being `!rar`-packable.** A folder used to become packable by containing anything in the list; now it needs a file in `RAR_EXTENSIONS`, which ships as the audio formats. So a folder of video or documents no longer gets a row in the album list — deliberately: packing a film folder is pointless work for the receiver, and `MAX_RAR_FOLDER_SIZE` (10 GB by default, see above) alone would still let a 9 GB film through. Individual files in those folders are still listed and still requestable by name.
 
 If you keep video, it also gets its own list from now on, travelling in the same archive people already receive. `SEPARATE_VIDEO_LIST = No` puts everything back in one list.
 

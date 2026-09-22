@@ -64,7 +64,7 @@ The optional dashboard is `webserver.py` and `web/`, and disables itself cleanly
 python3 -m unittest discover -s tests -t .
 ```
 
-4994 of them, stdlib-only, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14 in CI.
+Thousands of them - the count is kept in [docs/FUTURE.md](docs/FUTURE.md) - stdlib-only, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14 in CI.
 
 ## License
 

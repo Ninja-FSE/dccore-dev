@@ -9,7 +9,7 @@
 # settings.conf is gitignored, so your values never show up as a diff
 # and are never overwritten by an update.
 #
-# GENERATED FILE - do not edit by hand. It is produced from config.py by
+# GENERATED FILE - do not edit by hand. It is produced from defaults.py by
 # scripts/gen_settings_sample.py, and a test fails if the two disagree.
 #
 # NOTES
@@ -344,11 +344,13 @@
 # folder in the library became packable - including one holding a single
 # text file, and including a season of a series that is tens of gigabytes.
 # 
-# There is no size cap anywhere on packing (see the roadmap), so an
-# unbounded amount of CPU, disk and one transfer slot sat behind a line
-# anybody in the channel could paste. RAR_ENABLED was the only defence and
-# it is all-or-nothing: an operator who wanted albums packable had to accept
-# films packable too.
+# At the time there was no size cap on packing at all, so an unbounded
+# amount of CPU, disk and one transfer slot sat behind a line anybody in the
+# channel could paste. MAX_RAR_FOLDER_SIZE (below) has bounded it since, at
+# 10 GB - but a cap alone still lets a 9 GB film through, and packing a film
+# is pointless work for the receiver. RAR_ENABLED was the only other defence
+# and it is all-or-nothing: an operator who wanted albums packable had to
+# accept films packable too.
 # 
 # An album is a genuine multi-file collection - tracks, a cover, a cue sheet
 # - which is what makes packing it useful. A film is one large file that can
@@ -498,8 +500,8 @@
 # once the process that was driving them is gone.
 #FETCH_HISTORY_FILE = ./data/fetch_history.json
 
-# Where the notices shown on the dashboard - kicks, failed rebuilds,
-# disconnects - are saved.
+# Where the notices shown on the dashboard - a lost connection, a kick or a
+# refused join, a failed list rebuild - are saved.
 #
 # Where the operator-facing notices live - the kicks, the give-ups, the
 # rebuilds that failed. Persisted because the events worth telling somebody

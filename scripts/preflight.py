@@ -270,6 +270,7 @@ def main():
     print("")
     print("=== verifying the hostile environment ===")
     print(f"    rar_command() under stripped env: {found}")
+    hostile_ran = False
     if found != "NONE":
         # SKIPPED, not failed. This step exists to prove the suite passes on a
         # bare runner with no host tooling, and it fakes that by stripping PATH
@@ -288,6 +289,7 @@ def main():
         print("    If you meant to hide it, add whatever exposed it to "
               "HOST_TOOLING_VARS.")
     else:
+        hostile_ran = True
         print("--- hostile environment verified: host tooling is hidden")
         results.append(run(
             "full suite with host tooling hidden (simulates a bare runner)",
@@ -302,12 +304,25 @@ def main():
         return 0
 
     print("PREFLIGHT FAILED - do not push")
-    if results[-1] is False and all(results[:-1]):
+    if only_the_hidden_pass_failed(results, hostile_ran):
         print()
         print("Note: only the hidden-tooling pass failed. That means a test depends on")
         print("something installed on this machine that CI does not have. Fix the test,")
         print("not the environment - CI will fail the same way.")
     return 1
+
+
+def only_the_hidden_pass_failed(results, hostile_ran):
+    """Whether the note above applies: the hidden-tooling pass RAN, it is the
+    one failure, and everything before it passed. It used to read
+    `results[-1] is False and all(results[:-1])`, which with the hostile pass
+    SKIPPED pointed at the test-count floor - and told an operator whose
+    count had dropped to fix a hidden-tooling dependency that does not
+    exist (#706). The hidden pass appends two results (the run, then the
+    state check); the run is the second-last."""
+    if not hostile_ran or len(results) < 2:
+        return False
+    return results[-2] is False and all(results[:-2]) and results[-1] is not False
 
 
 if __name__ == "__main__":

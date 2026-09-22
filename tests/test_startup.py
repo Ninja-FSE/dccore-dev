@@ -315,7 +315,9 @@ class TheEntryPointStillWiresItUp(unittest.TestCase):
             self.source = handle.read()
 
     def test_main_calls_startup_then_run_forever(self):
-        tail = self.source.split('if __name__ == "__main__":', 1)[1]
+        # The LAST guard: the console installs at the top of the file sit
+        # under a guard of their own since #707.
+        tail = self.source.rsplit('if __name__ == "__main__":', 1)[1]
         self.assertIn("startup()", tail)
         self.assertIn("run_forever()", tail)
         self.assertLess(tail.index("startup()"), tail.index("run_forever()"),

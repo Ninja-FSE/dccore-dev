@@ -4,7 +4,7 @@ setlocal
 rem ---------------------------------------------------------------------
 rem  DCCore launcher for Windows.
 rem
-rem  The important line is the cd below. Every data path in config.py is
+rem  The important line is the cd below. Every data path in defaults.py is
 rem  relative - ./data/bans.txt, ./lists - so they resolve against the
 rem  working directory. Double-clicking this file from anywhere, or
 rem  running it from a shortcut, would otherwise start the daemon with a
@@ -198,6 +198,10 @@ rem  The Linux twin was always right (`"$PY" ... ; exit $?`, outside any
 rem  block), so the two launchers had drifted on the one thing this shim
 rem  layer exists to keep identical.
 if /i "%~1"=="check" goto :run_check
+rem  Under the logon task (#710) there is nobody at the keyboard: the Flask
+rem  offer below prints its command instead of asking, and a stop at the end
+rem  does not wait for a key. install-autostart.bat passes this.
+if /i "%~1"=="autostart" set "DCCORE_AUTOSTART=1"
 goto :after_check
 
 :run_check
@@ -226,7 +230,7 @@ if not exist "admin_config.py" if not exist "settings.conf" if exist "local_conf
     echo   Nothing to copy - start the daemon once and it renames the file
     echo   for you, keeping every setting in it:
     echo.
-    echo       python oserve.py
+    echo       py oserve.py
     echo.
     echo   Do NOT copy admin_config.py.sample over the top: that leaves your
     echo   real settings stranded in local_config.py.
@@ -315,6 +319,16 @@ echo   Closing this window stops the bot too - leave it open, or minimise it.
 echo.
 %PY% oserve.py
 set "RC=%errorlevel%"
+rem  4 is "another DCCore holds this folder" (#710): the logon task and a
+rem  double-click, or two logon sessions, both ran the bot. Not a failure of
+rem  this copy - the other is fine - so said as what it is.
+if "%RC%"=="4" (
+    echo.
+    echo   DCCore is already running from this folder - in another window, or
+    echo   started by the logon task. This copy did nothing. Stop that one first
+    echo   if you meant to restart it.
+    echo.
+)
 
 rem  THE PAGE COULD NOT BE SERVED (#617). oserve.py exits 3 when the setup
 rem  page was this first run's path and could not finish - the port was
