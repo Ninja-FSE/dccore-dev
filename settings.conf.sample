@@ -382,6 +382,9 @@
 # Permanent hostmask patterns added with !ban; timed bans live in BANS_FILE
 #HARD_BANS_FILE = ./data/hard_bans.txt
 
+# Where the per-user send queue is saved. The single-instance lock lives
+# beside it.
+#
 # db.py has always read this one through getattr(config, "DCC_QUEUE_FILE", ...)
 # rather than importing it directly, so nothing shipped noticed it was never
 # actually defined here - until #710's instance lock (oserve.startup())
