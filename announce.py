@@ -822,7 +822,12 @@ QUEUE_FULL_KINDS = ("user_full", "global_full")
 QUEUE_FULL_REPEAT_SECONDS = 120.0
 QUEUE_FULL_MEMORY = 256
 _told_queue_full = {}
-_told_queue_full_lock = threading.Lock()
+# Bound to runtime.py's object, not constructed here (test_no_reloaded_
+# module_owns_a_lock.py): announce.py is reloaded on every !rehash, and a
+# lock built at module level would be REBOUND by that reload while a
+# thread already inside the critical section below kept holding the old
+# object - the same fix as dcc.queue_lock, generalised.
+_told_queue_full_lock = runtime.told_queue_full_lock
 
 
 def _already_told_queue_full(user, error_type):

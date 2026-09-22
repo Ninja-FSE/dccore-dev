@@ -130,6 +130,7 @@ queue_lock         = threading.Lock()  # dcc.py's transfer queue - see dcc.py's 
 debug_drain_guard  = threading.Lock()  # announce.py's single-drain-worker start guard
 debug_sinks_lock   = threading.Lock()  # announce.py's admin-console debug sink list
 disk_lock          = threading.Lock()  # db.py's serialised on-disk writes
+told_queue_full_lock = threading.Lock()  # announce.py's queue-full notice memory (#888)
 
 # The reload window, which is not only about rebinding.
 #
