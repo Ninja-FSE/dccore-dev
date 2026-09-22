@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔴 The @DCCore window lights up like a channel: red on activity, highlight on a failure (#892)
+
+Asked by the operator: every other mIRC window's button turns red when something new is said in it, and `@DCCore`
+never did. Every line the script drew went through `dccore.echo`, a plain `echo -ti2` - and mIRC's reference is
+explicit that `/echo` without `-m` is an **event** line; `-m` "treats line as user message", which is what gives a
+button the message colour. So the window only ever reached the event colour, however much happened in it.
+
+Two aliases beside `dccore.echo`: `dccore.msg` (`echo -mti2`, the message colour) for activity - `REQUEST`,
+`QUEUED`, `SENDING`, `RESUMED`, `SENT`, `SEARCH` and list fetches - and `dccore.alert` for failures (`FAIL`, and
+`DROPPED` - the console itself falling behind), which is `dccore.msg` plus `/window -g2`, the **highlight** colour,
+the operator's choice so a failure stands out from ordinary activity. Not on the active window: mIRC does not
+colour the button of the window you are looking at, and `-g2` there would stay lit after the line was read.
+`dccore.echo` stays the event line for what a channel would treat as one too - the `STATUS` heartbeat (red every
+few minutes would mean red always), joins, parts, bans and the script's own grey remarks. mIRC's help dates
+neither `-m` nor `/window -g`, so both are gated on mIRC 7 per the script's own rule for its 6.10 floor; an older
+mIRC shows every line exactly as before. `dccore.ver` 1.1 -> 1.2; the bot's `MIN_SCRIPT_VERSION` (1.1) is
+unchanged, since the feed is. ADMIN-CONSOLE.md's "What you see" table has a row for the button.
+`tests/test_the_console_window_lights_up_like_a_channel.py` (7) pins which kind of line takes which colour, reading
+the script's code lines with comments stripped - mIRC cannot run here. Reload the script in mIRC to get it.
+
 ### 🚦 A pasted album is not a flood, and the mute notice no longer says the queue was cleared (#888)
 
 Follow-up to #886, with the operator's decision. Every line to the bot counted toward the flood gate -
