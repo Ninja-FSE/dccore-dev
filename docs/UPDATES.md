@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🏷️ The list names the configured nick, however it is built (#376)
+
+A list outlives the connection it was built on, so its request lines must name the nick the bot comes back to.
+They always have, and only by accident of how the rebuild is launched: `!update`, the dashboard button and the
+rebuild schedule all run `update_list.py` as a subprocess, which reads the configured nick fresh and never sees
+the daemon's live alternate. Built in-process while the bot was on its alternate nick, every row said `!altnick` -
+a trigger the bot stops answering to the moment it takes its name back. A test documented exactly that hazard
+("hence the subprocess"). `update_list.list_nick()` now stamps every row, heading and the *Served by* line with
+`ORIGINAL_NICK` (what irc.py keeps as the configured nick, and what `get_bot_aliases()` already answers to while on
+the alternate), falling back to `NICKNAME` in the subprocess, where irc.py never ran. No change to what a
+subprocess build writes. The hazard test now asserts the fix and gains its subprocess twin; three tests that set
+`NICKNAME` as "the configured name" set `ORIGINAL_NICK` too, as a connected bot has. The other half of #376 - one
+sidebar row for a bot seen renaming itself - is proposed on the issue, waiting on a decision.
+
 ### 🎚️ The list can say how long each track is and how good (#567)
 
 The list gave size and nothing else, while other servers' lists give duration and quality too - which is what
