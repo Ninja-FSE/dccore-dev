@@ -275,6 +275,8 @@ PLAIN_HELP = {
     'STATS_FILE': 'Where the lifetime totals, the speed record and the daily figures are saved.',
     'KNOWN_BOTS_FILE': 'Where the bot remembers the other bots it has seen advertising.',
     'FETCHED_BOT_LISTS_FILE': "Where the bot remembers which other bots' lists it holds.",
+    'LIST_SHOW_AUDIO_INFO': 'Add each MP3 and FLAC file\'s length and quality after its size in your list, e.g. 10.3MB 4m31s 320/44.1/JS. The first rebuild with it on opens every audio file and takes longer; later ones only read new or changed files.',
+    'LIST_AUDIO_INFO_CACHE': 'Where the length and quality read from your audio files are kept between rebuilds. Safe to delete; the next rebuild reads every file again.',
     'LIST_INDEX_FILE': 'The search index over every list you have fetched from other bots. Can be large; safe to delete, it is rebuilt at the next fetch.',
     'FETCH_HISTORY_FILE': 'Where finished downloads from other bots are recorded for the Downloads page.',
     'DOWNLOAD_COUNTS_FILE': 'Where the count of how often each file was sent is kept, for the Most downloaded table.',

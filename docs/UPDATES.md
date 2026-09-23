@@ -4,6 +4,50 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🎚️ The list can say how long each track is and how good (#567)
+
+The list gave size and nothing else, while other servers' lists give duration and quality too - which is what
+someone choosing between two copies of an album wants to know: 320 or VBR, is that FLAC really lossless-sized, is
+track 4 the seven-minute version. **`LIST_SHOW_AUDIO_INFO`** (off by default; *Your list* on the Settings page) adds
+them after the size on every MP3 and FLAC row, in the spelling those lists already use, so our own parser and other
+bots' read it unchanged:
+
+```
+!DCCore Artist - Album - 01 - Track.mp3  ::INFO:: 10.3MB 4m31s 320/44.1/JS
+!DCCore Artist - Album - 02 - Track.flac  ::INFO:: 16.7MB 2m5s 1115/44.1/S
+!DCCore Artist - Album - Front.jpg  ::INFO:: 94.4KB
+```
+
+- **Standard library only** (`audio_info.py`, no mutagen). MP3: skip every ID3v2 tag, find the first frame whose
+  successor is where its header says (a lone sync pattern in padding proves nothing), decode it, then read a
+  Xing / Info / VBRI header for the frame count - the only honest duration for VBR; without one it is CBR and the
+  audio bytes over the bitrate, an ID3v1 tag at the end excluded. FLAC: `fLaC`, the metadata blocks walked (a big
+  picture block is seeked over, not read), STREAMINFO for rate, channels and samples; the bitrate is the real one,
+  audio bytes over duration. A few KB per file, never a full read.
+- **Spelling decided here** (the issue left it open): duration `4m31s` (minutes go past 59: `72m10s`),
+  then `kbps/kHz/channels` with channels `S` `JS` `DC` `M` or `6ch`. A VBR average is marked with a leading
+  `~` (`~245/44.1/JS`) - no spelling for it was on record.
+- **Anything it cannot read keeps its size and nothing more** - a malformed file, an unknown format, a read error.
+  `read()` never raises; a list build is never taken down by one file.
+- **The cache**, SQLite at `LIST_AUDIO_INFO_CACHE` (`./data/audio_info.db`, beside the list index): keyed by the
+  row's folder and name, checked against the file's size and mtime, so only the first rebuild opens every file and
+  later ones only what changed. Each list prunes only its own rows, and only when its rebuild **publishes** - an
+  aborted scan that saw half the library does not forget the other half. The rebuild says how many it read and
+  how many were unchanged. A cache that cannot be opened is said, and that list is written size-only.
+- **`@find` keeps the name first.** A result row goes through the line budget as before, but one that would be cut
+  is sent without its audio tail first, so no letter of the name - the part people paste back - is spent on it.
+  Search words still match the whole row, so `@find <artist> 320` narrows to 320 kbps copies.
+- AutoQ is unaffected: the tail is on file rows only, after the size, where its file branch never looks; the
+  `!rar` rows stay exactly as they were.
+
+Stacked on #913, where *Your list* has room since #776 moved the rebuild limits out.
+`tests/test_the_list_says_how_long_and_how_good.py` (31) builds every MP3 and FLAC byte by byte - CBR, both ID3
+tags, a tag bigger than the search window, a false sync, all four channel modes, Xing, Info, VBRI, MPEG-2, FLAC
+mono / 6ch / 96 kHz / a 3 MB picture block, six kinds of broken file - plus the cache (reuse, change, prune,
+per-list scope, cannot open), a real rebuild on and off, and `@find` at the exact length where the tail decides
+whether the name is cut. Mutation-checked: removing the sync confirmation, the ID3v1 exclusion, the ID3v2 skip,
+the per-list prune, the size/mtime check, the prune on publish or the search fallback each fails a test.
+
 ### 🆕 The bot says when a new version of DCCore is out (#572)
 
 Nothing told an operator that a release existed: the ones who never read the repository - most of them - ran old

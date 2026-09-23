@@ -560,6 +560,18 @@ def strip_info_suffix(rest):
     return filename.strip(), size.strip()
 
 
+# The duration-and-quality tail one of OUR rows carries after its size when
+# LIST_SHOW_AUDIO_INFO is on (#567): "::INFO:: 10.3MB 4m31s 320/44.1/JS", or
+# "~245/44.1/JS" for a VBR average. Anchored to the end, and to the size
+# token right after the marker, so nothing in a filename can match it.
+_AUDIO_TAIL_RE = re.compile(r'(::INFO::\s*\S+)\s+\d+m\d+s\s+~?\d+/[\d.]+/\w+\s*$')
+
+
+def without_audio_info(row):
+    """The row with its audio tail removed, or the row unchanged."""
+    return _AUDIO_TAIL_RE.sub(r'\1', row)
+
+
 def _split_entry_line(line_strip):
     """Pull the filename and size back out of one "!..." master-list line.
 
@@ -1336,7 +1348,13 @@ def execute_search(irc_sock, user, search_term, channel):
                                        f"{shown_match}{R} {BG_CYAN_BLOCK} {BG_RED_BLOCK} ")
                         return f"PRIVMSG {user} :{block_match}\r\n"
 
-                    oserve.queue_message(user, announce.fit_irc_line(_build, match))
+                    line = announce.fit_irc_line(_build, match)
+                    # A row the budget would cut loses its audio tail
+                    # (#567) before a single letter of its name: the name
+                    # is what the reader pastes back to ask for the file.
+                    if line != _build(match) and without_audio_info(match) != match:
+                        line = announce.fit_irc_line(_build, without_audio_info(match))
+                    oserve.queue_message(user, line)
         else:
             print(f"[SEARCH RESULT] 0 Match(es) found for {user} in {channel} on '{search_term}'")
                 

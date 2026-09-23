@@ -2386,7 +2386,8 @@ SETTINGS_CATEGORIES = (
                                                 "RAR_ENABLED", "RAR_EXTENSIONS", "RAR_BINARY",
                                                 "MAX_RAR_FOLDER_SIZE", "RAR_TIMEOUT",
                                                 "LIST_HEADER_FILE",
-                                                "LIST_HEADER_MAX_BYTES"]),
+                                                "LIST_HEADER_MAX_BYTES",
+                                                "LIST_SHOW_AUDIO_INFO"]),
     # #776: when the list rebuilds by itself, beside the two limits every
     # rebuild runs under. Its own category because "Your list" had reached
     # the sixteen the grouping test allows before one becomes a dumping ground.
@@ -2449,6 +2450,7 @@ SETTINGS_CATEGORIES = (
                                                 "FETCHED_FILES_DIR", "BANS_FILE", "HARD_BANS_FILE",
                                                 "STATS_FILE", "KNOWN_BOTS_FILE",
                                                 "FETCHED_BOT_LISTS_FILE", "LIST_INDEX_FILE",
+                                                "LIST_AUDIO_INFO_CACHE",
                                                 "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_PROGRESS_FILE", "LIBRARY_FOLDERS_FILE",
@@ -2530,6 +2532,8 @@ SETTINGS_LABELS = {
     "DCC_QUEUE_FILE": "DCC queue file",
     "KNOWN_BOTS_FILE": "Known bots file",
     "LIST_INDEX_FILE": "Cross-list search index",
+    "LIST_AUDIO_INFO_CACHE": "Audio info cache",
+    "LIST_SHOW_AUDIO_INFO": "Length and quality in the list",
     "DOWNLOAD_COUNTS_FILE": "Download counts file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "FETCH_HISTORY_FILE": "Fetch history file",

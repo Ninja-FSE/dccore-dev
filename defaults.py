@@ -341,6 +341,19 @@ KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 # and rebuilt from the lists on disk (#628); the copy can be deleted.
 LIST_INDEX_FILE: str = "./data/list_index.db"
 
+# Duration and quality after the size on the list's MP3 and FLAC rows (#567):
+# "::INFO:: 10.3MB 4m31s 320/44.1/JS" - the spelling other servers' lists use.
+# Off by default because it OPENS every audio file, where the scan otherwise
+# asks for nothing but sizes: the first rebuild with it on takes noticeably
+# longer. What it read is kept in LIST_AUDIO_INFO_CACHE, checked against each
+# file's size and modification time, so later rebuilds open only new or changed
+# files. Read with the standard library (audio_info.py); a file it cannot read
+# keeps its size and nothing more.
+LIST_SHOW_AUDIO_INFO: bool = False  # Put duration and bitrate after the size on MP3 and FLAC rows
+# One row per audio file in the lists (about 150 bytes each). Safe to delete:
+# the next rebuild reads every file again.
+LIST_AUDIO_INFO_CACHE: str = "./data/audio_info.db"
+
 # One row per thing this bot has ever sent, {relative path or archive name ->
 # {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not
 # bounded on purpose: a bot can only send what it shares, so the row count is
