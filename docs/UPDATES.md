@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 A leaked queue sweep cannot thaw the rename test's fixture (#920)
+
+`test_their_freezer_slot_follows_them` failed on `main` for the #916 merge (Windows / Python 3.12 only): `None !=
+1234.0`. Its fixture has `someuser` both present in `#one` and frozen - the combination
+`dcc.check_queue_and_send()`'s freeze sweep thaws on sight - and dispatch threads from earlier tests outlive them
+(tests/support.py routes their writes to a sink for that reason). One sweeping between setUp and the rename left
+nothing to move. Reproduced by calling the sweep there by hand. The sweep is gated on `bot_joined_channel`, which the
+rename does not read, so the class now sets it False; a new test runs the sweep mid-test on purpose and fails
+without that line. Test only.
+
 ### 🧪 The reload-lock test asks during the reload instead of racing it (#915)
 
 `test_the_reload_actually_holds_the_lock` failed on `main` for the #904 merge (macOS / Python 3.14 only; the next
