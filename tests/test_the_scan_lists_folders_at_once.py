@@ -48,8 +48,17 @@ class TreeCase(DCCoreTestCase):
         return sorted(found)
 
     def replace_scandir(self, fake):
+        """os.scandir replaced for this test. A file descriptor goes straight
+        to the real one: the fake is still in place during tearDown (cleanups
+        run after it), where shutil.rmtree on Linux and macOS lists by fd."""
         real = os.scandir
-        os.scandir = fake
+
+        def guarded(path="."):
+            if isinstance(path, int):
+                return real(path)
+            return fake(path)
+
+        os.scandir = guarded
         self.addCleanup(setattr, os, "scandir", real)
         return real
 
