@@ -79,7 +79,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.4 }
+alias dccore.ver { return 1.5 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1193,8 +1193,11 @@ on *:dialog:dccore.opt:sclick:1: {
   ; checkupdates is the bot's own setting (#572 follow-up): sent only when
   ; the checkbox actually disagrees with what the bot last told us, so
   ; opening and closing the dialog untouched does not trigger a rehash.
+  ; And only once the bot HAS told us: before its first CHECKUPDATES line
+  ; the state is empty, the box shows unticked, and an empty state never
+  ; equals "off" - so OK pressed in that moment used to turn the check off.
   var %checkupdates = $iif($did(dccore.opt,406).state == 1,on,off)
-  if (%checkupdates != $dccore.st(checkupdates)) { dccore.send checkupdates %checkupdates }
+  if ($dccore.st(checkupdates) != $null && %checkupdates != $dccore.st(checkupdates)) { dccore.send checkupdates %checkupdates }
   if ($window($dccore.win)) {
     if (%panel != $dccore.opt(panel)) { dccore.rebuild }
     if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
