@@ -252,13 +252,13 @@ Two settings decide how the result is split up:
 
 **`LIST_SHOW_AUDIO_INFO`** (off by default) adds each MP3 and FLAC file's length and quality after its size -
 `::INFO:: 10.3MB 4m31s 320/44.1/JS`, the way other servers' lists show it (`~245` is a VBR average). Every audio
-file has to be read once. The files are read several at a time (`LIST_AUDIO_INFO_THREADS`, 16), and each rebuild
+file has to be read once. The files are read several at a time (`LIST_AUDIO_INFO_THREADS`, 32), and each rebuild
 spends at most `LIST_AUDIO_INFO_MINUTES` (5) on it, since searches wait while a rebuild runs: on a large library,
 or one on a network drive, the first few rebuilds each publish with part of the library read and the rest showing
 its size alone, until everything has been read once. After that only new files are read, and a rebuild costs what
 it did without the setting. What was read is kept in `data/audio_info.db`; deleting it is safe - the files are
 read again. The rebuild's last line says how fast the files were read; on a network drive, try a higher
-`LIST_AUDIO_INFO_THREADS` once and compare - past the server's own limit it stops helping.
+`LIST_AUDIO_INFO_THREADS` (64, say) once and compare - past the server's own limit it stops helping.
 
 ### If your users queue with AutoQ
 

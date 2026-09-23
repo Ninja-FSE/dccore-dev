@@ -515,14 +515,17 @@
 #LIST_AUDIO_INFO_CACHE = ./data/audio_info.db
 
 # How many audio files are read at once for their length and quality. On a
-# network drive most of the time is waiting, so reading several at once is
-# much faster. 1 to 64.
+# network drive most of the time is waiting, so more at once is faster: try 64
+# there. The rebuild says the rate it got, to compare. 1 to 128.
 #
 # How many audio files are read at once (#914). On a network mount (NFS, SMB)
-# the time goes into round trips, which overlap: one at a time measured 9.8
-# files a second on a real NFS library. 1 to 64.
+# the time goes into round trips, which overlap. Measured on a real 64,136-file
+# NFS library: one at a time 9.8 files a second, 16 about 73, 64 about 236 (the
+# last partly on a cache warmed by the run before). 32 by default - harmless on
+# a local disk; a network drive may want 64 or more. The rebuild's last line
+# says the rate it got, to compare. 1 to 128.
 # Audio files read at once for length and quality
-#LIST_AUDIO_INFO_THREADS = 16
+#LIST_AUDIO_INFO_THREADS = 32
 
 # The longest one rebuild spends reading audio files it has not read before,
 # since searches wait while it runs. Past it, the list is published and the

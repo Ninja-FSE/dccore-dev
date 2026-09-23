@@ -38,7 +38,7 @@ bots' read it unchanged:
     A big ID3 tag or a picture block in the middle costs one more; the ID3v1 tag is no longer looked for (a request
     for 128 bytes, 8 ms of a 128 kbps file).
   - **Many files at once.** Files are only *noted* during the walk; the ones to read are read after it,
-    `LIST_AUDIO_INFO_THREADS` (16) at a time, so the round trips overlap. With 5 ms of simulated latency per
+    `LIST_AUDIO_INFO_THREADS` (32) at a time, so the round trips overlap. With 5 ms of simulated latency per
     request, 16 workers read 35 times as many files a second as one.
   - **No request at all for an unchanged file.** The cache is loaded into memory once and checked against the size
     the directory listing already gave - no stat, no read - and written back once.
@@ -49,7 +49,9 @@ bots' read it unchanged:
     mount the ceiling is the server's, so that is what an operator compares when trying another thread count.
     Measured live on the NFS library (Neo, #914): three ordinary rebuilds of 5-6 minutes each read 62,657 of
     the 62,699 audio files (42 unreadable) - 17 minutes in total, where the first version needed two hours in one - at about 55-60 files a
-    second with 16.
+    second with 16. From an empty cache again, 16 read about 73 files a second and 64 about 236 - three to four
+    times as fast, partly on a server cache warmed by the run before. So the default is 32, the range 1 to 128,
+    and the help says a network drive should try 64.
   The two live under *List rebuild* on the Settings page.
 - **The cache**, SQLite at `LIST_AUDIO_INFO_CACHE` (`./data/audio_info.db`, beside the list index), keyed by the
   row's folder and name. Each list prunes only its own rows, and only when its rebuild **publishes**; a rebuild that
@@ -64,7 +66,7 @@ bots' read it unchanged:
   `!rar` rows stay exactly as they were.
 
 Stacked on #913, where *Your list* has room since #776 moved the rebuild limits out.
-`tests/test_the_list_says_how_long_and_how_good.py` (41) builds every MP3 and FLAC byte by byte - CBR, both ID3
+`tests/test_the_list_says_how_long_and_how_good.py` (42) builds every MP3 and FLAC byte by byte - CBR, both ID3
 tags, a tag bigger than the search window, a false sync, all four channel modes, Xing, Info, VBRI, MPEG-2, FLAC
 mono / 6ch / 96 kHz / a 3 MB picture block, six kinds of broken file - plus the reads each file costs (one, or two
 with cover art), the cache (no request for an unchanged file, a changed size, prune, a stopped rebuild, per-list
