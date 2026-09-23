@@ -134,6 +134,20 @@ drives the wrong answer through the real request path, both with the memories ke
 reads the rehash's own wiring - the reload cannot be run in a test, the same reason
 `test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` reads its own.
 
+**#889's `!rehash` call is not the only way the library changes (#901).** The dashboard's Folders and Lists
+pages save and return without one - `apply_folder_changes()`/`apply_list_changes()` in `webserver.py` - and
+`library.folders()` reads the saved file on every call, so a folder removed there is live on the very next
+request. A path remembered under it is still on disk, so the memory's own existence check cannot catch this
+either, and without a rehash to forget by, the wrong `invalid path` answer lasted the full
+`LOOKUP_HIT_TTL_SECONDS`. Closed at the point of use instead of relying on being told: a remembered path is
+now checked against `search_roots` - the roots *this* request just resolved, not whatever they were when the
+memory was made - with the same `is_safe_path()` check the request makes on any other path, before it is
+trusted; outside them, the request falls through to the folder memory and then the scan. `#889`'s `!rehash`
+call stays - it still frees the memory outright, which this does not replace: a scan still in flight across a
+rehash records its hit after the forget, and this is what keeps that entry honest too, along with every other
+way the roots can move. `test_a_path_from_a_root_that_is_gone_is_refused_rather_than_served` documented the
+gap itself, so it flips to served, even without a forget.
+
 ### 🗣️ The person downloading is told their own client never accepted it (#884)
 
 Follow-up to #879, from the same operator, with the user's words this time: *"it says active transfer started
