@@ -51,7 +51,8 @@ class TheSetupReallyDoesOfferStepThreeNowOptionally(unittest.TestCase):
         `if admin_host:` unchanged, with no `or default_host`/similar
         fallback between the input() call and the write it guards."""
         code = read("configure.py")
-        prompt_at = code.index('input(f"Your services host (blank to skip){suffix}: ")')
+        # The prompt text is a variable since #911; the first read is the ask.
+        prompt_at = code.index("admin_host = input(prompt).strip()")
         line_end = code.index("\n", prompt_at)
         prompt_line = code[prompt_at:line_end]
 
