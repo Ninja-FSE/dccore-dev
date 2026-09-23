@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The file-request exemption is executed, not just read (#897)
+
+#894 (#888) tested the file-request flood exemption two ways - `security.is_flooding()` directly, and the two
+gate expressions lifted out of `irc.py`'s source and evaluated on their own - and neither one runs the actual
+`if` statement. Putting `not is_file_request` back out of the real line, undoing the fix outright, left the
+whole suite green: the behaviour the operator asked for had no test that would notice it going.
+
+`tests/test_file_requests_really_skip_the_flood_gate.py` (6) drives `irc.irc_loop()` for real against a
+scripted server (the #789 harness) and sends a burst of `!<bot> <file>` lines: every row dispatches, the user
+is never muted, a batch twice `MAX_REQUESTS` still is not, and a request is served during a mute earned by
+something else. A control class proves the harness still catches a real flood from searches, so a pass above
+is not the harness being too permissive to prove anything. Removing `not is_file_request` fails four of the
+six. No behaviour changed - #888's fix was already correct - only what verifies it.
+
 ### 🔴 The @DCCore window lights up like a channel: red on activity, highlight on a failure (#892)
 
 Asked by the operator: every other mIRC window's button turns red when something new is said in it, and `@DCCore`
