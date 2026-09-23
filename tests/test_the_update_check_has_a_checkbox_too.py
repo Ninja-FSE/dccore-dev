@@ -70,18 +70,44 @@ class TheConsoleCommand(DCCoreTestCase):
     def test_it_is_registered(self):
         self.assertIn("checkupdates", adminchat.COMMANDS)
 
-    def test_no_argument_reports_the_current_state(self):
+    def structured(self):
+        """The mIRC script's session: it said hello, so it reads DCCORE lines."""
         session = FakeSession()
+        session.structured = True
+        return session
+
+    def test_no_argument_reports_the_current_state(self):
+        session = self.structured()
         adminchat.COMMANDS["checkupdates"][0](session, "")
 
         self.assertEqual(session.lines, ["DCCORE CHECKUPDATES on"])
 
     def test_no_argument_reports_off_too(self):
         self.set_config(CHECK_FOR_UPDATES=False)
-        session = FakeSession()
+        session = self.structured()
         adminchat.COMMANDS["checkupdates"][0](session, "")
 
         self.assertEqual(session.lines, ["DCCORE CHECKUPDATES off"])
+
+    def test_a_person_is_answered_in_words(self):
+        """A plain DCC chat, or the dashboard's Console: never the protocol
+        line, which is for the script."""
+        import webserver
+        for session in (FakeSession(), webserver._WebConsoleSession("SysOp")):
+            adminchat.COMMANDS["checkupdates"][0](session, "")
+            self.assertEqual(session.lines, ["The daily update check is on."])
+        self.set_config(CHECK_FOR_UPDATES=False)
+        session = FakeSession()
+        adminchat.COMMANDS["checkupdates"][0](session, "")
+        self.assertEqual(session.lines,
+                         ["The daily update check is off - checkversion still asks GitHub by hand."])
+
+    def test_a_person_who_turns_it_off_is_told_in_words(self):
+        session = FakeSession()
+        adminchat.COMMANDS["checkupdates"][0](session, "off")
+        lines = self.wait_for(session, 2)
+        self.assertNotIn("DCCORE", " ".join(lines))
+        self.assertTrue(lines[1].startswith("The daily update check is off"), lines)
 
     def test_a_bad_argument_is_refused(self):
         session = FakeSession()
@@ -90,7 +116,7 @@ class TheConsoleCommand(DCCoreTestCase):
         self.assertEqual(session.lines, ["Usage: checkupdates [on|off]"])
 
     def test_turning_it_off_writes_the_setting_and_confirms(self):
-        session = FakeSession()
+        session = self.structured()
         adminchat.COMMANDS["checkupdates"][0](session, "off")
         lines = self.wait_for(session, 2)
 
@@ -111,6 +137,7 @@ class TheConsoleCommand(DCCoreTestCase):
     def test_turning_it_on_confirms_on(self):
         self.set_config(CHECK_FOR_UPDATES=False)
         session = FakeSession()
+        session = self.structured()
         adminchat.COMMANDS["checkupdates"][0](session, "ON")
         lines = self.wait_for(session, 2)
 
@@ -198,6 +225,15 @@ class TheDialogHasTheCheckbox(unittest.TestCase):
         self.assertTrue(send_lines[0].strip().startswith("if ("), send_lines[0])
         self.assertIn("checkupdates", send_lines[0].split("dccore.send", 1)[0])
 
+    def test_ok_sends_nothing_before_the_bot_has_said_the_state(self):
+        """Before the first CHECKUPDATES line the state is empty and the box
+        unticked - and empty is not "off", so OK in that moment used to send
+        `checkupdates off`. The send's own condition must require a state."""
+        ok_handler = script().split("on *:dialog:dccore.opt:sclick:1: {", 1)[1].split("\n}", 1)[0]
+        send_line = [line for line in ok_handler.splitlines() if "dccore.send checkupdates" in line][0]
+        condition = send_line.split("{", 1)[0]
+        self.assertIn("$dccore.st(checkupdates) != $null", condition)
+
     def test_the_checkbox_is_never_saved_locally(self):
         """checkupdates must not appear in the `hadd dccore ...` lines
         sclick:1 writes into the persisted dccore.ini hash - only in the
@@ -235,7 +271,8 @@ class TheVersionIsBumped(unittest.TestCase):
 
     def test_dccore_ver_moved_on_from_913(self):
         text = script()
-        self.assertIn("alias dccore.ver { return 1.4 }", text)
+        # 1.4 for the checkbox, 1.5 for its guard before the bot has spoken.
+        self.assertIn("alias dccore.ver { return 1.5 }", text)
 
 
 class TheMenuHasAToggleToo(unittest.TestCase):

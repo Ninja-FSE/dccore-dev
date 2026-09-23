@@ -60,7 +60,11 @@ need) really starts or leaves off the daily worker. The reply is a structured `D
 the same one `hello` now sends right after connecting, so a freshly opened options dialog is never left showing an
 unknown state. The dialog's new checkbox (id 406, in the Connection box) reflects what the bot last said - kept in
 `dccore.live`, not `dccore.ini`: it is the bot's state, not a local preference - and sends the command only when the
-checkbox actually disagrees with it, so opening and closing the dialog untouched triggers no rehash. The window
+checkbox actually disagrees with it, so opening and closing the dialog untouched triggers no rehash - and, since the
+review follow-up (`dccore.mrc` 1.5), only once the bot has said the state at all: before its first line the state was
+empty, the box unticked, and OK pressed in that moment sent `checkupdates off`. The same follow-up has `checkupdates`
+answer a person in words (*The daily update check is on.*) - a plain DCC chat and the dashboard's Console were shown
+the `DCCORE CHECKUPDATES` line meant for the script, the choice `pair` already makes by `session.structured`. The window
 menu gets a matching toggle item beside "Check for a new version", reading its label from the same live state, the
 same reflective pattern the existing Panel/Connect items already use. `dccore.ver` 1.3 -> 1.4.
 

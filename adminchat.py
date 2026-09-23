@@ -963,6 +963,18 @@ def _cmd_checkversion(session, args):
     threading.Thread(target=run, daemon=True).start()
 
 
+def _checkupdates_reply(session, on):
+    """The setting, said to whoever asked: the DCCORE line dccore.mrc reads
+    to a structured session, a sentence to a person - a plain DCC chat, or
+    the dashboard's Console (_WebConsoleSession.structured is False). A
+    person used to be shown the protocol line itself; `pair` made the same
+    choice for the same reason (#581)."""
+    if getattr(session, "structured", False):
+        return f"DCCORE CHECKUPDATES {'on' if on else 'off'}"
+    return (f"The daily update check is {'on' if on else 'off'}"
+            f"{'' if on else ' - checkversion still asks GitHub by hand'}.")
+
+
 def _cmd_checkupdates(session, args):
     """Turn CHECK_FOR_UPDATES on or off, or report it with no argument.
 
@@ -987,7 +999,7 @@ def _cmd_checkupdates(session, args):
         session.send("Usage: checkupdates [on|off]")
         return
     if not arg:
-        session.send(f"DCCORE CHECKUPDATES {'on' if getattr(config, 'CHECK_FOR_UPDATES', True) else 'off'}")
+        session.send(_checkupdates_reply(session, getattr(config, "CHECK_FOR_UPDATES", True)))
         return
     wanted = arg == "on"
 
@@ -1002,7 +1014,7 @@ def _cmd_checkupdates(session, args):
         # on that reload having actually finished, which is exactly the
         # coupling test_rehash_returns_only_the_acknowledgement's own
         # rehash-mocking convention exists to avoid.
-        session.send(f"DCCORE CHECKUPDATES {'on' if wanted else 'off'}")
+        session.send(_checkupdates_reply(session, wanted))
 
     session.send(f"Turning the daily update check {'on' if wanted else 'off'} ...")
     _run_detached(session, "checkupdates", apply)
