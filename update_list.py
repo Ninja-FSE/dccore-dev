@@ -1028,6 +1028,26 @@ def build_list_artifact(fmt, members, date_str, directory=None):
     return fmt, tmp, final
 
 
+def list_nick():
+    """The nick every request line in the list names: the CONFIGURED one.
+
+    A list outlives the connection it was built on - people save it and paste
+    from it days later - so it must name the nick the bot comes back to, not
+    whichever one it happens to hold (#376). On its alternate nick the bot is
+    config.NICKNAME = the alternate; irc.py keeps what was configured in
+    ORIGINAL_NICK, answers "!<ORIGINAL_NICK> <file>" all the same
+    (get_bot_aliases()), and takes the name back as soon as it is free.
+
+    Every rebuild today runs this module as a subprocess, which reads the
+    configured nick fresh and never sees the daemon's live one - so this held
+    by accident of how the rebuild is launched. Built in-process, the list was
+    stamped with the alternate. ORIGINAL_NICK first makes it hold either way;
+    a subprocess, where irc.py never ran, has no ORIGINAL_NICK and takes
+    NICKNAME, which there is the configured value.
+    """
+    return str(getattr(config, "ORIGINAL_NICK", None) or getattr(config, "NICKNAME", "") or "")
+
+
 def list_identity_line(nickname=None):
     """"Served by <nick> - <version> - <url>", with absent parts left out.
 
@@ -1043,7 +1063,7 @@ def list_identity_line(nickname=None):
     that. An empty fallback declines to have an opinion instead.
     """
     if nickname is None:
-        nickname = getattr(config, "NICKNAME", "")
+        nickname = list_nick()
 
     parts = [str(getattr(config, "SCRIPT_VERSION", "") or "").strip(),
              str(getattr(config, "PROJECT_URL", "") or "").strip()]
@@ -1632,7 +1652,7 @@ def generate_master_list(list_name=None):
              open(tmp_rar_path, "w", encoding="utf-8") as f_rar:
                  
             f.write(f"List of {total_files_count:,} Files ({formatted_music_size}) generated on {date_header_str} in {duration_str} ( {files_per_second:,} Files Per Second )\n")
-            f.write(f"To request a file, copy/paste to the channel... !{config.NICKNAME} FILENAME eg. !{config.NICKNAME} Songname.flac\n")
+            f.write(f"To request a file, copy/paste to the channel... !{list_nick()} FILENAME eg. !{list_nick()} Songname.flac\n")
 
             # The operator's banner and the bot's identity go BELOW the two
             # lines above and above the first folder - not at the very top.
@@ -1662,9 +1682,9 @@ def generate_master_list(list_name=None):
             f.write("\n")
 
             if serve_albums:
-                f_rar.write(f"List of Entire Album Folders (!rar) for !{config.NICKNAME} generated on {date_header_str}\n")
+                f_rar.write(f"List of Entire Album Folders (!rar) for !{list_nick()} generated on {date_header_str}\n")
                 f_rar.write(f"To request an entire album, copy/paste the line... eg. "
-                            f"!{config.NICKNAME} !rar {list_mod.LIST_FOLDER_PREFIX}Album\\\n")
+                            f"!{list_nick()} !rar {list_mod.LIST_FOLDER_PREFIX}Album\\\n")
                 # Same order as the .txt above, and for the same reason. The
                 # !rar list is a separate download that travels on its own, so
                 # it carries its own copy rather than inheriting one.
@@ -1825,7 +1845,7 @@ def generate_master_list(list_name=None):
                         # (*.mp3 and *.rar), not the tail. See defaults.py's note
                         # above LIST_IGNORED_EXTENSIONS for the quoted source.
                         if display_rar_folder not in written_rar_folders:
-                            f_rar.write(f"!{config.NICKNAME} !rar {_one_line(display_rar_folder)}\n")
+                            f_rar.write(f"!{list_nick()} !rar {_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)
                 single_file_size = format_size_human(bytes_size)
                 # "4m31s 320/44.1/JS" after the size (#567), or nothing. After
@@ -1835,7 +1855,7 @@ def generate_master_list(list_name=None):
                     tail = audio.suffix(audio_info.row_key(folder, filename))
                     if tail:
                         single_file_size = f"{single_file_size} {tail}"
-                f.write(f"!{config.NICKNAME} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
+                f.write(f"!{list_nick()} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
 
         # The film and series list. Written after the music one and from the
         # same walk, exactly as the album list is - a separate file with its
@@ -1858,7 +1878,7 @@ def generate_master_list(list_name=None):
                     f"{date_header_str}\n")
                 f_video.write(
                     f"To request one, copy/paste to the channel... "
-                    f"!{config.NICKNAME} FILENAME eg. !{config.NICKNAME} "
+                    f"!{list_nick()} FILENAME eg. !{list_nick()} "
                     f"Some.Film.2021.mkv\n")
                 # Same order as the .txt above, and for the same reason: this
                 # file travels on its own once it is out of the archive, so it
@@ -1880,7 +1900,7 @@ def generate_master_list(list_name=None):
                         f_video.write(f"\n{rule}\n{line}\n{rule}\n")
                         f_video.write(folder_summary_line(*video_totals[folder], format_size_human) + "\n")
                     f_video.write(
-                        f"!{config.NICKNAME} {_one_line(filename)}"
+                        f"!{list_nick()} {_one_line(filename)}"
                         f"  ::INFO:: {format_size_human(bytes_size)}\n")
             print(f"[LIST-GEN] Film & series list created: {tmp_video_path}")
 
