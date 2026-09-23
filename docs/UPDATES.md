@@ -4,6 +4,37 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗓️ The list rebuilds itself on a schedule (#776)
+
+Asked by the operator. Nothing rebuilt the list on a timer: `!update`, the dashboard's **Update list** and the
+console's `update` each ran it once, and FUTURE.md's "rebuilt ... on a schedule" meant the operator's own cron -
+which a novice never sets up, and which ran `update_list.py` around `PAUSE_ON_UPDATE` and the in-progress guard.
+
+`LIST_REBUILD_SCHEDULE` (off by default) takes one of four shapes - `daily 04:00`, `weekly sun 04:00`,
+`monthly 1 03:30` (a day the month lacks means its last day), `every 12h` - parsed by
+`settings_file.parse_rebuild_schedule()` and refused in `coerce()` for anything else, with the four written out, so a
+bad value never reaches the worker. `commands.ensure_rebuild_schedule_worker()` starts a daemon loop - from
+`oserve.startup()` and from every rehash, guarded once in `runtime.py` like the automatic refresh - that waits a
+minute and then calls `scheduled_rebuild_tick()`, which runs exactly `handle_list_update_request(..., authorised=True)`.
+A time-of-day schedule is due when the last rebuild is older than the most recent slot: a bot down at 04:00 rebuilds
+once when it is back, a restart at 23:00 after the 04:00 rebuild does not rebuild again. `every Nh` counts from the
+last rebuild of any kind, manual included. "Last" is the newer of the published list's age and
+`runtime.rebuild_schedule_last_attempt`: without the attempt a rebuild that *fails* (a folder whose disk is not
+mounted) would start again every minute; it is reported like a manual failure and tried at the next slot. A
+rebuild already running is not doubled; turning the setting off idles the loop.
+
+Two defaults the issue left open, taken as it leaned: `every Nh` counts manual rebuilds, and a scheduled rebuild
+does not announce in the channel (it is nobody's request) - `!update` itself only ever reported to the debug feed.
+Where it shows: an `[INFO]` *Scheduled list rebuild starting* line (the mIRC window gets it as a `LOG` line), a
+`Rebuild :` line in the console's `status`, and the Tools page beside **Update list** - *next ...*, *due now*, or
+where to set one. The Settings page carries it in a new **List rebuild** category, with `LIST_UPDATE_TIMEOUT` and
+`LIST_UPDATE_STALL_SECONDS` moved beside it ("Your list" was at the sixteen settings the grouping test allows),
+help in three languages; the sample is
+regenerated; FUTURE.md names the setting. `tests/test_the_list_rebuilds_on_a_schedule.py` (25): the parser, when
+it is due (each rule above, the month clamp), the tick against a real list file whose age is set, the worker's
+start rules and first wait, and the three places it shows. Removing the attempt record, or the in-progress guard,
+fails the test written for it.
+
 ### 🔎 A "quoted phrase" in a search means those words together, in order (#774)
 
 Asked by the operator after `@find Metal Church` answered 6516 results. A search matched a row when every

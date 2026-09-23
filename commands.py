@@ -1288,6 +1288,14 @@ def _handle_rehash_request(user, target_chan):
             print(f"[REHASH] Could not start the automatic list refresh: "
                   f"{refetch_err}")
 
+        # The list rebuild schedule (#776), the same way and for the same
+        # reason: a dashboard save that sets one lands here.
+        try:
+            if ensure_rebuild_schedule_worker():
+                print("[REHASH] LIST_REBUILD_SCHEDULE is set: the rebuild schedule has started.")
+        except Exception as schedule_err:
+            print(f"[REHASH] Could not start the rebuild schedule: {schedule_err}")
+
         # ---------------------------------------------------------------------
         # 4. FULLY AUTOMATIC CHANNEL SYNC (JOIN NEW / PART REMOVED)
         # ---------------------------------------------------------------------
@@ -1761,6 +1769,209 @@ def describe_duration(seconds):
     if total < 3600:
         return f"{total // 60}m {total % 60:02d}s"
     return f"{total // 3600}h {(total % 3600) // 60:02d}m"
+
+
+# ---------------------------------------------------------------------------
+# THE LIST REBUILD SCHEDULE (#776). Nothing rebuilt the list on a timer:
+# !update, the dashboard's Update list and the console's `update` each run it
+# once, and FUTURE.md's "on a schedule" meant the operator's own cron - which a
+# novice never sets up, and which bypassed PAUSE_ON_UPDATE and the in-progress
+# guard. LIST_REBUILD_SCHEDULE runs exactly what !update runs, from a worker
+# that checks once a minute.
+#
+# WHEN IT IS DUE. A time-of-day schedule is due when the last rebuild (the
+# newer of the list file's age and the schedule's own last attempt) is older
+# than the most recent slot - so a bot that was down at 04:00 rebuilds when it
+# comes back, once, and one restarted at 23:00 after a 04:00 rebuild does not
+# rebuild again. "every Nh" is due N hours after the last rebuild of any kind,
+# manual included: it means "never older than N hours". The attempt is what
+# keeps a FAILING rebuild from starting again every minute - it waits for the
+# next slot, and its failure is reported the way a manual one's is.
+# ---------------------------------------------------------------------------
+
+def _rebuild_slot_before(spec, now):
+    """The most recent scheduled moment at or before `now` (local datetimes)."""
+    import calendar
+    from datetime import datetime, timedelta
+
+    kind = spec[0]
+    if kind == "daily":
+        slot = now.replace(hour=spec[1], minute=spec[2], second=0, microsecond=0)
+        return slot - timedelta(days=1) if slot > now else slot
+    if kind == "weekly":
+        weekday, hour, minute = spec[1:]
+        slot = (now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                - timedelta(days=(now.weekday() - weekday) % 7))
+        return slot - timedelta(days=7) if slot > now else slot
+    day, hour, minute = spec[1:]
+
+    def in_month(year, month):
+        return datetime(year, month, min(day, calendar.monthrange(year, month)[1]), hour, minute)
+
+    slot = in_month(now.year, now.month)
+    if slot > now:
+        slot = in_month(now.year - 1, 12) if now.month == 1 else in_month(now.year, now.month - 1)
+    return slot
+
+
+def _rebuild_slot_after(spec, now):
+    """The first scheduled moment after `now` (local datetimes)."""
+    import calendar
+    from datetime import datetime, timedelta
+
+    kind = spec[0]
+    if kind == "daily":
+        slot = now.replace(hour=spec[1], minute=spec[2], second=0, microsecond=0)
+        return slot + timedelta(days=1) if slot <= now else slot
+    if kind == "weekly":
+        weekday, hour, minute = spec[1:]
+        slot = (now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                + timedelta(days=(weekday - now.weekday()) % 7))
+        return slot + timedelta(days=7) if slot <= now else slot
+    day, hour, minute = spec[1:]
+
+    def in_month(year, month):
+        return datetime(year, month, min(day, calendar.monthrange(year, month)[1]), hour, minute)
+
+    slot = in_month(now.year, now.month)
+    if slot <= now:
+        slot = in_month(now.year + 1, 1) if now.month == 12 else in_month(now.year, now.month + 1)
+    return slot
+
+
+def rebuild_is_due(spec, now, last):
+    """Whether schedule `spec` wants a rebuild at `now`, the last having been
+    at `last` (timestamps; `last` None for never)."""
+    from datetime import datetime
+
+    if spec is None:
+        return False
+    if last is None:
+        return True
+    if spec[0] == "every":
+        return now - last >= spec[1] * 3600
+    return last < _rebuild_slot_before(spec, datetime.fromtimestamp(now)).timestamp()
+
+
+def last_list_rebuild():
+    """The newer of when the published list was last written and when the
+    schedule last started a rebuild, or None for neither."""
+    import os
+    import list as list_mod
+
+    stamps = []
+    for path in list_mod.all_list_paths():
+        try:
+            stamps.append(os.path.getmtime(path))
+        except OSError:
+            pass
+    if runtime.rebuild_schedule_last_attempt:
+        stamps.append(runtime.rebuild_schedule_last_attempt)
+    return max(stamps) if stamps else None
+
+
+def _rebuild_schedule():
+    """(text, spec) for the configured schedule; spec None when off or unreadable.
+
+    An unreadable value cannot normally get here - settings_file.coerce()
+    refuses it at load and at save - so it is treated as off rather than
+    guessed at."""
+    import settings_file
+
+    text = str(getattr(config, "LIST_REBUILD_SCHEDULE", "") or "").strip()
+    try:
+        return text, settings_file.parse_rebuild_schedule(text)
+    except ValueError:
+        return text, None
+
+
+def next_scheduled_rebuild(now=None):
+    """When the schedule will next start a rebuild (a timestamp), `now` if it
+    is due already, or None when there is no schedule."""
+    import time as time_mod
+    from datetime import datetime
+
+    now = time_mod.time() if now is None else now
+    _text, spec = _rebuild_schedule()
+    if spec is None:
+        return None
+    last = last_list_rebuild()
+    if rebuild_is_due(spec, now, last):
+        return now
+    if spec[0] == "every":
+        return last + spec[1] * 3600
+    return _rebuild_slot_after(spec, datetime.fromtimestamp(now)).timestamp()
+
+
+def describe_rebuild_schedule(now=None):
+    """One line for the console's `status`: off, or the schedule and when next."""
+    import time as time_mod
+    from datetime import datetime
+
+    now = time_mod.time() if now is None else now
+    text, spec = _rebuild_schedule()
+    if spec is None:
+        return "off"
+    when = next_scheduled_rebuild(now)
+    if when is None or when <= now:
+        return f"{text} - due now"
+    return f"{text} - next {datetime.fromtimestamp(when).strftime('%a %d %b %H:%M')}"
+
+
+def scheduled_rebuild_tick(now=None):
+    """One check: start the rebuild when it is due. Returns True if it did."""
+    import time as time_mod
+    import announce
+
+    now = time_mod.time() if now is None else now
+    text, spec = _rebuild_schedule()
+    if spec is None or getattr(config, "update_inprogress", False):
+        return False
+    if not rebuild_is_due(spec, now, last_list_rebuild()):
+        return False
+    runtime.rebuild_schedule_last_attempt = now
+    announce.send_debug(f"Scheduled list rebuild starting (LIST_REBUILD_SCHEDULE = {text}).",
+                        category="INFO")
+    handle_list_update_request("the rebuild schedule", text, authorised=True)
+    return True
+
+
+def rebuild_schedule_worker(sleep=None):
+    """The loop: a minute's wait, then one check, for as long as the process
+    lives. Turning the setting off needs no stop - the check reads it every
+    time and does nothing while it is empty."""
+    import time as time_mod
+
+    naptime = sleep or (lambda seconds: time_mod.sleep(seconds))
+    print("[SCHEDULE] The list rebuild schedule is on.")
+    while True:
+        # The wait comes FIRST, so a bot just started connects before a due
+        # rebuild pauses its sharing.
+        naptime(60.0)
+        try:
+            scheduled_rebuild_tick()
+        except Exception as err:
+            print(f"[SCHEDULE] The scheduled rebuild check failed: {err}")
+
+
+def ensure_rebuild_schedule_worker(start=None):
+    """Start the loop above if a schedule is set and it is not running yet.
+    Returns True only when this call started it. From oserve.startup() and
+    from every rehash, so setting a schedule on the dashboard starts it live;
+    ONCE, guarded in runtime.py - see ensure_auto_refetch_worker(), the same
+    pattern for the same reasons. `start` is injectable for tests."""
+    import threading
+
+    if not str(getattr(config, "LIST_REBUILD_SCHEDULE", "") or "").strip():
+        return False
+    with runtime.rebuild_schedule_guard:
+        if runtime.rebuild_schedule_started:
+            return False
+        starter = start or (lambda: threading.Thread(
+            target=rebuild_schedule_worker, daemon=True).start())
+        starter()
+        runtime.rebuild_schedule_started = True
+    return True
 
 
 def handle_list_update_request(user, target_chan, authorised=False, user_host=None):
