@@ -136,7 +136,7 @@ def pack_size_over(path, cap):
     return False, measured
 
 
-def walk_with_sizes(top, onerror=None):
+def walk_with_sizes(top, onerror=None, workers=None):
     """Every file under `top`, with the size the directory entry already knew.
 
     WHY THIS EXISTS. os.walk is built on os.scandir, which gets each entry's
@@ -185,17 +185,33 @@ def walk_with_sizes(top, onerror=None):
     `onerror` is called with the OSError, matching os.walk's parameter of the
     same name, so an unreadable subtree is reported the way it always was
     rather than ending the scan.
+
+    SEVERAL DIRECTORIES AT ONCE (#922). On a network mount every scandir()
+    and every entry.stat() is a round trip - Linux's d_type gives the type
+    but not the size - and one directory at a time, none of them overlap: a
+    64,136-file NFS library spent about 80 s here, with every search paused.
+    `workers` directories (LIST_SCAN_THREADS unless given) are listed and
+    stat'd at once, the way QuickList - OmenServe's list maker - walks. Each
+    directory is classified exactly as below whichever thread lists it; only
+    the order directories come back in changes, and the caller sorts before
+    writing anything (#443). onerror is called here, on the caller's thread,
+    never from a worker. One worker is the walk as it always was.
     """
-    pending = [top]
-    while pending:
-        current = pending.pop()
+    if workers is None:
+        workers = scan_workers()
+    workers = max(1, int(workers))
+
+    def list_one(current):
+        """(files, subdirs, errors) for one directory, or None for files when
+        it could not be listed at all. Run by whichever thread gets it; says
+        nothing itself - the errors go back to the caller's thread."""
+        errors = []
+        subdirs = []
         try:
             with os.scandir(current) as scanning:
                 entries = list(scanning)
         except OSError as err:
-            if onerror is not None:
-                onerror(err)
-            continue
+            return None, subdirs, [err]
 
         files = []
         for entry in entries:
@@ -217,20 +233,63 @@ def walk_with_sizes(top, onerror=None):
                 # that wrote it.
                 if entry.is_dir():
                     if not entry.is_symlink():
-                        pending.append(entry.path)
+                        subdirs.append(entry.path)
                     continue
             except OSError as err:
                 # A directory entry that cannot even be classified. Report it
                 # like an unreadable subtree - it is one - rather than
                 # guessing it is a file and failing again on the stat.
-                if onerror is not None:
-                    onerror(err)
+                errors.append(err)
                 continue
             try:
                 files.append((entry.name, entry.stat().st_size))
             except OSError:
                 files.append((entry.name, None))
-        yield current, files
+        return files, subdirs, errors
+
+    def report(errors):
+        if onerror is not None:
+            for err in errors:
+                onerror(err)
+
+    if workers == 1:
+        pending = [top]
+        while pending:
+            current = pending.pop()
+            files, subdirs, errors = list_one(current)
+            report(errors)
+            pending.extend(subdirs)
+            if files is not None:
+                yield current, files
+        return
+
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="list-scan")
+    try:
+        running = {pool.submit(list_one, top): top}
+        while running:
+            finished, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in finished:
+                current = running.pop(future)
+                files, subdirs, errors = future.result()
+                report(errors)
+                for subdir in subdirs:
+                    running[pool.submit(list_one, subdir)] = subdir
+                if files is not None:
+                    yield current, files
+    finally:
+        # A caller that stops early - an exception mid-scan - must not leave
+        # workers listing a library nobody is reading any more.
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
+def scan_workers():
+    """LIST_SCAN_THREADS, held to 1..64."""
+    try:
+        wanted = int(getattr(config, "LIST_SCAN_THREADS", 16) or 1)
+    except (TypeError, ValueError):
+        wanted = 1
+    return max(1, min(64, wanted))
 
 
 def _has_extension(name, extensions):
@@ -1270,7 +1329,8 @@ def generate_master_list(list_name=None):
 
     scan_folders = library.folders(list_name)
     print("[LIST-GEN] Scanning the library in "
-          + ", ".join(f"{f.path} ({f.name})" for f in scan_folders) + "...")
+          + ", ".join(f"{f.path} ({f.name})" for f in scan_folders)
+          + f", {scan_workers()} folder(s) at a time...")
 
     all_files_data = []
     # The music list, the film-and-series list, and which folders !rar may
