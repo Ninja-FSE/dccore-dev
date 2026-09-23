@@ -491,8 +491,10 @@
 #LIST_INDEX_FILE = ./data/list_index.db
 
 # Add each MP3 and FLAC file's length and quality after its size in your list,
-# e.g. 10.3MB 4m31s 320/44.1/JS. The first rebuild with it on opens every
-# audio file and takes longer; later ones only read new or changed files.
+# e.g. 10.3MB 4m31s 320/44.1/JS. Every audio file has to be read once: on a
+# large library, or one on a network drive, that takes several rebuilds, each
+# limited by the reading time set under List rebuild. After that only new
+# files are read.
 #
 # Duration and quality after the size on the list's MP3 and FLAC rows (#567):
 # "::INFO:: 10.3MB 4m31s 320/44.1/JS" - the spelling other servers' lists use.
@@ -511,6 +513,28 @@
 # One row per audio file in the lists (about 150 bytes each). Safe to delete:
 # the next rebuild reads every file again.
 #LIST_AUDIO_INFO_CACHE = ./data/audio_info.db
+
+# How many audio files are read at once for their length and quality. On a
+# network drive most of the time is waiting, so reading several at once is
+# much faster. 1 to 64.
+#
+# How many audio files are read at once (#914). On a network mount (NFS, SMB)
+# the time goes into round trips, which overlap: one at a time measured 9.8
+# files a second on a real NFS library. 1 to 64.
+# Audio files read at once for length and quality
+#LIST_AUDIO_INFO_THREADS = 16
+
+# The longest one rebuild spends reading audio files it has not read before,
+# since searches wait while it runs. Past it, the list is published and the
+# rest are read by the next rebuild. 0 means no limit.
+#
+# The most time one rebuild spends reading audio files it has not read before
+# (#914). A rebuild pauses searches and requests, and the first one with
+# LIST_AUDIO_INFO on has the whole library to read: past this, the list
+# publishes with what was read and the rest wait for the next rebuild. 0 = no
+# limit.
+# Minutes one rebuild may spend reading new audio files; 0 = no limit
+#LIST_AUDIO_INFO_MINUTES = 5
 
 # Where the count of how often each file was sent is kept, for the Most
 # downloaded table.

@@ -353,6 +353,16 @@ LIST_SHOW_AUDIO_INFO: bool = False  # Put duration and bitrate after the size on
 # One row per audio file in the lists (about 150 bytes each). Safe to delete:
 # the next rebuild reads every file again.
 LIST_AUDIO_INFO_CACHE: str = "./data/audio_info.db"
+# How many audio files are read at once (#914). On a network mount (NFS, SMB)
+# the time goes into round trips, which overlap: one at a time measured 9.8
+# files a second on a real NFS library. 1 to 64.
+LIST_AUDIO_INFO_THREADS: int = 16  # Audio files read at once for length and quality
+# The most time one rebuild spends reading audio files it has not read before
+# (#914). A rebuild pauses searches and requests, and the first one with
+# LIST_AUDIO_INFO on has the whole library to read: past this, the list
+# publishes with what was read and the rest wait for the next rebuild. 0 = no
+# limit.
+LIST_AUDIO_INFO_MINUTES: int = 5  # Minutes one rebuild may spend reading new audio files; 0 = no limit
 
 # One row per thing this bot has ever sent, {relative path or archive name ->
 # {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not

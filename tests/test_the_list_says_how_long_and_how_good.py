@@ -67,11 +67,16 @@ def vbri_frame(frame_count, byte_count):
     return bytes(frame)
 
 
-def flac(rate=44100, channels=2, bits=16, samples=44100 * 2, audio_bytes=278750, padding=100):
+def flac(rate=44100, channels=2, bits=16, samples=44100 * 2, audio_bytes=278750, padding=100,
+         picture=0):
+    """A FLAC: STREAMINFO, then a PICTURE block of `picture` bytes if asked
+    for, then a last PADDING block, then the audio."""
     word = (rate << 44) | ((channels - 1) << 41) | ((bits - 1) << 36) | samples
     streaminfo = (b"\x10\x00\x10\x00" + b"\x00" * 6 + word.to_bytes(8, "big") + b"\x00" * 16)
-    blocks = (bytes([0x00]) + len(streaminfo).to_bytes(3, "big") + streaminfo
-              + bytes([0x81]) + padding.to_bytes(3, "big") + b"\x00" * padding)
+    blocks = bytes([0x00]) + len(streaminfo).to_bytes(3, "big") + streaminfo
+    if picture:
+        blocks += bytes([0x06]) + picture.to_bytes(3, "big") + b"\x00" * picture
+    blocks += bytes([0x81]) + padding.to_bytes(3, "big") + b"\x00" * padding
     return b"fLaC" + blocks + b"\x55" * audio_bytes
 
 
@@ -97,11 +102,11 @@ class ReadingMp3(FileCase):
         # 1000 frames of 417 bytes at 128 kbps: 417000 * 8 / 128000 = 26.06 s.
         self.assertEqual(self.described("cbr.mp3", frames(1000)), "0m26s 128/44.1/JS")
 
-    def test_tags_at_either_end_are_not_audio(self):
-        # 940 frames: 24.499 s of audio. Counting the ID3v1 tag's 128 bytes
-        # as audio would make it 24.507 s, and the row would say 0m25s.
-        data = id3v2() + frames(940) + id3v1()
-        self.assertEqual(self.described("tagged.mp3", data), "0m24s 128/44.1/JS")
+    def test_a_leading_tag_is_not_audio_and_a_trailing_one_changes_nothing(self):
+        # An ID3v1 tag at the end is no longer looked for (#914): a request of
+        # its own, for 128 bytes - 8 ms of a 128 kbps file.
+        data = id3v2() + frames(1000) + id3v1()
+        self.assertEqual(self.described("tagged.mp3", data), "0m26s 128/44.1/JS")
 
     def test_a_tag_bigger_than_the_search_window_is_skipped(self):
         """Embedded cover art makes ID3v2 tags of hundreds of KB; the frame
@@ -182,6 +187,56 @@ class NothingItCannotReadIsGuessed(FileCase):
         self.assertEqual(audio_info.describe(None), "")
 
 
+class CountingOpen:
+    """audio_info's open(), counting the reads each file costs - on a network
+    mount every one is a round trip (#914)."""
+
+    def __init__(self, case):
+        self.reads = []
+        real = open
+
+        class Counted:
+            def __init__(inner, path, *args, **kwargs):
+                inner.file = real(path, *args, **kwargs)
+                self.reads.append(0)
+
+            def read(inner, *args):
+                self.reads[-1] += 1
+                return inner.file.read(*args)
+
+            def seek(inner, *args):
+                return inner.file.seek(*args)
+
+            def __enter__(inner):
+                return inner
+
+            def __exit__(inner, *exc):
+                inner.file.close()
+
+        audio_info.open = Counted
+        case.addCleanup(delattr, audio_info, "open")
+
+
+class FewRequestsPerFile(FileCase):
+    def test_an_ordinary_mp3_or_flac_is_one_read(self):
+        counted = CountingOpen(self)
+        self.described("cbr.mp3", id3v2() + frames(1000))
+        self.described("vbr.mp3", xing_frame(b"Xing", 2297, 1837592) + frames(5))
+        self.described("track.flac", flac())
+        self.assertEqual(counted.reads, [1, 1, 1])
+
+    def test_cover_art_costs_one_more(self):
+        counted = CountingOpen(self)
+        self.assertEqual(self.described("art.mp3", id3v2(body_size=200 * 1024) + frames(1000)),
+                         "0m26s 128/44.1/JS")
+        # The picture is stepped over: the block header after it is fetched
+        # where it is, not read up to.
+        self.assertEqual(self.described("art.flac", flac(picture=3 * 1024 * 1024)), "0m2s 1115/44.1/S")
+        # A big LAST block needs nothing after it: the audio starts there.
+        self.assertEqual(self.described("pad.flac", flac(padding=3 * 1024 * 1024)), "0m2s 1115/44.1/S")
+        self.assertEqual(counted.reads, [2, 2, 1])
+
+
 class TheCache(FileCase):
     def counting(self):
         self.reads = []
@@ -196,61 +251,77 @@ class TheCache(FileCase):
         self.addCleanup(cache.close)
         return cache
 
+    def build(self, scope="", keys=("k",), publish=True):
+        """One rebuild's worth: note, read, publish, close."""
+        cache = self.open(scope)
+        for key in keys:
+            cache.note(key, self.path, os.path.getsize(self.path))
+        cache.read_pending(workers=2)
+        if publish:
+            cache.publish()
+        cache.close()
+        return cache
+
     def setUp(self):
         super().setUp()
         self.reader = self.counting()
         self.path = self.write("a.mp3", frames(1000))
-        self.size = os.path.getsize(self.path)
 
     def test_an_unchanged_file_is_not_read_again(self):
-        first = self.open()
-        first.observe("k", self.path, self.size)
-        first.publish()
-        first.close()
-        second = self.open()
-        second.observe("k", self.path, self.size)
+        self.build()
+        second = self.build()
         self.assertEqual(self.reads, ["a.mp3"])
         self.assertEqual(second.suffix("k"), "0m26s 128/44.1/JS")
         self.assertEqual((second.read_count, second.reused_count), (0, 1))
 
-    def test_a_changed_file_is(self):
-        first = self.open()
-        first.observe("k", self.path, self.size)
-        first.close()
+    def test_note_makes_no_request_at_all(self):
+        """The whole point on a network mount: an unchanged file costs no
+        stat and no read - its size came from the directory listing."""
+        self.build()
+        calls = []
+        real_stat = os.stat
+        cache = self.open()
+        size = os.path.getsize(self.path)
+
+        def counting_stat(*args, **kwargs):
+            calls.append(args[0])
+            return real_stat(*args, **kwargs)
+
+        os.stat = counting_stat
+        try:
+            cache.note("k", self.path, size)
+        finally:
+            os.stat = real_stat
+        self.assertEqual(calls, [])
+        self.assertEqual(cache.pending, [])
+
+    def test_a_changed_size_is_read_again(self):
+        self.build()
         self.write("a.mp3", frames(2000))
-        second = self.open()
-        second.observe("k", self.path, os.path.getsize(self.path))
+        second = self.build()
         self.assertEqual(self.reads, ["a.mp3", "a.mp3"])
         self.assertEqual(second.suffix("k"), "0m52s 128/44.1/JS")
 
     def test_a_published_rebuild_forgets_what_it_did_not_see(self):
-        first = self.open()
-        first.observe("gone", self.path, self.size)
-        first.publish()
-        first.close()
-        second = self.open()
-        second.publish()
-        second.close()
-        third = self.open()
-        third.observe("gone", self.path, self.size)
-        self.assertEqual(len(self.reads), 2, "the row was dropped, so it was read again")
+        self.build(keys=("gone", "kept"))
+        self.build(keys=("kept",))
+        self.build(keys=("gone", "kept"))
+        self.assertEqual(self.reads.count("a.mp3"), 3, "gone and kept once, then gone again")
+
+    def test_a_stopped_rebuild_keeps_what_it_read_and_forgets_nothing(self):
+        self.build(keys=("old",))
+        self.build(keys=("new",), publish=False)
+        self.build(keys=("old", "new"))
+        self.assertEqual(len(self.reads), 2, "neither was read twice")
 
     def test_a_rebuild_that_did_not_see_a_file_has_no_suffix_for_it(self):
-        first = self.open()
-        first.observe("k", self.path, self.size)
-        first.close()
+        self.build()
         self.assertEqual(self.open().suffix("k"), "")
 
     def test_one_list_never_prunes_another(self):
-        other = self.open(scope="other")
-        other.observe("k", self.path, self.size)
-        other.publish()
-        other.close()
-        primary = self.open(scope="")
-        primary.publish()
-        primary.close()
-        again = self.open(scope="other")
-        again.observe("k", self.path, self.size)
+        self.build(scope="other")
+        self.build(scope="", keys=())
+        self.build(scope="other")
         self.assertEqual(self.reads, ["a.mp3"], "the other list's row survived")
 
     def test_a_cache_that_cannot_open_says_so(self):
@@ -260,6 +331,68 @@ class TheCache(FileCase):
         said = []
         self.assertIsNone(audio_info.Cache.open(path=os.path.join(blocker, "audio.db"), log=said.append))
         self.assertIn("written with sizes only", said[0])
+
+
+class ReadingManyAtOnce(FileCase):
+    def pending(self, count):
+        cache = audio_info.Cache.open(reader=self.reader)
+        self.addCleanup(cache.close)
+        for n in range(count):
+            path = self.write(f"t{n}.mp3", frames(10))
+            cache.note(f"k{n}", path, os.path.getsize(path))
+        return cache
+
+    def test_the_reads_really_overlap(self):
+        """Four reads that can only finish if four are in flight together:
+        a barrier of four, which a one-at-a-time reader never passes."""
+        import threading
+        barrier = threading.Barrier(4, timeout=10)
+
+        def reader(path, size=None):
+            barrier.wait()
+            return audio_info.read(path, size)
+
+        self.reader = reader
+        cache = self.pending(4)
+        cache.read_pending(workers=4)
+        self.assertEqual(cache.read_count, 4)
+        self.assertTrue(all(cache.suffix(f"k{n}") for n in range(4)))
+
+    def test_past_the_time_limit_no_read_is_started(self):
+        """A clock that says the budget ran out after two reads were started:
+        those finish, nothing else starts, and the rest are counted as left."""
+        started = []
+        ticks = iter([0, 0, 0, 999] + [999] * 50)
+
+        def reader(path, size=None):
+            started.append(path)
+            return audio_info.read(path, size)
+
+        self.reader = reader
+        cache = self.pending(6)
+        cache.read_pending(workers=1, budget=60, clock=lambda: next(ticks))
+        self.assertEqual(len(started), 2)
+        self.assertEqual((cache.read_count, cache.left_count), (2, 4))
+        self.assertEqual(cache.suffix("k5"), "")
+
+    def test_a_reader_that_raises_costs_only_its_file(self):
+        def reader(path, size=None):
+            if path.endswith("t1.mp3"):
+                raise OSError("stale NFS handle")
+            return audio_info.read(path, size)
+
+        self.reader = reader
+        cache = self.pending(3)
+        cache.read_pending(workers=2)
+        self.assertEqual(cache.suffix("k1"), "")
+        self.assertTrue(cache.suffix("k0") and cache.suffix("k2"))
+
+    def test_progress_is_reported(self):
+        self.reader = audio_info.read
+        cache = self.pending(3)
+        seen = []
+        cache.read_pending(workers=2, progress=lambda done, total: seen.append((done, total)))
+        self.assertEqual(seen[-1], (3, 3))
 
 
 class TheList(FileCase):
@@ -272,11 +405,21 @@ class TheList(FileCase):
         self.write("Front.jpg", b"\xff\xd8" + b"\x00" * 500, folder="Album")
         self.write("Broken.mp3", b"not audio at all", folder="Album")
 
-    def rows(self, **overrides):
+    def rows(self, _clock=None, **overrides):
         self.set_config(**overrides)
         buffer = io.StringIO()
-        with redirect_stdout(buffer):
-            built = update_list.generate_master_list()
+        real = audio_info.Cache.read_pending
+        if _clock is not None:
+            ticks = iter(_clock)
+
+            def with_clock(cache, **kwargs):
+                return real(cache, clock=lambda: next(ticks), **kwargs)
+            audio_info.Cache.read_pending = with_clock
+        try:
+            with redirect_stdout(buffer):
+                built = update_list.generate_master_list()
+        finally:
+            audio_info.Cache.read_pending = real
         self.assertTrue(built, buffer.getvalue())
         path = list_mod.find_latest_list()
         with open(path, encoding="utf-8") as handle:
@@ -291,6 +434,7 @@ class TheList(FileCase):
         self.assertNotIn(" ", rows["Broken.mp3"], "unreadable: size only")
         # make_tree() ships a few audio files of its own; every one is read.
         self.assertRegex(said, r"\[LIST-GEN\] Audio info: [1-9]\d* file\(s\) read, 0 unchanged")
+        self.assertRegex(said, r"Reading the length and quality of [1-9]\d* new or changed audio file\(s\), 16 at a time, for at most 5 minute\(s\)")
 
     def test_off_nothing_is_opened_and_the_rows_are_as_before(self):
         rows, said = self.rows(LIST_SHOW_AUDIO_INFO=False)
@@ -314,6 +458,19 @@ class TheList(FileCase):
         keys = [row[0] for row in conn.execute("SELECT key FROM audio")]
         self.assertTrue(any(key.endswith("Opening.mp3") for key in keys), keys)
         self.assertFalse(any(key.endswith("Closing.flac") for key in keys), keys)
+
+    def test_a_rebuild_out_of_time_publishes_and_the_next_one_finishes(self):
+        rows, said = self.rows(LIST_SHOW_AUDIO_INFO=True, LIST_AUDIO_INFO_THREADS=1,
+                               LIST_AUDIO_INFO_MINUTES=1, _clock=[0, 0] + [999] * 200)
+        # One read started before the clock ran out; which file it was is the
+        # walk's order, and make_tree() has audio files of its own.
+        self.assertIn("not read within LIST_AUDIO_INFO_MINUTES = 1", said)
+        self.assertRegex(said, r"Audio info: 1 file\(s\) read, 0 unchanged since the last "
+                               r"rebuild, [1-9]\d* left for the next one\.")
+        self.assertLessEqual(len([tail for tail in rows.values() if " " in tail]), 1)
+        rows, said = self.rows(LIST_SHOW_AUDIO_INFO=True, LIST_AUDIO_INFO_MINUTES=0)
+        self.assertRegex(rows["Example Artist - 01 - Opening.mp3"], r" 0m26s 128/44\.1/JS$")
+        self.assertRegex(rows["Example Artist - 02 - Closing.flac"], r" 0m2s 1115/44\.1/S$")
 
     def test_our_own_parser_reads_the_row_back(self):
         self.rows(LIST_SHOW_AUDIO_INFO=True)

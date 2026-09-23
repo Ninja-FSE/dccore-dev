@@ -21,19 +21,37 @@ bots' read it unchanged:
 - **Standard library only** (`audio_info.py`, no mutagen). MP3: skip every ID3v2 tag, find the first frame whose
   successor is where its header says (a lone sync pattern in padding proves nothing), decode it, then read a
   Xing / Info / VBRI header for the frame count - the only honest duration for VBR; without one it is CBR and the
-  audio bytes over the bitrate, an ID3v1 tag at the end excluded. FLAC: `fLaC`, the metadata blocks walked (a big
-  picture block is seeked over, not read), STREAMINFO for rate, channels and samples; the bitrate is the real one,
-  audio bytes over duration. A few KB per file, never a full read.
+  audio bytes over the bitrate. FLAC: `fLaC`, the metadata blocks walked (a big picture block is stepped over, not
+  read), STREAMINFO for rate, channels and samples; the bitrate is the real one, audio bytes over duration.
 - **Spelling decided here** (the issue left it open): duration `4m31s` (minutes go past 59: `72m10s`),
   then `kbps/kHz/channels` with channels `S` `JS` `DC` `M` or `6ch`. A VBR average is marked with a leading
   `~` (`~245/44.1/JS`) - no spelling for it was on record.
 - **Anything it cannot read keeps its size and nothing more** - a malformed file, an unknown format, a read error.
   `read()` never raises; a list build is never taken down by one file.
-- **The cache**, SQLite at `LIST_AUDIO_INFO_CACHE` (`./data/audio_info.db`, beside the list index): keyed by the
-  row's folder and name, checked against the file's size and mtime, so only the first rebuild opens every file and
-  later ones only what changed. Each list prunes only its own rows, and only when its rebuild **publishes** - an
-  aborted scan that saw half the library does not forget the other half. The rebuild says how many it read and
-  how many were unchanged. A cache that cannot be opened is said, and that list is written size-only.
+- **Built for a network mount, after a live test on one.** The first version read one file at a time during the
+  walk - a stat, a 64 KB read and a seek to the end for an ID3v1 tag each - and on the operator's real library
+  (64,136 files, 1.85 TB, NFS) managed **9.8 files a second**: two hours for one rebuild, with `PAUSE_ON_UPDATE`
+  refusing every search and request meanwhile (Neo's report on #914; the run was stopped, cleanly). On a network
+  mount the time is round trips, not bytes, so it now works the way QuickList - OmenServe's list maker - does:
+  - **One request for an ordinary file.** Opened unbuffered and read through a window that fetches only what it
+    does not hold: one 16 KB read covers the ID3 header, the first frame and its Xing header, or FLAC's STREAMINFO.
+    A big ID3 tag or a picture block in the middle costs one more; the ID3v1 tag is no longer looked for (a request
+    for 128 bytes, 8 ms of a 128 kbps file).
+  - **Many files at once.** Files are only *noted* during the walk; the ones to read are read after it,
+    `LIST_AUDIO_INFO_THREADS` (16) at a time, so the round trips overlap. With 5 ms of simulated latency per
+    request, 16 workers read 35 times as many files a second as one.
+  - **No request at all for an unchanged file.** The cache is loaded into memory once and checked against the size
+    the directory listing already gave - no stat, no read - and written back once.
+  - **A time limit.** `LIST_AUDIO_INFO_MINUTES` (5; 0 = none) bounds the reading one rebuild does: past it no read is
+    started, the list publishes with what was read, the rest keep their size alone and the next rebuild reads them.
+    The dashboard shows *Reading length and quality: n of m files*, which also keeps the stall check fed.
+  The two live under *List rebuild* on the Settings page.
+- **The cache**, SQLite at `LIST_AUDIO_INFO_CACHE` (`./data/audio_info.db`, beside the list index), keyed by the
+  row's folder and name. Each list prunes only its own rows, and only when its rebuild **publishes**; a rebuild that
+  fails or is stopped keeps what it read and forgets nothing. A file that could not be read is remembered as such
+  until its size changes, so a broken file is not re-read on every rebuild. The rebuild says how many it read, how
+  many were unchanged and how many are left. A cache that cannot be opened is said, and that list is written
+  size-only. (A cache from the first version is read as it is.)
 - **`@find` keeps the name first.** A result row goes through the line budget as before, but one that would be cut
   is sent without its audio tail first, so no letter of the name - the part people paste back - is spent on it.
   Search words still match the whole row, so `@find <artist> 320` narrows to 320 kbps copies.
@@ -41,12 +59,15 @@ bots' read it unchanged:
   `!rar` rows stay exactly as they were.
 
 Stacked on #913, where *Your list* has room since #776 moved the rebuild limits out.
-`tests/test_the_list_says_how_long_and_how_good.py` (31) builds every MP3 and FLAC byte by byte - CBR, both ID3
+`tests/test_the_list_says_how_long_and_how_good.py` (40) builds every MP3 and FLAC byte by byte - CBR, both ID3
 tags, a tag bigger than the search window, a false sync, all four channel modes, Xing, Info, VBRI, MPEG-2, FLAC
-mono / 6ch / 96 kHz / a 3 MB picture block, six kinds of broken file - plus the cache (reuse, change, prune,
-per-list scope, cannot open), a real rebuild on and off, and `@find` at the exact length where the tail decides
-whether the name is cut. Mutation-checked: removing the sync confirmation, the ID3v1 exclusion, the ID3v2 skip,
-the per-list prune, the size/mtime check, the prune on publish or the search fallback each fails a test.
+mono / 6ch / 96 kHz / a 3 MB picture block, six kinds of broken file - plus the reads each file costs (one, or two
+with cover art), the cache (no request for an unchanged file, a changed size, prune, a stopped rebuild, per-list
+scope, cannot open), reads that provably overlap (a barrier only four concurrent reads pass), the time limit, a
+reader that raises, a real rebuild on, off and out of time, and `@find` at the exact length where the tail decides
+whether the name is cut. Mutation-checked: removing the sync confirmation, the ID3v2 skip, the window's reuse, the
+16 KB first read, the size check, the parallelism, the time limit, the save on a stopped rebuild, the per-list
+prune, the prune on publish or the search fallback each fails a test.
 
 ### 🆕 The bot says when a new version of DCCore is out (#572)
 

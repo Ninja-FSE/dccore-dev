@@ -251,10 +251,13 @@ Two settings decide how the result is split up:
 - **`RAR_EXTENSIONS`** — which formats make a folder packable with `!rar`. A folder needs one of these to get a row in the album list. Everything else stays listed and directly requestable; this only decides what can be packed. **`MAX_RAR_FOLDER_SIZE`** bounds how large a folder `!rar` will pack — 10 GB by default, which passes a large box set and refuses the folder somebody names hoping it is a library. Set it to 0 for no limit.
 
 **`LIST_SHOW_AUDIO_INFO`** (off by default) adds each MP3 and FLAC file's length and quality after its size -
-`::INFO:: 10.3MB 4m31s 320/44.1/JS`, the way other servers' lists show it (`~245` is a VBR average). The first
-rebuild with it on opens every audio file, so on a large library expect it to take noticeably longer; what it read
-is kept in `data/audio_info.db` and later rebuilds only open new or changed files. Deleting that file is safe - the
-next rebuild reads everything again.
+`::INFO:: 10.3MB 4m31s 320/44.1/JS`, the way other servers' lists show it (`~245` is a VBR average). Every audio
+file has to be read once. The files are read several at a time (`LIST_AUDIO_INFO_THREADS`, 16), and each rebuild
+spends at most `LIST_AUDIO_INFO_MINUTES` (5) on it, since searches wait while a rebuild runs: on a large library,
+or one on a network drive, the first few rebuilds each publish with part of the library read and the rest showing
+its size alone, until everything has been read once. After that only new files are read, and a rebuild costs what
+it did without the setting. What was read is kept in `data/audio_info.db`; deleting it is safe - the files are
+read again.
 
 ### If your users queue with AutoQ
 

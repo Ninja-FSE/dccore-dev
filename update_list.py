@@ -1489,8 +1489,11 @@ def generate_master_list(list_name=None):
                     else:
                         all_files_data.append((rel_dir, file, file_bytes))
                         if audio is not None and audio_info.is_audio(file):
-                            audio.observe(audio_info.row_key(rel_dir, file),
-                                          os.path.join(root, file), file_bytes)
+                            # No request here: an unchanged file is answered
+                            # from the cache by its size, the rest are read
+                            # after the walk, many at once (#914).
+                            audio.note(audio_info.row_key(rel_dir, file),
+                                       os.path.join(root, file), file_bytes)
 
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
@@ -1498,6 +1501,25 @@ def generate_master_list(list_name=None):
         if audio is not None:
             audio.close()
         return False
+
+    # The audio files new or changed since the last rebuild (#567, #914).
+    # After the walk rather than inside it: read several at once, where on a
+    # network mount the time is round trips, and within LIST_AUDIO_INFO_MINUTES
+    # - the rebuild is pausing every search and request meanwhile.
+    if audio is not None and audio.pending:
+        workers = max(1, min(64, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 16) or 1)))
+        minutes = max(0, int(getattr(config, "LIST_AUDIO_INFO_MINUTES", 5) or 0))
+        listed = len(all_files_data) + len(video_files_data)
+        print(f"[LIST-GEN] Reading the length and quality of {len(audio.pending):,} new or changed "
+              f"audio file(s), {workers} at a time"
+              f"{f', for at most {minutes} minute(s)' if minutes else ''}...")
+        audio.read_pending(workers=workers, budget=minutes * 60,
+                           progress=lambda done, total: write_progress(
+                               "audio", folder_index=done, folder_count=total, files=listed))
+        if audio.left_count:
+            print(f"[LIST-GEN] {audio.left_count:,} audio file(s) not read within "
+                  f"LIST_AUDIO_INFO_MINUTES = {minutes}: they show their size alone this "
+                  f"time, and the next rebuild reads them.")
 
     if denied_dirs:
         # Said once, with the count, because it is a standing condition rather
@@ -2057,7 +2079,8 @@ def generate_master_list(list_name=None):
             # failed one may have seen half the library.
             audio.publish()
             print(f"[LIST-GEN] Audio info: {audio.read_count:,} file(s) read, "
-                  f"{audio.reused_count:,} unchanged since the last rebuild.")
+                  f"{audio.reused_count:,} unchanged since the last rebuild"
+                  f"{f', {audio.left_count:,} left for the next one' if audio.left_count else ''}.")
         return True
             
     except Exception as e:

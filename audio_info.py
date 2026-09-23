@@ -29,22 +29,45 @@ Anything else, and anything these cannot make sense of, is None: the row keeps
 its size and nothing more. A malformed file must never take a list build down,
 so read() never raises.
 
-THE CACHE. The scan otherwise asks each file for nothing but its size; this
-opens every one. Kept in SQLite (stdlib) at LIST_AUDIO_INFO_CACHE, keyed by the
-row's list path and checked against the file's size and mtime, so a rebuild
-re-reads only what changed - the first one pays, the rest are a stat each.
-Rows for files no longer in the library are dropped when a rebuild publishes.
+FEW REQUESTS PER FILE, MANY FILES AT ONCE. Measured on a real library on an
+NFS mount (#914): read one file at a time, with a stat, a 64 KB read and a
+seek to the end each, it managed 9.8 files a second - two hours for 64,136
+files, every search blocked meanwhile. On a network mount the time is round
+trips, not bytes. So each file is opened unbuffered and read in as few
+requests as the format allows: one 16 KB read covers the ID3 header, the
+first frame and its Xing header, or FLAC's STREAMINFO, in the ordinary case;
+a big tag (cover art) or a big picture block costs one more. The ID3v1 tag at
+the end is no longer looked for - a request to shave 128 bytes, a few
+milliseconds, off a CBR duration. And the files are read several at a
+time (LIST_AUDIO_INFO_THREADS), the way QuickList - OmenServe's list maker -
+reads them: round trips overlap, bytes do not matter.
+
+THE CACHE, the way QuickList keeps its own: loaded into memory once, checked
+against the SIZE the directory scan already knows - no stat, no request, for a
+file that has not changed - and written back once. SQLite (stdlib) at
+LIST_AUDIO_INFO_CACHE. Rows for files no longer in the library are dropped only
+when a rebuild publishes; what a failed or stopped rebuild read is kept.
+
+A TIME LIMIT, so the first run cannot hold the bot. A rebuild pauses searches
+and requests (PAUSE_ON_UPDATE), and the first one with this on has every audio
+file to read. LIST_AUDIO_INFO_MINUTES bounds it: past the limit no new read is
+started, the list publishes with what was read, and the rest keep their size
+alone until the next rebuild reads them. Later rebuilds read only new files.
 """
 
 import os
 import sqlite3
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import defaults as config
 
 # Extensions read at all. Everything else is size-only without being opened.
 AUDIO_EXTENSIONS = (".mp3", ".flac")
 
+# The first request's size: the ordinary file's ID3 header, first frame and
+# Xing header, or FLAC's STREAMINFO, all fit.
+FIRST_READ = 16 * 1024
 # How far past the ID3v2 tag the first MP3 frame may start. Encoders pad; a
 # file whose first frame is further out than this is size-only, not a stall.
 MP3_SYNC_WINDOW = 64 * 1024
@@ -67,13 +90,38 @@ def is_audio(name):
     return name.lower().endswith(AUDIO_EXTENSIONS)
 
 
-def _id3v2_end(handle, start=0):
+class _Window:
+    """The bytes of one file, fetched in as few requests as possible.
+
+    Every access asks for (offset, length); it is answered from the last read
+    when that covers it, and otherwise costs ONE read of at least FIRST_READ
+    from that offset. The file is opened unbuffered, so a read is a request
+    and nothing is fetched behind it."""
+
+    def __init__(self, handle):
+        self.handle = handle
+        self.base = 0
+        self.data = b""
+
+    def get(self, offset, length, need=None):
+        """Up to `length` bytes at `offset`; `need` of them must already be
+        in the window for it to be enough, else they are fetched."""
+        need = length if need is None else need
+        start = offset - self.base
+        if 0 <= start and start + need <= len(self.data):
+            return self.data[start:start + length]
+        self.handle.seek(offset)
+        self.data = self.handle.read(max(length, FIRST_READ))
+        self.base = offset
+        return self.data[:length]
+
+
+def _id3v2_end(window, start=0):
     """The offset just past every ID3v2 tag at `start` (there may be more
     than one, back to back), or `start` when there is none."""
     offset = start
     for _ in range(8):
-        handle.seek(offset)
-        head = handle.read(10)
+        head = window.get(offset, 10)
         if len(head) < 10 or head[:3] != b"ID3":
             break
         size = 0
@@ -129,20 +177,19 @@ def _first_frame(data):
     return None
 
 
-def _read_mp3(handle, size):
-    start = _id3v2_end(handle)
-    handle.seek(start)
-    data = handle.read(MP3_SYNC_WINDOW)
+def _read_mp3(window, size):
+    start = _id3v2_end(window)
+    # What the first read already holds past the tag, then - only if no frame
+    # is found in it - the whole search window in one more request.
+    data = window.get(start, FIRST_READ, need=1)
     found = _first_frame(data)
+    if not found and len(data) < MP3_SYNC_WINDOW and start + len(data) < size:
+        data = window.get(start, MP3_SYNC_WINDOW)
+        found = _first_frame(data)
     if not found:
         return None
     at, header = found
-    audio_end = size
-    if size >= 128:
-        handle.seek(size - 128)
-        if handle.read(3) == b"TAG":
-            audio_end = size - 128
-    audio_bytes = audio_end - (start + at)
+    audio_bytes = size - (start + at)
     if audio_bytes <= 0:
         return None
 
@@ -183,27 +230,26 @@ def _read_mp3(handle, size):
             "channels": _MP3_MODES[header["mode"]], "vbr": vbr}
 
 
-def _read_flac(handle, size):
-    start = _id3v2_end(handle)
-    handle.seek(start)
-    if handle.read(4) != b"fLaC":
+def _read_flac(window, size):
+    start = _id3v2_end(window)
+    if window.get(start, 4) != b"fLaC":
         return None
     offset = start + 4
     info = None
     for _ in range(FLAC_MAX_BLOCKS):
-        head = handle.read(4)
+        head = window.get(offset, 4)
         if len(head) < 4:
             return None
         length = int.from_bytes(head[1:4], "big")
         if head[0] & 0x7F == 0:
-            body = handle.read(length)
+            body = window.get(offset + 4, length)
             if length < 34 or len(body) < 34:
                 return None
             word = int.from_bytes(body[10:18], "big")
             info = {"rate": word >> 44, "channels": ((word >> 41) & 7) + 1,
                     "samples": word & 0xFFFFFFFFF}
-        else:
-            handle.seek(length, 1)
+        # Any other block - a picture of megabytes - is stepped over: the next
+        # header is fetched where it is, not read up to.
         offset += 4 + length
         if head[0] & 0x80:
             break
@@ -225,11 +271,14 @@ def read(path, size=None):
     try:
         if size is None:
             size = os.path.getsize(path)
-        with open(path, "rb") as handle:
+        if not name.endswith(AUDIO_EXTENSIONS):
+            return None
+        # Unbuffered: a read is exactly one request, nothing fetched behind it.
+        with open(path, "rb", buffering=0) as handle:
+            window = _Window(handle)
             if name.endswith(".mp3"):
-                return _read_mp3(handle, size)
-            if name.endswith(".flac"):
-                return _read_flac(handle, size)
+                return _read_mp3(window, size)
+            return _read_flac(window, size)
     except Exception:
         return None
     return None
@@ -251,80 +300,137 @@ def cache_path():
 class Cache:
     """What a rebuild knows about each audio file, kept between rebuilds.
 
-    observe() is called from the walk, once per listed audio file: it answers
-    from the stored row when the file's size and mtime still match, and reads
-    the file otherwise. suffix() is called while the list is written. publish()
-    drops every row this rebuild did not observe - a file removed from the
-    library - and is called only when the rebuild publishes, so an aborted scan
-    that saw half the library does not throw away the other half.
+    note() is called from the walk for each listed audio file: a file whose
+    size matches the stored row is answered from memory, anything else is put
+    aside. read_pending() then reads what was put aside, many at once and
+    within a time limit. suffix() answers while the list is written. publish()
+    stores what this rebuild knows and drops every row it did not see - a file
+    removed from the library - and is called only when the rebuild publishes;
+    close() without it keeps what was read and drops nothing, so an aborted
+    scan that saw half the library does not forget the other half.
 
     Opening can fail (a read-only data directory, a damaged file); then open()
     returns None, the caller says so, and the list is written size-only.
     """
 
-    COMMIT_EVERY = 2000
-
     def __init__(self, conn, reader=None, scope=""):
         self.conn = conn
         self.scope = scope
-        self.run = time.time_ns()
         self.reader = reader or read
-        self.pending = 0
+        self.known = {key: (size, suffix or "") for key, size, suffix in conn.execute(
+            "SELECT key, size, suffix FROM audio WHERE scope = ?", (scope,))}
+        self.seen = {}       # key -> suffix, for every audio file this rebuild listed and knows
+        self.sizes = {}      # key -> size, for the same
+        self.fresh = {}      # key -> (size, suffix) read by this rebuild
+        self.pending = []    # (key, path, size) still to read
         self.read_count = 0
         self.reused_count = 0
+        self.left_count = 0
+        self.published = False
 
     @classmethod
     def open(cls, path=None, reader=None, log=print, scope=""):
         """`scope` is the list being built: each list prunes only its own
         rows, so rebuilding one never empties another's."""
         path = path or cache_path()
+        conn = None
         try:
             folder = os.path.dirname(path)
             if folder:
                 os.makedirs(folder, exist_ok=True)
             conn = sqlite3.connect(path)
+            # mtime and run are kept for a cache written before #914's rework;
+            # nothing reads them now.
             conn.execute("CREATE TABLE IF NOT EXISTS audio (scope TEXT, key TEXT, size INTEGER, "
                          "mtime INTEGER, suffix TEXT, run INTEGER, PRIMARY KEY (scope, key))")
             conn.commit()
             return cls(conn, reader, scope or "")
         except (sqlite3.Error, OSError) as err:
+            if conn is not None:
+                conn.close()
             log(f"[LIST-GEN] Could not open the audio info cache at {path!r} ({err}); "
                 f"this list is written with sizes only.")
             return None
 
-    def observe(self, key, path, size):
-        try:
-            mtime = os.stat(path).st_mtime_ns
-        except OSError:
-            return
-        row = self.conn.execute("SELECT size, mtime FROM audio WHERE scope = ? AND key = ?",
-                                (self.scope, key)).fetchone()
-        if row and row[0] == size and row[1] == mtime:
-            self.conn.execute("UPDATE audio SET run = ? WHERE scope = ? AND key = ?",
-                              (self.run, self.scope, key))
+    def note(self, key, path, size):
+        """One listed audio file. No request is made here: a file whose size
+        has not changed is answered from the cache, anything else waits for
+        read_pending()."""
+        hit = self.known.get(key)
+        if hit is not None and hit[0] == size:
+            self.seen[key] = hit[1]
+            self.sizes[key] = size
             self.reused_count += 1
         else:
-            suffix = describe(self.reader(path, size))
-            self.conn.execute("INSERT OR REPLACE INTO audio (scope, key, size, mtime, suffix, run) "
-                              "VALUES (?, ?, ?, ?, ?, ?)", (self.scope, key, size, mtime, suffix, self.run))
-            self.read_count += 1
-        self.pending += 1
-        if self.pending >= self.COMMIT_EVERY:
-            self.conn.commit()
-            self.pending = 0
+            self.pending.append((key, path, size))
+
+    def read_pending(self, workers=16, budget=None, clock=time.monotonic, progress=None):
+        """Read what note() put aside, `workers` at a time. With `budget`
+        (seconds), no read is STARTED after it runs out - the ones in flight
+        finish - and the rest are left for the next rebuild. `progress(done,
+        total)` is called as reads complete, at least once a second."""
+        total = len(self.pending)
+        if not total:
+            return
+        workers = max(1, int(workers))
+        deadline = None if not budget else clock() + budget
+        queue = iter(self.pending)
+        running = {}
+        done = 0
+
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="audio-info") as pool:
+            def top_up():
+                while len(running) < workers * 2:
+                    if deadline is not None and clock() >= deadline:
+                        return
+                    item = next(queue, None)
+                    if item is None:
+                        return
+                    key, path, size = item
+                    running[pool.submit(self.reader, path, size)] = (key, size)
+
+            top_up()
+            while running:
+                finished, _ = wait(running, timeout=1.0, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    key, size = running.pop(future)
+                    try:
+                        suffix = describe(future.result())
+                    except Exception:
+                        suffix = ""
+                    self.seen[key] = suffix
+                    self.sizes[key] = size
+                    self.fresh[key] = (size, suffix)
+                    done += 1
+                if progress is not None:
+                    progress(done, total)
+                top_up()
+
+        self.read_count = done
+        self.left_count = total - done
+        self.pending = []
 
     def suffix(self, key):
-        row = self.conn.execute("SELECT suffix FROM audio WHERE scope = ? AND key = ? AND run = ?",
-                                (self.scope, key, self.run)).fetchone()
-        return row[0] if row and row[0] else ""
+        return self.seen.get(key, "")
+
+    def _save(self, rows):
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO audio (scope, key, size, mtime, suffix, run) VALUES (?, ?, ?, 0, ?, 0)",
+            ((self.scope, key, size, suffix) for key, (size, suffix) in rows))
 
     def publish(self):
-        self.conn.execute("DELETE FROM audio WHERE scope = ? AND run != ?", (self.scope, self.run))
-        self.conn.commit()
+        """This rebuild published: keep what it saw, forget the rest."""
+        with self.conn:
+            self.conn.execute("DELETE FROM audio WHERE scope = ?", (self.scope,))
+            self._save((key, (self.sizes[key], suffix)) for key, suffix in self.seen.items())
+        self.published = True
 
     def close(self):
+        """Without publish(): keep what was read, drop nothing."""
         try:
-            self.conn.commit()
+            if not self.published and self.fresh:
+                with self.conn:
+                    self._save(self.fresh.items())
             self.conn.close()
         except sqlite3.Error:
             pass
