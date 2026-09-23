@@ -40,6 +40,30 @@ version parsing, each failure's wording, never-silent, said once per release, pr
 the loop, off starts nothing, the console, the setup page (and that a redisplay after a form error keeps an
 unticked box unticked - it fell back to the shipped `True`), and the dashboard routes behind the login.
 
+**A checkbox for it in `dccore.mrc` too, not only the dashboard.** The dashboard already showed `CHECK_FOR_UPDATES`
+as an ordinary checkbox - every `bool` setting on that page is one - but the mIRC window's only control over it was
+the one-shot "Check for a new version" menu item, which asks GitHub once and does not touch the setting. A new
+console command, **`checkupdates [on|off]`**, reports the setting with no argument, and with one writes it through
+`settings_file.save()` and a rehash - the same path the dashboard's own Settings save uses, so a rehash really
+reloads it and `version_check.ensure_worker()` (already called after every rehash, wired in for #776's identical
+need) really starts or leaves off the daily worker. The reply is a structured `DCCORE CHECKUPDATES on|off` line -
+the same one `hello` now sends right after connecting, so a freshly opened options dialog is never left showing an
+unknown state. The dialog's new checkbox (id 406, in the Connection box) reflects what the bot last said - kept in
+`dccore.live`, not `dccore.ini`: it is the bot's state, not a local preference - and sends the command only when the
+checkbox actually disagrees with it, so opening and closing the dialog untouched triggers no rehash. The window
+menu gets a matching toggle item beside "Check for a new version", reading its label from the same live state, the
+same reflective pattern the existing Panel/Connect items already use. `dccore.ver` 1.3 -> 1.4.
+
+`tests/test_the_update_check_has_a_checkbox_too.py` (20): the console command (registered, reports on/off with no
+argument, refuses a bad argument, writes the setting and confirms - checked against the real, redirected
+settings.conf, not mocked - and that a rehash is actually triggered); `hello` sends the current state; the dialog
+table (the checkbox exists, its id is not reused, init reads the live state, OK sends only when it disagrees with
+the bot and never saves the value locally); the structured dispatcher's new branch; and the menu toggle item. A
+guard the whole class of tests exists to satisfy either way:
+`tests/test_the_mirc_menu_has_every_command.py`'s rule that every non-plumbing console command has a menu entry -
+`checkupdates` earns the same reflective toggle label rather than an exemption, since it is exactly the kind of
+control that pattern already exists for.
+
 ### 🗓️ The list rebuilds itself on a schedule (#776)
 
 Asked by the operator. Nothing rebuilt the list on a timer: `!update`, the dashboard's **Update list** and the
