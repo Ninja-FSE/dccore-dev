@@ -403,9 +403,9 @@ class ReadingManyAtOnce(FileCase):
         a typo cannot turn into ten thousand threads or none."""
         with io.open(os.path.join(REPO_ROOT, "update_list.py"), encoding="utf-8") as handle:
             code = handle.read()
-        self.assertIn('workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 32) or 1)))', code)
+        self.assertIn('workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 64) or 1)))', code)
         import defaults
-        self.assertEqual(defaults.LIST_AUDIO_INFO_THREADS, 32)
+        self.assertEqual(defaults.LIST_AUDIO_INFO_THREADS, 64)
 
     def test_progress_is_reported(self):
         self.reader = audio_info.read
@@ -454,8 +454,8 @@ class TheList(FileCase):
         self.assertNotIn(" ", rows["Broken.mp3"], "unreadable: size only")
         # make_tree() ships a few audio files of its own; every one is read.
         self.assertRegex(said, r"\[LIST-GEN\] Audio info: [1-9]\d* file\(s\) read, 0 unchanged")
-        self.assertRegex(said, r"Read at [\d,]+ files a second, 32 at a time\.")
-        self.assertRegex(said, r"Reading the length and quality of [1-9]\d* new or changed audio file\(s\), 32 at a time, for at most 5 minute\(s\)")
+        self.assertRegex(said, r"Read at [\d,]+ files a second, 64 at a time\.")
+        self.assertRegex(said, r"Reading the length and quality of [1-9]\d* new or changed audio file\(s\), 64 at a time, for at most 5 minute\(s\)")
 
     def test_off_nothing_is_opened_and_the_rows_are_as_before(self):
         rows, said = self.rows(LIST_SHOW_AUDIO_INFO=False)

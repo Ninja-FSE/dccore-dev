@@ -38,20 +38,21 @@ bots' read it unchanged:
     A big ID3 tag or a picture block in the middle costs one more; the ID3v1 tag is no longer looked for (a request
     for 128 bytes, 8 ms of a 128 kbps file).
   - **Many files at once.** Files are only *noted* during the walk; the ones to read are read after it,
-    `LIST_AUDIO_INFO_THREADS` (32) at a time, so the round trips overlap. With 5 ms of simulated latency per
+    `LIST_AUDIO_INFO_THREADS` (64) at a time, so the round trips overlap. With 5 ms of simulated latency per
     request, 16 workers read 35 times as many files a second as one.
   - **No request at all for an unchanged file.** The cache is loaded into memory once and checked against the size
     the directory listing already gave - no stat, no read - and written back once.
   - **A time limit.** `LIST_AUDIO_INFO_MINUTES` (5; 0 = none) bounds the reading one rebuild does: past it no read is
     started, the list publishes with what was read, the rest keep their size alone and the next rebuild reads them.
     The dashboard shows *Reading length and quality: n of m files*, which also keeps the stall check fed.
-  - **The rate is said.** The rebuild's last line ends *Read at N files a second, 16 at a time* - on a network
+  - **The rate is said.** The rebuild's last line ends *Read at N files a second, 64 at a time* - on a network
     mount the ceiling is the server's, so that is what an operator compares when trying another thread count.
     Measured live on the NFS library (Neo, #914): three ordinary rebuilds of 5-6 minutes each read 62,657 of
     the 62,699 audio files (42 unreadable) - 17 minutes in total, where the first version needed two hours in one - at about 55-60 files a
     second with 16. From an empty cache again, 16 read about 73 files a second and 64 about 236 - three to four
-    times as fast, partly on a server cache warmed by the run before. So the default is 32, the range 1 to 128,
-    and the help says a network drive should try 64.
+    times as fast, partly on a server cache warmed by the run before. The proposal here had shipped 32 as the
+    cautious middle of that result; asked directly, the operator preferred shipping the number actually measured
+    - 64 by default, range 1 to 128 - since a plain disk answers 64 requests as readily as 16.
   The two live under *List rebuild* on the Settings page.
 - **The cache**, SQLite at `LIST_AUDIO_INFO_CACHE` (`./data/audio_info.db`, beside the list index), keyed by the
   row's folder and name. Each list prunes only its own rows, and only when its rebuild **publishes**; a rebuild that

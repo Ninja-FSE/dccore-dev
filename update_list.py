@@ -1507,7 +1507,7 @@ def generate_master_list(list_name=None):
     # network mount the time is round trips, and within LIST_AUDIO_INFO_MINUTES
     # - the rebuild is pausing every search and request meanwhile.
     if audio is not None and audio.pending:
-        workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 32) or 1)))
+        workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 64) or 1)))
         minutes = max(0, int(getattr(config, "LIST_AUDIO_INFO_MINUTES", 5) or 0))
         listed = len(all_files_data) + len(video_files_data)
         print(f"[LIST-GEN] Reading the length and quality of {len(audio.pending):,} new or changed "
