@@ -354,9 +354,13 @@ LIST_SHOW_AUDIO_INFO: bool = False  # Put duration and bitrate after the size on
 # the next rebuild reads every file again.
 LIST_AUDIO_INFO_CACHE: str = "./data/audio_info.db"
 # How many audio files are read at once (#914). On a network mount (NFS, SMB)
-# the time goes into round trips, which overlap: one at a time measured 9.8
-# files a second on a real NFS library. 1 to 64.
-LIST_AUDIO_INFO_THREADS: int = 16  # Audio files read at once for length and quality
+# the time goes into round trips, which overlap. Measured on a real 64,136-file
+# NFS library: one at a time 9.8 files a second, 16 about 73, 64 about 236 (the
+# last partly on a cache warmed by the run before). 64 by default - a plain
+# disk answers 64 requests as readily as it answers 16; on a very old drive
+# or a very small library, lower it. The rebuild's last line says the rate it
+# got, to compare. 1 to 128.
+LIST_AUDIO_INFO_THREADS: int = 64  # Audio files read at once for length and quality
 # The most time one rebuild spends reading audio files it has not read before
 # (#914). A rebuild pauses searches and requests, and the first one with
 # LIST_AUDIO_INFO on has the whole library to read: past this, the list

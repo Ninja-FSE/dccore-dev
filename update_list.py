@@ -1527,7 +1527,7 @@ def generate_master_list(list_name=None):
     # network mount the time is round trips, and within LIST_AUDIO_INFO_MINUTES
     # - the rebuild is pausing every search and request meanwhile.
     if audio is not None and audio.pending:
-        workers = max(1, min(64, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 16) or 1)))
+        workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 64) or 1)))
         minutes = max(0, int(getattr(config, "LIST_AUDIO_INFO_MINUTES", 5) or 0))
         listed = len(all_files_data) + len(video_files_data)
         print(f"[LIST-GEN] Reading the length and quality of {len(audio.pending):,} new or changed "
@@ -2098,9 +2098,11 @@ def generate_master_list(list_name=None):
             # Only a PUBLISHED rebuild forgets the files it did not see; a
             # failed one may have seen half the library.
             audio.publish()
+            rate = audio.rate()
             print(f"[LIST-GEN] Audio info: {audio.read_count:,} file(s) read, "
                   f"{audio.reused_count:,} unchanged since the last rebuild"
-                  f"{f', {audio.left_count:,} left for the next one' if audio.left_count else ''}.")
+                  f"{f', {audio.left_count:,} left for the next one' if audio.left_count else ''}."
+                  f"{f' Read at {rate:,.0f} files a second, {audio.workers} at a time.' if rate else ''}")
         return True
             
     except Exception as e:

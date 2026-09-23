@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The reload-lock test asks during the reload instead of racing it (#915)
+
+`test_the_reload_actually_holds_the_lock` failed on `main` for the #904 merge (macOS / Python 3.14 only; the next
+three runs were green everywhere). It spun a watcher thread on `acquire(blocking=False)` and needed the scheduler to
+run it while `reload_modules_in_order()` held `runtime.config_reload_lock`, within 30 reloads - and reloading
+`defaults` is quicker than CPython's 5 ms switch interval, so a slow runner could finish every reload between
+switches. Now `importlib.reload` is wrapped for the test: inside the reload a second thread asks for the lock and is
+joined before the reload goes on, so it is refused exactly when the lock is held around the reload. Five runs in a
+row pass; with the `with runtime.config_reload_lock:` removed it fails (as does its neighbour). Test only.
+
 ### 🏷️ The list names the configured nick, however it is built (#376)
 
 A list outlives the connection it was built on, so its request lines must name the nick the bot comes back to.
@@ -52,13 +62,21 @@ bots' read it unchanged:
     A big ID3 tag or a picture block in the middle costs one more; the ID3v1 tag is no longer looked for (a request
     for 128 bytes, 8 ms of a 128 kbps file).
   - **Many files at once.** Files are only *noted* during the walk; the ones to read are read after it,
-    `LIST_AUDIO_INFO_THREADS` (16) at a time, so the round trips overlap. With 5 ms of simulated latency per
+    `LIST_AUDIO_INFO_THREADS` (64) at a time, so the round trips overlap. With 5 ms of simulated latency per
     request, 16 workers read 35 times as many files a second as one.
   - **No request at all for an unchanged file.** The cache is loaded into memory once and checked against the size
     the directory listing already gave - no stat, no read - and written back once.
   - **A time limit.** `LIST_AUDIO_INFO_MINUTES` (5; 0 = none) bounds the reading one rebuild does: past it no read is
     started, the list publishes with what was read, the rest keep their size alone and the next rebuild reads them.
     The dashboard shows *Reading length and quality: n of m files*, which also keeps the stall check fed.
+  - **The rate is said.** The rebuild's last line ends *Read at N files a second, 64 at a time* - on a network
+    mount the ceiling is the server's, so that is what an operator compares when trying another thread count.
+    Measured live on the NFS library (Neo, #914): three ordinary rebuilds of 5-6 minutes each read 62,657 of
+    the 62,699 audio files (42 unreadable) - 17 minutes in total, where the first version needed two hours in one - at about 55-60 files a
+    second with 16. From an empty cache again, 16 read about 73 files a second and 64 about 236 - three to four
+    times as fast, partly on a server cache warmed by the run before. The proposal here had shipped 32 as the
+    cautious middle of that result; asked directly, the operator preferred shipping the number actually measured
+    - 64 by default, range 1 to 128 - since a plain disk answers 64 requests as readily as 16.
   The two live under *List rebuild* on the Settings page.
 - **The cache**, SQLite at `LIST_AUDIO_INFO_CACHE` (`./data/audio_info.db`, beside the list index), keyed by the
   row's folder and name. Each list prunes only its own rows, and only when its rebuild **publishes**; a rebuild that
@@ -73,7 +91,7 @@ bots' read it unchanged:
   `!rar` rows stay exactly as they were.
 
 Stacked on #913, where *Your list* has room since #776 moved the rebuild limits out.
-`tests/test_the_list_says_how_long_and_how_good.py` (40) builds every MP3 and FLAC byte by byte - CBR, both ID3
+`tests/test_the_list_says_how_long_and_how_good.py` (42) builds every MP3 and FLAC byte by byte - CBR, both ID3
 tags, a tag bigger than the search window, a false sync, all four channel modes, Xing, Info, VBRI, MPEG-2, FLAC
 mono / 6ch / 96 kHz / a 3 MB picture block, six kinds of broken file - plus the reads each file costs (one, or two
 with cover art), the cache (no request for an unchanged file, a changed size, prune, a stopped rebuild, per-list
@@ -118,6 +136,34 @@ tests turn it on and hand every check a fake GitHub. `tests/test_the_bot_says_wh
 version parsing, each failure's wording, never-silent, said once per release, pre-releases ignored, the cooldown,
 the loop, off starts nothing, the console, the setup page (and that a redisplay after a form error keeps an
 unticked box unticked - it fell back to the shipped `True`), and the dashboard routes behind the login.
+
+**A checkbox for it in `dccore.mrc` too, not only the dashboard.** The dashboard already showed `CHECK_FOR_UPDATES`
+as an ordinary checkbox - every `bool` setting on that page is one - but the mIRC window's only control over it was
+the one-shot "Check for a new version" menu item, which asks GitHub once and does not touch the setting. A new
+console command, **`checkupdates [on|off]`**, reports the setting with no argument, and with one writes it through
+`settings_file.save()` and a rehash - the same path the dashboard's own Settings save uses, so a rehash really
+reloads it and `version_check.ensure_worker()` (already called after every rehash, wired in for #776's identical
+need) really starts or leaves off the daily worker. The reply is a structured `DCCORE CHECKUPDATES on|off` line -
+the same one `hello` now sends right after connecting, so a freshly opened options dialog is never left showing an
+unknown state. The dialog's new checkbox (id 406, in the Connection box) reflects what the bot last said - kept in
+`dccore.live`, not `dccore.ini`: it is the bot's state, not a local preference - and sends the command only when the
+checkbox actually disagrees with it, so opening and closing the dialog untouched triggers no rehash - and, since the
+review follow-up (`dccore.mrc` 1.5), only once the bot has said the state at all: before its first line the state was
+empty, the box unticked, and OK pressed in that moment sent `checkupdates off`. The same follow-up has `checkupdates`
+answer a person in words (*The daily update check is on.*) - a plain DCC chat and the dashboard's Console were shown
+the `DCCORE CHECKUPDATES` line meant for the script, the choice `pair` already makes by `session.structured`. The window
+menu gets a matching toggle item beside "Check for a new version", reading its label from the same live state, the
+same reflective pattern the existing Panel/Connect items already use. `dccore.ver` 1.3 -> 1.4.
+
+`tests/test_the_update_check_has_a_checkbox_too.py` (20): the console command (registered, reports on/off with no
+argument, refuses a bad argument, writes the setting and confirms - checked against the real, redirected
+settings.conf, not mocked - and that a rehash is actually triggered); `hello` sends the current state; the dialog
+table (the checkbox exists, its id is not reused, init reads the live state, OK sends only when it disagrees with
+the bot and never saves the value locally); the structured dispatcher's new branch; and the menu toggle item. A
+guard the whole class of tests exists to satisfy either way:
+`tests/test_the_mirc_menu_has_every_command.py`'s rule that every non-plumbing console command has a menu entry -
+`checkupdates` earns the same reflective toggle label rather than an exemption, since it is exactly the kind of
+control that pattern already exists for.
 
 ### 🗓️ The list rebuilds itself on a schedule (#776)
 
@@ -205,6 +251,17 @@ offered as the default, which used to make pressing Enter fail the validator on 
 replaces more than one says so, checked against the printed text; a wildcarded first entry is not offered as
 the default and prints no confusing refusal. The first fails on the old code with the exact reported shape -
 `ADMIN_HOSTMASKS` collapsed to the first entry alone.
+
+Two ways the same step still lost or misread hosts, closed afterwards (#911). **Retyping a host that is already
+configured** - out of habit, or because the prompt no longer offers it - wrote `[just that one]`: with home and
+phone set, retyping home dropped the phone, the loss this entry is about, reached by typing instead of by Enter. A
+host already there (any case) now changes nothing and says so. And **a comma-separated `ADMIN_HOSTMASKS`** (a form
+`adminchat` accepts, and `admin_config.py` may hold) was indexed as a string - its first *character* taken as the
+first host, `len()` counting characters (*"replaces the 13 services hosts"*). The hosts are now read the way the
+console reads them, `adminchat.admin_host_patterns()` - either form, host part only - and all of them are shown
+(*Configured now: ...*) rather than the first offered as a default. A new host still replaces the list with the
+warning above. `tests/test_retyping_a_configured_host_keeps_the_others.py` (6); five fail on the old code, the
+sixth pins that a new host still replaces. Two source guards follow the prompt into its variable.
 
 ### 🧪 The file-request exemption is executed, not just read (#897)
 

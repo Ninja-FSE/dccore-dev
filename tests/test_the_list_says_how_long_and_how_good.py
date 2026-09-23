@@ -387,6 +387,26 @@ class ReadingManyAtOnce(FileCase):
         self.assertEqual(cache.suffix("k1"), "")
         self.assertTrue(cache.suffix("k0") and cache.suffix("k2"))
 
+    def test_the_rate_is_measured_on_the_real_clock(self):
+        """Files per second of reading - what an operator compares to pick
+        LIST_AUDIO_INFO_THREADS - and not taken from the budget's clock,
+        which a test (or a frozen clock) can stop."""
+        self.reader = audio_info.read
+        cache = self.pending(4)
+        self.assertIsNone(cache.rate(), "nothing read yet")
+        cache.read_pending(workers=2, clock=lambda: 0)
+        self.assertGreater(cache.rate(), 0)
+        self.assertEqual(cache.workers, 2)
+
+    def test_the_thread_count_is_clamped_to_1_to_128(self):
+        """What update_list hands read_pending(): the setting, held to a range
+        a typo cannot turn into ten thousand threads or none."""
+        with io.open(os.path.join(REPO_ROOT, "update_list.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        self.assertIn('workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 64) or 1)))', code)
+        import defaults
+        self.assertEqual(defaults.LIST_AUDIO_INFO_THREADS, 64)
+
     def test_progress_is_reported(self):
         self.reader = audio_info.read
         cache = self.pending(3)
@@ -434,7 +454,8 @@ class TheList(FileCase):
         self.assertNotIn(" ", rows["Broken.mp3"], "unreadable: size only")
         # make_tree() ships a few audio files of its own; every one is read.
         self.assertRegex(said, r"\[LIST-GEN\] Audio info: [1-9]\d* file\(s\) read, 0 unchanged")
-        self.assertRegex(said, r"Reading the length and quality of [1-9]\d* new or changed audio file\(s\), 16 at a time, for at most 5 minute\(s\)")
+        self.assertRegex(said, r"Read at [\d,]+ files a second, 64 at a time\.")
+        self.assertRegex(said, r"Reading the length and quality of [1-9]\d* new or changed audio file\(s\), 64 at a time, for at most 5 minute\(s\)")
 
     def test_off_nothing_is_opened_and_the_rows_are_as_before(self):
         rows, said = self.rows(LIST_SHOW_AUDIO_INFO=False)
@@ -446,6 +467,7 @@ class TheList(FileCase):
         self.rows(LIST_SHOW_AUDIO_INFO=True)
         rows, said = self.rows(LIST_SHOW_AUDIO_INFO=True)
         self.assertRegex(said, r"\[LIST-GEN\] Audio info: 0 file\(s\) read, [1-9]\d* unchanged")
+        self.assertNotIn("files a second", said, "no rate when nothing was read")
         self.assertRegex(rows["Example Artist - 01 - Opening.mp3"], r" 0m26s 128/44\.1/JS$")
 
     def test_a_published_rebuild_forgets_a_removed_file(self):

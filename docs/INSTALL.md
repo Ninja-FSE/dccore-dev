@@ -108,7 +108,7 @@ On Windows that command is **`py configure.py`**. A python.org install gives you
 2. **IRC server** (`irc.undernet.org` unless you say otherwise).
 3. **Channel(s)**, comma-separated.
 4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
-5. **Your services host**, optional - blank skips it. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
+5. **Your services host**, optional - blank skips it. On a re-run the hosts already configured are shown; blank keeps them all, and typing one you already have changes nothing. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
 6. **Admin console password**, typed twice and never shown; only its hash is written.
 7. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
 8. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.
@@ -252,12 +252,13 @@ Two settings decide how the result is split up:
 
 **`LIST_SHOW_AUDIO_INFO`** (off by default) adds each MP3 and FLAC file's length and quality after its size -
 `::INFO:: 10.3MB 4m31s 320/44.1/JS`, the way other servers' lists show it (`~245` is a VBR average). Every audio
-file has to be read once. The files are read several at a time (`LIST_AUDIO_INFO_THREADS`, 16), and each rebuild
+file has to be read once. The files are read several at a time (`LIST_AUDIO_INFO_THREADS`, 64), and each rebuild
 spends at most `LIST_AUDIO_INFO_MINUTES` (5) on it, since searches wait while a rebuild runs: on a large library,
 or one on a network drive, the first few rebuilds each publish with part of the library read and the rest showing
 its size alone, until everything has been read once. After that only new files are read, and a rebuild costs what
 it did without the setting. What was read is kept in `data/audio_info.db`; deleting it is safe - the files are
-read again.
+read again. The rebuild's last line says how fast the files were read; if raising `LIST_AUDIO_INFO_THREADS`
+further does not raise that number, you have found the server's own limit rather than the setting's.
 
 ### If your users queue with AutoQ
 
