@@ -3254,6 +3254,12 @@
     var parts = [];
     if (progress.phase === "writing") {
       parts.push(t("tools.writingList"));
+    } else if (progress.phase === "audio") {
+      // #914: reading length and quality - folder_index/folder_count carry
+      // files read / files to read, so the bar below follows it too.
+      parts.push(t("tools.readingAudioInfo")
+        .replace("{done}", (progress.folder_index || 0).toLocaleString())
+        .replace("{total}", (progress.folder_count || 0).toLocaleString()));
     } else if (progress.folder_count) {
       parts.push(t("tools.scanningFolder")
         .replace("{index}", progress.folder_index).replace("{total}", progress.folder_count));
@@ -3840,6 +3846,10 @@
     DCC_QUEUE_FILE: "settings.field.DCC_QUEUE_FILE",
     KNOWN_BOTS_FILE: "settings.field.KNOWN_BOTS_FILE",
     LIST_INDEX_FILE: "settings.field.LIST_INDEX_FILE",
+    LIST_AUDIO_INFO_CACHE: "settings.field.LIST_AUDIO_INFO_CACHE",
+    LIST_SHOW_AUDIO_INFO: "settings.field.LIST_SHOW_AUDIO_INFO",
+    LIST_AUDIO_INFO_MINUTES: "settings.field.LIST_AUDIO_INFO_MINUTES",
+    LIST_AUDIO_INFO_THREADS: "settings.field.LIST_AUDIO_INFO_THREADS",
     DOWNLOAD_COUNTS_FILE: "settings.field.DOWNLOAD_COUNTS_FILE",
     FETCHED_BOT_LISTS_FILE: "settings.field.FETCHED_BOT_LISTS_FILE",
     FETCH_HISTORY_FILE: "settings.field.FETCH_HISTORY_FILE",

@@ -341,6 +341,33 @@ KNOWN_BOTS_FILE: str = "./data/known_bots.json"
 # and rebuilt from the lists on disk (#628); the copy can be deleted.
 LIST_INDEX_FILE: str = "./data/list_index.db"
 
+# Duration and quality after the size on the list's MP3 and FLAC rows (#567):
+# "::INFO:: 10.3MB 4m31s 320/44.1/JS" - the spelling other servers' lists use.
+# Off by default because it OPENS every audio file, where the scan otherwise
+# asks for nothing but sizes: the first rebuild with it on takes noticeably
+# longer. What it read is kept in LIST_AUDIO_INFO_CACHE, checked against each
+# file's size and modification time, so later rebuilds open only new or changed
+# files. Read with the standard library (audio_info.py); a file it cannot read
+# keeps its size and nothing more.
+LIST_SHOW_AUDIO_INFO: bool = False  # Put duration and bitrate after the size on MP3 and FLAC rows
+# One row per audio file in the lists (about 150 bytes each). Safe to delete:
+# the next rebuild reads every file again.
+LIST_AUDIO_INFO_CACHE: str = "./data/audio_info.db"
+# How many audio files are read at once (#914). On a network mount (NFS, SMB)
+# the time goes into round trips, which overlap. Measured on a real 64,136-file
+# NFS library: one at a time 9.8 files a second, 16 about 73, 64 about 236 (the
+# last partly on a cache warmed by the run before). 64 by default - a plain
+# disk answers 64 requests as readily as it answers 16; on a very old drive
+# or a very small library, lower it. The rebuild's last line says the rate it
+# got, to compare. 1 to 128.
+LIST_AUDIO_INFO_THREADS: int = 64  # Audio files read at once for length and quality
+# The most time one rebuild spends reading audio files it has not read before
+# (#914). A rebuild pauses searches and requests, and the first one with
+# LIST_AUDIO_INFO on has the whole library to read: past this, the list
+# publishes with what was read and the rest wait for the next rebuild. 0 = no
+# limit.
+LIST_AUDIO_INFO_MINUTES: int = 5  # Minutes one rebuild may spend reading new audio files; 0 = no limit
+
 # One row per thing this bot has ever sent, {relative path or archive name ->
 # {name, kind, count}}. Feeds the Stats page's "Most downloaded" table. Not
 # bounded on purpose: a bot can only send what it shares, so the row count is

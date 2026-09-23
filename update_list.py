@@ -13,6 +13,7 @@ import json
 import defaults as config
 import library
 import platform_compat
+import audio_info
 
 # BEFORE ANYTHING PRINTS A FILENAME. This runs as its own process - the daemon
 # starts it with subprocess.run() and configure.py runs it directly - so
@@ -1337,6 +1338,13 @@ def generate_master_list(list_name=None):
 
     write_progress("scanning", folder_count=len(scan_folders), force=True)
 
+    # Duration and quality on the file rows (#567), when asked for. The cache
+    # is what keeps it affordable: only files new or changed since the last
+    # rebuild are opened. Unopenable, it says so and the list is size-only.
+    audio = None
+    if getattr(config, "LIST_SHOW_AUDIO_INFO", False):
+        audio = audio_info.Cache.open(scope=list_name or "")
+
     for folder_number, scan_folder in enumerate(scan_folders, start=1):
         # Reported per folder because the folder COUNT is the one total known
         # before the walk starts - a file total would need a full pass to
@@ -1480,11 +1488,38 @@ def generate_master_list(list_name=None):
                         video_files_data.append((rel_dir, file, file_bytes))
                     else:
                         all_files_data.append((rel_dir, file, file_bytes))
+                        if audio is not None and audio_info.is_audio(file):
+                            # No request here: an unchanged file is answered
+                            # from the cache by its size, the rest are read
+                            # after the walk, many at once (#914).
+                            audio.note(audio_info.row_key(rel_dir, file),
+                                       os.path.join(root, file), file_bytes)
 
     if walk_errors:
         print(f"[LIST-GEN ERROR] {len(walk_errors)} part(s) of the library could not be "
               "read - keeping the previous index rather than publishing a truncated one.")
+        if audio is not None:
+            audio.close()
         return False
+
+    # The audio files new or changed since the last rebuild (#567, #914).
+    # After the walk rather than inside it: read several at once, where on a
+    # network mount the time is round trips, and within LIST_AUDIO_INFO_MINUTES
+    # - the rebuild is pausing every search and request meanwhile.
+    if audio is not None and audio.pending:
+        workers = max(1, min(128, int(getattr(config, "LIST_AUDIO_INFO_THREADS", 64) or 1)))
+        minutes = max(0, int(getattr(config, "LIST_AUDIO_INFO_MINUTES", 5) or 0))
+        listed = len(all_files_data) + len(video_files_data)
+        print(f"[LIST-GEN] Reading the length and quality of {len(audio.pending):,} new or changed "
+              f"audio file(s), {workers} at a time"
+              f"{f', for at most {minutes} minute(s)' if minutes else ''}...")
+        audio.read_pending(workers=workers, budget=minutes * 60,
+                           progress=lambda done, total: write_progress(
+                               "audio", folder_index=done, folder_count=total, files=listed))
+        if audio.left_count:
+            print(f"[LIST-GEN] {audio.left_count:,} audio file(s) not read within "
+                  f"LIST_AUDIO_INFO_MINUTES = {minutes}: they show their size alone this "
+                  f"time, and the next rebuild reads them.")
 
     if denied_dirs:
         # Said once, with the count, because it is a standing condition rather
@@ -1793,6 +1828,13 @@ def generate_master_list(list_name=None):
                             f_rar.write(f"!{config.NICKNAME} !rar {_one_line(display_rar_folder)}\n")
                             written_rar_folders.add(display_rar_folder)
                 single_file_size = format_size_human(bytes_size)
+                # "4m31s 320/44.1/JS" after the size (#567), or nothing. After
+                # the size, where AutoQ never looks (see the !rar note above)
+                # and where other servers' lists already put it.
+                if audio is not None:
+                    tail = audio.suffix(audio_info.row_key(folder, filename))
+                    if tail:
+                        single_file_size = f"{single_file_size} {tail}"
                 f.write(f"!{config.NICKNAME} {_one_line(filename)}  ::INFO:: {single_file_size}\n")
 
         # The film and series list. Written after the music one and from the
@@ -2032,6 +2074,15 @@ def generate_master_list(list_name=None):
         # left beside a fresh .rar would go on being handed out to somebody the
         # day the operator switched formats and the build failed.
         _prune_superseded_lists(keep=keep, directory=directory)
+        if audio is not None:
+            # Only a PUBLISHED rebuild forgets the files it did not see; a
+            # failed one may have seen half the library.
+            audio.publish()
+            rate = audio.rate()
+            print(f"[LIST-GEN] Audio info: {audio.read_count:,} file(s) read, "
+                  f"{audio.reused_count:,} unchanged since the last rebuild"
+                  f"{f', {audio.left_count:,} left for the next one' if audio.left_count else ''}."
+                  f"{f' Read at {rate:,.0f} files a second, {audio.workers} at a time.' if rate else ''}")
         return True
             
     except Exception as e:
@@ -2050,6 +2101,9 @@ def generate_master_list(list_name=None):
             print("[LIST-GEN] The previous list was left untouched and is still in use.")
         _discard_temp_lists(*tmp_all_paths)
         return False
+    finally:
+        if audio is not None:
+            audio.close()
 
 def generate_all_lists(log=print):
     """Build every configured list. True only if every one of them succeeded.

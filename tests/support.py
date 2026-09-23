@@ -698,7 +698,8 @@ class DCCoreTestCase(unittest.TestCase):
         self.set_config(
             BANS_FILE=os.path.join(self._fetch_history_dir, "bans.txt"),
             STATS_FILE=os.path.join(self._fetch_history_dir, "stats.txt"),
-            LIST_INDEX_FILE=os.path.join(self._fetch_history_dir, "list_index.db"))
+            LIST_INDEX_FILE=os.path.join(self._fetch_history_dir, "list_index.db"),
+            LIST_AUDIO_INFO_CACHE=os.path.join(self._fetch_history_dir, "audio_info.db"))
 
     def tearDown(self):
         restore_daemon_functions()
