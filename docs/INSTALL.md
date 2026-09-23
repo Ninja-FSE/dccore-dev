@@ -106,7 +106,7 @@ On Windows that command is **`py configure.py`**. A python.org install gives you
 2. **IRC server** (`irc.undernet.org` unless you say otherwise).
 3. **Channel(s)**, comma-separated.
 4. **Admin nick** - who may run `!ban`, `!rehash`, `!update`, `!clearqueue`.
-5. **Your services host**, optional - blank skips it. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
+5. **Your services host**, optional - blank skips it. On a re-run the hosts already configured are shown; blank keeps them all, and typing one you already have changes nothing. Locks the admin console (and the in-channel admin commands, once this is set) to your account rather than just your nick, which anyone can take while you are offline; see [ADMIN-CONSOLE.md](ADMIN-CONSOLE.md#how-the-host-proves-your-login) for how to read it off `/whois`.
 6. **Admin console password**, typed twice and never shown; only its hash is written.
 7. **Music directory** - optional here (see below); if the folder does not exist it offers to create it.
 8. **Web dashboard, yes or no** (off unless you say yes). A yes asks two more: whether it should be reachable from other devices on your LAN, and - if Flask is not installed - whether to install it now.

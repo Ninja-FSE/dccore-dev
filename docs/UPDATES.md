@@ -22,6 +22,17 @@ replaces more than one says so, checked against the printed text; a wildcarded f
 the default and prints no confusing refusal. The first fails on the old code with the exact reported shape -
 `ADMIN_HOSTMASKS` collapsed to the first entry alone.
 
+Two ways the same step still lost or misread hosts, closed afterwards (#911). **Retyping a host that is already
+configured** - out of habit, or because the prompt no longer offers it - wrote `[just that one]`: with home and
+phone set, retyping home dropped the phone, the loss this entry is about, reached by typing instead of by Enter. A
+host already there (any case) now changes nothing and says so. And **a comma-separated `ADMIN_HOSTMASKS`** (a form
+`adminchat` accepts, and `admin_config.py` may hold) was indexed as a string - its first *character* taken as the
+first host, `len()` counting characters (*"replaces the 13 services hosts"*). The hosts are now read the way the
+console reads them, `adminchat.admin_host_patterns()` - either form, host part only - and all of them are shown
+(*Configured now: ...*) rather than the first offered as a default. A new host still replaces the list with the
+warning above. `tests/test_retyping_a_configured_host_keeps_the_others.py` (6); five fail on the old code, the
+sixth pins that a new host still replaces. Two source guards follow the prompt into its variable.
+
 ### 🧪 The file-request exemption is executed, not just read (#897)
 
 #894 (#888) tested the file-request flood exemption two ways - `security.is_flooding()` directly, and the two
