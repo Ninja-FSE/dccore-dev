@@ -377,8 +377,10 @@ class Cache:
         workers = max(1, int(workers))
         self.workers = workers
         # Wall time on the real clock, not `clock` - that one is the budget's,
-        # and a test drives it by hand.
-        began = time.monotonic()
+        # and a test drives it by hand. perf_counter, not monotonic: on
+        # Windows before 3.13 monotonic ticks every ~15.6 ms, and a short
+        # batch read inside one tick measured 0 s and no rate at all.
+        began = time.perf_counter()
         deadline = None if not budget else clock() + budget
         queue = iter(self.pending)
         running = {}
@@ -414,7 +416,7 @@ class Cache:
 
         self.read_count = done
         self.left_count = total - done
-        self.read_seconds = time.monotonic() - began
+        self.read_seconds = time.perf_counter() - began
 
     def rate(self):
         """Files read per second of reading, or None when nothing was read.
