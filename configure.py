@@ -179,10 +179,16 @@ def collect_answers():
     print("services and set +x, then /whois yourself - you want the host it")
     print("shows, ending in something like .users.undernet.org.")
     current_hostmasks = _current("ADMIN_HOSTMASKS")
-    default_host = (current_hostmasks[0].rsplit("@", 1)[-1]
-                    if current_hostmasks and current_hostmasks[0] else "")
+    # Shown for context only, never substituted in on a blank answer (#891)
+    # - see below. And only when it would itself pass admin_host_problem():
+    # the first entry being a wildcard pattern like "*.home.net" used to be
+    # offered anyway, so pressing Enter printed "That will not do:
+    # '*.home.net' has a '*' in it" about a value the operator never typed.
+    first_host = (current_hostmasks[0].rsplit("@", 1)[-1]
+                 if current_hostmasks and current_hostmasks[0] else "")
+    default_host = first_host if first_host and not settings_file.admin_host_problem(first_host) else ""
     suffix = f" [{default_host}]" if default_host else ""
-    admin_host = input(f"Your services host (blank to skip){suffix}: ").strip() or default_host
+    admin_host = input(f"Your services host (blank to skip){suffix}: ").strip()
     while admin_host:
         problem = settings_file.admin_host_problem(admin_host)
         if not problem:
@@ -190,7 +196,16 @@ def collect_answers():
         print(f"  That will not do: {problem}.")
         admin_host = input("Your services host (blank to skip): ").strip()
     if admin_host:
+        # More than one already configured (home and phone, say) - said
+        # before replacing them, not after: a re-run that collapsed the list
+        # to just this one used to do it silently (#891).
+        if len(current_hostmasks) > 1:
+            print(f"  This replaces the {len(current_hostmasks)} services hosts "
+                 f"already configured with just this one.")
         changes["ADMIN_HOSTMASKS"] = [f"*!*@{admin_host}"]
+    # A blank answer leaves ADMIN_HOSTMASKS exactly as it is - nothing is
+    # written - rather than rewriting it from the first entry shown above,
+    # which is what silently dropped every host after the first (#891).
 
     print()
     print("Admin console password (for the DCC CHAT console - see")

@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔧 Re-running setup no longer collapses more than one services host to just the first (#891)
+
+Found reviewing #811's merged change. A blank answer at the services-host prompt showed the first configured
+host as the default and, on Enter, wrote it back as the **only** entry: an operator with two hosts configured
+(home and phone, say) who re-ran `configure.py` and pressed Enter there had the second one silently drop admin
+access, to the console and the in-channel commands alike.
+
+A blank answer now writes nothing - `ADMIN_HOSTMASKS` is left exactly as it is, rather than rewritten from the
+first entry. A host actually typed still replaces the list as before, and now says so first when there was more
+than one: *"This replaces the 2 services hosts already configured with just this one."* A smaller oddity in the
+same prompt is fixed alongside it: a first entry that is itself a wildcard pattern (`*.home.net`) is no longer
+offered as the default, which used to make pressing Enter fail the validator on a value the operator never typed.
+
+`tests/test_configure.py` (3): a blank answer with two hosts configured writes nothing; a typed answer that
+replaces more than one says so, checked against the printed text; a wildcarded first entry is not offered as
+the default and prints no confusing refusal. The first fails on the old code with the exact reported shape -
+`ADMIN_HOSTMASKS` collapsed to the first entry alone.
+
 ### 🔴 The @DCCore window lights up like a channel: red on activity, highlight on a failure (#892)
 
 Asked by the operator: every other mIRC window's button turns red when something new is said in it, and `@DCCore`
