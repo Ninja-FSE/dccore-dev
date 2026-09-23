@@ -943,6 +943,26 @@ def _cmd_version(session, args):
     session.send(platform_compat.describe())
 
 
+def _cmd_checkversion(session, args):
+    """Ask GitHub now whether a newer DCCore exists (#572), whatever
+    CHECK_FOR_UPDATES says. On a thread, so the console is not held for the
+    request's timeout; the answer comes back into this session - success or
+    failure, never silence."""
+    import threading
+
+    def run():
+        import version_check
+        result = version_check.manual_check()
+        if result.get("cooldown"):
+            session.send(f"Checked moments ago - try again in {result['cooldown']}s. "
+                         f"Version: {version_check.describe()}")
+        else:
+            session.send(f"Version check: {version_check.describe()}")
+
+    session.send("Asking GitHub for the latest release...")
+    threading.Thread(target=run, daemon=True).start()
+
+
 def _cmd_uptime(session, args):
     session.send(f"Running {format_uptime(_uptime_seconds())}")
 
@@ -1019,6 +1039,11 @@ def _cmd_status(session, args):
         session.send(f"Rebuild     : {_commands.describe_rebuild_schedule()}")
     except Exception as err:
         session.send(f"Rebuild     : unavailable ({err})")
+    try:
+        import version_check
+        session.send(f"Version     : {version_check.describe()}")
+    except Exception as err:
+        session.send(f"Version     : unavailable ({err})")
 
 
 # --------------------------------------------------------------------------
@@ -1364,6 +1389,7 @@ COMMANDS = {
     "bans":       (_cmd_bans,       "permanent and timed bans",          "bans"),
     "uptime":     (_cmd_uptime,     "how long the daemon has run",       "uptime"),
     "version":    (_cmd_version,    "build and platform",                "version"),
+    "checkversion": (_cmd_checkversion, "ask GitHub whether a newer DCCore is out", "checkversion"),
     "ban":        (_cmd_ban,        "add a permanent wildcard ban",      "ban <pattern>"),
     "unban":      (_cmd_unban,      "remove a permanent wildcard ban",   "unban <pattern>"),
     "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),

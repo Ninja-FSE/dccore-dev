@@ -1296,6 +1296,15 @@ def _handle_rehash_request(user, target_chan):
         except Exception as schedule_err:
             print(f"[REHASH] Could not start the rebuild schedule: {schedule_err}")
 
+        # The daily version check (#572), for the same reason: a Settings save
+        # that ticks CHECK_FOR_UPDATES on lands here.
+        try:
+            import version_check as _version_check
+            if _version_check.ensure_worker():
+                print("[REHASH] CHECK_FOR_UPDATES is on: the daily version check has started.")
+        except Exception as update_err:
+            print(f"[REHASH] Could not start the version check: {update_err}")
+
         # ---------------------------------------------------------------------
         # 4. FULLY AUTOMATIC CHANNEL SYNC (JOIN NEW / PART REMOVED)
         # ---------------------------------------------------------------------

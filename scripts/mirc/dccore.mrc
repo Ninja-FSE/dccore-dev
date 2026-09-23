@@ -79,7 +79,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.2 }
+alias dccore.ver { return 1.3 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1004,6 +1004,7 @@ menu @DCCore {
   Bans:dccore.send bans
   Uptime:dccore.send uptime
   Version:dccore.send version
+  Check for a new version:dccore.send checkversion
   -
   $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
   $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq

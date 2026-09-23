@@ -233,6 +233,7 @@ prefix.
 | `bans` | permanent and timed bans |
 | `uptime` | how long the daemon has been running |
 | `version` | build and platform |
+| `checkversion` | ask GitHub now whether a newer DCCore is out; works with `CHECK_FOR_UPDATES` off, once a minute |
 | `verify` | filenames that appear in two folders |
 
 ### What you can do

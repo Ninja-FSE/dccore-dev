@@ -78,7 +78,9 @@ it) is readable with `ps`, nobody else can open the page after you have; if
 you are told the link was already opened elsewhere, stop DCCore and start it
 again for a fresh code. Save, and
 the bot starts in the same window; if you left the dashboard on, the page
-takes you to its login with the password you just chose. The dashboard box
+takes you to its login with the password you just chose. The box that tells
+you when a new version of DCCore is out starts ticked too (see
+[Upgrading](#upgrading)). The dashboard box
 starts ticked (reachable from this machine only, unless you tick the
 network box too): the music folder is optional on this page because the
 Settings page can take it later - untick the dashboard and the folder has
@@ -352,6 +354,12 @@ reported for 20m 00s"* points at the library — a mount that dropped. *"Timed
 out"* points at a cap you set.
 
 ## Upgrading
+
+**How you hear about one.** Once a day the bot asks GitHub whether a newer release is out - one request, carrying
+nothing about your bot - and says so in the dashboard's sidebar (with a **Check now** button), in the console's
+`status` and in the mIRC window; `checkversion` in the console asks straight away. If GitHub cannot be reached it
+says why instead. It is on by default and says so at every start: untick *Tell me when a new version is out* on the
+Settings page, or set `CHECK_FOR_UPDATES = false`, on a machine that should not go out.
 
 Your settings and data are never touched by an upgrade: `settings.conf`, `admin_config.py` and everything under `data/` are gitignored, so updating the code cannot overwrite them. That is also the one thing to watch — see step 4.
 

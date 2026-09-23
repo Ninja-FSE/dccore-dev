@@ -158,6 +158,8 @@
     connText:     document.getElementById("conn-text"),
     statusSlots:  document.getElementById("status-slots"),
     statusQueued: document.getElementById("status-queued"),
+    versionText:     document.getElementById("version-text"),
+    versionCheckBtn: document.getElementById("version-check-btn"),
     broadcastBtn:        document.getElementById("broadcast-btn"),
     broadcastStatus:     document.getElementById("broadcast-status"),
     broadcastWrap:       document.getElementById("broadcast-wrap"),
@@ -1178,6 +1180,60 @@
     var totalFiles = rows.reduce(function (sum, r) { return sum + (r.count || 0); }, 0);
     el.statusSlots.textContent = sending;
     el.statusQueued.textContent = totalFiles;
+  }
+
+  // #572: this bot's version, and what the version check last found. A
+  // failure is written out, not hidden: the reason stays here until a check
+  // succeeds. The release link is only ever a github.com address.
+  function renderVersion(info) {
+    if (!el.versionText || !info) { return; }
+    el.versionText.classList.remove("is-news", "is-error");
+    el.versionText.textContent = "";
+    if (info.error) {
+      el.versionText.classList.add("is-error");
+      el.versionText.textContent = t("version.couldNotCheck").replace("{reason}", info.error);
+    } else if (info.newer && info.latest) {
+      el.versionText.classList.add("is-news");
+      var label = t("version.available").replace("{version}", info.latest);
+      if (String(info.url || "").indexOf("https://github.com/") === 0) {
+        var link = document.createElement("a");
+        link.href = info.url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = label;
+        el.versionText.appendChild(link);
+      } else {
+        el.versionText.textContent = label;
+      }
+    } else if (info.checked_at) {
+      el.versionText.textContent = t("version.upToDate").replace("{version}", info.current);
+    } else {
+      el.versionText.textContent = info.current || "";
+    }
+    if (info.cooldown) {
+      el.versionText.appendChild(document.createTextNode(
+        " " + t("version.cooldown").replace("{seconds}", info.cooldown)));
+    }
+  }
+
+  function loadVersion() {
+    fetchJson("/api/version-check").then(renderVersion).catch(function () {});
+  }
+
+  if (el.versionCheckBtn) {
+    el.versionCheckBtn.addEventListener("click", function () {
+      el.versionCheckBtn.disabled = true;
+      el.versionText.classList.remove("is-news", "is-error");
+      el.versionText.textContent = t("version.checking");
+      postJson("/api/version-check", {}).then(function (res) {
+        renderVersion(res.data);
+      }).catch(function () {
+        el.versionText.classList.add("is-error");
+        el.versionText.textContent = t("version.couldNotCheck").replace("{reason}", t("version.noAnswer"));
+      }).then(function () {
+        el.versionCheckBtn.disabled = false;
+      });
+    });
   }
 
   function markConnection(ok) {
@@ -3823,6 +3879,7 @@
     FLOOD_BAN_SECONDS: "settings.field.FLOOD_BAN_SECONDS",
     DCC_ACCEPT_TIMEOUT: "settings.field.DCC_ACCEPT_TIMEOUT",
     MAX_SEND_FAILS: "settings.field.MAX_SEND_FAILS",
+    CHECK_FOR_UPDATES: "settings.field.CHECK_FOR_UPDATES",
     RAR_TIMEOUT: "settings.field.RAR_TIMEOUT",
     LIST_UPDATE_TIMEOUT: "settings.field.LIST_UPDATE_TIMEOUT",
     LIST_UPDATE_STALL_SECONDS: "settings.field.LIST_UPDATE_STALL_SECONDS",
@@ -5127,6 +5184,9 @@
   loadQueue();
   loadNotices(false);
   loadMessages(false);
+  loadVersion();
+  // The check itself runs at most daily; ten minutes is plenty to show it.
+  setInterval(loadVersion, 10 * 60 * 1000);
   setInterval(function () {
     // Keep the sidebar status fresh always; refresh the visible table only
     // when it is the one showing, so a search result is never clobbered by a

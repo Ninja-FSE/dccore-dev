@@ -4,6 +4,42 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🆕 The bot says when a new version of DCCore is out (#572)
+
+Nothing told an operator that a release existed: the ones who never read the repository - most of them - ran old
+builds indefinitely, security fixes included. **`version_check.py`** asks GitHub once a day for the latest release
+of the repository `PROJECT_URL` names (`GET api.github.com/repos/<owner>/<name>/releases/latest`, unauthenticated,
+10 s timeout; one request a day against a limit of 60 an hour) and compares its tag with `SCRIPT_VERSION`. Only a
+full release counts: `/releases/latest` never returns a draft or pre-release, a tag that is not plain
+`vMAJOR.MINOR.PATCH` is not compared, and a bot on `v1.14.0-RC1` is behind `v1.14.0`. The request carries this
+machine's address and a `DCCore version check (<version>)` user agent - nothing about the bot, its library or its
+channels.
+
+- **On by default, visibly** (`CHECK_FOR_UPDATES = True`, Identity & network). The setup page shows it as a
+  pre-ticked box; every startup says *"[UPDATE] Checking once a day ... CHECK_FOR_UPDATES = false, or the Settings
+  page, turns it off"*, so an install that upgrades into it is told, not just a new one. This replaces #547's
+  "nothing phones home without a tickbox": the tickbox is there, ticked, and said out loud - an update notice that
+  ships off reaches exactly the operators who do not need it.
+- **Where it shows.** A *Version* line in the dashboard sidebar with a **Check now** button (the release link is only
+  ever a `https://github.com/` address); a `Version     :` line in the console's `status`; a new console command,
+  **`checkversion`**, also in the mIRC window's menu (`dccore.mrc` 1.3); and one debug-feed line per new release -
+  said once per tag, not daily.
+- **A failure is never silent.** A check that cannot reach GitHub says why - *could not connect to GitHub (...)*,
+  *GitHub answered HTTP 502*, *GitHub's hourly limit ... was reached*, *GitHub has no published release for ...* -
+  as a debug-feed line (at most one a day from the daily check, so a box that is never allowed out is not flooded),
+  and the reason stays on the dashboard and in `status` until a check succeeds.
+- **Checking by hand** works with the daily check off - clicking is the consent - and waits a minute between checks
+  (the button answers with the last result and how long to wait), so a stuck button cannot spend the hourly limit.
+- The worker starts once, guarded in `runtime.py` like the list refresh, from startup and from every rehash - so
+  ticking it on the Settings page starts it without a restart - and does nothing while it is off. It waits five
+  minutes after boot, then looks every ten whether a day has passed.
+
+`tests/support.py` turns it off for every test, so no test ever holds a thread that could reach GitHub; the new
+tests turn it on and hand every check a fake GitHub. `tests/test_the_bot_says_when_a_new_version_is_out.py` (36):
+version parsing, each failure's wording, never-silent, said once per release, pre-releases ignored, the cooldown,
+the loop, off starts nothing, the console, the setup page (and that a redisplay after a form error keeps an
+unticked box unticked - it fell back to the shipped `True`), and the dashboard routes behind the login.
+
 ### 🗓️ The list rebuilds itself on a schedule (#776)
 
 Asked by the operator. Nothing rebuilt the list on a timer: `!update`, the dashboard's **Update list** and the
