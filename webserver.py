@@ -696,11 +696,10 @@ def split_list_search_words(query):
     results, not the whole list) - so each caller decides what to do with an
     empty return rather than this function guessing for all of them.
     """
-    import re
-
-    raw_clean = str(query or "")
-    clean_term = re.sub(r'[-*_.]', ' ', raw_clean)
-    return [w.strip().lower() for w in clean_term.split() if w.strip()]
+    # One rule, not a copy of it (#774): a "quoted phrase" means the same
+    # here as in @find, and the two cannot drift apart.
+    import list as list_mod
+    return list_mod.split_search_term(query)
 
 
 def build_search_payload(query):

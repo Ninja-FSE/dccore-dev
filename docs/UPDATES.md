@@ -4,6 +4,27 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🔎 A "quoted phrase" in a search means those words together, in order (#774)
+
+Asked by the operator after `@find Metal Church` answered 6516 results. A search matched a row when every
+word appeared somewhere on that file's line, in any order, as a substring - so a band named with two common
+words matched every file holding both (`Metallica ... Church`, `Church Of Heavy Metal`, `Churchill`). A quoted
+term was no way out: the quotes were searched for literally and matched nothing, which made the syntax free.
+
+`list.split_search_term()`: a part in double quotes is a **phrase** - its words must appear together, in that
+order, separated only by space, `_`, `-`, `.` or `*` (`Metal Church`, `Metal_Church`, `metal.church`) - and
+comes back as a tuple inside the same word list, so every caller that passes the list through gets it
+unchanged; `find_matching_entries()` compiles each tuple once per list. Words outside the quotes keep the old
+rule, so `@find "Metal Church" 1986` narrows further. A term with no quotes splits exactly as before (tested
+against a copy of the old rule); a one-word "phrase" is a word; an unpaired quote is dropped rather than
+searched for. `webserver.split_list_search_words()` now calls the same function instead of repeating its
+code, so `@find`, the dashboard's Search tab and a list's own search cannot drift apart. The List Browser's
+filter bar already treats typed words as a phrase (`*` between phrases, #399's beta request) and is untouched.
+A phrase is matched against the file's line, like the words - not the folder it sits in. The `-help` reply and
+the README say so, and that it is this bot's rule: the same `@find` reaches every bot, and one that does not
+know quotes answers nothing to a quoted term. `tests/test_a_quoted_phrase_is_matched_together.py` (14): the
+split, the match against a real list file, and `@find` itself.
+
 ### 🔒 The library-scan locks live in runtime.py, and the lock guard sees the `or` form (#749)
 
 Follow-up to #731 (#580). `dcc.py` built its scan semaphore and its lookup-memory lock at module level as
