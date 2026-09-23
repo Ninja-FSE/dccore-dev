@@ -157,6 +157,11 @@ SETTINGS_DEFAULTS = {
     # a guard reads defaults.py to keep these two the shipped ones.
     "MSG_DELAY": 5.0,
     "DEBUG_MSG_DELAY": 0.0,
+    # The daily version check (#572) ships ON, and a test that boots the
+    # daemon would start its worker - which one day asks GitHub. Off here,
+    # so no test ever holds that thread; the ones that exercise the check
+    # turn it on themselves and give it a fake GitHub.
+    "CHECK_FOR_UPDATES": False,
 }
 
 RUNTIME_FLAGS = {
@@ -243,6 +248,16 @@ def reset_config(**overrides):
         setattr(config, name, value)
     for name, value in RUNTIME_FLAGS.items():
         setattr(config, name, value)
+
+    # What the version check (#572) last found. Read from runtime.py itself,
+    # not through config, so reset there: a release "found" by one test would
+    # otherwise be the next test's `status` line.
+    for name, value in (("update_check_started", False), ("update_check_last_attempt", None),
+                        ("update_check_last_manual", None), ("update_check_at", None),
+                        ("update_check_error", None), ("update_check_error_at", None),
+                        ("update_check_latest", None), ("update_check_url", None),
+                        ("update_check_newer", False), ("update_check_announced", None)):
+        setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a
     # process-wide singleton holding "the earliest moment the next line may

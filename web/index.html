@@ -88,6 +88,13 @@
         <span class="status-label" data-i18n="sidebar.queued">Queued</span>
         <span class="status-value" id="status-queued">&mdash;</span>
       </div>
+      <!-- #572: this bot's version, and whether a newer one is out. -->
+      <div class="status-row status-version">
+        <span class="status-label" data-i18n="sidebar.version">Version</span>
+        <button type="button" class="version-check-btn" id="version-check-btn"
+                data-i18n="sidebar.checkNow">Check now</button>
+      </div>
+      <div class="version-text" id="version-text">&mdash;</div>
       <!-- Nothing at all when there is nothing unread, so it means something
            when it appears. See renderNoticeBadge() for what decides that. -->
       <div class="status-row status-notices" id="status-notices" hidden>

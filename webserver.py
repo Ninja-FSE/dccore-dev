@@ -2369,7 +2369,8 @@ def start_list_update():
 # slotted in fails a test instead of silently never showing up.
 SETTINGS_CATEGORIES = (
     ("identity",      "Identity & network",    ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME", "REJOIN_ATTEMPTS",
-                                                "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL"]),
+                                                "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL",
+                                                "CHECK_FOR_UPDATES"]),
     ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
                                                 "MAX_GLOBAL_QUEUE", "MAX_SEARCH_RESULTS",
                                                 "PAUSE_ON_UPDATE", "REHASH_TRANSFER_WAIT"]),
@@ -2570,6 +2571,7 @@ SETTINGS_LABELS = {
     "FLOOD_BAN_SECONDS": "Ban after flooding while muted (seconds)",
     "DCC_ACCEPT_TIMEOUT": "Wait for the receiver to connect (seconds)",
     "MAX_SEND_FAILS": "Max send failures",
+    "CHECK_FOR_UPDATES": "Tell me when a new version is out",
     "RAR_TIMEOUT": "RAR pack timeout (seconds)",
     "LIST_UPDATE_TIMEOUT": "List rebuild hard cap (seconds, 0 = none)",
     "LIST_UPDATE_STALL_SECONDS": "Give up if a rebuild reports nothing for (seconds)",
@@ -4106,6 +4108,17 @@ if HAVE_FLASK:
         def api_tools_update_list_status():
             return jsonify(build_update_list_status_payload())
 
+        # #572: what the version check last found, and a check on request.
+        @app.route("/api/version-check")
+        def api_version_check():
+            import version_check
+            return jsonify(version_check.state())
+
+        @app.route("/api/version-check", methods=["POST"])
+        def api_version_check_now():
+            import version_check
+            return jsonify(version_check.manual_check())
+
         @app.route("/api/filelists/fetch", methods=["POST"])
         def api_filelists_fetch():
             body = json_object(request.get_json(silent=True))
@@ -4401,7 +4414,7 @@ if HAVE_FLASK:
 # ---------------------------------------------------------------------------
 
 SETUP_FIELDS = ("NICKNAME", "SERVER", "CHANNEL", "ADMIN_NICK", "FILE_DIRECTORY",
-                "WEBUI_ENABLED", "WEBUI_HOST")
+                "WEBUI_ENABLED", "WEBUI_HOST", "CHECK_FOR_UPDATES")
 SETUP_LANGS = ("en", "fr", "es")
 _SETUP_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
 
@@ -4452,8 +4465,13 @@ def build_setup_fields(lang="en", values=None):
     fields = []
     for name in SETUP_FIELDS:
         current = values.get(name, getattr(config, name, None))
-        if name == "WEBUI_ENABLED" and fresh:
-            current = True
+        if name in ("WEBUI_ENABLED", "CHECK_FOR_UPDATES"):
+            # Both start ticked: the operator sees the choice and can untick
+            # it (#572 - the daily version check is on by default, visibly).
+            # On a redisplay the box is what was sent - absent is unticked,
+            # never config's value: CHECK_FOR_UPDATES ships True, and falling
+            # back to it re-ticked a box the operator had just unticked.
+            current = True if fresh else str(values.get(name, "")).lower() in ("1", "on", "true", "yes")
         field = _settings_field(name, types.get(name, str), current)
         label = strings.get(f"settings.field.{name}")
         if label:
@@ -4579,6 +4597,9 @@ def validate_setup_form(form, lang="en"):
                                "Settings page.")))
 
     changes["WEBUI_ENABLED"] = enable_webui
+    # #572: ticked unless the operator unticked it; a box left unticked is
+    # not sent at all, which is the "off".
+    changes["CHECK_FOR_UPDATES"] = str(form.get("CHECK_FOR_UPDATES", "") or "").lower() in ("1", "on", "true", "yes")
     if enable_webui:
         lan = str(form.get("WEBUI_LAN", "") or "").lower() in ("1", "on", "true", "yes")
         changes["WEBUI_HOST"] = "0.0.0.0" if lan else "127.0.0.1"
@@ -4651,9 +4672,9 @@ def render_setup_page(fields, token, lang="en", errors=(), values=None, port=842
         error_html = (f'<div class="error">{_html(errors[name])}</div>'
                       if name in errors else "")
         value = values.get(name, field.get("value"))
-        if name == "WEBUI_ENABLED":
+        if name in ("WEBUI_ENABLED", "CHECK_FOR_UPDATES"):
             checked = " checked" if (value is None or value in (True, "on", "1", "true")) else ""
-            rows.append(f'<label class="check"><input type="checkbox" name="WEBUI_ENABLED" value="1"{checked}> '
+            rows.append(f'<label class="check"><input type="checkbox" name="{name}" value="1"{checked}> '
                         f'{label}{help_html}</label>')
             continue
         if name == "WEBUI_HOST":

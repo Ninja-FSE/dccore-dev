@@ -239,6 +239,18 @@ rebuild_schedule_guard        = threading.Lock()
 rebuild_schedule_started      = False
 rebuild_schedule_last_attempt = None
 
+update_check_guard        = threading.Lock()  # the version check's start guard (#572)
+update_check_started      = False
+update_check_last_attempt = None   # when the last check (daily or manual) began
+update_check_last_manual  = None   # for the manual check's cooldown
+update_check_at           = None   # when the last SUCCESSFUL check finished
+update_check_error        = None   # why the last check failed, until one succeeds
+update_check_error_at     = None
+update_check_latest       = None   # the latest full release's tag
+update_check_url          = None
+update_check_newer        = False
+update_check_announced    = None   # the release already said in the feed
+
 # Other bots advertising in our channels ------------------------------------
 # nick.lower() -> {"nick", "channel", "files", "list_date", "list_size",
 #                  "last_seen"}, built from the periodic advert every

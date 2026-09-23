@@ -432,6 +432,20 @@ def startup(setup_page=None):
     except Exception as schedule_err:
         print(f"[SCHEDULE] Could not start the rebuild schedule: {schedule_err}")
 
+    # The daily version check (#572). Said at EVERY start while it is on, so an
+    # install that upgraded into it - where nobody ticked a box - is told, and
+    # told how to turn it off. Started once, guarded in runtime.py; a rehash
+    # starts it too, when the setting is ticked on later.
+    try:
+        import version_check
+        if getattr(config, "CHECK_FOR_UPDATES", True):
+            print("[UPDATE] Checking once a day for a new version of DCCore (one request to "
+                  "GitHub; nothing about this bot is sent). CHECK_FOR_UPDATES = false, or "
+                  "the Settings page, turns it off.")
+        version_check.ensure_worker()
+    except Exception as update_err:
+        print(f"[UPDATE] Could not start the version check: {update_err}")
+
     # Optional web dashboard (mostly read-only status views, plus the
     # cross-bot search/fetch routes - see webserver.py's module docstring).
     # Lazy import (not at module top) so a missing Flask install - the normal

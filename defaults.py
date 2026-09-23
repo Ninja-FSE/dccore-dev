@@ -28,6 +28,13 @@ SCRIPT_VERSION: str = "DCCore v1.13.0"
 # no project URL anywhere in the tree, so anyone who received a list had no way
 # to find out what produced it.
 PROJECT_URL: str = "https://github.com/Ninja-FSE/dccore"
+# Tell the operator when a newer DCCore is out (#572). Once a day the bot asks
+# the latest release of the repository PROJECT_URL names - one request to
+# GitHub, carrying nothing about this bot - and says so on the dashboard, in the
+# console's `status` and in the mIRC window. On by default, and said at every
+# startup while it is on; a check that fails says why, never silently. The
+# dashboard's Check now and the console's `checkversion` work with it off.
+CHECK_FOR_UPDATES: bool = True  # Check once a day whether a newer DCCore has been released
 
 # Answer CTCP VERSION with SCRIPT_VERSION and PROJECT_URL. Operators who would
 # rather not advertise a version can turn this off; the bot then ignores the

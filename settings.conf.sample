@@ -41,6 +41,20 @@
 # to find out what produced it.
 #PROJECT_URL = https://github.com/Ninja-FSE/dccore
 
+# Once a day, ask GitHub whether a newer DCCore has been released, and say so
+# on the dashboard, in the console and in the mIRC window. Only the version
+# numbers are compared; nothing about your bot is sent. Turn it off on a
+# machine that should not go out.
+#
+# Tell the operator when a newer DCCore is out (#572). Once a day the bot asks
+# the latest release of the repository PROJECT_URL names - one request to
+# GitHub, carrying nothing about this bot - and says so on the dashboard, in the
+# console's `status` and in the mIRC window. On by default, and said at every
+# startup while it is on; a check that fails says why, never silently. The
+# dashboard's Check now and the console's `checkversion` work with it off.
+# Check once a day whether a newer DCCore has been released
+#CHECK_FOR_UPDATES = true
+
 # Answer when somebody asks the bot what software it runs (a CTCP VERSION
 # request). The answer goes only to the person who asked. Turn off to stay
 # quiet about it.
