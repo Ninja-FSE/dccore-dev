@@ -73,7 +73,7 @@ def names_a_remote_or_absolute_path(name, windows=None):
 # is busy, at once, without touching the disk), and a name that just missed is
 # answered "not found" from memory for a minute - the same stale row pasted ten
 # times costs one scan, not ten.
-MAX_CONCURRENT_LIBRARY_SCANS = 2
+MAX_CONCURRENT_LIBRARY_SCANS = runtime.MAX_CONCURRENT_LIBRARY_SCANS
 LOOKUP_MISS_TTL_SECONDS = 60.0
 LOOKUP_MISS_MEMORY = 512
 # WHAT A PASTE OF NINE ROWS COSTS (#886). Only misses were remembered, so
@@ -94,9 +94,12 @@ LOOKUP_HIT_TTL_SECONDS = 300.0
 LOOKUP_HIT_MEMORY = 512
 LOOKUP_FOLDER_MEMORY = 32
 LOOKUP_SCAN_WAIT_SECONDS = 5.0
-_library_scans = globals().get("_library_scans") or threading.BoundedSemaphore(MAX_CONCURRENT_LIBRARY_SCANS)
+# Owned by runtime.py, which nothing reloads (#749) - bound by name, the way
+# queue_lock is, so a !rehash re-runs these lines and picks the same live
+# objects back up. The memories themselves are this module's own cache.
+_library_scans = runtime.library_scans
 _lookup_misses = globals().get("_lookup_misses") or {}
-_lookup_misses_lock = globals().get("_lookup_misses_lock") or threading.Lock()
+_lookup_misses_lock = runtime.lookup_memory_lock
 _lookup_hits = globals().get("_lookup_hits") or {}
 _lookup_folders = globals().get("_lookup_folders") or {}
 
