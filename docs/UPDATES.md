@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The reload-lock test asks during the reload instead of racing it (#915)
+
+`test_the_reload_actually_holds_the_lock` failed on `main` for the #904 merge (macOS / Python 3.14 only; the next
+three runs were green everywhere). It spun a watcher thread on `acquire(blocking=False)` and needed the scheduler to
+run it while `reload_modules_in_order()` held `runtime.config_reload_lock`, within 30 reloads - and reloading
+`defaults` is quicker than CPython's 5 ms switch interval, so a slow runner could finish every reload between
+switches. Now `importlib.reload` is wrapped for the test: inside the reload a second thread asks for the lock and is
+joined before the reload goes on, so it is refused exactly when the lock is held around the reload. Five runs in a
+row pass; with the `with runtime.config_reload_lock:` removed it fails (as does its neighbour). Test only.
+
 ### 🗓️ The list rebuilds itself on a schedule (#776)
 
 Asked by the operator. Nothing rebuilt the list on a timer: `!update`, the dashboard's **Update list** and the
