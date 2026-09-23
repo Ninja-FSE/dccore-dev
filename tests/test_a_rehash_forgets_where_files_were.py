@@ -1,17 +1,29 @@
-"""The lookup memories are dropped when the library is reconfigured (#886).
+"""The lookup memories are dropped when the library is reconfigured (#886),
+and checked against the CURRENT configuration wherever they are used (#901).
 
 #886 gave the request path three memories so a pasted batch costs one
 scan instead of nine. Each is a hint that re-checks the file on disk
 before it is trusted, which is what makes a moved or deleted file cost a
-stale check rather than a wrong answer - and it is also precisely why a
-rehash has to be told explicitly.
+stale check rather than a wrong answer.
 
-A path remembered under a folder the operator has just REMOVED from the
-library is still there on disk. The on-disk check therefore passes, the
-remembered path is used, and is_safe_path() then refuses it against the
-new roots: "invalid path" for a name the new configuration can serve
-perfectly well. Nothing about the entry is stale, so nothing self-heals
-it; without the call the wrong answer lasts LOOKUP_HIT_TTL_SECONDS.
+That existence check cannot catch every way the library changes, though:
+a path remembered under a folder the operator has just REMOVED is still
+there on disk. #889 made a rehash forget the memories outright - but the
+dashboard's Folders and Lists pages change the library WITHOUT a rehash
+(webserver.py's apply_folder_changes()/apply_list_changes() save and
+return; library.folders() reads the file on every call), so a memory made
+just before such a save outlived the root it came from until either
+LOOKUP_HIT_TTL_SECONDS passed or a !rehash happened to run.
+
+#901 closes that gap at the point of use: a remembered path is checked
+against search_roots - the roots this very request just resolved, not
+whatever they were when the memory was made - before it is trusted, the
+same is_safe_path() check the request makes on any other path afterwards.
+Outside them, the request falls through to the folder memory and then the
+scan instead of being refused. #889's !rehash call stays: it still frees
+the memory outright, which this does not replace - a scan still in flight
+across a rehash records its hit after the forget, and this is what keeps
+THAT entry honest too, along with every other way the roots can move.
 
 A rebuild (!update) needs no such call: it changes the lists, not where
 the files are, and anything it does move fails the on-disk check.
@@ -34,8 +46,9 @@ from tests.test_an_unknown_filename_does_not_scan_the_library_unbounded import L
 
 
 class ARememberedPathOutlivesTheRootItCameFrom(LookupBase):
-    """The bug the call exists to prevent, driven through the real request
-    path. Both tests fail without dcc.forget_library_lookups()."""
+    """Driven through the real request path, with the memories left in
+    place (no forget, no rehash) - #901's own case: a dashboard save that
+    changes the library without either."""
 
     def setUp(self):
         super().setUp()
@@ -50,10 +63,14 @@ class ARememberedPathOutlivesTheRootItCameFrom(LookupBase):
         return os.path.basename(self.tree.tracks[0])
 
     def point_the_library_at(self, root):
-        """What the reload does to search_roots, without reloading."""
+        """What a dashboard Folders save does to search_roots - live on the
+        very next request, no rehash and no reload involved (#901)."""
         config.FILE_DIRECTORY = root
 
-    def test_a_path_from_a_root_that_is_gone_is_refused_rather_than_served(self):
+    def test_a_path_from_a_root_that_is_gone_is_served_from_the_new_one(self):
+        """#901: checked against search_roots at the point of use, so this
+        is served even with the memory still in place and no !rehash run -
+        the dashboard case the old behaviour (asserted below) missed."""
         name = self.a_track()
         self.ask(name)
         self.assertEqual(self.errors(), [], "the first request should have been served")
@@ -61,10 +78,13 @@ class ARememberedPathOutlivesTheRootItCameFrom(LookupBase):
         self.point_the_library_at(self.moved_root)
         self.ask(name)
 
-        self.assertEqual(self.errors(), ["invalid_path"],
-                         "the remembered path survived the root it came from")
+        self.assertEqual(self.errors(), [],
+                         "the remembered path, checked against the new roots, "
+                         "should have been passed over for the new one")
 
-    def test_forgetting_them_is_what_serves_it_from_the_new_root(self):
+    def test_forgetting_them_also_still_serves_it(self):
+        """#889's !rehash call is not made redundant by #901 - it still
+        frees the memory outright, which #901 does not replace."""
         name = self.a_track()
         self.ask(name)
         self.assertEqual(self.errors(), [])

@@ -22,6 +22,20 @@ replaces more than one says so, checked against the printed text; a wildcarded f
 the default and prints no confusing refusal. The first fails on the old code with the exact reported shape -
 `ADMIN_HOSTMASKS` collapsed to the first entry alone.
 
+### 🧪 The file-request exemption is executed, not just read (#897)
+
+#894 (#888) tested the file-request flood exemption two ways - `security.is_flooding()` directly, and the two
+gate expressions lifted out of `irc.py`'s source and evaluated on their own - and neither one runs the actual
+`if` statement. Putting `not is_file_request` back out of the real line, undoing the fix outright, left the
+whole suite green: the behaviour the operator asked for had no test that would notice it going.
+
+`tests/test_file_requests_really_skip_the_flood_gate.py` (6) drives `irc.irc_loop()` for real against a
+scripted server (the #789 harness) and sends a burst of `!<bot> <file>` lines: every row dispatches, the user
+is never muted, a batch twice `MAX_REQUESTS` still is not, and a request is served during a mute earned by
+something else. A control class proves the harness still catches a real flood from searches, so a pass above
+is not the harness being too permissive to prove anything. Removing `not is_file_request` fails four of the
+six. No behaviour changed - #888's fix was already correct - only what verifies it.
+
 ### 🔴 The @DCCore window lights up like a channel: red on activity, highlight on a failure (#892)
 
 Asked by the operator: every other mIRC window's button turns red when something new is said in it, and `@DCCore`
@@ -137,6 +151,20 @@ in the #580 tests now shortens the wait and says why. `tests/test_a_rehash_forge
 drives the wrong answer through the real request path, both with the memories kept and with them dropped, and
 reads the rehash's own wiring - the reload cannot be run in a test, the same reason
 `test_a_rehash_keeps_the_interlocks_of_a_running_pack.py` reads its own.
+
+**#889's `!rehash` call is not the only way the library changes (#901).** The dashboard's Folders and Lists
+pages save and return without one - `apply_folder_changes()`/`apply_list_changes()` in `webserver.py` - and
+`library.folders()` reads the saved file on every call, so a folder removed there is live on the very next
+request. A path remembered under it is still on disk, so the memory's own existence check cannot catch this
+either, and without a rehash to forget by, the wrong `invalid path` answer lasted the full
+`LOOKUP_HIT_TTL_SECONDS`. Closed at the point of use instead of relying on being told: a remembered path is
+now checked against `search_roots` - the roots *this* request just resolved, not whatever they were when the
+memory was made - with the same `is_safe_path()` check the request makes on any other path, before it is
+trusted; outside them, the request falls through to the folder memory and then the scan. `#889`'s `!rehash`
+call stays - it still frees the memory outright, which this does not replace: a scan still in flight across a
+rehash records its hit after the forget, and this is what keeps that entry honest too, along with every other
+way the roots can move. `test_a_path_from_a_root_that_is_gone_is_refused_rather_than_served` documented the
+gap itself, so it flips to served, even without a forget.
 
 ### 🗣️ The person downloading is told their own client never accepted it (#884)
 
