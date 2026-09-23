@@ -2078,9 +2078,11 @@ def generate_master_list(list_name=None):
             # Only a PUBLISHED rebuild forgets the files it did not see; a
             # failed one may have seen half the library.
             audio.publish()
+            rate = audio.rate()
             print(f"[LIST-GEN] Audio info: {audio.read_count:,} file(s) read, "
                   f"{audio.reused_count:,} unchanged since the last rebuild"
-                  f"{f', {audio.left_count:,} left for the next one' if audio.left_count else ''}.")
+                  f"{f', {audio.left_count:,} left for the next one' if audio.left_count else ''}."
+                  f"{f' Read at {rate:,.0f} files a second, {audio.workers} at a time.' if rate else ''}")
         return True
             
     except Exception as e:

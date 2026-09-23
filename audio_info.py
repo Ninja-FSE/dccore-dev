@@ -326,6 +326,8 @@ class Cache:
         self.read_count = 0
         self.reused_count = 0
         self.left_count = 0
+        self.workers = 0
+        self.read_seconds = 0.0
         self.published = False
 
     @classmethod
@@ -373,6 +375,10 @@ class Cache:
         if not total:
             return
         workers = max(1, int(workers))
+        self.workers = workers
+        # Wall time on the real clock, not `clock` - that one is the budget's,
+        # and a test drives it by hand.
+        began = time.monotonic()
         deadline = None if not budget else clock() + budget
         queue = iter(self.pending)
         running = {}
@@ -408,6 +414,15 @@ class Cache:
 
         self.read_count = done
         self.left_count = total - done
+        self.read_seconds = time.monotonic() - began
+
+    def rate(self):
+        """Files read per second of reading, or None when nothing was read.
+        What an operator compares to choose LIST_AUDIO_INFO_THREADS: on a
+        network mount the ceiling is the server's, not the setting's."""
+        if not self.read_count or self.read_seconds <= 0:
+            return None
+        return self.read_count / self.read_seconds
         self.pending = []
 
     def suffix(self, key):
