@@ -2605,14 +2605,31 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         is_master_zip = list_mod.is_list_artifact_name(requested_file)
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
             # Both memories first (#886), cheapest first: this exact name,
-            # then the folders recent lookups resolved into. Either way the
-            # path found here goes through the same containment check below
-            # as one the scan produces.
+            # then the folders recent lookups resolved into. Checked against
+            # search_roots - the CURRENT configuration, not whatever it was
+            # when the memory was made - right here rather than trusting the
+            # containment check further down to sort it out (#901).
+            #
+            # The dashboard's Folders and Lists pages change the library
+            # without a rehash: apply_folder_changes()/apply_list_changes()
+            # (webserver.py) save and return, and the folder set is re-read
+            # from disk on every call, so the new roots are live on the very
+            # next request. A path remembered under a folder just removed on
+            # that page is still on disk - the memory's own existence check
+            # cannot catch this, the file has not gone anywhere - so without
+            # this check it would reach the containment check below and be
+            # refused as "invalid path" for a file the new configuration
+            # serves perfectly well, until LOOKUP_HIT_TTL_SECONDS passes.
+            # #889's !rehash call stays; it frees the memory outright, which
+            # this does not need to wait for and does not replace - a scan
+            # still in flight across a rehash records its hit after the
+            # forget, and this is what keeps THAT entry honest too.
             remembered_key = (str(wanted_list), str(requested_file).lower().strip())
-            remembered = (_remembered_path(remembered_key)
-                          or _in_a_recent_folder(str(wanted_list), requested_file))
-            if remembered:
-                full_path = remembered
+            for candidate in (_remembered_path(remembered_key),
+                              _in_a_recent_folder(str(wanted_list), requested_file)):
+                if candidate and any(is_safe_path(root, candidate) for root in search_roots):
+                    full_path = candidate
+                    break
 
         if not is_master_zip and not os.path.exists(platform_compat.long_path(full_path)):
             # THE EXPENSIVE PART, BOUNDED (#580). A name that is not in the first
