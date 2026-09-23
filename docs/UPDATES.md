@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The reload-lock test asks during the reload instead of racing it (#915)
+
+`test_the_reload_actually_holds_the_lock` failed on `main` for the #904 merge (macOS / Python 3.14 only; the next
+three runs were green everywhere). It spun a watcher thread on `acquire(blocking=False)` and needed the scheduler to
+run it while `reload_modules_in_order()` held `runtime.config_reload_lock`, within 30 reloads - and reloading
+`defaults` is quicker than CPython's 5 ms switch interval, so a slow runner could finish every reload between
+switches. Now `importlib.reload` is wrapped for the test: inside the reload a second thread asks for the lock and is
+joined before the reload goes on, so it is refused exactly when the lock is held around the reload. Five runs in a
+row pass; with the `with runtime.config_reload_lock:` removed it fails (as does its neighbour). Test only.
+
 ### 🆕 The bot says when a new version of DCCore is out (#572)
 
 Nothing told an operator that a release existed: the ones who never read the repository - most of them - ran old
@@ -150,6 +160,17 @@ offered as the default, which used to make pressing Enter fail the validator on 
 replaces more than one says so, checked against the printed text; a wildcarded first entry is not offered as
 the default and prints no confusing refusal. The first fails on the old code with the exact reported shape -
 `ADMIN_HOSTMASKS` collapsed to the first entry alone.
+
+Two ways the same step still lost or misread hosts, closed afterwards (#911). **Retyping a host that is already
+configured** - out of habit, or because the prompt no longer offers it - wrote `[just that one]`: with home and
+phone set, retyping home dropped the phone, the loss this entry is about, reached by typing instead of by Enter. A
+host already there (any case) now changes nothing and says so. And **a comma-separated `ADMIN_HOSTMASKS`** (a form
+`adminchat` accepts, and `admin_config.py` may hold) was indexed as a string - its first *character* taken as the
+first host, `len()` counting characters (*"replaces the 13 services hosts"*). The hosts are now read the way the
+console reads them, `adminchat.admin_host_patterns()` - either form, host part only - and all of them are shown
+(*Configured now: ...*) rather than the first offered as a default. A new host still replaces the list with the
+warning above. `tests/test_retyping_a_configured_host_keeps_the_others.py` (6); five fail on the old code, the
+sixth pins that a new host still replaces. Two source guards follow the prompt into its variable.
 
 ### 🧪 The file-request exemption is executed, not just read (#897)
 
