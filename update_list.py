@@ -442,6 +442,14 @@ def _discard_temp_lists(*paths):
             print(f"[LIST-CLEAN ERROR] Could not remove {path}: {err}")
 
 
+# How patient the swap is with a reader holding a list open (#923). Searches
+# now run during the scan; the swap refuses new ones, but one that started a
+# moment before may still be reading the list - a second or two on a very
+# large one - and on Windows the rename waits for it. Ten attempts back off to
+# about ten seconds in all; POSIX never retries at all.
+PUBLISH_REPLACE_ATTEMPTS = 10
+
+
 def _publish_artifacts(swaps):
     """Move every (temporary, destination) pair into place, or none of them.
 
@@ -479,8 +487,10 @@ def _publish_artifacts(swaps):
             backup = None
             if os.path.exists(platform_compat.long_path(destination)):
                 backup = destination + ".previous"
-                platform_compat.replace_with_retry(destination, backup)
-            platform_compat.replace_with_retry(temporary, destination)
+                platform_compat.replace_with_retry(destination, backup,
+                                                   attempts=PUBLISH_REPLACE_ATTEMPTS)
+            platform_compat.replace_with_retry(temporary, destination,
+                                               attempts=PUBLISH_REPLACE_ATTEMPTS)
             done.append((destination, backup))
     except Exception:
         # Reverse order because that is the convention for undoing a
@@ -941,6 +951,25 @@ def write_progress(phase, folder="", folder_index=0, folder_count=0,
         platform_compat.replace_with_retry(temp, path)
     except Exception:
         pass
+
+
+# The phases in which the published list is untouched (#923): the scan, the
+# audio-info reading and the writing all work on temporary names. Anything
+# else - "publishing", which covers the swap and the prune after it, or no
+# phase at all - is a moment searches and file requests wait out.
+PHASES_BEFORE_THE_SWAP = ("scanning", "audio", "writing")
+
+
+def read_phase():
+    """The phase the running rebuild last reported, or None when it reported
+    nothing readable. The daemon asks this; the rebuild is another process."""
+    try:
+        with io.open(platform_compat.long_path(progress_path()), encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        phase = loaded.get("phase") if isinstance(loaded, dict) else None
+        return str(phase) if phase else None
+    except (OSError, ValueError):
+        return None
 
 
 def clear_progress():
@@ -2051,6 +2080,11 @@ def generate_master_list(list_name=None):
             swaps.append((tmp_video_path, video_path))
         if serve_albums:
             swaps.append((tmp_rar_path, rar_path))
+        # Said BEFORE the swap (#923): from here until this list is done -
+        # the swap and the prune of what it replaced - the daemon refuses new
+        # searches and file requests, since on Windows a file somebody is
+        # reading cannot be renamed or removed.
+        write_progress("publishing", force=True)
         _publish_artifacts(swaps)
 
         # THE POINT OF NO RETURN (#442). Everything from here to the except is

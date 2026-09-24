@@ -105,7 +105,16 @@ BROADCAST_SEARCH_CHANNEL: str = None
 # ---------------------------------------------------------------------
 # 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
-PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
+# While the list is rebuilt, searches and file requests are refused while the
+# new list is SWAPPED IN - a few seconds at the end - and answered from the
+# current list the rest of the time (#923). The new list is built under
+# temporary names and the current one is complete and unchanged until the
+# swap, so the scan (and the audio-info reading) no longer takes the bot off
+# the air for its whole length. False: never pause at all.
+PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: pause searching and sharing while a rebuilt list is swapped in
+# The old behaviour: pause searching and sharing for the WHOLE rebuild, not
+# only the swap. For an operator who wants it back; nothing else needs it.
+PAUSE_FOR_WHOLE_UPDATE: bool = False  # Pause searching and sharing for the whole rebuild, not only the swap
 # None, not a real path - a shipped literal path would let a copy-paste
 # install silently inherit somebody else's actual music folder path. Unlike
 # NICKNAME/CHANNEL/ADMIN_NICK, FILE_DIRECTORY is NOT in settings_file.
