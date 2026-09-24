@@ -1186,6 +1186,17 @@
 # Seconds an "offered" row waits for a DCC SEND before it's marked failed
 #FETCH_OFFER_TIMEOUT = 60
 
+# When another bot puts your request in its queue, how long to wait for your
+# turn before giving up. Busy servers take hours. 0 waits for ever.
+#
+# How long a request the other bot has QUEUED waits for its file (#926). When
+# a bot answers "you are number 12 in my queue", the request stops counting
+# against MAX_FETCH_SLOTS and waits for its turn - hours, on a busy server.
+# Past this it fails: a bot that restarted or dropped its queue never says so.
+# 0 = wait for ever.
+# Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
+#FETCH_QUEUED_TIMEOUT = 43200
+
 # When you request a whole folder (.rar) from another bot, how many seconds to
 # wait for its offer. Much longer than for a single file, because the other
 # bot has to pack the folder first.
