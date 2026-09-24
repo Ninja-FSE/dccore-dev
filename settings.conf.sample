@@ -168,13 +168,27 @@
 # setting it explicitly, here or in admin_config.py, still wins.
 #BROADCAST_SEARCH_CHANNEL = 
 
-
-[filesystem, paths and text stores]
-# While the list is being rebuilt (!update), stop serving and searching until
-# it is done. Keeps the bot from handing out a half-built list.
+# While a rebuilt list is being swapped in - a few seconds at the end of
+# !update - refuse searches and file requests. The rest of the rebuild, they
+# are answered from the current list, which stays complete until the swap.
 #
-# MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
+# While the list is rebuilt, searches and file requests are refused while the
+# new list is SWAPPED IN - a few seconds at the end - and answered from the
+# current list the rest of the time (#923). The new list is built under
+# temporary names and the current one is complete and unchanged until the
+# swap, so the scan (and the audio-info reading) no longer takes the bot off
+# the air for its whole length. False: never pause at all.
+# MAINTENANCE SWITCH: pause searching and sharing while a rebuilt list is swapped in
 #PAUSE_ON_UPDATE = true
+
+# The old behaviour: refuse searches and file requests for the whole rebuild,
+# not only while the new list is swapped in. Only needs Pause sharing during
+# !update on too.
+#
+# The old behaviour: pause searching and sharing for the WHOLE rebuild, not
+# only the swap. For an operator who wants it back; nothing else needs it.
+# Pause searching and sharing for the whole rebuild, not only the swap
+#PAUSE_FOR_WHOLE_UPDATE = false
 
 # The folder with the files you share. Used only if you have not added folders
 # on the Library page - if you have, those are used instead and this is

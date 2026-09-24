@@ -239,7 +239,7 @@ The bot has nothing to serve until its library has been scanned:
 python3 update_list.py
 ```
 
-or `!update` from IRC, or the dashboard's **Update list** button. On a large library this takes a while; the advert will report the real file count once it finishes. The scan lists several folders at once (`LIST_SCAN_THREADS`, 16), which is what makes it bearable on a network drive; searches wait while a rebuild runs, so on a slow share raising it shortens that wait.
+or `!update` from IRC, or the dashboard's **Update list** button. On a large library this takes a while; the advert will report the real file count once it finishes. The scan lists several folders at once (`LIST_SCAN_THREADS`, 16), which is what makes it bearable on a network drive. Searches and downloads go on while it runs, answered from the list people already have; they pause only for the few seconds the new list takes to swap in (`PAUSE_ON_UPDATE`). `PAUSE_FOR_WHOLE_UPDATE` brings back the old pause for the whole rebuild.
 
 **Everything under `FILE_DIRECTORY` goes into the list** — every format, and files with no extension at all. `LIST_IGNORED_EXTENSIONS` names what to leave out; write it however you like, since dots and spacing are optional and case does not matter (`db,ini,tmp` and `.DB, .INI, .TMP` are the same list). It ships skipping only what is never a real file: `.db`, `.ini`, `.lnk`, `.url`, and the `.tmp`/`.part`/`.crdownload`/`.!ut` suffixes of downloads still in flight. The scan prints what it is skipping before it starts.
 
@@ -253,7 +253,7 @@ Two settings decide how the result is split up:
 **`LIST_SHOW_AUDIO_INFO`** (off by default) adds each MP3 and FLAC file's length and quality after its size -
 `::INFO:: 10.3MB 4m31s 320/44.1/JS`, the way other servers' lists show it (`~245` is a VBR average). Every audio
 file has to be read once. The files are read several at a time (`LIST_AUDIO_INFO_THREADS`, 64), and each rebuild
-spends at most `LIST_AUDIO_INFO_MINUTES` (5) on it, since searches wait while a rebuild runs: on a large library,
+spends at most `LIST_AUDIO_INFO_MINUTES` (5) on it, so a first pass never holds a rebuild for long: on a large library,
 or one on a network drive, the first few rebuilds each publish with part of the library read and the rest showing
 its size alone, until everything has been read once. After that only new files are read, and a rebuild costs what
 it did without the setting. What was read is kept in `data/audio_info.db`; deleting it is safe - the files are

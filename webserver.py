@@ -2314,8 +2314,11 @@ def start_list_update():
     """
     if bool(getattr(config, "update_inprogress", False)):
         return 409, {"error": "A list update is already running."}
+    # A running search only stands in the way of the old whole-rebuild pause
+    # (#923): by default the rebuild runs alongside searches.
+    import list as list_mod
     if (bool(getattr(config, "search_inprogress", False))
-            and bool(getattr(config, "PAUSE_ON_UPDATE", True))):
+            and list_mod.rebuild_pauses_everything()):
         return 409, {"error": "Another system scan is already in progress."}
 
     import commands
@@ -2373,7 +2376,8 @@ SETTINGS_CATEGORIES = (
                                                 "CHECK_FOR_UPDATES"]),
     ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
                                                 "MAX_GLOBAL_QUEUE", "MAX_SEARCH_RESULTS",
-                                                "PAUSE_ON_UPDATE", "REHASH_TRANSFER_WAIT"]),
+                                                "PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE",
+                                                "REHASH_TRANSFER_WAIT"]),
     # The transfer-tuning pair, together. Anyone reaching for one wants the
     # other in front of them.
     ("transfers",     "Transfers",             ["DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
@@ -2511,6 +2515,7 @@ SETTINGS_LABELS = {
 
     "LIST_BASE_NAME": "List base name",
     "PAUSE_ON_UPDATE": "Pause sharing during !update",
+    "PAUSE_FOR_WHOLE_UPDATE": "Pause for the whole rebuild",
     # Named for what it now IS. From an operator: "under Paths & Storage, this is not
     # needed anymore" - not quite, it is still the fallback for an install
     # with no folder list, which is most of them. But presenting it as a
