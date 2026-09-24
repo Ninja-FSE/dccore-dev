@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The stats route test holds the uptime still (#941)
+
+`test_dashboard_routes.TheReadOnlyRoutesAnswer.test_each_one_returns_the_payload_its_builder_produces` failed once on
+ubuntu-latest / Python 3.12 for the #934 merge and passed on the rerun. Not leaked state: it calls `GET /api/stats`, then
+`build_stats_payload()`, and asserts the two are equal - and the payload carries `transfer.uptime_seconds`, which is
+`int(time.time() - start_time)`. A whole second ticking over between the two calls made them differ by 1. The test
+now holds `stats_mgr.get_uptime_seconds()` still while it compares; what it checks is which builder a route calls,
+not what time it is. The daemon is unchanged - a live uptime is meant to move.
+
+New `test_a_second_ticking_between_the_two_calls_cannot_fail_it` reproduces it with a clock that moves a second on
+every read, and asserts that the clock really ticks, so it cannot pass by proving nothing. Mutation-checked: without
+the hold it fails on `/api/stats`, and with an uptime that does not move, its own guard fails.
+
 ## 🟩 v1.13.1 (2026-09-24) - "The Fetch Queue Looks After Itself"
 
 ### 🧲 Lists are grabbed automatically, on AutoGet's rules (#926)
