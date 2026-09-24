@@ -139,8 +139,15 @@ class WhatAReplyDoesToTheRequest(FetchCase):
         self.assertEqual(self.row(rid)["state"], "failed")
         self.assertTrue(self.row(rid)["reason"].startswith("refused: Request Denied"))
 
-    def test_busy_ends_it_as_busy(self):
+    def test_busy_is_asked_again_later_then_ends_as_busy(self):
+        """Busy is not never: back to pending with a time, BUSY_RETRIES times."""
         rid = self.offered()
+        for attempt in range(dcc_fetch.BUSY_RETRIES):
+            self.row(rid).update(state="offered")
+            dcc_fetch.handle_bot_reply("ServerOne", "I am totally maxed out even in que list. Try it later.")
+            self.assertEqual(self.row(rid)["state"], "pending", attempt)
+            self.assertGreater(self.row(rid)["retry_at"], time.time() + dcc_fetch.BUSY_RETRY_SECONDS - 5)
+        self.row(rid).update(state="offered")
         dcc_fetch.handle_bot_reply("ServerOne", "I am totally maxed out even in que list. Try it later.")
         self.assertEqual(self.row(rid)["state"], "failed")
         self.assertTrue(self.row(rid)["reason"].startswith("busy: "))

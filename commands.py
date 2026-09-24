@@ -2029,8 +2029,13 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
             return
         config.update_inprogress = True
 
-        # The global maintenance lock is only taken if the switch is True in config
-        if getattr(config, 'PAUSE_ON_UPDATE', True) is True:
+        # The global maintenance lock is only taken for the old whole-rebuild
+        # pause (#923). By default searches run through the scan, answered
+        # from the current list, and only the swap at the end pauses them -
+        # list.rebuild_pauses_requests() - so a search running now is no
+        # reason to refuse the rebuild, and the rebuild holds no search lock.
+        import list as list_mod
+        if list_mod.rebuild_pauses_everything():
             if getattr(config, 'search_inprogress', False) is True:
                 announce.send_debug(f"List update request from {user} denied: Another system scan is already running.", category="INFO")
                 # The flag was raised by the gate above and this request is not
@@ -2044,6 +2049,11 @@ def handle_list_update_request(user, target_chan, authorised=False, user_host=No
     if paused_searches:
         print(f"[MAINTENANCE START] {user} ran !update. Searching and sharing are now PAUSED.")
         announce.send_debug(f"System maintenance initiated by {user}. MasterList is rebuilding, file requests temporarily paused...", category="INFO")
+    elif getattr(config, 'PAUSE_ON_UPDATE', True) is True:
+        print(f"[UPDATE START] {user} ran !update. Searching and sharing continue from the current "
+              f"list and pause only while the new one is swapped in.")
+        announce.send_debug(f"List update triggered by {user} from {target_chan}. Searches and file "
+                            f"requests continue meanwhile.", category="INFO")
     else:
         print(f"[UPDATE START] {user} ran !update. The pause switch is False, so sharing continues meanwhile.")
         announce.send_debug(f"List update triggered by {user} from {target_chan}. Indexing the music directory...", category="INFO")
