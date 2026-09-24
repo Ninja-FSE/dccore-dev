@@ -274,6 +274,136 @@ BUSY_RETRY_SECONDS = 600
 _seen_absent = set()
 _back_since = {}
 
+# PAUSED BOTS (#926 item 4). A bot we could not connect to this many times in a
+# row is paused - its requests wait, "Paused", until the operator resumes it -
+# the way AutoGet disabled a nick after three "unable to connect" failures: a
+# bot behind a firewall that cannot accept our connection fails every file the
+# same way, and asking on burns its slot and ours. The operator can pause and
+# resume any bot too. Kept in a small file beside the fetch history, so a pause
+# survives a restart; the consecutive-failure count does not need to.
+CONNECT_FAILURES_TO_PAUSE = 3
+_paused = {}               # bot (lowercased) -> {"nick", "reason", "since", "by"}
+_connect_failures = {}     # bot (lowercased) -> consecutive active-connect failures
+
+# A FULL DISK (#926 item 4). No new fetch starts while FETCHED_FILES_DIR has
+# less than this free; a transfer that runs out of space mid-way goes back to
+# pending rather than failing, and everything resumes by itself once space is
+# freed. AutoGet switched itself off when a write failed; waiting is kinder.
+MIN_FREE_BYTES = 200 * 1024 * 1024
+_disk_was_low = [False]
+
+
+def _paused_path():
+    """Beside the fetch history - so wherever that is redirected (tests,
+    FETCH_HISTORY_FILE), this goes with it."""
+    return os.path.join(os.path.dirname(os.path.abspath(db.FETCH_HISTORY_FILE)),
+                        "fetch_paused_bots.json")
+
+
+def load_paused_bots():
+    """Read the paused bots back at startup. A missing or unreadable file is
+    no pauses, not a refusal to start."""
+    import json
+    _paused.clear()
+    try:
+        with open(_paused_path(), "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (OSError, ValueError):
+        return
+    if isinstance(loaded, dict):
+        _paused.update({str(key).lower(): value for key, value in loaded.items()
+                        if isinstance(value, dict)})
+
+
+def _save_paused_bots():
+    import json
+    try:
+        with db._disk_lock:
+            db._atomic_write(_paused_path(), json.dumps(_paused, indent=1, sort_keys=True))
+    except Exception as err:
+        print(f"[FETCH] Could not save the paused bots: {err}")
+
+
+def paused_bots():
+    """{bot (lowercased): {"nick", "reason", "since", "by"}}, a copy."""
+    return {key: dict(value) for key, value in _paused.items()}
+
+
+def pause_bot(bot, reason, by="operator"):
+    nick = str(bot or "").strip()
+    if not nick:
+        return False
+    _paused[nick.lower()] = {"nick": nick, "reason": str(reason), "since": time.time(), "by": by}
+    _connect_failures.pop(nick.lower(), None)
+    _save_paused_bots()
+    print(f"[FETCH] Paused fetching from {nick}: {reason}")
+    return True
+
+
+def resume_bot(bot):
+    key = str(bot or "").strip().lower()
+    if _paused.pop(key, None) is None:
+        return False
+    _connect_failures.pop(key, None)
+    _save_paused_bots()
+    print(f"[FETCH] Resumed fetching from {bot}.")
+    return True
+
+
+def _note_connect_failure(bot):
+    """One more time we could not connect to this bot; the third in a row
+    pauses it, and says so where the operator looks."""
+    key = str(bot or "").strip().lower()
+    if not key or key in _paused:
+        return
+    _connect_failures[key] = _connect_failures.get(key, 0) + 1
+    if _connect_failures[key] >= CONNECT_FAILURES_TO_PAUSE:
+        pause_bot(bot, f"could not connect {CONNECT_FAILURES_TO_PAUSE} times in a row", by="auto")
+        try:
+            import announce
+            announce.send_debug(f"Fetching from {bot} is paused: could not connect "
+                                f"{CONNECT_FAILURES_TO_PAUSE} times in a row. Resume it on the "
+                                f"Downloads page when it can take connections.", category="INFO")
+        except Exception:
+            pass
+
+
+def _note_connect_success(bot):
+    _connect_failures.pop(str(bot or "").strip().lower(), None)
+
+
+def _disk_is_low():
+    """Whether FETCHED_FILES_DIR has less than MIN_FREE_BYTES free. Said once
+    when it becomes low and once when it recovers. A disk that cannot be
+    measured is not called low - the write itself still fails safely."""
+    import shutil
+    folder = getattr(config, "FETCHED_FILES_DIR", "") or "."
+    try:
+        free = shutil.disk_usage(platform_compat.long_path(os.path.abspath(folder))).free
+    except OSError:
+        return False
+    low = free < MIN_FREE_BYTES
+    if low != _disk_was_low[0]:
+        _disk_was_low[0] = low
+        message = (f"Fetching is waiting: under {MIN_FREE_BYTES // (1024 * 1024)} MB free where fetched "
+                   f"files go. It carries on by itself once space is freed."
+                   if low else "Fetching carries on: there is space for fetched files again.")
+        print(f"[FETCH] {message}")
+        try:
+            import announce
+            announce.send_debug(message, category="INFO")
+        except Exception:
+            pass
+    return low
+
+
+def _is_disk_full(err):
+    """Whether an error is the disk running out of space (ENOSPC; Windows
+    reports ERROR_DISK_FULL as the same errno)."""
+    import errno
+    return isinstance(err, OSError) and (err.errno == errno.ENOSPC
+                                         or getattr(err, "winerror", None) in (112, 39))
+
 # MAX_UNRESOLVED_FETCHES: the ceiling on how many rows may sit unresolved
 # (pending or in flight) at once, across every requester.
 #
@@ -859,6 +989,10 @@ def check_fetch_queue():
         waiting_bots = {str(row.get("bot", "")).strip().lower()
                         for row in queue.values() if row.get("state") == "pending"}
     readiness = _bot_readiness(waiting_bots, now)
+    for bot in waiting_bots:
+        if bot in _paused:
+            readiness[bot] = "paused"
+    disk_low = bool(waiting_bots) and _disk_is_low()
 
     to_dispatch = []
     with _fetch_lock():
@@ -934,6 +1068,8 @@ def check_fetch_queue():
             row = queue[rid]
             key = str(row.get("bot", "")).strip().lower()
             why = readiness.get(key, "")
+            if not why and disk_low:
+                why = "disk-full"
             if not why and (row.get("retry_at") or 0) > now:
                 why = "retry"
             if not why and max_per_bot > 0 and load.get(key, 0) >= max_per_bot:
@@ -1932,6 +2068,10 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
         except Exception as connect_err:
             _mark_failed_locked(row, f"connect error: {connect_err}")
             print(f"[FETCH] Could not connect to {offer['ip']}:{offer['port']}: {connect_err}")
+            # Only an ACTIVE connect counts (#926): we dialled them and could
+            # not reach them. A passive offer that nobody connects back to is
+            # about our side, not theirs.
+            _note_connect_failure(row.get("bot"))
             try:
                 sock.close()
             except Exception:
@@ -1952,6 +2092,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
 
     bytes_received = 0
     failure_reason = None
+    disk_full = False
     handle = None
     try:
         # Two different limits, and long_path() only lifts one of them. The
@@ -1990,6 +2131,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
             row["bytes_received"] = bytes_received
     except Exception as recv_err:
         failure_reason = f"transfer error: {recv_err}"
+        disk_full = _is_disk_full(recv_err)
     finally:
         try:
             if handle:
@@ -2004,6 +2146,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     if failure_reason is None and bytes_received == total_size:
         row["state"] = "complete"
         row["bytes_received"] = bytes_received
+        _note_connect_success(row.get("bot"))
         if row.get("request_type") == "list":
             # The DCC transfer itself succeeded (declared size matched what
             # arrived) - that is what "complete" above means, and is left
@@ -2033,8 +2176,17 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     if failure_reason is None:
         failure_reason = f"incomplete transfer ({bytes_received}/{total_size} bytes)"
 
-    _mark_failed_locked(row, failure_reason)
-    print(f"[FETCH] Failed ({failure_reason}): {stored_name}.")
+    if disk_full:
+        # Not this request's fault (#926): it goes back to pending, and the
+        # dispatcher holds everything until there is space again.
+        row.update(state="pending", offered_at=None, bytes_received=0,
+                   reason="the disk filled up - asking again once there is space",
+                   waiting="disk-full")
+        _disk_was_low[0] = False  # so the next check says it
+        print(f"[FETCH] The disk filled up receiving {stored_name}; it will be asked again.")
+    else:
+        _mark_failed_locked(row, failure_reason)
+        print(f"[FETCH] Failed ({failure_reason}): {stored_name}.")
     try:
         if os.path.exists(platform_compat.long_path(dest_path)):
             # Unwrapped, exists() answers False for a >260 path and the

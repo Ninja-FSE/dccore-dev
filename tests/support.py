@@ -256,6 +256,9 @@ def reset_config(**overrides):
     if fetch_module is not None:
         fetch_module._seen_absent.clear()
         fetch_module._back_since.clear()
+        fetch_module._paused.clear()
+        fetch_module._connect_failures.clear()
+        fetch_module._disk_was_low[0] = False
 
     # What the version check (#572) last found. Read from runtime.py itself,
     # not through config, so reset there: a release "found" by one test would
