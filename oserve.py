@@ -321,6 +321,12 @@ def startup(setup_page=None):
     # in-memory only until now, so a completed download and its Delete
     # button both silently vanished from the dashboard on every restart.
     config.fetch_queue.update(db.load_fetch_history())
+    # And the bots whose fetching is paused (#926), kept beside it.
+    try:
+        import dcc_fetch
+        dcc_fetch.load_paused_bots()
+    except Exception as paused_err:
+        print(f"[FETCH] Could not read the paused bots: {paused_err}")
     # The notices survive a restart, which is the whole point of them: an
     # event worth a badge is by definition one that happened while nobody was
     # looking, and a kick at three in the morning that is gone by nine is a
