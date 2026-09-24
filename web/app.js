@@ -139,6 +139,7 @@
     filelistsBody:document.getElementById("filelists-body"),
     filelistsFilterInput: document.getElementById("filelists-filter-input"),
     filelistsFilterClear: document.getElementById("filelists-filter-clear"),
+    filelistsOnlineOnly: document.getElementById("filelists-online-only"),
     filelistsFilterStatus: document.getElementById("filelists-filter-status"),
     filelistsFilterActions: document.getElementById("filelists-filter-actions"),
     filelistsFilterAll: document.getElementById("filelists-filter-all"),
@@ -1553,6 +1554,14 @@
     state.filelistsRevealEmpty = !state.filelistsRevealEmpty;
     rerenderFromFilterPayload();
   });
+
+  // #926: search only the lists of bots that are in a channel right now.
+  if (el.filelistsOnlineOnly) {
+    el.filelistsOnlineOnly.addEventListener("change", function () {
+      state.filelistsOnlineOnly = el.filelistsOnlineOnly.checked;
+      runFilelistsFilter();
+    });
+  }
 
   el.filelistsFilterClear.addEventListener("click", function () {
     el.filelistsFilterInput.value = "";
@@ -2982,7 +2991,8 @@
         // spans every list held, so "which bot am I looking at" stops being
         // the question while a term is set. The sidebar still shows which
         // bots have matches - see applyFilterHighlight().
-        url = "/api/filelists/search?q=" + encodeURIComponent(filter);
+        url = "/api/filelists/search?q=" + encodeURIComponent(filter) +
+          (state.filelistsOnlineOnly ? "&online=1" : "");
       } else {
         var base;
         if (isOwnSource(source)) {

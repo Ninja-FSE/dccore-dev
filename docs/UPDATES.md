@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🟢 The List Browser's search can ask only the bots that are online (#926)
+
+Item 7 of #926, AutoGet's "Online Only". The cross-list filter searched every list held, including bots that left
+days ago - so the best match was often a file nobody could send. An **Online only** switch beside the filter asks
+`/api/filelists/search?online=1`, and `build_crosslist_search_payload(online_only=True)` keeps only the lists whose
+bot is in one of our channels right now (`dcc.user_is_present_in_ram()`, the same presence every request is checked
+against); the others are reported with the lists that had no match, so the sidebar dims them. Off, it is exactly as
+before. `tests/test_the_search_can_ask_only_bots_that_are_online.py` (5): off, on, nobody online, and the route and
+page passing the switch; removing the presence check fails two of them.
+
 ### ⚖️ The README says what DCCore is for, and who is responsible for what it shares
 
 The only legal text was the GPL, which covers the code and says nothing about use. A **Responsible use** section,

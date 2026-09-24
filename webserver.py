@@ -1065,7 +1065,7 @@ def mark_rows_with_fetch_state(rows, marks, bot=None):
     return rows
 
 
-def build_crosslist_search_payload(term, limit=None):
+def build_crosslist_search_payload(term, limit=None, online_only=False):
     """GET /api/filelists/search: one term against every list we hold.
 
     Returns the SAME shape as GET /api/filelists - {"folders": [...]} of
@@ -1090,6 +1090,10 @@ def build_crosslist_search_payload(term, limit=None):
     Scoped to the lists actually held, never to whatever is in the index. The
     two can drift - a list file removed by hand, a reset store - and a row for
     a list we no longer have offers a file that cannot be requested.
+
+    `online_only` (#926, AutoGet's "Online Only"): only the lists of bots in
+    one of our channels right now - the ones a request can reach today. The
+    others are reported with the empty ones, so the sidebar dims them.
     """
     import list as list_mod
     import list_index
@@ -1130,6 +1134,14 @@ def build_crosslist_search_payload(term, limit=None):
             source = list_fetch.index_key(name, marker)
             held[source.lower()] = source
 
+    offline = []
+    if online_only:
+        import dcc
+        for key, source in list(held.items()):
+            if not dcc.user_is_present_in_ram(source.split("/", 1)[0]):
+                offline.append(key)
+                del held[key]
+
     empty_payload = {
         "term": str(term or ""),
         "terms": terms,
@@ -1139,7 +1151,7 @@ def build_crosslist_search_payload(term, limit=None):
         "returned": 0,
         "truncated": False,
         "matched": [],
-        "empty": sorted(held),
+        "empty": sorted(list(held) + offline),
     }
     if not terms or not held:
         return empty_payload
@@ -1147,6 +1159,7 @@ def build_crosslist_search_payload(term, limit=None):
     names = list(held.values())
     rows = list_index.search(terms, limit=limit, bots=names)
     matched, empty = list_index.bots_with_a_match(terms, names)
+    empty = list(empty) + offline
 
     # One group per (bot, folder), in the order the index returned them so
     # that a bot's own list order survives rather than being re-sorted into
@@ -4241,7 +4254,8 @@ if HAVE_FLASK:
             _offset, limit = parse_pagination_params(
                 None, request.args.get("limit"))
             return jsonify(build_crosslist_search_payload(
-                request.args.get("q", ""), limit))
+                request.args.get("q", ""), limit,
+                online_only=request.args.get("online", "") in ("1", "true")))
 
         @app.route("/api/filelists/bot/<nick>")
         def api_filelists_bot(nick):

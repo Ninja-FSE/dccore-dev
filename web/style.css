@@ -1141,6 +1141,16 @@ html, body {
   margin-bottom: 6px;
 }
 
+/* #926: the "Online only" switch beside the filter. */
+.filelists-online-only {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
 .filelists-filter .search-input {
   flex: 1;
   padding: 9px 12px;

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Added: "Online only" in the List Browser's search.** Tick it to search only the lists of bots that are in the channel right now - the ones you can actually download from today.
 - **Added: a "Responsible use" note in the README.** DCCore is for sharing files you have the right to share; you decide what your bot offers and are responsible for it; the contributors do not host, control or endorse anything any bot shares.
 - **Added: a bot that keeps failing is paused, and a full disk makes downloads wait.** If DCCore cannot connect to a bot three times in a row, that bot is paused - its downloads stay queued with a **Resume** button on the Downloads page - instead of failing file after file. And when the drive fetched files go to has less than 200 MB free, downloads wait instead of failing, and carry on by themselves once there is space.
 - **Added: the Downloads queue looks after itself.** Files you queue from another bot wait for it if it is offline and are asked for a minute after it comes back; only three are asked of one bot at a time (*Files asked of one bot at once*), the next going when one arrives, so a big selection no longer earns "queue full"; a "busy" answer is asked again later, three times; and unfinished downloads survive a restart. The Downloads page says why each one is waiting.

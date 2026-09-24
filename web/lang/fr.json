@@ -105,6 +105,7 @@
   "filelists.fetch": "Récupérer",
   "filelists.fetchPlaceholder": "Récupérer la liste d'un bot… (pseudo)",
   "filelists.filterPlaceholder": "Filtrer toutes les listes que vous détenez…",
+  "filelists.onlineOnly": "En ligne seulement",
   "filelists.legendCannotTell": "impossible à dire",
   "filelists.legendHereNow": "présent maintenant",
   "filelists.legendListCurrent": "liste à jour",
