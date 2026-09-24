@@ -2025,8 +2025,11 @@ def build_fetch_enqueue_result(payload):
         # once, and one of them having signed off is no reason to refuse the
         # rest. It joins `errors`, which this route already reports beside
         # whatever it did manage to queue.
+        # A bot we know may be away (#926): its request waits for it and goes
+        # out when it is back. One we have never seen is still refused - a
+        # typo in a pasted nick would otherwise wait for ever.
         absent = bot_not_here_error(bot)
-        if absent:
+        if absent and not dcc_fetch.bot_is_known(bot):
             errors.append({"error": absent, "item": raw})
             continue
         request_id = dcc_fetch.enqueue_fetch(bot, filename)
@@ -2077,6 +2080,25 @@ def build_fetch_status_payload():
         row["id"] = request_id
         rows.append(row)
     return rows
+
+
+def build_fetch_pause_result(payload, pause):
+    """POST /api/fetch/pause and /api/fetch/resume (#926): stop or restart
+    fetching from one bot. Its requests stay in the queue - paused ones wait,
+    "Paused", and go out again once it is resumed."""
+    import dcc_fetch
+    bot = str((payload or {}).get("bot") or "").strip() if isinstance(payload, dict) else ""
+    if not bot:
+        return 400, {"error": "Which bot?"}
+    unsafe = reject_if_unsafe_for_irc_line(bot, "bot")
+    if unsafe:
+        return 400, {"error": unsafe}
+    if pause:
+        dcc_fetch.pause_bot(bot, "paused from the Downloads page")
+        return 200, {"paused": bot}
+    if not dcc_fetch.resume_bot(bot):
+        return 404, {"error": f"{bot} is not paused."}
+    return 200, {"resumed": bot}
 
 
 def build_fetch_delete_result(request_id):
@@ -2358,8 +2380,11 @@ def start_list_update():
     """
     if bool(getattr(config, "update_inprogress", False)):
         return 409, {"error": "A list update is already running."}
+    # A running search only stands in the way of the old whole-rebuild pause
+    # (#923): by default the rebuild runs alongside searches.
+    import list as list_mod
     if (bool(getattr(config, "search_inprogress", False))
-            and bool(getattr(config, "PAUSE_ON_UPDATE", True))):
+            and list_mod.rebuild_pauses_everything()):
         return 409, {"error": "Another system scan is already in progress."}
 
     import commands
@@ -2417,7 +2442,8 @@ SETTINGS_CATEGORIES = (
                                                 "CHECK_FOR_UPDATES"]),
     ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
                                                 "MAX_GLOBAL_QUEUE", "MAX_SEARCH_RESULTS",
-                                                "PAUSE_ON_UPDATE", "REHASH_TRANSFER_WAIT"]),
+                                                "PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE",
+                                                "REHASH_TRANSFER_WAIT"]),
     # The transfer-tuning pair, together. Anyone reaching for one wants the
     # other in front of them.
     ("transfers",     "Transfers",             ["DCC_BLOCK_SIZE", "DCC_SEND_BUFFER",
@@ -2449,7 +2475,6 @@ SETTINGS_CATEGORIES = (
                                                 "AUTO_REFETCH_INTERVAL_HOURS",
                                                 "AUTO_REFETCH_MAX_PER_RUN",
                                                 "FETCH_OFFER_TIMEOUT",
-                                                "FETCH_QUEUED_TIMEOUT",
                                                 "FETCH_TRANSFER_TIMEOUT",
                                                 "FETCH_FOLDER_OFFER_TIMEOUT",
                                                 "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
@@ -2460,6 +2485,8 @@ SETTINGS_CATEGORIES = (
                                                 "MAX_LIST_TEXT_SIZE",
                                                 "FETCH_HISTORY_DAYS",
                                                 "FETCH_HISTORY_MAX_ROWS"]),
+    # #926: how the fetch queue paces itself with another bot.
+    ("fetch-queue",   "Fetch queue",           ["FETCH_MAX_PER_BOT", "FETCH_QUEUED_TIMEOUT"]),
     ("advertising",   "Advertising & search",  ["ANNOUNCE_INTERVAL", "ANNOUNCE_TRANSFERS",
                                                 "BROADCAST_SEARCH_CHANNEL",
                                                 "BROADCAST_SEARCH_COOLDOWN", "CTCP_VERSION_REPLY",
@@ -2555,6 +2582,7 @@ SETTINGS_LABELS = {
     # this is the wait AFTER we send a request, not a timeout on an offer
     # anybody made us.
     "FETCH_QUEUED_TIMEOUT": "Wait for a queued request (s)",
+    "FETCH_MAX_PER_BOT": "Files asked of one bot at once",
     "FETCH_OFFER_TIMEOUT": "Wait for a reply to a fetch request (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT": "Wait for a reply to a folder (.rar) request (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED":
@@ -2565,6 +2593,7 @@ SETTINGS_LABELS = {
 
     "LIST_BASE_NAME": "List base name",
     "PAUSE_ON_UPDATE": "Pause sharing during !update",
+    "PAUSE_FOR_WHOLE_UPDATE": "Pause for the whole rebuild",
     # Named for what it now IS. From an operator: "under Paths & Storage, this is not
     # needed anymore" - not quite, it is still the fallback for an install
     # with no folder list, which is most of them. But presenting it as a
@@ -4158,6 +4187,21 @@ if HAVE_FLASK:
         @app.route("/api/fetch/status")
         def api_fetch_status():
             return jsonify(build_fetch_status_payload())
+
+        @app.route("/api/fetch/paused")
+        def api_fetch_paused():
+            import dcc_fetch
+            return jsonify(dcc_fetch.paused_bots())
+
+        @app.route("/api/fetch/pause", methods=["POST"])
+        def api_fetch_pause():
+            status, result = build_fetch_pause_result(request.get_json(silent=True), True)
+            return jsonify(result), status
+
+        @app.route("/api/fetch/resume", methods=["POST"])
+        def api_fetch_resume():
+            status, result = build_fetch_pause_result(request.get_json(silent=True), False)
+            return jsonify(result), status
 
         @app.route("/api/tools/verify-list")
         def api_tools_verify_list():

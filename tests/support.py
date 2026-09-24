@@ -252,6 +252,17 @@ def reset_config(**overrides):
     for name, value in RUNTIME_FLAGS.items():
         setattr(config, name, value)
 
+    # Which bots the fetch dispatcher saw leave, and when each came back
+    # (#926). Process-long in dcc_fetch; one test's absent bot would give the
+    # next test's a "just back" delay, depending only on test order.
+    fetch_module = sys.modules.get("dcc_fetch")
+    if fetch_module is not None:
+        fetch_module._seen_absent.clear()
+        fetch_module._back_since.clear()
+        fetch_module._paused.clear()
+        fetch_module._connect_failures.clear()
+        fetch_module._disk_was_low[0] = False
+
     # What the version check (#572) last found. Read from runtime.py itself,
     # not through config, so reset there: a release "found" by one test would
     # otherwise be the next test's `status` line.
