@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs: every feature is listed in one place again.** The roadmap's *Implemented* section ([docs/FUTURE.md](FUTURE.md)) had fallen behind: it now covers what fetching from other bots does today (queued requests, the self-running download queue, paused bots, the List Browser, automatic refresh and grabbing), the rebuild that keeps answering, faster scans, length and quality in the list, quoted searches and the update check. The README's summary points to it.
 ## v1.13.1 — The Fetch Queue Looks After Itself
 
 - **Added: automatic list grabbing (off by default).** Turn on *Grab the lists of bots you have no list from* (`AUTO_GRAB_LISTS`, under *Grabbing lists*) and DCCore asks for the list of each bot that advertises one and whose list you do not have yet - politely: one at a time, at most one every 10 minutes, after a random wait of 5 seconds to 6 minutes, not at all if someone else just asked that bot, and never more than 3 tries per bot, 30 minutes apart. You can skip small or slow bots, bots in "servers only" mode are always skipped, and a list you remove is not fetched back.

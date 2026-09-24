@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📚 Every feature in one place: the roadmap catches up
+
+Where is every feature written down together? In `docs/FUTURE.md`'s *Implemented* section - the README's "What it
+does" is a summary that links to it - and it had fallen behind: the #926 PRs, among others, updated both changelogs
+but not the roadmap, which that file's own header asks for in the same commit. Now listed: under *The file list*, quoted `@find` phrases, the rebuild that keeps answering (#923), the
+parallel scan (#922) and audio length/quality (#914); under *Receiving files from other bots*, understood replies
+(#927), the self-running queue (#928), paused bots and the low-disk wait (#929), the List Browser as a whole
+(per-archive tabs #399, freshness, *New*, slots/queue/speed, the cross-list filter and Online only, hand-entered bots),
+`AUTO_REFETCH_LISTS` with the 14-day rule and `AUTO_GRAB_LISTS`; under *Operating it*, the update check (#572). "The
+117 settings" is now "every setting" (131 today, and a count there goes stale with every one added). *A fetched list
+keeps only the peer's master* leaves *Planned*: every list in the archive has been kept since #399. The README's
+summary gains the rebuild and the fetch queue, and says the roadmap is the full list.
+
 ## 🟩 v1.13.1 (2026-09-24) - "The Fetch Queue Looks After Itself"
 
 ### 🧲 Lists are grabbed automatically, on AutoGet's rules (#926)
