@@ -66,6 +66,14 @@ python3 -m unittest discover -s tests -t .
 
 Thousands of them - the count is kept in [docs/FUTURE.md](docs/FUTURE.md) - stdlib-only, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14 in CI.
 
+## Responsible use
+
+DCCore is a tool for sharing files **you have the right to share**: your own recordings and creations, public-domain and Creative Commons works, and anything else whose licence allows it to be passed on. It comes with no content, points to none, and is not made for distributing material you have no right to distribute.
+
+As the operator, you decide what goes into your shared folders, and you are responsible for it: the bot offers everything in them to anyone who asks. Before you share a folder, make sure you are allowed to - copyright and related laws differ from country to country, and the ones where you live are the ones that apply to you.
+
+The DCCore contributors do not host, control, monitor or endorse anything any bot shares, and accept no liability for how the software is used. See also the "no warranty" terms of the licence below.
+
 ## License
 
 DCCore - an IRC DCC file-sharing daemon
