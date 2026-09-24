@@ -97,6 +97,7 @@
   "filelists.fetch": "Fetch",
   "filelists.fetchPlaceholder": "Fetch a bot's list… (nick)",
   "filelists.filterPlaceholder": "Filter every list you hold…",
+  "filelists.onlineOnly": "Online only",
   "filelists.legendCannotTell": "cannot tell",
   "filelists.legendHereNow": "here now",
   "filelists.legendListCurrent": "list current",

@@ -257,6 +257,11 @@
                    autocomplete="off" aria-describedby="filelists-filter-status">
             <button type="button" class="btn btn-small" id="filelists-filter-clear"
                     data-i18n="common.clear" hidden>Clear</button>
+            <!-- #926: only the lists of bots in a channel right now. -->
+            <label class="filelists-online-only">
+              <input type="checkbox" id="filelists-online-only">
+              <span data-i18n="filelists.onlineOnly">Online only</span>
+            </label>
           </div>
           <p class="filelists-filter-status" id="filelists-filter-status" hidden></p>
           <div class="filelists-filter-actions" id="filelists-filter-actions" hidden>

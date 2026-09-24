@@ -97,6 +97,7 @@
   "filelists.fetch": "Obtener",
   "filelists.fetchPlaceholder": "Obtener la lista de un bot… (apodo)",
   "filelists.filterPlaceholder": "Filtrar todas las listas que tiene…",
+  "filelists.onlineOnly": "Solo en línea",
   "filelists.legendCannotTell": "no se puede saber",
   "filelists.legendHereNow": "presente ahora",
   "filelists.legendListCurrent": "lista actualizada",
