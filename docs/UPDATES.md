@@ -4,6 +4,41 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ The fetch queue waits for a bot, paces itself per bot, and survives a restart (#926)
+
+Items 2 and 3 of #926, stacked on the reply handling below. The fetch queue could only ask a bot that was in a
+channel at that moment, forgot every unfinished request on a restart, and - once a queued request stopped holding a
+slot - would send a whole hundred-file selection to one bot within minutes, which a server answers "queue full".
+AutoGet kept its download list working by itself; this is its practice, in `dcc_fetch.check_fetch_queue()`:
+
+- **One bot holds only so many.** `FETCH_MAX_PER_BOT` (3; *Fetch queue* on the Settings page, 0 = no limit) caps our
+  requests at one bot - asked, queued there or arriving. The next goes out when one finishes: AutoGet's "active"
+  mode. The slot limit still applies across bots.
+- **It waits for the bot.** A request whose bot is not in any of our channels stays pending, *Waiting for <bot> to
+  come back*, and goes out a minute after it returns (`RETURN_DELAY_SECONDS`: it may still be loading its list, and
+  every other fetcher is asking at the same moment - AutoGet waited 30-180 s after a JOIN). A bot present since we
+  started is asked at once, and while we are still joining (no channel membership at all) nothing is held back, as
+  before. Presence is read outside the fetch lock.
+- **Busy is asked again.** A *queue full / maxed out / rebuilding* answer puts the request back to pending with a
+  time: `BUSY_RETRIES` (3) times, `BUSY_RETRY_SECONDS` (10 min) apart, then it fails as busy.
+- **Queued for a bot that is away.** The bulk-fetch box used to refuse any bot not present. A bot we know - seen
+  advertising, or whose list we hold (`dcc_fetch.bot_is_known()`) - is now queued for and waits; a nick we have
+  never seen is still refused, since a typo would otherwise wait for ever.
+- **It survives a restart.** Every row is saved now, in the form it restarts in: waiting and queued rows as they
+  are, and a mid-flight one (offered, listening, receiving - its socket and thread die with the process) as pending,
+  to be asked again. Written in that form, a transfer's rising byte count does not rewrite the file each tick.
+- **The Downloads panel says why** a request is waiting: the bot is away or just back, it has enough of ours, it
+  was busy, or every slot is taken.
+
+`tests/test_the_fetch_queue_waits_and_paces_itself.py` (15): the per-bot limit, a queued request counting against
+it, the next going when one finishes, per-bot allowances, 0, the slot limit across bots; an absent bot, one coming
+back and its minute, one here all along, still joining, a busy retry time; the restart forms and a ticking transfer
+not rewriting; a known bot queued while away and an unknown nick refused. Mutation-checked: queued not counting,
+presence ignored, no return delay, the retry time ignored, unfinished rows not saved, and a known offline bot
+refused each fail a test. Three existing tests follow: the history test now expects unfinished rows saved in their
+restart form, and two slot-limit tests with a single bot turn the per-bot limit off, since it is not what they
+measure. `tests/support.py` resets the dispatcher's who-left memory between tests.
+
 ### ⏯️ Searches and downloads go on while the list rebuilds (#923)
 
 `PAUSE_ON_UPDATE` refused every `@find` and every file request for the **whole** `!update` - about 80 s a rebuild on

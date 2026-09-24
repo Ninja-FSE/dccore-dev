@@ -74,6 +74,7 @@ import uuid
 import defaults as config
 import db
 import dcc
+import runtime
 import list as list_mod
 import platform_compat
 
@@ -248,6 +249,30 @@ _UNRESOLVED_FETCH_STATES = ("pending", "offered", "queued", "listening", "receiv
 # this state existed that arrival was refused as unsolicited: fetching from a
 # bot with a queue could only ever succeed with an empty queue.
 _AWAITING_OFFER_STATES = ("offered", "queued")
+
+# The states that count against FETCH_MAX_PER_BOT (#926): everything asked of a
+# bot and not yet finished - including "queued", which holds no slot of ours but
+# holds a place in THEIR queue. A bot allows each user only so many; asking for
+# more gets "queue full", which is why AutoGet kept a per-server maximum.
+_BOT_LOAD_STATES = ("offered", "queued", "listening", "receiving")
+
+# A bot that was gone and came back gets a minute before we ask it anything
+# (#926): it has just connected and may still be loading its list, and every
+# other fetcher in the channel is asking at the same moment. AutoGet waited 30
+# to 180 seconds after a JOIN for the same reason.
+RETURN_DELAY_SECONDS = 60
+
+# "Busy" - queue full, maxed out, rebuilding - is not "never" (#926). Such a
+# request is asked again this many times, this far apart, before it fails.
+BUSY_RETRIES = 3
+BUSY_RETRY_SECONDS = 600
+
+# Bots we have seen ABSENT, and when each was next seen present again. Only a
+# bot that went away gets RETURN_DELAY_SECONDS; one present since we started
+# is asked at once. Module state on purpose: a rehash resetting it costs at
+# most one early request, and it is not a lock (see runtime.py's rule).
+_seen_absent = set()
+_back_since = {}
 
 # MAX_UNRESOLVED_FETCHES: the ceiling on how many rows may sit unresolved
 # (pending or in flight) at once, across every requester.
@@ -551,22 +576,37 @@ def _persist_fetch_history_locked(queue):
     fixed for a fetched LIST's registry entry, applied here to an
     individual fetch's own row.
 
-    Deliberately excludes every in-flight state (pending/offered/listening/
-    receiving) - none of those can mean anything after a restart (the
-    socket/thread that would have driven them to completion is gone with
-    the old process), so there is nothing worth persisting for them; they
-    simply do not exist after a restart, same as before this change.
+    Every row, since #926 - see the comment in the body: an unfinished
+    request survives a restart, and one that was mid-transfer is asked again.
     """
     global _last_persisted_terminal_snapshot
     # #221: on the same tick that already holds the lock and already walks the
     # dict, so retention costs one comparison per row and no new machinery.
     prune_fetch_history_locked(queue)
-    terminal = {rid: dict(row) for rid, row in queue.items()
-                if row.get("state") in ("complete", "failed")}
-    if terminal == _last_persisted_terminal_snapshot:
+    # THE UNFINISHED ROWS TOO (#926), in the form they take after a restart:
+    # a request still waiting or queued at another bot is kept, and one that
+    # was mid-flight - offered, listening, receiving; its socket and thread
+    # die with the process - is written as pending, to be asked again. Written
+    # in that form rather than as-is so a transfer's bytes_received ticking
+    # up does not rewrite the file every two seconds.
+    snapshot = {rid: _restart_form(row) for rid, row in queue.items()}
+    if snapshot == _last_persisted_terminal_snapshot:
         return
-    _last_persisted_terminal_snapshot = terminal
-    db.save_fetch_history(terminal)
+    _last_persisted_terminal_snapshot = snapshot
+    db.save_fetch_history(snapshot)
+
+
+_ASKED_AGAIN_AFTER_A_RESTART = ("offered", "listening", "receiving")
+
+
+def _restart_form(row):
+    """A row as it should come back after a restart (#926)."""
+    row = dict(row)
+    if row.get("state") in _ASKED_AGAIN_AFTER_A_RESTART:
+        row.update(state="pending", offered_at=None, bytes_received=0)
+        for volatile in ("listening_since",):
+            row.pop(volatile, None)
+    return row
 
 
 def persist_fetch_history():
@@ -709,13 +749,67 @@ def handle_bot_reply(bot, text):
             row["reply"] = reply.text
         elif reply.outcome == "refused":
             _mark_failed_locked(row, f"refused: {reply.text}")
+        elif int(row.get("busy_retries", 0)) < BUSY_RETRIES:
+            # Asked again later (#926): back to pending with a time, so the
+            # dispatcher leaves it until then and it keeps its place.
+            row["busy_retries"] = int(row.get("busy_retries", 0)) + 1
+            row.update(state="pending", offered_at=None, retry_at=now + BUSY_RETRY_SECONDS,
+                       reason=f"busy: {reply.text}", waiting="retry")
+            row.pop("queued_at", None)
+            row.pop("queue_position", None)
         else:
-            _mark_failed_locked(row, f"busy: {reply.text}")
+            _mark_failed_locked(row, f"busy: {reply.text} (asked {BUSY_RETRIES + 1} times)")
         described = (f"position {row.get('queue_position')}"
                      if row.get("state") == "queued" and row.get("queue_position") else row.get("state"))
     print(f"[FETCH] {bot} answered our request for {row.get('requested_filename') or row.get('request_type')}: "
           f"{reply.outcome} ({described}).")
     return reply.outcome
+
+
+def bot_is_known(bot):
+    """Whether this nick is a file server we know: one we have seen advertise
+    (runtime.known_bots) or whose list we hold. A request for such a bot can
+    wait for it while it is away (#926); a nick we have never seen is still
+    refused, since it is far more likely a typo than a server."""
+    key = str(bot or "").strip().lower()
+    if not key:
+        return False
+    if key in (getattr(runtime, "known_bots", None) or {}):
+        return True
+    return key in (getattr(config, "fetched_bot_lists", None) or {})
+
+
+def _bot_readiness(bots, now):
+    """{bot (lowercased): "" when we may ask it now, else why not ("offline",
+    "just-back")}, for the bots with rows waiting. Read OUTSIDE the fetch lock:
+    presence has its own lock, and holding both is an ordering to get wrong.
+
+    No channel membership at all means we are still joining - "wait" is not
+    known yet, and the old behaviour (ask) stands, as it does for
+    webserver.bot_not_here_error()."""
+    import dcc
+    with runtime.channel_users_lock():
+        joined = any(users for users in (getattr(config, "channel_users", {}) or {}).values())
+    ready = {}
+    for bot in bots:
+        if not joined:
+            ready[bot] = ""
+            continue
+        if not dcc.user_is_present_in_ram(bot):
+            _seen_absent.add(bot)
+            _back_since.pop(bot, None)
+            ready[bot] = "offline"
+            continue
+        if bot in _seen_absent:
+            _seen_absent.discard(bot)
+            _back_since[bot] = now
+        since = _back_since.get(bot)
+        if since is not None and now - since < RETURN_DELAY_SECONDS:
+            ready[bot] = "just-back"
+        else:
+            _back_since.pop(bot, None)
+            ready[bot] = ""
+    return ready
 
 
 def check_fetch_queue():
@@ -754,11 +848,17 @@ def check_fetch_queue():
 
     queue = _ensure_fetch_queue()
     max_slots = int(getattr(config, "MAX_FETCH_SLOTS", 3))
+    max_per_bot = int(getattr(config, "FETCH_MAX_PER_BOT", 3) or 0)
     offer_timeout = float(getattr(config, "FETCH_OFFER_TIMEOUT", 60))
     folder_offer_timeout = float(getattr(config, "FETCH_FOLDER_OFFER_TIMEOUT", 1800))
     unadvertised_folder_timeout = float(
         getattr(config, "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED", 120))
     now = time.time()
+
+    with _fetch_lock():
+        waiting_bots = {str(row.get("bot", "")).strip().lower()
+                        for row in queue.values() if row.get("state") == "pending"}
+    readiness = _bot_readiness(waiting_bots, now)
 
     to_dispatch = []
     with _fetch_lock():
@@ -813,18 +913,41 @@ def check_fetch_queue():
         _persist_fetch_history_locked(queue)
 
         active = count_active_fetches(queue)
-        free_slots = max_slots - active
-        if free_slots <= 0:
-            return
+        free_slots = max(0, max_slots - active)
 
         pending_ids = sorted(
             (rid for rid, row in queue.items() if row.get("state") == "pending"),
             key=lambda rid: queue[rid].get("requested_at", 0),
         )
-        for rid in pending_ids[:free_slots]:
+        # WHO MAY BE ASKED NOW (#926), oldest first. A row waits - saying why,
+        # in row["waiting"], for the Downloads panel - while its bot is away
+        # or just back, while that bot already has FETCH_MAX_PER_BOT of ours,
+        # or until a busy bot's retry time. The oldest ready rows take the
+        # free slots; everything else keeps its place for the next tick.
+        load = {}
+        for row in queue.values():
+            if row.get("state") in _BOT_LOAD_STATES:
+                key = str(row.get("bot", "")).strip().lower()
+                load[key] = load.get(key, 0) + 1
+        promoted = 0
+        for rid in pending_ids:
             row = queue[rid]
+            key = str(row.get("bot", "")).strip().lower()
+            why = readiness.get(key, "")
+            if not why and (row.get("retry_at") or 0) > now:
+                why = "retry"
+            if not why and max_per_bot > 0 and load.get(key, 0) >= max_per_bot:
+                why = "their-turn"
+            if not why and promoted >= free_slots:
+                why = "slots"
+            if why:
+                row["waiting"] = why
+                continue
+            row.pop("waiting", None)
             row["state"] = "offered"
             row["offered_at"] = now
+            load[key] = load.get(key, 0) + 1
+            promoted += 1
             to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file")))
 
     if not to_dispatch:
