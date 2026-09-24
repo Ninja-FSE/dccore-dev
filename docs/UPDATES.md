@@ -4,7 +4,6 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
-<<<<<<< HEAD
 ### ⚖️ The README says what DCCore is for, and who is responsible for what it shares
 
 The only legal text was the GPL, which covers the code and says nothing about use. A **Responsible use** section,
