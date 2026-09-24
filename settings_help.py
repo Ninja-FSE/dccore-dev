@@ -210,6 +210,7 @@ PLAIN_HELP = {
     'AUTO_REFETCH_LISTS': "When another bot advertises that its list has changed, fetch the new list automatically. Off by default because it uses the other bot's bandwidth without you asking each time.",
     'AUTO_REFETCH_INTERVAL_HOURS': "The least time between two automatic asks for the same bot's list, in hours. Counted from the last list that arrived or the last time the bot was asked, so a bot that rebuilds hourly - or does not answer - is not asked every hour.",
     'AUTO_REFETCH_MAX_PER_RUN': 'The most lists to re-fetch in one go. If many are out of date at once, the rest are picked up on later rounds, oldest first.',
+    'FETCH_MAX_PER_BOT': 'How many files to ask one bot for at once. The next one is asked when one arrives. Servers allow each person only a few; asking for more gets "queue full". 0 means no limit.',
     'FETCH_QUEUED_TIMEOUT': 'When another bot puts your request in its queue, how long to wait for your turn before giving up. Busy servers take hours. 0 waits for ever.',
     'FETCH_OFFER_TIMEOUT': 'When you request a file from another bot, how many seconds to wait for it to offer the file before giving up.',
     'FETCH_TRANSFER_TIMEOUT': 'The longest a file download from another bot may take in total, in seconds, before it is abandoned.',

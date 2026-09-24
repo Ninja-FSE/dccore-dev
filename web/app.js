@@ -764,6 +764,12 @@
     complete: "download.state.complete", failed: "download.state.failed",
     rejected: "download.state.rejected"
   };
+  // #926: why a pending request has not gone out - dcc_fetch sets row.waiting.
+  var DOWNLOAD_WAITING_LABELS = {
+    offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
+    retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
+    slots: "download.waiting.slots"
+  };
 
   function loadDownloads() {
     fetchJson("/api/fetch/status").then(function (rows) {
@@ -872,6 +878,11 @@
       // #926: the other bot said where our request is in its queue.
       if (state === "queued" && row.queue_position) {
         label = t("download.state.queuedAt").replace("{position}", row.queue_position);
+      }
+      // #926: why a request has not gone out yet - its bot is away or just
+      // back, it has enough of ours, it was busy, or every slot is taken.
+      if (state === "pending" && DOWNLOAD_WAITING_LABELS[row.waiting]) {
+        label = t(DOWNLOAD_WAITING_LABELS[row.waiting]).replace("{bot}", row.bot || "");
       }
       var progress = row.total_size
         ? Math.round(100 * (row.bytes_received || 0) / row.total_size) + "%"
@@ -3791,6 +3802,7 @@
     "your-list": "settings.category.yourList",
     "list-rebuild": "settings.category.listRebuild",
     "fetching": "settings.category.fetching",
+    "fetch-queue": "settings.category.fetchQueue",
     "advertising": "settings.category.advertising",
     "appearance": "settings.category.appearance",
     "anti-flood": "settings.category.antiFlood",
@@ -3832,6 +3844,7 @@
     FETCH_TRANSFER_TIMEOUT: "settings.field.FETCH_TRANSFER_TIMEOUT",
     FETCH_OFFER_TIMEOUT: "settings.field.FETCH_OFFER_TIMEOUT",
     FETCH_QUEUED_TIMEOUT: "settings.field.FETCH_QUEUED_TIMEOUT",
+    FETCH_MAX_PER_BOT: "settings.field.FETCH_MAX_PER_BOT",
     FETCH_FOLDER_OFFER_TIMEOUT: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT",
     FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
     MAX_FETCH_FOLDER_FILE_SIZE: "settings.field.MAX_FETCH_FOLDER_FILE_SIZE",

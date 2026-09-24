@@ -1186,14 +1186,25 @@
 # Seconds an "offered" row waits for a DCC SEND before it's marked failed
 #FETCH_OFFER_TIMEOUT = 60
 
-# When another bot puts your request in its queue, how long to wait for your
-# turn before giving up. Busy servers take hours. 0 waits for ever.
+# How many files to ask one bot for at once. The next one is asked when one
+# arrives. Servers allow each person only a few; asking for more gets "queue
+# full". 0 means no limit.
 #
 # How long a request the other bot has QUEUED waits for its file (#926). When
 # a bot answers "you are number 12 in my queue", the request stops counting
 # against MAX_FETCH_SLOTS and waits for its turn - hours, on a busy server.
 # Past this it fails: a bot that restarted or dropped its queue never says so.
 # 0 = wait for ever.
+# How many of our requests one bot may hold at once - asked, queued there or
+# arriving (#926). A server allows each user only so many; the rest would be
+# answered "queue full". The next file goes out when one finishes, the way
+# AutoGet's "active" mode did it. 0 = no limit.
+# Files asked of one bot at once; the next goes when one finishes
+#FETCH_MAX_PER_BOT = 3
+
+# When another bot puts your request in its queue, how long to wait for your
+# turn before giving up. Busy servers take hours. 0 waits for ever.
+#
 # Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
 #FETCH_QUEUED_TIMEOUT = 43200
 

@@ -790,6 +790,11 @@ FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DC
 # against MAX_FETCH_SLOTS and waits for its turn - hours, on a busy server.
 # Past this it fails: a bot that restarted or dropped its queue never says so.
 # 0 = wait for ever.
+# How many of our requests one bot may hold at once - asked, queued there or
+# arriving (#926). A server allows each user only so many; the rest would be
+# answered "queue full". The next file goes out when one finishes, the way
+# AutoGet's "active" mode did it. 0 = no limit.
+FETCH_MAX_PER_BOT: int = 3  # Files asked of one bot at once; the next goes when one finishes
 FETCH_QUEUED_TIMEOUT: int = 43200  # Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
 
 # A "folder" request_type row (dcc_fetch.py) asks another bot to pack a whole
