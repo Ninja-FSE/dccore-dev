@@ -251,6 +251,18 @@ class SafeExtractionTests(DCCoreTestCase):
 
         self.assertTrue(ok, reason)
 
+    def test_zero_means_no_cap_here_too(self):
+        """#937: dcc_fetch.py's own admission check already treats 0 as no
+        limit; this belt-and-braces check must agree, not reject every real
+        zip because any on-disk size is "more than" a cap of 0."""
+        self.set_config(MAX_FETCH_LIST_FILE_SIZE=0)
+        big_txt = _list_txt() + ("!OtherBot Filler.flac  ::INFO:: 1.0MB\n" * 50)
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", big_txt)])
+
+        ok, reason = list_fetch.process_fetched_list_zip("bigbot", self.zip_path)
+
+        self.assertTrue(ok, reason)
+
     def test_too_many_entries_is_rejected(self):
         members = [(f"file{i}.txt", "x") for i in range(list_fetch.MAX_LIST_ZIP_ENTRIES + 1)]
         _write_zip(self.zip_path, members)

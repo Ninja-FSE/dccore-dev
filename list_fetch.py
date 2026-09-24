@@ -652,7 +652,11 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
     except OSError as err:
         return None, f"could not stat the fetched zip: {err}"
     list_zip_cap = int(getattr(config, "MAX_FETCH_LIST_FILE_SIZE", 10 * 1024 * 1024))
-    if on_disk_size > list_zip_cap:
+    # 0 MEANS NO LIMIT, same as dcc_fetch.py's own admission check on this
+    # setting (#302) - missing here meant a fetch that setting explicitly
+    # allowed through was thrown away right after a successful download,
+    # since `on_disk_size > 0` is true of any real file (#937).
+    if list_zip_cap > 0 and on_disk_size > list_zip_cap:
         shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
         return None, (f"fetched zip is {on_disk_size} bytes, more than "
                        f"MAX_FETCH_LIST_FILE_SIZE ({list_zip_cap}) - refusing "
