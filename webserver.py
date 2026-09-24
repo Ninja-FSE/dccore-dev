@@ -2467,6 +2467,10 @@ SETTINGS_CATEGORIES = (
                                                 "LIST_AUDIO_INFO_MINUTES",
                                                 "LIST_AUDIO_INFO_THREADS",
                                                 "LIST_SCAN_THREADS"]),
+    # #926: fetching lists nobody asked for is its own decision, with its
+    # own rules - not four more lines at the end of "Fetching from bots".
+    ("list-grab",     "Grabbing lists",        ["AUTO_GRAB_LISTS", "AUTO_GRAB_EVERY_MINUTES",
+                                                "AUTO_GRAB_MIN_FILES", "AUTO_GRAB_MIN_SPEED_KB"]),
     ("fetching",      "Fetching from bots",    ["MAX_FETCH_SLOTS", "AUTO_REFETCH_LISTS",
                                                 "AUTO_REFETCH_INTERVAL_HOURS",
                                                 "AUTO_REFETCH_MAX_PER_RUN",
@@ -2567,6 +2571,10 @@ SETTINGS_LABELS = {
     "DCC_SEND_BUFFER": "Socket send buffer (0 = the default for your platform)",
     "REHASH_TRANSFER_WAIT": "Seconds a rehash waits for transfers to finish",
     "AUTO_REFETCH_LISTS": "Re-fetch a held list when its bot advertises a new one",
+    "AUTO_GRAB_LISTS": "Grab the lists of bots you have no list from",
+    "AUTO_GRAB_EVERY_MINUTES": "Minutes between automatic grabs",
+    "AUTO_GRAB_MIN_FILES": "Skip bots with fewer files than",
+    "AUTO_GRAB_MIN_SPEED_KB": "Skip bots slower than (KB/s)",
     "AUTO_REFETCH_INTERVAL_HOURS": "Least time between re-fetches of one bot (hours)",
     "AUTO_REFETCH_MAX_PER_RUN": "Most lists to re-fetch in one sweep",
     "FETCH_TRANSFER_TIMEOUT": "Fetch transfer timeout (seconds)",

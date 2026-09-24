@@ -446,7 +446,10 @@ PRESERVE_RUNTIME = (
     'nick_aliases',       # the merges already inferred. Losing this un-merges
                           # every bot the List Browser had already combined,
                           # for no reason connected to the setting that changed
-    'private_messages',   # somebody spoke to the bot and it said nothing back. A
+    'list_grab_others_asked',  # #926: who just asked which bot for its list.
+                          # Losing it lets the automatic grab ask a bot that is
+                          # busy sending someone else's list
+    'private_messages',  # somebody spoke to the bot and it said nothing back. A
                           # rehash is not a reply, and losing these would drop the
                           # only record that anybody tried
     'private_message_state',
@@ -1287,6 +1290,13 @@ def _handle_rehash_request(user, target_chan):
         except Exception as refetch_err:
             print(f"[REHASH] Could not start the automatic list refresh: "
                   f"{refetch_err}")
+        # Automatic list grabbing (#926), for the same reason.
+        try:
+            import list_grab as _list_grab
+            if _list_grab.ensure_worker():
+                print("[REHASH] AUTO_GRAB_LISTS is on: automatic list grabbing has started.")
+        except Exception as grab_err:
+            print(f"[REHASH] Could not start automatic list grabbing: {grab_err}")
 
         # The list rebuild schedule (#776), the same way and for the same
         # reason: a dashboard save that sets one lands here.

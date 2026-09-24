@@ -239,6 +239,21 @@ rebuild_schedule_guard        = threading.Lock()
 rebuild_schedule_started      = False
 rebuild_schedule_last_attempt = None
 
+# Automatic list grabbing (#926 item 5), list_grab.py. Here for the same
+# reasons: a start guard a rehash cannot reset, and a wait in progress that a
+# reload of list_grab.py must not forget (or it would plan a second grab).
+# list_grab_plan: {"key", "nick", "planned", "at"} or None. list_grab_last:
+# when the last automatic grab was made. list_grab_state: the per-bot tries and
+# the removed-by-hand set, loaded from db.LIST_GRABS_FILE on first use.
+# list_grab_others_asked: bot key -> when someone else typed "@Bot".
+list_grab_guard        = threading.Lock()
+list_grab_started      = False
+list_grab_lock         = threading.Lock()
+list_grab_plan         = None
+list_grab_last         = None
+list_grab_state        = None
+list_grab_others_asked = {}
+
 update_check_guard        = threading.Lock()  # the version check's start guard (#572)
 update_check_started      = False
 update_check_last_attempt = None   # when the last check (daily or manual) began

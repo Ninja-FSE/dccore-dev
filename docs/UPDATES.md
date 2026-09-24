@@ -4,6 +4,43 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧲 Lists are grabbed automatically, on AutoGet's rules (#926)
+
+Item 5 of #926, the last one. New `list_grab.py`: with `AUTO_GRAB_LISTS` on (off by default - it spends other
+people's bandwidth), the list of a bot that advertises one (an OmenServe or SPQR advert with a file count) and whose
+list is not held is asked for automatically. The rules are AutoGet's, whose own counter says only 37% of list
+requests ever arrived:
+
+- one grab at a time, at most one every `AUTO_GRAB_EVERY_MINUTES` (10), the biggest list first;
+- a random 5-360 second wait first (`GRAB_DELAY_SECONDS`), so clients that saw the same advert do not all ask at once;
+- someone else typing *@Bot* in a channel (`irc._capture_list_ask()` -> `list_grab.note_someone_else_asked()`)
+  drops a grab waiting on that bot and leaves it alone for 10 minutes (`OTHERS_ASKED_SECONDS`) - it is busy
+  sending theirs. Not counted as a try;
+- 3 tries per bot (`GRAB_TRIES`), 30 minutes apart (`GRAB_COOLDOWN_SECONDS`), then it stops;
+- skipped: a bot offline or ourselves, below `AUTO_GRAB_MIN_FILES` files, advertising a speed below
+  `AUTO_GRAB_MIN_SPEED_KB` (a bot that shows none is not skipped; `list_grab.advertised_speed()` reads cps, KB/s,
+  MB/s), in "servers only" mode, or whose list the operator removed by hand - `list_fetch.purge_fetched_list()` now
+  calls `list_grab.note_removed_by_hand()`. The bulk purge of offline bots does not: that is tidying, not an answer.
+  Everything is checked again when the wait ends, so a bot that left meanwhile is not asked.
+
+The ask goes through `webserver.build_list_fetch_enqueue_result()`, the List Browser's own path, so every slot limit
+and duplicate guard applies. Each grab is a console line (*"Asking X for its list automatically (try 1 of 3)"*).
+
+State: the wait, the last grab and the start guard live in runtime.py (`list_grab_*`), so a rehash neither forgets a
+wait nor starts a second worker; the per-bot tries and the removed-by-hand set are in `data/list_grabs.json`
+(`db.load_list_grabs()`/`save_list_grabs()`), so a restart does not start the three tries over. The worker starts
+from `oserve.startup()` and from the rehash, like the list refresh. Settings in their own *Grabbing lists* category,
+with help and en/es/fr labels; `settings.conf.sample` regenerated. tests/support.py redirects the new file and
+resets the new runtime state; `list_grab_others_asked` is bound in defaults.py and kept across a rehash
+(`commands.PRESERVE_RUNTIME`).
+
+`tests/test_lists_are_grabbed_automatically_on_autogets_rules.py` (26): the wait, its range, off, before joining,
+pacing, biggest first, someone else asking (and what counts as asking), three tries and the cool-down, tries kept on
+disk, every skip reason, a bot that left during the wait, speed parsing, the worker's start guard and loop, and the
+boot/rehash/IRC/purge wiring. Mutation-checked: 13 mutations (no pacing, no cancel, no leave-alone, no give-up, no
+cool-down, servers-only ignored, unknown speed skipped, removed ignored, no wait, no re-check, no ordering, grabbing
+ourselves, any *@word* counted) each fail a test.
+
 ### 🆕 Undated lists are refreshed when old, and a list not opened yet says "New" (#926)
 
 Item 6 of #926, AutoGet's list expiry. `list_fetch.lists_worth_refetching()` acted only on freshness "changed" -

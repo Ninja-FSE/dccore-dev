@@ -429,6 +429,12 @@ def startup(setup_page=None):
     except Exception as refetch_err:
         print(f"[LIST-FETCH] Could not start the automatic refresh: "
               f"{refetch_err}")
+    # Automatic list grabbing (#926), the same way.
+    try:
+        import list_grab
+        list_grab.ensure_worker()
+    except Exception as grab_err:
+        print(f"[LIST-GRAB] Could not start automatic list grabbing: {grab_err}")
 
     # The list rebuild schedule (#776): started the same way, also re-armed by
     # every rehash, so setting it on the dashboard needs no restart.

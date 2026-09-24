@@ -1624,6 +1624,12 @@ def purge_fetched_list(source):
     if not forget_bot(nick):
         return False, f"Nothing is held from {nick}."
 
+    # Removed by hand: automatic list grabbing (#926) must not fetch it
+    # straight back. The bulk purge of offline bots does not do this - that
+    # is tidying, not an answer about the bot.
+    import list_grab
+    list_grab.note_removed_by_hand(nick)
+
     # forget_bot() answers a bool and logs the detail, which is right for the
     # bulk purge that calls it in a loop. A per-list purge has one status line
     # to fill and an operator watching it, so it asks the question again here

@@ -1100,6 +1100,36 @@
 # outbound requests nobody asked for. The rest go next sweep, oldest first.
 #AUTO_REFETCH_MAX_PER_RUN = 3
 
+# Fetch the list of each bot that advertises one you do not have, one at a
+# time: after a random wait, not if someone else just asked that bot, and at
+# most 3 tries per bot. A list you remove is not fetched again. Off by
+# default: it uses other bots' bandwidth without you asking.
+#
+# Ask for the list of a bot that advertises one and whose list is not held yet
+# (#926), on AutoGet's rules: one grab at a time, a random 5-360 second wait
+# first, dropped if someone else asks that bot meanwhile, three tries 30
+# minutes apart, then it stops. A list removed by hand is not grabbed back.
+# OFF by default, for the same reason as AUTO_REFETCH_LISTS.
+#AUTO_GRAB_LISTS = false
+
+# The least time between two automatic list grabs, in minutes.
+#
+# The least time between two automatic grabs, in minutes.
+#AUTO_GRAB_EVERY_MINUTES = 10
+
+# Do not grab the list of a bot that advertises fewer files than this. 0 grabs
+# any size.
+#
+# Skip bots advertising fewer files than this. 0 grabs any size.
+#AUTO_GRAB_MIN_FILES = 0
+
+# Do not grab the list of a bot that advertises a speed below this, in KB/s. A
+# bot that shows no speed is not skipped. 0 turns this off.
+#
+# Skip bots advertising a speed below this, in KB/s. A bot that advertises no
+# speed is not skipped. 0 turns it off.
+#AUTO_GRAB_MIN_SPEED_KB = 0
+
 # When you rehash (reload settings), how many seconds the bot waits for
 # running transfers to finish first before reloading anyway. 0 reloads
 # straight away.
@@ -1476,6 +1506,8 @@
 # Timestamps and secondary text
 #CUSTOM_THEME_ACCENT = 
 
+
+[py.]
 # Turn the web dashboard on. Off by default so nothing opens a web page just
 # because the bot was updated. Needs the Flask package installed.
 #
