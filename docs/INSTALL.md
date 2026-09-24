@@ -400,6 +400,8 @@ That lists every setting the sample knows about and your file does not. Most of 
 
 Nothing breaks if you skip this — every setting has a working default and the daemon runs fine without any of them being present. You simply will not know what became available. The changelog is the readable version of the same information.
 
+That diff only catches settings that are new. **`PAUSE_ON_UPDATE` is not new in v1.13.1, but its meaning changed**: it now pauses searching and sharing only for the few seconds a rebuilt list is being swapped in, not for the whole rebuild. If you were relying on the old whole-rebuild pause, turn on the new `PAUSE_FOR_WHOLE_UPDATE` setting to keep it.
+
 **5. Read the changelog.** [UPDATES-PUBLIC.md](UPDATES-PUBLIC.md) says what changed and, where it matters, what you have to do about it.
 
 **6. Verify before going live.**

@@ -4,6 +4,8 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+## 🟩 v1.13.1 (2026-09-24) - "The Fetch Queue Looks After Itself"
+
 ### 🧲 Lists are grabbed automatically, on AutoGet's rules (#926)
 
 Item 5 of #926, the last one. New `list_grab.py`: with `AUTO_GRAB_LISTS` on (off by default - it spends other
