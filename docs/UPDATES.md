@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⚖️ The README says what DCCore is for, and who is responsible for what it shares
+
+The only legal text was the GPL, which covers the code and says nothing about use. A **Responsible use** section,
+just above the licence in the README (and so on the GitHub page and in every download), says DCCore is for sharing
+files the operator has the right to share - their own work, public-domain and Creative Commons works, anything whose
+licence allows it - that it comes with no content and points to none, that the operator decides what is shared and
+is responsible for it under the laws where they live, and that the contributors do not host, control, monitor or
+endorse what any bot shares and accept no liability for how it is used. Documentation only.
+
 ### 📬 A bot's answer to our request is understood, and a queued file is taken when it comes (#926)
 
 Fetching from another bot understood one reply: "!rar is disabled". Everything else a server says about a request
