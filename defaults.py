@@ -729,6 +729,19 @@ AUTO_REFETCH_INTERVAL_HOURS: int = 24
 # lot of stale lists, and asking for all of them at once is a burst of
 # outbound requests nobody asked for. The rest go next sweep, oldest first.
 AUTO_REFETCH_MAX_PER_RUN: int = 3
+# Ask for the list of a bot that advertises one and whose list is not held yet
+# (#926), on AutoGet's rules: one grab at a time, a random 5-360 second wait
+# first, dropped if someone else asks that bot meanwhile, three tries 30
+# minutes apart, then it stops. A list removed by hand is not grabbed back.
+# OFF by default, for the same reason as AUTO_REFETCH_LISTS.
+AUTO_GRAB_LISTS: bool = False
+# The least time between two automatic grabs, in minutes.
+AUTO_GRAB_EVERY_MINUTES: int = 10
+# Skip bots advertising fewer files than this. 0 grabs any size.
+AUTO_GRAB_MIN_FILES: int = 0
+# Skip bots advertising a speed below this, in KB/s. A bot that advertises no
+# speed is not skipped. 0 turns it off.
+AUTO_GRAB_MIN_SPEED_KB: int = 0
 # How long a rehash waits for transfers in flight to finish before reloading
 # anyway, in seconds (#310). A transfer can sit idle for as long as the far
 # end keeps its socket open, so this cannot be unbounded: a bot that cannot
@@ -1077,6 +1090,8 @@ feed_counts = runtime.feed_counts          # FAIL and SEARCH events since the pr
 # download counter. Bound from runtime.py for the same reason as everything
 # above it.
 recent_departures = runtime.recent_departures
+# #926: who else asked which bot for its list - list_grab.py.
+list_grab_others_asked = runtime.list_grab_others_asked
 nick_aliases = runtime.nick_aliases
 
 # ---------------------------------------------------------------------

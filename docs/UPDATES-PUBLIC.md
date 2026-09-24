@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Added: automatic list grabbing (off by default).** Turn on *Grab the lists of bots you have no list from* (`AUTO_GRAB_LISTS`, under *Grabbing lists*) and DCCore asks for the list of each bot that advertises one and whose list you do not have yet - politely: one at a time, at most one every 10 minutes, after a random wait of 5 seconds to 6 minutes, not at all if someone else just asked that bot, and never more than 3 tries per bot, 30 minutes apart. You can skip small or slow bots, bots in "servers only" mode are always skipped, and a list you remove is not fetched back.
 - **Added: a "New" mark on fetched lists in the List Browser.** A list you fetched and have not opened yet says *New*; opening it clears the mark, and a refreshed list is new again.
 - **Improved: with `AUTO_REFETCH_LISTS` on, lists from bots that show no date are refreshed too.** Such a bot never says its list changed, so its list was never refreshed; it is now fetched again once it is 14 days old. Bots that do show a date are still refreshed only when it changes.
 - **Added: the List Browser shows each online bot's free slots, queue and speed**, as that bot advertises them - so you can see which one is quick and which one is full before you ask.

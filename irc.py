@@ -1915,6 +1915,13 @@ def _capture_channel_advert(user, target, msg, now=None):
     _flush_known_bots()
 
 
+@never_breaks_the_read_loop
+def _capture_list_ask(user, msg):
+    """Another user typed "@Bot" - see list_grab.note_someone_else_asked()."""
+    import list_grab
+    list_grab.note_someone_else_asked(user, msg)
+
+
 def _prune_known_bots(now):
     """Forget bots not seen inside the TTL, then cap what is left.
 
@@ -3443,6 +3450,10 @@ def irc_loop():
                         # advertising in a channel we sit in is not subject to
                         # our ban list.
                         _capture_channel_advert(user, target_chan, msg)
+
+                        # Someone else asking a bot for its list (#926): the
+                        # automatic grab leaves that bot alone for a while.
+                        _capture_list_ask(user, msg)
 
                         # A private message from a bot we asked for a file
                         # (#926): some servers answer a request that way
