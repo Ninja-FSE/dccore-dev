@@ -759,6 +759,7 @@
   // views{} above.
   var DOWNLOAD_STATE_LABELS = {
     pending: "download.state.pending", offered: "download.state.requested",
+    queued: "download.state.queued",
     listening: "download.state.listening", receiving: "download.state.receiving",
     complete: "download.state.complete", failed: "download.state.failed",
     rejected: "download.state.rejected"
@@ -868,6 +869,10 @@
       var rejected = !!row.list_processing_error;
       var displayState = rejected ? "rejected" : state;
       var label = t(DOWNLOAD_STATE_LABELS[displayState] || displayState);
+      // #926: the other bot said where our request is in its queue.
+      if (state === "queued" && row.queue_position) {
+        label = t("download.state.queuedAt").replace("{position}", row.queue_position);
+      }
       var progress = row.total_size
         ? Math.round(100 * (row.bytes_received || 0) / row.total_size) + "%"
         : (row.bytes_received ? row.bytes_received + " B" : "—");
@@ -880,7 +885,10 @@
       // cancellation path for a transfer thread already running.
       // Without this the server-side fix would be invisible: the queue would
       // be clearable by API and not by the dashboard that filled it.
-      var deletable = (state === "complete" || state === "failed" || state === "pending");
+      // A request the other bot queued (#926) can be let go as well: nothing
+      // is moving yet, and forgetting it is all there is to do.
+      var deletable = (state === "complete" || state === "failed" || state === "pending" ||
+                       state === "queued");
       // "Cancel" for a row that has not started - calling it Delete would
       // suggest a downloaded file is being thrown away when none exists.
       var deleteBtn = deletable
@@ -916,6 +924,9 @@
         action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + retryBtn + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
+      } else if (state === "queued") {
+        // #926: what the other bot said, and a way to let the request go.
+        action = (row.reply ? "<span class=\"col-dim\">" + escapeHtml(row.reply) + "</span> " : "") + deleteBtn;
       } else {
         action = "";
       }
@@ -3820,6 +3831,7 @@
     AUTO_REFETCH_MAX_PER_RUN: "settings.field.AUTO_REFETCH_MAX_PER_RUN",
     FETCH_TRANSFER_TIMEOUT: "settings.field.FETCH_TRANSFER_TIMEOUT",
     FETCH_OFFER_TIMEOUT: "settings.field.FETCH_OFFER_TIMEOUT",
+    FETCH_QUEUED_TIMEOUT: "settings.field.FETCH_QUEUED_TIMEOUT",
     FETCH_FOLDER_OFFER_TIMEOUT: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT",
     FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
     MAX_FETCH_FOLDER_FILE_SIZE: "settings.field.MAX_FETCH_FOLDER_FILE_SIZE",

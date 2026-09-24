@@ -4,6 +4,45 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📬 A bot's answer to our request is understood, and a queued file is taken when it comes (#926)
+
+Fetching from another bot understood one reply: "!rar is disabled". Everything else a server says about a request
+was ignored, and two things went wrong because of it:
+
+- **A queued file could never arrive.** A busy server answers *"Request Accepted - Position: 12"* and sends the
+  file when our turn comes, often an hour later. The request sat "offered", failed as *no response* after
+  `FETCH_OFFER_TIMEOUT` (60 s), and when the DCC SEND finally came `_claim_matching_offer_locked()` - which only
+  admitted "offered" rows - refused it as unsolicited. Fetching from a bot with a queue could only work while its
+  queue was empty.
+- **A refusal was a minute of nothing.** *"I don't have that file"*, *"file deleted"*, *"queue full"* all ended as
+  *no response*, holding one of `MAX_FETCH_SLOTS` for the whole minute and telling the operator nothing.
+
+Now `fetch_replies.classify()` reads each private NOTICE, and each private non-CTCP message, from a bot we asked
+(`irc.py` hands both to `dcc_fetch.handle_bot_reply()`), and answers **queued** (with the position when given),
+**duplicate** (already in their queue), **refused** or **busy**. The phrases are the ones Autoget 7.40 - the download
+manager that went with OmeNServE, read in full for #926 - recognised from OmeNServE 1.31-2.x, SDFind, SpR Jukebox
+(English and French) and BWI, plus DCCore's own: word sequences matched in order, after colour codes are stripped.
+
+- **Queued / duplicate:** the row becomes **queued**, shows *Queued there (#12)* and the server's words, stops
+  holding a fetch slot, and still takes its file (or list, or packed folder) when the offer comes.
+  `FETCH_QUEUED_TIMEOUT` (12 h, *Fetching from bots*; 0 = no limit) ends it if nothing arrives - a server that
+  restarted or dropped its queue never says so. A queued row can be let go from the Downloads panel.
+- **Refused:** failed at once, *refused: <their words>*. **Busy:** failed at once, *busy: <their words>* (retrying
+  later is #926's next step).
+- **Only the bot we asked can move its requests.** A reply naming a file acts on that file's row; one naming none
+  acts only when there is a single candidate - except queued/duplicate, which goes to the oldest still waiting,
+  since servers answer in order and the worst a wrong pick does is wait longer. A refusal that could be about any of
+  several requests is left to their timeouts: failing the wrong one has no way back.
+- The old "!rar is disabled" path is unchanged and runs first.
+
+`tests/test_other_servers_replies_are_understood.py` (20): a line from each server family and DCCore, including
+colour codes and the French; lines that must mean nothing (the right words out of order, a CTCP); a queued request
+freeing its slot, keeping and updating its position and taking its file and its list when they come; refused and
+busy; another bot's reply, a reply naming one of two files, an unnamed refusal among several, an unnamed acceptance
+among several; the queued timeout, 0, and letting one go; and that irc.py hands both kinds of private line over.
+Mutation-checked: a queued row refusing its file, any bot moving any row, an ambiguous refusal acting, matching any
+one word, and a queued row never expiring each fail a test.
+
 ### 📂 The rebuild scans several folders at once (#922)
 
 Every `!update` pauses searches and requests for the whole rebuild (`PAUSE_ON_UPDATE`), and most of a rebuild is the
