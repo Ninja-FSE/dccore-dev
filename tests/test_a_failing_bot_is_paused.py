@@ -32,6 +32,22 @@ import webserver  # noqa: E402
 from tests.support import DCCoreTestCase, silence_debug  # noqa: E402
 
 
+class TcpLike:
+    """One end of socket.socketpair(), answering getpeername() the way a real
+    fetch's TCP socket does. On Linux and macOS the pair is AF_UNIX, whose
+    getpeername() is '' - and _run_transfer() reads [0] of it, which only a
+    TCP address has. On Windows the pair is TCP already."""
+
+    def __init__(self, sock):
+        self._sock = sock
+
+    def getpeername(self):
+        return ("127.0.0.1", 50000)
+
+    def __getattr__(self, name):
+        return getattr(self._sock, name)
+
+
 class PauseCase(DCCoreTestCase):
     def setUp(self):
         super().setUp()
@@ -80,7 +96,7 @@ class ThreeFailuresPauseABot(PauseCase):
         row.update(state="receiving")
         dest = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
-        dcc_fetch._run_transfer(row, {"size": 64, "ip": None, "port": 0}, dest, "Track.flac", sock=ours)
+        dcc_fetch._run_transfer(row, {"size": 64, "ip": None, "port": 0}, dest, "Track.flac", sock=TcpLike(ours))
         self.assertEqual(row["state"], "complete")
         dcc_fetch._note_connect_failure("ServerOne")
         self.assertNotIn("serverone", dcc_fetch.paused_bots())
@@ -199,7 +215,7 @@ class AFullDiskWaits(PauseCase):
         dest = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
 
-        dcc_fetch._run_transfer(row, {"size": 64, "ip": None, "port": 0}, dest, "Track.flac", sock=ours)
+        dcc_fetch._run_transfer(row, {"size": 64, "ip": None, "port": 0}, dest, "Track.flac", sock=TcpLike(ours))
 
         self.assertEqual(row["state"], "pending")
         self.assertEqual(row["waiting"], "disk-full")
