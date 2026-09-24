@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: with `MAX_FETCH_FILE_SIZE` set to 0 ("no limit"), a downloaded file list was unpacked with no size limit at all**, so a booby-trapped list from another bot - a few MB that unpack to many GB - could fill your disk. 0 still means no limit for files; a list archive is now limited to what real lists can hold (8 lists of the biggest size `MAX_LIST_TEXT_SIZE` allows, 1 GB by default), which refuses nothing that would have been kept. This came in after v1.13.1, which is not affected.
 ## v1.13.1 — The Fetch Queue Looks After Itself
 
 - **Added: automatic list grabbing (off by default).** Turn on *Grab the lists of bots you have no list from* (`AUTO_GRAB_LISTS`, under *Grabbing lists*) and DCCore asks for the list of each bot that advertises one and whose list you do not have yet - politely: one at a time, at most one every 10 minutes, after a random wait of 5 seconds to 6 minutes, not at all if someone else just asked that bot, and never more than 3 tries per bot, 30 minutes apart. You can skip small or slow bots, bots in "servers only" mode are always skipped, and a list you remove is not fetched back.

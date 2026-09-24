@@ -226,9 +226,31 @@ def _fetch_file_size_budget():
     process_fetched_list_zip() - and a `budget` that starts at a literal 0
     would fail the very first byte written, the same bug either call site
     would have on its own (#937 was the sibling of this one, on
-    MAX_FETCH_LIST_FILE_SIZE)."""
+    MAX_FETCH_LIST_FILE_SIZE).
+
+    BUT 0 IS NOT "NO BOUND" FOR A LIST ARCHIVE (#945). Here the value is the
+    zip-bomb guard: _validate_zip_members()'s sum of declared sizes is the
+    only thing bounding extraction (ZipExtFile truncates each member to what
+    it declares, and max_list_text_size() is checked after extraction). #940
+    returned float("inf"), so with the setting at 0 a small zip of zeros
+    unpacked without limit. An operator lifting the cap on FILES is not
+    asking for that. So 0 falls back to what real lists can hold -
+    max_list_text_size() per list, MAX_LISTS_PER_ARCHIVE of them: any list
+    bigger than that is refused after extraction anyway, so this refuses
+    nothing that would have been kept."""
     raw = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
-    return raw if raw > 0 else float("inf")
+    if raw > 0:
+        return raw
+    return max_list_text_size() * MAX_LISTS_PER_ARCHIVE
+
+
+def _fetch_file_size_budget_name():
+    """Which ceiling _fetch_file_size_budget() applied, for the rejection
+    message - "MAX_FETCH_FILE_SIZE (0 bytes)" named a limit that is not
+    the one refusing the list."""
+    if int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024)) > 0:
+        return "MAX_FETCH_FILE_SIZE"
+    return f"the list archive ceiling (MAX_LIST_TEXT_SIZE x {MAX_LISTS_PER_ARCHIVE})"
 
 
 def _validate_zip_members(infolist, extract_dir):
@@ -251,8 +273,8 @@ def _validate_zip_members(infolist, extract_dir):
         total_uncompressed += info.file_size
         if total_uncompressed > max_total:
             return (f"zip's declared total uncompressed size exceeds "
-                     f"MAX_FETCH_FILE_SIZE ({max_total} bytes) - refusing to "
-                     f"extract (zip-bomb guard)")
+                     f"{_fetch_file_size_budget_name()} ({max_total} bytes) - "
+                     f"refusing to extract (zip-bomb guard)")
 
         member_name = info.filename.replace('\\', '/')
         # An absolute path (POSIX "/etc/..." or a Windows drive letter like
