@@ -105,7 +105,16 @@ BROADCAST_SEARCH_CHANNEL: str = None
 # ---------------------------------------------------------------------
 # 3. FILESYSTEM, PATHS AND TEXT STORES
 # ---------------------------------------------------------------------
-PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
+# While the list is rebuilt, searches and file requests are refused while the
+# new list is SWAPPED IN - a few seconds at the end - and answered from the
+# current list the rest of the time (#923). The new list is built under
+# temporary names and the current one is complete and unchanged until the
+# swap, so the scan (and the audio-info reading) no longer takes the bot off
+# the air for its whole length. False: never pause at all.
+PAUSE_ON_UPDATE: bool = True  # MAINTENANCE SWITCH: pause searching and sharing while a rebuilt list is swapped in
+# The old behaviour: pause searching and sharing for the WHOLE rebuild, not
+# only the swap. For an operator who wants it back; nothing else needs it.
+PAUSE_FOR_WHOLE_UPDATE: bool = False  # Pause searching and sharing for the whole rebuild, not only the swap
 # None, not a real path - a shipped literal path would let a copy-paste
 # install silently inherit somebody else's actual music folder path. Unlike
 # NICKNAME/CHANNEL/ADMIN_NICK, FILE_DIRECTORY is NOT in settings_file.
@@ -792,6 +801,11 @@ FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DC
 # against MAX_FETCH_SLOTS and waits for its turn - hours, on a busy server.
 # Past this it fails: a bot that restarted or dropped its queue never says so.
 # 0 = wait for ever.
+# How many of our requests one bot may hold at once - asked, queued there or
+# arriving (#926). A server allows each user only so many; the rest would be
+# answered "queue full". The next file goes out when one finishes, the way
+# AutoGet's "active" mode did it. 0 = no limit.
+FETCH_MAX_PER_BOT: int = 3  # Files asked of one bot at once; the next goes when one finishes
 FETCH_QUEUED_TIMEOUT: int = 43200  # Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
 
 # A "folder" request_type row (dcc_fetch.py) asks another bot to pack a whole

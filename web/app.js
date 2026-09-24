@@ -765,6 +765,13 @@
     complete: "download.state.complete", failed: "download.state.failed",
     rejected: "download.state.rejected"
   };
+  // #926: why a pending request has not gone out - dcc_fetch sets row.waiting.
+  var DOWNLOAD_WAITING_LABELS = {
+    offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
+    retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
+    slots: "download.waiting.slots", paused: "download.waiting.paused",
+    "disk-full": "download.waiting.diskFull"
+  };
 
   function loadDownloads() {
     fetchJson("/api/fetch/status").then(function (rows) {
@@ -777,6 +784,20 @@
       state.downloads = rows || [];
       renderDownloads(rows);
     }).catch(function () { markConnection(false); });
+  }
+
+  // #926: resume a paused bot from one of its waiting rows. The bot comes
+  // from the held row, looked up by id - never from an attribute.
+  function resumeFetchBot(button) {
+    var requestId = decodeURIComponent(button.dataset.requestId);
+    var row = (state.downloads || []).filter(function (candidate) {
+      return String(candidate.id) === requestId;
+    })[0];
+    if (!row) { return; }
+    button.disabled = true;
+    postJson("/api/fetch/resume", { bot: row.bot }).then(function () {
+      loadDownloads();
+    }).catch(function () { button.disabled = false; });
   }
 
   function redownloadFetchRow(button) {
@@ -830,6 +851,11 @@
       redownloadFetchRow(retry);
       return;
     }
+    var resume = evt.target.closest ? evt.target.closest(".fetch-resume-btn") : null;
+    if (resume) {
+      resumeFetchBot(resume);
+      return;
+    }
 
     var btn = evt.target.closest ? evt.target.closest(".fetch-delete-btn") : null;
     if (!btn) { return; }
@@ -873,6 +899,11 @@
       // #926: the other bot said where our request is in its queue.
       if (state === "queued" && row.queue_position) {
         label = t("download.state.queuedAt").replace("{position}", row.queue_position);
+      }
+      // #926: why a request has not gone out yet - its bot is away or just
+      // back, it has enough of ours, it was busy, or every slot is taken.
+      if (state === "pending" && DOWNLOAD_WAITING_LABELS[row.waiting]) {
+        label = t(DOWNLOAD_WAITING_LABELS[row.waiting]).replace("{bot}", row.bot || "");
       }
       var progress = row.total_size
         ? Math.round(100 * (row.bytes_received || 0) / row.total_size) + "%"
@@ -923,6 +954,10 @@
         action = "<span class=\"col-dim\">" + t("download.browseInListBrowser") + "</span> " + deleteBtn;
       } else if (state === "failed") {
         action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + retryBtn + deleteBtn;
+      } else if (state === "pending" && row.waiting === "paused") {
+        // #926: a paused bot's requests wait here; one click resumes it.
+        action = "<button type=\"button\" class=\"btn btn-small fetch-resume-btn\" data-request-id=\"" +
+          encodeURIComponent(row.id) + "\">" + t("download.resumeBot") + "</button> " + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
       } else if (state === "queued") {
@@ -3839,6 +3874,7 @@
     "your-list": "settings.category.yourList",
     "list-rebuild": "settings.category.listRebuild",
     "fetching": "settings.category.fetching",
+    "fetch-queue": "settings.category.fetchQueue",
     "advertising": "settings.category.advertising",
     "appearance": "settings.category.appearance",
     "anti-flood": "settings.category.antiFlood",
@@ -3880,6 +3916,7 @@
     FETCH_TRANSFER_TIMEOUT: "settings.field.FETCH_TRANSFER_TIMEOUT",
     FETCH_OFFER_TIMEOUT: "settings.field.FETCH_OFFER_TIMEOUT",
     FETCH_QUEUED_TIMEOUT: "settings.field.FETCH_QUEUED_TIMEOUT",
+    FETCH_MAX_PER_BOT: "settings.field.FETCH_MAX_PER_BOT",
     FETCH_FOLDER_OFFER_TIMEOUT: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT",
     FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED: "settings.field.FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
     MAX_FETCH_FOLDER_FILE_SIZE: "settings.field.MAX_FETCH_FOLDER_FILE_SIZE",
@@ -3887,6 +3924,7 @@
     FETCH_FOLDER_TRANSFER_TIMEOUT: "settings.field.FETCH_FOLDER_TRANSFER_TIMEOUT",
     LIST_BASE_NAME: "settings.field.LIST_BASE_NAME",
     PAUSE_ON_UPDATE: "settings.field.PAUSE_ON_UPDATE",
+    PAUSE_FOR_WHOLE_UPDATE: "settings.field.PAUSE_FOR_WHOLE_UPDATE",
     FILE_DIRECTORY: "settings.field.FILE_DIRECTORY",
     LIST_FORMAT: "settings.field.LIST_FORMAT",
     LIST_IGNORED_EXTENSIONS: "settings.field.LIST_IGNORED_EXTENSIONS",

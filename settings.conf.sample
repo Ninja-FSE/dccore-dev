@@ -168,13 +168,27 @@
 # setting it explicitly, here or in admin_config.py, still wins.
 #BROADCAST_SEARCH_CHANNEL = 
 
-
-[filesystem, paths and text stores]
-# While the list is being rebuilt (!update), stop serving and searching until
-# it is done. Keeps the bot from handing out a half-built list.
+# While a rebuilt list is being swapped in - a few seconds at the end of
+# !update - refuse searches and file requests. The rest of the rebuild, they
+# are answered from the current list, which stays complete until the swap.
 #
-# MAINTENANCE SWITCH: when True the bot pauses ALL sharing and searching during !update
+# While the list is rebuilt, searches and file requests are refused while the
+# new list is SWAPPED IN - a few seconds at the end - and answered from the
+# current list the rest of the time (#923). The new list is built under
+# temporary names and the current one is complete and unchanged until the
+# swap, so the scan (and the audio-info reading) no longer takes the bot off
+# the air for its whole length. False: never pause at all.
+# MAINTENANCE SWITCH: pause searching and sharing while a rebuilt list is swapped in
 #PAUSE_ON_UPDATE = true
+
+# The old behaviour: refuse searches and file requests for the whole rebuild,
+# not only while the new list is swapped in. Only needs Pause sharing during
+# !update on too.
+#
+# The old behaviour: pause searching and sharing for the WHOLE rebuild, not
+# only the swap. For an operator who wants it back; nothing else needs it.
+# Pause searching and sharing for the whole rebuild, not only the swap
+#PAUSE_FOR_WHOLE_UPDATE = false
 
 # The folder with the files you share. Used only if you have not added folders
 # on the Library page - if you have, those are used instead and this is
@@ -1189,14 +1203,25 @@
 # Seconds an "offered" row waits for a DCC SEND before it's marked failed
 #FETCH_OFFER_TIMEOUT = 60
 
-# When another bot puts your request in its queue, how long to wait for your
-# turn before giving up. Busy servers take hours. 0 waits for ever.
+# How many files to ask one bot for at once. The next one is asked when one
+# arrives. Servers allow each person only a few; asking for more gets "queue
+# full". 0 means no limit.
 #
 # How long a request the other bot has QUEUED waits for its file (#926). When
 # a bot answers "you are number 12 in my queue", the request stops counting
 # against MAX_FETCH_SLOTS and waits for its turn - hours, on a busy server.
 # Past this it fails: a bot that restarted or dropped its queue never says so.
 # 0 = wait for ever.
+# How many of our requests one bot may hold at once - asked, queued there or
+# arriving (#926). A server allows each user only so many; the rest would be
+# answered "queue full". The next file goes out when one finishes, the way
+# AutoGet's "active" mode did it. 0 = no limit.
+# Files asked of one bot at once; the next goes when one finishes
+#FETCH_MAX_PER_BOT = 3
+
+# When another bot puts your request in its queue, how long to wait for your
+# turn before giving up. Busy servers take hours. 0 waits for ever.
+#
 # Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
 #FETCH_QUEUED_TIMEOUT = 43200
 

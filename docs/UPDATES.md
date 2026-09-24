@@ -57,6 +57,115 @@ against); the others are reported with the lists that had no match, so the sideb
 before. `tests/test_the_search_can_ask_only_bots_that_are_online.py` (5): off, on, nobody online, and the route and
 page passing the switch; removing the presence check fails two of them.
 
+### ⚖️ The README says what DCCore is for, and who is responsible for what it shares
+
+The only legal text was the GPL, which covers the code and says nothing about use. A **Responsible use** section,
+just above the licence in the README (and so on the GitHub page and in every download), says DCCore is for sharing
+files the operator has the right to share - their own work, public-domain and Creative Commons works, anything whose
+licence allows it - that it comes with no content and points to none, that the operator decides what is shared and
+is responsible for it under the laws where they live, and that the contributors do not host, control, monitor or
+endorse what any bot shares and accept no liability for how it is used. Documentation only.
+
+### ⏸️ A bot we cannot reach is paused, and a full disk makes fetching wait (#926)
+
+Item 4 of #926, stacked on the queue pacing below.
+
+- **Three failed connections pause a bot.** A bot behind a firewall that cannot take our connection fails every
+  file the same way, and asking on burns its slot and ours; AutoGet disabled a nick after three "unable to connect".
+  Now three *active* connect failures in a row (`CONNECT_FAILURES_TO_PAUSE`) pause the bot: its requests stay
+  queued and wait, *Paused - resume it to carry on*, with a **Resume this bot** button on the Downloads page, and
+  the debug feed says so once. A finished transfer resets the count. A passive offer nobody connects back to is not
+  counted - that one is our side, not theirs.
+- **Pause and resume any bot** (`POST /api/fetch/pause` and `/api/fetch/resume`, `GET /api/fetch/paused`). Pauses
+  are saved to `fetch_paused_bots.json` beside the fetch history, so one survives a restart; the failure count does
+  not need to.
+- **A full disk makes fetching wait instead of fail.** With under `MIN_FREE_BYTES` (200 MB) free where fetched files
+  go, no new fetch starts - the rows wait, *Waiting for disk space* - and a transfer that runs out of space goes back
+  to pending rather than failing. Both carry on by themselves once space is freed, and the change is said once each
+  way. A disk that cannot be measured is not called low; the write itself still fails safely. AutoGet switched
+  itself off on a write error; waiting is kinder.
+
+`tests/test_a_failing_bot_is_paused.py` (14): the third failure pausing and saying so, a finished transfer - through
+the real `_run_transfer()` over a socket pair - resetting the count, only the active connect counting; a paused
+bot's requests waiting while others go, resuming, the operator pausing any bot, resuming one not paused, the pause
+surviving a restart (and the resume being saved); a low disk holding fetches and saying so once, carrying on once
+there is space, an unmeasurable disk not blocking, a transfer that fills the disk - the real `_run_transfer()` into
+a file that says no space left - going back to pending, and recognising the error. Mutation-checked: never pausing,
+the real transfer not resetting the count, the pause ignored, the disk ignored, a full disk failing the row, and a
+resume not saved each fail a test.
+
+### 🗂️ The fetch queue waits for a bot, paces itself per bot, and survives a restart (#926)
+
+Items 2 and 3 of #926, stacked on the reply handling below. The fetch queue could only ask a bot that was in a
+channel at that moment, forgot every unfinished request on a restart, and - once a queued request stopped holding a
+slot - would send a whole hundred-file selection to one bot within minutes, which a server answers "queue full".
+AutoGet kept its download list working by itself; this is its practice, in `dcc_fetch.check_fetch_queue()`:
+
+- **One bot holds only so many.** `FETCH_MAX_PER_BOT` (3; *Fetch queue* on the Settings page, 0 = no limit) caps our
+  requests at one bot - asked, queued there or arriving. The next goes out when one finishes: AutoGet's "active"
+  mode. The slot limit still applies across bots.
+- **It waits for the bot.** A request whose bot is not in any of our channels stays pending, *Waiting for <bot> to
+  come back*, and goes out a minute after it returns (`RETURN_DELAY_SECONDS`: it may still be loading its list, and
+  every other fetcher is asking at the same moment - AutoGet waited 30-180 s after a JOIN). A bot present since we
+  started is asked at once, and while we are still joining (no channel membership at all) nothing is held back, as
+  before. Presence is read outside the fetch lock.
+- **Busy is asked again.** A *queue full / maxed out / rebuilding* answer puts the request back to pending with a
+  time: `BUSY_RETRIES` (3) times, `BUSY_RETRY_SECONDS` (10 min) apart, then it fails as busy.
+- **Queued for a bot that is away.** The bulk-fetch box used to refuse any bot not present. A bot we know - seen
+  advertising, or whose list we hold (`dcc_fetch.bot_is_known()`) - is now queued for and waits; a nick we have
+  never seen is still refused, since a typo would otherwise wait for ever.
+- **It survives a restart.** Every row is saved now, in the form it restarts in: waiting and queued rows as they
+  are, and a mid-flight one (offered, listening, receiving - its socket and thread die with the process) as pending,
+  to be asked again. Written in that form, a transfer's rising byte count does not rewrite the file each tick.
+- **The Downloads panel says why** a request is waiting: the bot is away or just back, it has enough of ours, it
+  was busy, or every slot is taken.
+
+`tests/test_the_fetch_queue_waits_and_paces_itself.py` (15): the per-bot limit, a queued request counting against
+it, the next going when one finishes, per-bot allowances, 0, the slot limit across bots; an absent bot, one coming
+back and its minute, one here all along, still joining, a busy retry time; the restart forms and a ticking transfer
+not rewriting; a known bot queued while away and an unknown nick refused. Mutation-checked: queued not counting,
+presence ignored, no return delay, the retry time ignored, unfinished rows not saved, and a known offline bot
+refused each fail a test. Three existing tests follow: the history test now expects unfinished rows saved in their
+restart form, and two slot-limit tests with a single bot turn the per-bot limit off, since it is not what they
+measure. `tests/support.py` resets the dispatcher's who-left memory between tests.
+
+### ⏯️ Searches and downloads go on while the list rebuilds (#923)
+
+`PAUSE_ON_UPDATE` refused every `@find` and every file request for the **whole** `!update` - about 80 s a rebuild on
+the operator's 64k-file NFS library before #924, longer while audio info filled in - and the rebuild schedule
+(#776) made that happen by itself. The pause predates the atomic publish: the new list is now built under temporary
+names and swapped in at the end, so until the swap the published list is complete, unchanged and exactly what users
+have downloaded. Raised by Neo on #914; built here for review, not as a decision made.
+
+- **Only the swap pauses.** The rebuild writes the phase *publishing* to its progress file just before
+  `_publish_artifacts()` and keeps it through the prune of what it replaced. `list.rebuild_pauses_requests()` - the
+  one gate `execute_search()` and `dcc.handle_download_request()` now ask - pauses only then. Through *scanning*,
+  *audio* and *writing*, searches read the current list (the temporaries are `.new` names `find_latest_list()`
+  never matches) and requests are served. A request that lands in the swap is told *try again in a few seconds*.
+- **Fail-safe.** A phase that cannot be read - no progress file, half a file, a read-only `data/` - pauses exactly as
+  before, so a rebuild that cannot report never lets requests through blind. The tests that set `update_inprogress`
+  with no progress file keep their meaning for that reason.
+- **The rebuild no longer takes the search lock.** Starting a rebuild used to raise `search_inprogress` for its whole
+  length and to refuse to start while a search ran; both only apply to the old whole-rebuild pause now, in
+  `handle_list_update_request()` and in the dashboard's `start_list_update()`.
+- **A patient swap.** A search that started a moment before the swap may still hold the list open, and on Windows the
+  rename waits for it: `_publish_artifacts()` retries up to `PUBLISH_REPLACE_ATTEMPTS` (10, about ten seconds of
+  backoff) where every other replace keeps five. POSIX never needs it.
+- **The old behaviour is one setting away:** `PAUSE_FOR_WHOLE_UPDATE` (off; next to `PAUSE_ON_UPDATE` on the
+  Settings page). `PAUSE_ON_UPDATE = false` still means no pause at all.
+- Unchanged: sending the list file itself (`@nick`) is still refused for the whole rebuild - a DCC send holds that
+  file open for minutes, which no retry outwaits.
+
+`tests/test_searches_run_while_the_list_rebuilds.py` (15): when the gate pauses (each phase, unreadable progress,
+the old setting, off); a real `@find` answered during the scan and refused in the swap; a real file request not
+refused during the audio phase, told *seconds* in the swap and *minutes* under the old setting; *publishing* said
+before the swap; the swap's longer patience; and what `handle_list_update_request()` holds while the rebuild runs.
+Mutation-checked: pausing throughout, treating an unreadable phase as open, dropping the *publishing* write, the
+rebuild taking the search lock again, and the old request gate each fail a test. Three existing tests follow the
+change: the publish tests' fake replace takes the new argument, the `PAUSE_ON_UPDATE` call-site count now finds the
+two readers in `list.py` and one in `commands.py`, and a running search blocks a dashboard rebuild only under
+`PAUSE_FOR_WHOLE_UPDATE`.
+
 ### 📬 A bot's answer to our request is understood, and a queued file is taken when it comes (#926)
 
 Fetching from another bot understood one reply: "!rar is disabled". Everything else a server says about a request
