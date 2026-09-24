@@ -1142,6 +1142,16 @@ html, body {
 }
 
 /* #926: the "Online only" switch beside the filter. */
+/* #926: a bot's advertised slots, queue and speed, under its name. */
+.bot-row-live {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .filelists-online-only {
   display: flex;
   align-items: center;

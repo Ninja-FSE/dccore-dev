@@ -1562,6 +1562,18 @@ _ADVERT_DATE_RE = re.compile(
     r"(?:List:|Date:|created)\s*([A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?)",
     re.IGNORECASE)
 
+# The live figures an advert carries (#926 item 8), read the way AutoGet's
+# "slots" page read them: "Slots: 3/10 <> Queued: 12 <> Speed: 45000cps <>
+# Mode: Normal". OmenServe's slots are FREE/total - the same sense
+# parse_search_header() gives them.
+_ADVERT_SLOTS_RE = re.compile(r"Slots:\s*(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+_ADVERT_QUEUED_RE = re.compile(r"Queued:\s*([\d,]+)", re.IGNORECASE)
+_ADVERT_SPEED_RE = re.compile(r"Speed:\s*([\d,.]+\s*(?:cps|[KMG]?B/?s)?)", re.IGNORECASE)
+_ADVERT_MODE_RE = re.compile(r"Mode:\s*(Normal|Servers?\s+Only|Servers?\s+Priority)", re.IGNORECASE)
+# SPQR's "[(0/7) Slots (0/216) Ques Taken]" - slots IN USE, and queues taken.
+_SPQR_SLOTS_RE = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)\s*Slots", re.IGNORECASE)
+_SPQR_QUEUES_RE = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)\s*Ques\s+Taken", re.IGNORECASE)
+
 # SPQR: "For My List(19527files:163812MB) ... type @LoadBot and @LoadBot-stats."
 _SPQR_LIST_RE = re.compile(
     r"For\s+My\s+List\s*\(\s*([\d,]+)\s*files\s*:\s*([\d,.]+\s*[KMGT]?B)\s*\)", re.IGNORECASE)
@@ -1630,6 +1642,21 @@ def _parse_omenserve_advert(clean):
     if date:
         advert["list_date"] = re.sub(r"\s+", " ", date.group(1)).strip()
 
+    # The live figures (#926), each only when the bot said it.
+    slots = _ADVERT_SLOTS_RE.search(clean)
+    if slots:
+        advert["slots_free"] = _as_int(slots.group(1))
+        advert["slots_total"] = _as_int(slots.group(2))
+    queued = _ADVERT_QUEUED_RE.search(clean)
+    if queued:
+        advert["queued"] = _as_int(queued.group(1).replace(",", ""))
+    speed = _ADVERT_SPEED_RE.search(clean)
+    if speed:
+        advert["speed"] = re.sub(r"\s+", "", speed.group(1))
+    mode = _ADVERT_MODE_RE.search(clean)
+    if mode:
+        advert["mode"] = re.sub(r"\s+", " ", mode.group(1)).title()
+
     return advert
 
 
@@ -1649,12 +1676,20 @@ def _parse_spqr_advert(clean):
     if not nick:
         return None
 
-    return {
+    advert = {
         "family": "spqr",
         "nick": nick.group(1),
         "files": _as_int(listing.group(1).replace(",", "")),
         "list_size": re.sub(r"\s+", "", listing.group(2)),
     }
+    slots = _SPQR_SLOTS_RE.search(clean)
+    if slots:
+        advert["slots_in_use"] = _as_int(slots.group(1))
+        advert["slots_total"] = _as_int(slots.group(2))
+    queues = _SPQR_QUEUES_RE.search(clean)
+    if queues:
+        advert["queued"] = _as_int(queues.group(1))
+    return advert
 
 
 def _parse_rar_folder_advert(clean):
@@ -1712,9 +1747,13 @@ _ADVERT_PARSERS = (_parse_omenserve_advert, _parse_spqr_advert, _parse_rar_folde
 # What each family is entitled to write into a registry entry. A bot's RAR
 # advert must not overwrite the count of its loose-file list, and the other way
 # round - they are two lists and PackBot publishes both.
+# The live figures (slots, queued, speed, mode) are kept beside the list's own
+# (#926) but never compared for freshness - list_fetch._advert_snapshot() reads
+# files and list_date only, since slots change with every send.
 _ADVERT_FIELDS = {
-    "omenserve": ("files", "list_date", "list_size"),
-    "spqr": ("files", "list_size"),
+    "omenserve": ("files", "list_date", "list_size",
+                  "slots_free", "slots_total", "queued", "speed", "mode"),
+    "spqr": ("files", "list_size", "slots_in_use", "slots_total", "queued"),
     "rar": ("rar_folders", "rar_size", "rar_trigger"),
 }
 
