@@ -2040,6 +2040,25 @@ def build_fetch_status_payload():
     return rows
 
 
+def build_fetch_pause_result(payload, pause):
+    """POST /api/fetch/pause and /api/fetch/resume (#926): stop or restart
+    fetching from one bot. Its requests stay in the queue - paused ones wait,
+    "Paused", and go out again once it is resumed."""
+    import dcc_fetch
+    bot = str((payload or {}).get("bot") or "").strip() if isinstance(payload, dict) else ""
+    if not bot:
+        return 400, {"error": "Which bot?"}
+    unsafe = reject_if_unsafe_for_irc_line(bot, "bot")
+    if unsafe:
+        return 400, {"error": unsafe}
+    if pause:
+        dcc_fetch.pause_bot(bot, "paused from the Downloads page")
+        return 200, {"paused": bot}
+    if not dcc_fetch.resume_bot(bot):
+        return 404, {"error": f"{bot} is not paused."}
+    return 200, {"resumed": bot}
+
+
 def build_fetch_delete_result(request_id):
     """DELETE /api/fetch/<request_id>: forget a finished fetch and remove its
     file from FETCHED_FILES_DIR, if it has one.
@@ -4118,6 +4137,21 @@ if HAVE_FLASK:
         @app.route("/api/fetch/status")
         def api_fetch_status():
             return jsonify(build_fetch_status_payload())
+
+        @app.route("/api/fetch/paused")
+        def api_fetch_paused():
+            import dcc_fetch
+            return jsonify(dcc_fetch.paused_bots())
+
+        @app.route("/api/fetch/pause", methods=["POST"])
+        def api_fetch_pause():
+            status, result = build_fetch_pause_result(request.get_json(silent=True), True)
+            return jsonify(result), status
+
+        @app.route("/api/fetch/resume", methods=["POST"])
+        def api_fetch_resume():
+            status, result = build_fetch_pause_result(request.get_json(silent=True), False)
+            return jsonify(result), status
 
         @app.route("/api/tools/verify-list")
         def api_tools_verify_list():

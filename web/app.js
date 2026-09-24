@@ -768,7 +768,8 @@
   var DOWNLOAD_WAITING_LABELS = {
     offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
     retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
-    slots: "download.waiting.slots"
+    slots: "download.waiting.slots", paused: "download.waiting.paused",
+    "disk-full": "download.waiting.diskFull"
   };
 
   function loadDownloads() {
@@ -782,6 +783,20 @@
       state.downloads = rows || [];
       renderDownloads(rows);
     }).catch(function () { markConnection(false); });
+  }
+
+  // #926: resume a paused bot from one of its waiting rows. The bot comes
+  // from the held row, looked up by id - never from an attribute.
+  function resumeFetchBot(button) {
+    var requestId = decodeURIComponent(button.dataset.requestId);
+    var row = (state.downloads || []).filter(function (candidate) {
+      return String(candidate.id) === requestId;
+    })[0];
+    if (!row) { return; }
+    button.disabled = true;
+    postJson("/api/fetch/resume", { bot: row.bot }).then(function () {
+      loadDownloads();
+    }).catch(function () { button.disabled = false; });
   }
 
   function redownloadFetchRow(button) {
@@ -833,6 +848,11 @@
     var retry = evt.target.closest ? evt.target.closest(".fetch-retry-btn") : null;
     if (retry) {
       redownloadFetchRow(retry);
+      return;
+    }
+    var resume = evt.target.closest ? evt.target.closest(".fetch-resume-btn") : null;
+    if (resume) {
+      resumeFetchBot(resume);
       return;
     }
 
@@ -933,6 +953,10 @@
         action = "<span class=\"col-dim\">" + t("download.browseInListBrowser") + "</span> " + deleteBtn;
       } else if (state === "failed") {
         action = "<span class=\"col-dim\">" + escapeHtml(row.reason || "") + "</span> " + retryBtn + deleteBtn;
+      } else if (state === "pending" && row.waiting === "paused") {
+        // #926: a paused bot's requests wait here; one click resumes it.
+        action = "<button type=\"button\" class=\"btn btn-small fetch-resume-btn\" data-request-id=\"" +
+          encodeURIComponent(row.id) + "\">" + t("download.resumeBot") + "</button> " + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
       } else if (state === "queued") {

@@ -4,6 +4,34 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏸️ A bot we cannot reach is paused, and a full disk makes fetching wait (#926)
+
+Item 4 of #926, stacked on the queue pacing below.
+
+- **Three failed connections pause a bot.** A bot behind a firewall that cannot take our connection fails every
+  file the same way, and asking on burns its slot and ours; AutoGet disabled a nick after three "unable to connect".
+  Now three *active* connect failures in a row (`CONNECT_FAILURES_TO_PAUSE`) pause the bot: its requests stay
+  queued and wait, *Paused - resume it to carry on*, with a **Resume this bot** button on the Downloads page, and
+  the debug feed says so once. A finished transfer resets the count. A passive offer nobody connects back to is not
+  counted - that one is our side, not theirs.
+- **Pause and resume any bot** (`POST /api/fetch/pause` and `/api/fetch/resume`, `GET /api/fetch/paused`). Pauses
+  are saved to `fetch_paused_bots.json` beside the fetch history, so one survives a restart; the failure count does
+  not need to.
+- **A full disk makes fetching wait instead of fail.** With under `MIN_FREE_BYTES` (200 MB) free where fetched files
+  go, no new fetch starts - the rows wait, *Waiting for disk space* - and a transfer that runs out of space goes back
+  to pending rather than failing. Both carry on by themselves once space is freed, and the change is said once each
+  way. A disk that cannot be measured is not called low; the write itself still fails safely. AutoGet switched
+  itself off on a write error; waiting is kinder.
+
+`tests/test_a_failing_bot_is_paused.py` (14): the third failure pausing and saying so, a finished transfer - through
+the real `_run_transfer()` over a socket pair - resetting the count, only the active connect counting; a paused
+bot's requests waiting while others go, resuming, the operator pausing any bot, resuming one not paused, the pause
+surviving a restart (and the resume being saved); a low disk holding fetches and saying so once, carrying on once
+there is space, an unmeasurable disk not blocking, a transfer that fills the disk - the real `_run_transfer()` into
+a file that says no space left - going back to pending, and recognising the error. Mutation-checked: never pausing,
+the real transfer not resetting the count, the pause ignored, the disk ignored, a full disk failing the row, and a
+resume not saved each fail a test.
+
 ### 🗂️ The fetch queue waits for a bot, paces itself per bot, and survives a restart (#926)
 
 Items 2 and 3 of #926, stacked on the reply handling below. The fetch queue could only ask a bot that was in a
