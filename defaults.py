@@ -723,7 +723,9 @@ MAX_FETCH_SLOTS: int        = 3        # Max simultaneous in-flight/offered fetc
 # one to inherit.
 #
 # The ADVERT decides, not a timer - #286 already worked out what "moved on"
-# means. A timer alone would re-ask every bot for a list we already have.
+# means. A timer alone would re-ask every bot for a list we already have. The
+# one exception is a bot whose advert gives no date to compare (#926): its
+# list is re-asked for once it is 14 days old, or it would never be refreshed.
 AUTO_REFETCH_LISTS: bool = False
 # How stale a held list may get before it is re-asked for, in hours. Not how
 # often the check runs (that is hourly); this is the floor on how often any one

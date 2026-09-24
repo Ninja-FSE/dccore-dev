@@ -1443,6 +1443,10 @@ def build_fetched_bot_list_summaries():
                 "advert_then": then,
                 "advert_now": now,
                 "advert_live": _advert_live(known, bot, present),
+                # Fetched and not opened since (#926 item 6). Only an entry
+                # that carries seen_at - one fetched since this existed.
+                "unseen": ("seen_at" in entry
+                           and float(entry.get("seen_at") or 0) < float(entry.get("fetched_at") or 0)),
             })
 
     # AND THE BOTS WE HAVE ONLY SEEN ADVERTISING. #133's colour rule makes
@@ -4289,6 +4293,10 @@ if HAVE_FLASK:
             status, result = build_fetched_bot_list_payload(
                 nick, offset, limit, list_marker=request.args.get("list", ""),
                 q=request.args.get("q", ""))
+            if status == 200:
+                # Opened: no longer new (#926 item 6).
+                import list_fetch
+                list_fetch.mark_seen(nick)
             return jsonify(result), status
 
         @app.route("/api/fetch/<request_id>/download")

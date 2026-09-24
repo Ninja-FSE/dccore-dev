@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added: a "New" mark on fetched lists in the List Browser.** A list you fetched and have not opened yet says *New*; opening it clears the mark, and a refreshed list is new again.
+- **Improved: with `AUTO_REFETCH_LISTS` on, lists from bots that show no date are refreshed too.** Such a bot never says its list changed, so its list was never refreshed; it is now fetched again once it is 14 days old. Bots that do show a date are still refreshed only when it changes.
 - **Added: the List Browser shows each online bot's free slots, queue and speed**, as that bot advertises them - so you can see which one is quick and which one is full before you ask.
 - **Added: "Online only" in the List Browser's search.** Tick it to search only the lists of bots that are in the channel right now - the ones you can actually download from today.
 - **Added: a "Responsible use" note in the README.** DCCore is for sharing files you have the right to share; you decide what your bot offers and are responsible for it; the contributors do not host, control or endorse anything any bot shares.
