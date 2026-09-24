@@ -1764,6 +1764,16 @@
       button.appendChild(badge);
     }
 
+    // #926: what the bot last advertised about itself - free slots, queue,
+    // speed, "servers only" - AutoGet's slots page, one short line.
+    var live = describeAdvertLive(primary.advert_live || {});
+    if (live) {
+      var stats = document.createElement("span");
+      stats.className = "bot-row-live";
+      stats.textContent = live;
+      button.appendChild(stats);
+    }
+
     var count = document.createElement("span");
     count.className = "bot-row-count";
     // An em dash, not 0: a bot that published no count did not say, and
@@ -1881,6 +1891,25 @@
   // Set as a PROPERTY, never concatenated into an attribute: these strings
   // come off another bot's advert, and escapeHtml() encodes & < > and leaves
   // a double quote alone. Same rule as the nick beside it.
+  // #926: "3/10 free · 12 queued · 45000cps · Servers Only". Text only, and
+  // set as textContent: every piece comes off another bot's advert.
+  function describeAdvertLive(live) {
+    var parts = [];
+    if (live.slots_free !== undefined && live.slots_total !== undefined) {
+      parts.push(t("filelists.liveSlotsFree").replace("{free}", live.slots_free)
+        .replace("{total}", live.slots_total));
+    } else if (live.slots_in_use !== undefined && live.slots_total !== undefined) {
+      parts.push(t("filelists.liveSlotsBusy").replace("{busy}", live.slots_in_use)
+        .replace("{total}", live.slots_total));
+    }
+    if (live.queued !== undefined) {
+      parts.push(t("filelists.liveQueued").replace("{count}", live.queued));
+    }
+    if (live.speed) { parts.push(String(live.speed)); }
+    if (live.mode && String(live.mode).toLowerCase() !== "normal") { parts.push(String(live.mode)); }
+    return parts.join(" \u00b7 ");
+  }
+
   function ledTitle(row) {
     var freshness = row.freshness;
     if (freshness === "changed") {

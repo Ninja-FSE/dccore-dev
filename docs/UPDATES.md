@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📊 Each bot's advertised slots, queue and speed show in the List Browser (#926)
+
+Item 8 of #926, AutoGet's "slots" page. An OmenServe-style advert says *Slots: 3/10 <> Queued: 12 <> Speed:
+45000cps <> Mode: Servers Only*; `irc._parse_omenserve_advert()` read the file count and date out of it and dropped
+the rest. Now it keeps `slots_free`/`slots_total` (free/total, the sense `parse_search_header()` already gives
+them), `queued`, `speed` and `mode`; SPQR's *[(2/7) Slots (5/216) Ques Taken]* gives `slots_in_use`/`slots_total`
+and `queued`. Only what a bot said is kept, and freshness still compares file count and date only
+(`list_fetch._advert_snapshot()`) - these change with every send.
+
+The List Browser shows them as one line under an ONLINE bot - *3/10 free · 12 queued · 45000cps · Servers Only* -
+via `advert_live` on each sidebar row (`webserver._advert_live()`); figures from a bot that left describe a moment
+that is over, and numbers too large for JavaScript are left out, as `_advert_now()` already does. Written as text,
+never HTML: every piece comes off another bot's advert.
+
+`tests/test_a_bots_slots_queue_and_speed_are_shown.py` (9): both families, fields a bot did not publish staying
+absent, the registry keeping them from a real advert, online only, the oversized number, freshness untouched, and
+textContent. Mutation-checked: showing them for a bot that left, not keeping them, and keeping a number JavaScript
+cannot carry each fail a test.
+
 ### 🟢 The List Browser's search can ask only the bots that are online (#926)
 
 Item 7 of #926, AutoGet's "Online Only". The cross-list filter searched every list held, including bots that left

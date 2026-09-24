@@ -1442,6 +1442,7 @@ def build_fetched_bot_list_summaries():
                 "freshness": freshness,
                 "advert_then": then,
                 "advert_now": now,
+                "advert_live": _advert_live(known, bot, present),
             })
 
     # AND THE BOTS WE HAVE ONLY SEEN ADVERTISING. #133's colour rule makes
@@ -1467,6 +1468,7 @@ def build_fetched_bot_list_summaries():
             # Named by the operator rather than seen advertising (#376):
             # the page marks it, and offers to forget it.
             "hand_entered": bool(entry.get("hand_entered")),
+            "advert_live": _advert_live(known, bot, present),
             "online": (bot.lower() in present) if present else None,
             "fetched_at": 0,
             "count": now.get("files"),
@@ -1664,6 +1666,29 @@ def build_purge_offline_fetched_lists_result():
 # JavaScript's Number.MAX_SAFE_INTEGER. Past this a JSON number no longer
 # survives the trip into the page unchanged.
 _MAX_SAFE_JS_INT = 2 ** 53 - 1
+
+
+_ADVERT_LIVE_FIELDS = ("slots_free", "slots_in_use", "slots_total", "queued", "speed", "mode")
+
+
+def _advert_live(known, bot, present):
+    """The live figures `bot` last advertised - slots, queue, speed, mode -
+    or {} (#926 item 8). Only for a bot that is online now: figures from a bot
+    that left are about a moment that is over. Numbers too large to carry
+    faithfully to JavaScript are left out, like _advert_now()'s."""
+    if not present or str(bot).strip().lower() not in present:
+        return {}
+    entry = known.get(str(bot).strip().lower())
+    entry = entry if isinstance(entry, dict) else {}
+    live = {}
+    for field in _ADVERT_LIVE_FIELDS:
+        value = entry.get(field)
+        if value in (None, ""):
+            continue
+        if isinstance(value, int) and abs(value) > 2 ** 53:
+            continue
+        live[field] = value if isinstance(value, int) else str(value)[:24]
+    return live
 
 
 def _advert_now(known, bot):
