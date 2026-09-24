@@ -433,6 +433,7 @@
   "settings.field.FETCH_FOLDER_TRANSFER_TIMEOUT": "Folder (.rar) fetch transfer timeout (seconds)",
   "settings.field.LIST_BASE_NAME": "List base name",
   "settings.field.PAUSE_ON_UPDATE": "Pause sharing during !update",
+  "settings.field.PAUSE_FOR_WHOLE_UPDATE": "Pause for the whole rebuild",
   "settings.field.FILE_DIRECTORY": "Music directory (used only when no folders are set)",
   "settings.field.LIST_FORMAT": "List delivery format",
   "settings.field.LIST_IGNORED_EXTENSIONS": "File types to leave out of the list",

@@ -1229,12 +1229,39 @@ def page_folder_groups(groups, offset, limit, max_rows=None):
     return page, total_folders, total_rows, row_capped
 
 
+def rebuild_pauses_everything():
+    """PAUSE_FOR_WHOLE_UPDATE's old behaviour: a rebuild pauses searching and
+    sharing from its start to its end."""
+    return (getattr(config, 'PAUSE_ON_UPDATE', True) is True
+            and bool(getattr(config, 'PAUSE_FOR_WHOLE_UPDATE', False)))
+
+
+def rebuild_pauses_requests():
+    """Whether a search or a file request must wait for the rebuild right now.
+
+    Only while the new list is being swapped in (#923). The rebuild builds
+    under temporary names, so through the scan, the audio-info reading and
+    the writing the published list is complete and exactly what users have -
+    answering from it is answering from the list they are looking at. What
+    the rebuild is doing comes from its progress file, since it is another
+    process; a phase that cannot be read is treated as the swap, so a rebuild
+    that cannot report (a read-only data/) pauses the way it always did."""
+    if getattr(config, 'PAUSE_ON_UPDATE', True) is not True:
+        return False
+    if getattr(config, 'update_inprogress', False) is not True:
+        return False
+    if rebuild_pauses_everything():
+        return True
+    import update_list
+    return update_list.read_phase() not in update_list.PHASES_BEFORE_THE_SWAP
+
+
 def execute_search(irc_sock, user, search_term, channel):
     """Search the list file, sending the matching rows exactly as they are stored."""
     # update_inprogress, not search_inprogress (#214) - see dcc.py's own comment
     # on the same change. This branch is the REBUILD case and its message says
     # so; the branch below is the concurrent-search case and needs its own.
-    if getattr(config, 'PAUSE_ON_UPDATE', True) is True and getattr(config, 'update_inprogress', False) is True:
+    if rebuild_pauses_requests():
         oserve = sys.modules.get('oserve')
         if oserve:
             oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Message{config.C_RESET}: Search engine is temporarily paused during MasterList rebuild. Please wait a moment.\r\n")

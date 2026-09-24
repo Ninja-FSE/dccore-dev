@@ -4,6 +4,43 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### ⏯️ Searches and downloads go on while the list rebuilds (#923)
+
+`PAUSE_ON_UPDATE` refused every `@find` and every file request for the **whole** `!update` - about 80 s a rebuild on
+the operator's 64k-file NFS library before #924, longer while audio info filled in - and the rebuild schedule
+(#776) made that happen by itself. The pause predates the atomic publish: the new list is now built under temporary
+names and swapped in at the end, so until the swap the published list is complete, unchanged and exactly what users
+have downloaded. Raised by Neo on #914; built here for review, not as a decision made.
+
+- **Only the swap pauses.** The rebuild writes the phase *publishing* to its progress file just before
+  `_publish_artifacts()` and keeps it through the prune of what it replaced. `list.rebuild_pauses_requests()` - the
+  one gate `execute_search()` and `dcc.handle_download_request()` now ask - pauses only then. Through *scanning*,
+  *audio* and *writing*, searches read the current list (the temporaries are `.new` names `find_latest_list()`
+  never matches) and requests are served. A request that lands in the swap is told *try again in a few seconds*.
+- **Fail-safe.** A phase that cannot be read - no progress file, half a file, a read-only `data/` - pauses exactly as
+  before, so a rebuild that cannot report never lets requests through blind. The tests that set `update_inprogress`
+  with no progress file keep their meaning for that reason.
+- **The rebuild no longer takes the search lock.** Starting a rebuild used to raise `search_inprogress` for its whole
+  length and to refuse to start while a search ran; both only apply to the old whole-rebuild pause now, in
+  `handle_list_update_request()` and in the dashboard's `start_list_update()`.
+- **A patient swap.** A search that started a moment before the swap may still hold the list open, and on Windows the
+  rename waits for it: `_publish_artifacts()` retries up to `PUBLISH_REPLACE_ATTEMPTS` (10, about ten seconds of
+  backoff) where every other replace keeps five. POSIX never needs it.
+- **The old behaviour is one setting away:** `PAUSE_FOR_WHOLE_UPDATE` (off; next to `PAUSE_ON_UPDATE` on the
+  Settings page). `PAUSE_ON_UPDATE = false` still means no pause at all.
+- Unchanged: sending the list file itself (`@nick`) is still refused for the whole rebuild - a DCC send holds that
+  file open for minutes, which no retry outwaits.
+
+`tests/test_searches_run_while_the_list_rebuilds.py` (15): when the gate pauses (each phase, unreadable progress,
+the old setting, off); a real `@find` answered during the scan and refused in the swap; a real file request not
+refused during the audio phase, told *seconds* in the swap and *minutes* under the old setting; *publishing* said
+before the swap; the swap's longer patience; and what `handle_list_update_request()` holds while the rebuild runs.
+Mutation-checked: pausing throughout, treating an unreadable phase as open, dropping the *publishing* write, the
+rebuild taking the search lock again, and the old request gate each fail a test. Three existing tests follow the
+change: the publish tests' fake replace takes the new argument, the `PAUSE_ON_UPDATE` call-site count now finds the
+two readers in `list.py` and one in `commands.py`, and a running search blocks a dashboard rebuild only under
+`PAUSE_FOR_WHOLE_UPDATE`.
+
 ### 📬 A bot's answer to our request is understood, and a queued file is taken when it comes (#926)
 
 Fetching from another bot understood one reply: "!rar is disabled". Everything else a server says about a request
