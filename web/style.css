@@ -1143,6 +1143,18 @@ html, body {
 
 /* #926: the "Online only" switch beside the filter. */
 /* #926: a bot's advertised slots, queue and speed, under its name. */
+/* #926: a fetched list not opened yet. */
+.bot-row-new {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+}
+
 .bot-row-live {
   display: block;
   font-size: 11px;

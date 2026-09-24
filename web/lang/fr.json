@@ -101,6 +101,8 @@
   "filelists.liveSlotsFree": "{free}/{total} libres",
   "filelists.liveSlotsBusy": "{busy}/{total} occupés",
   "filelists.liveQueued": "{count} en file",
+  "filelists.newBadge": "Nouvelle",
+  "filelists.newBadgeTitle": "Récupérée et pas encore ouverte",
   "filelists.legendCannotTell": "impossible à dire",
   "filelists.legendHereNow": "présent maintenant",
   "filelists.legendListCurrent": "liste à jour",

@@ -1721,6 +1721,15 @@
       button.appendChild(hand);
     }
 
+    // #926: fetched and not opened yet.
+    if (primary.unseen) {
+      var fresh = document.createElement("span");
+      fresh.className = "bot-row-new";
+      fresh.textContent = t("filelists.newBadge");
+      fresh.title = t("filelists.newBadgeTitle");
+      button.appendChild(fresh);
+    }
+
     if (grouped) {
       var badge = document.createElement("span");
       badge.className = "bot-row-lists-badge";

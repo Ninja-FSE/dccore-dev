@@ -4,6 +4,30 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🆕 Undated lists are refreshed when old, and a list not opened yet says "New" (#926)
+
+Item 6 of #926, AutoGet's list expiry. `list_fetch.lists_worth_refetching()` acted only on freshness "changed" -
+a bot's advert showing a different file count or date than when its list was fetched. A bot that publishes no date,
+or one whose advert has not been seen since starting, is "unknown" and was never refreshed at all, however old its
+list. Age is the only evidence such a bot leaves, so an "unknown" list older than
+`list_fetch.UNKNOWN_LIST_MAX_AGE_DAYS` (14, as AutoGet's default expiry) is now due as well; the interval, the
+per-run cap and the "we already asked" mark still apply. A dated bot is unchanged: an "unchanged" list is never
+refreshed on age. The sweep's console line says which it was - *"X's list is over 14 days old"* rather than *"has
+changed"*, which such a list has not been shown to have (`list_fetch._freshness_of()`). `test_list_freshness`'s
+*unknown is not changed* now holds a list three days old, the case it was about.
+
+Every fetch now stores `seen_at: 0` in the held entry, and opening the list in the List Browser
+(`/api/filelists/bot/<nick>`, on a 200) calls the new `list_fetch.mark_seen()`, which stamps it and saves. The
+sidebar row carries `unseen` - fetched and not opened since - and the page shows a small *New* badge. An entry
+from before this has no `seen_at` and is never marked: nothing says it is new. The setting's help, the
+`defaults.py` comment and `settings.conf.sample` say the 14-day exception.
+
+`tests/test_an_old_list_is_refreshed_and_a_new_one_is_marked.py` (10): an undated list just over and just under the
+limit, an unchanged dated list left alone however old, the sweep saying why, the setting off, a new list unseen, opening it clearing the
+mark and saving (and a second open doing nothing), a legacy entry never marked, and both the fetch and the route
+code. Mutation-checked: no expiry, expiring dated lists too, calling an old list changed, never stamping seen, and
+marking legacy entries each fail a test.
+
 ### 📊 Each bot's advertised slots, queue and speed show in the List Browser (#926)
 
 Item 8 of #926, AutoGet's "slots" page. An OmenServe-style advert says *Slots: 3/10 <> Queued: 12 <> Speed:

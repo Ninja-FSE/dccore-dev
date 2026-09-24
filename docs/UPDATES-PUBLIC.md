@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added: a "New" mark on fetched lists in the List Browser.** A list you fetched and have not opened yet says *New*; opening it clears the mark, and a refreshed list is new again.
+- **Improved: with `AUTO_REFETCH_LISTS` on, lists from bots that show no date are refreshed too.** Such a bot never says its list changed, so its list was never refreshed; it is now fetched again once it is 14 days old. Bots that do show a date are still refreshed only when it changes.
 - **Added: the List Browser shows each online bot's free slots, queue and speed**, as that bot advertises them - so you can see which one is quick and which one is full before you ask.
 - **Added: "Online only" in the List Browser's search.** Tick it to search only the lists of bots that are in the channel right now - the ones you can actually download from today.
 - **Fixed: fetching from a busy bot now works.** When another bot answered "you're number 12 in my queue", DCCore ignored it, gave up after a minute - and then refused the file when it arrived later. It now understands what file servers answer (OmeNServE, SDFind, SpR, BWI and DCCore itself): a queued request shows its place in their queue on the Downloads page and waits for its turn (up to 12 hours, *Wait for a queued request*), and "I don't have that file" or "queue full" ends the request straight away with the server's own words instead of a minute of silence.
