@@ -239,7 +239,7 @@ The bot has nothing to serve until its library has been scanned:
 python3 update_list.py
 ```
 
-or `!update` from IRC, or the dashboard's **Update list** button. On a large library this takes a while; the advert will report the real file count once it finishes.
+or `!update` from IRC, or the dashboard's **Update list** button. On a large library this takes a while; the advert will report the real file count once it finishes. The scan lists several folders at once (`LIST_SCAN_THREADS`, 16), which is what makes it bearable on a network drive; searches wait while a rebuild runs, so on a slow share raising it shortens that wait.
 
 **Everything under `FILE_DIRECTORY` goes into the list** — every format, and files with no extension at all. `LIST_IGNORED_EXTENSIONS` names what to leave out; write it however you like, since dots and spacing are optional and case does not matter (`db,ini,tmp` and `.DB, .INI, .TMP` are the same list). It ships skipping only what is never a real file: `.db`, `.ini`, `.lnk`, `.url`, and the `.tmp`/`.part`/`.crdownload`/`.!ut` suffixes of downloads still in flight. The scan prints what it is skipping before it starts.
 

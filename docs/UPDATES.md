@@ -4,6 +4,36 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📂 The rebuild scans several folders at once (#922)
+
+Every `!update` pauses searches and requests for the whole rebuild (`PAUSE_ON_UPDATE`), and most of a rebuild is the
+walk: about 80 s on the operator's 64,136-file NFS library (Neo's numbers on #914). `walk_with_sizes()` visited one
+directory at a time - a `scandir()`, then an `entry.stat()` per file, since Linux's `d_type` gives the type and not
+the size - and on a network mount each is a round trip that nothing overlapped. #914 showed what overlapping them
+buys on that mount. QuickList, OmenServe's list maker, walks the way it reads: several directories at once.
+
+- **`LIST_SCAN_THREADS`** (16, *List rebuild*; 1 to 64) directories are listed and stat'd at once. With 2 ms of
+  simulated latency per listing and per stat over 4,800 files: 1 at a time 400 files a second, 8 about 3,100, 16
+  about 5,900, 32 about 10,800 - the same rows every time. On a local disk the threads cost more than they save
+  (about 107,000 files a second against 50,000 here), which on a 64k-file library is under a second and a half
+  either way, so the default serves the network case.
+- **Nothing about what it finds changes.** Each directory is still classified by the same statements - a symlinked
+  directory is listed as a directory and not descended into, an unclassifiable entry goes to `onerror`, an
+  unstattable file comes back with size `None` - now in a function nested in `walk_with_sizes()`, so the source
+  guards that read its body still see them. Only the order directories come back in differs, and the rebuild sorts
+  before writing (#443). `onerror` is called on the caller's thread, never a worker's. `LIST_SCAN_THREADS = 1` runs
+  the walk as it always ran, starting no thread.
+- A caller that stops early - an exception mid-scan - shuts the pool down and waits for it, so no worker keeps
+  listing a library nobody reads.
+- The rebuild's opening line now says *N folder(s) at a time*.
+
+`tests/test_the_scan_lists_folders_at_once.py` (9): 1, 2, 8 and 16 workers find exactly the same files and sizes;
+an unreadable folder is reported once and the rest still found, serial and parallel; the listings provably overlap
+(a barrier only six concurrent listings pass); errors arrive on the caller's thread; one worker starts no thread; an
+early stop leaves no worker alive; the setting's range; the rebuild's line. Mutation-checked: forcing the serial
+path, dropping the parallel path's error reports, not waiting on an early stop and not descending each fail a test.
+A live number on the NFS library would settle the default.
+
 ### 🧪 A leaked queue sweep cannot thaw the rename test's fixture (#920)
 
 `test_their_freezer_slot_follows_them` failed on `main` for the #916 merge (Windows / Python 3.12 only): `None !=

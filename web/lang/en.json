@@ -453,6 +453,7 @@
   "settings.field.LIST_SHOW_AUDIO_INFO": "Length and quality in the list",
   "settings.field.LIST_AUDIO_INFO_MINUTES": "Time limit for reading audio files",
   "settings.field.LIST_AUDIO_INFO_THREADS": "Audio files read at once",
+  "settings.field.LIST_SCAN_THREADS": "Folders scanned at once",
   "settings.field.DOWNLOAD_COUNTS_FILE": "Download counts file",
   "settings.field.FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
   "settings.field.FETCH_HISTORY_FILE": "Fetch history file",

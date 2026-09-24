@@ -361,6 +361,14 @@ LIST_AUDIO_INFO_CACHE: str = "./data/audio_info.db"
 # or a very small library, lower it. The rebuild's last line says the rate it
 # got, to compare. 1 to 128.
 LIST_AUDIO_INFO_THREADS: int = 64  # Audio files read at once for length and quality
+# How many folders the rebuild lists at once (#922). On a network mount every
+# directory listing and every file's size is a round trip, and one folder at a
+# time none of them overlap - about 80 s of every rebuild on a 64,136-file NFS
+# library, with searches paused. With 2 ms of simulated latency per request,
+# 16 at a time scanned 15 times as fast as one. On a local disk it makes no
+# difference worth measuring (a fraction of a second either way). 1 is the
+# scan as it always was. 1 to 64.
+LIST_SCAN_THREADS: int = 16  # Folders listed at once while the list is rebuilt
 # The most time one rebuild spends reading audio files it has not read before
 # (#914). A rebuild pauses searches and requests, and the first one with
 # LIST_AUDIO_INFO on has the whole library to read: past this, the list
