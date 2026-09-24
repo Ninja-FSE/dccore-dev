@@ -86,7 +86,7 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 
 ### Quality
 
-- **6378 tests**, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14, in CI on every push and pull request — and a preflight script that runs the whole suite twice, the second time with the host's own tooling hidden, so a test that only passes on a developer's machine fails before it is pushed.
+- **6659 tests**, on Linux, Windows and macOS, Python 3.10, 3.12 and 3.14, in CI on every push and pull request — and a preflight script that runs the whole suite twice, the second time with the host's own tooling hidden, so a test that only passes on a developer's machine fails before it is pushed.
 - **Stdlib-only** — the daemon and its test suite need no third-party packages; Flask is required only for the optional dashboard.
 - **No reloaded module owns a lock** — `!rehash` re-executes a module body, so a module-level `threading.Lock()` is rebound while a thread is still inside it. Every lock in a reloaded module is allocated in `runtime.py` and bound by name, and `tests/test_no_reloaded_module_owns_a_lock.py` fails if a new one appears — the class, not the four instances that prompted it.
 - **A cross-list search index** — SQLite FTS5, built as each bot list is fetched, so the dashboard can filter every held list live rather than re-reading them at 2-11 seconds a keystroke.
@@ -138,13 +138,18 @@ fetched list is `!nickname <track>`, written by that bot when it built the
 list, so it still names whichever nick was current at build time. Copying that
 line into the channel sends the request to a nick that may not be there.
 
-We have the same problem in the other direction, and it is not hypothetical:
-`update_list.py` writes `!{config.NICKNAME}` into every line of our own list at
-build time, and `irc.py` rebinds `config.NICKNAME` to the alt nick on a 433.
-A rebuild while we are on the alt nick therefore ships a list whose every line
-names the alt nick.
+We had the same problem in the other direction, and it was not hypothetical:
+`update_list.py` wrote `!{config.NICKNAME}` into every line of our own list at
+build time, and `irc.py` rebinds `config.NICKNAME` to the alt nick on a 433, so
+a rebuild while we were on the alt nick shipped a list whose every line named
+the alt nick. **This half is fixed (#376):** the list now names the configured
+nick (`ORIGINAL_NICK`, falling back to `NICKNAME`) however it is built, live or
+from a subprocess, so it survives the bot being on its alt nick at rebuild
+time.
 
-Open: what is the stable identity — the services account, the host, an operator
+The sidebar half is still open: a bot that reconnects under its alt nick still
+shows there as a second bot, since nothing merges the two adverts. What is the
+stable identity to merge them on — the services account, the host, an operator
 mapping in settings? And is the fix to normalise at fetch time, to rewrite the
 request lines on the way out, or only to merge the two rows in the sidebar?
 
