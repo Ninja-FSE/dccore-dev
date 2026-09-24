@@ -794,6 +794,12 @@ MAX_RAR_FOLDER_SIZE: int = 10 * 1024 * 1024 * 1024   # 10 GB - refuse to pack mo
 MAX_FETCH_LIST_FILE_SIZE: int = 64 * 1024 * 1024  # 64 MB - the archive, not the text inside it; 0 = no limit
 FETCH_TRANSFER_TIMEOUT: int = 600      # Seconds - total wall-clock per transfer (against a slow "drip" that keeps resetting the idle timeout)
 FETCH_OFFER_TIMEOUT: int    = 60       # Seconds an "offered" row waits for a DCC SEND before it's marked failed
+# How long a request the other bot has QUEUED waits for its file (#926). When
+# a bot answers "you are number 12 in my queue", the request stops counting
+# against MAX_FETCH_SLOTS and waits for its turn - hours, on a busy server.
+# Past this it fails: a bot that restarted or dropped its queue never says so.
+# 0 = wait for ever.
+FETCH_QUEUED_TIMEOUT: int = 43200  # Seconds a request queued at another bot waits for the file (12 h); 0 = no limit
 
 # A "folder" request_type row (dcc_fetch.py) asks another bot to pack a whole
 # folder/album as .rar via its own "!rar" convention and shares the same

@@ -20,9 +20,13 @@ default:
 State machine, owned entirely by this module:
 
     pending -> offered -> receiving -> complete
-                   |             ^
-                   |             |
-                   `-> listening-'
+                   |  |          ^  ^
+                   |  |          |  |
+                   |  `-> listening-'
+                   |                |
+                   `-> queued ------'   (#926: the other bot said it queued
+                                         our request; its DCC SEND may come
+                                         hours later)
                    \\-----------------------------> failed (any timeout/
                                                       admission-rejection/
                                                       size-mismatch/connect-
@@ -234,7 +238,16 @@ def new_fetch_row(bot, filename, now=None, request_type="file"):
     }
 
 
-_UNRESOLVED_FETCH_STATES = ("pending", "offered", "listening", "receiving")
+_UNRESOLVED_FETCH_STATES = ("pending", "offered", "queued", "listening", "receiving")
+
+# The states in which the other bot's DCC SEND is still expected (#926).
+# "offered": we asked and are waiting, holding a slot. "queued": the other bot
+# told us our request is in its queue - the file comes when our turn does, so
+# the row stops holding a slot and stops timing out after FETCH_OFFER_TIMEOUT,
+# but an offer for it must still be admitted when it finally arrives. Before
+# this state existed that arrival was refused as unsolicited: fetching from a
+# bot with a queue could only ever succeed with an empty queue.
+_AWAITING_OFFER_STATES = ("offered", "queued")
 
 # MAX_UNRESOLVED_FETCHES: the ceiling on how many rows may sit unresolved
 # (pending or in flight) at once, across every requester.
@@ -601,7 +614,7 @@ def handle_refusal_notice(bot, notice_text):
     """
     text_lower = str(notice_text).lower()
     if not all(marker in text_lower for marker in _RAR_REFUSAL_MARKERS):
-        return
+        return False
     wanted_bot = str(bot).strip().lower()
     queue = _ensure_fetch_queue()
     with _fetch_lock():
@@ -612,7 +625,7 @@ def handle_refusal_notice(bot, notice_text):
             and str(row.get("bot", "")).strip().lower() == wanted_bot
         ]
         if not candidates:
-            return
+            return False
         # Oldest wins, same defence-in-depth tie-break
         # _claim_matching_offer_locked() uses - unreachable in the normal
         # case (enqueue_fetch() already refuses a second outstanding
@@ -621,6 +634,88 @@ def handle_refusal_notice(bot, notice_text):
         row = min(candidates, key=lambda r: r.get("requested_at", 0))
         _mark_failed_locked(row, f"refused: {notice_text}".strip())
     print(f"[FETCH] {bot} refused a folder-rar request: {notice_text}")
+    return True
+
+
+def _row_named_in(row, text):
+    """Whether a reply names this row's file. Compared the way offers are,
+    spaces and underscores alike, so "Some_Track.mp3" in a reply finds the row
+    that asked for "Some Track.mp3"."""
+    name = _normalize_filename_for_match(row.get("requested_filename") or row.get("filename") or "")
+    return bool(name) and name in _normalize_filename_for_match(text)
+
+
+def handle_bot_reply(bot, text):
+    """Act on what another bot says about a request we sent it (#926).
+
+    Called from irc.py for every private NOTICE, and every private message
+    that is not a CTCP, addressed to us. fetch_replies.classify() says what
+    the line means; this finds the request it is about and moves it:
+
+      queued / duplicate  -> "queued", with the queue position when given.
+                            The row stops holding a fetch slot and waits up to
+                            FETCH_QUEUED_TIMEOUT for the DCC SEND.
+      refused             -> failed at once, with their words as the reason.
+      busy                -> failed at once, "busy: ..." - a request that will
+                            not come now, instead of a minute's "no response".
+
+    WHICH REQUEST. Only rows sent to THIS bot and still waiting for it
+    (offered or queued) are candidates - nobody else's reply can touch them.
+    A reply that names a file acts on that file's row. One that names none
+    acts when there is exactly one candidate; with several, a queued or
+    duplicate reply goes to the oldest still "offered" (servers answer in the
+    order asked, and the worst a wrong pick does is wait longer), but a
+    refusal or a busy reply is left alone - failing the wrong request has no
+    way back, and the timeout still ends the right one.
+
+    Returns the outcome acted on, or None.
+    """
+    if handle_refusal_notice(bot, text):
+        return "refused"
+    import fetch_replies
+    reply = fetch_replies.classify(text)
+    if reply is None:
+        return None
+    wanted_bot = str(bot).strip().lower()
+    queue = _ensure_fetch_queue()
+    now = time.time()
+    with _fetch_lock():
+        candidates = sorted(
+            (row for row in queue.values()
+             if row.get("state") in _AWAITING_OFFER_STATES
+             and str(row.get("bot", "")).strip().lower() == wanted_bot),
+            key=lambda r: r.get("requested_at", 0))
+        if not candidates:
+            return None
+        named = [row for row in candidates if _row_named_in(row, reply.text)]
+        if named:
+            row = named[0]
+        elif len(candidates) == 1:
+            row = candidates[0]
+        elif reply.outcome in ("queued", "duplicate"):
+            offered = [r for r in candidates if r.get("state") == "offered"]
+            if not offered:
+                return None
+            row = offered[0]
+        else:
+            return None
+
+        if reply.outcome in ("queued", "duplicate"):
+            row["state"] = "queued"
+            if row.get("queued_at") is None:
+                row["queued_at"] = now
+            if reply.position is not None:
+                row["queue_position"] = reply.position
+            row["reply"] = reply.text
+        elif reply.outcome == "refused":
+            _mark_failed_locked(row, f"refused: {reply.text}")
+        else:
+            _mark_failed_locked(row, f"busy: {reply.text}")
+        described = (f"position {row.get('queue_position')}"
+                     if row.get("state") == "queued" and row.get("queue_position") else row.get("state"))
+    print(f"[FETCH] {bot} answered our request for {row.get('requested_filename') or row.get('request_type')}: "
+          f"{reply.outcome} ({described}).")
+    return reply.outcome
 
 
 def check_fetch_queue():
@@ -691,6 +786,18 @@ def check_fetch_queue():
         # thread-start failure), leaving the row 'listening' with nothing left
         # to ever revisit it. A generous multiple of PASSIVE_LISTEN_TIMEOUT
         # avoids racing a passive transfer that is still legitimately waiting.
+        # A row the other bot queued waits for its turn there (#926), which
+        # on a busy server is hours - but not for ever: a bot that restarted,
+        # dropped its queue or forgot us never says so.
+        queued_timeout = float(getattr(config, "FETCH_QUEUED_TIMEOUT", 43200) or 0)
+        if queued_timeout > 0:
+            for row in queue.values():
+                if row.get("state") == "queued" and row.get("queued_at") is not None:
+                    if (now - row["queued_at"]) > queued_timeout:
+                        _mark_failed_locked(
+                            row, f"still queued at {row.get('bot')} after "
+                                 f"{int(queued_timeout // 3600)} h - nothing arrived")
+
         listen_timeout = PASSIVE_LISTEN_TIMEOUT * 3
         for row in queue.values():
             if row.get("state") == "listening" and row.get("listening_since") is not None:
@@ -1039,7 +1146,7 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
     wanted_name = _normalize_filename_for_match(filename)
 
     for rid, row in queue.items():
-        if row.get("state") != "offered":
+        if row.get("state") not in _AWAITING_OFFER_STATES:
             continue
         if row.get("request_type", "file") != "file":
             continue
@@ -1052,7 +1159,7 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
 
     list_candidates = [
         (rid, row) for rid, row in queue.items()
-        if row.get("state") == "offered"
+        if row.get("state") in _AWAITING_OFFER_STATES
         and row.get("request_type") == "list"
         and str(row.get("bot", "")).strip().lower() == wanted_bot
     ]
@@ -1067,7 +1174,7 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
 
     folder_candidates = [
         (rid, row) for rid, row in queue.items()
-        if row.get("state") == "offered"
+        if row.get("state") in _AWAITING_OFFER_STATES
         and row.get("request_type") == "folder"
         and str(row.get("bot", "")).strip().lower() == wanted_bot
     ]

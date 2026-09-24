@@ -2086,7 +2086,9 @@ def build_fetch_delete_result(request_id):
         row = getattr(config, "fetch_queue", {}).get(request_id)
         if row is None:
             return 404, {"error": "Unknown fetch request."}
-        if row.get("state") not in ("complete", "failed", "pending"):
+        # "queued" too (#926): the other bot holds our request in its queue
+        # and nothing is moving yet - letting it go is only forgetting it.
+        if row.get("state") not in ("complete", "failed", "pending", "queued"):
             return 409, {"error": "A fetch already in progress cannot be deleted."}
         stored_filename = row.get("stored_filename")
         del config.fetch_queue[request_id]
@@ -2405,6 +2407,7 @@ SETTINGS_CATEGORIES = (
                                                 "AUTO_REFETCH_INTERVAL_HOURS",
                                                 "AUTO_REFETCH_MAX_PER_RUN",
                                                 "FETCH_OFFER_TIMEOUT",
+                                                "FETCH_QUEUED_TIMEOUT",
                                                 "FETCH_TRANSFER_TIMEOUT",
                                                 "FETCH_FOLDER_OFFER_TIMEOUT",
                                                 "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED",
@@ -2505,6 +2508,7 @@ SETTINGS_LABELS = {
     # Named from the operator's side, like the pill in the Downloads table:
     # this is the wait AFTER we send a request, not a timeout on an offer
     # anybody made us.
+    "FETCH_QUEUED_TIMEOUT": "Wait for a queued request (s)",
     "FETCH_OFFER_TIMEOUT": "Wait for a reply to a fetch request (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT": "Wait for a reply to a folder (.rar) request (seconds)",
     "FETCH_FOLDER_OFFER_TIMEOUT_UNADVERTISED":

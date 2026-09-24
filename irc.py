@@ -3370,16 +3370,14 @@ def irc_loop():
                                 notice_user, notice_target, notice_text)
                             if notice_target.lower() == config.NICKNAME.lower():
                                 # A private NOTICE addressed to us, from
-                                # another bot - the shape a foreign bot's own
-                                # "!rar is disabled here" refusal takes (see
-                                # dcc_fetch.handle_refusal_notice()'s own
-                                # docstring). Read-only here too: this only
-                                # ever fails a "folder" row that would
-                                # otherwise sit "offered" for the full
-                                # FETCH_FOLDER_OFFER_TIMEOUT against one of
-                                # only MAX_FETCH_SLOTS fetch slots.
+                                # another bot - how file servers answer a
+                                # request: "queued at position 12", "I don't
+                                # have that", "queue full", "!rar is disabled
+                                # here" (#926, dcc_fetch.handle_bot_reply()).
+                                # It only ever moves a request we sent to
+                                # THAT bot, and nothing else.
                                 import dcc_fetch
-                                dcc_fetch.handle_refusal_notice(notice_user, notice_text)
+                                dcc_fetch.handle_bot_reply(notice_user, notice_text)
 
                     # See parse_privmsg()'s own docstring (top of this file)
                     # for why the anchoring matters, and what user_host is
@@ -3406,6 +3404,21 @@ def irc_loop():
                         # advertising in a channel we sit in is not subject to
                         # our ban list.
                         _capture_channel_advert(user, target_chan, msg)
+
+                        # A private message from a bot we asked for a file
+                        # (#926): some servers answer a request that way
+                        # rather than by NOTICE (SDFind's queue position,
+                        # BWI's "not found"). Not a CTCP - DCC SEND is those,
+                        # and has its own path. Same placement and reasoning
+                        # as the two above: observational, and only ever
+                        # moves a request we sent to this sender.
+                        if (target_chan.lower() == config.NICKNAME.lower()
+                                and not msg.startswith("\x01")):
+                            try:
+                                import dcc_fetch
+                                dcc_fetch.handle_bot_reply(user, msg)
+                            except Exception as reply_err:
+                                print(f"[FETCH] Could not read {user}'s reply: {reply_err}")
 
                         if not security.check_user_status(user, hostmask=user_host):
                             continue
