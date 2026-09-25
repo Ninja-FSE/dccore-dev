@@ -113,6 +113,16 @@
     // than asking again: the rows are already here, and a round trip per
     // click would be slower than the search that produced them.
     filelistsExcluded: {}, filelistsFilterPayload: null, filelistsMatchTerms: [],
+    // #948: the "Online only" box, and the rows the sidebar was last built
+    // from - kept so ticking the box redraws the sidebar at once instead of
+    // waiting for the next poll to hand it the same rows again.
+    filelistsOnlineOnly: false, filelistsBotRows: null,
+    // #943: the one bot (lowercased nick) whose slots/queue/speed line is
+    // open under its row. Set by a click on any sidebar row, so it is NOT the
+    // open list - a bot we only saw advertising can be clicked for its line
+    // without being switched to. Kept here because the rows are rebuilt on
+    // every poll and would otherwise forget it.
+    filelistsInfoNick: "",
     // Whether what is on screen has any folders in it - see listIsFlat().
     filelistsFlat: false,
     // Off for every new term. A row put back on screen while looking for one
@@ -1429,6 +1439,15 @@
     var row = evt.target.closest ? evt.target.closest(".bot-row") : null;
     if (!row) { return; }
 
+    // #943: a click opens THAT bot's slots/queue/speed line under its row and
+    // closes whichever one was open; clicking the open one closes it again.
+    // Before the early returns below on purpose: a bot we only saw
+    // advertising has no list to switch to, and its line is exactly what is
+    // wanted before deciding whether to fetch one.
+    var infoNick = String(row.dataset.nick || "").toLowerCase();
+    state.filelistsInfoNick = state.filelistsInfoNick === infoNick ? "" : infoNick;
+    markFilelistsInfoBot();
+
     // A bot we have only seen advertising has no list to page through. Rather
     // than switching to a source that would come back empty, put its nick
     // where fetching one starts.
@@ -1557,8 +1576,15 @@
 
   // #926: search only the lists of bots that are in a channel right now.
   if (el.filelistsOnlineOnly) {
+    // A soft reload can hand the box back ticked; the state must start from
+    // what is on screen, not from false.
+    state.filelistsOnlineOnly = el.filelistsOnlineOnly.checked;
     el.filelistsOnlineOnly.addEventListener("change", function () {
       state.filelistsOnlineOnly = el.filelistsOnlineOnly.checked;
+      // #948: the sidebar too, and now - not only the search. With no term
+      // typed the search has nothing to ask, so this used to change nothing
+      // at all on screen.
+      if (state.filelistsBotRows) { renderFilelistsSwitcher(state.filelistsBotRows); }
       runFilelistsFilter();
     });
   }
@@ -1600,6 +1626,23 @@
       renderFilelistsSwitcher(rows);
       renderFilelistsFreshness();
     }).catch(function () { markConnection(false); });
+  }
+
+  // #948: whether "Online only" keeps this bot's row off the sidebar. Only a
+  // bot KNOWN to be away goes (`online === false`); `null` is a bot that has
+  // not finished joining, where the membership mirror is empty and every nick
+  // would read as gone (see presenceClass). Our own lists never go, and
+  // neither does the bot whose list is open - the table would be showing a
+  // list the sidebar no longer has a row for. Only the ROW is left out:
+  // state.filelistsBots still holds every bot, since the rest of the page
+  // looks bots up there.
+  function hiddenByOnlineOnly(group) {
+    if (!state.filelistsOnlineOnly) { return false; }
+    var primary = primaryEntry(group);
+    if (isOwnSource(primary.bot)) { return false; }
+    var open = nickOfSource(state.filelistsSource || "__own__").toLowerCase();
+    if (String(group.nick || "").toLowerCase() === open) { return false; }
+    return primary.online === false;
   }
 
   // BUILT WITH DOM APIs, not concatenated markup. A bot nick is remote input
@@ -1655,7 +1698,9 @@
       }
       group.entries.push(row);
     });
+    state.filelistsBotRows = rows;
     groupOrder.forEach(function (nickKey) {
+      if (hiddenByOnlineOnly(groupsByNick[nickKey])) { return; }
       list.appendChild(botRow(groupsByNick[nickKey]));
     });
 
@@ -1775,12 +1820,22 @@
 
     // #926: what the bot last advertised about itself - free slots, queue,
     // speed, "servers only" - AutoGet's slots page, one short line.
+    //
+    // #943: on its own line UNDER the row, and only for the bot that was
+    // clicked (state.filelistsInfoNick, see the sidebar's click handler) -
+    // beside the name it squeezed the nick out on a narrow sidebar, and on
+    // every row at once it was a wall of small print. The class decides what
+    // is shown, so the text is always built and a click needs no rebuild.
     var live = describeAdvertLive(primary.advert_live || {});
     if (live) {
       var stats = document.createElement("span");
       stats.className = "bot-row-live";
       stats.textContent = live;
       button.appendChild(stats);
+      var opened = state.filelistsInfoNick !== ""
+        && state.filelistsInfoNick === String(group.nick || "").toLowerCase();
+      button.classList.toggle("is-info-open", opened);
+      button.setAttribute("aria-expanded", opened ? "true" : "false");
     }
 
     var count = document.createElement("span");
@@ -1959,6 +2014,24 @@
       }
     }
     renderFilelistsTabs();
+  }
+
+  // #943: which row shows its slots/queue/speed line. By NICK for the same
+  // reason markFilelistsActiveBot() is (a row stands for every list its bot
+  // has), and applied to the rows already on screen so a click does not wait
+  // for the next poll's redraw - botRow() applies the same state to rows it
+  // builds. Only rows that HAVE a line get aria-expanded: it would promise
+  // something to open on a row with nothing under it.
+  function markFilelistsInfoBot() {
+    var rows = el.filelistsBotList.querySelectorAll(".bot-row");
+    for (var i = 0; i < rows.length; i++) {
+      var opened = state.filelistsInfoNick !== ""
+        && String(rows[i].dataset.nick || "").toLowerCase() === state.filelistsInfoNick;
+      rows[i].classList.toggle("is-info-open", opened);
+      if (rows[i].querySelector(".bot-row-live")) {
+        rows[i].setAttribute("aria-expanded", opened ? "true" : "false");
+      }
+    }
   }
 
   // ONE TAB PER LIST THE OPEN BOT PUBLISHES (#399), shown above the table in
