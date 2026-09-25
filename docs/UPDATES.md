@@ -4,6 +4,41 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📚 The Stats page's Library counts every served list, not the primary alone (#952)
+
+`build_stats_payload()` read the Library block without saying which list: no name to
+`get_file_count_date_size_and_raw_bytes()` (list-aware only when given one), and `count_rar_album_folders()` looked
+only in `LOCAL_LIST_DIR`. On a bot serving a music list and a film list the page showed the music list's files, size
+and album folders as though they were the library, and disagreed with the channel adverts, which do ask per list.
+
+- **The four Library cards are now totals** across every list: files and bytes summed, the size written from the sum
+  in the same two-decimal style the lists' own size files use (`2.00GB`), album folders summed over the lists that
+  have a RAR list, and the newest build date. `webserver.build_library_payload()` builds it.
+- **`library.lists` has one row per list**, in the operator's order, with its own figures. The page shows them as a
+  **By list** table under the cards - only when there is more than one list, so a single-list install looks exactly
+  as before (`web/index.html`, `renderLibraryLists()`).
+- **The primary is still asked for with no name**, the path the page has always taken; only a list that is not the
+  primary is named. A single-list install shows the list's own stored size string, not a recomputed one.
+- **One list that cannot be read costs its own row.** Each list is read in its own guard, as every source in this
+  module is; if `library.lists()` itself fails the page falls back to the primary alone.
+- **Unknown is not zero:** a list with no RAR list has no album count of its own (shown as a dash) but does not make
+  the total unknown; only no RAR list anywhere does.
+- A folder that belongs to two lists is counted in both and the totals do not de-duplicate; the rows make that
+  visible. `count_rar_album_folders()` takes an optional list name; without one it reads the primary's directory as before.
+- New strings `stats.byList` and `stats.listName` in English, French and Spanish.
+- `tests/test_stats_page.py`'s import guard now checks `build_library_payload()` for the `library` and `list` imports
+  (`list` moved there with the block); `build_stats_payload()` keeps `db` and `stats_mgr`.
+
+`tests/test_the_stats_library_counts_every_list.py` (22): the totals over a real two-list install on disk (files,
+bytes and size, albums, unknown vs zero, newest date), one row per list in order, the primary asked for with no name,
+the RAR count reading the named list's directory, one unreadable list leaving the other in the totals, a single-list
+install unchanged (stored size string kept, nothing built yet is unknown), and - under node, skipped where it is not
+installed - the real `renderLibraryLists()`: hidden for one list or none, a row each for several, a dash for
+unknowns, and a name with markup shown as text. Mutation-checked eleven ways: files from the primary only, the
+primary asked by name, no per-list guard, the size not summed, the date from the primary, the album total unknown
+when any list has none, a single list recomputed, the RAR count ignoring the name, the table shown for one list, names
+written as markup, and an unknown count shown as zero each fail a test.
+
 ### 🧪 The console tests wait for the bot's decision, and say why an offer never came (#950)
 
 Three `test_adminchat` tests failed once on macos-latest / Python 3.14 for the #942 merge, each waiting its full
