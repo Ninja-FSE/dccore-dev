@@ -4,6 +4,44 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 💬 DCCore Chat: public operator chat in dccore.mrc (#371)
+
+Built as decided on #371: public, in `dccore.mrc`, no encryption, and with the window as the whole interface. The
+design note's open question is settled: the script does it alone. The chat goes out from the operator's OWN client
+(`.notice #chan [ServersChat] text`), and `on ^*:NOTICE:*:#:` catches a NOTICE whose FIRST word is the tag, draws it in
+`@DCCore-Chat` and `haltdef`s it. The bot needs no change, since a channel-targeted NOTICE reaches nothing in `irc.py`.
+
+- **The tag** `[ServersChat]` is neutral, so a script that is not DCCore's can speak it. It is built with
+  `$chr(91)`/`$chr(93)` because `[ ]` are evaluation brackets, and matched as `$1` only. A NOTICE that is not chat, or
+  arrives on a channel not listened to, returns before `haltdef` and shows as it always did.
+- **The window is the interface** (Neo's suggestion on #371). "DCCore Chat · public · typing sends to #chan" in the
+  title, and two lines saying it is public when it opens. Typing sends. It opens by itself for an arriving line,
+  minimised with its button lit (`window -en`) so it does not take the focus, unless *Open the chat window when a line
+  arrives* is off: then the line is left in the channel as an ordinary NOTICE rather than hidden and lost. The
+  right-click menu picks *Send to* and *Listen on* from `$chan(N)` through `$submenu`, ticked with `$style(1)`.
+  Picking where to send also listens there. *Listen on all my channels* is there and in `/dccore options`, off by
+  default.
+- **Rules from #371:** nothing reachable from the NOTICE handler sends anything (RFC 2812); a per-nick flood limit on
+  what arrives (more than 5 lines in 10 s hides the nick for 60 s, said once, in session-only hash tables that expire
+  by themselves); `$strip` on what is shown and on what is sent; never PRIVMSG; nothing identifying in the script.
+- **The shortcut** is `/dccore chat [text]`, not a bare `/sc`. The script's own rule is that every global alias is
+  namespaced `dccore.*` so it collides with nothing. `/dccore chat` alone opens the window.
+- `/dccore options` gains a *DCCore Chat (public)* box with the two checkboxes; the dialog grows by 33 dbu. Version
+  1.6. The feed protocol is untouched (the bot's `MIN_SCRIPT_VERSION` stays 1.1).
+
+Docs: ADMIN-CONSOLE.md has a *DCCore Chat* section and the command, the roadmap lists it, and both changelogs say to
+update the script.
+
+`tests/test_dccore_chat_in_the_mirc_window.py` (21) reads the script statement by statement: the tag and that it is
+the first check; every pass-through return before the single `haltdef`; the flood limit before anything is shown; the
+listen rule and its default; no send in the handler or in any alias it reaches (with a check that the pattern does
+see a send); the limit's numbers, expiry and single notice; session-only tables; the stripped, tagged NOTICE only to a
+picked channel you are in, never PRIVMSG; typing sends; the public title and lines; the quiet open; the menu, the
+dialog boxes, the command list and the version. The dialog-label tests measured the two new labels, and their box
+count is now 4. Mutation-checked 10 ways: the tag matched anywhere, no `haltdef`, every channel, an auto-reply in the
+handler, a reply to a flooder, colours kept, no flood limit, PRIVMSG, focus stolen, all channels by default. Each
+fails a test. Not run in a real mIRC, since there is none here.
+
 ### 👥 One bot under two nicks is one List Browser row (#376)
 
 Part 1 of #376, the sidebar half, as decided there: option B plus the NICK-message merge, display only

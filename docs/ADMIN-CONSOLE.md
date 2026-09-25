@@ -714,6 +714,7 @@ sent at all: what is off there never reaches the script.
 /dccore trust                accept the bot's current host as the one to send the token to
 /dccore options              what to show, colours, panel, title bar, beep
 /dccore window               open or focus @DCCore
+/dccore chat [text]          open DCCore Chat, or say something in it (public)
 /dccore status               ask the bot for its status
 /dccore lists                the bots' lists we hold, and which have changed
 /dccore fetch [bot]          ask the bots whose lists changed, or one bot
@@ -721,6 +722,42 @@ sent at all: what is off there never reaches the script.
 /dccore panel on|off         the side panel
 /dccore font <size>          the window's font size, e.g. /dccore font 14
 ```
+
+### DCCore Chat: talking to other operators
+
+A second window, **DCCore Chat**, for chatting with other operators in the
+channels you already share. It is **public**: what you type goes out from
+your own mIRC as a NOTICE to the channel, so everyone in that channel can
+read it, whether or not they run this script. The window's title and its
+first lines say so.
+
+- **Opening it:** right-click in a channel or in `@DCCore` → *DCCore Chat*,
+  or `/dccore chat`. It also opens by itself (minimised, its button lit)
+  when a chat line arrives, unless you turn that off in `/dccore options`.
+- **Talking:** type in the window. The line goes to the channel picked for
+  it, which the title shows. Right-click → *Send to* picks it from the
+  channels you are in; that channel is listened on too.
+  `/dccore chat <text>` does the same from anywhere.
+- **Listening:** right-click → *Listen on* ticks the channels whose chat
+  shows here. *Listen on all my channels* (also in `/dccore options`) takes
+  every channel you are in. A channel you did not choose is never touched.
+
+A chat line is a NOTICE whose first word is `[ServersChat]`. The tag is
+neutral so that a script that is not DCCore's can speak it too. The script
+catches only those, and only on the channels you listen on, and keeps them
+out of the channel window. Every other NOTICE shows exactly as it always
+has. A few rules it keeps:
+
+- **It never answers a NOTICE by itself.** Every line sent is one a person
+  typed.
+- **One sender cannot flood it.** More than 5 lines in 10 seconds from one
+  nick hides that nick for 60 seconds, said once in the window.
+- **Colours and control codes are stripped**, both ways.
+- **The tag proves nothing about the sender.** Anyone can type it. The nick
+  shown is whoever the server says sent the line.
+
+The bot is not involved at all: it ignores channel NOTICEs, and nothing
+here goes through the admin console.
 
 ### Updating the script
 

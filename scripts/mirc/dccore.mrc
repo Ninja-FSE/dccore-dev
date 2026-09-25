@@ -11,6 +11,10 @@
 ;    totals. Anything you type in the window goes back to the bot as a
 ;    console command, and the reply comes back into the window.
 ;
+;    And DCCore Chat (#371): a second window for public chat with other
+;    operators in the channels you share, over a tagged NOTICE from your
+;    own client - see its section near the end of this file.
+;
 ;  Install
 ;    Save this file anywhere (your mIRC folder is fine), then in mIRC:
 ;
@@ -79,7 +83,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.5 }
+alias dccore.ver { return 1.6 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -109,6 +113,9 @@ alias dccore.in { if ($1 == $null) || ($1 == -) { return } | return $+($chr(160)
 alias dccore.init {
   if (!$hget(dccore)) { hmake dccore 32 }
   if (!$hget(dccore.live)) { hmake dccore.live 64 }
+  ; DCCore Chat's flood limit (#371): this session only, never saved
+  if (!$hget(dccore.chatrate)) { hmake dccore.chatrate 32 }
+  if (!$hget(dccore.chatmute)) { hmake dccore.chatmute 16 }
   if ($isfile($dccore.ini)) { hload dccore $dccore.ini }
   ; defaults only where nothing is saved yet, so an upgrade keeps choices
   dccore.default auto 1
@@ -139,6 +146,10 @@ alias dccore.init {
   dccore.default col.console 6
   dccore.default col.name 2
   dccore.default col.head 2
+  ; DCCore Chat (#371): only the channels ticked in its window, until
+  ; "all my channels" is chosen; the window opens by itself for a line
+  dccore.default chat.all 0
+  dccore.default chat.popup 1
 }
 alias dccore.default { if ($hget(dccore,$1) == $null) { hadd dccore $1 $2- } }
 alias dccore.save { hsave -o dccore $dccore.ini }
@@ -154,6 +165,8 @@ on *:UNLOAD: {
   dccore.timers.off
   if ($hget(dccore)) { dccore.save | hfree dccore }
   if ($hget(dccore.live)) { hfree dccore.live }
+  if ($hget(dccore.chatrate)) { hfree dccore.chatrate }
+  if ($hget(dccore.chatmute)) { hfree dccore.chatmute }
 }
 
 ; ---------------------------------------------------------------------
@@ -213,6 +226,11 @@ alias dccore {
   if (%cmd == lists) { dccore.send lists | return }
   if (%cmd == fetch) { dccore.send fetch $2- | return }
   if (%cmd == window) { dccore.window | window -a $dccore.win | return }
+  if (%cmd == chat) {
+    if ($2 == $null) { dccore.chat.window | window -a $dccore.chat.win | return }
+    dccore.chat.say $2-
+    return
+  }
   if (%cmd == status) { dccore.send status | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
@@ -233,6 +251,7 @@ alias dccore {
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore trust $+ $str($dccore.nbsp,16) accept the bot's current host as the one to send the token to
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore options $+ $str($dccore.nbsp,14) what to show, colours, panel, title bar, beep
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore window $+ $str($dccore.nbsp,15) open or focus @DCCore
+  echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore chat [text] $+ $str($dccore.nbsp,9) open DCCore Chat, or say something in it (public)
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore status $+ $str($dccore.nbsp,15) ask the bot for its status
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore lists $+ $str($dccore.nbsp,16) the bots' lists we hold, and which have changed
   echo 14 -a $dccore.nbsp $+ $dccore.nbsp /dccore fetch [bot] $+ $str($dccore.nbsp,10) ask the bots whose lists changed, or one bot
@@ -1041,6 +1060,7 @@ menu @DCCore {
   .Panel $iif($dccore.opt(panel),off,on):dccore panel $iif($dccore.opt(panel),off,on)
   .Font size...:dccore.askfont
   .Clear window:clear @DCCore
+  DCCore Chat:dccore chat
   Command list:dccore
 }
 
@@ -1053,6 +1073,7 @@ menu nicklist {
 menu status,channel {
   DCCore
   .Open the window:dccore window
+  .Open DCCore Chat:dccore chat
   .Show the lists:dccore lists
   .Fetch the changed lists:dccore fetch
   .Command list:dccore
@@ -1072,7 +1093,7 @@ alias dccore.options {
 
 dialog dccore.opt {
   title "DCCore window - options"
-  size -1 -1 322 247
+  size -1 -1 322 280
   option dbu
   box "Show in @DCCore", 100, 5 3 312 102
   check "Requests (who asked for what)", 101, 10 13 170 10
@@ -1116,10 +1137,13 @@ dialog dccore.opt {
   check "Reconnect and log in by itself when the bot comes back", 404, 10 186 300 10
   text "The bot's own Settings > Console feed is the ceiling on what is sent at all.", 405, 10 198 300 8
   check "Check GitHub for a new DCCore version", 406, 10 210 260 10
-  button "OK", 1, 232 229 40 12, ok default
-  button "Cancel", 2, 276 229 40 12, cancel
-  button "Pair again...", 501, 5 229 46 12
-  button "Forget token", 502, 54 229 46 12
+  box "DCCore Chat (public)", 600, 5 227 312 36
+  check "Listen on every channel I am in, not only the ticked ones", 601, 10 237 300 10
+  check "Open the chat window when a line arrives", 602, 10 248 300 10
+  button "OK", 1, 232 266 40 12, ok default
+  button "Cancel", 2, 276 266 40 12, cancel
+  button "Pair again...", 501, 5 266 46 12
+  button "Forget token", 502, 54 266 46 12
 }
 
 alias dccore.colours { return 00 white,01 black,02 navy,03 green,04 red,05 maroon,06 purple,07 orange,08 yellow,09 lime,10 teal,11 cyan,12 blue,13 pink,14 grey,15 silver }
@@ -1153,6 +1177,8 @@ on *:dialog:dccore.opt:init:0: {
   ; opened in the instant after connecting) leaves it unchecked rather
   ; than guessing either way.
   if ($dccore.st(checkupdates) == on) { did -c dccore.opt 406 }
+  if ($dccore.opt(chat.all)) { did -c dccore.opt 601 }
+  if ($dccore.opt(chat.popup)) { did -c dccore.opt 602 }
 }
 ; "none" first, then the sixteen colours: the selected line is the colour + 2
 alias dccore.fillbg {
@@ -1188,6 +1214,8 @@ on *:dialog:dccore.opt:sclick:1: {
   if ($did(dccore.opt,306).text isnum) && ($did(dccore.opt,306).text >= 6) { hadd dccore fontsize $did(dccore.opt,306).text }
   hadd dccore bg $calc($did(dccore.opt,308).sel - 2)
   hadd dccore auto $did(dccore.opt,404).state
+  hadd dccore chat.all $did(dccore.opt,601).state
+  hadd dccore chat.popup $did(dccore.opt,602).state
   if ($did(dccore.opt,402).text != $null) { hadd dccore bot $did(dccore.opt,402).text }
   dccore.save
   ; checkupdates is the bot's own setting (#572 follow-up): sent only when
@@ -1214,4 +1242,180 @@ on *:dialog:dccore.opt:sclick:501: {
 on *:dialog:dccore.opt:sclick:502: {
   dialog -x dccore.opt
   dccore unpair
+}
+
+; ---------------------------------------------------------------------
+;  DCCore Chat - public operator chat over a tagged NOTICE (#371)
+; ---------------------------------------------------------------------
+;
+;  Operators chatting with each other in the channels they already share,
+;  without the bot in the loop: what you type in the chat window goes out
+;  from YOUR client as a NOTICE to the channel, starting with a tag, and a
+;  NOTICE starting with that tag is caught here, drawn in the window and
+;  kept out of the channel view. Nothing else changes: a NOTICE that does
+;  not start with the tag is left exactly as mIRC would show it.
+;
+;  It is PUBLIC, and says so. A NOTICE to a channel reaches everybody in
+;  it; somebody without this script sees the line in the channel as it is.
+;  The tag is a presentation filter, not a trust boundary: anybody can type
+;  it. The nick shown is whatever the server says sent the line.
+;
+;  Rules it keeps (#371):
+;    - the tag is matched as the first word ($1) and nowhere else;
+;    - only channels you listen on, or all of them if you ticked that;
+;    - NOTHING in the NOTICE handler ever sends anything (RFC 2812: never
+;      answer a NOTICE automatically) - replies are typed by a person;
+;    - per-nick flood limit on what arrives: past 5 lines in 10 seconds a
+;      nick is hidden for 60 seconds, said once, never answered;
+;    - colours and control codes are stripped, both ways.
+;
+;  The tag is neutral on purpose, so a script that is not DCCore's can
+;  speak it too. It cannot change once people use it.
+
+alias dccore.chat.tag { return $+($chr(91),ServersChat,$chr(93)) }
+alias dccore.chat.win { return @DCCore-Chat }
+alias dccore.chat.max { return 5 }
+alias dccore.chat.per { return 10 }
+alias dccore.chat.hide { return 60 }
+
+; Is this channel one we listen on? Every channel you are in when "all my
+; channels" is ticked; otherwise only the ones ticked in the window's menu.
+alias dccore.chat.listens {
+  if ($dccore.opt(chat.all)) { return $true }
+  return $istok($dccore.opt(chat.listen),$1,32)
+}
+
+; The window: "DCCore Chat", public, saying where a typed line goes.
+; $1 = quiet: opened by an arriving line, so minimised with its button
+; lit rather than taking the focus from whatever you were typing in.
+alias dccore.chat.window {
+  if ($window($dccore.chat.win)) { return }
+  if ($1 == quiet) { window -en $dccore.chat.win }
+  else { window -e $dccore.chat.win }
+  if ($dccore.opt(font)) { font $dccore.chat.win $dccore.fontsize Lucida Console }
+  dccore.chat.title
+  dccore.chat.sys Public: everyone in the channel reads what is typed here, with or without this script.
+  dccore.chat.sys Right-click to choose the channel to send to and the ones to listen on.
+}
+alias dccore.chat.title {
+  if (!$window($dccore.chat.win)) { return }
+  var %to = $dccore.opt(chat.to)
+  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot $iif(%to,typing sends to %to,right-click to pick a channel to send to)
+}
+alias dccore.chat.sys {
+  dccore.chat.window
+  echo 14 -ti2 $dccore.chat.win $1-
+}
+; One chat line: $1 channel, $2 nick, $3 own or other, $4- the text.
+alias dccore.chat.show {
+  dccore.chat.window quiet
+  var %text = $4-
+  if ($len(%text) > 400) { var %text = $left(%text,397) $+ ... }
+  var %who = $+($chr(3),$iif($3 == own,$dccore.col(console),$dccore.col(name)),$chr(2),$2,$chr(15))
+  var %line = $+($chr(3),14,$1,$chr(15)) %who %text
+  if ($version >= 7) { echo -mti2 $dccore.chat.win %line }
+  else { echo -ti2 $dccore.chat.win %line }
+}
+
+; Arriving. The ^ lets haltdef keep a chat line out of the channel view;
+; everything that is not one is left alone - the handler returns before
+; haltdef, and mIRC shows the NOTICE as it always has.
+on ^*:NOTICE:*:#: {
+  if ($1 != $dccore.chat.tag) { return }
+  if (!$dccore.chat.listens($chan)) { return }
+  ; Told not to open the window by itself, and it is not open: the line is
+  ; left in the channel as an ordinary NOTICE rather than hidden and lost.
+  if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }
+  haltdef
+  if ($dccore.chat.flooding($nick)) { return }
+  var %text = $strip($2-)
+  if (%text == $null) { return }
+  dccore.chat.show $chan $nick other %text
+}
+
+; Per-nick flood limit on what ARRIVES. Anyone in a channel can send a
+; tagged NOTICE, so one person must not be able to fill every operator's
+; window. Counted in this session's tables only; the hide expires by itself.
+alias dccore.chat.flooding {
+  var %k = $1
+  if ($hget(dccore.chatmute,%k)) { return $true }
+  var %v = $hget(dccore.chatrate,%k)
+  if (%v == $null) || ($calc($ctime - $gettok(%v,1,32)) >= $dccore.chat.per) {
+    hadd -u $+ $dccore.chat.hide dccore.chatrate %k $ctime 1
+    return $false
+  }
+  var %n = $calc($gettok(%v,2,32) + 1)
+  hadd -u $+ $dccore.chat.hide dccore.chatrate %k $gettok(%v,1,32) %n
+  if (%n > $dccore.chat.max) {
+    hadd -u $+ $dccore.chat.hide dccore.chatmute %k 1
+    dccore.chat.sys %k is sending too fast: hidden for $dccore.chat.hide seconds.
+    return $true
+  }
+  return $false
+}
+
+; Sending: typed in the window, or /dccore chat <text>. From your own
+; client, to the one channel picked for it, and shown here - the server
+; does not send a NOTICE back to the one who sent it.
+alias dccore.chat.say {
+  var %to = $dccore.opt(chat.to)
+  if (%to == $null) { dccore.chat.sys No channel to send to yet: right-click the window and pick one. | return }
+  if ($me !ison %to) { dccore.chat.sys You are not in %to $+ : join it, or pick another channel (right-click). | return }
+  var %text = $strip($1-)
+  if (%text == $null) { return }
+  .notice %to $dccore.chat.tag %text
+  dccore.chat.show %to $me own %text
+}
+on *:INPUT:@DCCore-Chat: {
+  if ($left($1,1) == /) && ($left($1,2) != //) { return }
+  dccore.chat.say $1-
+  halt
+}
+
+; Choosing channels, from the window's right-click menu. Picking where to
+; send also listens there: a channel you talk into and cannot hear back
+; from is never what anybody wants.
+alias dccore.chat.to {
+  dccore.set chat.to $1
+  if (!$istok($dccore.opt(chat.listen),$1,32)) { dccore.set chat.listen $addtok($dccore.opt(chat.listen),$1,32) }
+  dccore.chat.title
+  dccore.chat.sys Typing here now sends to $1 $+ , and $1 is listened on.
+}
+alias dccore.chat.listen {
+  if ($istok($dccore.opt(chat.listen),$1,32)) {
+    dccore.set chat.listen $remtok($dccore.opt(chat.listen),$1,1,32)
+    dccore.chat.sys No longer listening on $1 $+ .
+  }
+  else {
+    dccore.set chat.listen $addtok($dccore.opt(chat.listen),$1,32)
+    dccore.chat.sys Listening on $1 $+ .
+  }
+}
+alias dccore.chat.all {
+  dccore.set chat.all $iif($dccore.opt(chat.all),0,1)
+  dccore.chat.sys $iif($dccore.opt(chat.all),Listening on every channel you are in.,Listening only on the channels ticked in this menu.)
+}
+; $submenu's rows: $1 is begin, then 1, 2, ... until an empty answer, then end.
+alias dccore.chat.sendrow {
+  if ($1 !isnum) { return }
+  var %c = $chan($1)
+  if (%c == $null) { return }
+  return $iif(%c == $dccore.opt(chat.to),$style(1)) %c $+ :dccore.chat.to %c
+}
+alias dccore.chat.listenrow {
+  if ($1 !isnum) { return }
+  var %c = $chan($1)
+  if (%c == $null) { return }
+  return $iif($istok($dccore.opt(chat.listen),%c,32),$style(1)) %c $+ :dccore.chat.listen %c
+}
+
+menu @DCCore-Chat {
+  Send to
+  .$submenu($dccore.chat.sendrow($1))
+  Listen on
+  .$submenu($dccore.chat.listenrow($1))
+  $iif($dccore.opt(chat.all),$style(1)) Listen on all my channels:dccore.chat.all
+  -
+  Clear window:clear $dccore.chat.win
+  Options...:dccore.options
 }
