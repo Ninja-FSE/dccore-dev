@@ -207,6 +207,41 @@ class SafeExtractionTests(DCCoreTestCase):
 
         self.assertFalse(ok)
         self.assertIn("exceeds", reason)
+        # Nothing left behind: no registry entry, no extract directory. These
+        # two went missing in #940 when the test below was inserted (#945).
+        self.assertNotIn("bigbot", config.fetched_bot_lists)
+        self.assertFalse(os.path.exists(list_fetch.list_extract_dir("bigbot")))
+
+    def test_zero_still_keeps_a_zip_bomb_guard_for_a_list(self):
+        """#945: 0 is "no limit" for FILES, and #940 read it as no limit on a
+        list archive's declared total too - float('inf'). That total is the
+        only bound on extraction (ZipExtFile truncates each member to what it
+        declares, and the list-size ceiling is checked after extraction), so
+        with MAX_FETCH_FILE_SIZE = 0 a small zip of zeros unpacked without
+        limit. A list archive falls back to what real lists can hold:
+        max_list_text_size() per list, MAX_LISTS_PER_ARCHIVE lists."""
+        self.set_config(MAX_FETCH_FILE_SIZE=0, MAX_LIST_TEXT_SIZE=1000)
+        ceiling = 1000 * list_fetch.MAX_LISTS_PER_ARCHIVE
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", _list_txt()),
+                                   ("padding.bin", "0" * (ceiling + 1))])
+
+        ok, reason = list_fetch.process_fetched_list_zip("bigbot", self.zip_path)
+
+        self.assertFalse(ok)
+        self.assertIn("exceeds", reason)
+        self.assertIn(str(ceiling), reason)
+        self.assertIn("list archive ceiling", reason, "names the limit that refused it")
+        self.assertNotIn("bigbot", config.fetched_bot_lists)
+        self.assertFalse(os.path.exists(list_fetch.list_extract_dir("bigbot")))
+
+    def test_the_fallback_ceiling_follows_the_list_size_setting(self):
+        self.set_config(MAX_FETCH_FILE_SIZE=0, MAX_LIST_TEXT_SIZE=0)
+        self.assertEqual(list_fetch._fetch_file_size_budget(),
+                         list_fetch.DEFAULT_MAX_LIST_TEXT_SIZE * list_fetch.MAX_LISTS_PER_ARCHIVE)
+        self.set_config(MAX_LIST_TEXT_SIZE=5000)
+        self.assertEqual(list_fetch._fetch_file_size_budget(), 5000 * list_fetch.MAX_LISTS_PER_ARCHIVE)
+        self.set_config(MAX_FETCH_FILE_SIZE=123)
+        self.assertEqual(list_fetch._fetch_file_size_budget(), 123, "a real cap is used as it is")
 
     def test_zero_means_no_cap_on_the_declared_total_either(self):
         """#937's sibling: MAX_FETCH_FILE_SIZE = 0 is "no limit" here too, not
