@@ -217,6 +217,20 @@ def list_extract_dir(bot):
     return candidate
 
 
+def _fetch_file_size_budget():
+    """MAX_FETCH_FILE_SIZE, resolved the way dcc_fetch.py's own admission
+    check already reads it: 0 means no limit (#302), not a real zero-byte
+    ceiling. Read here rather than left as the raw setting because this
+    module uses the value twice - once as the zip-bomb sum cap in
+    _validate_zip_members(), once as the running extraction budget in
+    process_fetched_list_zip() - and a `budget` that starts at a literal 0
+    would fail the very first byte written, the same bug either call site
+    would have on its own (#937 was the sibling of this one, on
+    MAX_FETCH_LIST_FILE_SIZE)."""
+    raw = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
+    return raw if raw > 0 else float("inf")
+
+
 def _validate_zip_members(infolist, extract_dir):
     """Check EVERY member before anything is extracted. Returns a short
     rejection reason string, or None if the whole archive is clear to
@@ -229,7 +243,7 @@ def _validate_zip_members(infolist, extract_dir):
                 f"{MAX_LIST_ZIP_ENTRIES} a real master-list archive should "
                 f"ever need (zip-bomb-shaped guard)")
 
-    max_total = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
+    max_total = _fetch_file_size_budget()
     total_uncompressed = 0
     for info in infolist:
         if info.is_dir():
@@ -683,8 +697,7 @@ def _extract_and_locate_list_file(zip_path, extract_dir):
                 shutil.rmtree(platform_compat.long_path(extract_dir), ignore_errors=True)
                 return None, reason
 
-            max_total = int(getattr(config, "MAX_FETCH_FILE_SIZE", 200 * 1024 * 1024))
-            budget = max_total
+            budget = _fetch_file_size_budget()
             for info in infolist:
                 if info.is_dir():
                     continue

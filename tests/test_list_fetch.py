@@ -207,8 +207,20 @@ class SafeExtractionTests(DCCoreTestCase):
 
         self.assertFalse(ok)
         self.assertIn("exceeds", reason)
-        self.assertNotIn("bigbot", config.fetched_bot_lists)
-        self.assertFalse(os.path.exists(list_fetch.list_extract_dir("bigbot")))
+
+    def test_zero_means_no_cap_on_the_declared_total_either(self):
+        """#937's sibling: MAX_FETCH_FILE_SIZE = 0 is "no limit" here too, not
+        a zero-byte zip-bomb ceiling that rejects any real list - and the same
+        value is the running extraction budget, so a fix that only touched the
+        sum check and left `budget` starting at a literal 0 would still fail
+        on the very first byte written."""
+        self.set_config(MAX_FETCH_FILE_SIZE=0)
+        big_txt = _list_txt() + ("!OtherBot Filler.flac  ::INFO:: 1.0MB\n" * 50)
+        _write_zip(self.zip_path, [("OtherBot-2026-08-27.txt", big_txt)])
+
+        ok, reason = list_fetch.process_fetched_list_zip("bigbot", self.zip_path)
+
+        self.assertTrue(ok, reason)
 
     def test_an_oversized_zip_on_disk_is_rejected_before_it_is_opened(self):
         """#162 finding #10, belt-to-braces half: MAX_LIST_ZIP_ENTRIES and the

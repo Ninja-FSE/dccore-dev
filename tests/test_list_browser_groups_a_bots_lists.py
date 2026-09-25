@@ -169,11 +169,11 @@ class GroupMembershipReplacesExactKeyMatching(unittest.TestCase):
     def test_the_sidebar_click_reopens_the_bot_s_last_list_not_always_primary(self):
         """Re-clicking a row whose RAR tab is already open must not silently
         reset the table to the main list on every redraw."""
-        body = self.source().split('el.filelistsBotList.addEventListener("click"', 1)[1][:2200]
+        body = self.source().split('el.filelistsBotList.addEventListener("click"', 1)[1][:3000]
         self.assertIn("nickOfSource(row.dataset.bot) === nickOfSource(state.filelistsSource)", body)
 
     def test_the_exclude_while_filtering_toggle_is_keyed_by_nick(self):
-        body = self.source().split('el.filelistsBotList.addEventListener("click"', 1)[1][:2200]
+        body = self.source().split('el.filelistsBotList.addEventListener("click"', 1)[1][:3000]
         self.assertIn("row.dataset.nick || row.dataset.bot", body)
 
     def test_the_empty_check_considers_every_list_in_the_group(self):
