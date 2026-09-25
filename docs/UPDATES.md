@@ -20,7 +20,9 @@ design note's open question is settled: the script does it alone. The chat goes 
   arrives* is off: then the line is left in the channel as an ordinary NOTICE rather than hidden and lost. The
   right-click menu picks *Send to* and *Listen on* from `$chan(N)` through `$submenu`, ticked with `$style(1)`.
   Picking where to send also listens there. *Listen on all my channels* is there and in `/dccore options`, off by
-  default.
+  default. A row's command carries the channel's NUMBER, resolved back with `$chan(N)` inside the alias
+  (`dccore.chat.to.n`, `dccore.chat.listen.n`), never its name: mIRC parses the command text on the click, and a
+  channel whose name holds `|` or `$` could otherwise run a command (found in review).
 - **Rules from #371:** nothing reachable from the NOTICE handler sends anything (RFC 2812); a per-nick flood limit on
   what arrives (more than 5 lines in 10 s hides the nick for 60 s, said once, in session-only hash tables that expire
   by themselves); `$strip` on what is shown and on what is sent; never PRIVMSG; nothing identifying in the script.
@@ -32,7 +34,7 @@ design note's open question is settled: the script does it alone. The chat goes 
 Docs: ADMIN-CONSOLE.md has a *DCCore Chat* section and the command, the roadmap lists it, and both changelogs say to
 update the script.
 
-`tests/test_dccore_chat_in_the_mirc_window.py` (21) reads the script statement by statement: the tag and that it is
+`tests/test_dccore_chat_in_the_mirc_window.py` (22) reads the script statement by statement: the tag and that it is
 the first check; every pass-through return before the single `haltdef`; the flood limit before anything is shown; the
 listen rule and its default; no send in the handler or in any alias it reaches (with a check that the pattern does
 see a send); the limit's numbers, expiry and single notice; session-only tables; the stripped, tagged NOTICE only to a

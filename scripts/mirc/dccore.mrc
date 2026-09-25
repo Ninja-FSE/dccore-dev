@@ -1396,18 +1396,27 @@ alias dccore.chat.all {
   dccore.chat.sys $iif($dccore.opt(chat.all),Listening on every channel you are in.,Listening only on the channels ticked in this menu.)
 }
 ; $submenu's rows: $1 is begin, then 1, 2, ... until an empty answer, then end.
+;
+; The COMMAND a row runs carries the channel's NUMBER, never its name (#955
+; review): mIRC parses the command text when the row is clicked, and a
+; channel name may contain | or $ - a channel with a hostile name that you
+; are in could otherwise run a command of its choosing on the click. The
+; number is resolved back to the channel inside the alias. The name is
+; still shown as the row's label, which mIRC does not run.
 alias dccore.chat.sendrow {
   if ($1 !isnum) { return }
   var %c = $chan($1)
   if (%c == $null) { return }
-  return $iif(%c == $dccore.opt(chat.to),$style(1)) %c $+ :dccore.chat.to %c
+  return $iif(%c == $dccore.opt(chat.to),$style(1)) %c $+ :dccore.chat.to.n $1
 }
 alias dccore.chat.listenrow {
   if ($1 !isnum) { return }
   var %c = $chan($1)
   if (%c == $null) { return }
-  return $iif($istok($dccore.opt(chat.listen),%c,32),$style(1)) %c $+ :dccore.chat.listen %c
+  return $iif($istok($dccore.opt(chat.listen),%c,32),$style(1)) %c $+ :dccore.chat.listen.n $1
 }
+alias dccore.chat.to.n { if ($1 isnum) && ($chan($1) != $null) { dccore.chat.to $chan($1) } }
+alias dccore.chat.listen.n { if ($1 isnum) && ($chan($1) != $null) { dccore.chat.listen $chan($1) } }
 
 menu @DCCore-Chat {
   Send to

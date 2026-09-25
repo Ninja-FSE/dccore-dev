@@ -178,6 +178,22 @@ class TheWindowIsTheInterface(unittest.TestCase):
         self.assertIn(".$submenu($dccore.chat.listenrow($1))", menu)
         self.assertIn("Listen on all my channels:dccore.chat.all", menu)
 
+    def test_a_menu_row_runs_a_number_never_a_channel_name(self):
+        """#955 review: mIRC parses a row's command text on the click, and a
+        channel name can hold | or $. The name may be the label; the command
+        carries only the row number, resolved inside the alias."""
+        text = script()
+        for row in ("alias dccore.chat.sendrow", "alias dccore.chat.listenrow"):
+            body = statements(block(text, row))
+            ret = [s for s in body if s.startswith("return $iif(")][0]
+            label, command = ret.split(":", 1)
+            self.assertNotIn("%c", command, f"{row}: {command}")
+            self.assertTrue(command.endswith(" $1"), command)
+        self.assertIn("alias dccore.chat.to.n { if ($1 isnum) && ($chan($1) != $null) "
+                      "{ dccore.chat.to $chan($1) } }", text)
+        self.assertIn("alias dccore.chat.listen.n { if ($1 isnum) && ($chan($1) != $null) "
+                      "{ dccore.chat.listen $chan($1) } }", text)
+
     def test_picking_where_to_send_also_listens_there(self):
         body = statements(block(script(), "alias dccore.chat.to"))
         self.assertIn("dccore.set chat.to $1", body)
