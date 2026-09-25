@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 👆 A bot's slots, queue and speed show under it when you click it (#943)
+
+#932 wrote each online bot's advertised free slots, queue and speed on its own sidebar row. Beside the name, in the
+same flex row, it squeezed the nick out on a narrow sidebar (rows with the line and no readable name), and on every
+row at once it was a wall of small print. Now the line is out of the layout until its bot is clicked and then sits on
+a line of its own under the row, lined up with the name. Clicking another bot closes the first one's line; clicking
+the open one closes it. The presence rule is unchanged: still only online bots have a line at all.
+
+- **Any row can be clicked for its line**, not only a bot whose list is open. A bot we only saw advertising has no
+  list to switch to (its click still puts the nick in the fetch box), and its slots are exactly what you want before
+  deciding to fetch one - so the marking comes before that early return.
+- **It survives the poll.** The rows are rebuilt every poll, so which bot is open lives in `state.filelistsInfoNick`
+  and `botRow()` reads it back; a row with a line carries `aria-expanded`.
+- Web files only (`web/app.js`, `web/style.css`); no daemon change and no new setting.
+
+`tests/test_the_slots_line_shows_only_under_the_clicked_bot.py` (11): the stylesheet hides it by default, shows it
+for the open row, gives it a line of its own with a small gap and puts it last (`order: 1`) - the file count is
+appended after it in the markup, and without that it wrapped onto a third line instead of staying on the name's line; the click marks its bot before any early return
+and a rebuilt row reads the state back; and - under node, skipped where it is not installed - the real click fragment
+and `markFilelistsInfoBot()` run against stub rows: one line open at a time, a second click closes it, a row with no
+line is never marked expandable. Mutation-checked: shown by default, a click that never closes, the marking moved
+after the early return and a redrawn row forgetting the open bot each fail a test.
+
 ## 🟩 v1.13.1 (2026-09-24) - "The Fetch Queue Looks After Itself"
 
 ### 🧲 Lists are grabbed automatically, on AutoGet's rules (#926)
