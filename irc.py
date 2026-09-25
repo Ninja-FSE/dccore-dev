@@ -957,6 +957,11 @@ def note_nick_change(old_nick, new_nick):
 # join burst, short enough that anything further out is a different session
 # and quite possibly a different person.
 ALT_NICK_RECONNECT_WINDOW_SECONDS = 15
+# #376 option B: how far apart the old nick's observed departure and the new
+# nick's first sighting may be, either way round - a ghost pings out AFTER
+# its owner is back under the alt nick, and a clean QUIT comes before. Past
+# this, the same ident and file count are left as the coincidence they may be.
+IDENT_MERGE_WINDOW_SECONDS = 10 * 60
 
 # The ordinary shape a client's own collision retry produces: the nick it
 # wanted, plus a trailing run of underscores and/or digits it did not choose.
@@ -1938,7 +1943,12 @@ def _capture_bot_ident(user, user_host, now=None):
     with runtime.bot_idents_lock:
         record = runtime.bot_idents.get(key)
         if record is None or record.get("ident") != ident:
-            runtime.bot_idents[key] = {"ident": ident, "first_seen": now}
+            # First SEEN, which is its JOIN if we saw one recently: a bot's
+            # first message can come long after it arrived.
+            joined = runtime.recent_joins.get(key)
+            if joined is None or now - joined > IDENT_MERGE_WINDOW_SECONDS:
+                joined = now
+            runtime.bot_idents[key] = {"ident": ident, "first_seen": min(joined, now)}
         # Bounded by the registry: a bot it has forgotten is forgotten here.
         if len(runtime.bot_idents) > len(runtime.known_bots) + 50:
             for gone in [k for k in runtime.bot_idents if k not in runtime.known_bots]:
@@ -1946,7 +1956,22 @@ def _capture_bot_ident(user, user_host, now=None):
                 runtime.bot_departures.pop(gone, None)
 
 
-def note_bot_renamed(old_nick, new_nick):
+def note_join_seen(nick, now=None):
+    """When `nick` joined a channel we are in - a nick and a time, nothing
+    else, kept only for IDENT_MERGE_WINDOW_SECONDS (#376). See
+    runtime.recent_joins."""
+    key = str(nick or "").strip().lower()
+    if not key:
+        return
+    now = time.time() if now is None else now
+    with runtime.bot_idents_lock:
+        runtime.recent_joins[key] = now
+        for gone in [k for k, at in runtime.recent_joins.items()
+                     if now - at > IDENT_MERGE_WINDOW_SECONDS]:
+            runtime.recent_joins.pop(gone, None)
+
+
+def note_bot_renamed(old_nick, new_nick, ident=None):
     """A NICK message from a known bot: proof, so its rows merge (#376).
 
     The server says exactly who became whom, so there is nothing to infer.
@@ -1954,6 +1979,12 @@ def note_bot_renamed(old_nick, new_nick):
     the new, anything that pointed at the old follows it, and the new nick is
     nobody's alias any more - which is what keeps a bot that goes back and
     forth from ending up aliased to itself. Display only, like every alias.
+
+    `ident` is the one on the NICK line itself. A NICK proves who became whom
+    only for whoever holds the nick at that moment: somebody who took a known
+    bot's nick while it was away, and then renamed, would otherwise file the
+    real bot's row under their new name. So where we hold the old nick's
+    ident and the NICK line's differs, nothing is aliased.
     Returns True when an alias was written."""
     old_key = str(old_nick or "").strip().lower()
     new_key = str(new_nick or "").strip().lower()
@@ -1961,6 +1992,12 @@ def note_bot_renamed(old_nick, new_nick):
         return False
     held = getattr(config, "fetched_bot_lists", None) or {}
     if old_key not in runtime.known_bots and old_key not in held:
+        return False
+    with runtime.bot_idents_lock:
+        known = (runtime.bot_idents.get(old_key) or {}).get("ident")
+    if known and ident and ident != known:
+        print(f"[ALT-NICK] {old_nick} -> {new_nick} is not the bot we knew as "
+              f"{old_nick} (a different connection) - not merging.")
         return False
     new_nick = str(new_nick).strip()
     with runtime.nick_aliases_lock:
@@ -3244,8 +3281,10 @@ def irc_loop():
                                              nick_match.group(2).strip())
                             # A known bot changing nick: its List Browser
                             # rows merge, on proof (#376).
+                            renamed_ident = re.match(r"^:[^!\s]+!([^@\s]+)@", line)
                             note_bot_renamed(nick_match.group(1),
-                                             nick_match.group(2).strip())
+                                             nick_match.group(2).strip(),
+                                             renamed_ident.group(1) if renamed_ident else None)
                             
                     # Anchored: this writes straight into config.whois_status.
                     if is_server_numeric(line, "352"):
@@ -3326,6 +3365,8 @@ def irc_loop():
                             # Display only - see note_possible_reconnect()'s own
                             # docstring for the three things this checks.
                             note_possible_reconnect(joined_user)
+                            # #376 option B: when this nick appeared.
+                            note_join_seen(joined_user)
 
                             # One pop, not `in` then `del`. Between the two, the
                             # freeze sweep in check_queue_and_send() - which runs

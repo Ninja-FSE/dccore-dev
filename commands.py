@@ -448,6 +448,8 @@ PRESERVE_RUNTIME = (
                           # for no reason connected to the setting that changed
     'bot_idents',         # #376: a rehash is not a restart. The idents are RAM
     'bot_departures',     # only and go at restart; a settings save keeps them
+    'recent_joins',       # #376: joins inside the merge window - a rehash in it
+                          # would otherwise lose when the new nick appeared
     'list_grab_others_asked',  # #926: who just asked which bot for its list.
                           # Losing it lets the automatic grab ask a bot that is
                           # busy sending someone else's list

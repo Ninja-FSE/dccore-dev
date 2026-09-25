@@ -113,6 +113,7 @@ RUNTIME_CONTAINERS = {
     # never set up.
     "bot_idents": dict,
     "bot_departures": dict,
+    "recent_joins": dict,
     # Same reasoning: a leftover is one test's message showing up in the next
     # test's panel.
     "private_messages": list,

@@ -1110,6 +1110,7 @@ nick_aliases = runtime.nick_aliases
 # #376 option B - see runtime.py.
 bot_idents = runtime.bot_idents
 bot_departures = runtime.bot_departures
+recent_joins = runtime.recent_joins
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)

@@ -1599,17 +1599,24 @@ def _ident_merges(known, present):
       * both advertise the SAME FILE COUNT - two libraries almost never
         match to the file;
       * they were never ADVERTISING at the same time: the old nick's last
-        advert came before the new nick's first this session. A ghost still
-        sitting in the channel after its connection died cannot advertise,
-        so the ordinary alt-nick reconnect passes this, and two live bots
-        that happen to share an ident and a count do not;
+        advert came before the new nick was first seen this session. A ghost
+        still sitting in the channel after its connection died cannot
+        advertise, so the ordinary alt-nick reconnect passes this, and two
+        live bots that happen to share an ident and a count do not;
+      * the departure and the new nick's first sighting are within
+        irc.IDENT_MERGE_WINDOW_SECONDS of each other, either way round - a
+        ghost pings out after its owner is back, a clean QUIT comes before.
+        Hours apart, the same ident and count are left as a coincidence;
       * exactly one current nick matches. Two candidates is not an answer.
     """
+    import irc
+
     with runtime.bot_idents_lock:
         idents = {key: dict(record) for key, record in runtime.bot_idents.items()}
         departed = dict(runtime.bot_departures)
     if not present or not departed:
         return {}
+    window = irc.IDENT_MERGE_WINDOW_SECONDS
 
     def files_of(key):
         files = (known.get(key) or {}).get("files")
@@ -1624,7 +1631,7 @@ def _ident_merges(known, present):
                 (key, nick, float(record.get("first_seen") or 0)))
 
     merges = {}
-    for key in departed:
+    for key, left_at in departed.items():
         record = idents.get(key)
         files = files_of(key)
         if key in present or record is None or files is None:
@@ -1636,6 +1643,8 @@ def _ident_merges(known, present):
         _other, nick, first_seen = matches[0]
         last_advert = float((known.get(key) or {}).get("last_seen") or 0)
         if last_advert >= first_seen:
+            continue
+        if abs(first_seen - float(left_at or 0)) > window:
             continue
         merges[key] = nick
     return merges

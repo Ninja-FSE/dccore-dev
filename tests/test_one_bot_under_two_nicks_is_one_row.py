@@ -12,7 +12,10 @@ known_bots and the counters stay keyed per nick:
 
 import io
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +30,7 @@ import webserver  # noqa: E402
 from tests.support import DCCoreTestCase  # noqa: E402
 
 T0 = 1_000_000.0
+NL = chr(10)
 
 
 class Case(DCCoreTestCase):
@@ -109,6 +113,55 @@ class ByIdent(Case):
         self.leave("PackBot", T0 + 400)
         self.assertEqual(self.merges(), {})
 
+    def test_hours_apart_is_a_coincidence(self):
+        """The review's reproduction: the old nick quits, and three hours later a
+        different bot with the same ident and file count appears."""
+        self.advertise("PackBot", T0)
+        self.leave("PackBot", T0 + 60)
+        self.advertise("OtherBot", T0 + 3 * 3600)
+        self.assertEqual(self.merges(), {})
+
+    def test_inside_the_window(self):
+        window = irc.IDENT_MERGE_WINDOW_SECONDS
+        # A clean QUIT first, the new nick a little later.
+        self.advertise("PackBot", T0)
+        self.leave("PackBot", T0 + 60)
+        self.advertise("PackBot_", T0 + 60 + window - 1)
+        self.assertEqual(self.merges(), {"packbot": "PackBot_"})
+
+    def test_just_outside_the_window(self):
+        window = irc.IDENT_MERGE_WINDOW_SECONDS
+        self.advertise("PackBot", T0)
+        self.leave("PackBot", T0 + 60)
+        self.advertise("PackBot_", T0 + 60 + window + 1)
+        self.assertEqual(self.merges(), {})
+
+    def test_the_ghost_leaving_after_the_new_nick_came_is_in_the_window_too(self):
+        window = irc.IDENT_MERGE_WINDOW_SECONDS
+        self.advertise("PackBot", T0)
+        self.advertise("PackBot_", T0 + 100)
+        self.leave("PackBot", T0 + 100 + window + 1)
+        self.assertEqual(self.merges(), {}, "too long after the new nick appeared")
+
+    def test_first_seen_is_the_join_when_we_saw_one(self):
+        """A bot's first advert can come long after it joined: the join is
+        when it appeared, so a slow advert does not push it out of the
+        window."""
+        window = irc.IDENT_MERGE_WINDOW_SECONDS
+        self.advertise("PackBot", T0 - 100)
+        self.leave("PackBot", T0)
+        irc.note_join_seen("PackBot_", now=T0 + 10)
+        # First advert just inside the window from the JOIN, and past it from
+        # the departure: measured from the advert this would not merge.
+        self.advertise("PackBot_", T0 + 10 + window - 5)
+        self.assertEqual(runtime.bot_idents["packbot_"]["first_seen"], T0 + 10)
+        self.assertEqual(self.merges(), {"packbot": "PackBot_"})
+
+    def test_a_join_is_forgotten_after_the_window(self):
+        irc.note_join_seen("SomeUser", now=T0)
+        irc.note_join_seen("OtherUser", now=T0 + irc.IDENT_MERGE_WINDOW_SECONDS + 1)
+        self.assertEqual(set(runtime.recent_joins), {"otheruser"})
+
     def test_only_a_known_bot_ident_is_kept(self):
         irc._capture_bot_ident("SomeUser", "someuser@host.example.net", now=T0)
         self.assertNotIn("someuser", runtime.bot_idents)
@@ -190,6 +243,21 @@ class ByNickMessage(Case):
         self.assertEqual(runtime.resolve_display_nick("PackBot_"), "PackBot_")
         self.assertEqual(runtime.resolve_display_nick("PackBot"), "PackBot_")
 
+    def test_someone_else_on_the_bot_s_nick_is_not_merged(self):
+        """The review's case: the bot is away, somebody takes its nick and renames.
+        We hold the bot's ident, and the NICK line's is different."""
+        self.advertise("PackBot", T0, ident="packbot")
+        self.assertFalse(irc.note_bot_renamed("PackBot", "Zed", "someoneelse"))
+        self.assertEqual(runtime.resolve_display_nick("PackBot"), "PackBot")
+
+    def test_the_same_ident_on_the_nick_line_merges(self):
+        self.advertise("PackBot_", T0, ident="packbot")
+        self.assertTrue(irc.note_bot_renamed("PackBot_", "PackBot", "packbot"))
+
+    def test_no_ident_held_is_still_proof(self):
+        self.set_config(fetched_bot_lists={"quietbot": {"bot": "QuietBot"}})
+        self.assertTrue(irc.note_bot_renamed("QuietBot", "QuietBot_", "anything"))
+
     def test_a_held_list_counts_as_known(self):
         self.set_config(fetched_bot_lists={"quietbot": {"bot": "QuietBot"}})
         self.assertTrue(irc.note_bot_renamed("QuietBot", "QuietBot_"))
@@ -205,10 +273,17 @@ class TheWiring(unittest.TestCase):
         at = code.index("_capture_channel_advert(user, target_chan, msg)\n")
         self.assertIn("_capture_bot_ident(user, user_host)", code[at:at + 200])
 
-    def test_the_nick_handler_merges(self):
+    def test_the_nick_handler_merges_with_the_line_s_ident(self):
         code = self.read("irc.py")
         at = code.index("note_nick_change(nick_match.group(1),")
-        self.assertIn("note_bot_renamed(nick_match.group(1),", code[at:at + 400])
+        handler = code[at:at + 700]
+        self.assertIn("note_bot_renamed(nick_match.group(1),", handler)
+        self.assertIn("renamed_ident.group(1) if renamed_ident else None", handler)
+
+    def test_the_join_handler_notes_the_join(self):
+        code = self.read("irc.py")
+        at = code.index("note_possible_reconnect(joined_user)" + NL)
+        self.assertIn("note_join_seen(joined_user)", code[at:at + 200])
 
     def test_the_summary_applies_it(self):
         code = self.read("webserver.py")
@@ -222,6 +297,92 @@ class TheWiring(unittest.TestCase):
         self.assertLess(body.index("group.entries[h].held"), body.index("return group.entries[0];"))
         self.assertIn("var online = groupOnline(group, primary);", js)
         self.assertIn('t("filelists.alsoSeenAs")', js)
+
+
+HARNESS = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+const NL = String.fromCharCode(10);
+const fn = (name) => {
+  const i = src.indexOf("  function " + name + "(");
+  const j = src.indexOf(NL + "  }" + NL, i);
+  if (i < 0 || j < 0) { throw new Error("missing " + name); }
+  return src.slice(i, j + 4);
+};
+const code = ["splitFetchedSource", "nickOfSource", "displayNickOfSource", "entriesForNick",
+              "renderFilelistsTabs", "markFilelistsActiveBot"].map(fn).join(NL);
+function node() {
+  const cls = new Set(), attrs = {};
+  return { dataset: {}, hidden: true, innerHTML: "", children: [],
+    classList: { toggle: (c, on) => on ? cls.add(c) : cls.delete(c), has: (c) => cls.has(c) },
+    setAttribute: (k, v) => { attrs[k] = v; }, removeAttribute: (k) => { delete attrs[k]; },
+    appendChild(ch) { this.children.push(ch); }, attrs };
+}
+const document = { createElement: () => node() };
+const rowEls = [node(), node()];
+rowEls[0].dataset.nick = "PackBot_";
+rowEls[1].dataset.nick = "OtherBot";
+const el = { filelistsListTabs: node(),
+             filelistsBotList: { querySelectorAll: () => rowEls } };
+const t = (k) => k;
+function run(bots, source) {
+  const state = { filelistsBots: bots, filelistsSource: source };
+  el.filelistsListTabs.children = [];
+  new Function("state", "el", "document", "t", code + NL + "markFilelistsActiveBot();")(state, el, document, t);
+  return { tabs: el.filelistsListTabs.hidden ? 0 : el.filelistsListTabs.children.length,
+           active: rowEls.filter(r => r.classList.has("is-active")).map(r => r.dataset.nick).join(",") };
+}
+const merged = {
+  "PackBot": { bot: "PackBot", nick: "PackBot_", list: "", held: true },
+  "PackBot_": { bot: "PackBot_", nick: "PackBot_", list: "", held: false }
+};
+const mergedTwoLists = Object.assign({}, merged, {
+  "PackBot/rar": { bot: "PackBot/rar", nick: "PackBot_", list: "rar", held: true }
+});
+const out = {};
+let r = run(merged, "PackBot");
+out.oneListTabs = r.tabs; out.oneListActive = r.active;
+r = run(mergedTwoLists, "PackBot");
+out.twoListsTabs = r.tabs; out.twoListsActive = r.active;
+console.log(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed; CI's runners have it")
+class ThePageOnAMergedRow(unittest.TestCase):
+    """The review's follow-up, run the way it was found: the real functions out of
+    app.js under node, on a merged bot's rows - a held list under the old
+    nick, an advert-only entry under the new, both shown as the new."""
+
+    def run_page(self):
+        import json
+        handle, path = tempfile.mkstemp(suffix=".js")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(HARNESS)
+            done = subprocess.run(["node", path, os.path.join(REPO_ROOT, "web", "app.js")],
+                                  capture_output=True, timeout=60)
+        finally:
+            os.unlink(path)
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        return json.loads(done.stdout.decode("utf-8"))
+
+    def test_the_merged_row_is_marked_open(self):
+        seen = self.run_page()
+        self.assertEqual(seen["oneListActive"], "PackBot_")
+        self.assertEqual(seen["twoListsActive"], "PackBot_")
+
+    def test_tabs_are_the_lists_we_hold_not_the_nicks(self):
+        seen = self.run_page()
+        self.assertEqual(seen["oneListTabs"], 0, "one list held: no tab bar")
+        self.assertEqual(seen["twoListsTabs"], 2, "two lists held: both tabs")
+
+    def test_the_badge_counts_lists_not_entries(self):
+        with io.open(os.path.join(REPO_ROOT, "web", "app.js"), encoding="utf-8") as handle:
+            js = handle.read()
+        self.assertIn("var listCount = group.entries.filter(function (entry) { return entry.held; }).length;", js)
+        self.assertIn("if (listCount > 1) {", js)
+        self.assertNotIn("badge.textContent = String(group.entries.length);", js)
 
 
 if __name__ == "__main__":

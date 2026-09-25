@@ -422,10 +422,17 @@ nick_aliases_lock = threading.Lock()
 # host and no IP are kept in any form; the ident is the part before the "@"
 # that the user or their client picks.
 #
-# bot_idents: nick.lower() -> {"ident", "first_seen"}, for a bot we saw
-# advertising this session (irc._capture_bot_ident()). first_seen is its
-# first advert since then, which is what "never advertising at the same
-# time" is measured against.
+# bot_idents: nick.lower() -> {"ident", "first_seen"}, for a known bot we
+# heard in a channel this session (irc._capture_bot_ident()). first_seen is
+# when we first SAW that nick: its JOIN, if we saw one in the last
+# IDENT_MERGE_WINDOW_SECONDS, else its first channel message - which is what
+# both "never advertising at the same time" and the time window are
+# measured against.
+#
+# recent_joins: nick.lower() -> when we saw it JOIN. A nick and a time, no
+# ident and no host, and only for IDENT_MERGE_WINDOW_SECONDS: a bot's first
+# advert can come many minutes after it joined, and the join is when it
+# actually appeared.
 #
 # bot_departures: nick.lower() -> when a QUIT, PART, KICK or NICK of that bot
 # was OBSERVED (irc.note_observed_departure()), never just its absence -
@@ -436,6 +443,7 @@ nick_aliases_lock = threading.Lock()
 # nick.
 bot_idents = {}
 bot_departures = {}
+recent_joins = {}
 bot_idents_lock = threading.Lock()
 
 
