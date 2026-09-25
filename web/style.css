@@ -849,6 +849,25 @@ html, body {
   white-space: nowrap;
 }
 
+/* #952: the Library totals' per-list rows. Fixed layout like the tables above
+   for the same reason - the list name is the one column meant to give way, so
+   a long name truncates instead of pushing the figures around. */
+.stat-lists-table {
+  table-layout: fixed;
+  margin-bottom: 16px;
+}
+
+.stat-lists-table .col-num {
+  width: 128px;
+  text-align: right;
+}
+
+.stat-lists-table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

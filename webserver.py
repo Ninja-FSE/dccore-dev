@@ -262,7 +262,7 @@ def reject_if_unsafe_for_irc_line(value, field_name, max_len=IRC_LINE_FIELD_MAX_
 # Pure data-building functions - no Flask, unit tested directly.
 # ==========================================================================
 
-def count_rar_album_folders():
+def count_rar_album_folders(name=None):
     """How many album folders the RAR list offers, or None if there is no list.
 
     The file update_list.py writes opens with three lines of explanation and
@@ -273,10 +273,18 @@ def count_rar_album_folders():
     None rather than 0 when there is no list at all: a bot whose first list has
     not been built yet has an unknown album count, and zero is a different
     claim - it would read on the page as "this bot offers no albums".
+
+    `name` picks a served list (#952): a list's files live in its own
+    directory (list.list_dir()), and without a name this reads the primary's,
+    which is where every install's RAR list was before there were several.
     """
     import io
 
-    directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
+    if name is None:
+        directory = getattr(config, "LOCAL_LIST_DIR", "./lists")
+    else:
+        import list as list_mod
+        directory = list_mod.list_dir(name)
     prefix = f"{getattr(config, 'LIST_BASE_NAME', 'DCCore')}-RAR-"
     try:
         names = sorted(name for name in os.listdir(directory)
@@ -292,6 +300,101 @@ def count_rar_album_folders():
             return sum(1 for line in handle if line.startswith("!"))
     except OSError:
         return None
+
+
+def _format_library_size(raw_bytes):
+    """A byte total the way a list's own size file writes it - two decimals,
+    "1.85TB" - so a total summed from several lists reads like the figures it
+    is made of and not in a second style (#952)."""
+    size = float(raw_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024.0:
+            return f"{size:.2f}{unit}"
+        size /= 1024.0
+    return f"{size:.2f}PB"
+
+
+def build_library_payload():
+    """The Library block of the Stats page: totals across EVERY served list,
+    and one row per list (#952).
+
+    It used to read the primary list alone - no name given, so the primary's
+    files, its side files for the size, and LOCAL_LIST_DIR's RAR list - and on
+    a bot serving music and film lists the page showed the music list's
+    numbers as though they were the library. The channel adverts already ask
+    per list, so the page and the advert disagreed.
+
+    The top-level keys are the ones the page has always had (files, size,
+    raw_bytes, list_date, rar_folders) and are now the totals; a single-list
+    install therefore reads exactly as before. `lists` holds each list's own
+    figures, in the operator's order.
+
+    Every list is read in its own guard, the way every source in this module
+    is: one list whose side file is unreadable costs its own row and nothing
+    else. The primary is asked for with NO name, not its own - that is the
+    path the page has always taken, and a single-list install has no reason to
+    be routed differently.
+
+    A folder that belongs to two lists is counted in both, and the totals do
+    not de-duplicate; the rows are there so that can be seen.
+    """
+    import library
+    import list as list_mod
+
+    try:
+        entries = [(str(entry.name), bool(entry.primary)) for entry in library.lists()]
+    except Exception:
+        entries = []
+    if not entries:
+        entries = [("", True)]
+
+    rows = []
+    newest_row, newest_when = None, None
+    for name, primary in entries:
+        row = {"name": name, "primary": primary, "files": 0, "size": None,
+               "raw_bytes": 0, "list_date": None, "rar_folders": None}
+        asked = None if primary else name
+        try:
+            files, list_date, size, raw_bytes = list_mod.get_file_count_date_size_and_raw_bytes(asked)
+            row.update({"files": int(files or 0), "list_date": list_date or None,
+                        "size": size or None, "raw_bytes": int(raw_bytes or 0)})
+        except Exception:
+            pass
+        try:
+            row["rar_folders"] = count_rar_album_folders(asked)
+        except Exception:
+            pass
+        try:
+            latest = list_mod.find_latest_list(asked)
+            when = os.path.getmtime(latest) if latest else None
+        except Exception:
+            when = None
+        if when is not None and (newest_when is None or when > newest_when):
+            newest_row, newest_when = row, when
+        rows.append(row)
+
+    primary_row = next((row for row in rows if row["primary"]), rows[0])
+    total_bytes = sum(row["raw_bytes"] for row in rows)
+    albums = [row["rar_folders"] for row in rows if row["rar_folders"] is not None]
+
+    if len(rows) == 1:
+        size = primary_row["size"]
+    else:
+        size = _format_library_size(total_bytes) if total_bytes else primary_row["size"]
+
+    return {
+        "files": sum(row["files"] for row in rows),
+        "size": size,
+        "raw_bytes": total_bytes,
+        # The newest build among the lists; when none has been built at all,
+        # what the primary says (a bot with no list yet says so).
+        "list_date": (newest_row or primary_row)["list_date"],
+        # None only when NO list has a RAR list: a total of the ones that do
+        # is a true count of the albums on offer, while a list with no RAR list
+        # simply has none to add.
+        "rar_folders": sum(albums) if albums else None,
+        "lists": rows,
+    }
 
 
 # The ceilings the import refuses beyond. A stray digit from a hand-edited
@@ -491,7 +594,6 @@ def build_stats_payload():
     # and db/list/stats_mgr are named in that test explicitly. Same reason the
     # File Lists payload imports `list` inside its own function.
     import db
-    import list as list_mod
     import stats_mgr
 
     active = list(getattr(config, "active_transfers", []))
@@ -531,18 +633,12 @@ def build_stats_payload():
     except Exception:
         pass
 
-    library = {"files": 0, "size": None, "raw_bytes": 0, "list_date": None,
-               "rar_folders": None}
+    # Every served list, not the primary alone (#952) - see the function.
     try:
-        files, list_date, size, raw_bytes = list_mod.get_file_count_date_size_and_raw_bytes()
-        library.update({"files": int(files or 0), "list_date": list_date or None,
-                        "size": size or None, "raw_bytes": int(raw_bytes or 0)})
+        library = build_library_payload()
     except Exception:
-        pass
-    try:
-        library["rar_folders"] = count_rar_album_folders()
-    except Exception:
-        pass
+        library = {"files": 0, "size": None, "raw_bytes": 0, "list_date": None,
+                   "rar_folders": None, "lists": []}
 
     for name in ("total", "today", "yesterday"):
         sent[name + "_text"] = stats_mgr.format_size_human(sent[name + "_bytes"])

@@ -224,6 +224,8 @@
     stSize:                document.getElementById("st-size"),
     stAlbums:              document.getElementById("st-albums"),
     stBuilt:               document.getElementById("st-built"),
+    stLists:               document.getElementById("st-lists"),
+    stListsBody:           document.getElementById("st-lists-body"),
     stFoot:                document.getElementById("st-foot"),
     stTopFiles:            document.getElementById("st-top-files"),
     importFile:            document.getElementById("import-file"),
@@ -5539,9 +5541,44 @@
     setStat(el.stAlbums, lib.rar_folders === null || lib.rar_folders === undefined
             ? "—" : lib.rar_folders.toLocaleString());
     setStat(el.stBuilt, lib.list_date || "—");
+    renderLibraryLists(lib.lists);
 
     renderTopDownloads(data.top);
     setStat(el.stFoot, data.version || "");
+  }
+
+  // #952: one row per served list - what the four Library cards above add up
+  // from. Shown only when there is more than one: with a single list the row
+  // would repeat the cards, and a single-list install should look as it
+  // always did. Built with DOM APIs and textContent, not concatenated markup:
+  // a list's name is whatever the operator typed on the Library page.
+  function renderLibraryLists(lists) {
+    if (!el.stLists || !el.stListsBody) { return; }
+    var rows = Array.isArray(lists) ? lists : [];
+    var show = rows.length > 1;
+    el.stLists.hidden = !show;
+    el.stListsBody.innerHTML = "";
+    if (!show) { return; }
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      var cells = [
+        [row.name, false],
+        [Number(row.files || 0).toLocaleString(), true],
+        [row.size || "0B", true],
+        // Unknown, not zero: same reading as the Album folders card above.
+        [row.rar_folders === null || row.rar_folders === undefined
+          ? "—" : Number(row.rar_folders).toLocaleString(), true],
+        [row.list_date || "—", true]
+      ];
+      cells.forEach(function (cell) {
+        var td = document.createElement("td");
+        td.textContent = String(cell[0]);
+        if (cell[1]) { td.className = "col-num"; }
+        tr.appendChild(td);
+      });
+      tr.firstChild.title = String(row.name);
+      el.stListsBody.appendChild(tr);
+    });
   }
 
   function loadStats() {

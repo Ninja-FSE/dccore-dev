@@ -524,6 +524,26 @@
         <div class="stat-card"><div class="stat-value stat-value-sm" id="st-built">&mdash;</div><div class="stat-label" data-i18n="stats.listBuilt">List built</div></div>
       </div>
 
+      <!-- #952: only with more than one served list. The four cards above are
+           then totals across every list, and this is what they add up from.
+           Hidden, not absent, so a single-list install renders as it always
+           did and renderStats() just turns it on. -->
+      <div id="st-lists" hidden>
+        <div class="stat-group-label" data-i18n="stats.byList">By list</div>
+        <div class="table-wrap">
+          <table class="stat-lists-table">
+            <thead><tr>
+              <th data-i18n="stats.listName">List</th>
+              <th class="col-num" data-i18n="stats.filesShared">Files shared</th>
+              <th class="col-num" data-i18n="common.size">Size</th>
+              <th class="col-num" data-i18n="stats.albumFolders">Album folders (!rar)</th>
+              <th class="col-num" data-i18n="stats.listBuilt">List built</th>
+            </tr></thead>
+            <tbody id="st-lists-body"></tbody>
+          </table>
+        </div>
+      </div>
+
 
       <!-- SIDE BY SIDE: two "most downloaded" tables that used to stack full
            width, one under the other, for no reason beyond being written
