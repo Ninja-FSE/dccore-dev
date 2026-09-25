@@ -4,6 +4,41 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 👥 One bot under two nicks is one List Browser row (#376)
+
+Part 1 of #376, the sidebar half, as decided there: option B plus the NICK-message merge, display only
+(`fetched_bot_lists`, `known_bots` and the counters stay keyed per nick).
+
+- **A NICK message is proof.** `irc.note_bot_renamed()`, called from the NICK handler beside `note_nick_change()`,
+  aliases a known bot's old nick (in the registry or with a held list) to its new one in `runtime.nick_aliases`. The
+  row is shown under the CURRENT nick; aliases that pointed at the old nick follow it, and the new nick stops being
+  anybody's alias - so a bot going back and forth is never filed under another bot or itself.
+- **By ident (option B).** `irc._capture_bot_ident()` keeps a known bot's ident - the part before the "@", nothing
+  else - in `runtime.bot_idents`, with its first advert this session; `note_observed_departure()` stamps
+  `runtime.bot_departures` for such a bot on an OBSERVED QUIT/PART/KICK. Both are RAM only, as Neo required: never in
+  `known_bots` (which is saved), never logged, gone on restart (a rehash keeps them, `PRESERVE_RUNTIME`).
+  `webserver._ident_merges()` merges an absent nick into a present one only when all hold: the departure was
+  observed; same ident; same advertised file count; the old nick's last advert came before the new nick's first this
+  session; and exactly one nick matches. Every failure leaves two rows.
+- **"Never online together" is read as "never advertising at the same time"**, with the observed departure on top.
+  The case this issue is about is a bot whose connection dies and which comes back on its alt nick while the ghost
+  still sits in the channel until it pings out: by channel presence the two ARE there together, briefly, but a ghost
+  cannot advertise. Two live bots sharing an ident and a count interleave their adverts and stay two rows.
+- **The page**: a merged row opens the list we hold rather than the advert-only entry, shows the bot here if it is
+  here under either nick, and names the other nick in the tooltip (*Also seen as ...*, en/es/fr).
+
+The existing collision-suffix merge (`note_possible_reconnect()`) and `_display_nick()`'s "both present disproves
+it" check are unchanged and still apply.
+
+`tests/test_one_bot_under_two_nicks_is_one_row.py` (23): the reconnect merging, and each condition failing safe
+(different ident, different count, absence without a departure, back again, advertising together, two candidates);
+only known bots' idents kept, a changed ident starting over, departures only for bots; one sidebar row under the
+current nick with each row's real nick kept; no host kept, the ident not in the saved registry and never printed; the
+NICK merge, a non-bot left alone, back and forth, an older alias following, the new nick leaving another bot's alias,
+a held list counting as known; and the IRC, summary and page wiring. Mutation-checked: 13 mutations each fail a test.
+The one that does not - removing the "never itself" filter from the candidates - is covered by the "old nick is not
+here" check right before it, which does fail its own mutation.
+
 ### 🧪 The console tests wait for the bot's decision, and say why an offer never came (#950)
 
 Three `test_adminchat` tests failed once on macos-latest / Python 3.14 for the #942 merge, each waiting its full

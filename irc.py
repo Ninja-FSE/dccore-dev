@@ -1012,6 +1012,11 @@ def note_observed_departure(nick, channel, now=None):
             "channel": str(channel or "").strip().lower(),
             "at": time.time() if now is None else now,
         }
+    # #376 option B: an observed departure of a BOT whose ident we hold -
+    # the only kind webserver._ident_merges() will merge from.
+    with runtime.bot_idents_lock:
+        if key in runtime.bot_idents:
+            runtime.bot_departures[key] = time.time() if now is None else now
 
 
 def _prune_recent_departures(now):
@@ -1913,6 +1918,61 @@ def _capture_channel_advert(user, target, msg, now=None):
     _advert_tails[key] = [started, stitched]
     _record_bot(key, user, target, merged, now)
     _flush_known_bots()
+
+
+@never_breaks_the_read_loop
+def _capture_bot_ident(user, user_host, now=None):
+    """Remember a known bot's IDENT, in memory only (#376, option B).
+
+    Only for a nick in the bot registry, and only the part before the "@" -
+    the host and the IP are never kept, in any form. See runtime.bot_idents
+    for why this is RAM only and what reads it. A changed ident starts the
+    record again: it is a different connection."""
+    key = str(user or "").strip().lower()
+    if not key or key not in runtime.known_bots:
+        return
+    ident = str(user_host or "").split("@", 1)[0].strip()
+    if not ident:
+        return
+    now = time.time() if now is None else now
+    with runtime.bot_idents_lock:
+        record = runtime.bot_idents.get(key)
+        if record is None or record.get("ident") != ident:
+            runtime.bot_idents[key] = {"ident": ident, "first_seen": now}
+        # Bounded by the registry: a bot it has forgotten is forgotten here.
+        if len(runtime.bot_idents) > len(runtime.known_bots) + 50:
+            for gone in [k for k in runtime.bot_idents if k not in runtime.known_bots]:
+                runtime.bot_idents.pop(gone, None)
+                runtime.bot_departures.pop(gone, None)
+
+
+def note_bot_renamed(old_nick, new_nick):
+    """A NICK message from a known bot: proof, so its rows merge (#376).
+
+    The server says exactly who became whom, so there is nothing to infer.
+    The row is shown under the CURRENT nick: the old one becomes an alias of
+    the new, anything that pointed at the old follows it, and the new nick is
+    nobody's alias any more - which is what keeps a bot that goes back and
+    forth from ending up aliased to itself. Display only, like every alias.
+    Returns True when an alias was written."""
+    old_key = str(old_nick or "").strip().lower()
+    new_key = str(new_nick or "").strip().lower()
+    if not old_key or not new_key or old_key == new_key:
+        return False
+    held = getattr(config, "fetched_bot_lists", None) or {}
+    if old_key not in runtime.known_bots and old_key not in held:
+        return False
+    new_nick = str(new_nick).strip()
+    with runtime.nick_aliases_lock:
+        # dict(...), not list(...): this module's `import list` shadows the builtin.
+        for alias, primary in dict(runtime.nick_aliases).items():
+            if str(primary).lower() == old_key:
+                runtime.nick_aliases[alias] = new_nick
+        runtime.nick_aliases[old_key] = new_nick
+        runtime.nick_aliases.pop(new_key, None)
+    print(f"[ALT-NICK] {old_nick} is now {new_nick} - showing them as one "
+          f"bot in the List Browser.")
+    return True
 
 
 @never_breaks_the_read_loop
@@ -3182,6 +3242,10 @@ def irc_loop():
                             # outbound messages - see note_nick_change().
                             note_nick_change(nick_match.group(1),
                                              nick_match.group(2).strip())
+                            # A known bot changing nick: its List Browser
+                            # rows merge, on proof (#376).
+                            note_bot_renamed(nick_match.group(1),
+                                             nick_match.group(2).strip())
                             
                     # Anchored: this writes straight into config.whois_status.
                     if is_server_numeric(line, "352"):
@@ -3450,6 +3514,8 @@ def irc_loop():
                         # advertising in a channel we sit in is not subject to
                         # our ban list.
                         _capture_channel_advert(user, target_chan, msg)
+                        # #376: a known bot's ident, memory only.
+                        _capture_bot_ident(user, user_host)
 
                         # Someone else asking a bot for its list (#926): the
                         # automatic grab leaves that bot alone for a while.

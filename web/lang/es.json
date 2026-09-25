@@ -134,6 +134,7 @@
   "filelists.typeANickToForget": "Escribe primero en la casilla el nick que quieres olvidar.",
   "filelists.handEnteredTag": "a mano",
   "filelists.handEnteredTitle": "Añadiste este bot por su nick. No se le ha visto anunciarse.",
+  "filelists.alsoSeenAs": "Visto también como {nicks}",
   "filelists.purgeThisBotTitle": "Eliminar todo lo descargado de este bot: cada lista, sus archivos y sus filas del índice de búsqueda.",
   "filelists.purgeThisBotsLists": "Purgar las listas de este bot",
   "filelists.redownloadList": "Volver a descargar la lista",

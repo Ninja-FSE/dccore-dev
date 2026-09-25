@@ -416,6 +416,28 @@ recent_departures_lock = threading.Lock()
 nick_aliases = {}
 nick_aliases_lock = threading.Lock()
 
+# The same bot under another nick, by its IDENT (#376, option B). Both RAM
+# ONLY, and that is the decision this rests on: never written to disk, never
+# logged, gone on restart - not a registry of other operators' addresses. No
+# host and no IP are kept in any form; the ident is the part before the "@"
+# that the user or their client picks.
+#
+# bot_idents: nick.lower() -> {"ident", "first_seen"}, for a bot we saw
+# advertising this session (irc._capture_bot_ident()). first_seen is its
+# first advert since then, which is what "never advertising at the same
+# time" is measured against.
+#
+# bot_departures: nick.lower() -> when a QUIT, PART, KICK or NICK of that bot
+# was OBSERVED (irc.note_observed_departure()), never just its absence -
+# absence also covers "was never in a channel we share".
+#
+# webserver._ident_merges() is the one reader, and like nick_aliases it is
+# display only: fetched_bot_lists, known_bots and the counters stay keyed per
+# nick.
+bot_idents = {}
+bot_departures = {}
+bot_idents_lock = threading.Lock()
+
 
 def resolve_display_nick(nick):
     """The nick a List Browser row should be grouped and labelled under.

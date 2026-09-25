@@ -134,6 +134,7 @@
   "filelists.typeANickToForget": "Type the nick to forget in the box first.",
   "filelists.handEnteredTag": "by hand",
   "filelists.handEnteredTitle": "You added this bot by nick. It has not been seen advertising.",
+  "filelists.alsoSeenAs": "Also seen as {nicks}",
   "filelists.purgeThisBotTitle": "Remove everything downloaded from this bot: every list, its files and its search index rows.",
   "filelists.purgeThisBotsLists": "Purge this bot's lists",
   "filelists.redownloadList": "Re-download list",

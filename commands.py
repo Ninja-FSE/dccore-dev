@@ -446,6 +446,8 @@ PRESERVE_RUNTIME = (
     'nick_aliases',       # the merges already inferred. Losing this un-merges
                           # every bot the List Browser had already combined,
                           # for no reason connected to the setting that changed
+    'bot_idents',         # #376: a rehash is not a restart. The idents are RAM
+    'bot_departures',     # only and go at restart; a settings save keeps them
     'list_grab_others_asked',  # #926: who just asked which bot for its list.
                           # Losing it lets the automatic grab ask a bot that is
                           # busy sending someone else's list

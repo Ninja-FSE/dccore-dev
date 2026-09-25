@@ -1107,6 +1107,9 @@ recent_departures = runtime.recent_departures
 # #926: who else asked which bot for its list - list_grab.py.
 list_grab_others_asked = runtime.list_grab_others_asked
 nick_aliases = runtime.nick_aliases
+# #376 option B - see runtime.py.
+bot_idents = runtime.bot_idents
+bot_departures = runtime.bot_departures
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
