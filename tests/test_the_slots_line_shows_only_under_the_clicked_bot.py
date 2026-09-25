@@ -64,6 +64,14 @@ class TheLineIsOutOfTheLayoutUntilItsBotIsClicked(unittest.TestCase):
         self.assertRegex(line, r"flex:\s*0\s+0\s+100%")
         self.assertRegex(css_rule(self.css, ".bot-row"), r"flex-wrap:\s*wrap")
 
+    def test_it_comes_last_so_the_count_stays_on_the_names_line(self):
+        """botRow() appends the file count AFTER this line. A full-width item
+        that wraps takes its own line in markup order, so without `order` the
+        count went to a third line under it - reported from the operator's own
+        dashboard on the first try - instead of staying on the name's line at
+        the right."""
+        self.assertRegex(css_rule(self.css, ".bot-row-live"), r"order:\s*1\b")
+
     def test_the_gap_between_the_two_lines_is_small(self):
         """`gap` is both directions in a wrapping flex row: a bare `gap: 10px`
         would leave ten pixels between the name and its own slots line."""

@@ -19,8 +19,9 @@ the open one closes it. The presence rule is unchanged: still only online bots h
   and `botRow()` reads it back; a row with a line carries `aria-expanded`.
 - Web files only (`web/app.js`, `web/style.css`); no daemon change and no new setting.
 
-`tests/test_the_slots_line_shows_only_under_the_clicked_bot.py` (10): the stylesheet hides it by default, shows it
-for the open row and gives it a line of its own with a small gap; the click marks its bot before any early return
+`tests/test_the_slots_line_shows_only_under_the_clicked_bot.py` (11): the stylesheet hides it by default, shows it
+for the open row, gives it a line of its own with a small gap and puts it last (`order: 1`) - the file count is
+appended after it in the markup, and without that it wrapped onto a third line instead of staying on the name's line; the click marks its bot before any early return
 and a rebuilt row reads the state back; and - under node, skipped where it is not installed - the real click fragment
 and `markFilelistsInfoBot()` run against stub rows: one line open at a time, a second click closes it, a row with no
 line is never marked expandable. Mutation-checked: shown by default, a click that never closes, the marking moved
