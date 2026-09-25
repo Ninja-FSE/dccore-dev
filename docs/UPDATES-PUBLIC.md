@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: "Online only" in the List Browser now takes the offline bots off the list at the side.** It used to work only while you had typed something to search for - with the search box empty, ticking it changed nothing. Now ticking it hides every bot that is not in a channel right now (a bot still joining is kept, and so are your own lists and the bot you have open), and unticking it brings them back.
+
 ## v1.13.1 — The Fetch Queue Looks After Itself
 
 - **Added: automatic list grabbing (off by default).** Turn on *Grab the lists of bots you have no list from* (`AUTO_GRAB_LISTS`, under *Grabbing lists*) and DCCore asks for the list of each bot that advertises one and whose list you do not have yet - politely: one at a time, at most one every 10 minutes, after a random wait of 5 seconds to 6 minutes, not at all if someone else just asked that bot, and never more than 3 tries per bot, 30 minutes apart. You can skip small or slow bots, bots in "servers only" mode are always skipped, and a list you remove is not fetched back.

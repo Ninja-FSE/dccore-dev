@@ -4,6 +4,31 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🟢 "Online only" takes the offline bots off the sidebar (#948)
+
+#931 added the box beside the List Browser's filter, but it only reached `/api/filelists/search?online=1`, and that
+request is made only while a search term is typed. With the filter box empty, ticking it changed the box and
+nothing else on screen: the operator ticked it and the offline (red) bots were still listed.
+
+Now the sidebar leaves out a bot that is known to be away and redraws the moment the box changes, without waiting
+for the four-second poll (`state.filelistsBotRows` is the rows it was last built from).
+
+- **Only a bot known to be away goes** (`online === false`). `null` is a bot that has not finished joining, where the
+  membership mirror is empty and every nick would read as gone - it stays.
+- **Never removed:** our own lists, and the bot whose list is open (the table would be showing a list the sidebar no
+  longer has a row for).
+- **Only the row is left out.** `state.filelistsBots` still holds every bot; the fetch box, the tabs and
+  `entriesForNick()` look bots up there.
+- A soft reload can hand the box back ticked, so the state now starts from what is on screen instead of `false`.
+- Web file only (`web/app.js`); no daemon change, no new setting.
+
+`tests/test_online_only_filters_the_sidebar.py` (9): the state is declared and starts from the box, ticking redraws the
+sidebar before it searches, every bot is registered before any row is left out; and under node (skipped where it is
+not installed) the real `hiddenByOnlineOnly()` with the real `primaryEntry()`, `isOwnSource()` and `nickOfSource()`:
+nothing goes while the box is off, a bot that is here stays, one known to be away goes, one still joining stays, our
+own lists stay, the open bot stays while another away bot goes. Mutation-checked five ways: unknown presence hidden
+too, own lists hidden, the open bot hidden, the box ignored, and ticking not redrawing each fail a test.
+
 ## 🟩 v1.13.1 (2026-09-24) - "The Fetch Queue Looks After Itself"
 
 ### 🧲 Lists are grabbed automatically, on AutoGet's rules (#926)
