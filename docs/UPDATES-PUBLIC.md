@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: "Online only" in the List Browser now takes the offline bots off the list at the side.** It used to work only while you had typed something to search for - with the search box empty, ticking it changed nothing. Now ticking it hides every bot that is not in a channel right now (a bot still joining is kept, and so are your own lists and the bot you have open), and unticking it brings them back.
 - **Changed: a bot's free slots, queue and speed now show under it when you click it in the List Browser**, instead of on every row at once - where they crowded the name out on a narrow sidebar. Click a bot to see its line, click another to see that one instead, click the open one to close it. Any bot you can see there can be clicked, including one whose list you have not fetched yet.
 
 ## v1.13.1 — The Fetch Queue Looks After Itself

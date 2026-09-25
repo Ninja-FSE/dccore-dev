@@ -113,6 +113,10 @@
     // than asking again: the rows are already here, and a round trip per
     // click would be slower than the search that produced them.
     filelistsExcluded: {}, filelistsFilterPayload: null, filelistsMatchTerms: [],
+    // #948: the "Online only" box, and the rows the sidebar was last built
+    // from - kept so ticking the box redraws the sidebar at once instead of
+    // waiting for the next poll to hand it the same rows again.
+    filelistsOnlineOnly: false, filelistsBotRows: null,
     // #943: the one bot (lowercased nick) whose slots/queue/speed line is
     // open under its row. Set by a click on any sidebar row, so it is NOT the
     // open list - a bot we only saw advertising can be clicked for its line
@@ -1572,8 +1576,15 @@
 
   // #926: search only the lists of bots that are in a channel right now.
   if (el.filelistsOnlineOnly) {
+    // A soft reload can hand the box back ticked; the state must start from
+    // what is on screen, not from false.
+    state.filelistsOnlineOnly = el.filelistsOnlineOnly.checked;
     el.filelistsOnlineOnly.addEventListener("change", function () {
       state.filelistsOnlineOnly = el.filelistsOnlineOnly.checked;
+      // #948: the sidebar too, and now - not only the search. With no term
+      // typed the search has nothing to ask, so this used to change nothing
+      // at all on screen.
+      if (state.filelistsBotRows) { renderFilelistsSwitcher(state.filelistsBotRows); }
       runFilelistsFilter();
     });
   }
@@ -1615,6 +1626,23 @@
       renderFilelistsSwitcher(rows);
       renderFilelistsFreshness();
     }).catch(function () { markConnection(false); });
+  }
+
+  // #948: whether "Online only" keeps this bot's row off the sidebar. Only a
+  // bot KNOWN to be away goes (`online === false`); `null` is a bot that has
+  // not finished joining, where the membership mirror is empty and every nick
+  // would read as gone (see presenceClass). Our own lists never go, and
+  // neither does the bot whose list is open - the table would be showing a
+  // list the sidebar no longer has a row for. Only the ROW is left out:
+  // state.filelistsBots still holds every bot, since the rest of the page
+  // looks bots up there.
+  function hiddenByOnlineOnly(group) {
+    if (!state.filelistsOnlineOnly) { return false; }
+    var primary = primaryEntry(group);
+    if (isOwnSource(primary.bot)) { return false; }
+    var open = nickOfSource(state.filelistsSource || "__own__").toLowerCase();
+    if (String(group.nick || "").toLowerCase() === open) { return false; }
+    return primary.online === false;
   }
 
   // BUILT WITH DOM APIs, not concatenated markup. A bot nick is remote input
@@ -1670,7 +1698,9 @@
       }
       group.entries.push(row);
     });
+    state.filelistsBotRows = rows;
     groupOrder.forEach(function (nickKey) {
+      if (hiddenByOnlineOnly(groupsByNick[nickKey])) { return; }
       list.appendChild(botRow(groupsByNick[nickKey]));
     });
 
