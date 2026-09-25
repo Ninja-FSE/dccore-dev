@@ -157,11 +157,15 @@ nick (`ORIGINAL_NICK`, falling back to `NICKNAME`) however it is built, live or
 from a subprocess, so it survives the bot being on its alt nick at rebuild
 time.
 
-The sidebar half is still open: a bot that reconnects under its alt nick still
-shows there as a second bot, since nothing merges the two adverts. What is the
-stable identity to merge them on — the services account, the host, an operator
-mapping in settings? And is the fix to normalise at fetch time, to rewrite the
-request lines on the way out, or only to merge the two rows in the sidebar?
+**The sidebar half is done, for display only.** A bot seen under two nicks is
+one row, shown under the nick it has now, with the other named in the row's
+tooltip. Two kinds of evidence count. A NICK message from a known bot is proof.
+The other is its **ident**, together with the same advertised file count, an
+old nick whose QUIT, PART or NICK was actually seen, and the two never
+advertising at the same time. The ident is held in memory only: never written,
+never logged, gone on restart. No host or IP is kept at all. Anything short of
+all of that leaves two rows. Saved lists, the registry and the counters stay
+keyed per nick, so a wrong merge could only ever mis-group a row.
 
 **A bot that never advertises can now be added by hand.** A bot that answers
 `@nick` and `!nick <track>` perfectly well but never advertises in a shared

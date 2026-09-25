@@ -134,6 +134,7 @@
   "filelists.typeANickToForget": "Tapez d'abord le pseudo à oublier dans la case.",
   "filelists.handEnteredTag": "à la main",
   "filelists.handEnteredTitle": "Vous avez ajouté ce bot par son pseudo. Il n'a pas été vu s'annoncer.",
+  "filelists.alsoSeenAs": "Vu aussi sous le nom {nicks}",
   "filelists.purgeThisBotTitle": "Supprimer tout ce qui a été téléchargé de ce bot : chaque liste, ses fichiers et ses entrées d'index de recherche.",
   "filelists.purgeThisBotsLists": "Purger les listes de ce bot",
   "filelists.redownloadList": "Retélécharger la liste",

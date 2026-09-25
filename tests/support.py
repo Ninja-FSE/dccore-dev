@@ -109,6 +109,11 @@ RUNTIME_CONTAINERS = {
     # behind and get merged with it in the List Browser.
     "recent_departures": dict,
     "nick_aliases": dict,
+    # #376 option B: a leftover ident or departure is a merge the next test
+    # never set up.
+    "bot_idents": dict,
+    "bot_departures": dict,
+    "recent_joins": dict,
     # Same reasoning: a leftover is one test's message showing up in the next
     # test's panel.
     "private_messages": list,

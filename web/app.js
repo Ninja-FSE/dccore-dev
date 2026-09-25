@@ -1743,10 +1743,41 @@
   // own list, and every not-held advert-only row, always has exactly one
   // entry and IS that entry either way).
   function primaryEntry(group) {
+    // #376: a row merged from two nicks of one bot can hold a main list we
+    // HAVE (under the old nick) and an advert-only row (the new one) -
+    // the list we hold is what a click should open.
+    for (var h = 0; h < group.entries.length; h++) {
+      if (!group.entries[h].list && group.entries[h].held) { return group.entries[h]; }
+    }
     for (var i = 0; i < group.entries.length; i++) {
       if (!group.entries[i].list) { return group.entries[i]; }
     }
     return group.entries[0];
+  }
+
+  // #376: the other nicks a merged row stands for - the real nick of each
+  // entry, where it is not the one the row is shown under.
+  function otherNicks(group) {
+    var seen = {};
+    var others = [];
+    var shown = String(group.nick || "").toLowerCase();
+    group.entries.forEach(function (entry) {
+      var real = splitFetchedSource(entry.bot).nick;
+      var key = String(real || "").toLowerCase();
+      if (key && key !== shown && !seen[key]) {
+        seen[key] = true;
+        others.push(real);
+      }
+    });
+    return others;
+  }
+
+  // #376: the bot is HERE if it is here under any of its nicks.
+  function groupOnline(group, primary) {
+    for (var i = 0; i < group.entries.length; i++) {
+      if (group.entries[i].online === true) { return true; }
+    }
+    return primary.online;
   }
 
   function botRow(group) {
@@ -1775,9 +1806,10 @@
     //
     // The dot is now whether they are HERE, and the name's colour is what we
     // hold from them. Asked for exactly that way in the beta.
+    var online = groupOnline(group, primary);
     var led = document.createElement("span");
-    led.className = "led " + presenceClass(primary.online);
-    led.title = presenceTitle(primary.online);
+    led.className = "led " + presenceClass(online);
+    led.title = presenceTitle(online);
     button.appendChild(led);
 
     var name = document.createElement("span");
@@ -1790,6 +1822,11 @@
     // keeps its existing label untouched, own lists included ("Our own
     // list", or the list's own name).
     name.textContent = grouped ? group.nick : (primary.label || primary.bot);
+    // #376: one bot seen under two nicks - say which, where it is asked for.
+    var others = otherNicks(group);
+    if (others.length) {
+      name.title += " \u00b7 " + t("filelists.alsoSeenAs").replace("{nicks}", others.join(", "));
+    }
     button.appendChild(name);
 
     // Named by the operator rather than seen advertising (#376): say so on
@@ -1812,11 +1849,14 @@
       button.appendChild(fresh);
     }
 
-    if (grouped) {
+    // How many LISTS we hold for the row - not how many entries it groups:
+    // a bot merged from two nicks (#376) is two entries and may be one list.
+    var listCount = group.entries.filter(function (entry) { return entry.held; }).length;
+    if (listCount > 1) {
       var badge = document.createElement("span");
       badge.className = "bot-row-lists-badge";
-      badge.textContent = String(group.entries.length);
-      badge.title = t("filelists.listsBadgeTitle").replace("{count}", group.entries.length);
+      badge.textContent = String(listCount);
+      badge.title = t("filelists.listsBadgeTitle").replace("{count}", listCount);
       button.appendChild(badge);
     }
 
@@ -1889,6 +1929,15 @@
   // exactly what group.nick already carries for it (see renderFilelistsSwitcher).
   function nickOfSource(source) {
     return splitFetchedSource(source).nick;
+  }
+
+  // #376: the nick the sidebar SHOWS a source under - its real nick, unless
+  // the server merged that bot into another nick's row (row.nick). Rows are
+  // grouped by this, so what is open has to be compared by it too, or a
+  // merged bot's row is never marked open and its tabs never appear.
+  function displayNickOfSource(source) {
+    var row = state.filelistsBots[source];
+    return row && row.nick ? String(row.nick) : nickOfSource(source);
   }
 
   // Every row currently held for one bot, wherever state.filelistsBots put
@@ -2000,7 +2049,7 @@
     // VIDEO list, whose row shows the bot's PRIMARY key in dataset.bot - the
     // row still has to read as "active" for any of its own bot's lists, not
     // only its primary one.
-    var openNick = nickOfSource(state.filelistsSource).toLowerCase();
+    var openNick = displayNickOfSource(state.filelistsSource).toLowerCase();
     var rows = el.filelistsBotList.querySelectorAll(".bot-row");
     for (var i = 0; i < rows.length; i++) {
       var active = String(rows[i].dataset.nick || "").toLowerCase() === openNick;
@@ -2047,7 +2096,10 @@
     var container = el.filelistsListTabs;
     if (!container) { return; }
 
-    var entries = entriesForNick(nickOfSource(state.filelistsSource));
+    // Lists we HOLD: a merged row (#376) can also carry the new nick's
+    // advert-only entry, which is not a list to open.
+    var entries = entriesForNick(displayNickOfSource(state.filelistsSource))
+      .filter(function (entry) { return entry.held; });
     if (entries.length < 2) {
       container.hidden = true;
       container.innerHTML = "";

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a bot that reconnects under another nick is no longer shown twice in the List Browser.** When a bot changes nick while DCCore watches, or comes back on its alternate nick after losing its connection, its rows are now one, under the nick it has now; the other nick is named when you point at it. For the second case DCCore compares only the part of the address before the "@" (the ident), keeps it in memory only, and merges only when the file count matches too and the old nick was seen leaving - anything less and the two rows stay.
 - **Fixed: with more than one list, the Stats page now counts all of them.** The Library figures - files shared, size, album folders, when the list was built - used to describe only your first (primary) list, so a bot serving music and films showed the music list's numbers as the whole library. They are now totals across every list, and a **By list** table under them shows each list's own figures. With a single list the page looks exactly as before.
 
 - **Docs: every feature is listed in one place again.** The roadmap's *Implemented* section ([docs/FUTURE.md](FUTURE.md)) had fallen behind: it now covers what fetching from other bots does today (queued requests, the self-running download queue, paused bots, the List Browser, automatic refresh and grabbing), the rebuild that keeps answering, faster scans, length and quality in the list, quoted searches and the update check. The README's summary points to it.

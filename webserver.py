@@ -1483,6 +1483,9 @@ def build_fetched_bot_list_summaries():
     # asking user_is_present_in_ram() per row would rescan every channel's
     # membership per row, per poll.
     present = present_nicks()
+    # #376 option B, also once per payload: which absent nicks are the same
+    # bot as one that is here, by ident.
+    merges = _ident_merges(known, present)
 
     for key, entry in store.items():
         bot = entry.get("bot", key)
@@ -1517,7 +1520,7 @@ def build_fetched_bot_list_summaries():
                 # sidebar row - see runtime.resolve_display_nick()'s own
                 # comment for why nothing else is allowed to change here.
                 "bot": list_fetch.index_key(bot, marker),
-                "nick": _display_nick(bot, present),
+                "nick": _display_nick(bot, present, merges),
                 "list": marker,
                 "label": f"{bot} - {marker}" if marker else bot,
                 "held": True,
@@ -1561,7 +1564,7 @@ def build_fetched_bot_list_summaries():
         now = _advert_now(known, bot)
         rows.append({
             "bot": bot,
-            "nick": _display_nick(bot, present),
+            "nick": _display_nick(bot, present, merges),
             "list": "",
             "label": bot,
             "held": False,
@@ -1581,7 +1584,73 @@ def build_fetched_bot_list_summaries():
     return rows
 
 
-def _display_nick(bot, present):
+def _ident_merges(known, present):
+    """{departed nick (lower): current nick} for a bot seen again under
+    another nick, by its ident (#376, option B). Display only.
+
+    All of these have to hold, and each one fails safe - no merge, the rows
+    stay two:
+
+      * the old nick's departure was OBSERVED (a QUIT, PART, KICK or NICK -
+        runtime.bot_departures), and it is not here now;
+      * the new nick is here now;
+      * both have the SAME IDENT, seen this session (runtime.bot_idents,
+        memory only - no host or IP is kept at all);
+      * both advertise the SAME FILE COUNT - two libraries almost never
+        match to the file;
+      * they were never ADVERTISING at the same time: the old nick's last
+        advert came before the new nick was first seen this session. A ghost
+        still sitting in the channel after its connection died cannot
+        advertise, so the ordinary alt-nick reconnect passes this, and two
+        live bots that happen to share an ident and a count do not;
+      * the departure and the new nick's first sighting are within
+        irc.IDENT_MERGE_WINDOW_SECONDS of each other, either way round - a
+        ghost pings out after its owner is back, a clean QUIT comes before.
+        Hours apart, the same ident and count are left as a coincidence;
+      * exactly one current nick matches. Two candidates is not an answer.
+    """
+    import irc
+
+    with runtime.bot_idents_lock:
+        idents = {key: dict(record) for key, record in runtime.bot_idents.items()}
+        departed = dict(runtime.bot_departures)
+    if not present or not departed:
+        return {}
+    window = irc.IDENT_MERGE_WINDOW_SECONDS
+
+    def files_of(key):
+        files = (known.get(key) or {}).get("files")
+        return files if isinstance(files, int) and not isinstance(files, bool) else None
+
+    here = {}
+    for key, record in idents.items():
+        files = files_of(key)
+        if key in present and files is not None:
+            nick = (known.get(key) or {}).get("nick") or key
+            here.setdefault((record.get("ident"), files), []).append(
+                (key, nick, float(record.get("first_seen") or 0)))
+
+    merges = {}
+    for key, left_at in departed.items():
+        record = idents.get(key)
+        files = files_of(key)
+        if key in present or record is None or files is None:
+            continue
+        # Never itself: a nick that came back matches its own record.
+        matches = [m for m in here.get((record.get("ident"), files), []) if m[0] != key]
+        if len(matches) != 1:
+            continue
+        _other, nick, first_seen = matches[0]
+        last_advert = float((known.get(key) or {}).get("last_seen") or 0)
+        if last_advert >= first_seen:
+            continue
+        if abs(first_seen - float(left_at or 0)) > window:
+            continue
+        merges[key] = nick
+    return merges
+
+
+def _display_nick(bot, present, merges=None):
     """resolve_display_nick(), minus any alias the network is CURRENTLY
     disproving.
 
@@ -1603,6 +1672,11 @@ def _display_nick(bot, present):
     known_bots, or a download counter.
     """
     primary = runtime.resolve_display_nick(bot)
+    # #376 option B: no alias from a NICK or a reconnect, but the same bot by
+    # ident - see _ident_merges(). Only ever maps a nick that is NOT here to
+    # one that is, so the presence check below never needs to undo it.
+    if primary == bot and merges:
+        return merges.get(str(bot).lower(), bot)
     if primary == bot or not present:
         return primary
     if primary.lower() in present and bot.lower() in present:
