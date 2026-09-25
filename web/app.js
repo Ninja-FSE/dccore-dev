@@ -220,12 +220,7 @@
     stSentTotalFiles:      document.getElementById("st-sent-total-files"),
     stSentTodayFiles:      document.getElementById("st-sent-today-files"),
     stSentYesterdayFiles:  document.getElementById("st-sent-yesterday-files"),
-    stFiles:               document.getElementById("st-files"),
-    stSize:                document.getElementById("st-size"),
-    stAlbums:              document.getElementById("st-albums"),
-    stBuilt:               document.getElementById("st-built"),
-    stLists:               document.getElementById("st-lists"),
-    stListsBody:           document.getElementById("st-lists-body"),
+    stLibrary:             document.getElementById("st-library"),
     stFoot:                document.getElementById("st-foot"),
     stTopFiles:            document.getElementById("st-top-files"),
     importFile:            document.getElementById("import-file"),
@@ -5549,51 +5544,61 @@
     setStat(el.stSentYesterdayFiles, t("stats.labelledFileCount")
       .replace("{label}", t("common.yesterday")).replace("{count}", (s.yesterday_files || 0).toLocaleString()));
 
-    setStat(el.stFiles, (lib.files || 0).toLocaleString());
-    setStat(el.stSize, lib.size || "0B");
-    // null means "no RAR list has been built", which is not the same claim as
-    // "this bot offers no albums" - so it shows as unknown rather than zero.
-    setStat(el.stAlbums, lib.rar_folders === null || lib.rar_folders === undefined
-            ? "—" : lib.rar_folders.toLocaleString());
-    setStat(el.stBuilt, lib.list_date || "—");
-    renderLibraryLists(lib.lists);
+    renderLibrary(lib);
 
     renderTopDownloads(data.top);
     setStat(el.stFoot, data.version || "");
   }
 
-  // #952: one row per served list - what the four Library cards above add up
-  // from. Shown only when there is more than one: with a single list the row
-  // would repeat the cards, and a single-list install should look as it
-  // always did. Built with DOM APIs and textContent, not concatenated markup:
-  // a list's name is whatever the operator typed on the Library page.
-  function renderLibraryLists(lists) {
-    if (!el.stLists || !el.stListsBody) { return; }
-    var rows = Array.isArray(lists) ? lists : [];
-    var show = rows.length > 1;
-    el.stLists.hidden = !show;
-    el.stListsBody.innerHTML = "";
-    if (!show) { return; }
-    rows.forEach(function (row) {
-      var tr = document.createElement("tr");
-      var cells = [
-        [row.name, false],
-        [Number(row.files || 0).toLocaleString(), true],
-        [row.size || "0B", true],
-        // Unknown, not zero: same reading as the Album folders card above.
-        [row.rar_folders === null || row.rar_folders === undefined
-          ? "—" : Number(row.rar_folders).toLocaleString(), true],
-        [row.list_date || "—", true]
-      ];
-      cells.forEach(function (cell) {
-        var td = document.createElement("td");
-        td.textContent = String(cell[0]);
-        if (cell[1]) { td.className = "col-num"; }
-        tr.appendChild(td);
+  // #952: the Library cards, built rather than fixed because how many there are
+  // depends on how many lists this bot serves: the TOTAL, then one card per
+  // list when there is more than one, then when the list was built. Each
+  // follows the Sent row's shape above it - the size big, and under it a label
+  // with the file count ("Total \u00b7 71 278 files") - so the page reads one
+  // way. A list's card is labelled with the name the operator gave it. Built
+  // with DOM APIs and textContent, not concatenated markup: that name is
+  // whatever the operator typed on the Library page.
+  function libraryCard(value, label, small) {
+    var card = document.createElement("div");
+    card.className = "stat-card";
+    var big = document.createElement("div");
+    big.className = small ? "stat-value stat-value-sm" : "stat-value";
+    big.textContent = String(value);
+    var caption = document.createElement("div");
+    caption.className = "stat-label";
+    caption.textContent = String(label);
+    card.appendChild(big);
+    card.appendChild(caption);
+    return card;
+  }
+
+  // "Total \u00b7 71 278 files", plus the album count when there is one. Null
+  // means "no RAR list has been built", which is not the same claim as "this
+  // bot offers no albums" - so it is left out, never shown as zero.
+  function libraryLabel(name, files, albums) {
+    var text = t("stats.labelledFileCount")
+      .replace("{label}", name).replace("{count}", Number(files || 0).toLocaleString());
+    if (albums !== null && albums !== undefined) {
+      text += " \u00b7 " + t("stats.albumFoldersCount")
+        .replace("{count}", Number(albums).toLocaleString());
+    }
+    return text;
+  }
+
+  function renderLibrary(lib) {
+    if (!el.stLibrary) { return; }
+    lib = lib || {};
+    var lists = Array.isArray(lib.lists) ? lib.lists : [];
+    el.stLibrary.innerHTML = "";
+    el.stLibrary.appendChild(libraryCard(
+      lib.size || "0B", libraryLabel(t("common.total"), lib.files, lib.rar_folders)));
+    if (lists.length > 1) {
+      lists.forEach(function (row) {
+        el.stLibrary.appendChild(libraryCard(
+          row.size || "0B", libraryLabel(String(row.name), row.files, row.rar_folders)));
       });
-      tr.firstChild.title = String(row.name);
-      el.stListsBody.appendChild(tr);
-    });
+    }
+    el.stLibrary.appendChild(libraryCard(lib.list_date || "\u2014", t("stats.listBuilt"), true));
   }
 
   function loadStats() {
