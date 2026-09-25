@@ -16,6 +16,29 @@ not what time it is. The daemon is unchanged - a live uptime is meant to move.
 New `test_a_second_ticking_between_the_two_calls_cannot_fail_it` reproduces it with a clock that moves a second on
 every read, and asserts that the clock really ticks, so it cannot pass by proving nothing. Mutation-checked: without
 the hold it fails on `/api/stats`, and with an uptime that does not move, its own guard fails.
+
+### 🛡️ MAX_FETCH_FILE_SIZE = 0 keeps a zip-bomb guard for list archives (#945)
+
+#940 fixed #939 - 0 ("no limit") read as a zero-byte ceiling - by resolving 0 to `float("inf")` in
+`list_fetch._fetch_file_size_budget()`. For a LIST ARCHIVE that value is the zip-bomb guard: `_validate_zip_members()`'s
+sum of declared sizes is the only bound on extraction (`ZipExtFile` truncates each member to what it declares, which
+was now unbounded, and `max_list_text_size()` is checked only after extraction). With the setting at 0, a small zip of
+zeros unpacked without limit - about 10 GB through the default 10 MB `MAX_FETCH_LIST_FILE_SIZE`, and with no bound at
+all with that at 0 too. Reproduced on main: an 8001-byte member against a 1000-byte `MAX_LIST_TEXT_SIZE` was extracted
+in full and only then refused by the list-size check.
+
+0 stays "no limit" for files. For a list archive it now falls back to `max_list_text_size() * MAX_LISTS_PER_ARCHIVE`
+(1 GB with the defaults): any list over `max_list_text_size()` is refused after extraction anyway, so this refuses
+nothing that would have been kept - #940's live 482 MB case still passes. The rejection names the ceiling that applied
+(`_fetch_file_size_budget_name()`) rather than "MAX_FETCH_FILE_SIZE (0 bytes)". The setting's help and `defaults.py`
+say so; `settings.conf.sample` regenerated.
+
+`tests/test_list_fetch.py`: `test_zero_still_keeps_a_zip_bomb_guard_for_a_list` (the reproduction, refused before
+extraction with nothing left behind) and `test_the_fallback_ceiling_follows_the_list_size_setting`; and the two
+assertions #940 dropped from `test_a_declared_total_size_over_the_cap_is_rejected_before_extracting` (no registry
+entry, no extract directory) are back. Mutation-checked: `inf` again, a fallback ignoring `MAX_LIST_TEXT_SIZE`, 0 as a
+zero-byte ceiling (#939 again) and the old message each fail a test.
+
 ### 🟢 "Online only" takes the offline bots off the sidebar (#948)
 
 #931 added the box beside the List Browser's filter, but it only reached `/api/filelists/search?online=1`, and that

@@ -767,7 +767,7 @@ FETCH_HISTORY_MAX_ROWS: int = 500      # Hard cap on finished rows, whatever the
 # taking the choice from everyone else. Defensible here because a fetch is
 # SOLICITED: only an offer matching a row this operator created is ever
 # accepted, so it is their own request landing on their own disk.
-MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect; 0 = no limit
+MAX_FETCH_FILE_SIZE: int    = 200 * 1024 * 1024   # 200 MB - reject the offer before we even connect; 0 = no limit (a list archive keeps a ceiling, #945)
 # The largest EXTRACTED list text this bot will parse from a peer, in bytes.
 # Every "!" line in it becomes a retained row, so this bounds memory rather
 # than disk. It was a fixed 20 MB, set from this operator's own 4 MB list -
