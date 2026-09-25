@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The console tests wait for the bot's decision, and say why an offer never came (#950)
+
+Three `test_adminchat` tests failed once on macos-latest / Python 3.14 for the #942 merge, each waiting its full
+5-8 s for the bot's `DCC CHAT chat <port>` offer and getting none; a rerun passed. The timestamps rule out plain
+slowness - the tests around them got their offers within milliseconds - so the offer was never sent. Two findings:
+
+- **`test_connect_mode_refuses_to_fall_back` did not wait for the thread it started.** It checked that connect mode
+  had not fallen back right after the dial was attempted, behind a `wait_for(lambda: True, timeout=0.2)` that returns
+  on its first poll. So it checked before the thread had decided: with connect mode broken on purpose it still passed
+  3 runs in 20. And the thread could decide after the test ended - with the real `_listen_and_serve` and the mode
+  already put back, fall back for real, take the one-listener flag after the next test's reset and hold it for
+  `LISTEN_TIMEOUT`, so the next test's offer was ignored. That is the first failure's shape
+  (`test_listen_mode_does_not_dial_at_all` is the next test). It now wraps `_connect_and_serve` and waits for it to
+  return; broken connect mode now fails 20 runs in 20.
+- **The other two (`TheListenerFlagReleasesBeforeTheSessionBlocks`) could not be pinned down** from a log that does not
+  carry the bot's own lines, and do not reproduce locally, where the flag is clear and 5 of the 11 ports are free when
+  they run. So every offer wait now has a 30 s ceiling (`OFFER_WAIT_SECONDS`, still returning the moment the offer
+  arrives) - Neo's suggestion, for a runner that truly stalls - and a failed wait says what was in the way:
+  `why_no_offer()` reports the one-listener flag and how many ports in the DCC range are free, so a next occurrence
+  names its own cause.
+
+Test-only; the daemon is unchanged.
+
 ### 📚 Every feature in one place: the roadmap catches up
 
 Where is every feature written down together? In `docs/FUTURE.md`'s *Implemented* section - the README's "What it
