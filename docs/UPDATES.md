@@ -11,7 +11,8 @@ does" is a summary that links to it - and it had fallen behind: the #926 PRs, am
 but not the roadmap, which that file's own header asks for in the same commit. Now listed: under *The file list*, quoted `@find` phrases, the rebuild that keeps answering (#923), the
 parallel scan (#922) and audio length/quality (#914); under *Receiving files from other bots*, understood replies
 (#927), the self-running queue (#928), paused bots and the low-disk wait (#929), the List Browser as a whole
-(per-archive tabs #399, freshness, *New*, slots/queue/speed, the cross-list filter and Online only, hand-entered bots),
+(per-archive tabs #399, freshness, *New*, slots/queue/speed under a clicked bot #943, the cross-list filter and
+Online only #931/#948, hand-entered bots),
 `AUTO_REFETCH_LISTS` with the 14-day rule and `AUTO_GRAB_LISTS`; under *Operating it*, the update check (#572). "The
 117 settings" is now "every setting" (131 today, and a count there goes stale with every one added). *A fetched list
 keeps only the peer's master* leaves *Planned*: every list in the archive has been kept since #399. The README's
