@@ -21,7 +21,10 @@ What DCCore does today, and what it does not do yet.
 
 - **One master list**, rebuilt by `!update`, from the dashboard, or by itself on a schedule (`LIST_REBUILD_SCHEDULE`: daily, weekly, monthly or every N hours), published atomically so a failed scan never overwrites a good index.
 - **Three formats** — `.txt`, `.zip` and `.rar`, all built every time; `LIST_FORMAT` picks which one is offered.
-- **Search** — `@find <words>` against the master list, with results fitted to the IRC line limit.
+- **Search** — `@find <words>` against the master list, with results fitted to the IRC line limit. Words in quotes must appear together, in that order: `@find "metal church" 1986`.
+- **Searching and downloading go on while the list rebuilds.** The new list is built beside the one people already have, and the bot pauses only for the few seconds it takes to swap it in (`PAUSE_ON_UPDATE`; `PAUSE_FOR_WHOLE_UPDATE` brings back the old whole-rebuild pause).
+- **Several folders scanned at once** (`LIST_SCAN_THREADS`, 16 by default), which is what makes a rebuild over a network drive shorter.
+- **Length and quality in the list, if you want them** (`LIST_SHOW_AUDIO_INFO`) — every MP3 and FLAC row gets its duration and bitrate after the size, `::INFO:: 10.3MB 4m31s 320/44.1/JS`, read once per file and remembered.
 - **Every folder heading says what it holds** — `14 files, 1.20GB` on its own line under the heading, placed so that every program that reads these lists (other DCCore bots, AutoQ, DCCore's own request handling) ignores it. Companion files (`.srt`, `.nfo`, `.sfv`…) travel with the film they belong to when the video list is split out, and stay with an album otherwise.
 - **A partially unreadable library fails the rebuild** rather than silently publishing a truncated list.
 
@@ -66,6 +69,12 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 - **Broadcast search** — send one `@find` to a channel and collect every bot's reply, grouped under each bot's own parsed header.
 - **Both DCC directions** — active and passive/reverse SEND, since bots behind NAT use the latter.
 - **Hostile-input handling** — every other bot is treated as untrusted: admission control, size caps, and zip-slip / zip-bomb guards on any archive received.
+- **Their answers are understood** — what OmeNServE, SDFind, SpR, BWI and DCCore itself reply to a request. A queued request shows its place in their queue on the Downloads page and waits for its turn (`FETCH_QUEUED_TIMEOUT`, 12 hours by default); "I don't have that file" or "queue full" ends it at once, in the server's own words.
+- **The download queue looks after itself.** A file queued from a bot that is offline waits, and is asked for a minute after the bot comes back. Only `FETCH_MAX_PER_BOT` (3) are asked of one bot at a time, the next going when one arrives, so a big selection does not earn "queue full". A "busy" answer is asked again, three times, ten minutes apart. Unfinished downloads survive a restart.
+- **A bot that cannot be reached is paused**, after three failed connections in a row, with a **Resume** button on the Downloads page, instead of failing file after file. When the drive fetched files go to has less than 200 MB free, downloads wait and carry on by themselves once there is room.
+- **The List Browser** — every list you have fetched, one row per bot, with a tab for each list its archive holds (music, RAR, video) rather than only the largest. A light says whether the bot's advert shows a newer list than yours; a list you have not opened yet says *New*; click an online bot and its advertised free slots, queue and speed appear under it. One filter searches every held list at once, from an index built as each list arrives, and **Online only** takes the bots that are not here off both the sidebar and the search. A bot that never advertises can be added by hand, and a list can be fetched again, or removed, from its own row.
+- **Held lists can keep themselves up to date** (`AUTO_REFETCH_LISTS`, off by default): a list is fetched again when its bot's advert shows a different date or file count, or - for a bot whose advert shows no date - once it is 14 days old. Never more often than `AUTO_REFETCH_INTERVAL_HOURS`, and at most `AUTO_REFETCH_MAX_PER_RUN` at a time.
+- **Lists can be grabbed by themselves** (`AUTO_GRAB_LISTS`, off by default), on AutoGet's rules: the list of a bot you have none from is asked for one at a time, at most one every 10 minutes, after a random 5-360 second wait, not at all if someone else just asked that bot, and at most three times per bot, 30 minutes apart. Small, slow and "servers only" bots can be skipped, and a list you removed is not grabbed back.
 
 ### Operating it
 
@@ -78,7 +87,8 @@ Two pieces were worth doing carefully rather than quickly, and one of them turne
 - **The launcher is the install.** Extract, double-click (`start-dccore.bat`, `start-dccore.sh`, `start-dccore.command`): the first run opens a setup page in the browser — nickname, server, channels, your nick, the password, the music folder, the dashboard, each with the same **?** explanation the Settings page has, in English, French or Spanish — loopback-only, one-shot, behind a one-time code in the link, and the bot starts the moment you save. No Flask, or no browser: the same questions in the terminal (`configure.py`). On Windows with no Python at all, the launcher offers to download python.org's installer, checks it against a fingerprint pinned in the script, and runs it with both boxes ticked. Every run after that checks the setup and starts the bot.
 - **Starting with the system, the firewall, the router.** `install-autostart` scripts for Windows (Task Scheduler), Linux (a systemd user unit) and macOS (launchd), each with a remover, each running the launcher so the working directory is right; `allow-firewall.bat` adds the Windows rule for the bot's ports and the setup check names the `ufw`/`firewall-cmd` lines on Linux; port forwarding explained in plain words in both guides.
 - **Pre-flight check** — `start-dccore.sh check` verifies the setup without opening a socket, and says what stands between the bound ports and the outside on this OS.
-- **Every setting explains itself.** The **?** beside each of the 117 settings on the dashboard — and the comment above it in `settings.conf.sample` — is written for the person running the bot, in English, French and Spanish; the dashboard itself is translated the same three ways.
+- **It tells you when a new version is out.** Once a day (`CHECK_FOR_UPDATES`) it asks GitHub for the latest release - one request, carrying nothing about your bot - and says so in the dashboard's sidebar, the console's `status` and the mIRC window, each with a way to check now.
+- **Every setting explains itself.** The **?** beside every setting on the dashboard — and the comment above it in `settings.conf.sample` — is written for the person running the bot, in English, French and Spanish; the dashboard itself is translated the same three ways.
 - **Two configuration mechanisms** — `admin_config.py` for Python, `settings.conf` for plain text; the dashboard and console both write to the latter.
 - **`!rehash`** reloads code and settings live, preserving queues and transfer state.
 - **Channel adverts** on a timer, with a per-bot theme (five presets, or your own colours).
@@ -172,7 +182,6 @@ works, only that the operator says it exists.
 ### Smaller things worth having
 
 - **PER-LIST file exclusions** (`Exclude = .mpu,.db`) — OmenServe has them per list. `LIST_IGNORED_EXTENSIONS` does this globally; scoping it to one folder is the part still missing.
-- **A fetched list keeps only the peer's master.** Since the film-and-series split, a DCCore bot's archive carries two `.txt` files, and `list_fetch` picks one - now the master rather than whichever is larger. The films in the other are dropped from the fetched copy. Reading both into one fetched list changes what `_pick_list_file()` returns and the size ceiling that guards it, so it is a change of its own rather than part of the fix.
 - **Stealth channels** — serve a channel while advertising nothing in it.
 - **Multi-network** — real in OmenServe, and it would touch every socket path here.
 
