@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🧪 The stats route test holds the uptime still (#941)
+
+`test_dashboard_routes.TheReadOnlyRoutesAnswer.test_each_one_returns_the_payload_its_builder_produces` failed once on
+ubuntu-latest / Python 3.12 for the #934 merge and passed on the rerun. Not leaked state: it calls `GET /api/stats`, then
+`build_stats_payload()`, and asserts the two are equal - and the payload carries `transfer.uptime_seconds`, which is
+`int(time.time() - start_time)`. A whole second ticking over between the two calls made them differ by 1. The test
+now holds `stats_mgr.get_uptime_seconds()` still while it compares; what it checks is which builder a route calls,
+not what time it is. The daemon is unchanged - a live uptime is meant to move.
+
+New `test_a_second_ticking_between_the_two_calls_cannot_fail_it` reproduces it with a clock that moves a second on
+every read, and asserts that the clock really ticks, so it cannot pass by proving nothing. Mutation-checked: without
+the hold it fails on `/api/stats`, and with an uptime that does not move, its own guard fails.
+
 ### 🛡️ MAX_FETCH_FILE_SIZE = 0 keeps a zip-bomb guard for list archives (#945)
 
 #940 fixed #939 - 0 ("no limit") read as a zero-byte ceiling - by resolving 0 to `float("inf")` in
@@ -25,6 +38,7 @@ extraction with nothing left behind) and `test_the_fallback_ceiling_follows_the_
 assertions #940 dropped from `test_a_declared_total_size_over_the_cap_is_rejected_before_extracting` (no registry
 entry, no extract directory) are back. Mutation-checked: `inf` again, a fallback ignoring `MAX_LIST_TEXT_SIZE`, 0 as a
 zero-byte ceiling (#939 again) and the old message each fail a test.
+
 ### 🟢 "Online only" takes the offline bots off the sidebar (#948)
 
 #931 added the box beside the List Browser's filter, but it only reached `/api/filelists/search?online=1`, and that
