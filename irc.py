@@ -2013,6 +2013,15 @@ def note_bot_renamed(old_nick, new_nick, ident=None):
 
 
 @never_breaks_the_read_loop
+def _capture_chat_notice(user, target, msg):
+    """A NOTICE that may be DCCore Chat (#371) - see serverschat.capture().
+    Observational like the other captures here: it records and relays to the
+    operator's console, and it never dispatches and never answers."""
+    import serverschat
+    serverschat.capture(user, target, msg)
+
+
+@never_breaks_the_read_loop
 def _capture_list_ask(user, msg):
     """Another user typed "@Bot" - see list_grab.note_someone_else_asked()."""
     import list_grab
@@ -3519,6 +3528,9 @@ def irc_loop():
                         if notice_user.lower() != config.NICKNAME.lower():
                             _capture_broadcast_search_reply(
                                 notice_user, notice_target, notice_text)
+                            # DCCore Chat (#371): a tagged NOTICE to one of
+                            # our channels, relayed to the operator's console.
+                            _capture_chat_notice(notice_user, notice_target, notice_text)
                             if notice_target.lower() == config.NICKNAME.lower():
                                 # A private NOTICE addressed to us, from
                                 # another bot - how file servers answer a

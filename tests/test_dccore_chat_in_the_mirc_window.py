@@ -1,16 +1,18 @@
-"""#371: DCCore Chat - public operator chat in dccore.mrc, over a tagged NOTICE.
+"""#371: DCCore Chat in dccore.mrc - the window, relayed by the bot.
 
 mIRC cannot run here, so these read the script, statement by statement, the
-way the script's other tests do. What they hold it to is what #371 decided:
+way the script's other tests do. The bot does the checking
+(tests/test_servers_chat_is_relayed_by_the_bot.py); the script is held to
+what is left for it:
 
-- the tag is matched as the first word and nowhere else, and a NOTICE that
-  is not chat is left exactly as mIRC shows it (the handler returns before
-  haltdef);
-- NOTHING reachable from the NOTICE handler sends anything (RFC 2812: never
-  answer a NOTICE automatically);
-- a per-nick flood limit on what arrives;
-- colours stripped both ways;
-- only channels the operator chose, and it says it is public.
+- it only ever sends what the operator typed, and only through the bot;
+- nothing in the NOTICE handler, or in anything drawing a CHAT line, sends
+  anything (RFC 2812);
+- a raw tagged NOTICE is hidden only while the relay is up and would draw
+  it - otherwise it shows in the channel as usual, so nothing is lost;
+- a line is drawn once, stripped, only for channels the operator chose;
+- it says it is public;
+- a menu row never puts a channel name into a command.
 """
 
 import io
@@ -60,42 +62,32 @@ class TheTag(unittest.TestCase):
         self.assertEqual(body[0], "if ($1 != $dccore.chat.tag) { return }")
 
 
-class WhatArrives(unittest.TestCase):
+class ARawNoticeIsHiddenOnlyWhenItWillBeDrawn(unittest.TestCase):
     def setUp(self):
         self.handler = statements(block(script(), "on ^*:NOTICE:*:#:"))
 
-    def test_a_notice_that_is_not_chat_is_left_alone(self):
-        """Every return that lets a line through comes before haltdef, so
-        mIRC shows it as it always has."""
+    def test_every_condition_comes_before_haltdef(self):
         halt = self.handler.index("haltdef")
-        self.assertLess(self.handler.index("if (!$dccore.chat.listens($chan)) { return }"), halt)
-        self.assertLess(self.handler.index(
-            "if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }"), halt)
-        self.assertEqual(sum(1 for line in self.handler if line == "haltdef"), 1)
+        for condition in ("if (!$dccore.chat.relaying) { return }",
+                          "if (!$dccore.here) { return }",
+                          "if (!$istok($dccore.st(chat.chans),$chan,32)) { return }",
+                          "if (!$dccore.chat.listens($chan)) { return }",
+                          "if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }"):
+            self.assertLess(self.handler.index(condition), halt, condition)
+        self.assertEqual(self.handler[-1], "haltdef", "it hides, and draws nothing itself")
 
-    def test_the_flood_limit_comes_before_anything_is_shown(self):
-        self.assertLess(self.handler.index("if ($dccore.chat.flooding($nick)) { return }"),
-                        self.handler.index("dccore.chat.show $chan $nick other %text"))
-
-    def test_what_is_shown_is_stripped(self):
-        self.assertIn("var %text = $strip($2-)", self.handler)
-
-    def test_only_chosen_channels_unless_all_is_ticked(self):
-        text = script()
-        body = statements(block(text, "alias dccore.chat.listens"))
-        self.assertEqual(body, ["if ($dccore.opt(chat.all)) { return $true }",
-                                "return $istok($dccore.opt(chat.listen),$1,32)"])
-        self.assertIn("dccore.default chat.all 0", text)
+    def test_the_relay_is_up_only_when_connected_and_structured(self):
+        self.assertIn("alias dccore.chat.relaying { return $iif(($dccore.st(state) == in) && "
+                      "($dccore.st(mode) == structured),$true,$false) }", script())
 
 
-class NothingAnswersANotice(unittest.TestCase):
-    """RFC 2812 - and the reason a presence ping or an auto-acknowledge can
-    never be built on this tag. Checked in the handler AND in every alias it
-    reaches, since a send one call away is still an automatic reply."""
+class NothingAnswers(unittest.TestCase):
+    """RFC 2812 - checked in the handler AND in every alias drawing a line,
+    since a send one call away is still an automatic reply."""
 
-    REACHED = ["on ^*:NOTICE:*:#:", "alias dccore.chat.listens", "alias dccore.chat.flooding",
-               "alias dccore.chat.show", "alias dccore.chat.window", "alias dccore.chat.sys",
-               "alias dccore.chat.title"]
+    REACHED = ["on ^*:NOTICE:*:#:", "alias dccore.chat.feed", "alias dccore.chat.channels",
+               "alias dccore.chat.listens", "alias dccore.chat.show", "alias dccore.chat.window",
+               "alias dccore.chat.sys", "alias dccore.chat.title"]
 
     def test_no_send_anywhere_it_reaches(self):
         text = script()
@@ -107,47 +99,47 @@ class NothingAnswersANotice(unittest.TestCase):
         """So the test above cannot pass by matching nothing."""
         self.assertIsNotNone(SENDS.search(".notice $nick hello"))
         self.assertIsNotNone(SENDS.search("if (x) { msg $chan hi }"))
-        self.assertIsNotNone(SENDS.search("dccore.chat.say %text"))
+        self.assertIsNotNone(SENDS.search("dccore.send chat %to %text"))
 
 
-class TheFloodLimit(unittest.TestCase):
-    def test_five_in_ten_seconds_then_hidden_for_sixty(self):
-        text = script()
-        self.assertIn("alias dccore.chat.max { return 5 }", text)
-        self.assertIn("alias dccore.chat.per { return 10 }", text)
-        self.assertIn("alias dccore.chat.hide { return 60 }", text)
+class WhatComesFromTheBot(unittest.TestCase):
+    def setUp(self):
+        self.text = script()
+        self.feed = statements(block(self.text, "alias dccore.chat.feed"))
 
-    def test_the_hide_expires_by_itself_and_is_said_once(self):
-        body = statements(block(script(), "alias dccore.chat.flooding"))
-        self.assertIn("if ($hget(dccore.chatmute,%k)) { return $true }", body)
-        self.assertIn("hadd -u $+ $dccore.chat.hide dccore.chatmute %k 1", body)
-        self.assertIn("if (%n > $dccore.chat.max) {", body)
-        self.assertEqual(sum("dccore.chat.sys" in line for line in body), 1)
+    def test_both_lines_are_read(self):
+        self.assertIn("if (%type == CHAT) { dccore.chat.feed $2- | return }", self.text)
+        self.assertIn("if (%type == CHANNELS) { dccore.chat.channels $2- | return }", self.text)
 
-    def test_the_tables_are_this_session_only(self):
-        text = script()
-        self.assertIn("if (!$hget(dccore.chatrate)) { hmake dccore.chatrate 32 }", text)
-        self.assertIn("if ($hget(dccore.chatmute)) { hfree dccore.chatmute }", text)
-        self.assertNotIn("hsave -o dccore.chat", text)
+    def test_a_line_is_drawn_once(self):
+        """The bot replays its recent lines after every HELLO."""
+        self.assertIn("if ($dccore.st(chat.last) isnum) && ($1 <= $dccore.st(chat.last)) { return }",
+                      self.feed)
+        self.assertIn("hadd dccore.live chat.last $1", self.feed)
+
+    def test_only_listened_channels_and_stripped(self):
+        self.assertIn("if (!$dccore.chat.listens($2)) { return }", self.feed)
+        self.assertTrue(all("$strip($4-)" in s for s in self.feed if s.startswith("dccore.chat.show")))
+        self.assertIn("dccore.default chat.all 0", self.text)
+
+    def test_its_own_lines_are_marked_as_its_own(self):
+        self.assertTrue(any("$iif($3 == $dccore.bot,own,other)" in s for s in self.feed))
 
 
 class WhatIsSent(unittest.TestCase):
     def setUp(self):
         self.say = statements(block(script(), "alias dccore.chat.say"))
 
-    def test_a_tagged_notice_from_your_own_client_stripped(self):
-        self.assertIn("var %text = $strip($1-)", self.say)
-        self.assertIn(".notice %to $dccore.chat.tag %text", self.say)
-        self.assertLess(self.say.index("var %text = $strip($1-)"),
-                        self.say.index(".notice %to $dccore.chat.tag %text"))
+    def test_through_the_bot_only(self):
+        self.assertEqual(self.say[-1], "dccore.send chat %to %text")
+        self.assertFalse([s for s in self.say if re.search(r"(^|[\s|{])\.?(notice|msg)\b", s)],
+                         "never straight from this client")
 
-    def test_only_to_a_channel_picked_and_one_you_are_in(self):
-        send = self.say.index(".notice %to $dccore.chat.tag %text")
+    def test_stripped_and_only_when_the_relay_is_up(self):
+        send = self.say.index("dccore.send chat %to %text")
+        self.assertLess(self.say.index("var %text = $strip($1-)"), send)
+        self.assertLess(next(i for i, s in enumerate(self.say) if s.startswith("if (!$dccore.chat.relaying)")), send)
         self.assertLess(next(i for i, s in enumerate(self.say) if s.startswith("if (%to == $null)")), send)
-        self.assertLess(next(i for i, s in enumerate(self.say) if s.startswith("if ($me !ison %to)")), send)
-
-    def test_never_privmsg(self):
-        self.assertFalse([s for s in self.say if re.search(r"(^|\s)\.?msg\b", s)])
 
     def test_typing_in_the_window_sends(self):
         body = statements(block(script(), "on *:INPUT:@DCCore-Chat:"))
@@ -156,43 +148,40 @@ class WhatIsSent(unittest.TestCase):
 
 
 class ItSaysItIsPublic(unittest.TestCase):
-    def test_the_title_and_the_first_line(self):
+    def test_the_title_and_the_first_lines(self):
         text = script()
         title = statements(block(text, "alias dccore.chat.title"))
         self.assertTrue(any("DCCore Chat $dccore.dot public" in s for s in title))
-        self.assertIn("dccore.chat.sys Public: everyone in the channel reads what is typed here",
-                      text)
+        self.assertIn("dccore.chat.sys Public: everyone in the channel reads what is typed here", text)
         self.assertIn('box "DCCore Chat (public)", 600,', text)
 
     def test_an_arriving_line_does_not_take_the_focus(self):
         body = statements(block(script(), "alias dccore.chat.window"))
         self.assertIn("if ($1 == quiet) { window -en $dccore.chat.win }", body)
-        show = statements(block(script(), "alias dccore.chat.show"))
-        self.assertEqual(show[0], "dccore.chat.window quiet")
+        self.assertEqual(statements(block(script(), "alias dccore.chat.show"))[0],
+                         "dccore.chat.window quiet")
 
 
 class TheWindowIsTheInterface(unittest.TestCase):
-    def test_its_menu_picks_the_channels(self):
-        menu = block(script(), "menu @DCCore-Chat")
+    def test_its_menu_picks_from_the_bot_s_channels(self):
+        text = script()
+        menu = block(text, "menu @DCCore-Chat")
         self.assertIn(".$submenu($dccore.chat.sendrow($1))", menu)
         self.assertIn(".$submenu($dccore.chat.listenrow($1))", menu)
-        self.assertIn("Listen on all my channels:dccore.chat.all", menu)
+        self.assertIn("alias dccore.chat.chan { return $gettok($dccore.st(chat.chans),$1,32) }", text)
 
     def test_a_menu_row_runs_a_number_never_a_channel_name(self):
-        """#955 review: mIRC parses a row's command text on the click, and a
-        channel name can hold | or $. The name may be the label; the command
-        carries only the row number, resolved inside the alias."""
+        """mIRC parses a row's command text on the click, and a channel name
+        can hold | or $. The name may be the label; the command carries only
+        the row number, resolved inside the alias."""
         text = script()
         for row in ("alias dccore.chat.sendrow", "alias dccore.chat.listenrow"):
-            body = statements(block(text, row))
-            ret = [s for s in body if s.startswith("return $iif(")][0]
-            label, command = ret.split(":", 1)
+            ret = [s for s in statements(block(text, row)) if s.startswith("return $iif(")][0]
+            _label, command = ret.split(":", 1)
             self.assertNotIn("%c", command, f"{row}: {command}")
             self.assertTrue(command.endswith(" $1"), command)
-        self.assertIn("alias dccore.chat.to.n { if ($1 isnum) && ($chan($1) != $null) "
-                      "{ dccore.chat.to $chan($1) } }", text)
-        self.assertIn("alias dccore.chat.listen.n { if ($1 isnum) && ($chan($1) != $null) "
-                      "{ dccore.chat.listen $chan($1) } }", text)
+        self.assertIn("alias dccore.chat.to.n { if ($1 isnum) && ($dccore.chat.chan($1) != $null) "
+                      "{ dccore.chat.to $dccore.chat.chan($1) } }", text)
 
     def test_picking_where_to_send_also_listens_there(self):
         body = statements(block(script(), "alias dccore.chat.to"))
@@ -204,9 +193,12 @@ class TheWindowIsTheInterface(unittest.TestCase):
         init = block(text, "on *:dialog:dccore.opt:init:0:")
         ok = block(text, "on *:dialog:dccore.opt:sclick:1:")
         self.assertIn("if ($dccore.opt(chat.all)) { did -c dccore.opt 601 }", init)
-        self.assertIn("if ($dccore.opt(chat.popup)) { did -c dccore.opt 602 }", init)
-        self.assertIn("hadd dccore chat.all $did(dccore.opt,601).state", ok)
         self.assertIn("hadd dccore chat.popup $did(dccore.opt,602).state", ok)
+
+    def test_no_flood_table_of_its_own(self):
+        """The bot limits what arrives; a second limit here would only hide
+        lines the bot already decided to show."""
+        self.assertNotIn("dccore.chatrate", script())
 
     def test_it_is_in_the_command_list_and_the_menus(self):
         text = script()

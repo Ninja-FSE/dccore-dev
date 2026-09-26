@@ -247,6 +247,7 @@ prefix.
 | `update` | rebuild the MasterList |
 | `lists` | the bots' lists we hold, whether each has changed since we took our copy, how big and how old |
 | `fetch [<bot>]` | ask every held bot whose list has changed (up to 10 at a time, skipping offline ones), or one bot whatever its freshness |
+| `chat [#channel <text>]` | say something in DCCore Chat, as the bot, in one of its channels - **public**, see below; alone, the channels it can chat in |
 | `help` | the command list |
 | `hello <client> <version>` | switch this session to the structured feed (below) |
 | `pair <client> <version>` | mint a login token for a script (below) |
@@ -519,6 +520,14 @@ have been replaced with spaces.
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20 in the order they are served: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
 | `DCCORE PING` | stands in for a status burst the bot could not compute in time; a client treats it as any other line and shows nothing | |
+| `DCCORE CHAT <id> <channel> <nick>` | a DCCore Chat line said in one of the bot's channels: an id (its time in milliseconds, only ever going up - a client draws each id once), the channel, who said it (the bot's own nick for a line sent with `chat`; `*` for the bot's own remark, such as somebody hidden for flooding) | the text, stripped of colours |
+| `DCCORE CHANNELS` | the channels the bot is in, which are the ones it chats in; sent after `HELLO` and in answer to `chat` alone | the channels, space-separated |
+
+After `HELLO` the bot also sends `CHANNELS` and then the last 50 `CHAT` lines it
+holds, so a window that reconnects shows what it missed. They are kept in memory
+only, and a restart forgets them. `CHAT` and `CHANNELS` are new line types, not
+fields inserted into old ones, so they do not move the minor. An older script
+shows them as they come, as it does any type it does not know.
 
 `<channel>` is always exactly one token, straight after the nick: the channel
 the request or search was made in, or `-` when there is none (a request by
@@ -726,38 +735,49 @@ sent at all: what is off there never reaches the script.
 ### DCCore Chat: talking to other operators
 
 A second window, **DCCore Chat**, for chatting with other operators in the
-channels you already share. It is **public**: what you type goes out from
-your own mIRC as a NOTICE to the channel, so everyone in that channel can
-read it, whether or not they run this script. The window's title and its
-first lines say so.
+channels your bot is in. **Your bot is the relay.** What you type goes to the
+bot over this console, and the bot says it in the channel as a NOTICE. A chat
+line anyone sends in one of the bot's channels comes back to your window.
+Your own mIRC does not have to be in any channel.
+
+It is **public**. A NOTICE to a channel reaches everyone in it, whether or
+not they run this script. Your lines show as said by your bot. The window's
+title and its first lines say so.
 
 - **Opening it:** right-click in a channel or in `@DCCore` → *DCCore Chat*,
   or `/dccore chat`. It also opens by itself (minimised, its button lit)
   when a chat line arrives, unless you turn that off in `/dccore options`.
 - **Talking:** type in the window. The line goes to the channel picked for
-  it, which the title shows. Right-click → *Send to* picks it from the
-  channels you are in; that channel is listened on too.
-  `/dccore chat <text>` does the same from anywhere.
+  it, which the title shows. Right-click → *Send to* picks it from the bot's
+  channels, and that channel is listened on too. `/dccore chat <text>` does
+  the same from anywhere.
 - **Listening:** right-click → *Listen on* ticks the channels whose chat
-  shows here. *Listen on all my channels* (also in `/dccore options`) takes
-  every channel you are in. A channel you did not choose is never touched.
+  shows here. *Listen on all the bot's channels* (also in `/dccore options`)
+  takes every one.
+- **Reconnecting:** the bot keeps the last 50 lines in memory, and a window
+  that reconnects shows what it missed, each line once, with the time it
+  was said. A bot restart forgets them.
 
 A chat line is a NOTICE whose first word is `[ServersChat]`. The tag is
-neutral so that a script that is not DCCore's can speak it too. The script
-catches only those, and only on the channels you listen on, and keeps them
-out of the channel window. Every other NOTICE shows exactly as it always
-has. A few rules it keeps:
+neutral so that a script that is not DCCore's can speak it too. The bot
+takes only those, and only in its own channels, and:
 
-- **It never answers a NOTICE by itself.** Every line sent is one a person
-  typed.
-- **One sender cannot flood it.** More than 5 lines in 10 seconds from one
-  nick hides that nick for 60 seconds, said once in the window.
-- **Colours and control codes are stripped**, both ways.
-- **The tag proves nothing about the sender.** Anyone can type it. The nick
-  shown is whoever the server says sent the line.
+- **never answers a NOTICE by itself.** Every line it sends is one an
+  operator typed;
+- **limits each sender:** more than 5 lines in 10 seconds from one nick
+  hides that nick for 60 seconds, said once in the window;
+- **limits what you send:** 6 lines a minute, so chat never holds up the
+  queue's own messages;
+- **strips colours and control codes**, both ways;
+- **never writes a chat line to disk or to the debug channel.**
 
-The bot is not involved at all: it ignores channel NOTICEs, and nothing
-here goes through the admin console.
+The tag proves nothing about the sender. Anyone can type it, and the nick
+shown is whoever the server says sent the line.
+
+If your own mIRC is in the channel too, the raw NOTICE is kept out of the
+channel window while the bot relays it, so you don't see every line twice.
+With the chat to the bot down, it shows in the channel as usual, so nothing
+is lost.
 
 ### Updating the script
 

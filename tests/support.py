@@ -114,6 +114,11 @@ RUNTIME_CONTAINERS = {
     "bot_idents": dict,
     "bot_departures": dict,
     "recent_joins": dict,
+    # #371: one test's chat lines or limits are not the next one's.
+    "chat_recent": list,
+    "chat_rate": dict,
+    "chat_outbound": dict,
+    "chat_muted": dict,
     # Same reasoning: a leftover is one test's message showing up in the next
     # test's panel.
     "private_messages": list,
@@ -279,7 +284,8 @@ def reset_config(**overrides):
                         # #926: automatic list grabbing's wait, last grab and
                         # per-bot record - reloaded from the test's own file.
                         ("list_grab_started", False), ("list_grab_plan", None),
-                        ("list_grab_last", None), ("list_grab_state", None)):
+                        ("list_grab_last", None), ("list_grab_state", None),
+                        ("chat_last_id", 0)):
         setattr(runtime, name, value)
 
     # A FRESH OUTBOUND CLOCK PER TEST. runtime.outbound_pacer is a

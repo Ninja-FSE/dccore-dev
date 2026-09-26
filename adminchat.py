@@ -1361,6 +1361,12 @@ def _cmd_hello(session, args):
     # the moment it is opened, rather than "unknown" until the operator
     # happens to run checkupdates themselves.
     session.send(f"DCCORE CHECKUPDATES {'on' if getattr(config, 'CHECK_FOR_UPDATES', True) else 'off'}")
+    # DCCore Chat (#371): the channels it can chat in, and what was said
+    # while this window was away - from memory, never from disk.
+    import serverschat
+    session.send(serverschat.channels_line())
+    for line in serverschat.recent_lines():
+        session.send(line)
     session.send_status()
     print(f"[ADMINCHAT] {session.nick}'s session switched to the structured feed "
           f"({session.client} {' '.join(parts[1:]) or '?'}).")
@@ -1426,6 +1432,28 @@ def _cmd_unpair(session, args):
     session.send(f"Revoked {name}. A client still logged in with it stays until it disconnects.")
 
 
+def _cmd_chat(session, args):
+    """`chat #channel <text>`: say something in DCCore Chat (#371), as the
+    bot, in one of its channels - a NOTICE starting with [ServersChat],
+    which is public. `chat` alone: the channels it can chat in."""
+    import serverschat
+    text = str(args or "").strip()
+    if not text:
+        if session.structured:
+            session.send(serverschat.channels_line())
+        else:
+            chans = serverschat.channels()
+            session.send("Chat channels: " + (" ".join(chans) if chans else "none yet")
+                         + ". Usage: chat #channel <text> (public: everyone there reads it).")
+        return
+    parts = text.split(None, 1)
+    ok, message = serverschat.say(session.nick, parts[0], parts[1] if len(parts) > 1 else "")
+    # A structured window sees its own line come back as a CHAT line; a
+    # person at a plain console is told it went.
+    if not ok or not session.structured:
+        session.send(message)
+
+
 def _cmd_help(session, args):
     session.send("Available commands:")
     for name in sorted(COMMANDS):
@@ -1460,6 +1488,7 @@ COMMANDS = {
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
     "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
+    "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan text]"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),

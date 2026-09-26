@@ -4,45 +4,65 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
-### 💬 DCCore Chat: public operator chat in dccore.mrc (#371)
+### 💬 DCCore Chat: public operator chat, relayed by the bot (#371)
 
-Built as decided on #371: public, in `dccore.mrc`, no encryption, and with the window as the whole interface. The
-design note's open question is settled: the script does it alone. The chat goes out from the operator's OWN client
-(`.notice #chan [ServersChat] text`), and `on ^*:NOTICE:*:#:` catches a NOTICE whose FIRST word is the tag, draws it in
-`@DCCore-Chat` and `haltdef`s it. The bot needs no change, since a channel-targeted NOTICE reaches nothing in `irc.py`.
+Built as decided on #371: public, no encryption, the window as the whole interface, and - after a first version
+(#955, held) that sent from the operator's own client - **relayed by the bot**, as agreed there. The operator's mIRC
+does not have to be in any channel, and the bot's half is tested here for real.
 
-- **The tag** `[ServersChat]` is neutral, so a script that is not DCCore's can speak it. It is built with
-  `$chr(91)`/`$chr(93)` because `[ ]` are evaluation brackets, and matched as `$1` only. A NOTICE that is not chat, or
-  arrives on a channel not listened to, returns before `haltdef` and shows as it always did.
-- **The window is the interface** (Neo's suggestion on #371). "DCCore Chat · public · typing sends to #chan" in the
-  title, and two lines saying it is public when it opens. Typing sends. It opens by itself for an arriving line,
-  minimised with its button lit (`window -en`) so it does not take the focus, unless *Open the chat window when a line
-  arrives* is off: then the line is left in the channel as an ordinary NOTICE rather than hidden and lost. The
-  right-click menu picks *Send to* and *Listen on* from `$chan(N)` through `$submenu`, ticked with `$style(1)`.
-  Picking where to send also listens there. *Listen on all my channels* is there and in `/dccore options`, off by
-  default. A row's command carries the channel's NUMBER, resolved back with `$chan(N)` inside the alias
-  (`dccore.chat.to.n`, `dccore.chat.listen.n`), never its name: mIRC parses the command text on the click, and a
-  channel whose name holds `|` or `$` could otherwise run a command (found in review).
-- **Rules from #371:** nothing reachable from the NOTICE handler sends anything (RFC 2812); a per-nick flood limit on
-  what arrives (more than 5 lines in 10 s hides the nick for 60 s, said once, in session-only hash tables that expire
-  by themselves); `$strip` on what is shown and on what is sent; never PRIVMSG; nothing identifying in the script.
-- **The shortcut** is `/dccore chat [text]`, not a bare `/sc`. The script's own rule is that every global alias is
-  namespaced `dccore.*` so it collides with nothing. `/dccore chat` alone opens the window.
-- `/dccore options` gains a *DCCore Chat (public)* box with the two checkboxes; the dialog grows by 33 dbu. Version
-  1.6. The feed protocol is untouched (the bot's `MIN_SCRIPT_VERSION` stays 1.1).
+**The bot, `serverschat.py`** (state in runtime.py: `chat_recent`, `chat_rate`, `chat_outbound`, `chat_muted`,
+`chat_last_id`, `chat_lock`, bound in defaults.py and kept across a rehash).
 
-Docs: ADMIN-CONSOLE.md has a *DCCore Chat* section and the command, the roadmap lists it, and both changelogs say to
-update the script.
+- **Arriving:** `irc._capture_chat_notice()`, beside the broadcast-search capture in the NOTICE branch and wrapped
+  in `never_breaks_the_read_loop`, hands every NOTICE to `serverschat.capture()`. It takes only a NOTICE whose FIRST
+  word is `[ServersChat]`, to a channel the bot is in, not from our own nick. It strips colours and control codes,
+  caps the text at 400 characters, and limits each nick (more than 5 lines in 10 s hides it for 60 s, said once as a
+  `*` line). Up to 50 lines are kept **in memory only** (Neo: other people's chat is not kept in a file) and handed to
+  the console session's outbox. It never goes to `send_debug()`, so nothing reaches the debug channel or the plain
+  log, and nothing on this path sends (RFC 2812).
+- **Sent:** the console command `chat #channel <text>` (`adminchat._cmd_chat()` → `serverschat.say()`). Only to the
+  bot's own channels; stripped of colours and control characters, so no CR/LF can end the line early; capped at 350
+  bytes so the line fits IRC's 512; 6 lines a minute per session, so chat never holds up the queue's own notices. It
+  goes out through the paced queue (`oserve.queue_message`, lane = the channel) as `NOTICE #chan :[ServersChat]
+  <text>`, and the bot's own line is recorded and shown, since a server does not echo a NOTICE to its sender.
+  `chat` alone gives the channels.
+- **The wire stays `[ServersChat] <text>`** (agreed on #371): the sender is the nick that sent the NOTICE, which the
+  server vouches for, and no name sits in the text for anyone to forge.
+- **The feed:** `DCCORE CHAT <id> <channel> <nick> <text>` and `DCCORE CHANNELS <channels>`. The id is the line's time
+  in milliseconds, strictly increasing even across a restart. After `HELLO` the session gets `CHANNELS` and the last
+  50 `CHAT` lines. These are new line TYPES, not fields inserted into old ones, so the protocol minor does not move
+  and `MIN_SCRIPT_VERSION` stays 1.1 - an older script shows an unknown type in `@DCCore` as it comes (its
+  `a type this script does not know` branch). This corrects what the #371 comment expected.
 
-`tests/test_dccore_chat_in_the_mirc_window.py` (22) reads the script statement by statement: the tag and that it is
-the first check; every pass-through return before the single `haltdef`; the flood limit before anything is shown; the
-listen rule and its default; no send in the handler or in any alias it reaches (with a check that the pattern does
-see a send); the limit's numbers, expiry and single notice; session-only tables; the stripped, tagged NOTICE only to a
-picked channel you are in, never PRIVMSG; typing sends; the public title and lines; the quiet open; the menu, the
-dialog boxes, the command list and the version. The dialog-label tests measured the two new labels, and their box
-count is now 4. Mutation-checked 10 ways: the tag matched anywhere, no `haltdef`, every channel, an auto-reply in the
-handler, a reply to a flooder, colours kept, no flood limit, PRIVMSG, focus stolen, all channels by default. Each
-fails a test. Not run in a real mIRC, since there is none here.
+**The script, `dccore.mrc` 1.6** - the #955 window, fed by the bot instead:
+
+- *DCCore Chat · public · typing sends to #chan* in the title, and two lines saying it is public and that the bot
+  says what you type. Typing, or `/dccore chat <text>`, sends `chat %to %text` over the console - never a `/notice`
+  of its own. It opens by itself (minimised, `window -en`) for an arriving line, unless that option is off.
+- `CHAT` lines are drawn once per id (`chat.last`), stripped, only for listened channels, with the time from the id;
+  `CHANNELS` fills the right-click *Send to* / *Listen on* menus. A row's command carries the channel's NUMBER, never
+  its name (#955 review: a channel name holding `|` or `$` would otherwise run a command on the click).
+- A raw tagged NOTICE that also reaches the operator's own mIRC is `haltdef`ed only while the relay is up, on the
+  bot's network, in one of its channels, listened on, and with the window open or allowed to open - so the line is
+  drawn from the relay and not twice. With the relay down it shows in the channel as usual (Neo's second adjustment).
+- The script's own flood table from #955 is gone: the bot limits what arrives.
+
+Docs: ADMIN-CONSOLE.md has the `chat` command, the two feed lines, and a *DCCore Chat* section rewritten for the relay;
+the roadmap and both changelogs follow.
+
+Tests: `tests/test_servers_chat_is_relayed_by_the_bot.py` (33) runs the real code: the first-word tag, the bot's
+channels only, never our own nick, stripping, the cap, no debug channel, a plain console's line, rising ids; that
+capture sends nothing (and has no send in its statements); the per-nick limit and its single notice; bounded recent
+lines and limit table; nothing to disk; the tagged NOTICE through the queue, the bot's own line back, CR/LF unable to
+end the line, the 512-byte fit, own channels only, the send cap; the console command in both modes; `hello`
+replaying the channels and the recent lines; the read-loop wiring, and a capture that raises not breaking it.
+`tests/test_dccore_chat_in_the_mirc_window.py` (21) reads the script: the tag first, every condition before the one
+`haltdef`, no send in anything drawing a line, a line drawn once, listened and stripped, sending only through the bot,
+the public wording, the quiet open, the menu by number, the dialog, no flood table of its own. Mutation-checked 17
+ways (tag anywhere, any channel, our own nick, unstripped, no inbound limit, unbounded recent, capture answering,
+sent unstripped, no send cap, any channel for sending, ids going back, not wired, no replay, hiding with the relay
+down, a replay drawn twice, sending from the client, the script answering), each failing a test. Not run in a real
+mIRC.
 
 ### 👥 One bot under two nicks is one List Browser row (#376)
 
