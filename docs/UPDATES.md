@@ -116,6 +116,32 @@ mIRC.
 
 Tests: 5 more (the fan-out counting, a fan-out refused whole, the bound, own lines, the default). Mutation-checked 5
 ways, each failing a test.
+### 🃏 The Library cards are built from the lists: a total, one per list, when it was built (#956)
+
+#952 made the Library block count every list but still drew four fixed cards (files, size, album folders, list built)
+and a separate **By list** table under them - two ways of saying the same thing on a bot with two lists, and on a bot
+with one, cards with nothing to compare to. The block is now built from what the bot serves:
+
+- **One Total card, one card per list when there is more than one, and List built last.** One list gives two cards, two
+  lists four, three lists five; nothing is drawn empty. Each follows the Sent row above it: the size big, and under it
+  a label with the file count (`Total · 71,278 files`), reusing `stats.labelledFileCount`.
+- **A list's card carries the name the operator gave it** (`music`, `video`), written as text and not markup.
+- **Album folders** moved into the label of the total and of each list that has a RAR list
+  (`music · 64,136 files · 11,322 album folders (!rar)`); a list with no RAR list says nothing about albums, since
+  unknown is not zero, while a RAR list of zero says `0`.
+- The **By list** table, its CSS, `renderLibraryLists()` and the strings `stats.byList`, `stats.listName`,
+  `stats.filesShared` and `stats.albumFolders` are gone; `stats.albumFoldersCount` is new (en, fr, es).
+- Page only: `build_library_payload()` already carries the totals and the rows. `web/index.html` has one container,
+  `#st-library`, and `renderLibrary()` fills it.
+
+`tests/test_the_stats_library_counts_every_list.py` gained the page tests (the file is 26 tests): the markup has the one
+container and none of the old fixed cards, names and figures are written as text, every string exists in every
+language, and - under node, skipped where it is not installed - the real `renderLibrary()` for one, two and three
+lists, no lists and no payload: the cards and their order, the album wording, a name with markup shown as text, an
+unknown date as a dash, and List built always last. The node harness pins number formatting, since `toLocaleString()`
+follows the machine's locale. Mutation-checked eight ways: a card for a single list, unknown albums shown as zero, zero
+albums left out, List built not last, names written as markup, a list card showing the total's file count, the fixed
+cards back in the markup, and a list's size missing each fail a test.
 
 ### 👥 One bot under two nicks is one List Browser row (#376)
 
@@ -172,12 +198,11 @@ here" check right before it, which does fail its own mutation.
 only in `LOCAL_LIST_DIR`. On a bot serving a music list and a film list the page showed the music list's files, size
 and album folders as though they were the library, and disagreed with the channel adverts, which do ask per list.
 
-- **The four Library cards are now totals** across every list: files and bytes summed, the size written from the sum
+- **The Library figures are now totals** across every list: files and bytes summed, the size written from the sum
   in the same two-decimal style the lists' own size files use (`2.00GB`), album folders summed over the lists that
   have a RAR list, and the newest build date. `webserver.build_library_payload()` builds it.
-- **`library.lists` has one row per list**, in the operator's order, with its own figures. The page shows them as a
-  **By list** table under the cards - only when there is more than one list, so a single-list install looks exactly
-  as before (`web/index.html`, `renderLibraryLists()`).
+- **`library.lists` has one row per list**, in the operator's order, with its own figures. The page draws them as
+  cards (#956).
 - **The primary is still asked for with no name**, the path the page has always taken; only a list that is not the
   primary is named. A single-list install shows the list's own stored size string, not a recomputed one.
 - **One list that cannot be read costs its own row.** Each list is read in its own guard, as every source in this
@@ -186,19 +211,16 @@ and album folders as though they were the library, and disagreed with the channe
   the total unknown; only no RAR list anywhere does.
 - A folder that belongs to two lists is counted in both and the totals do not de-duplicate; the rows make that
   visible. `count_rar_album_folders()` takes an optional list name; without one it reads the primary's directory as before.
-- New strings `stats.byList` and `stats.listName` in English, French and Spanish.
 - `tests/test_stats_page.py`'s import guard now checks `build_library_payload()` for the `library` and `list` imports
   (`list` moved there with the block); `build_stats_payload()` keeps `db` and `stats_mgr`.
 
-`tests/test_the_stats_library_counts_every_list.py` (22): the totals over a real two-list install on disk (files,
-bytes and size, albums, unknown vs zero, newest date), one row per list in order, the primary asked for with no name,
-the RAR count reading the named list's directory, one unreadable list leaving the other in the totals, a single-list
-install unchanged (stored size string kept, nothing built yet is unknown), and - under node, skipped where it is not
-installed - the real `renderLibraryLists()`: hidden for one list or none, a row each for several, a dash for
-unknowns, and a name with markup shown as text. Mutation-checked eleven ways: files from the primary only, the
-primary asked by name, no per-list guard, the size not summed, the date from the primary, the album total unknown
-when any list has none, a single list recomputed, the RAR count ignoring the name, the table shown for one list, names
-written as markup, and an unknown count shown as zero each fail a test.
+`tests/test_the_stats_library_counts_every_list.py`: the totals over a real two-list install on disk (files, bytes and
+size, albums, unknown vs zero, newest date), one row per list in order, the primary asked for with no name, the RAR
+count reading the named list's directory, one unreadable list leaving the other in the totals, and a single-list
+install unchanged (stored size string kept, nothing built yet is unknown). The page tests are under #956.
+Mutation-checked: files from the primary only, the primary asked by name, no per-list guard, the size not summed, the
+date from the primary, the album total unknown when any list has none, a single list recomputed and the RAR count
+ignoring the name each fail a test.
 
 ### 🧪 The console tests wait for the bot's decision, and say why an offer never came (#950)
 

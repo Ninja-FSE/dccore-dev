@@ -517,32 +517,10 @@
       </div>
 
       <div class="stat-group-label" data-i18n="stats.library">Library</div>
-      <div class="stat-row is-wide">
-        <div class="stat-card"><div class="stat-value" id="st-files">&mdash;</div><div class="stat-label" data-i18n="stats.filesShared">Files shared</div></div>
-        <div class="stat-card"><div class="stat-value" id="st-size">&mdash;</div><div class="stat-label" data-i18n="common.size">Size</div></div>
-        <div class="stat-card"><div class="stat-value" id="st-albums">&mdash;</div><div class="stat-label" data-i18n="stats.albumFolders">Album folders (!rar)</div></div>
-        <div class="stat-card"><div class="stat-value stat-value-sm" id="st-built">&mdash;</div><div class="stat-label" data-i18n="stats.listBuilt">List built</div></div>
-      </div>
-
-      <!-- #952: only with more than one served list. The four cards above are
-           then totals across every list, and this is what they add up from.
-           Hidden, not absent, so a single-list install renders as it always
-           did and renderStats() just turns it on. -->
-      <div id="st-lists" hidden>
-        <div class="stat-group-label" data-i18n="stats.byList">By list</div>
-        <div class="table-wrap">
-          <table class="stat-lists-table">
-            <thead><tr>
-              <th data-i18n="stats.listName">List</th>
-              <th class="col-num" data-i18n="stats.filesShared">Files shared</th>
-              <th class="col-num" data-i18n="common.size">Size</th>
-              <th class="col-num" data-i18n="stats.albumFolders">Album folders (!rar)</th>
-              <th class="col-num" data-i18n="stats.listBuilt">List built</th>
-            </tr></thead>
-            <tbody id="st-lists-body"></tbody>
-          </table>
-        </div>
-      </div>
+      <!-- #952: the cards are BUILT by renderLibrary(), because how many there
+           are depends on how many lists this bot serves - the total, one per
+           list when there is more than one, and when the list was built. -->
+      <div class="stat-row is-wide" id="st-library"></div>
 
 
       <!-- SIDE BY SIDE: two "most downloaded" tables that used to stack full

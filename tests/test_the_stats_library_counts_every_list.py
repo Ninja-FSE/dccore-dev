@@ -246,82 +246,98 @@ def read_app_js():
         return handle.read()
 
 
-class ThePageShowsTheBreakdownOnlyForSeveralLists(unittest.TestCase):
+class TheCardsAreBuiltNotFixed(unittest.TestCase):
+    """How many Library cards there are depends on how many lists the bot
+    serves, so the page builds them: four fixed cards had two of them empty or
+    repeating each other on a bot with one list, and nowhere to say which list
+    a figure belonged to on a bot with several."""
+
+    def test_the_markup_has_one_container_and_no_fixed_library_cards(self):
+        with io.open(os.path.join(REPO_ROOT, "web", "index.html"), encoding="utf-8") as handle:
+            html = handle.read()
+        self.assertIn('id="st-library"', html)
+        for gone in ("st-files", "st-size", "st-albums", "st-built", "st-lists"):
+            with self.subTest(id=gone):
+                self.assertNotIn('id="%s"' % gone, html)
 
     def test_the_render_is_called_from_the_stats_render(self):
         code = read_app_js()
-        at = code.index('setStat(el.stBuilt, lib.list_date || "—");')
-        self.assertIn("renderLibraryLists(lib.lists);", code[at:at + 200])
+        self.assertIn("renderLibrary(lib);", code)
 
-    def test_list_names_are_written_as_text_not_markup(self):
+    def test_names_and_figures_are_written_as_text_not_markup(self):
         """A list's name is whatever the operator typed on the Library page."""
         code = read_app_js()
-        start = code.index("function renderLibraryLists(lists)")
+        start = code.index("function libraryCard(")
         body = code[start:code.index("\n  }\n", start)]
-        self.assertIn("td.textContent = String(cell[0]);", body)
-        self.assertNotIn("innerHTML =", body.replace('el.stListsBody.innerHTML = "";', ""))
+        self.assertIn("big.textContent = String(value);", body)
+        self.assertIn("caption.textContent = String(label);", body)
+        self.assertNotIn("innerHTML", body)
 
-    def test_the_block_starts_hidden_and_the_labels_exist_in_every_language(self):
-        with io.open(os.path.join(REPO_ROOT, "web", "index.html"), encoding="utf-8") as handle:
-            html = handle.read()
-        self.assertRegex(html, r'<div id="st-lists" hidden>')
+    def test_every_string_the_cards_use_exists_in_every_language(self):
         for code in ("en", "es", "fr"):
             with io.open(os.path.join(REPO_ROOT, "web", "lang", code + ".json"),
                          encoding="utf-8") as handle:
                 strings = json.load(handle)
-            for key in ("stats.byList", "stats.listName"):
+            for key in ("stats.labelledFileCount", "stats.albumFoldersCount",
+                        "stats.listBuilt", "common.total"):
                 with self.subTest(language=code, key=key):
                     self.assertTrue(strings.get(key), "%s.json has no %s" % (code, key))
+            with self.subTest(language=code, gone="the By list strings"):
+                self.assertNotIn("stats.byList", strings)
+                self.assertNotIn("stats.listName", strings)
 
 
 HARNESS = r"""
 const fs = require("fs");
 const src = fs.readFileSync(process.argv[2], "utf8");
-const start = src.indexOf("function renderLibraryLists(lists)");
-if (start < 0) { throw new Error("renderLibraryLists is missing"); }
-let depth = 0, i = src.indexOf("{", start);
-for (; i < src.length; i++) {
-  if (src[i] === "{") { depth++; }
-  else if (src[i] === "}") { depth--; if (depth === 0) { break; } }
+function fn(sig) {
+  const s = src.indexOf(sig); if (s < 0) { throw new Error("saknas: " + sig); }
+  let d = 0, i = src.indexOf("{", s);
+  for (; i < src.length; i++) { if (src[i] === "{") { d++; } else if (src[i] === "}") { d--; if (d === 0) { break; } } }
+  return src.slice(s, i + 1);
 }
-const fn = src.slice(start, i + 1);
-
+const code = ["function libraryCard(", "function libraryLabel(", "function renderLibrary("].map(fn).join("\n");
+// toLocaleString() follows the machine's locale (a space here, a comma on the
+// CI runners). What is under test is which numbers go where, not the locale,
+// so it is pinned to one style.
+Number.prototype.toLocaleString = function () { return String(this).replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+const STRINGS = {
+  "stats.labelledFileCount": "{label} \u00b7 {count} files",
+  "stats.albumFoldersCount": "{count} album folders (!rar)",
+  "stats.listBuilt": "List built", "common.total": "Total"
+};
 function element() {
-  return { children: [], className: "", title: "", textContent: "",
-    appendChild(c) { this.children.push(c); if (this.children.length === 1) { this.firstChild = c; } return c; },
-    set innerHTML(v) { this.children = []; this.firstChild = undefined; } };
+  return { children: [], className: "", textContent: "",
+    appendChild(c) { this.children.push(c); return c; },
+    set innerHTML(v) { this.children = []; } };
 }
 const document = { createElement: element };
-function run(lists) {
-  const el = { stLists: { hidden: true }, stListsBody: element() };
-  new Function("el", "document", fn + "\nrenderLibraryLists(" + JSON.stringify(lists) + ");")(el, document);
-  return el;
+function run(lib) {
+  const el = { stLibrary: element() };
+  new Function("el", "document", "t", code + "\nrenderLibrary(" + JSON.stringify(lib) + ");")(el, document, k => STRINGS[k]);
+  return el.stLibrary.children.map(card => ({ value: card.children[0].textContent, label: card.children[1].textContent, small: card.children[0].className.indexOf("stat-value-sm") >= 0 }));
 }
-const out = [];
-let el = run([{ name: "only", files: 3, size: "1GB", rar_folders: 1, list_date: "Sep 1st" }]);
-out.push("oneHidden=" + el.stLists.hidden);
-out.push("oneRows=" + el.stListsBody.children.length);
-el = run([]);
-out.push("noneHidden=" + el.stLists.hidden);
-el = run(null);
-out.push("nullHidden=" + el.stLists.hidden);
-el = run([
-  { name: "music", files: 64136, size: "1.85TB", rar_folders: 11322, list_date: "Sep 25th" },
-  { name: "<b>video</b>", files: 2, size: "512.00MB", rar_folders: null, list_date: null }
-]);
-out.push("twoHidden=" + el.stLists.hidden);
-out.push("twoRows=" + el.stListsBody.children.length);
-const cells = (r) => el.stListsBody.children[r].children.map(c => c.textContent);
-out.push("row0=" + cells(0).join("|"));
-out.push("row1=" + cells(1).join("|"));
-out.push("row1Title=" + el.stListsBody.children[1].firstChild.title);
-out.push("row0NumClasses=" + el.stListsBody.children[0].children.map(c => c.className).join(","));
-console.log(out.join("\n"));
+const out = {};
+out.one = run({ files: 64136, size: "1.85TB", rar_folders: 11322, list_date: "Sep 25th",
+  lists: [{ name: "music", files: 64136, size: "1.85TB", rar_folders: 11322 }] });
+out.two = run({ files: 71278, size: "20.44TB", rar_folders: 11322, list_date: "Sep 25th",
+  lists: [{ name: "music", files: 64136, size: "1.85TB", rar_folders: 11322 },
+          { name: "video", files: 7142, size: "18.59TB", rar_folders: null }] });
+out.three = run({ files: 6, size: "3GB", rar_folders: null, list_date: null,
+  lists: [{ name: "a", files: 1, size: "1GB", rar_folders: null }, { name: "<b>b</b>", files: 2, size: "1GB", rar_folders: 0 },
+          { name: "c", files: 3, size: "1GB", rar_folders: null }] });
+out.tricky = run({ files: 36, size: "3GB", rar_folders: null, list_date: null,
+  lists: [{ name: "Rock $& Roll", files: 12, size: "1GB", rar_folders: null },
+          { name: "Films $'", files: 12, size: "1GB", rar_folders: null },
+          { name: "my {count} list", files: 12, size: "1GB", rar_folders: null }] });
+out.none = run(null);
+out.nolists = run({ files: 5, size: "1GB", rar_folders: 2, list_date: "Sep 1st" });
+console.log(JSON.stringify(out));
 """
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed; CI's runners have it")
-class TheRealRenderHidesAndShows(unittest.TestCase):
+class TheRealRenderBuildsTheCards(unittest.TestCase):
 
     def seen(self):
         handle, path = tempfile.mkstemp(suffix=".js")
@@ -333,39 +349,61 @@ class TheRealRenderHidesAndShows(unittest.TestCase):
         finally:
             os.unlink(path)
         self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
-        return dict(line.split("=", 1) for line in done.stdout.decode("utf-8").splitlines())
+        return json.loads(done.stdout.decode("utf-8"))
 
-    def test_one_list_or_none_shows_nothing_extra(self):
+    def test_one_list_is_the_total_and_when_it_was_built_and_nothing_empty(self):
+        cards = self.seen()["one"]
+
+        self.assertEqual([card["label"] for card in cards],
+                         ["Total \u00b7 64,136 files \u00b7 11,322 album folders (!rar)", "List built"])
+        self.assertEqual(cards[0]["value"], "1.85TB")
+
+    def test_two_lists_are_the_total_each_list_and_when_it_was_built(self):
+        cards = self.seen()["two"]
+
+        self.assertEqual([card["value"] for card in cards], ["20.44TB", "1.85TB", "18.59TB", "Sep 25th"])
+        self.assertEqual(cards[0]["label"], "Total \u00b7 71,278 files \u00b7 11,322 album folders (!rar)")
+        self.assertEqual(cards[1]["label"], "music \u00b7 64,136 files \u00b7 11,322 album folders (!rar)")
+
+    def test_a_list_with_no_rar_list_says_nothing_about_albums(self):
+        """Unknown is not zero, so it is left out rather than shown as 0."""
+        self.assertEqual(self.seen()["two"][2]["label"], "video \u00b7 7,142 files")
+
+    def test_a_list_with_a_rar_list_of_zero_says_zero(self):
+        """Zero albums is a claim; no RAR list is not."""
+        self.assertTrue(self.seen()["three"][2]["label"].endswith("2 files \u00b7 0 album folders (!rar)"))
+
+    def test_the_number_of_cards_follows_the_number_of_lists(self):
         seen = self.seen()
 
-        self.assertEqual(seen["oneHidden"], "true")
-        self.assertEqual(seen["oneRows"], "0")
-        self.assertEqual(seen["noneHidden"], "true")
-        self.assertEqual(seen["nullHidden"], "true")
+        self.assertEqual(len(seen["one"]), 2)
+        self.assertEqual(len(seen["two"]), 4)
+        self.assertEqual(len(seen["three"]), 5)
+        self.assertEqual(len(seen["nolists"]), 2, "an older payload with no lists still renders")
+        self.assertEqual(len(seen["none"]), 2, "and so does no payload at all")
 
-    def test_several_lists_get_a_row_each_with_their_own_figures(self):
-        seen = self.seen()
+    def test_a_name_with_markup_is_text(self):
+        self.assertTrue(self.seen()["three"][2]["label"].startswith("<b>b</b> \u00b7 "))
 
-        self.assertEqual(seen["twoHidden"], "false")
-        self.assertEqual(seen["twoRows"], "2")
-        self.assertTrue(seen["row0"].startswith("music|"))
-        self.assertIn("|1.85TB|", seen["row0"])
-        self.assertTrue(seen["row0"].endswith("|Sep 25th"))
+    def test_a_list_name_is_shown_as_typed_whatever_characters_it_has(self):
+        """String.replace reads "$&" and "$'" in a replacement string as patterns,
+        and a "{count}" in the name must not be filled in (#957 review)."""
+        cards = self.seen()["tricky"]
 
-    def test_an_unknown_album_count_and_date_show_a_dash_not_zero(self):
-        row = self.seen()["row1"].split("|")
+        self.assertEqual([card["label"] for card in cards[1:4]],
+                         ["Rock $& Roll \u00b7 12 files", "Films $' \u00b7 12 files",
+                          "my {count} list \u00b7 12 files"])
 
-        self.assertEqual(row[3], "\u2014")
-        self.assertEqual(row[4], "\u2014")
+    def test_an_unknown_build_date_is_a_dash_and_the_small_size(self):
+        last = self.seen()["three"][-1]
 
-    def test_a_name_with_markup_is_text_and_the_full_name_is_on_hover(self):
-        seen = self.seen()
+        self.assertEqual(last["value"], "\u2014")
+        self.assertTrue(last["small"], "a date is not a measurement")
 
-        self.assertTrue(seen["row1"].startswith("<b>video</b>|"))
-        self.assertEqual(seen["row1Title"], "<b>video</b>")
-
-    def test_the_figure_cells_are_the_numeric_column(self):
-        self.assertEqual(self.seen()["row0NumClasses"], ",col-num,col-num,col-num,col-num")
+    def test_the_list_built_card_is_always_last(self):
+        for name, cards in self.seen().items():
+            with self.subTest(case=name):
+                self.assertEqual(cards[-1]["label"], "List built")
 
 
 if __name__ == "__main__":
