@@ -1,36 +1,51 @@
 """DCCore Chat, relayed by the bot (#371).
 
-Public chat between operators, over a NOTICE to a channel whose first word
-is the tag `[ServersChat]`. The bot is the relay: it reads a tagged NOTICE
-in the channels it is in and hands it to the admin session (dccore.mrc's
-DCCore Chat window), and it sends what the operator types there as a tagged
-NOTICE of its own. The operator's mIRC does not have to be in any channel.
+Public chat between DCCore bots' operators, over an ordinary channel message
+whose first word is the tag `[ServersChat]`. The bot is the relay: it reads a
+tagged message from ANOTHER DCCore bot in the channels it is in and hands it
+to the admin session (dccore.mrc's DCCore Chat window), and it says what the
+operator types there as a tagged message of its own. The operator's mIRC
+does not have to be in any channel.
+
+WHO IS A DCCore BOT: its realname says so. registration_names() (irc.py)
+puts REALNAME_MARK first in the USER line's realname, and the bot asks WHO
+for each of its channels now and then (refresh_peers(), on the server's own
+PINGs) and remembers the nicks whose realname starts with the mark
+(note_who_reply()). Nothing is sent to those nicks: WHO is answered by the
+server. The realname can be written by anybody, so this is a filter, not
+proof - fine for a chat that is public anyway.
+
+WHERE IT IS SAID: `chat #chan text` says it in that channel; `chat * text`
+says it once in as few channels as reach every peer seen (cover()), never in
+a channel with no other DCCore bot in it.
 
 THE WIRE IS `[ServersChat] <text>`, nothing else. The sender is the nick that
-sent the NOTICE - the bot, for a relayed line, or a person on plain mIRC -
-which the server vouches for. No name goes inside the text: a name there is
-a claim anybody can write, and the format cannot change once people use it.
-The tag itself is a presentation filter, not a trust boundary.
+sent the message, which the server vouches for. No name goes inside the
+text: a name there is a claim anybody can write, and the format cannot
+change once people use it. It is a plain PRIVMSG on purpose: a channel
+NOTICE is what eggdrops and channel bots kick for.
 
 WHAT ARRIVES is other people's text, on the IRC read loop, so it is taken
-the way every capture there is (irc._capture_chat_notice() wraps it in
+the way every capture there is (irc._capture_chat_message() wraps it in
 never_breaks_the_read_loop):
 
-- the tag is the FIRST word, and a NOTICE that is not chat is not touched;
+- the tag is the FIRST word, and the sender is a known peer - the bots'
+  own adverts and search replies carry the realname too, and never the tag;
 - only channels the bot is in, never our own nick;
 - control codes stripped, the text capped;
 - a per-nick limit, so one sender cannot fill the operator's window;
 - memory bounded, and IN MEMORY ONLY: the recent lines are a record of what
   other people said, and none of it is ever written to disk;
-- it never reaches dispatch, and it never answers: nothing on this path
-  sends anything (RFC 2812 - a NOTICE is never answered automatically).
+- it never reaches dispatch, and it never answers: a received line is never
+  sent on, so two bots cannot echo each other.
 
-WHAT IS SENT is what an authenticated operator typed (`chat #chan text`),
-through the same paced outbound queue as everything else the bot says, with
-a cap of its own so a chatty moment cannot delay the queue's own notices.
+WHAT IS SENT is what an authenticated operator typed, through the same paced
+outbound queue as everything else the bot says - on its express lane, so it
+does not wait behind a line for each of the bot's other channels - with a
+cap of its own so a chatty moment cannot delay the queue's own messages.
 
 State is runtime.py's - see the chat_* names there - so a rehash that
-reloads this module keeps the recent lines and the limits.
+reloads this module keeps the recent lines, the limits and the peers.
 """
 
 import re
@@ -41,6 +56,16 @@ import defaults as config
 import runtime
 
 TAG = "[ServersChat]"
+
+# The first word of the realname of every DCCore bot (irc.registration_names()).
+REALNAME_MARK = "DCCore/sc"
+
+# How often the channels are asked WHO, and how long a peer sighting counts.
+WHO_EVERY = 600
+PEER_FRESH = WHO_EVERY * 2.5
+# Tracked peers, and the channels one `chat *` says it in.
+PEER_MAX = 200
+SEND_CHANNELS_MAX = 5
 
 # What one arriving line may carry, in characters, after stripping.
 MAX_TEXT = 400
@@ -87,7 +112,7 @@ def _plain(text):
 
 
 def chat_text(message):
-    """The text of a chat NOTICE, or None when it is not one. The tag has to
+    """The text of a chat message, or None when it is not one. The tag has to
     be the first word - anywhere else, it is somebody's sentence."""
     words = str(message or "").split(None, 1)
     if not words or words[0].lower() != TAG.lower():
@@ -185,9 +210,123 @@ def _prune(now):
         runtime.chat_muted.pop(key, None)
 
 
+def _is_peer_realname(real):
+    words = str(real or "").split(None, 1)
+    return bool(words) and words[0] == REALNAME_MARK
+
+
+_WHO_REPLY = re.compile(
+    r"^:\S+\s+352\s+\S+\s+(\S+)\s+\S+\s+\S+\s+\S+\s+(\S+)\s+\S+\s+:\d+\s+(.*)$")
+
+
+def note_who_reply(line, now=None):
+    """One 352 (WHO reply): `:srv 352 me #chan ident host srv nick H :0 real`.
+    A nick whose realname starts with the mark is another DCCore bot, seen in
+    that channel. Returns the nick, or None."""
+    found = _WHO_REPLY.match(str(line or "").strip())
+    if not found:
+        return None
+    chan, nick, real = found.group(1).lower(), found.group(2), found.group(3)
+    if chan[:1] not in _CHANNEL_PREFIXES or not _is_peer_realname(real):
+        return None
+    if nick.lower() == str(getattr(config, "NICKNAME", "")).lower():
+        return None
+    now = time.time() if now is None else now
+    with runtime.chat_lock:
+        if nick.lower() not in runtime.chat_peers and len(runtime.chat_peers) >= PEER_MAX:
+            return None
+        runtime.chat_peers.setdefault(nick.lower(), {})[chan] = now
+    return nick
+
+
+def note_gone(nick, chan=None):
+    """A peer left `chan` (or the network, with no channel)."""
+    key = str(nick or "").lower()
+    with runtime.chat_lock:
+        seen = runtime.chat_peers.get(key)
+        if seen is None:
+            return
+        if chan is None:
+            runtime.chat_peers.pop(key, None)
+        else:
+            seen.pop(str(chan).lower(), None)
+            if not seen:
+                runtime.chat_peers.pop(key, None)
+
+
+def peer_channels(now=None):
+    """{channel: set of peer nicks} for the channels the bot is in, from
+    sightings that are still fresh."""
+    now = time.time() if now is None else now
+    ours = set(channels())
+    out = {}
+    with runtime.chat_lock:
+        for nick, seen in list(runtime.chat_peers.items()):
+            for chan, when in list(seen.items()):
+                if now - when > PEER_FRESH:
+                    seen.pop(chan, None)
+                elif chan in ours:
+                    out.setdefault(chan, set()).add(nick)
+            if not seen:
+                runtime.chat_peers.pop(nick, None)
+    return out
+
+
+def peer_nicks(now=None):
+    nicks = set()
+    for members in peer_channels(now).values():
+        nicks |= members
+    return sorted(nicks)
+
+
+def cover(now=None):
+    """The fewest channels that reach every peer at least once, greedily
+    (most peers first, then by name), at most SEND_CHANNELS_MAX."""
+    remaining = {chan: set(members) for chan, members in peer_channels(now).items()}
+    picked = []
+    while remaining and len(picked) < SEND_CHANNELS_MAX:
+        best = max(sorted(remaining), key=lambda chan: len(remaining[chan]))
+        if not remaining[best]:
+            break
+        picked.append(best)
+        covered = remaining.pop(best)
+        for chan in list(remaining):
+            remaining[chan] -= covered
+            if not remaining[chan]:
+                del remaining[chan]
+    return picked
+
+
+def refresh_peers(now=None, force=False):
+    """Ask WHO for every channel, at most every WHO_EVERY seconds (or at once
+    with `force`). Through the paced queue like everything the bot says.
+    Returns how many channels were asked."""
+    now = time.time() if now is None else now
+    with runtime.chat_lock:
+        if not force and now - runtime.chat_peers_meta.get("last", 0.0) < WHO_EVERY:
+            return 0
+        chans = channels()
+        if not chans:
+            return 0
+        runtime.chat_peers_meta["last"] = now
+    for chan in chans:
+        _enqueue(chan, f"WHO {chan}\r\n")
+    return len(chans)
+
+
+def peers_line(now=None):
+    """The operator's answer to `chat peers`."""
+    members = peer_channels(now)
+    if not members:
+        return "No other DCCore bot seen yet (asked WHO every %d min)." % (WHO_EVERY // 60)
+    parts = [f"{chan}: {', '.join(sorted(nicks))}" for chan, nicks in sorted(members.items())]
+    return "DCCore bots seen - " + "; ".join(parts)
+
+
 def capture(nick, target, message, now=None):
-    """A NOTICE arrived. Relay it if it is chat on a channel we are in.
-    Returns the recorded line, or None. Sends nothing, ever."""
+    """A channel message arrived. Relay it if it is chat, from a known DCCore
+    bot, on a channel we are in. Returns the recorded line, or None. Sends
+    nothing, ever."""
     text = chat_text(message)
     if text is None:
         return None
@@ -196,6 +335,10 @@ def capture(nick, target, message, now=None):
         return None
     nick = str(nick or "").strip()
     if not nick or nick.lower() == str(getattr(config, "NICKNAME", "")).lower():
+        return None
+    with runtime.chat_lock:
+        known = nick.lower() in runtime.chat_peers
+    if not known:
         return None
     text = _plain(text)[:MAX_TEXT]
     if not text:
@@ -233,24 +376,40 @@ def capture(nick, target, message, now=None):
     return line
 
 
-def _enqueue(key, line):
-    """Onto the bot's paced outbound queue, the lane oserve.queue_message()
-    uses for everything addressed to one target."""
+def _enqueue(key, line, vip=False):
+    """Onto the bot's paced outbound queue. The standard lane is one line per
+    user per pass, so a line for one channel waits behind a line for each of
+    the bot's other channels - a minute or more with a dozen channels, which
+    is no way to chat. What an operator TYPED goes on the express lane
+    (`vip`, as an advert does; the cap on `say()` keeps it from crowding
+    anything); WHO, which nobody waits for, takes the standard lane."""
     oserve = sys.modules.get("oserve")
     if oserve is not None and hasattr(oserve, "queue_message"):
-        oserve.queue_message(key, line)
+        oserve.queue_message(key, line, is_vip=vip)
+        return
+    if vip:
+        config.vip_queue.append(line)
         return
     with runtime.send_queue_lock:
         config.send_queue.setdefault(key.lower(), []).append(line)
 
 
 def say(sender, channel, text, now=None):
-    """Send what an operator typed as a tagged NOTICE. (ok, message)."""
+    """Say what an operator typed, as a tagged PRIVMSG. `channel` is one of
+    the bot's channels, or `*` for the fewest channels that reach every other
+    DCCore bot seen. (ok, message)."""
     chan = str(channel or "").strip().lower()
-    if chan[:1] not in _CHANNEL_PREFIXES:
-        return False, "Usage: chat #channel <text> - or just chat, for the channels."
-    if chan not in channels():
+    if chan == "*":
+        targets = cover(now)
+        if not targets:
+            return False, ("No other DCCore bot seen in the bot's channels yet, so "
+                           "there is nobody to say it to (chat peers, chat who).")
+    elif chan[:1] not in _CHANNEL_PREFIXES:
+        return False, "Usage: chat #channel <text> - or chat * <text>, or just chat, for the channels."
+    elif chan not in channels():
         return False, f"Not in {chan}: the bot can only chat in its own channels ({', '.join(channels()) or 'none yet'})."
+    else:
+        targets = [chan]
     clean = _plain(text)
     clean = clean.encode("utf-8")[:MAX_SEND_BYTES].decode("utf-8", "ignore").strip()
     if not clean:
@@ -261,8 +420,10 @@ def say(sender, channel, text, now=None):
                     OUTBOUND_MAX, OUTBOUND_PER, now):
             return False, (f"Slow down: {OUTBOUND_MAX} chat lines a minute, so chat "
                            f"never holds up the queue's own messages.")
-    _enqueue(chan, f"NOTICE {chan} :{TAG} {clean}\r\n")
-    # The server does not send a NOTICE back to whoever sent it, so the
+    for target in targets:
+        _enqueue(target, f"PRIVMSG {target} :{TAG} {clean}\r\n", vip=True)
+    # The server does not send a message back to whoever sent it, so the
     # operator's own line is recorded and shown from here.
-    _deliver(_record(chan, str(getattr(config, "NICKNAME", "") or "?"), clean, now))
-    return True, f"Sent to {chan}."
+    _deliver(_record(targets[0] if len(targets) == 1 else "-",
+                     str(getattr(config, "NICKNAME", "") or "?"), clean, now))
+    return True, f"Sent to {', '.join(targets)}."

@@ -1116,6 +1116,8 @@ chat_recent = runtime.chat_recent
 chat_rate = runtime.chat_rate
 chat_outbound = runtime.chat_outbound
 chat_muted = runtime.chat_muted
+chat_peers = runtime.chat_peers
+chat_peers_meta = runtime.chat_peers_meta
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)

@@ -50,6 +50,27 @@ does not have to be in any channel, and the bot's half is tested here for real.
 Docs: ADMIN-CONSOLE.md has the `chat` command, the two feed lines, and a *DCCore Chat* section rewritten for the relay;
 the roadmap and both changelogs follow.
 
+**The transport changes: a channel PRIVMSG between DCCore bots, found by realname** (found while testing on the live
+bot: channel NOTICEs are what eggdrops and channel bots kick for).
+
+- **Realname:** `irc.registration_names()` now sends `DCCore/sc <nick>` (cut to 50), the first word being
+  `serverschat.REALNAME_MARK`. Ident and nick are unchanged.
+- **Peers:** `serverschat.refresh_peers()` asks `WHO #chan` for each channel (from the server's own PING, at most every
+  `WHO_EVERY` = 600 s, or at once with `chat who`), through the standard queue lane. `note_who_reply()` reads the 352
+  and keeps the nicks whose realname's first word is the mark, per channel, in `runtime.chat_peers` (bounded at
+  `PEER_MAX`, sightings older than 2.5 intervals ignored; PART, QUIT and NICK forget a peer). Nothing is sent to them.
+- **Arriving:** `irc._capture_chat_message()` (the PRIVMSG branch) replaces the NOTICE hook; a NOTICE is no longer chat.
+  Same rules as before, plus the sender must be a known peer (adverts and search replies carry the realname and never
+  the tag), and the ban check from the #958 review still applies.
+- **Sent:** `chat #chan text` or `chat * text` -> `PRIVMSG #chan :[ServersChat] text`. `*` is `cover()`: greedily the
+  fewest channels (at most `SEND_CHANNELS_MAX` = 5) reaching every peer once; with no peer seen it says so and sends
+  nothing. What an operator typed goes on the **express (VIP) lane**: on the standard lane a line waits behind one for
+  each of the bot's other channels, which was over a minute with fourteen. WHO stays standard. `chat peers` lists who
+  was seen.
+- **The script:** the window sends to `*` by default (menu: *Send to → Every channel with other DCCore bots*), and the
+  raw-line hider is an `on ^*:TEXT` now.
+- Tests updated and added (peer table, cover, WHO cadence, the express lane, the PRIVMSG wiring, the realname).
+
 **Neo's review of #958**, all four points taken:
 
 1. **A banned nick's chat is not relayed.** `irc._capture_chat_notice()` now gets the NOTICE's `ident@host` and asks

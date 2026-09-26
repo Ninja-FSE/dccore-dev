@@ -452,6 +452,8 @@ PRESERVE_RUNTIME = (
     'chat_rate',          # and the limits on what arrives and what is sent -
     'chat_outbound',      # a settings save is not a reason to forget them
     'chat_muted',
+    'chat_peers',         # the other DCCore bots seen by WHO, and when it last ran
+    'chat_peers_meta',
     'recent_joins',       # #376: joins inside the merge window - a rehash in it
                           # would otherwise lose when the new nick appeared
     'list_grab_others_asked',  # #926: who just asked which bot for its list.

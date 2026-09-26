@@ -400,6 +400,10 @@ def ident_for_nick(nick):
     return kept or "dccore"
 
 
+# Undernet's REALLEN is 50; a longer realname is cut by the server anyway.
+REALNAME_MAX_LENGTH = 50
+
+
 def registration_names():
     """(ident, real name) for the USER line: both follow the configured nickname.
 
@@ -409,7 +413,9 @@ def registration_names():
     with that. Read at every connection, so changing NICKNAME changes both.
     """
     configured = str(getattr(config, "ORIGINAL_NICK", None) or getattr(config, "NICKNAME", None) or "")
-    return ident_for_nick(configured), (configured or "dccore")
+    import serverschat
+    real = f"{serverschat.REALNAME_MARK} {configured or 'dccore'}"
+    return ident_for_nick(configured), real[:REALNAME_MAX_LENGTH]
 
 
 def adopt_registered_nick(line):
@@ -2013,14 +2019,15 @@ def note_bot_renamed(old_nick, new_nick, ident=None):
 
 
 @never_breaks_the_read_loop
-def _capture_chat_notice(user, target, msg, hostmask=None):
-    """A NOTICE that may be DCCore Chat (#371) - see serverschat.capture().
-    Observational like the other captures here: it records and relays to the
-    operator's console, and it never dispatches and never answers.
+def _capture_chat_message(user, target, msg, hostmask=None):
+    """A channel message that may be DCCore Chat (#371) - see
+    serverschat.capture(). Observational like the other captures here: it
+    records and relays to the operator's console, and it never dispatches
+    and never answers.
 
     Not from somebody banned (#958 review): a ban is the operator saying they
     want nothing from that nick, and that includes their chat. Only checked
-    for a line that IS chat, so an ordinary NOTICE costs no ban lookup.
+    for a line that IS chat, so an ordinary message costs no ban lookup.
     `hostmask` is the sender's "ident@host", for the hostmask-shaped bans."""
     import serverschat
     if serverschat.chat_text(msg) is None:
@@ -2028,6 +2035,26 @@ def _capture_chat_notice(user, target, msg, hostmask=None):
     if not security.check_user_status(user, hostmask=hostmask):
         return
     serverschat.capture(user, target, msg)
+
+
+@never_breaks_the_read_loop
+def _note_chat_peers(line):
+    """A 352 (WHO reply): which nicks are other DCCore bots - see
+    serverschat.note_who_reply()."""
+    import serverschat
+    serverschat.note_who_reply(line)
+
+
+@never_breaks_the_read_loop
+def _forget_chat_peer(nick, chan=None):
+    import serverschat
+    serverschat.note_gone(nick, chan)
+
+
+@never_breaks_the_read_loop
+def _refresh_chat_peers():
+    import serverschat
+    serverschat.refresh_peers()
 
 
 @never_breaks_the_read_loop
@@ -3015,6 +3042,8 @@ def irc_loop():
                         if len(parts) > 1:
                             pong_code = parts[1].lstrip(':')
                             s.sendall(f"PONG {pong_code}\r\n".encode("utf-8", errors="ignore"))
+                        # The server's own ping is the clock for asking WHO again.
+                        _refresh_chat_peers()
                     
                     # Anchored with is_server_numeric(), for the same reason
                     # the 513 handler three lines below is: an unanchored
@@ -3303,9 +3332,13 @@ def irc_loop():
                             note_bot_renamed(nick_match.group(1),
                                              nick_match.group(2).strip(),
                                              renamed_ident.group(1) if renamed_ident else None)
+                            # A DCCore Chat peer that changes nick is found again
+                            # under the new name by the next WHO: drop the old.
+                            _forget_chat_peer(nick_match.group(1).lower())
                             
                     # Anchored: this writes straight into config.whois_status.
                     if is_server_numeric(line, "352"):
+                        _note_chat_peers(line)
                         parts = line.split()
                         if len(parts) > 7:
                             target_nick = parts[7].lower()
@@ -3407,6 +3440,7 @@ def irc_loop():
                         if part_match and is_valid_irc_target(part_match[1]):
                             p_user = part_match[0].lower()
                             p_chan = part_match[1].lower()
+                            _forget_chat_peer(p_user, p_chan)
                             with runtime.channel_users_lock():
                                 if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
                                     config.channel_users[p_chan].remove(p_user)
@@ -3422,6 +3456,7 @@ def irc_loop():
                         quit_match = re.search(r"^:([^!]+)!", line)
                         if quit_match:
                             q_user = quit_match.group(1).lower()
+                            _forget_chat_peer(q_user)
                             with runtime.channel_users_lock():
                                 quit_chan = None
                                 for chan in config.channel_users:
@@ -3537,11 +3572,6 @@ def irc_loop():
                         if notice_user.lower() != config.NICKNAME.lower():
                             _capture_broadcast_search_reply(
                                 notice_user, notice_target, notice_text)
-                            # DCCore Chat (#371): a tagged NOTICE to one of
-                            # our channels, relayed to the operator's console.
-                            notice_host = re.match(r"^:[^!\s]+!(\S+)\s+NOTICE\b", line)
-                            _capture_chat_notice(notice_user, notice_target, notice_text,
-                                                 notice_host.group(1) if notice_host else None)
                             if notice_target.lower() == config.NICKNAME.lower():
                                 # A private NOTICE addressed to us, from
                                 # another bot - how file servers answer a
@@ -3584,6 +3614,10 @@ def irc_loop():
                         # Someone else asking a bot for its list (#926): the
                         # automatic grab leaves that bot alone for a while.
                         _capture_list_ask(user, msg)
+
+                        # DCCore Chat (#371): a tagged message from another
+                        # DCCore bot, relayed to the operator's console.
+                        _capture_chat_message(user, target_chan, msg, user_host)
 
                         # A private message from a bot we asked for a file
                         # (#926): some servers answer a request that way

@@ -1455,11 +1455,20 @@ def _cmd_unpair(session, args):
 
 
 def _cmd_chat(session, args):
-    """`chat #channel <text>`: say something in DCCore Chat (#371), as the
-    bot, in one of its channels - a NOTICE starting with [ServersChat],
-    which is public. `chat` alone: the channels it can chat in."""
+    """`chat #channel <text>` or `chat * <text>`: say something in DCCore Chat
+    (#371), as the bot - a channel message starting with [ServersChat], which
+    is public; `*` is the fewest channels that reach every other DCCore bot.
+    `chat` alone: the channels it can chat in. `chat peers` / `chat who`: the
+    other DCCore bots seen, and ask again."""
     import serverschat
     text = str(args or "").strip()
+    if text.lower() == "peers":
+        session.send(serverschat.peers_line())
+        return
+    if text.lower() == "who":
+        asked = serverschat.refresh_peers(force=True)
+        session.send(f"Asked WHO in {asked} channel(s); `chat peers` shows who answered.")
+        return
     if not text:
         if session.structured:
             session.send(serverschat.channels_line())
@@ -1510,7 +1519,7 @@ COMMANDS = {
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
     "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
-    "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan text]"),
+    "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|* text]"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),

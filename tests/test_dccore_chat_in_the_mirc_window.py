@@ -6,9 +6,9 @@ way the script's other tests do. The bot does the checking
 what is left for it:
 
 - it only ever sends what the operator typed, and only through the bot;
-- nothing in the NOTICE handler, or in anything drawing a CHAT line, sends
+- nothing in the message handler, or in anything drawing a CHAT line, sends
   anything (RFC 2812);
-- a raw tagged NOTICE is hidden only while the relay is up and would draw
+- a raw tagged message is hidden only while the relay is up and would draw
   it - otherwise it shows in the channel as usual, so nothing is lost;
 - a line is drawn once, stripped, only for channels the operator chose;
 - it says it is public;
@@ -58,13 +58,13 @@ class TheTag(unittest.TestCase):
         self.assertIn("alias dccore.chat.tag { return $+($chr(91),ServersChat,$chr(93)) }", script())
 
     def test_it_is_the_first_word_and_the_first_check(self):
-        body = statements(block(script(), "on ^*:NOTICE:*:#:"))
+        body = statements(block(script(), "on ^*:TEXT:*:#:"))
         self.assertEqual(body[0], "if ($1 != $dccore.chat.tag) { return }")
 
 
 class ARawNoticeIsHiddenOnlyWhenItWillBeDrawn(unittest.TestCase):
     def setUp(self):
-        self.handler = statements(block(script(), "on ^*:NOTICE:*:#:"))
+        self.handler = statements(block(script(), "on ^*:TEXT:*:#:"))
 
     def test_every_condition_comes_before_haltdef(self):
         halt = self.handler.index("haltdef")
@@ -85,7 +85,7 @@ class NothingAnswers(unittest.TestCase):
     """RFC 2812 - checked in the handler AND in every alias drawing a line,
     since a send one call away is still an automatic reply."""
 
-    REACHED = ["on ^*:NOTICE:*:#:", "alias dccore.chat.feed", "alias dccore.chat.channels",
+    REACHED = ["on ^*:TEXT:*:#:", "alias dccore.chat.feed", "alias dccore.chat.channels",
                "alias dccore.chat.listens", "alias dccore.chat.show", "alias dccore.chat.window",
                "alias dccore.chat.sys", "alias dccore.chat.title"]
 
@@ -205,6 +205,25 @@ class TheWindowIsTheInterface(unittest.TestCase):
         self.assertIn("/dccore chat [text]", text)
         self.assertIn(".Open DCCore Chat:dccore chat", text)
         self.assertIn("alias dccore.ver { return 1.6 }", text)
+
+
+class TheDefaultIsEveryChannelWithOtherDccoreBots(unittest.TestCase):
+    """Typing in the window says it where the bot has seen another DCCore
+    bot (`chat *`), unless one channel was picked from the menu."""
+
+    def test_no_pick_means_star(self):
+        body = "\n".join(statements(block(script(), "alias dccore.chat.say")))
+        self.assertIn("if (%to == $null) { var %to = * }", body)
+        self.assertIn("dccore.send chat %to %text", body)
+
+    def test_star_is_not_checked_against_the_channel_list(self):
+        body = "\n".join(statements(block(script(), "alias dccore.chat.say")))
+        self.assertIn("if (%to != *) && ($dccore.st(chat.chans) != $null)", body)
+
+    def test_a_menu_row_goes_back_to_it(self):
+        body = "\n".join(statements(block(script(), "alias dccore.chat.to.all")))
+        self.assertIn("dccore.set chat.to *", body)
+        self.assertIn("dccore.chat.to.all", script())
 
 
 if __name__ == "__main__":

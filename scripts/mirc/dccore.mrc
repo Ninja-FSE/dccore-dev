@@ -1250,25 +1250,28 @@ on *:dialog:dccore.opt:sclick:502: {
 ;
 ;  Operators chatting with each other in the channels their bots share.
 ;  The BOT is the relay: what you type in the chat window goes to the bot
-;  over this console (`chat #chan text`), and the bot says it in the
-;  channel as a NOTICE starting with a tag; a NOTICE starting with that tag
-;  in one of the bot's channels comes back here as a CHAT line. Your own
-;  mIRC does not have to be in any channel.
+;  over this console (`chat * text`), and the bot says it as an ordinary
+;  channel message starting with a tag, in the fewest channels that reach
+;  the other DCCore bots (a channel NOTICE is what channel bots kick for).
+;  A tagged message from another DCCore bot - recognised by its realname,
+;  which the bot looks up with WHO - comes back here as a CHAT line. Your
+;  own mIRC does not have to be in any channel.
 ;
-;  It is PUBLIC, and says so. A NOTICE to a channel reaches everybody in it;
+;  It is PUBLIC, and says so. A channel message reaches everybody in it;
 ;  somebody without a chat window sees the line in the channel as it is.
-;  The sender is the nick that sent the NOTICE - your bot, for what you
-;  type - and the tag is a presentation filter, not a trust boundary.
+;  The sender is the nick that sent it - your bot, for what you type - and
+;  the tag is a presentation filter, not a trust boundary.
 ;
-;  The bot does the checking - the tag as the first word, its own channels
-;  only, control codes out, a per-nick flood limit, a cap on what you send
-;  - and keeps the last lines in memory, so a window that reconnects shows
-;  what it missed. Each line carries an id (its time in milliseconds), and
-;  the window never draws the same one twice.
+;  The bot does the checking - the tag as the first word, a sender that is
+;  another DCCore bot, its own channels only, control codes out, a per-nick
+;  flood limit, a cap on what you send - and keeps the last lines in
+;  memory, so a window that reconnects shows what it missed. Each line
+;  carries an id (its time in milliseconds), and the window never draws the
+;  same one twice.
 ;
-;  This script only ever sends what you typed. Nothing in the NOTICE handler
-;  or in anything drawing a CHAT line sends anything (RFC 2812: a NOTICE is
-;  never answered automatically).
+;  This script only ever sends what you typed. Nothing in the message
+;  handler or in anything drawing a CHAT line sends anything, so two
+;  scripts can never echo each other.
 ;
 ;  The tag is neutral so that a script that is not DCCore's can speak it too.
 ;  It cannot change once people use it.
@@ -1295,12 +1298,12 @@ alias dccore.chat.window {
   if ($dccore.opt(font)) { font $dccore.chat.win $dccore.fontsize Lucida Console }
   dccore.chat.title
   dccore.chat.sys Public: everyone in the channel reads what is typed here, with or without this script.
-  dccore.chat.sys What you type is said by $iif($dccore.bot,$dccore.bot,your bot) in its channel. Right-click to choose the channel and the ones to listen on.
+  dccore.chat.sys What you type is said by $iif($dccore.bot,$dccore.bot,your bot) in the channels where it has seen other DCCore bots. Right-click to send to one channel instead, and to choose the ones to listen on.
 }
 alias dccore.chat.title {
   if (!$window($dccore.chat.win)) { return }
   var %to = $dccore.opt(chat.to)
-  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot $iif(%to,typing sends to %to,right-click to pick a channel to send to) $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
+  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends to $iif((%to == $null) || (%to == *),every channel with other DCCore bots,%to) $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
 }
 alias dccore.chat.sys {
   dccore.chat.window
@@ -1334,12 +1337,12 @@ alias dccore.chat.channels {
   hadd dccore.live chat.chans $1-
 }
 
-; A tagged NOTICE that reaches YOUR mIRC as well, because you are in that
+; A tagged message that reaches YOUR mIRC as well, because you are in that
 ; channel too: the bot relays it, so it is drawn from its CHAT line - and
 ; kept out of the channel view here, but ONLY while the relay is up, the
 ; bot is in that channel, and the line will be drawn. With the relay down
 ; nothing would draw it, so it is left to show in the channel as usual.
-on ^*:NOTICE:*:#: {
+on ^*:TEXT:*:#: {
   if ($1 != $dccore.chat.tag) { return }
   if (!$dccore.chat.relaying) { return }
   if (!$dccore.here) { return }
@@ -1353,9 +1356,9 @@ on ^*:NOTICE:*:#: {
 ; says it in the channel picked for it; the line comes back as a CHAT line.
 alias dccore.chat.say {
   var %to = $dccore.opt(chat.to)
-  if (%to == $null) { dccore.chat.sys No channel to send to yet: right-click the window and pick one. | return }
+  if (%to == $null) { var %to = * }
   if (!$dccore.chat.relaying) { dccore.chat.sys Not connected to $iif($dccore.bot,$dccore.bot,the bot) $+ : the chat goes through it. /dccore connect | return }
-  if ($dccore.st(chat.chans) != $null) && (!$istok($dccore.st(chat.chans),%to,32)) { dccore.chat.sys $dccore.bot is not in %to $+ : pick one of its channels (right-click). | return }
+  if (%to != *) && ($dccore.st(chat.chans) != $null) && (!$istok($dccore.st(chat.chans),%to,32)) { dccore.chat.sys $dccore.bot is not in %to $+ : pick one of its channels (right-click). | return }
   var %text = $strip($1-)
   if (%text == $null) { return }
   dccore.send chat %to %text
@@ -1374,6 +1377,12 @@ alias dccore.chat.to {
   if (!$istok($dccore.opt(chat.listen),$1,32)) { dccore.set chat.listen $addtok($dccore.opt(chat.listen),$1,32) }
   dccore.chat.title
   dccore.chat.sys Typing here now sends to $1 $+ , and $1 is listened on.
+}
+; Send to every channel where the bot has seen another DCCore bot (the default).
+alias dccore.chat.to.all {
+  dccore.set chat.to *
+  dccore.chat.title
+  dccore.chat.sys Typing here now sends to every channel with other DCCore bots.
 }
 alias dccore.chat.listen {
   if ($istok($dccore.opt(chat.listen),$1,32)) {
@@ -1417,6 +1426,8 @@ alias dccore.chat.listen.n { if ($1 isnum) && ($dccore.chat.chan($1) != $null) {
 menu @DCCore-Chat {
   $iif(!$dccore.st(chat.chans),(connect to the bot to see its channels)):dccore connect
   Send to
+  .$iif((!$dccore.opt(chat.to)) || ($dccore.opt(chat.to) == *),$style(1)) Every channel with other DCCore bots:dccore.chat.to.all
+  .-
   .$submenu($dccore.chat.sendrow($1))
   Listen on
   .$submenu($dccore.chat.listenrow($1))

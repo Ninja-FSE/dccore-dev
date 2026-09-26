@@ -268,6 +268,11 @@ chat_rate = {}
 chat_outbound = {}
 chat_muted = {}
 chat_last_id = 0
+# chat_peers: nick -> {channel: last seen in a WHO reply}, the other DCCore bots
+# (their realname carries serverschat.REALNAME_MARK). chat_peers_meta["last"]:
+# when the channels were last asked WHO.
+chat_peers = {}
+chat_peers_meta = {"last": 0.0}
 chat_lock = threading.Lock()
 
 update_check_guard        = threading.Lock()  # the version check's start guard (#572)

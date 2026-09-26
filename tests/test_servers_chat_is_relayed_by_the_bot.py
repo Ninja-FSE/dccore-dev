@@ -1,17 +1,20 @@
 """#371: DCCore Chat, relayed by the bot (serverschat.py).
 
-The bot reads a NOTICE whose first word is [ServersChat] in one of its
-channels and hands it to the operator's console; `chat #chan text` sends one.
-What arrives is other people's text on the read loop, so it is held to the
-capture rules: first word only, the bot's channels only, stripped, capped,
-limited per nick, bounded, in memory only, never sent anywhere else and
-never answered.
+The bot reads a channel message whose first word is [ServersChat], from a
+nick whose realname says it is another DCCore bot (found with WHO), in one of
+its channels and hands it to the operator's console; `chat #chan text` and
+`chat * text` say one, as a PRIVMSG - a channel NOTICE is what channel bots
+kick for. What arrives is other people's text on the read loop, so it is held
+to the capture rules: first word only, a known peer, the bot's channels only,
+stripped, capped, limited per nick, bounded, in memory only, never sent
+anywhere else and never answered.
 """
 
 import io
 import os
 import re
 import sys
+import time
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,8 +67,16 @@ class Case(DCCoreTestCase):
         self.oserve = sys.modules.pop("oserve", None)
         self.addCleanup(lambda: self.oserve and sys.modules.__setitem__("oserve", self.oserve))
 
-    def arrive(self, text, nick="OtherOperator", target=CHAN, now=T0):
+    def arrive(self, text, nick="OtherOperator", target=CHAN, now=T0, peer=True):
+        if peer:
+            runtime.chat_peers.setdefault(nick.lower(), {})[CHAN] = now
         return serverschat.capture(nick, target, text, now=now)
+
+    def see_peer(self, nick, chan=CHAN, now=T0, real="DCCore/sc SomeBot"):
+        """What the server says in answer to WHO: a 352 line."""
+        return serverschat.note_who_reply(
+            f":irc.example.net 352 OurBot {chan} ~ident host.example irc.example.net "
+            f"{nick} H :0 {real}", now=now)
 
     def chat_lines(self):
         return [line for line in self.session.sent if line.startswith("DCCORE CHAT ")]
@@ -73,9 +84,13 @@ class Case(DCCoreTestCase):
     def queued(self):
         return {key: list(lines) for key, lines in (config.send_queue or {}).items()}
 
+    def spoken(self):
+        """What went on the express lane: what an operator typed."""
+        return list(config.vip_queue)
+
 
 class WhatArrives(Case):
-    def test_a_tagged_notice_in_our_channel_reaches_the_console(self):
+    def test_a_tagged_message_in_our_channel_reaches_the_console(self):
         line = self.arrive("[ServersChat] hello all")
         self.assertIsNotNone(line)
         self.assertEqual(len(self.chat_lines()), 1)
@@ -86,8 +101,14 @@ class WhatArrives(Case):
     def test_the_tag_has_to_be_the_first_word(self):
         self.assertIsNone(self.arrive("hello [ServersChat] all"))
         self.assertIsNone(self.arrive("[ServersChatX] hello"))
-        self.assertIsNone(self.arrive("plain notice"))
+        self.assertIsNone(self.arrive("plain message"))
         self.assertEqual(self.chat_lines(), [])
+
+    def test_only_from_a_nick_whose_realname_says_it_is_a_dccore_bot(self):
+        self.assertIsNone(self.arrive("[ServersChat] hi", nick="Stranger", peer=False))
+        self.assertEqual(self.chat_lines(), [])
+        self.see_peer("Stranger")
+        self.assertIsNotNone(self.arrive("[ServersChat] hi", nick="Stranger", peer=False))
 
     def test_only_the_bot_s_own_channels(self):
         self.assertIsNone(self.arrive("[ServersChat] hi", target="#elsewhere"))
@@ -129,18 +150,20 @@ class TheReviewOf958(Case):
 
     def test_a_banned_nick_s_chat_is_not_relayed(self):
         config.banned_users["banneduser"] = 9_999_999_999
-        irc._capture_chat_notice("BannedUser", CHAN, "[ServersChat] let me in", "b@host.example")
+        for nick in ("banneduser", "otheroperator"):
+            runtime.chat_peers[nick] = {CHAN: T0}
+        irc._capture_chat_message("BannedUser", CHAN, "[ServersChat] let me in", "b@host.example")
         self.assertEqual(self.chat_lines(), [])
-        irc._capture_chat_notice("OtherOperator", CHAN, "[ServersChat] fine", "o@host.example")
+        irc._capture_chat_message("OtherOperator", CHAN, "[ServersChat] fine", "o@host.example")
         self.assertEqual(len(self.chat_lines()), 1)
 
-    def test_an_ordinary_notice_costs_no_ban_lookup(self):
+    def test_an_ordinary_message_costs_no_ban_lookup(self):
         import security
         looked = []
         real = security.check_user_status
         security.check_user_status = lambda *a, **k: looked.append(a) or True
         self.addCleanup(setattr, security, "check_user_status", real)
-        irc._capture_chat_notice("OtherOperator", CHAN, "just a notice", "o@host.example")
+        irc._capture_chat_message("OtherOperator", CHAN, "just a message", "o@host.example")
         self.assertEqual(looked, [])
 
     def test_everyone_together_is_capped_and_said_once(self):
@@ -165,7 +188,7 @@ class TheReviewOf958(Case):
         line = self.arrive("[ServersChat] abc\u202edef\u2066g\u200f")
         self.assertEqual(line["text"], "abcdefg")
         serverschat.say("SomeOperator", CHAN, "x\u202ey", now=T0)
-        self.assertNotIn("\u202e", self.queued()[CHAN][0])
+        self.assertNotIn("\u202e", self.spoken()[0])
 
     def test_a_changed_channel_list_is_sent_again_with_the_status(self):
         session = adminchat.Session.__new__(adminchat.Session)
@@ -199,16 +222,17 @@ class NothingAnswers(Case):
         for i in range(10):
             self.arrive(f"[ServersChat] line {i}", nick=f"Operator{i}")
         self.assertEqual(self.queued(), {})
+        self.assertEqual(self.spoken(), [])
 
     def test_the_capture_path_has_no_send_in_it(self):
         with io.open(os.path.join(REPO_ROOT, "serverschat.py"), encoding="utf-8") as handle:
             code = handle.read()
         body = code[code.index("def capture("):code.index("def _enqueue(")]
-        # Statements only: the docstring says "A NOTICE arrived", which is
-        # not a send (a guard that reads prose passes or fails on words).
+        # Statements only: the docstring is prose, which is not a send (a guard that reads prose passes or fails on words).
         body = re.sub(r'"""[\s\S]*?"""', "", body)
         body = "\n".join(line for line in body.split("\n") if not line.strip().startswith("#"))
-        for word in ("_enqueue(", "queue_message", "send_queue", '"NOTICE', "f\"NOTICE", "session.sock"):
+        for word in ("_enqueue(", "queue_message", "send_queue", '"NOTICE', "f\"NOTICE",
+                     '"PRIVMSG', "f\"PRIVMSG", "session.sock"):
             self.assertNotIn(word, body)
         self.assertIn("_deliver(line)", body, "the body was really read")
 
@@ -251,10 +275,11 @@ class MemoryOnlyAndBounded(Case):
 
 
 class WhatIsSent(Case):
-    def test_a_tagged_notice_through_the_paced_queue(self):
+    def test_a_tagged_privmsg_through_the_paced_queue(self):
         ok, _message = serverschat.say("SomeOperator", CHAN, "hello there", now=T0)
         self.assertTrue(ok)
-        self.assertEqual(self.queued(), {CHAN: [f"NOTICE {CHAN} :[ServersChat] hello there\r\n"]})
+        self.assertEqual(self.spoken(), [f"PRIVMSG {CHAN} :[ServersChat] hello there\r\n"])
+        self.assertEqual(self.queued(), {}, "the express lane, not behind every other channel")
 
     def test_the_own_line_comes_back_as_the_bot(self):
         serverschat.say("SomeOperator", CHAN, "hello there", now=T0)
@@ -262,21 +287,21 @@ class WhatIsSent(Case):
 
     def test_a_line_break_cannot_smuggle_a_second_command(self):
         serverschat.say("SomeOperator", CHAN, "hi\r\nQUIT :bye\x0304red", now=T0)
-        line = self.queued()[CHAN][0]
+        line = self.spoken()[0]
         self.assertEqual(line.count("\r\n"), 1)
         self.assertTrue(line.endswith("\r\n"))
         self.assertNotIn("\x03", line)
 
     def test_the_line_fits_irc(self):
         serverschat.say("SomeOperator", CHAN, "é" * 500, now=T0)
-        self.assertLessEqual(len(self.queued()[CHAN][0].encode("utf-8")), 512)
+        self.assertLessEqual(len(self.spoken()[0].encode("utf-8")), 512)
 
     def test_only_the_bot_s_channels(self):
         ok, message = serverschat.say("SomeOperator", "#elsewhere", "hi", now=T0)
         self.assertFalse(ok)
         self.assertIn("Not in #elsewhere", message)
         self.assertFalse(serverschat.say("SomeOperator", "nochannel", "hi", now=T0)[0])
-        self.assertEqual(self.queued(), {})
+        self.assertEqual(self.spoken(), [])
 
     def test_nothing_to_send(self):
         self.assertFalse(serverschat.say("SomeOperator", CHAN, " \x02 ", now=T0)[0])
@@ -288,6 +313,136 @@ class WhatIsSent(Case):
         self.assertFalse(ok)
         self.assertIn("Slow down", message)
         self.assertTrue(serverschat.say("SomeOperator", CHAN, "later", now=T0 + serverschat.OUTBOUND_PER + 1)[0])
+
+
+class WhoIsADccoreBot(Case):
+    def test_a_352_with_the_mark_first_in_the_realname_is_a_peer(self):
+        self.assertEqual(self.see_peer("SomeBot"), "SomeBot")
+        self.assertEqual(serverschat.peer_channels(T0), {CHAN: {"somebot"}})
+
+    def test_the_mark_has_to_be_the_first_word(self):
+        self.assertIsNone(self.see_peer("Faker", real="I am DCCore/sc"))
+        self.assertIsNone(self.see_peer("Faker", real="DCCore/scx name"))
+        self.assertIsNone(self.see_peer("Faker", real="just a name"))
+        self.assertEqual(serverschat.peer_channels(T0), {})
+
+    def test_not_ourselves_and_not_a_who_about_a_nick(self):
+        self.assertIsNone(self.see_peer("OurBot"))
+        self.assertIsNone(self.see_peer("SomeBot", chan="*"))
+
+    def test_a_line_that_is_not_a_352_is_nothing(self):
+        for line in ("", ":srv 353 OurBot = #c :a b", ":srv 352 short", "PING :x"):
+            self.assertIsNone(serverschat.note_who_reply(line, now=T0))
+
+    def test_only_channels_the_bot_is_in_count(self):
+        self.see_peer("SomeBot", chan="#elsewhere")
+        self.assertEqual(serverschat.peer_channels(T0), {})
+
+    def test_a_sighting_goes_stale(self):
+        self.see_peer("SomeBot")
+        self.assertEqual(serverschat.peer_nicks(T0 + serverschat.PEER_FRESH - 1), ["somebot"])
+        self.assertEqual(serverschat.peer_nicks(T0 + serverschat.PEER_FRESH + 1), [])
+
+    def test_leaving_a_channel_or_the_network(self):
+        self.see_peer("SomeBot")
+        serverschat.note_gone("SomeBot", CHAN)
+        self.assertEqual(serverschat.peer_nicks(T0), [])
+        self.see_peer("SomeBot")
+        serverschat.note_gone("somebot")
+        self.assertEqual(serverschat.peer_nicks(T0), [])
+
+    def test_the_table_is_bounded(self):
+        for i in range(serverschat.PEER_MAX + 20):
+            self.see_peer(f"Bot{i}")
+        self.assertEqual(len(runtime.chat_peers), serverschat.PEER_MAX)
+
+    def test_the_real_line_from_the_read_loop(self):
+        irc._note_chat_peers(f":irc.example.net 352 OurBot {CHAN} ~i h s Other H :0 DCCore/sc Other")
+        self.assertIn("other", runtime.chat_peers)
+
+    def test_the_registration_carries_the_mark(self):
+        self.set_config(NICKNAME="jlnbln", ORIGINAL_NICK="jlnbln")
+        ident, real = irc.registration_names()
+        self.assertEqual(ident, "jlnbln")
+        self.assertEqual(real, f"{serverschat.REALNAME_MARK} jlnbln")
+        self.assertLessEqual(len(real), 50)
+
+
+class ThereIsNothingToSayItToUnlessAPeerIsThere(Case):
+    def test_the_fewest_channels_that_reach_everybody(self):
+        for chan in ("#one", "#two", "#three"):
+            config.channel_users[chan] = {"ourbot"}
+        self.see_peer("A", "#one")
+        self.see_peer("A", "#two")
+        self.see_peer("B", "#two")
+        self.see_peer("C", "#three")
+        self.assertEqual(serverschat.cover(T0), ["#two", "#three"])
+
+    def test_at_most_a_few_channels(self):
+        for i in range(serverschat.SEND_CHANNELS_MAX + 4):
+            config.channel_users[f"#c{i}"] = {"ourbot"}
+            self.see_peer(f"Bot{i}", f"#c{i}")
+        self.assertEqual(len(serverschat.cover(T0)), serverschat.SEND_CHANNELS_MAX)
+
+    def test_star_says_it_once_in_each_covering_channel(self):
+        config.channel_users["#two"] = {"ourbot"}
+        self.see_peer("A", CHAN)
+        self.see_peer("B", "#two")
+        ok, message = serverschat.say("SomeOperator", "*", "hello all", now=T0)
+        self.assertTrue(ok, message)
+        self.assertEqual(sorted(self.spoken()), [
+            f"PRIVMSG {CHAN} :[ServersChat] hello all\r\n",
+            "PRIVMSG #two :[ServersChat] hello all\r\n"])
+        self.assertEqual(len(self.chat_lines()), 1, "one line comes back to the window, not two")
+
+    def test_star_with_nobody_seen_says_nothing(self):
+        ok, message = serverschat.say("SomeOperator", "*", "hello", now=T0)
+        self.assertFalse(ok)
+        self.assertIn("nobody to say it to", message)
+        self.assertEqual(self.spoken(), [])
+
+    def test_a_named_channel_needs_no_peer(self):
+        self.assertTrue(serverschat.say("SomeOperator", CHAN, "hello", now=T0)[0])
+
+
+class ChatDoesNotWaitBehindWho(Case):
+    def test_who_is_standard_and_what_was_typed_is_express(self):
+        config.channel_users["#two"] = {"ourbot"}
+        serverschat.refresh_peers(now=T0)
+        serverschat.say("SomeOperator", CHAN, "now", now=T0)
+        self.assertEqual(len(self.queued()), 2, "WHO stays on the standard lane")
+        self.assertEqual(self.spoken(), [f"PRIVMSG {CHAN} :[ServersChat] now\r\n"])
+
+    def test_the_real_queue_takes_it_as_a_vip_line(self):
+        import oserve
+        sys.modules["oserve"] = oserve
+        serverschat.say("SomeOperator", CHAN, "via oserve", now=T0)
+        self.assertEqual(self.spoken(), [f"PRIVMSG {CHAN} :[ServersChat] via oserve\r\n"])
+
+
+class AskingWho(Case):
+    def test_every_channel_once_per_interval(self):
+        config.channel_users["#two"] = {"ourbot"}
+        self.assertEqual(serverschat.refresh_peers(now=T0), 2)
+        self.assertEqual(self.queued(), {CHAN: [f"WHO {CHAN}\r\n"], "#two": ["WHO #two\r\n"]})
+        self.assertEqual(serverschat.refresh_peers(now=T0 + serverschat.WHO_EVERY - 1), 0)
+        self.assertEqual(serverschat.refresh_peers(now=T0 + serverschat.WHO_EVERY + 1), 2)
+
+    def test_the_console_can_ask_at_once_and_list_who_answered(self):
+        serverschat.refresh_peers(now=T0)
+        self.session.sent = []
+        adminchat._cmd_chat(self.session, "who")
+        self.assertTrue(any("Asked WHO in 1 channel" in s for s in self.session.sent))
+        self.see_peer("SomeBot", now=time.time())
+        self.session.sent = []
+        adminchat._cmd_chat(self.session, "peers")
+        self.assertIn("somebot", self.session.sent[0].lower())
+
+    def test_it_runs_from_the_servers_ping(self):
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        at = code.index('if line.startswith("PING"):')
+        self.assertIn("_refresh_chat_peers()", code[at:at + 900])
 
 
 class TheConsoleCommand(Case):
@@ -328,13 +483,24 @@ class TheConsoleCommand(Case):
 
 
 class TheReadLoop(Case):
-    def test_the_notice_branch_hands_it_on(self):
+    def test_the_privmsg_branch_hands_it_on(self):
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        at = code.index("privmsg_parsed = parse_privmsg(line)")
+        self.assertIn("_capture_chat_message(user, target_chan, msg, user_host)", code[at:at + 3500])
+
+    def test_the_who_reply_and_the_departures_are_watched(self):
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        self.assertIn("_note_chat_peers(line)", code)
+        self.assertIn("_forget_chat_peer(p_user, p_chan)", code)
+        self.assertIn("_forget_chat_peer(q_user)", code)
+
+    def test_a_notice_is_not_chat(self):
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index("notice_parsed = parse_notice(line)")
-        branch = code[at:at + 1500]
-        self.assertIn("_capture_chat_notice(notice_user, notice_target, notice_text,", branch)
-        self.assertIn("notice_host.group(1) if notice_host else None", branch)
+        self.assertNotIn("_capture_chat", code[at:at + 1500])
 
     def test_a_capture_that_raises_cannot_break_the_connection(self):
         real = serverschat.capture
@@ -344,10 +510,11 @@ class TheReadLoop(Case):
 
         serverschat.capture = explode
         self.addCleanup(setattr, serverschat, "capture", real)
-        irc._capture_chat_notice("OtherOperator", CHAN, "[ServersChat] x")
+        irc._capture_chat_message("OtherOperator", CHAN, "[ServersChat] x")
 
     def test_the_real_capture_runs_from_it(self):
-        irc._capture_chat_notice("OtherOperator", CHAN, "[ServersChat] via irc")
+        runtime.chat_peers["otheroperator"] = {CHAN: T0}
+        irc._capture_chat_message("OtherOperator", CHAN, "[ServersChat] via irc")
         self.assertEqual(len(self.chat_lines()), 1)
 
 
