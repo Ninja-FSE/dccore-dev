@@ -326,6 +326,10 @@ out.two = run({ files: 71278, size: "20.44TB", rar_folders: 11322, list_date: "S
 out.three = run({ files: 6, size: "3GB", rar_folders: null, list_date: null,
   lists: [{ name: "a", files: 1, size: "1GB", rar_folders: null }, { name: "<b>b</b>", files: 2, size: "1GB", rar_folders: 0 },
           { name: "c", files: 3, size: "1GB", rar_folders: null }] });
+out.tricky = run({ files: 36, size: "3GB", rar_folders: null, list_date: null,
+  lists: [{ name: "Rock $& Roll", files: 12, size: "1GB", rar_folders: null },
+          { name: "Films $'", files: 12, size: "1GB", rar_folders: null },
+          { name: "my {count} list", files: 12, size: "1GB", rar_folders: null }] });
 out.none = run(null);
 out.nolists = run({ files: 5, size: "1GB", rar_folders: 2, list_date: "Sep 1st" });
 console.log(JSON.stringify(out));
@@ -380,6 +384,15 @@ class TheRealRenderBuildsTheCards(unittest.TestCase):
 
     def test_a_name_with_markup_is_text(self):
         self.assertTrue(self.seen()["three"][2]["label"].startswith("<b>b</b> \u00b7 "))
+
+    def test_a_list_name_is_shown_as_typed_whatever_characters_it_has(self):
+        """String.replace reads "$&" and "$'" in a replacement string as patterns,
+        and a "{count}" in the name must not be filled in (#957 review)."""
+        cards = self.seen()["tricky"]
+
+        self.assertEqual([card["label"] for card in cards[1:4]],
+                         ["Rock $& Roll \u00b7 12 files", "Films $' \u00b7 12 files",
+                          "my {count} list \u00b7 12 files"])
 
     def test_an_unknown_build_date_is_a_dash_and_the_small_size(self):
         last = self.seen()["three"][-1]

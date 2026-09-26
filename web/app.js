@@ -5576,8 +5576,12 @@
   // means "no RAR list has been built", which is not the same claim as "this
   // bot offers no albums" - so it is left out, never shown as zero.
   function libraryLabel(name, files, albums) {
+    // The count first, and the name through a function: as a replacement STRING
+    // "$&", "$`" and "$'" in a list name are patterns, and a "{count}" inside it
+    // would be filled by the second replace.
     var text = t("stats.labelledFileCount")
-      .replace("{label}", name).replace("{count}", Number(files || 0).toLocaleString());
+      .replace("{count}", Number(files || 0).toLocaleString())
+      .replace("{label}", function () { return name; });
     if (albums !== null && albums !== undefined) {
       text += " \u00b7 " + t("stats.albumFoldersCount")
         .replace("{count}", Number(albums).toLocaleString());
