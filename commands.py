@@ -448,6 +448,12 @@ PRESERVE_RUNTIME = (
                           # for no reason connected to the setting that changed
     'bot_idents',         # #376: a rehash is not a restart. The idents are RAM
     'bot_departures',     # only and go at restart; a settings save keeps them
+    'chat_recent',        # #371: the chat lines a reconnecting window is shown,
+    'chat_rate',          # and the limits on what arrives and what is sent -
+    'chat_outbound',      # a settings save is not a reason to forget them
+    'chat_muted',
+    'chat_peers',         # the other DCCore bots seen by WHO, and when it last ran
+    'chat_peers_meta',
     'recent_joins',       # #376: joins inside the merge window - a rehash in it
                           # would otherwise lose when the new nick appeared
     'list_grab_others_asked',  # #926: who just asked which bot for its list.

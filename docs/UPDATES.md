@@ -4,6 +4,118 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 💬 DCCore Chat: public operator chat, relayed by the bot (#371)
+
+Built as decided on #371: public, no encryption, the window as the whole interface, and - after a first version
+(#955, held) that sent from the operator's own client - **relayed by the bot**, as agreed there. The operator's mIRC
+does not have to be in any channel, and the bot's half is tested here for real.
+
+**The bot, `serverschat.py`** (state in runtime.py: `chat_recent`, `chat_rate`, `chat_outbound`, `chat_muted`,
+`chat_last_id`, `chat_lock`, bound in defaults.py and kept across a rehash).
+
+- **Arriving:** `irc._capture_chat_notice()`, beside the broadcast-search capture in the NOTICE branch and wrapped
+  in `never_breaks_the_read_loop`, hands every NOTICE to `serverschat.capture()`. It takes only a NOTICE whose FIRST
+  word is `[ServersChat]`, to a channel the bot is in, not from our own nick. It strips colours and control codes,
+  caps the text at 400 characters, and limits each nick (more than 5 lines in 10 s hides it for 60 s, said once as a
+  `*` line). Up to 50 lines are kept **in memory only** (Neo: other people's chat is not kept in a file) and handed to
+  the console session's outbox. It never goes to `send_debug()`, so nothing reaches the debug channel or the plain
+  log, and nothing on this path sends (RFC 2812).
+- **Sent:** the console command `chat #channel <text>` (`adminchat._cmd_chat()` → `serverschat.say()`). Only to the
+  bot's own channels; stripped of colours and control characters, so no CR/LF can end the line early; capped at 350
+  bytes so the line fits IRC's 512; 6 lines a minute per session, so chat never holds up the queue's own notices. It
+  goes out through the paced queue (`oserve.queue_message`, lane = the channel) as `NOTICE #chan :[ServersChat]
+  <text>`, and the bot's own line is recorded and shown, since a server does not echo a NOTICE to its sender.
+  `chat` alone gives the channels.
+- **The wire stays `[ServersChat] <text>`** (agreed on #371): the sender is the nick that sent the NOTICE, which the
+  server vouches for, and no name sits in the text for anyone to forge.
+- **The feed:** `DCCORE CHAT <id> <channel> <nick> <text>` and `DCCORE CHANNELS <channels>`. The id is the line's time
+  in milliseconds, strictly increasing even across a restart. After `HELLO` the session gets `CHANNELS` and the last
+  50 `CHAT` lines. These are new line TYPES, not fields inserted into old ones, so the protocol minor does not move
+  and `MIN_SCRIPT_VERSION` stays 1.1 - an older script shows an unknown type in `@DCCore` as it comes (its
+  `a type this script does not know` branch). This corrects what the #371 comment expected.
+
+**The script, `dccore.mrc` 1.6** - the #955 window, fed by the bot instead:
+
+- *DCCore Chat · public · typing sends to #chan* in the title, and two lines saying it is public and that the bot
+  says what you type. Typing, or `/dccore chat <text>`, sends `chat %to %text` over the console - never a `/notice`
+  of its own. It opens by itself (minimised, `window -en`) for an arriving line, unless that option is off.
+- `CHAT` lines are drawn once per id (`chat.last`), stripped, only for listened channels, with the time from the id;
+  `CHANNELS` fills the right-click *Send to* / *Listen on* menus. A row's command carries the channel's NUMBER, never
+  its name (#955 review: a channel name holding `|` or `$` would otherwise run a command on the click).
+- A raw tagged NOTICE that also reaches the operator's own mIRC is `haltdef`ed only while the relay is up, on the
+  bot's network, in one of its channels, listened on, and with the window open or allowed to open - so the line is
+  drawn from the relay and not twice. With the relay down it shows in the channel as usual (Neo's second adjustment).
+- The script's own flood table from #955 is gone: the bot limits what arrives.
+
+Docs: ADMIN-CONSOLE.md has the `chat` command, the two feed lines, and a *DCCore Chat* section rewritten for the relay;
+the roadmap and both changelogs follow.
+
+**The transport changes: a channel PRIVMSG between DCCore bots, found by realname** (found while testing on the live
+bot: channel NOTICEs are what eggdrops and channel bots kick for).
+
+- **Realname:** `irc.registration_names()` now sends `DCCore/sc <nick>` (cut to 50), the first word being
+  `serverschat.REALNAME_MARK`. Ident and nick are unchanged.
+- **Peers:** `serverschat.refresh_peers()` asks `WHO #chan` for each channel (from the server's own PING, at most every
+  `WHO_EVERY` = 600 s, or at once with `chat who`), through the standard queue lane. `note_who_reply()` reads the 352
+  and keeps the nicks whose realname's first word is the mark, per channel, in `runtime.chat_peers` (bounded at
+  `PEER_MAX`, sightings older than 2.5 intervals ignored; PART, QUIT and NICK forget a peer). Nothing is sent to them.
+- **Arriving:** `irc._capture_chat_message()` (the PRIVMSG branch) replaces the NOTICE hook; a NOTICE is no longer chat.
+  Same rules as before, plus the sender must be a known peer (adverts and search replies carry the realname and never
+  the tag), and the ban check from the #958 review still applies.
+- **Sent:** `chat #chan text` or `chat * text` -> `PRIVMSG #chan :[ServersChat] text`. `*` is `cover()`: greedily the
+  fewest channels (at most `SEND_CHANNELS_MAX` = 5) reaching every peer once; with no peer seen it says so and sends
+  nothing. What an operator typed goes on the **express (VIP) lane**: on the standard lane a line waits behind one for
+  each of the bot's other channels, which was over a minute with fourteen. WHO stays standard. `chat peers` lists who
+  was seen.
+- **The script:** the window sends to `*` by default (menu: *Send to → Every channel with other DCCore bots*), and the
+  raw-line hider is an `on ^*:TEXT` now.
+- Tests updated and added (peer table, cover, WHO cadence, the express lane, the PRIVMSG wiring, the realname).
+
+**Neo's review of #958**, all four points taken:
+
+1. **A banned nick's chat is not relayed.** `irc._capture_chat_notice()` now gets the NOTICE's `ident@host` and asks
+   `security.check_user_status()` - only for a line that IS chat, so an ordinary NOTICE costs no ban lookup.
+2. **A cap for everyone together**, `INBOUND_ALL_MAX` (30 lines in 10 s, kept under the `*` key a nick cannot have),
+   said once per window; and the per-nick table can no longer grow past `_TRACK_MAX` inside one window (the oldest
+   counts go first - forgetting one only ever lets a nick through, and the all-senders cap still holds).
+3. **Bidi controls are stripped** both ways (U+061C, U+200E/F, U+202A-202E, U+2066-2069), so a line cannot reverse
+   how it is drawn.
+4. **The channel list follows the bot:** a session told `CHANNELS` at `hello` is told again with a status burst
+   whenever the bot's channels have changed (`Session._send_chat_channels_if_changed()`), so the script's list is at
+   most one status interval stale. A session that never had it is never sent it.
+
+Tests: `tests/test_servers_chat_is_relayed_by_the_bot.py` (41) runs the real code: the first-word tag, the bot's
+channels only, never our own nick, stripping, the cap, no debug channel, a plain console's line, rising ids; that
+capture sends nothing (and has no send in its statements); the per-nick limit and its single notice; bounded recent
+lines and limit table; nothing to disk; the tagged NOTICE through the queue, the bot's own line back, CR/LF unable to
+end the line, the 512-byte fit, own channels only, the send cap; the console command in both modes; `hello`
+replaying the channels and the recent lines; the read-loop wiring, and a capture that raises not breaking it; and
+the review's four (a banned nick, no lookup for an ordinary NOTICE, the all-senders cap said once, the table bounded
+in one window, bidi both ways, the channels re-sent only when changed and only to a session that had them, the status
+burst asking). The four were mutation-checked 8 more ways, each failing a test.
+`tests/test_dccore_chat_in_the_mirc_window.py` (21) reads the script: the tag first, every condition before the one
+`haltdef`, no send in anything drawing a line, a line drawn once, listened and stripped, sending only through the bot,
+the public wording, the quiet open, the menu by number, the dialog, no flood table of its own. Mutation-checked 17
+ways (tag anywhere, any channel, our own nick, unstripped, no inbound limit, unbounded recent, capture answering,
+sent unstripped, no send cap, any channel for sending, ids going back, not wired, no replay, hiding with the relay
+down, a replay drawn twice, sending from the client, the script answering), each failing a test. Not run in a real
+mIRC.
+
+**Follow-up to the PRIVMSG change**, from its review:
+
+1. **The window shows your own lines, and listens everywhere by default.** An own line said with `chat *` comes back
+   with `-` for its channel, and the window filtered it out as an unlistened channel. With nothing ticked by default,
+   peers' lines never showed either, so out of the box the window stayed empty. Own lines now always show (as `*` for
+   a fan-out), and `chat.all` defaults to 1: only lines from other DCCore bots arrive at all.
+2. **`whois_status` is bounded** (`irc.WHOIS_STATUS_MAX`, 5000). The WHO every 10 minutes makes the 352 handler see
+   every nick in every channel, and nothing ever removed one. Nothing reads it for a decision; each sighting moves the
+   nick to the end, and the oldest goes first.
+3. **Every channel line counts against the send cap.** `chat *` to three channels is three lines (`_limited(...,
+   count=len(targets))`), so the express lane never carries more than 6 identical-text lines a minute. A fan-out wider
+   than the whole cap is refused whole: nothing is queued.
+
+Tests: 5 more (the fan-out counting, a fan-out refused whole, the bound, own lines, the default). Mutation-checked 5
+ways, each failing a test.
 ### 🃏 The Library cards are built from the lists: a total, one per list, when it was built (#956)
 
 #952 made the Library block count every list but still drew four fixed cards (files, size, album folders, list built)

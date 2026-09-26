@@ -1111,6 +1111,13 @@ nick_aliases = runtime.nick_aliases
 bot_idents = runtime.bot_idents
 bot_departures = runtime.bot_departures
 recent_joins = runtime.recent_joins
+# #371 DCCore Chat - see runtime.py.
+chat_recent = runtime.chat_recent
+chat_rate = runtime.chat_rate
+chat_outbound = runtime.chat_outbound
+chat_muted = runtime.chat_muted
+chat_peers = runtime.chat_peers
+chat_peers_meta = runtime.chat_peers_meta
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
