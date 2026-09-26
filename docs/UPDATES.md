@@ -50,12 +50,28 @@ does not have to be in any channel, and the bot's half is tested here for real.
 Docs: ADMIN-CONSOLE.md has the `chat` command, the two feed lines, and a *DCCore Chat* section rewritten for the relay;
 the roadmap and both changelogs follow.
 
-Tests: `tests/test_servers_chat_is_relayed_by_the_bot.py` (33) runs the real code: the first-word tag, the bot's
+**Neo's review of #958**, all four points taken:
+
+1. **A banned nick's chat is not relayed.** `irc._capture_chat_notice()` now gets the NOTICE's `ident@host` and asks
+   `security.check_user_status()` - only for a line that IS chat, so an ordinary NOTICE costs no ban lookup.
+2. **A cap for everyone together**, `INBOUND_ALL_MAX` (30 lines in 10 s, kept under the `*` key a nick cannot have),
+   said once per window; and the per-nick table can no longer grow past `_TRACK_MAX` inside one window (the oldest
+   counts go first - forgetting one only ever lets a nick through, and the all-senders cap still holds).
+3. **Bidi controls are stripped** both ways (U+061C, U+200E/F, U+202A-202E, U+2066-2069), so a line cannot reverse
+   how it is drawn.
+4. **The channel list follows the bot:** a session told `CHANNELS` at `hello` is told again with a status burst
+   whenever the bot's channels have changed (`Session._send_chat_channels_if_changed()`), so the script's list is at
+   most one status interval stale. A session that never had it is never sent it.
+
+Tests: `tests/test_servers_chat_is_relayed_by_the_bot.py` (41) runs the real code: the first-word tag, the bot's
 channels only, never our own nick, stripping, the cap, no debug channel, a plain console's line, rising ids; that
 capture sends nothing (and has no send in its statements); the per-nick limit and its single notice; bounded recent
 lines and limit table; nothing to disk; the tagged NOTICE through the queue, the bot's own line back, CR/LF unable to
 end the line, the 512-byte fit, own channels only, the send cap; the console command in both modes; `hello`
-replaying the channels and the recent lines; the read-loop wiring, and a capture that raises not breaking it.
+replaying the channels and the recent lines; the read-loop wiring, and a capture that raises not breaking it; and
+the review's four (a banned nick, no lookup for an ordinary NOTICE, the all-senders cap said once, the table bounded
+in one window, bidi both ways, the channels re-sent only when changed and only to a session that had them, the status
+burst asking). The four were mutation-checked 8 more ways, each failing a test.
 `tests/test_dccore_chat_in_the_mirc_window.py` (21) reads the script: the tag first, every condition before the one
 `haltdef`, no send in anything drawing a line, a line drawn once, listened and stripped, sending only through the bot,
 the public wording, the quiet open, the menu by number, the dialog, no flood table of its own. Mutation-checked 17

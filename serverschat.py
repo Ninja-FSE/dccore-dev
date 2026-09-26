@@ -53,6 +53,13 @@ MAX_SEND_BYTES = 350
 INBOUND_MAX = 5
 INBOUND_PER = 10
 INBOUND_HIDE = 60
+# And from everyone together (#958 review): a hundred nicks each inside
+# their own limit are still a flood. Past INBOUND_ALL_MAX lines in
+# INBOUND_PER seconds the rest are dropped, said once per window.
+INBOUND_ALL_MAX = 30
+# The key the all-senders count is kept under - never a nick, since a nick
+# cannot contain "*".
+_ALL = "*"
 
 # Sent: at most OUTBOUND_MAX lines per OUTBOUND_PER seconds per session.
 OUTBOUND_MAX = 6
@@ -65,12 +72,17 @@ RECENT_MAX = 50
 _TRACK_MAX = 200
 
 _FORMATTING = re.compile(r"\x03(\d{1,2}(,\d{1,2})?)?|[\x02\x0f\x16\x1d\x1e\x1f]")
+# The characters that change the DIRECTION text is drawn in (#958 review):
+# U+202E alone reverses the rest of a line in the operator's window, so a
+# line could show something other than what was sent. None of them is ever
+# needed in a chat line.
+_BIDI = re.compile("[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 _CHANNEL_PREFIXES = ("#", "&", "+", "!")
 
 
 def _plain(text):
     """Colour and control codes out, every other control character a space."""
-    text = _FORMATTING.sub("", str(text or ""))
+    text = _BIDI.sub("", _FORMATTING.sub("", str(text or "")))
     return "".join(" " if ord(ch) < 32 or ord(ch) == 127 else ch for ch in text).strip()
 
 
@@ -158,10 +170,16 @@ def _limited(table, key, most, per, now):
 
 def _prune(now):
     """Keep the limit tables bounded: past _TRACK_MAX nicks, drop the ones
-    whose window and hide are both over."""
+    whose window is over, and if that is not enough - many nicks inside one
+    window - the oldest, until it is back at _TRACK_MAX. Forgetting a nick's
+    count early only ever lets it through; the all-senders cap still holds."""
     if len(runtime.chat_rate) > _TRACK_MAX:
         for key in [k for k, (start, _n) in runtime.chat_rate.items()
-                    if now - start >= INBOUND_PER]:
+                    if now - start >= INBOUND_PER and k != _ALL]:
+            runtime.chat_rate.pop(key, None)
+    if len(runtime.chat_rate) > _TRACK_MAX:
+        oldest = sorted((start, k) for k, (start, _n) in runtime.chat_rate.items() if k != _ALL)
+        for _start, key in oldest[:len(runtime.chat_rate) - _TRACK_MAX]:
             runtime.chat_rate.pop(key, None)
     for key in [k for k, until in runtime.chat_muted.items() if until <= now]:
         runtime.chat_muted.pop(key, None)
@@ -188,11 +206,23 @@ def capture(nick, target, message, now=None):
         _prune(now)
         if runtime.chat_muted.get(key, 0) > now:
             return None
-        if _limited(runtime.chat_rate, key, INBOUND_MAX, INBOUND_PER, now):
+        if _limited(runtime.chat_rate, _ALL, INBOUND_ALL_MAX, INBOUND_PER, now):
+            # Said once per window: the first line over the cap.
+            first_over = runtime.chat_rate[_ALL][1] == INBOUND_ALL_MAX + 1
+            too_many = True
+        else:
+            too_many = False
+        if not too_many and _limited(runtime.chat_rate, key, INBOUND_MAX, INBOUND_PER, now):
             runtime.chat_muted[key] = now + INBOUND_HIDE
             hidden = True
         else:
             hidden = False
+    if too_many:
+        if first_over:
+            print(f"[CHAT] More than {INBOUND_ALL_MAX} chat lines in {INBOUND_PER}s: the rest are dropped.")
+            _deliver({"id": _next_id(now), "chan": chan, "nick": "*",
+                      "text": f"More than {INBOUND_ALL_MAX} lines in {INBOUND_PER} seconds from everyone together: the rest are not shown."})
+        return None
     if hidden:
         print(f"[CHAT] {nick} is sending too fast in {chan}: hidden for {INBOUND_HIDE}s.")
         _deliver({"id": _next_id(now), "chan": chan, "nick": "*",

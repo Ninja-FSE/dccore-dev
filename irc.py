@@ -2013,11 +2013,20 @@ def note_bot_renamed(old_nick, new_nick, ident=None):
 
 
 @never_breaks_the_read_loop
-def _capture_chat_notice(user, target, msg):
+def _capture_chat_notice(user, target, msg, hostmask=None):
     """A NOTICE that may be DCCore Chat (#371) - see serverschat.capture().
     Observational like the other captures here: it records and relays to the
-    operator's console, and it never dispatches and never answers."""
+    operator's console, and it never dispatches and never answers.
+
+    Not from somebody banned (#958 review): a ban is the operator saying they
+    want nothing from that nick, and that includes their chat. Only checked
+    for a line that IS chat, so an ordinary NOTICE costs no ban lookup.
+    `hostmask` is the sender's "ident@host", for the hostmask-shaped bans."""
     import serverschat
+    if serverschat.chat_text(msg) is None:
+        return
+    if not security.check_user_status(user, hostmask=hostmask):
+        return
     serverschat.capture(user, target, msg)
 
 
@@ -3530,7 +3539,9 @@ def irc_loop():
                                 notice_user, notice_target, notice_text)
                             # DCCore Chat (#371): a tagged NOTICE to one of
                             # our channels, relayed to the operator's console.
-                            _capture_chat_notice(notice_user, notice_target, notice_text)
+                            notice_host = re.match(r"^:[^!\s]+!(\S+)\s+NOTICE\b", line)
+                            _capture_chat_notice(notice_user, notice_target, notice_text,
+                                                 notice_host.group(1) if notice_host else None)
                             if notice_target.lower() == config.NICKNAME.lower():
                                 # A private NOTICE addressed to us, from
                                 # another bot - how file servers answer a

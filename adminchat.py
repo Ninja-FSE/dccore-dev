@@ -670,6 +670,10 @@ class Session:
         self._status_sent_at = 0.0
         self._status_due = False      # set by event_sink, acted on by the writer
         self._status_job = None       # (thread, lines) while a burst is being computed
+        # The DCCORE CHANNELS line this session was last sent (#371): sent
+        # again with a status burst when the bot's channels change, so a
+        # chat window's channel list does not go stale (#958 review).
+        self._chat_channels = None
         self._outbox = collections.deque(maxlen=OUTBOX_MAX)
         self._wake = threading.Event()
         self._lock = threading.Lock()
@@ -729,6 +733,7 @@ class Session:
             return
         self._status_sent_at = time.time()
         self._status_due = False
+        self._send_chat_channels_if_changed()
         job = self._status_job
         if job is None or not job[0].is_alive():
             lines = []
@@ -748,6 +753,22 @@ class Session:
             return
         self._status_job = None
         for line in job[1]:
+            self.send(line)
+
+    def _send_chat_channels_if_changed(self):
+        """DCCORE CHANNELS again when the bot's channels have changed since
+        this session was told (#371). A chat window reads it to know which
+        channels the bot relays; stale, it would hide a raw NOTICE for a
+        channel the bot has left. At most one status interval late. Only to
+        a session told once already, at `hello` - anything else never asked
+        for the chat's channels."""
+        try:
+            import serverschat
+            line = serverschat.channels_line()
+        except Exception:
+            return
+        if self._chat_channels is not None and line != self._chat_channels:
+            self._chat_channels = line
             self.send(line)
 
     def request_status(self):
@@ -1364,7 +1385,8 @@ def _cmd_hello(session, args):
     # DCCore Chat (#371): the channels it can chat in, and what was said
     # while this window was away - from memory, never from disk.
     import serverschat
-    session.send(serverschat.channels_line())
+    session._chat_channels = serverschat.channels_line()
+    session.send(session._chat_channels)
     for line in serverschat.recent_lines():
         session.send(line)
     session.send_status()

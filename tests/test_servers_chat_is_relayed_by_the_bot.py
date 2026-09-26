@@ -124,6 +124,76 @@ class WhatArrives(Case):
         self.assertLess(second["id"], third["id"])
 
 
+class TheReviewOf958(Case):
+    """The four points from the review of #958."""
+
+    def test_a_banned_nick_s_chat_is_not_relayed(self):
+        config.banned_users["banneduser"] = 9_999_999_999
+        irc._capture_chat_notice("BannedUser", CHAN, "[ServersChat] let me in", "b@host.example")
+        self.assertEqual(self.chat_lines(), [])
+        irc._capture_chat_notice("OtherOperator", CHAN, "[ServersChat] fine", "o@host.example")
+        self.assertEqual(len(self.chat_lines()), 1)
+
+    def test_an_ordinary_notice_costs_no_ban_lookup(self):
+        import security
+        looked = []
+        real = security.check_user_status
+        security.check_user_status = lambda *a, **k: looked.append(a) or True
+        self.addCleanup(setattr, security, "check_user_status", real)
+        irc._capture_chat_notice("OtherOperator", CHAN, "just a notice", "o@host.example")
+        self.assertEqual(looked, [])
+
+    def test_everyone_together_is_capped_and_said_once(self):
+        for i in range(serverschat.INBOUND_ALL_MAX):
+            self.assertIsNotNone(self.arrive(f"[ServersChat] {i}", nick=f"Operator{i}", now=T0))
+        for i in range(20):
+            self.assertIsNone(self.arrive("[ServersChat] one more", nick=f"Late{i}", now=T0 + 1))
+        remarks = [line for line in self.chat_lines() if " * " in line]
+        self.assertEqual(len(remarks), 1)
+        self.assertIn("from everyone together", remarks[0])
+        self.assertIsNotNone(self.arrive("[ServersChat] later", nick="Later", now=T0 + serverschat.INBOUND_PER + 1))
+
+    def test_many_nicks_in_one_window_cannot_grow_the_table(self):
+        real = serverschat.INBOUND_ALL_MAX
+        serverschat.INBOUND_ALL_MAX = 10 ** 6
+        self.addCleanup(setattr, serverschat, "INBOUND_ALL_MAX", real)
+        for i in range(serverschat._TRACK_MAX * 5):
+            self.arrive(f"[ServersChat] {i}", nick=f"Operator{i}", now=T0)
+        self.assertLessEqual(len(runtime.chat_rate), serverschat._TRACK_MAX + 2)
+
+    def test_bidi_controls_are_stripped_both_ways(self):
+        line = self.arrive("[ServersChat] abc\u202edef\u2066g\u200f")
+        self.assertEqual(line["text"], "abcdefg")
+        serverschat.say("SomeOperator", CHAN, "x\u202ey", now=T0)
+        self.assertNotIn("\u202e", self.queued()[CHAN][0])
+
+    def test_a_changed_channel_list_is_sent_again_with_the_status(self):
+        session = adminchat.Session.__new__(adminchat.Session)
+        session.sent = []
+        session.send = session.sent.append
+        session._chat_channels = serverschat.channels_line()
+        session._send_chat_channels_if_changed()
+        self.assertEqual(session.sent, [], "unchanged: nothing")
+        config.channel_users["#another"] = {"ourbot"}
+        session._send_chat_channels_if_changed()
+        self.assertEqual(session.sent, [f"DCCORE CHANNELS #another {CHAN}"])
+
+    def test_only_a_session_that_had_the_channels_gets_updates(self):
+        session = adminchat.Session.__new__(adminchat.Session)
+        session.sent = []
+        session.send = session.sent.append
+        session._chat_channels = None
+        session._send_chat_channels_if_changed()
+        self.assertEqual(session.sent, [])
+
+    def test_the_status_burst_asks_for_it(self):
+        with io.open(os.path.join(REPO_ROOT, "adminchat.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        at = code.index("    def send_status(self):")
+        body = code[at:code.index("    def request_status", at)]
+        self.assertIn("self._send_chat_channels_if_changed()", body)
+
+
 class NothingAnswers(Case):
     def test_capture_sends_nothing(self):
         for i in range(10):
@@ -262,8 +332,9 @@ class TheReadLoop(Case):
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
             code = handle.read()
         at = code.index("notice_parsed = parse_notice(line)")
-        self.assertIn("_capture_chat_notice(notice_user, notice_target, notice_text)",
-                      code[at:at + 1200])
+        branch = code[at:at + 1500]
+        self.assertIn("_capture_chat_notice(notice_user, notice_target, notice_text,", branch)
+        self.assertIn("notice_host.group(1) if notice_host else None", branch)
 
     def test_a_capture_that_raises_cannot_break_the_connection(self):
         real = serverschat.capture

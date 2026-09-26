@@ -521,7 +521,7 @@ have been replaced with spaces.
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
 | `DCCORE PING` | stands in for a status burst the bot could not compute in time; a client treats it as any other line and shows nothing | |
 | `DCCORE CHAT <id> <channel> <nick>` | a DCCore Chat line said in one of the bot's channels: an id (its time in milliseconds, only ever going up - a client draws each id once), the channel, who said it (the bot's own nick for a line sent with `chat`; `*` for the bot's own remark, such as somebody hidden for flooding) | the text, stripped of colours |
-| `DCCORE CHANNELS` | the channels the bot is in, which are the ones it chats in; sent after `HELLO` and in answer to `chat` alone | the channels, space-separated |
+| `DCCORE CHANNELS` | the channels the bot is in, which are the ones it chats in; sent after `HELLO`, in answer to `chat` alone, and again with a status burst whenever they have changed | the channels, space-separated |
 
 After `HELLO` the bot also sends `CHANNELS` and then the last 50 `CHAT` lines it
 holds, so a window that reconnects shows what it missed. They are kept in memory
@@ -765,10 +765,14 @@ takes only those, and only in its own channels, and:
 - **never answers a NOTICE by itself.** Every line it sends is one an
   operator typed;
 - **limits each sender:** more than 5 lines in 10 seconds from one nick
-  hides that nick for 60 seconds, said once in the window;
+  hides that nick for 60 seconds, said once in the window. **Everyone
+  together** is limited too: past 30 lines in 10 seconds the rest are
+  dropped, said once;
+- **takes nothing from a nick you have banned;**
 - **limits what you send:** 6 lines a minute, so chat never holds up the
   queue's own messages;
-- **strips colours and control codes**, both ways;
+- **strips colours, control codes and the characters that reverse the
+  direction text is drawn in**, both ways;
 - **never writes a chat line to disk or to the debug channel.**
 
 The tag proves nothing about the sender. Anyone can type it, and the nick
