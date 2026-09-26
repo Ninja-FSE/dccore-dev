@@ -400,6 +400,10 @@ def ident_for_nick(nick):
     return kept or "dccore"
 
 
+# The most nicks config.whois_status holds (#958 follow-up) - see the 352
+# handler. Nothing reads it for a decision, so this only bounds its memory.
+WHOIS_STATUS_MAX = 5000
+
 # Undernet's REALLEN is 50; a longer realname is cut by the server anyway.
 REALNAME_MAX_LENGTH = 50
 
@@ -3342,7 +3346,15 @@ def irc_loop():
                         parts = line.split()
                         if len(parts) > 7:
                             target_nick = parts[7].lower()
+                            # Bounded (#958 follow-up): DCCore Chat asks WHO
+                            # for every channel every few minutes, so this
+                            # sees every nick in every channel, and nothing
+                            # ever removed one. Moved to the end on each
+                            # sighting, so the oldest sighting goes first.
+                            config.whois_status.pop(target_nick, None)
                             config.whois_status[target_nick] = True
+                            while len(config.whois_status) > WHOIS_STATUS_MAX:
+                                config.whois_status.pop(next(iter(config.whois_status)))
                     # Anchored: this populates config.channel_users, which dcc.py treats as
                     # proof a user is present when deciding whether to thaw a frozen queue
                     # and dispatch to them. A forged line injected fake presence.

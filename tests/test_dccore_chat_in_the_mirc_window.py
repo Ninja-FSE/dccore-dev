@@ -118,9 +118,20 @@ class WhatComesFromTheBot(unittest.TestCase):
         self.assertIn("hadd dccore.live chat.last $1", self.feed)
 
     def test_only_listened_channels_and_stripped(self):
-        self.assertIn("if (!$dccore.chat.listens($2)) { return }", self.feed)
+        self.assertIn("if ($3 != $dccore.bot) && (!$dccore.chat.listens($2)) { return }", self.feed)
         self.assertTrue(all("$strip($4-)" in s for s in self.feed if s.startswith("dccore.chat.show")))
-        self.assertIn("dccore.default chat.all 0", self.text)
+
+    def test_it_listens_everywhere_by_default(self):
+        """Only lines from other DCCore bots arrive at all, so there is little
+        to filter - and with nothing ticked, nothing would ever show."""
+        self.assertIn("dccore.default chat.all 1", self.text)
+
+    def test_your_own_line_always_shows(self):
+        """One said with `chat *` comes back with "-" for its channel; it must
+        not be filtered out as an unlistened channel, and it reads as "*"."""
+        listen = self.feed.index("if ($3 != $dccore.bot) && (!$dccore.chat.listens($2)) { return }")
+        self.assertLess(listen, next(i for i, s in enumerate(self.feed) if s.startswith("dccore.chat.show")))
+        self.assertTrue(any(s.startswith("dccore.chat.show $iif($2 == -,*,$2) ") for s in self.feed))
 
     def test_its_own_lines_are_marked_as_its_own(self):
         self.assertTrue(any("$iif($3 == $dccore.bot,own,other)" in s for s in self.feed))

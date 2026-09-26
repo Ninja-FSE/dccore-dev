@@ -217,6 +217,41 @@ class TheReviewOf958(Case):
         self.assertIn("self._send_chat_channels_if_changed()", body)
 
 
+class TheFollowUpTo958(Case):
+    def test_every_channel_line_counts_against_the_cap(self):
+        """`chat *` to three channels is three lines: two such lines and the
+        cap of six is used up."""
+        real = serverschat.cover
+        serverschat.cover = lambda now=None: ["#one", "#two", "#three"]
+        self.addCleanup(setattr, serverschat, "cover", real)
+        self.assertTrue(serverschat.say("SomeOperator", "*", "a", now=T0)[0])
+        self.assertTrue(serverschat.say("SomeOperator", "*", "b", now=T0 + 1)[0])
+        ok, message = serverschat.say("SomeOperator", "*", "c", now=T0 + 2)
+        self.assertFalse(ok)
+        self.assertIn("counting once for each", message)
+
+    def test_one_fan_out_bigger_than_the_cap_is_refused_whole(self):
+        real = (serverschat.cover, serverschat.OUTBOUND_MAX)
+        serverschat.cover = lambda now=None: ["#one", "#two", "#three"]
+        serverschat.OUTBOUND_MAX = 2
+        self.addCleanup(lambda: (setattr(serverschat, "cover", real[0]),
+                                 setattr(serverschat, "OUTBOUND_MAX", real[1])))
+        self.assertFalse(serverschat.say("SomeOperator", "*", "too wide", now=T0)[0])
+        self.assertEqual(self.queued(), {})
+        self.assertEqual(list(config.vip_queue), [])
+
+    def test_whois_status_is_bounded(self):
+        config.whois_status.clear()
+        real = irc.WHOIS_STATUS_MAX
+        irc.WHOIS_STATUS_MAX = 3
+        self.addCleanup(setattr, irc, "WHOIS_STATUS_MAX", real)
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        at = code.index('if is_server_numeric(line, "352"):')
+        self.assertIn("while len(config.whois_status) > WHOIS_STATUS_MAX:", code[at:at + 1200])
+        self.assertIn("config.whois_status.pop(next(iter(config.whois_status)))", code[at:at + 1200])
+
+
 class NothingAnswers(Case):
     def test_capture_sends_nothing(self):
         for i in range(10):

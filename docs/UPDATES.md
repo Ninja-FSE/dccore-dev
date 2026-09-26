@@ -101,6 +101,22 @@ sent unstripped, no send cap, any channel for sending, ids going back, not wired
 down, a replay drawn twice, sending from the client, the script answering), each failing a test. Not run in a real
 mIRC.
 
+**Follow-up to the PRIVMSG change**, from its review:
+
+1. **The window shows your own lines, and listens everywhere by default.** An own line said with `chat *` comes back
+   with `-` for its channel, and the window filtered it out as an unlistened channel. With nothing ticked by default,
+   peers' lines never showed either, so out of the box the window stayed empty. Own lines now always show (as `*` for
+   a fan-out), and `chat.all` defaults to 1: only lines from other DCCore bots arrive at all.
+2. **`whois_status` is bounded** (`irc.WHOIS_STATUS_MAX`, 5000). The WHO every 10 minutes makes the 352 handler see
+   every nick in every channel, and nothing ever removed one. Nothing reads it for a decision; each sighting moves the
+   nick to the end, and the oldest goes first.
+3. **Every channel line counts against the send cap.** `chat *` to three channels is three lines (`_limited(...,
+   count=len(targets))`), so the express lane never carries more than 6 identical-text lines a minute. A fan-out wider
+   than the whole cap is refused whole: nothing is queued.
+
+Tests: 5 more (the fan-out counting, a fan-out refused whole, the bound, own lines, the default). Mutation-checked 5
+ways, each failing a test.
+
 ### 👥 One bot under two nicks is one List Browser row (#376)
 
 Part 1 of #376, the sidebar half, as decided there: option B plus the NICK-message merge, display only

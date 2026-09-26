@@ -756,9 +756,11 @@ title and its first lines say so.
   channel instead, and that channel is listened on too. `/dccore chat <text>`
   does the same from anywhere. What you type goes on the bot's express lane,
   so it is not held up behind a line for each of its other channels.
-- **Listening:** right-click → *Listen on* ticks the channels whose chat
-  shows here. *Listen on all the bot's channels* (also in `/dccore options`)
-  takes every one.
+- **Listening:** every channel the bot is in, by default. Only lines from
+  other DCCore bots arrive at all, so there is little to filter. Untick
+  *Listen on all the bot's channels* (right-click, or `/dccore options`) and
+  tick the ones you want under *Listen on* instead. Your own lines always
+  show.
 - **Reconnecting:** the bot keeps the last 50 lines in memory, and a window
   that reconnects shows what it missed, each line once, with the time it
   was said. A bot restart forgets them.
@@ -785,8 +787,8 @@ channels, and:
   together** is limited too: past 30 lines in 10 seconds the rest are
   dropped, said once;
 - **takes nothing from a nick you have banned;**
-- **limits what you send:** 6 lines a minute, so chat never holds up the
-  queue's own messages;
+- **limits what you send:** 6 channel lines a minute, so chat never holds up
+  the queue's own messages. A line said in three channels counts three;
 - **strips colours, control codes and the characters that reverse the
   direction text is drawn in**, both ways;
 - **never writes a chat line to disk or to the debug channel.**

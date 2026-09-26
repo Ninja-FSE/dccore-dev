@@ -182,14 +182,14 @@ def _deliver(line):
         session.send(f"[CHAT] {line['chan']} <{line['nick']}> {line['text']}")
 
 
-def _limited(table, key, most, per, now):
-    """Count one event for `key` in `table` ({key: [window_start, count]});
-    True when it is past `most` in `per` seconds."""
+def _limited(table, key, most, per, now, count=1):
+    """Count `count` events for `key` in `table` ({key: [window_start, n]});
+    True when that takes it past `most` in `per` seconds."""
     record = table.get(key)
     if record is None or now - record[0] >= per:
-        table[key] = [now, 1]
-        return False
-    record[1] += 1
+        table[key] = [now, count]
+        return count > most
+    record[1] += count
     return record[1] > most
 
 
@@ -416,9 +416,14 @@ def say(sender, channel, text, now=None):
         return False, "Nothing to send."
     now = time.time() if now is None else now
     with runtime.chat_lock:
+        # Every CHANNEL LINE counts, not every line typed: `chat *` says the
+        # same words in several channels at once, which is what channel bots
+        # take for spam, and the express lane should not carry more than the
+        # cap says (#958 follow-up).
         if _limited(runtime.chat_outbound, str(sender or "console").lower(),
-                    OUTBOUND_MAX, OUTBOUND_PER, now):
-            return False, (f"Slow down: {OUTBOUND_MAX} chat lines a minute, so chat "
+                    OUTBOUND_MAX, OUTBOUND_PER, now, count=len(targets)):
+            return False, (f"Slow down: {OUTBOUND_MAX} chat lines a minute, a line said "
+                           f"in several channels counting once for each, so chat "
                            f"never holds up the queue's own messages.")
     for target in targets:
         _enqueue(target, f"PRIVMSG {target} :{TAG} {clean}\r\n", vip=True)

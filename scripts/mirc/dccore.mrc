@@ -145,7 +145,9 @@ alias dccore.init {
   dccore.default col.head 2
   ; DCCore Chat (#371): only the channels ticked in its window, until
   ; "all my channels" is chosen; the window opens by itself for a line
-  dccore.default chat.all 0
+  ; Listening on every channel is the default (#958 follow-up): only lines
+  ; from other DCCore bots arrive at all, so there is little to filter
+  dccore.default chat.all 1
   dccore.default chat.popup 1
 }
 alias dccore.default { if ($hget(dccore,$1) == $null) { hadd dccore $1 $2- } }
@@ -1326,10 +1328,12 @@ alias dccore.chat.feed {
   if ($1 !isnum) { return }
   if ($dccore.st(chat.last) isnum) && ($1 <= $dccore.st(chat.last)) { return }
   hadd dccore.live chat.last $1
-  if (!$dccore.chat.listens($2)) { return }
+  ; Your own lines always show (#958 follow-up): one said with `chat *`
+  ; comes back with "-" for its channel, since it went to several.
+  if ($3 != $dccore.bot) && (!$dccore.chat.listens($2)) { return }
   if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }
   if ($3 == *) { dccore.chat.sys $2 $strip($4-) | return }
-  dccore.chat.show $2 $3 $iif($3 == $dccore.bot,own,other) $asctime($int($calc($1 / 1000)),HH:nn) $strip($4-)
+  dccore.chat.show $iif($2 == -,*,$2) $3 $iif($3 == $dccore.bot,own,other) $asctime($int($calc($1 / 1000)),HH:nn) $strip($4-)
 }
 ; A CHANNELS line: the channels the bot is in, which are the ones it chats in.
 alias dccore.chat.channels {
