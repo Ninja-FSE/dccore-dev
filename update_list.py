@@ -1452,7 +1452,16 @@ def generate_master_list(list_name=None):
     # rebuild are opened. Unopenable, it says so and the list is size-only.
     audio = None
     if getattr(config, "LIST_SHOW_AUDIO_INFO", False):
-        audio = audio_info.Cache.open(scope=list_name or "")
+        # THE LIST'S OWN NAME, however the rebuild was asked for (#979). A
+        # lone list is built with no name and each of several by its name, so
+        # the primary's scope was "" until a second list was added and its
+        # name after: its whole cache missed at once - re-read within
+        # LIST_AUDIO_INFO_MINUTES, the rest size-only for rebuilds - and the
+        # "" rows were never pruned. Only the primary was ever built as "",
+        # so it takes those rows over.
+        primary = library.primary_list().name
+        scope = list_name or primary
+        audio = audio_info.Cache.open(scope=scope, formerly="" if scope == primary else None)
 
     for folder_number, scan_folder in enumerate(scan_folders, start=1):
         # Reported per folder because the folder COUNT is the one total known

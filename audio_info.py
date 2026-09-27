@@ -345,9 +345,11 @@ class Cache:
         self.published = False
 
     @classmethod
-    def open(cls, path=None, reader=None, log=print, scope=""):
+    def open(cls, path=None, reader=None, log=print, scope="", formerly=None):
         """`scope` is the list being built: each list prunes only its own
-        rows, so rebuilding one never empties another's."""
+        rows, so rebuilding one never empties another's. `formerly` is a scope
+        whose rows are this list's now (#979): taken over - where this scope
+        has no row for the same file - and the rest dropped."""
         path = path or cache_path()
         conn = None
         try:
@@ -359,6 +361,9 @@ class Cache:
             # nothing reads them now.
             conn.execute("CREATE TABLE IF NOT EXISTS audio (scope TEXT, key TEXT, size INTEGER, "
                          "mtime INTEGER, suffix TEXT, run INTEGER, PRIMARY KEY (scope, key))")
+            if formerly is not None and formerly != (scope or ""):
+                conn.execute("UPDATE OR IGNORE audio SET scope = ? WHERE scope = ?", (scope or "", formerly))
+                conn.execute("DELETE FROM audio WHERE scope = ?", (formerly,))
             conn.commit()
             return cls(conn, reader, scope or "")
         except (sqlite3.Error, OSError) as err:
