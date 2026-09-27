@@ -159,7 +159,7 @@ class EveryPersistedValueHasAWriterInTheDaemon(unittest.TestCase):
 
     @staticmethod
     def db_source():
-        with io.open(os.path.join(REPO_ROOT, "db.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "db.py"), encoding="utf-8") as handle:
             return handle.read()
 
     def writers(self):
@@ -256,7 +256,7 @@ class TheClockStopsWhenTheBytesDo(DCCoreTestCase):
         property becomes: the stamp is the final ack, nothing sleeps between
         the stamp and its use, and the wall clock is not consulted again.
         """
-        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
             code = handle.read()
         body = code[code.index("def start_dcc_send("):]
 
@@ -272,7 +272,7 @@ class TheClockStopsWhenTheBytesDo(DCCoreTestCase):
                          "the receiver has closed its file")
 
     def test_the_duration_no_longer_reads_the_wall_clock_at_the_end(self):
-        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
             code = handle.read()
 
         self.assertNotIn(

@@ -148,7 +148,7 @@ class EveryStartedThreadIsADaemon(unittest.TestCase):
     def test_the_two_command_handlers_are_covered_by_this(self):
         """Named because they are the ones that were wrong, and because a
         future reader should be able to find the case from the test."""
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
 
         targets = []

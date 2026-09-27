@@ -363,7 +363,7 @@ class TheThirdUnpacedWriterIsFixedToo(unittest.TestCase):
 
     def source(self):
         with open(os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), "irc.py"), encoding="utf-8") as f:
+                os.path.abspath(__file__))), "src", "irc.py"), encoding="utf-8") as f:
             return f.read()
 
     def version_reply_block(self):
@@ -489,7 +489,7 @@ class TheFourthUnpacedWriterIsFixedToo(DCCoreTestCase):
 
 def queue_mgr_source():
     with open(os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), "queue_mgr.py"), encoding="utf-8") as f:
+            os.path.abspath(__file__))), "src", "queue_mgr.py"), encoding="utf-8") as f:
         return f.read()
 
 

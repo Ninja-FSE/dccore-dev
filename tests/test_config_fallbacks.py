@@ -62,7 +62,7 @@ def modules():
 
 def declared_defaults():
     """Every setting config.py declares, and the value it declares."""
-    with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+    with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     out = {}
     for node in tree.body:
@@ -258,7 +258,7 @@ class NoDebugChannelMeansNoneIsJoined(unittest.TestCase):
     default."""
 
     def source(self):
-        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "irc.py"), encoding="utf-8") as handle:
             return handle.read()
 
     def test_a_blank_value_puts_nothing_in_the_join(self):

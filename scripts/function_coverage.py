@@ -48,6 +48,7 @@ import threading
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(REPO_ROOT, "src")
 ALLOWLIST = os.path.join(REPO_ROOT, "tests", "uncovered_functions.txt")
 
 # admin_config.py is gitignored and machine-specific; scripts/ are entry points
@@ -57,17 +58,23 @@ SKIP_MODULES = {"admin_config.py"}
 
 
 def public_functions():
-    """{(module, name): lineno} for every public module-level function."""
+    """{(module, name): lineno} for every public module-level function, at the
+    repository root - an entry point run by hand, like oserve.py - and in
+    src/ (#959). entered() below matches by bare filename, so a module found
+    in either place is keyed the same way either would give it."""
     found = {}
-    for name in sorted(os.listdir(REPO_ROOT)):
-        if not name.endswith(".py") or name in SKIP_MODULES:
-            continue
-        with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not node.name.startswith("_"):
-                    found[(name, node.name)] = node.lineno
+    seen_modules = set()
+    for folder in (REPO_ROOT, SRC):
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".py") or name in SKIP_MODULES or name in seen_modules:
+                continue
+            seen_modules.add(name)
+            with io.open(os.path.join(folder, name), encoding="utf-8") as handle:
+                tree = ast.parse(handle.read())
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if not node.name.startswith("_"):
+                        found[(name, node.name)] = node.lineno
     return found
 
 
@@ -131,6 +138,8 @@ def run_suite():
 def main():
     if REPO_ROOT not in sys.path:
         sys.path.insert(0, REPO_ROOT)
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
     os.chdir(REPO_ROOT)
 
     declared = public_functions()

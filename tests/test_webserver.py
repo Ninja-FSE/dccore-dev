@@ -2999,7 +2999,7 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
     SOURCES = ("oserve.py", "webserver.py")
 
     def shipped_defaults(self):
-        path = os.path.join(REPO_ROOT, "defaults.py")
+        path = os.path.join(REPO_ROOT, "src", "defaults.py")
         with io.open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         shipped = {}

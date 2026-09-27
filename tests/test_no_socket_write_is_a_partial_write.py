@@ -181,7 +181,7 @@ class WhatGoesOnTheWire(unittest.TestCase):
         encode. Raising on the send would take down whichever thread is
         holding the socket, so every site that encodes a str does it the way
         announce.py's drain always has."""
-        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read(), filename="dcc.py")
 
         encodes = 0

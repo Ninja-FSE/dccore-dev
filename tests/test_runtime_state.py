@@ -302,7 +302,7 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
                    "LIST_VIDEO_EXTENSIONS", "LIST_VIDEO_COMPANION_EXTENSIONS",
                    "RAR_EXTENSIONS"}
 
-        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
 
         offenders = []

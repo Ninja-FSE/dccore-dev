@@ -186,7 +186,7 @@ class HardBanFileDurability(DCCoreTestCase):
 
     def test_the_handlers_no_longer_open_the_file_for_writing(self):
         """Source check, because the two defects above were both in this shape."""
-        with open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
+        with open(os.path.join(REPO_ROOT, "src", "commands.py"), encoding="utf-8") as handle:
             source = handle.read()
         for stale in ('open(filename, "w"', 'open(filename, "a"'):
             with self.subTest(stale=stale):
@@ -442,7 +442,7 @@ class BothPathsShareOneImplementation(unittest.TestCase):
     """The inline copy in !clearqueue was replaced, not duplicated."""
 
     def setUp(self):
-        with open(os.path.join(REPO_ROOT, "commands.py"), encoding="utf-8") as handle:
+        with open(os.path.join(REPO_ROOT, "src", "commands.py"), encoding="utf-8") as handle:
             self.source = handle.read()
 
     def test_both_handlers_call_the_shared_helper(self):

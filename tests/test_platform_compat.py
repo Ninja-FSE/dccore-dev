@@ -455,7 +455,7 @@ class WiringTests(unittest.TestCase):
                                    "platform_compat.prepare_listener"), [])
 
     def test_config_supports_a_local_override(self):
-        source = open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8").read()
+        source = open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8").read()
         self.assertIn("from admin_config import *", source)
 
     def test_admin_config_is_gitignored(self):

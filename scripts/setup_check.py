@@ -42,6 +42,7 @@ import sys
 # shims are one level below that again, and neither needs to know: the paths
 # are computed from THIS file, not from whichever script was invoked.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(REPO, "src")  # library.py/platform_compat.py/settings_file.py live there (#959)
 
 
 class Platform:
@@ -235,6 +236,8 @@ def main(platform):
     # to be imported, including by its own tests.
     if REPO not in sys.path:
         sys.path.insert(0, REPO)
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
     os.chdir(REPO)
 
     # #428: BEFORE the first print below, not after `import defaults`

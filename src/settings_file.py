@@ -52,7 +52,11 @@ import threading
 # Where the file lives, unless DCCORE_SETTINGS_FILE points somewhere else.
 # The environment variable exists for tests and for running two instances off
 # one checkout; ordinary installs never set it.
-DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.conf")
+#
+# One directory up from this file (#959): the daemon's modules moved into
+# src/, but settings.conf is the operator's own, already-existing file, and
+# stays at the repository root next to oserve.py.
+DEFAULT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.conf")
 
 # The settings a fresh install MUST change before oserve.startup() will boot -
 # see unconfigured_required()'s own docstring for the mechanism, and issue

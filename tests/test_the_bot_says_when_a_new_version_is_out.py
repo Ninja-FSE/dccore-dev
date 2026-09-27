@@ -289,7 +289,7 @@ class TheDailyLoop(VersionCase):
         self.assertIn("CHECK_FOR_UPDATES = false, or", code)
 
     def test_it_ships_on(self):
-        with io.open(os.path.join(REPO_ROOT, "defaults.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "defaults.py"), encoding="utf-8") as handle:
             self.assertIn("\nCHECK_FOR_UPDATES: bool = True", handle.read())
 
 

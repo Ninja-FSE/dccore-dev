@@ -10,6 +10,12 @@ import tempfile
 import zipfile
 import time
 import json
+
+# This script is an entry point of its own (README/INSTALL.md say "python3
+# update_list.py"), and stays at the repository root for that reason - but
+# everything it imports below now lives in src/ (#959).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+
 import defaults as config
 import library
 import platform_compat

@@ -226,7 +226,7 @@ class NoNinthCopy(unittest.TestCase):
         nothing anywhere would be broken rather than reassuring. This control
         is what caught the scan looking for the character when every module
         spells it as an escape."""
-        with io.open(os.path.join(REPO_ROOT, "theme.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "theme.py"), encoding="utf-8") as handle:
             body = handle.read()
 
         for code in BLOCK_CODES:

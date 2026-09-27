@@ -81,18 +81,23 @@ import re
 import subprocess
 import sys
 
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+# Every daemon module this script needs (platform_compat included) lives in
+# src/ (#959); this file stays at the repository root, next to oserve.py -
+# an operator runs it by hand (README/INSTALL.md both say "python3
+# configure.py"), the same reason oserve.py itself was never moved.
+SRC_DIR = os.path.join(REPO_ROOT, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts")
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+
 import platform_compat
 
 # See update_list.py's own note: this is an entry point of its own,
 # so it needs the guard oserve.py installs for the daemon.
 platform_compat.install_console_encoding_guard()
-
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
-SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts")
-if SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, SCRIPTS_DIR)
 
 import adminchat  # noqa: E402
 import defaults as config  # noqa: E402
