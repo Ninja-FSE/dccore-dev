@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 An audio file that could not be read is read again next time (#973)
+
+Audit 2026-09-27 L4. `audio_info.read()` swallowed every exception and returned None, so a transient I/O error -
+EIO or a timeout on an NFS/SMB mount, a sharing violation on Windows while another program held the file - was
+stored as the file's answer (`""`), published, and reused by every later rebuild while the size stayed the same:
+no length or quality for that file, indefinitely. `read()` now lets `OSError` through (a file gone since the walk is
+still None - the next walk will not list it either), and `Cache.read_pending()` shows such a file size-only this
+time and keeps it in `unread`, out of both `publish()` and `close()`, so the next rebuild reads it again. A file that
+makes no sense is still an answer and is remembered. The rebuild log says how many could not be read. Tests:
+`tests/test_a_failed_audio_read_is_tried_again.py`.
+
 ### 📦 A DCCore that is reloading has queued the request, not refused it (#972)
 
 Audit 2026-09-27 L3. Asked for a file mid-rehash, a DCCore bot keeps the request (#668): "The bot is reloading its
