@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a mass rejoin in a big channel no longer makes the bot stall.** After a netsplit, or in very large channels, a burst of thousands of joins could keep the bot busy for seconds. Each join now costs the same small amount of work.
 - **Fixed: a list rebuild is no longer reported as failed when only the saved track lengths could not be written.** If the file where DCCore keeps track lengths and quality was locked at the end of a rebuild, the rebuild was reported as failed although the new list was already in use. It now succeeds, and the log says the saved lengths could not be updated this time.
 - **Fixed: adding or removing a second list no longer throws away the saved track lengths and quality.** With length and quality in the list turned on, adding a list (or going back to one) made DCCore forget what it had already read about your main list and read it all again, showing sizes only in the meantime. It now keeps them - including, once, what earlier versions saved.
 - **Fixed: after a restart, downloads from a bot you were queued at no longer stall for up to 12 hours.** Requests that were waiting in another bot's queue were kept as "queued" across a restart - but leaving IRC empties your place in most bots' queues, so they waited for files that were never coming, and held up every other download from that bot meanwhile. They are now simply asked for again; a bot that did keep your place says so, and it is kept.
