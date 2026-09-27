@@ -269,12 +269,19 @@ def note_who_reply(line, now=None):
 
 
 def note_gone(nick, chan=None, now=None):
-    """A peer left `chan` (or the network, with no channel)."""
+    """A peer left `chan` (or the network, with no channel).
+
+    Prints either way (#982 follow-up): a departure this never even
+    considered a peer is as useful to see, live, as one it removed - the
+    one way to tell "was never known" from "removed but nothing reflects
+    it" apart without guessing."""
     key = str(nick or "").lower()
     touched = []
     with runtime.chat_lock:
         seen = runtime.chat_peers.get(key)
         if seen is None:
+            print(f"[CHAT] {key} left{f' {chan}' if chan else ' the network'}, "
+                  f"but was not a known DCCore Chat peer - nothing to remove.")
             return
         if chan is None:
             touched = list(seen.keys())
@@ -286,6 +293,8 @@ def note_gone(nick, chan=None, now=None):
                 touched = [chan]
                 if not seen:
                     runtime.chat_peers.pop(key, None)
+    print(f"[CHAT] {key} is gone from DCCore Chat peers: "
+          f"{', '.join(touched) if touched else '(nothing changed - it was not in ' + str(chan) + ')'}.")
     for one in touched:
         _deliver_peers(one, now)
 
