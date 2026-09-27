@@ -4,6 +4,7 @@ import io
 import re
 import sys
 import shutil
+import sqlite3
 import datetime
 import subprocess
 import tempfile
@@ -2204,7 +2205,18 @@ def generate_master_list(list_name=None):
         if audio is not None:
             # Only a PUBLISHED rebuild forgets the files it did not see; a
             # failed one may have seen half the library.
-            audio.publish()
+            #
+            # AN OPTIONAL CACHE DOES NOT FAIL A LIVE LIST (#980). The swap has
+            # happened: the new list is what users are getting. A locked or
+            # unwritable cache here went to the except below, and the rebuild
+            # was reported failed - with several lists, as "still serving
+            # what they last built", which was untrue. close() still keeps
+            # what this rebuild read; the next one reads the rest again.
+            try:
+                audio.publish()
+            except (sqlite3.Error, OSError) as cache_err:
+                print(f"[LIST-GEN] The list is published, but the audio info cache could not be "
+                      f"updated ({cache_err}): the next rebuild reads again what it could not keep.")
             rate = audio.rate()
             print(f"[LIST-GEN] Audio info: {audio.read_count:,} file(s) read, "
                   f"{audio.reused_count:,} unchanged since the last rebuild"
