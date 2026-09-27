@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The version line and the Stats cards follow the language (#976)
+
+Audit 2026-09-27 L7. `loadVersion()` runs before `loadLanguage()`, and `renderVersion()` builds its text from `t()`
+into `#version-text`, which has no `data-i18n`. When the check answered first, `t()` had no dictionary and returned
+the key, so the sidebar read "version.upToDate" until the next poll ten minutes on; a language switch left that line
+- and the Stats page's `renderLibrary()` cards, which replaced their `data-i18n` labels - in the old language.
+`renderVersion()` and `renderStats()` now keep what they drew (`state.lastVersionInfo`, `state.lastStats`), and
+`loadLanguage()` draws both again after `applyTranslations()`. Tests: `tests/test_the_version_line_follows_the_language.py`,
+which runs the real `t()`, `renderVersion()` and `loadLanguage()` under node, with a source guard beside it.
+
 ### 📦 "Online only" keeps a bot that is here under a new nick (#975)
 
 Audit 2026-09-27 L6. A row #376 merged holds the list kept under the old nick (offline, by definition) and the new
