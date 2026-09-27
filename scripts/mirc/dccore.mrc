@@ -1524,28 +1524,24 @@ alias dccore.chat.peerline {
 }
 ; The side-listbox: every bot WHO has found, in any of the bot's channels -
 ; deduped, since a peer usually shares more than one with us - and sorted.
-; The "already added" check is a HASH TABLE, not a growing token string: an
-; exact lookup, nothing to get subtly wrong about how a token list compares.
+; $addtok() itself never appends a token already in the list - documented
+; behaviour, not something built here by hand out of a second hash table
+; whose own create/free lifecycle turned out to be the wrong place to
+; look for exactness (seen live: three rows for one peer in three
+; channels, with the hash-table version this replaces).
 alias dccore.chat.peers.redraw {
   if (!$window($dccore.chat.win)) { return }
-  if ($hget(dccore.chatpeers.seen)) { hfree dccore.chatpeers.seen }
-  hmake dccore.chatpeers.seen 32
   var %sorted = $null
   var %i = 1
   while ($gettok($dccore.st(chat.chans),%i,32) != $null) {
     var %have = $hget(dccore.chatpeers,$gettok($dccore.st(chat.chans),%i,32))
     var %j = 1
     while ($gettok(%have,%j,32) != $null) {
-      var %nick = $gettok(%have,%j,32)
-      if (!$hget(dccore.chatpeers.seen,%nick)) {
-        hadd dccore.chatpeers.seen %nick 1
-        var %sorted = $iif(%sorted,$+(%sorted,$chr(32),%nick),%nick)
-      }
+      var %sorted = $addtok(%sorted,$gettok(%have,%j,32),32)
       inc %j
     }
     inc %i
   }
-  hfree dccore.chatpeers.seen
   if (%sorted != $null) { var %sorted = $sorttok(%sorted,32) }
   if ($line($dccore.chat.win,0,1) > 0) { dline -l $dccore.chat.win 1-$line($dccore.chat.win,0,1) }
   var %k = 1

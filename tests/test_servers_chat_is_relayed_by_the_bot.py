@@ -495,6 +495,69 @@ class AskingWho(Case):
         at = code.index('s.sendall(b"PING :lagcheck\\r\\n")')
         self.assertIn("_refresh_chat_peers()", code[at:at + 650])
 
+    def test_it_also_runs_the_moment_every_channel_is_joined(self):
+        """NAMES (353/366), which is all a JOIN itself ever gets, carries
+        nicknames only - never a realname - so this is the earliest a WHO
+        round can find a peer at all. Without it the first one waited for
+        the keepalive or the advert thread, both minutes away."""
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        at = code.index("if target_channels.issubset(channels_confirmed):")
+        self.assertIn("_refresh_chat_peers()", code[at:at + 1050])
+
+
+class WhoRoundReconciliation(Case):
+    """The server's own "End of /WHO list" (315) is the one point a peer
+    that quietly vanished - a QUIT or PART the read loop missed, a net
+    split - is ever caught: note_who_reply() only ever ADDS a sighting."""
+
+    def test_a_round_starts_empty_for_every_channel_asked(self):
+        serverschat.refresh_peers(now=T0)
+        self.assertEqual(runtime.chat_who_round, {CHAN: set()})
+
+    def test_a_reconfirmed_peer_is_recorded_into_the_open_round(self):
+        serverschat.refresh_peers(now=T0)
+        self.see_peer("SomeBot", now=T0)
+        self.assertEqual(runtime.chat_who_round[CHAN], {"somebot"})
+
+    def test_a_peer_not_reconfirmed_is_removed_when_the_round_ends(self):
+        self.see_peer("SomeBot", CHAN, now=T0)
+        serverschat.refresh_peers(now=T0, force=True)
+        # SomeBot is not seen again this round - it quietly vanished.
+        self.session.sent = []
+        serverschat.finish_who_round(CHAN, now=T0)
+        self.assertEqual(serverschat.peer_nicks(T0), [])
+        self.assertEqual(self.session.sent, [f"DCCORE PEERS {CHAN}"])
+
+    def test_a_reconfirmed_peer_survives_the_round_ending(self):
+        serverschat.refresh_peers(now=T0, force=True)
+        self.see_peer("SomeBot", now=T0)
+        serverschat.finish_who_round(CHAN, now=T0)
+        self.assertEqual(serverschat.peer_nicks(T0), ["somebot"])
+
+    def test_a_peer_in_a_different_channel_is_untouched(self):
+        config.channel_users["#two"] = {"ourbot"}
+        self.see_peer("SomeBot", CHAN, now=T0)
+        self.see_peer("OtherBot", "#two", now=T0)
+        serverschat.refresh_peers(now=T0, force=True)
+        self.see_peer("OtherBot", "#two", now=T0)
+        # SomeBot is not reconfirmed for CHAN; #two's own round is untouched.
+        serverschat.finish_who_round(CHAN, now=T0)
+        self.assertEqual(serverschat.peer_channels(T0), {"#two": {"otherbot"}})
+
+    def test_no_round_open_is_a_silent_no_op(self):
+        """A WHO the operator's own client happened to ask for outside
+        refresh_peers() must not read as a round this owns."""
+        self.see_peer("SomeBot", CHAN, now=T0)
+        self.session.sent = []
+        serverschat.finish_who_round(CHAN, now=T0)
+        self.assertEqual(serverschat.peer_nicks(T0), ["somebot"])
+        self.assertEqual(self.session.sent, [])
+
+    def test_the_real_line_from_the_read_loop(self):
+        irc._finish_chat_who_round(f":irc.example.net 315 OurBot {CHAN} :End of /WHO list.")
+        # Ran without raising is the wiring test; behaviour is covered above.
+
 
 class TheConsoleCommand(Case):
     def test_chat_alone_lists_the_channels(self):

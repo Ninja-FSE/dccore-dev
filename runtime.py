@@ -273,6 +273,13 @@ chat_last_id = 0
 # when the channels were last asked WHO.
 chat_peers = {}
 chat_peers_meta = {"last": 0.0}
+# chat_who_round: channel -> the peers (lowercase nicks) actually seen in the
+# WHO round currently in flight for it, from the moment refresh_peers() asks
+# to the server's own "End of /WHO list" for that channel - which is also
+# the one place a peer that quietly vanished (a QUIT or PART the read loop
+# missed, a net split) is ever caught: WHO only ever ADDS a sighting, so
+# without this, a peer WHO no longer finds would simply never be removed.
+chat_who_round = {}
 chat_lock = threading.Lock()
 
 update_check_guard        = threading.Lock()  # the version check's start guard (#572)

@@ -381,13 +381,14 @@ class ThePeerList(unittest.TestCase):
         self.assertIn("$hget(dccore.chatpeers,", body)
 
     def test_a_peer_seen_in_two_channels_is_not_doubled(self):
-        """A hash-table lookup for "already added", not a growing token
-        string: an exact check, not something that can be subtly wrong
-        about how a token list compares (seen live: it was)."""
+        """$addtok() itself never appends a token already in the list -
+        documented behaviour, and not something to re-verify by hand with a
+        second hash table, whose own create/free lifecycle was where the
+        real bug turned out to be (seen live: three rows for one peer seen
+        in three channels, with that version)."""
         body = "\n".join(statements(block(script(), "alias dccore.chat.peers.redraw")))
-        self.assertIn("hmake dccore.chatpeers.seen 32", body)
-        self.assertIn("if (!$hget(dccore.chatpeers.seen,%nick))", body)
-        self.assertIn("hadd dccore.chatpeers.seen %nick 1", body)
+        self.assertIn("var %sorted = $addtok(%sorted,$gettok(%have,%j,32),32)", body)
+        self.assertNotIn("chatpeers.seen", body)
         self.assertNotIn("istok", body)
 
     def test_redraw_clears_before_it_rebuilds(self):

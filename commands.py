@@ -454,6 +454,7 @@ PRESERVE_RUNTIME = (
     'chat_muted',
     'chat_peers',         # the other DCCore bots seen by WHO, and when it last ran
     'chat_peers_meta',
+    'chat_who_round',     # the WHO round in flight per channel - losing it mid-round
     'recent_joins',       # #376: joins inside the merge window - a rehash in it
                           # would otherwise lose when the new nick appeared
     'list_grab_others_asked',  # #926: who just asked which bot for its list.

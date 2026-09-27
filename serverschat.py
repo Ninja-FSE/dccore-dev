@@ -259,6 +259,11 @@ def note_who_reply(line, now=None):
         if nick.lower() not in runtime.chat_peers and len(runtime.chat_peers) >= PEER_MAX:
             return None
         runtime.chat_peers.setdefault(nick.lower(), {})[chan] = now
+        # Only if a round is actually open for this channel (refresh_peers()
+        # started one) - a WHO the operator's own client asked for, say,
+        # must not feed this.
+        if chan in runtime.chat_who_round:
+            runtime.chat_who_round[chan].add(nick.lower())
     _deliver_peers(chan, now)
     return nick
 
@@ -283,6 +288,36 @@ def note_gone(nick, chan=None, now=None):
                     runtime.chat_peers.pop(key, None)
     for one in touched:
         _deliver_peers(one, now)
+
+
+def finish_who_round(chan, now=None):
+    """The server's own "End of /WHO list" for `chan`: every peer this round
+    did NOT reconfirm is gone from it, whether or not a QUIT or PART for
+    them ever reached the read loop - a net split, a client that vanishes
+    without one, or a QUIT line this capture missed for any reason all look
+    the same from here: WHO no longer finds them. note_who_reply() only
+    ever ADDS a sighting, so without this, a peer WHO stops finding would
+    never be removed until PEER_FRESH quietly time it out, up to
+    WHO_EVERY * 2.5 later.
+
+    A silent no-op when no round is open for `chan` - a WHO the operator's
+    own client asked for outside refresh_peers() must not read as one."""
+    chan = str(chan or "").lower()
+    with runtime.chat_lock:
+        seen = runtime.chat_who_round.pop(chan, None)
+        if seen is None:
+            return
+        gone = [nick for nick, per_chan in runtime.chat_peers.items()
+                if chan in per_chan and nick not in seen]
+        for nick in gone:
+            per_chan = runtime.chat_peers.get(nick)
+            if per_chan is None:
+                continue
+            per_chan.pop(chan, None)
+            if not per_chan:
+                runtime.chat_peers.pop(nick, None)
+    if gone:
+        _deliver_peers(chan, now)
 
 
 def peer_channels(now=None):
@@ -331,7 +366,12 @@ def cover(now=None):
 def refresh_peers(now=None, force=False):
     """Ask WHO for every channel, at most every WHO_EVERY seconds (or at once
     with `force`). Through the paced queue like everything the bot says.
-    Returns how many channels were asked."""
+    Returns how many channels were asked.
+
+    Opens a round in runtime.chat_who_round for each channel asked - see
+    finish_who_round(), which closes it and reconciles who was actually
+    seen once the server's own "End of /WHO list" for that channel
+    arrives."""
     now = time.time() if now is None else now
     with runtime.chat_lock:
         if not force and now - runtime.chat_peers_meta.get("last", 0.0) < WHO_EVERY:
@@ -340,6 +380,8 @@ def refresh_peers(now=None, force=False):
         if not chans:
             return 0
         runtime.chat_peers_meta["last"] = now
+        for chan in chans:
+            runtime.chat_who_round[chan] = set()
     for chan in chans:
         _enqueue(chan, f"WHO {chan}\r\n")
     return len(chans)
