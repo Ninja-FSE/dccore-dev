@@ -1543,7 +1543,14 @@ alias dccore.chat.peers.redraw {
     inc %i
   }
   if (%sorted != $null) { var %sorted = $sorttok(%sorted,32) }
-  if ($line($dccore.chat.win,0,1) > 0) { dline -l $dccore.chat.win 1-$line($dccore.chat.win,0,1) }
+  ; dline -l <win> 1-N (one /dline call, a hyphenated range) turned out to be
+  ; a silent no-op on this listbox - confirmed live: a peer's rows stayed at
+  ; their old count and only ever grew, redraw after redraw, even the moment
+  ; after that peer had actually quit and $addtok's own list no longer had
+  ; it. One line at a time avoids the range form entirely and only depends
+  ; on a single dline -l deletion, which the peer-picker's $line(...,N,1)
+  ; read side already proves this window's listbox honours.
+  while ($line($dccore.chat.win,0,1) > 0) { dline -l $dccore.chat.win 1 }
   var %k = 1
   while ($gettok(%sorted,%k,32) != $null) {
     aline -l $dccore.chat.win $gettok(%sorted,%k,32)

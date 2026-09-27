@@ -392,11 +392,18 @@ class ThePeerList(unittest.TestCase):
         self.assertNotIn("istok", body)
 
     def test_redraw_clears_before_it_rebuilds(self):
+        """dline -l <win> 1-N - one call, a hyphenated range - turned out to
+        be a silent no-op on the side-listbox: rows a peer had already left
+        stayed at their old count and only ever grew, redraw after redraw.
+        One dline -l ... 1 per line, looped until the listbox reports 0,
+        depends on nothing but a single-line deletion, which the peer-picker
+        already proves this listbox honours."""
         body = statements(block(script(), "alias dccore.chat.peers.redraw"))
-        clear = next(i for i, s in enumerate(body) if s.startswith("if ($line($dccore.chat.win,0,1) > 0)"))
+        clear = next(i for i, s in enumerate(body) if s.startswith("while ($line($dccore.chat.win,0,1) > 0)"))
         add = next(i for i, s in enumerate(body) if s.startswith("aline -l $dccore.chat.win"))
         self.assertLess(clear, add)
-        self.assertIn("dline -l $dccore.chat.win", body[clear])
+        self.assertIn("dline -l $dccore.chat.win 1 }", body[clear])
+        self.assertNotIn("1-$line", body[clear])
 
     def test_the_hash_table_is_made_on_load(self):
         body = statements(block(script(), "alias dccore.init"))
