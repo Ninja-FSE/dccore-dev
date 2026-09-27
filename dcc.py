@@ -166,19 +166,44 @@ def _note_lookup_hit(key, path):
             del folders[:-LOOKUP_FOLDER_MEMORY]
 
 
-def _in_a_recent_folder(list_name, file_name):
+def _matches_size_hint(path, size_hint):
+    """Whether the file at `path` is the size a pasted `::INFO::` hint says.
+
+    The hint is what the list wrote after the name: the size as
+    update_list.format_size_human() writes it ("7.3MB"), then - with audio
+    info on - its length and quality. Only the first word is a size. No hint
+    matches anything; a file that cannot be read matches nothing."""
+    words = str(size_hint or "").split()
+    if not words:
+        return True
+    try:
+        actual = update_list.format_size_human(os.path.getsize(platform_compat.long_path(path)))
+    except OSError:
+        return False
+    return actual.lower() == words[0].lower()
+
+
+def _in_a_recent_folder(list_name, file_name, size_hint=""):
     """`<folder>/<name>` for the folders recent lookups resolved into.
 
     The reported case (#886): a user pastes nine rows from one album. The
     first costs a scan and names the folder; the other eight are one
     os.path.exists each, in the folder their sibling was just found in -
     newest folder first, because a batch arrives together.
+
+    A request that carries a size (#962) only takes a copy of that size.
+    `cover.jpg`, `folder.jpg` and `01 - Intro.mp3` are in nearly every album
+    folder, so "the name exists in a folder somebody just asked in" is not
+    "the file this request names": the pasted size is what tells two copies
+    apart, and a copy of another size falls through to the list scan, which
+    picks by it.
     """
     with _lookup_misses_lock:
         folders = list(reversed(_lookup_folders.get(list_name, [])))
     for folder in folders:
         candidate = os.path.join(folder, file_name)
-        if os.path.exists(platform_compat.long_path(candidate)):
+        if (os.path.exists(platform_compat.long_path(candidate))
+                and _matches_size_hint(candidate, size_hint)):
             return candidate
     return None
 
@@ -2631,9 +2656,19 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # this does not need to wait for and does not replace - a scan
             # still in flight across a rehash records its hit after the
             # forget, and this is what keeps THAT entry honest too.
-            remembered_key = (str(wanted_list), str(requested_file).lower().strip())
+            #
+            # THE SIZE HINT IS PART OF WHAT IS REMEMBERED (#962). A scan picks
+            # between same-named copies by the pasted ::INFO:: size; a memory
+            # keyed on the name alone handed the next request the copy the
+            # LAST one wanted - album A's "01 - Intro.mp3" to somebody who
+            # pasted album B's. So an exact-name memory is only reused by a
+            # request carrying the same hint (or none, as before), and a
+            # folder candidate must be the hinted size.
+            remembered_key = (str(wanted_list), str(requested_file).lower().strip(),
+                              requested_size_hint)
             for candidate in (_remembered_path(remembered_key),
-                              _in_a_recent_folder(str(wanted_list), requested_file)):
+                              _in_a_recent_folder(str(wanted_list), requested_file,
+                                                  requested_size_hint)):
                 if candidate and any(is_safe_path(root, candidate) for root in search_roots):
                     full_path = candidate
                     break
@@ -2831,8 +2866,9 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 _note_lookup_miss(miss_key)
             else:
                 # What it cost to find this is what the next request for it -
-                # or for its siblings in the same folder - does not pay.
-                _note_lookup_hit(miss_key, full_path)
+                # or for its siblings in the same folder - does not pay. Under
+                # the size hint too (#962): see remembered_key above.
+                _note_lookup_hit(miss_key + (requested_size_hint,), full_path)
 
 
         # Against every legitimate root rather than one. is_safe_path() itself
