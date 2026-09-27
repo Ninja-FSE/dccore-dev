@@ -1232,11 +1232,18 @@ def build_crosslist_search_payload(term, limit=None, online_only=False):
 
     offline = []
     if online_only:
-        import dcc
+        # PRESENT UNDER THE NICK ITS ROW IS SHOWN AS (#975). A bot #376 merged
+        # into its new nick keeps its list under the old one, which is not
+        # here by definition - asking about that nick alone left out exactly
+        # the renamed bots that are online and reachable.
+        present = present_nicks()
+        merges = _ident_merges(dict(getattr(runtime, "known_bots", {}) or {}), present)
         for key, source in list(held.items()):
-            if not dcc.user_is_present_in_ram(source.split("/", 1)[0]):
-                offline.append(key)
-                del held[key]
+            nick = source.split("/", 1)[0]
+            if nick.lower() in present or _display_nick(nick, present, merges).lower() in present:
+                continue
+            offline.append(key)
+            del held[key]
 
     empty_payload = {
         "term": str(term or ""),
