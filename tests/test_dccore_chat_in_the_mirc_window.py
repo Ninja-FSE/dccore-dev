@@ -172,7 +172,16 @@ class WhatComesFromTheBot(unittest.TestCase):
         """Typing with no channel picked replies where the conversation is,
         not to wherever a set-cover happens to land (#958 follow-up)."""
         self.assertIn('if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) '
-                      '{ hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) }', self.feed)
+                      '{ hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) | dccore.chat.title }',
+                      self.feed)
+
+    def test_the_title_follows_the_reply_target_the_moment_it_changes(self):
+        """Seen live: dccore.chat.title only ran on login, a send-target
+        pick, or a connection-state change - never when an incoming line
+        moved the auto-reply target to a different channel or peer - so it
+        could go on naming the PREVIOUS one for the rest of the session."""
+        record = [s for s in self.feed if "chat.replyto" in s][0]
+        self.assertIn("dccore.chat.title", record)
 
     def test_a_private_line_names_the_peer_to_reply_to_not_the_at_sign(self):
         """A private line's channel is "@<nick>" - replying there means

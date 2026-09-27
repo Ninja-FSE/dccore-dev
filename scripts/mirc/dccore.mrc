@@ -1361,7 +1361,7 @@ alias dccore.chat.feed {
   ; happens to land (#958 follow-up). Never "-" or "*" - those are only an
   ; OWN fan-out line's channel. A private line's channel is "@<nick>" -
   ; reply there means privately to that nick, so the "@" is dropped.
-  if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) { hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) }
+  if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) { hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) | dccore.chat.title }
   ; Your own lines, and any private line (its "@<nick>" channel was never
   ; something to tick in the Listen on menu), always show (#958 follow-up):
   ; one said with `chat *` comes back with "-" for its channel, since it
