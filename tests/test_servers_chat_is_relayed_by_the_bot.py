@@ -409,6 +409,28 @@ class WhoIsADccoreBot(Case):
         self.assertLessEqual(len(real), 50)
 
 
+class AJoinAsksWhoForAStranger(Case):
+    """A plain JOIN carries no realname (no extended-join capability), so a
+    reconnecting DCCore bot would otherwise sit out of the sidebar for up to
+    WHO_EVERY. note_join() asks WHO for just that one nick instead - unless
+    it is already a known peer, so ordinary join/part churn from regulars
+    does not turn into one extra WHO per join."""
+
+    def test_a_stranger_joining_is_asked_who(self):
+        serverschat.note_join("SomeBot", CHAN)
+        self.assertEqual(self.queued(), {CHAN.lower(): ["WHO SomeBot\r\n"]})
+
+    def test_an_already_known_peer_is_left_alone(self):
+        self.see_peer("SomeBot")
+        serverschat.note_join("SomeBot", CHAN)
+        self.assertEqual(self.queued(), {})
+
+    def test_the_who_reply_it_provoked_still_makes_the_bot_a_peer(self):
+        serverschat.note_join("SomeBot", CHAN)
+        self.see_peer("SomeBot")
+        self.assertEqual(serverschat.peer_channels(T0), {CHAN: {"somebot"}})
+
+
 class ThereIsNothingToSayItToUnlessAPeerIsThere(Case):
     def test_the_fewest_channels_that_reach_everybody(self):
         for chan in ("#one", "#two", "#three"):
@@ -609,6 +631,11 @@ class TheReadLoop(Case):
         self.assertIn("_note_chat_peers(line)", code)
         self.assertIn("_forget_chat_peer(p_user, p_chan)", code)
         self.assertIn("_forget_chat_peer(q_user)", code)
+
+    def test_a_join_is_watched_too(self):
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        self.assertIn("_note_chat_join(joined_user, joined_chan)", code)
 
     def test_a_notice_is_not_chat(self):
         with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:

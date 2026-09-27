@@ -2070,6 +2070,12 @@ def _forget_chat_peer(nick, chan=None):
 
 
 @never_breaks_the_read_loop
+def _note_chat_join(nick, chan):
+    import serverschat
+    serverschat.note_join(nick, chan)
+
+
+@never_breaks_the_read_loop
 def _refresh_chat_peers():
     import serverschat
     serverschat.refresh_peers()
@@ -3466,6 +3472,12 @@ def irc_loop():
                             note_possible_reconnect(joined_user)
                             # #376 option B: when this nick appeared.
                             note_join_seen(joined_user)
+                            # DCCore Chat: a stranger joining might be a
+                            # DCCore bot reconnecting - ask WHO for just this
+                            # one nick rather than wait up to WHO_EVERY.
+                            # Already-known peers are skipped inside
+                            # note_join() itself.
+                            _note_chat_join(joined_user, joined_chan)
 
                             # One pop, not `in` then `del`. Between the two, the
                             # freeze sweep in check_queue_and_send() - which runs

@@ -15,6 +15,12 @@ PINGs) and remembers the nicks whose realname starts with the mark
 server. The realname can be written by anybody, so this is a filter, not
 proof - fine for a chat that is public anyway.
 
+A JOIN carries no realname (no extended-join capability is negotiated), so a
+stranger arriving is asked about individually and at once (note_join()) - a
+single-nick WHO, not a full round - rather than wait up to WHO_EVERY to find
+out a DCCore bot reconnected. A nick already known is left alone there: only
+strangers are worth an extra WHO the moment they join.
+
 WHERE IT IS SAID: `chat #chan text` says it in that channel; `chat * text`
 says it once in as few channels as reach every peer seen (cover()), never in
 a channel with no other DCCore bot in it; `chat nick text` says it privately
@@ -266,6 +272,28 @@ def note_who_reply(line, now=None):
             runtime.chat_who_round[chan].add(nick.lower())
     _deliver_peers(chan, now)
     return nick
+
+
+def note_join(nick, chan):
+    """A nick just joined one of the bot's channels: if it is not already a
+    known peer, ask WHO for just that nick right away, rather than leave it
+    to sit out of the sidebar for up to WHO_EVERY - a DCCore bot reconnecting
+    (after a QUIT, say) is otherwise invisible here for up to ten minutes
+    even though the server already told us it arrived.
+
+    Already-known peers are left alone: this is only about finding out FAST
+    that a stranger MIGHT be one of ours, not about refreshing someone
+    already confirmed, so a busy channel's ordinary join/part churn does not
+    turn into one extra WHO per join once the regulars are known.
+
+    A single-nick WHO, not a full round: no round-tracking needed for this
+    one either, the same way note_who_reply() already tolerates a WHO
+    nobody opened a round for - a plain JOIN carries no realname (this bot
+    negotiates no extended-join capability), so asking is the only way to
+    tell."""
+    if is_known_peer(nick):
+        return
+    _enqueue(chan, f"WHO {nick}\r\n")
 
 
 def note_gone(nick, chan=None, now=None):
