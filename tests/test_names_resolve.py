@@ -95,7 +95,7 @@ class EveryNameAFunctionReadsExists(unittest.TestCase):
     def test_no_module_reads_a_name_nothing_defines(self):
         offenders = []
         for name in daemon_modules():
-            with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
                 source = handle.read()
             for where, missing in unresolvable_names(source, name):
                 offenders.append("%s: %s reads %r, which nothing defines"

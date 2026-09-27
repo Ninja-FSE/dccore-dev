@@ -3021,7 +3021,7 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
         """[(file, line, name, fallback), ...] for every WEBUI_* getattr."""
         found = []
         for filename in self.SOURCES:
-            path = os.path.join(REPO_ROOT, filename)
+            path = (os.path.join(REPO_ROOT, "src", filename) if os.path.exists(os.path.join(REPO_ROOT, "src", filename)) else os.path.join(REPO_ROOT, filename))
             with io.open(path, encoding="utf-8") as handle:
                 source = handle.read()
             for node in ast.walk(ast.parse(source)):

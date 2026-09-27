@@ -194,9 +194,13 @@ class TheDashboardCanReadItWithoutTheDaemon(unittest.TestCase):
             "         if m in sys.modules]\n"
             "print(','.join(heavy) or 'NONE')\n"
         )
+        # PYTHONPATH: webserver/runtime live in src/ now (#959), and cwd
+        # alone no longer finds them.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.path.join(REPO_ROOT, "src") + os.pathsep + env.get("PYTHONPATH", "")
         result = subprocess.run([sys.executable, "-c", code],
                                 cwd=REPO_ROOT, capture_output=True,
-                                text=True, timeout=120)
+                                text=True, timeout=120, env=env)
 
         self.assertEqual(result.returncode, 0, result.stderr.strip()[-1500:])
         self.assertEqual(

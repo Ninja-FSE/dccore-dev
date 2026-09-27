@@ -77,7 +77,7 @@ def module_level_locks():
     for filename in sorted(os.listdir(REPO_ROOT)):
         if not filename.endswith(".py"):
             continue
-        with io.open(os.path.join(REPO_ROOT, filename), encoding="utf-8") as handle:
+        with io.open((os.path.join(REPO_ROOT, "src", filename) if os.path.exists(os.path.join(REPO_ROOT, "src", filename)) else os.path.join(REPO_ROOT, filename)), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
 
         # tree.body only - a lock built inside a function is a local, is not

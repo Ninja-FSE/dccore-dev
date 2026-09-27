@@ -31,9 +31,15 @@ STAMP = re.compile(r"^\[\d\d:\d\d:\d\d\] ")
 
 
 def child(code):
+    # PYTHONPATH, not cwd alone (#959): most daemon modules live in src/ now,
+    # and a bare "import announce" (unlike "import oserve", which fixes up
+    # sys.path for the rest of the process once IT is imported) needs to find
+    # it without going through oserve.py first.
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    env["PYTHONPATH"] = os.path.join(REPO_ROOT, "src") + os.pathsep + env.get("PYTHONPATH", "")
     done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True,
                           text=True, encoding="utf-8", errors="replace", timeout=120,
-                          env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+                          env=env)
     return done
 
 

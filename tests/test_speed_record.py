@@ -184,7 +184,7 @@ class EveryPersistedValueHasAWriterInTheDaemon(unittest.TestCase):
         source = self.db_source()
         direct = set()
         for filename in self.daemon_modules():
-            with io.open(os.path.join(REPO_ROOT, filename), encoding="utf-8") as handle:
+            with io.open((os.path.join(REPO_ROOT, "src", filename) if os.path.exists(os.path.join(REPO_ROOT, "src", filename)) else os.path.join(REPO_ROOT, filename)), encoding="utf-8") as handle:
                 text = handle.read()
             for name in re.findall(r"def (\w+)\(", source):
                 if re.search(r"\b%s\s*\(" % re.escape(name), text):

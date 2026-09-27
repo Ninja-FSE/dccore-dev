@@ -29,7 +29,7 @@ PROSE = ["docs/INSTALL.md", "docs/WINDOWS.md", "docs/MACOS.md", "docs/FUTURE.md"
 
 
 def read(relative):
-    path = os.path.join(REPO_ROOT, relative)
+    path = (os.path.join(REPO_ROOT, "src", relative) if os.path.exists(os.path.join(REPO_ROOT, "src", relative)) else os.path.join(REPO_ROOT, relative))
     if not os.path.exists(path):
         return ""
     with io.open(path, encoding="utf-8", errors="replace") as handle:

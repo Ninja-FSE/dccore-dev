@@ -136,7 +136,7 @@ def _modules():
     out = []
     for name in sorted(os.listdir(REPO_ROOT)):
         if name.endswith(".py") and name != "admin_config.py":
-            out.append(os.path.join(REPO_ROOT, name))
+            out.append((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)))
     return out
 
 
@@ -444,7 +444,7 @@ def has_swedish_accent(line):
 
 
 def _plain_lines(name):
-    path = os.path.join(REPO_ROOT, name)
+    path = (os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name))
     if not os.path.exists(path):
         return []
     with io.open(path, encoding="utf-8") as handle:
@@ -502,7 +502,7 @@ class ThePlainOperatorFilesAreEnglish(unittest.TestCase):
         """A renamed or deleted file would make this pass by reading nothing,
         which is the failure mode of every allowlist-shaped check."""
         missing = [name for name in PLAIN_FILES
-                   if not os.path.exists(os.path.join(REPO_ROOT, name))]
+                   if not os.path.exists((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)))]
 
         self.assertEqual(missing, [],
                          "named here but not in the tree, so nothing is scanned")

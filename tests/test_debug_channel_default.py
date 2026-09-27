@@ -137,7 +137,7 @@ class ABlankValueJoinsNothing(unittest.TestCase):
         shared room for any install whose config omits the setting."""
         offenders = []
         for name in ("irc.py", "commands.py"):
-            with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
                 tree = ast.parse(handle.read())
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)

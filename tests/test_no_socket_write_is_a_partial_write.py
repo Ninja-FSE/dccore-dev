@@ -70,7 +70,7 @@ def send_calls():
     """(module, line, receiver) for every `<something>.send(...)` call."""
     found = []
     for name in daemon_modules():
-        with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+        with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
             tree = ast.parse(handle.read(), filename=name)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -86,7 +86,7 @@ def send_calls():
 def sendall_calls():
     total = 0
     for name in daemon_modules():
-        with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+        with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
             tree = ast.parse(handle.read(), filename=name)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
@@ -160,7 +160,7 @@ class WhatGoesOnTheWire(unittest.TestCase):
         import ast as _ast
 
         for name in daemon_modules():
-            with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
                 tree = _ast.parse(handle.read(), filename=name)
             for node in _ast.walk(tree):
                 if not (isinstance(node, _ast.Call)

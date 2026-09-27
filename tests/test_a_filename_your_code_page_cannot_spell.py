@@ -57,7 +57,7 @@ UNSPELLABLE = "Bjo\u0308rk \u2013 Jo\u0301ga \u00e9\u00e7"
 
 
 def source(name):
-    with io.open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
+    with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
         return handle.read()
 
 
@@ -208,7 +208,7 @@ class TheGuardSurvivesAPathItCannotSpell(unittest.TestCase):
 PARENTS = tuple(name for name in (
     "commands.py", "dcc.py", "update_list.py",
     os.path.join("scripts", "preflight.py"),
-) if os.path.exists(os.path.join(REPO_ROOT, name)))
+) if os.path.exists((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name))))
 
 
 class NoParentDecodesWithTheLocaleCodePage(unittest.TestCase):
