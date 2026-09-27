@@ -56,7 +56,7 @@ def thread_calls():
     for name in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
         if not name.endswith(".py"):
             continue
-        path = (os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name))
+        path = (next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name)))
         if not os.path.exists(path):
             # Gone between listdir() and here. The control test below writes
             # a tmp*.py into this very directory and removes it again, so two

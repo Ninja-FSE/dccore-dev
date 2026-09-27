@@ -195,7 +195,7 @@ class MemoryOnly(Case):
 
     def test_nothing_that_writes_to_disk_reads_it(self):
         for name in ("db.py", "irc.py", "announce.py"):
-            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
+            with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))), encoding="utf-8") as handle:
                 code = handle.read()
             for line in code.splitlines():
                 stripped = line.strip()

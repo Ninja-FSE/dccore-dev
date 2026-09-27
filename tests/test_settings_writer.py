@@ -41,7 +41,7 @@ import settings_file  # noqa: E402
 from tests.support import DCCoreTestCase  # noqa: E402
 
 
-SAMPLE = os.path.join(REPO_ROOT, "settings.conf.sample")
+SAMPLE = os.path.join(REPO_ROOT, "conf", "settings.conf.sample")
 
 
 class WriterTestCase(DCCoreTestCase):

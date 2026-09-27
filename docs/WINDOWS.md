@@ -230,7 +230,7 @@ equivalent, for anyone who would rather edit the files by hand.
 
 ### 1. Create `admin_config.py`
 
-Copy `admin_config.py.sample` to `admin_config.py` and fill it in. That file is
+Copy `conf/admin_config.py.sample` to `conf/admin_config.py` and fill it in. That file is
 gitignored and never leaves your machine.
 
 > **The one line that matters most is `CHANNEL`.**
@@ -264,7 +264,7 @@ set it explicitly if you want the list named differently from the bot.
 near the top.
 
 **Prefer plain text?** Every setting above can also go in `settings.conf`
-instead (copy `settings.conf.sample` to `settings.conf`) — no Python syntax,
+instead (copy `conf/settings.conf.sample` to `conf/settings.conf`) — no Python syntax,
 and it's what the web dashboard's Settings page writes to as well. The setup
 check in step 2 accepts either file; `admin_config.py` still owns
 `ADMIN_HOSTMASKS`/`ADMIN_PASSWORD_HASH` most naturally, since those come from

@@ -239,7 +239,7 @@ class NothingRebindsARuntimeContainer(unittest.TestCase):
     def test_no_module_rebinds_a_container(self):
         offenders = []
         for filename in self._production_modules():
-            path = (os.path.join(REPO_ROOT, "src", filename) if os.path.exists(os.path.join(REPO_ROOT, "src", filename)) else os.path.join(REPO_ROOT, filename))
+            path = (next((p for p in (os.path.join(REPO_ROOT, "src", filename), os.path.join(REPO_ROOT, "conf", filename), os.path.join(REPO_ROOT, filename)) if os.path.exists(p)), os.path.join(REPO_ROOT, filename)))
             with io.open(path, encoding="utf-8") as handle:
                 source = handle.read()
             tree = ast.parse(source)

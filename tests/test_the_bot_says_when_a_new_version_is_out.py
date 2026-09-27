@@ -279,7 +279,7 @@ class TheDailyLoop(VersionCase):
     def test_boot_and_rehash_both_start_it(self):
         for name, statement in (("oserve.py", "version_check.ensure_worker()"),
                                 ("commands.py", "if _version_check.ensure_worker():")):
-            with io.open((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)), encoding="utf-8") as handle:
+            with io.open((next((p for p in (os.path.join(REPO_ROOT, "src", name), os.path.join(REPO_ROOT, "conf", name), os.path.join(REPO_ROOT, name)) if os.path.exists(p)), os.path.join(REPO_ROOT, name))), encoding="utf-8") as handle:
                 self.assertIn(statement, handle.read(), name)
 
     def test_startup_says_it_is_on_and_how_to_turn_it_off(self):
