@@ -485,6 +485,16 @@ class AskingWho(Case):
         at = code.index('if line.startswith("PING"):')
         self.assertIn("_refresh_chat_peers()", code[at:at + 900])
 
+    def test_it_also_runs_from_the_bots_own_keepalive(self):
+        """#982 audit finding 2: ircu pings a client only after ~90s of
+        silence FROM it, and the keepalive below fires at 45s - so the
+        server always hears from the bot first and never sends its own
+        PING. Without this, refresh_peers() never ran on its own at all."""
+        with io.open(os.path.join(REPO_ROOT, "irc.py"), encoding="utf-8") as handle:
+            code = handle.read()
+        at = code.index('s.sendall(b"PING :lagcheck\\r\\n")')
+        self.assertIn("_refresh_chat_peers()", code[at:at + 650])
+
 
 class TheConsoleCommand(Case):
     def test_chat_alone_lists_the_channels(self):

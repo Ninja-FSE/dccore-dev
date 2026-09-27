@@ -384,6 +384,7 @@ on *:CHATCLOSE: {
   .timerdccoreHello off
   dccore.sys Console closed $+ $iif(%was == in,$chr(32) $+ after $duration($calc($ctime - $dccore.st(opened)))) $+ .
   dccore.title
+  dccore.chat.title
   dccore.panel
   if (%was == taken) {
     ; another client took the session; reconnecting now would only take
@@ -467,6 +468,7 @@ alias dccore.line {
     .timerdccoreHello 1 6 dccore.plain
     if ($dccore.st(pairing)) { dccore.send pair $dccore.client $dccore.ver }
     dccore.title
+    dccore.chat.title
     return
   }
   if (%text == Incorrect Password.) {
@@ -533,6 +535,7 @@ alias dccore.abandon {
   hadd dccore.live state closed
   if ($chat($dccore.bot)) { window -c $+(=,$dccore.bot) }
   dccore.title
+  dccore.chat.title
 }
 alias dccore.plain {
   .timerdccoreHello off
@@ -542,6 +545,7 @@ alias dccore.plain {
   hadd dccore.live mode plain
   dccore.sys Plain mode: this bot does not send the structured feed, so there is no panel; the chat is shown as it comes. Console commands still work.
   dccore.title
+  dccore.chat.title
   dccore.panel
 }
 
@@ -573,6 +577,11 @@ alias dccore.structured {
     hadd dccore.live searches 0
     hadd dccore.live lastecho 0
     dccore.sys --- connected to the console of $3 (DCCore $4- $+ , $iif($dccore.opt(token),paired client,not paired) $+ ) ---
+    ; #982 audit finding 3: the chat window's title only followed a send-
+    ; target change or its own creation, so it could go on saying "not
+    ; connected to the bot" for a whole session if the window was opened
+    ; before this HELLO landed - chat worked, the title just never said so.
+    dccore.chat.title
     return
   }
   if (%type == STATUS) { dccore.status $2- | return }
@@ -1373,11 +1382,26 @@ alias dccore.chat.channels {
 ; kept out of the channel view here, but ONLY while the relay is up, the
 ; bot is in that channel, and the line will be drawn. With the relay down
 ; nothing would draw it, so it is left to show in the channel as usual.
+;
+; #982 audit finding 1: checking the tag, relay state, channel and listen
+; settings is not the same as knowing the bot will actually relay it - a
+; person, a script that is not DCCore's (the tag is neutral on purpose),
+; or a DCCore bot WHO has not found yet all say the same tagged text, and
+; the bot's capture() drops every one of those (unknown sender, or empty
+; after stripping) with nothing arriving to draw. Hiding it here anyway
+; made the message vanish for the operator while everyone else in the
+; channel still read it. Checked against the same peer list the
+; side-listbox is drawn from, so only a line the bot is actually going to
+; relay is ever hidden - a peer muted for flooding or over the all-senders
+; cap in the few seconds after being confirmed known is the one case this
+; cannot see coming, and is rare and short next to what it replaces.
 on ^*:TEXT:*:#: {
   if ($1 != $dccore.chat.tag) { return }
+  if ($2 == $null) { return }
   if (!$dccore.chat.relaying) { return }
   if (!$dccore.here) { return }
   if (!$istok($dccore.st(chat.chans),$chan,32)) { return }
+  if (!$istok($hget(dccore.chatpeers,$lower($chan)),$nick,32)) { return }
   if (!$dccore.chat.listens($chan)) { return }
   if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }
   haltdef

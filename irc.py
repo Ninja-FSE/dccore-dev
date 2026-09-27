@@ -2961,6 +2961,13 @@ def irc_loop():
                         try:
                             s.sendall(b"PING :lagcheck\r\n")
                             last_ping_sent = now
+                            # #982 audit finding 2: the server's own PING was
+                            # the only clock refresh_peers() had. ircu pings a
+                            # client only after ~90s of silence FROM it - and
+                            # this keepalive fires at 45s, so the server always
+                            # hears from us first and never sends one. Without
+                            # this, WHO was never asked automatically at all.
+                            _refresh_chat_peers()
                         except Exception as ping_err:
                             print(f"[TIMEOUT] The keepalive PING did not get through ({ping_err}). Dropping the link to reconnect.")
                             try: s.close()

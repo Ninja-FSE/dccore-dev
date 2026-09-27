@@ -68,9 +68,11 @@ class ARawNoticeIsHiddenOnlyWhenItWillBeDrawn(unittest.TestCase):
 
     def test_every_condition_comes_before_haltdef(self):
         halt = self.handler.index("haltdef")
-        for condition in ("if (!$dccore.chat.relaying) { return }",
+        for condition in ("if ($2 == $null) { return }",
+                          "if (!$dccore.chat.relaying) { return }",
                           "if (!$dccore.here) { return }",
                           "if (!$istok($dccore.st(chat.chans),$chan,32)) { return }",
+                          "if (!$istok($hget(dccore.chatpeers,$lower($chan)),$nick,32)) { return }",
                           "if (!$dccore.chat.listens($chan)) { return }",
                           "if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }"):
             self.assertLess(self.handler.index(condition), halt, condition)
@@ -79,6 +81,26 @@ class ARawNoticeIsHiddenOnlyWhenItWillBeDrawn(unittest.TestCase):
     def test_the_relay_is_up_only_when_connected_and_structured(self):
         self.assertIn("alias dccore.chat.relaying { return $iif(($dccore.st(state) == in) && "
                       "($dccore.st(mode) == structured),$true,$false) }", script())
+
+    def test_only_a_line_the_bot_will_actually_relay_is_hidden(self):
+        """#982 audit finding 1: the tag, relay state, channel and listen
+        settings do not say whether the bot's capture() will actually treat
+        the line as chat - a person, a non-DCCore script (the tag is
+        neutral on purpose), or a DCCore bot WHO has not found yet all say
+        the same tagged text, and none of it ever arrives as a CHAT line.
+        Hiding it anyway made it vanish for the operator while everyone
+        else in the channel still read it. Checked against the same peer
+        list the side-listbox is built from, so only a sender the bot
+        already knows is a DCCore bot is ever hidden."""
+        self.assertIn("$hget(dccore.chatpeers,$lower($chan))", "\n".join(self.handler))
+
+    def test_an_empty_tagged_line_is_never_hidden_either(self):
+        """A bare tag with nothing after it strips to nothing and capture()
+        drops it - so it never arrives as a CHAT line no matter who sent
+        it, and hiding it would be the same silent loss."""
+        empty_check = self.handler.index("if ($2 == $null) { return }")
+        halt = self.handler.index("haltdef")
+        self.assertLess(empty_check, halt)
 
 
 class NothingAnswers(unittest.TestCase):
@@ -213,6 +235,37 @@ class ItSaysItIsPublic(unittest.TestCase):
         self.assertIn("if ($1 == quiet) { window -enl16 $dccore.chat.win }", body)
         self.assertEqual(statements(block(script(), "alias dccore.chat.show"))[0],
                          "dccore.chat.window quiet")
+
+
+class TheTitleFollowsEveryRelayStateChange(unittest.TestCase):
+    """#982 audit finding 3: dccore.chat.title only ran when the chat window
+    was created or its send target changed, never on HELLO, CHATCLOSE, or
+    giving up on the connection - so it could say "not connected to the
+    bot" for a whole session after the window was opened before HELLO
+    landed, or keep claiming a live relay after the console closed."""
+
+    def test_after_hello(self):
+        text = script()
+        hello = text.index("if (%type == HELLO) {")
+        next_branch = text.index("if (%type == STATUS)", hello)
+        self.assertIn("dccore.chat.title", text[hello:next_branch])
+
+    def test_after_entering_the_admin_chat(self):
+        text = script()
+        entered = text.index("if (%text == Entering DCC Chat Admin Interface) {")
+        self.assertIn("dccore.chat.title", text[entered:text.index("\n  }", entered)])
+
+    def test_on_chatclose(self):
+        body = "\n".join(statements(block(script(), "on *:CHATCLOSE:")))
+        self.assertIn("dccore.chat.title", body)
+
+    def test_giving_up_on_the_connection(self):
+        body = "\n".join(statements(block(script(), "alias dccore.abandon")))
+        self.assertIn("dccore.chat.title", body)
+
+    def test_switching_to_plain_mode(self):
+        body = "\n".join(statements(block(script(), "alias dccore.plain")))
+        self.assertIn("dccore.chat.title", body)
 
 
 class TheWindowIsTheInterface(unittest.TestCase):
