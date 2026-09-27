@@ -53,7 +53,7 @@ from tests.support import DCCoreTestCase, RecordingSocket  # noqa: E402
 def thread_calls():
     """(module, line, is_daemon) for every threading.Thread(...) call."""
     out = []
-    for name in sorted(os.listdir(REPO_ROOT)):
+    for name in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
         if not name.endswith(".py"):
             continue
         path = (os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name))

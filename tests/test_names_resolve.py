@@ -56,7 +56,7 @@ IMPLICIT_MODULE_NAMES = {
 
 def daemon_modules():
     """Every .py the daemon is built from. admin_config.py is the operator's."""
-    return sorted(name for name in os.listdir(REPO_ROOT)
+    return sorted(name for name in (os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))
                   if name.endswith(".py") and name != "admin_config.py")
 
 

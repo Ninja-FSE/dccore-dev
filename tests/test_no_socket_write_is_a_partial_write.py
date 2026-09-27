@@ -61,7 +61,7 @@ def daemon_modules():
     an IRC socket, and `tests/` stand-ins deliberately implement both `send`
     and `sendall` so that a test can prove which one production called.
     """
-    for name in sorted(os.listdir(REPO_ROOT)):
+    for name in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
         if name.endswith(".py") and not name.startswith("_"):
             yield name
 

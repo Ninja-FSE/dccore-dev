@@ -74,7 +74,7 @@ def constructs_a_lock(value):
 def module_level_locks():
     """(module, line, name) for every module-level lock object constructed."""
     found = []
-    for filename in sorted(os.listdir(REPO_ROOT)):
+    for filename in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
         if not filename.endswith(".py"):
             continue
         with io.open((os.path.join(REPO_ROOT, "src", filename) if os.path.exists(os.path.join(REPO_ROOT, "src", filename)) else os.path.join(REPO_ROOT, filename)), encoding="utf-8") as handle:

@@ -206,7 +206,7 @@ class NoNinthCopy(unittest.TestCase):
     output would pass just as happily on nine."""
 
     def modules(self):
-        for name in sorted(os.listdir(REPO_ROOT)):
+        for name in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
             if name.endswith(".py") and name not in ("theme.py", "admin_config.py"):
                 yield name
 

@@ -134,7 +134,7 @@ SWEDISH = re.compile(
 def _modules():
     """Every .py file the daemon itself is built from."""
     out = []
-    for name in sorted(os.listdir(REPO_ROOT)):
+    for name in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
         if name.endswith(".py") and name != "admin_config.py":
             out.append((os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name)))
     return out

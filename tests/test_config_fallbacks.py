@@ -51,7 +51,7 @@ RUNTIME_ASSIGNED = {"ORIGINAL_NICK", "MY_IP_OR_DOCK", "fetch_feature_disabled"}
 
 
 def modules():
-    for name in sorted(os.listdir(REPO_ROOT)):
+    for name in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
         if name.endswith(".py") and name != "admin_config.py":
             yield name, (os.path.join(REPO_ROOT, "src", name) if os.path.exists(os.path.join(REPO_ROOT, "src", name)) else os.path.join(REPO_ROOT, name))
     scripts = os.path.join(REPO_ROOT, "scripts")

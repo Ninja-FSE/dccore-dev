@@ -64,7 +64,7 @@ def source(name):
 def entry_points():
     """Every module that can be started as a script of its own."""
     found = []
-    for name in sorted(os.listdir(REPO_ROOT)):
+    for name in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src")))):
         if not name.endswith(".py"):
             continue
         if '__name__ == "__main__"' in source(name):

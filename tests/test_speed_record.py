@@ -176,7 +176,7 @@ class EveryPersistedValueHasAWriterInTheDaemon(unittest.TestCase):
         return found
 
     def daemon_modules(self):
-        return [f for f in sorted(os.listdir(REPO_ROOT))
+        return [f for f in sorted((os.listdir(REPO_ROOT) + os.listdir(os.path.join(REPO_ROOT, "src"))))
                 if f.endswith(".py") and f not in ("db.py",)]
 
     def reachable(self):
