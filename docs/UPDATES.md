@@ -4,6 +4,25 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 One nick cannot keep the library scans to itself (#969)
+
+Audit 2026-09-27 M7. A request for a name that is not in a folder's root streams every published list and walks
+every configured folder, bounded by `MAX_CONCURRENT_LIBRARY_SCANS` (2) and the one-minute miss memory (#580). The
+per-nick bound was the flood gate - "ten a nick per five seconds", as the comment said - until #888 took `!<bot>
+<name>` lines out of it. One nick sending distinct made-up names at the server's pace then kept both slots busy, the
+miss memory never helped (every name new), the queue caps never applied (nothing was queued), and every other user
+waited five seconds and was told "busy".
+
+`handle_download_request()` now gives each nick its share. A nick's lookups take turns (`_take_a_scan_turn()` on
+`runtime.library_scan_turns`, a Condition; the five-second wait covers the turn and then a slot), and once a turn
+comes the memories are looked in again - the miss memory and the new `_recall()` (the exact-name and folder
+memories, factored out of the block above) - so the rest of a pasted batch is answered by what its first row just
+learned instead of each scanning. A nick whose last `LOOKUP_NICK_MISSES` (10) scans within
+`LOOKUP_NICK_MISS_WINDOW_SECONDS` (60) found nothing is told "busy" without another; scans that found the file never
+count. The per-nick miss record is bounded like the other memories and cleared by `forget_library_lookups()`.
+`test_a_batch_of_requests_is_not_refused` now allows the slot wait to be what is left after the turn. Tests:
+`tests/test_one_nick_cannot_hold_the_scan_slots.py`.
+
 ### 📦 A hung audio read is a stall the watchdog can see (#968)
 
 Audit 2026-09-27 M6. `audio_info.Cache.read_pending()` called `progress(done, total)` after every one-second

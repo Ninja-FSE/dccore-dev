@@ -141,6 +141,7 @@ told_queue_full_lock = threading.Lock()  # announce.py's queue-full notice memor
 MAX_CONCURRENT_LIBRARY_SCANS = 2
 library_scans      = threading.BoundedSemaphore(MAX_CONCURRENT_LIBRARY_SCANS)  # library scans at once
 lookup_memory_lock = threading.Lock()  # dcc.py's lookup memories - misses, hits, folders
+library_scan_turns = threading.Condition()  # dcc.py: one library scan per nick at a time (#969)
 
 # The reload window, which is not only about rebinding.
 #
