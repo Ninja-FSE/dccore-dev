@@ -842,6 +842,17 @@ def handle_bot_reply(bot, text):
     """
     if handle_refusal_notice(bot, text):
         return "refused"
+    # Nothing waiting on this sender, nothing to read (audit of 2026-09-27):
+    # every private line from anybody reaches here on the IRC read loop, and
+    # classifying a stranger's text is work for nobody. Checked again under
+    # the lock below, since the answer can change in between.
+    wanted_bot = str(bot).strip().lower()
+    with _fetch_lock():
+        waiting = any(row.get("state") in _AWAITING_OFFER_STATES
+                      and str(row.get("bot", "")).strip().lower() == wanted_bot
+                      for row in _ensure_fetch_queue().values())
+    if not waiting:
+        return None
     import fetch_replies
     reply = fetch_replies.classify(text)
     if reply is None:
