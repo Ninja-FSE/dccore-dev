@@ -116,7 +116,12 @@ _RULES = [
     ("busy", "Error: The server's global queue is full", None),
     ("busy", "Error: You have reached your personal queue limit", None),
     ("busy", "MasterList is currently rebuilding", None),
-    ("busy", "The bot is reloading its configuration", None),
+    # Not busy (#972): a DCCore mid-rehash KEEPS the request - "Your request
+    # is queued and starts when the reload is done" - and its "Added ... at
+    # position" follows. Taken as busy, the row went back to pending, the
+    # position line found nothing waiting, and the file that came once the
+    # reload was done was refused as unasked-for.
+    ("queued", "The bot is reloading its configuration", None),
 
     # --- OmeNServE 1.32 - 2.x ---------------------------------------------
     ("duplicate", "Request Denied You Already Have In My Queue Position OmenServE",
