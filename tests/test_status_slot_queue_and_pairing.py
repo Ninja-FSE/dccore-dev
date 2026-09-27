@@ -631,7 +631,7 @@ class TheResumeIsRecordedOnTheRow(unittest.TestCase):
         import io
         import os
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with io.open(os.path.join(root, "dcc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(root, "src", "dcc.py"), encoding="utf-8") as handle:
             source = handle.read()
         start = source.index("tx['bytes_sent'] = resume_offset")
         self.assertIn("tx['resume_offset'] = resume_offset", source[start:start + 400])

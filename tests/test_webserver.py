@@ -2404,7 +2404,7 @@ class JsonBodyMustBeAnObject(DCCoreTestCase):
         """
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "webserver.py")
+            "src", "webserver.py")
         with io.open(path, encoding="utf-8") as handle:
             source = handle.read()
 

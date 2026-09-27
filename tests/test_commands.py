@@ -542,8 +542,8 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
                                            not silently missed by either.
         """
         import ast
-        path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "defaults.py")
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(repo_root, "src", "defaults.py")  # #959
         with open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         names = []

@@ -224,7 +224,7 @@ class TheRateIsKeptCurrent(unittest.TestCase):
 
     def test_the_queue_worker_samples_the_rate(self):
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "queue_mgr.py"), encoding="utf-8") as handle:
+        with open(os.path.join(repo_root, "src", "queue_mgr.py"), encoding="utf-8") as handle:
             source = handle.read()
 
         calls = [line.strip() for line in source.splitlines()
@@ -241,7 +241,7 @@ class TheRateIsKeptCurrent(unittest.TestCase):
         """One sampler. Two would each measure part of the movement and both
         would report a fraction of the real speed."""
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "announce.py"), encoding="utf-8") as handle:
+        with open(os.path.join(repo_root, "src", "announce.py"), encoding="utf-8") as handle:
             source = handle.read()
 
         self.assertNotIn(
