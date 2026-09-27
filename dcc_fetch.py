@@ -868,12 +868,28 @@ def handle_refusal_notice(bot, notice_text):
     return True
 
 
+def _match_name(row):
+    return _normalize_filename_for_match(row.get("requested_filename") or row.get("filename") or "")
+
+
 def _row_named_in(row, text):
     """Whether a reply names this row's file. Compared the way offers are,
     spaces and underscores alike, so "Some_Track.mp3" in a reply finds the row
     that asked for "Some Track.mp3"."""
-    name = _normalize_filename_for_match(row.get("requested_filename") or row.get("filename") or "")
+    name = _match_name(row)
     return bool(name) and name in _normalize_filename_for_match(text)
+
+
+def _the_longest_named(rows):
+    """Of the rows a reply names, the ones it is about (#974): a name that is
+    only part of a longer one it also carries does not count. "Sorry, but
+    Band - Intro.mp3 is not found" contains "Intro.mp3" too, and the older
+    request for that - named first - was failed in its place, while the one
+    it was about waited out its timeout. No word boundary could tell them
+    apart: "Intro.mp3" follows a space there."""
+    names = [_match_name(row) for row in rows]
+    return [row for row, name in zip(rows, names)
+            if not any(name != other and name in other for other in names)]
 
 
 def handle_bot_reply(bot, text):
@@ -929,7 +945,12 @@ def handle_bot_reply(bot, text):
             key=lambda r: r.get("requested_at", 0))
         if not candidates:
             return None
-        named = [row for row in candidates if _row_named_in(row, reply.text)]
+        named = _the_longest_named([row for row in candidates if _row_named_in(row, reply.text)])
+        if len({_match_name(row) for row in named}) > 1:
+            # Two different names, neither part of the other: which one it
+            # is about is a guess, and the same rule as an unnamed reply to
+            # several requests applies - among these.
+            candidates, named = named, []
         if named:
             row = named[0]
         elif len(candidates) == 1:
