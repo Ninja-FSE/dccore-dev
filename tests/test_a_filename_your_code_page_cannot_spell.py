@@ -161,6 +161,9 @@ class TheGuardSurvivesAPathItCannotSpell(unittest.TestCase):
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = NARROW_CODE_PAGE
         env.pop("PYTHONUTF8", None)
+        # PYTHONPATH: platform_compat lives in src/ now (#959), and cwd alone
+        # no longer finds it.
+        env["PYTHONPATH"] = os.path.join(REPO_ROOT, "src") + os.pathsep + env.get("PYTHONPATH", "")
         return subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True,
             encoding="utf-8", errors="replace", env=env, cwd=REPO_ROOT,
