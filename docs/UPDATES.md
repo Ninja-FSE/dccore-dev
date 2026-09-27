@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Bots that have left no longer take the automatic re-fetch's places (#966)
+
+Audit 2026-09-27 M4. `refetch_due_lists()` took `due[:AUTO_REFETCH_MAX_PER_RUN]` from a list sorted oldest first, and
+the oldest held lists are the likeliest to belong to bots long gone: with their adverts aged out of `known_bots`
+their freshness is "unknown", and past `UNKNOWN_LIST_MAX_AGE_DAYS` they are due. Three of them took the three places
+of every sweep; each got 409 "not here" from `build_list_fetch_enqueue_result()`, which is not an ask, so
+`_note_auto_attempt()` never set `last_attempt` and the interval floor never moved them back. An online bot whose
+advert showed a changed list was never refetched.
+
+Now the due list is filtered to `webserver.present_nicks()` before anything is asked - an absent bot is left for a
+sweep that finds it back, and its log line is not repeated every hour - and the bound counts the asks that went out
+(200), so a refusal (a fetch already outstanding) leaves its place to the next list. `lists_worth_refetching()` is
+unchanged. The refetch tests' fixtures now put their bots in the channel (`bots_in_the_channel()`, from #965); a new
+`tests/test_absent_bots_do_not_take_the_refetch_cap.py` covers the audit's case, a gone bot coming back, a refusal
+passing its place on, and the bound. `settings.conf.sample` and the roadmap say who is asked.
+
 ### 📦 No fetch goes out before the channels are joined (#965)
 
 Audit 2026-09-27 M3. `_bot_readiness()` called every bot ready while `channel_users` was empty - "still joining, the

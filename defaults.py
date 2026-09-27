@@ -737,6 +737,9 @@ AUTO_REFETCH_INTERVAL_HOURS: int = 24
 # Most lists to ask for in one sweep. A bot back after a month offline has a
 # lot of stale lists, and asking for all of them at once is a burst of
 # outbound requests nobody asked for. The rest go next sweep, oldest first.
+# Only bots in one of your channels are asked - a list whose bot has left
+# waits until it is back - and a request that is refused does not use up a
+# place.
 AUTO_REFETCH_MAX_PER_RUN: int = 3
 # Ask for the list of a bot that advertises one and whose list is not held yet
 # (#926), on AutoGet's rules: one grab at a time, a random 5-360 second wait
