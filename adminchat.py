@@ -1387,6 +1387,8 @@ def _cmd_hello(session, args):
     import serverschat
     session._chat_channels = serverschat.channels_line()
     session.send(session._chat_channels)
+    for chan in serverschat.channels():
+        session.send(serverschat.peers_channel_line(chan))
     for line in serverschat.recent_lines():
         session.send(line)
     session.send_status()
@@ -1455,11 +1457,12 @@ def _cmd_unpair(session, args):
 
 
 def _cmd_chat(session, args):
-    """`chat #channel <text>` or `chat * <text>`: say something in DCCore Chat
-    (#371), as the bot - a channel message starting with [ServersChat], which
-    is public; `*` is the fewest channels that reach every other DCCore bot.
-    `chat` alone: the channels it can chat in. `chat peers` / `chat who`: the
-    other DCCore bots seen, and ask again."""
+    """`chat #channel <text>`, `chat * <text>` or `chat nick <text>`: say
+    something in DCCore Chat (#371), as the bot. `#channel`/`*` is a channel
+    message, public; `nick` is a private message to one known peer instead -
+    only ever a nick WHO has already found. `chat` alone: the channels it can
+    chat in. `chat peers` / `chat who`: the other DCCore bots seen, and ask
+    again."""
     import serverschat
     text = str(args or "").strip()
     if text.lower() == "peers":
@@ -1519,7 +1522,7 @@ COMMANDS = {
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
     "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
-    "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|* text]"),
+    "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|*|nick text]"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),

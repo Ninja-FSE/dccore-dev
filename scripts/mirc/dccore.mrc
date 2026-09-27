@@ -113,6 +113,10 @@ alias dccore.in { if ($1 == $null) || ($1 == -) { return } | return $+($chr(160)
 alias dccore.init {
   if (!$hget(dccore)) { hmake dccore 32 }
   if (!$hget(dccore.live)) { hmake dccore.live 64 }
+  ; #371 follow-up: the DCCore bots WHO has found, one entry per channel -
+  ; kept apart from dccore.live so redrawing the side-listbox is a plain
+  ; loop over chat.chans, not a scan of every key in that bigger table.
+  if (!$hget(dccore.chatpeers)) { hmake dccore.chatpeers 32 }
   if ($isfile($dccore.ini)) { hload dccore $dccore.ini }
   ; defaults only where nothing is saved yet, so an upgrade keeps choices
   dccore.default auto 1
@@ -585,6 +589,7 @@ alias dccore.structured {
   ; channels it can chat in (after HELLO, and on `chat` with nothing after it).
   if (%type == CHAT) { dccore.chat.feed $2- | return }
   if (%type == CHANNELS) { dccore.chat.channels $2- | return }
+  if (%type == PEERS) { dccore.chat.peerline $2- | return }
   if (%type == SLOT) { hadd dccore.live slot. $+ $dccore.st(nslots) $2- | hinc dccore.live nslots | dccore.panel.soon | return }
   if (%type == QUEUE) { hadd dccore.live queue. $+ $2 $3- | dccore.panel.soon | return }
   if (%type == OUT) { dccore.out $2- | return }
@@ -1259,6 +1264,13 @@ on *:dialog:dccore.opt:sclick:502: {
 ;  which the bot looks up with WHO - comes back here as a CHAT line. Your
 ;  own mIRC does not have to be in any channel.
 ;
+;  The DCCore bots WHO has found are listed to the right of the window
+;  (plain nicknames). Double-click one, or right-click it and pick "Message
+;  this bot privately", to send there instead - a private message to one
+;  known peer (#371 follow-up), never a channel, and never to a nick the
+;  bot has not itself found: that is the only proof it has that the other
+;  end can see it.
+;
 ;  It is PUBLIC, and says so. A channel message reaches everybody in it;
 ;  somebody without a chat window sees the line in the channel as it is.
 ;  The sender is the nick that sent it - your bot, for what you type - and
@@ -1293,21 +1305,26 @@ alias dccore.chat.relaying { return $iif(($dccore.st(state) == in) && ($dccore.s
 ; The window: "DCCore Chat", public, saying where a typed line goes.
 ; $1 = quiet: opened by an arriving line, so minimised with its button
 ; lit rather than taking the focus from whatever you were typing in.
+; -l16: a side-listbox 16 characters wide, for the DCCore bots WHO has
+; found (#371 follow-up) - plain nicknames, nothing else drawn on them.
 alias dccore.chat.window {
   if ($window($dccore.chat.win)) { return }
-  if ($1 == quiet) { window -en $dccore.chat.win }
-  else { window -e $dccore.chat.win }
+  if ($1 == quiet) { window -enl16 $dccore.chat.win }
+  else { window -el16 $dccore.chat.win }
   if ($dccore.opt(font)) { font $dccore.chat.win $dccore.fontsize Lucida Console }
   dccore.chat.title
   dccore.chat.sys Public: everyone in the channel reads what is typed here, with or without this script.
   dccore.chat.sys What you type is said by $iif($dccore.bot,$dccore.bot,your bot) in the channels where it has seen other DCCore bots. Right-click to send to one channel instead, and to choose the ones to listen on.
+  dccore.chat.sys Double-click a bot in the list on the right (or right-click it) to message it privately instead.
+  dccore.chat.peers.redraw
 }
 alias dccore.chat.title {
   if (!$window($dccore.chat.win)) { return }
   var %to = $dccore.opt(chat.to)
   var %auto = (%to == $null) || (%to == *)
   var %where = $iif(%auto,$iif($dccore.st(chat.replyto) != $null,$dccore.st(chat.replyto),every channel with other DCCore bots),%to)
-  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends to %where $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
+  var %priv = (!%auto) && ($left(%to,1) !isin #&+!)
+  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends $iif(%priv,privately to,to) %where $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
 }
 alias dccore.chat.sys {
   dccore.chat.window
@@ -1333,11 +1350,14 @@ alias dccore.chat.feed {
   ; Somebody else's line names where the conversation is: typing with no
   ; channel manually picked replies there, not to wherever a set-cover
   ; happens to land (#958 follow-up). Never "-" or "*" - those are only an
-  ; OWN fan-out line's channel.
-  if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) { hadd dccore.live chat.replyto $2 }
-  ; Your own lines always show (#958 follow-up): one said with `chat *`
-  ; comes back with "-" for its channel, since it went to several.
-  if ($3 != $dccore.bot) && (!$dccore.chat.listens($2)) { return }
+  ; OWN fan-out line's channel. A private line's channel is "@<nick>" -
+  ; reply there means privately to that nick, so the "@" is dropped.
+  if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) { hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) }
+  ; Your own lines, and any private line (its "@<nick>" channel was never
+  ; something to tick in the Listen on menu), always show (#958 follow-up):
+  ; one said with `chat *` comes back with "-" for its channel, since it
+  ; went to several.
+  if ($3 != $dccore.bot) && ($left($2,1) != @) && (!$dccore.chat.listens($2)) { return }
   if (!$window($dccore.chat.win)) && (!$dccore.opt(chat.popup)) { return }
   if ($3 == *) { dccore.chat.sys $2 $strip($4-) | return }
   dccore.chat.show $iif($2 == -,*,$2) $3 $iif($3 == $dccore.bot,own,other) $asctime($int($calc($1 / 1000)),HH:nn) $strip($4-)
@@ -1368,12 +1388,15 @@ on ^*:TEXT:*:#: {
 alias dccore.chat.say {
   var %to = $dccore.opt(chat.to)
   ; No channel manually picked (right-click), or explicitly "every channel":
-  ; reply where the conversation is - the channel the last line other than
-  ; your own arrived on - and only broadcast to reach everyone when nobody
-  ; has said anything back yet (#958 follow-up).
+  ; reply where the conversation is - the channel (or peer) the last line
+  ; other than your own arrived on - and only broadcast to reach everyone
+  ; when nobody has said anything back yet (#958 follow-up).
   if (%to == $null) || (%to == *) { var %to = $iif($dccore.st(chat.replyto) != $null,$dccore.st(chat.replyto),*) }
   if (!$dccore.chat.relaying) { dccore.chat.sys Not connected to $iif($dccore.bot,$dccore.bot,the bot) $+ : the chat goes through it. /dccore connect | return }
-  if (%to != *) && ($dccore.st(chat.chans) != $null) && (!$istok($dccore.st(chat.chans),%to,32)) { dccore.chat.sys $dccore.bot is not in %to $+ : pick one of its channels (right-click). | return }
+  ; A channel target has to be one of the bot's own; a nick (private, #371
+  ; follow-up) is checked by the bot instead, which is the one that knows
+  ; who it has actually seen.
+  if (%to != *) && ($left(%to,1) isin #&+!) && ($dccore.st(chat.chans) != $null) && (!$istok($dccore.st(chat.chans),%to,32)) { dccore.chat.sys $dccore.bot is not in %to $+ : pick one of its channels (right-click). | return }
   var %text = $strip($1-)
   if (%text == $null) { return }
   dccore.send chat %to %text
@@ -1438,7 +1461,21 @@ alias dccore.chat.listenrow {
 alias dccore.chat.to.n { if ($1 isnum) && ($dccore.chat.chan($1) != $null) { dccore.chat.to $dccore.chat.chan($1) } }
 alias dccore.chat.listen.n { if ($1 isnum) && ($dccore.chat.chan($1) != $null) { dccore.chat.listen $dccore.chat.chan($1) } }
 
+; Message a peer privately (#371 follow-up): picked from the side-listbox, a
+; line NUMBER only, never the nick itself - the same reason a channel picker
+; carries a number (#955 review): the nick's own text is read back inside the
+; alias with $line(), never re-parsed as a command.
+alias dccore.chat.pickpeer {
+  if ($1 !isnum) { return }
+  var %nick = $line($dccore.chat.win,$1,1)
+  if (%nick == $null) { return }
+  dccore.set chat.to %nick
+  dccore.chat.title
+  dccore.chat.sys Typing here now sends privately to %nick $+ .
+}
+
 menu @DCCore-Chat {
+  dclick:dccore.chat.pickpeer $1
   $iif(!$dccore.st(chat.chans),(connect to the bot to see its channels)):dccore connect
   Send to
   .$iif((!$dccore.opt(chat.to)) || ($dccore.opt(chat.to) == *),$style(1)) Every channel with other DCCore bots:dccore.chat.to.all
@@ -1447,7 +1484,43 @@ menu @DCCore-Chat {
   Listen on
   .$submenu($dccore.chat.listenrow($1))
   $iif($dccore.opt(chat.all),$style(1)) Listen on all the bot's channels:dccore.chat.all
+  $iif($sline($dccore.chat.win,1),Message this bot privately):dccore.chat.pickpeer $sline($dccore.chat.win,1).ln
   -
   Clear window:clear $dccore.chat.win
   Options...:dccore.options
+}
+
+; A PEERS line: the DCCore bots WHO found in one channel, right now - kept
+; per channel so a channel the bot leaves does not linger in the list.
+alias dccore.chat.peerline {
+  if ($1 == $null) { return }
+  if ($2-) { hadd dccore.chatpeers $1 $2- }
+  else { hdel dccore.chatpeers $1 }
+  dccore.chat.peers.redraw
+}
+; The side-listbox: every bot WHO has found, in any of the bot's channels -
+; deduped, since a peer usually shares more than one with us - and sorted.
+alias dccore.chat.peers.redraw {
+  if (!$window($dccore.chat.win)) { return }
+  var %all = $null
+  var %i = 1
+  while ($gettok($dccore.st(chat.chans),%i,32) != $null) {
+    var %have = $hget(dccore.chatpeers,$gettok($dccore.st(chat.chans),%i,32))
+    if (%have != $null) { var %all = $iif(%all,$+(%all,$chr(32),%have),%have) }
+    inc %i
+  }
+  var %sorted = $null
+  var %j = 1
+  while ($gettok(%all,%j,32) != $null) {
+    var %nick = $gettok(%all,%j,32)
+    if (!$istok(%sorted,%nick,32)) { var %sorted = $iif(%sorted,$+(%sorted,$chr(32),%nick),%nick) }
+    inc %j
+  }
+  if (%sorted != $null) { var %sorted = $sorttok(%sorted,32) }
+  if ($line($dccore.chat.win,0,1) > 0) { dline -l $dccore.chat.win 1-$line($dccore.chat.win,0,1) }
+  var %k = 1
+  while ($gettok(%sorted,%k,32) != $null) {
+    aline -l $dccore.chat.win $gettok(%sorted,%k,32)
+    inc %k
+  }
 }

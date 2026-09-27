@@ -110,9 +110,15 @@ class WhatArrives(Case):
         self.see_peer("Stranger")
         self.assertIsNotNone(self.arrive("[ServersChat] hi", nick="Stranger", peer=False))
 
-    def test_only_the_bot_s_own_channels(self):
+    def test_a_channel_not_our_own_is_nothing(self):
         self.assertIsNone(self.arrive("[ServersChat] hi", target="#elsewhere"))
-        self.assertIsNone(self.arrive("[ServersChat] hi", target="OurBot"))
+
+    def test_a_private_line_to_us_is_chat_too(self):
+        """#371 follow-up: a tagged private message from a known peer is
+        chat the same way a channel one is - see PrivateMessages below."""
+        line = self.arrive("[ServersChat] hi", target="OurBot")
+        self.assertIsNotNone(line)
+        self.assertEqual(line["chan"], "@OtherOperator")
 
     def test_never_our_own_nick(self):
         self.assertIsNone(self.arrive("[ServersChat] echo", nick="OurBot"))

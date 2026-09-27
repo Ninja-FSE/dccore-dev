@@ -118,7 +118,8 @@ class WhatComesFromTheBot(unittest.TestCase):
         self.assertIn("hadd dccore.live chat.last $1", self.feed)
 
     def test_only_listened_channels_and_stripped(self):
-        self.assertIn("if ($3 != $dccore.bot) && (!$dccore.chat.listens($2)) { return }", self.feed)
+        self.assertIn("if ($3 != $dccore.bot) && ($left($2,1) != @) && (!$dccore.chat.listens($2)) { return }",
+                      self.feed)
         self.assertTrue(all("$strip($4-)" in s for s in self.feed if s.startswith("dccore.chat.show")))
 
     def test_it_listens_everywhere_by_default(self):
@@ -129,9 +130,18 @@ class WhatComesFromTheBot(unittest.TestCase):
     def test_your_own_line_always_shows(self):
         """One said with `chat *` comes back with "-" for its channel; it must
         not be filtered out as an unlistened channel, and it reads as "*"."""
-        listen = self.feed.index("if ($3 != $dccore.bot) && (!$dccore.chat.listens($2)) { return }")
+        listen = self.feed.index("if ($3 != $dccore.bot) && ($left($2,1) != @) && (!$dccore.chat.listens($2)) "
+                                  "{ return }")
         self.assertLess(listen, next(i for i, s in enumerate(self.feed) if s.startswith("dccore.chat.show")))
         self.assertTrue(any(s.startswith("dccore.chat.show $iif($2 == -,*,$2) ") for s in self.feed))
+
+    def test_a_private_line_always_shows_too(self):
+        """A private line's "@<nick>" channel was never something to tick in
+        the Listen on menu, so it must not be filtered out either (#371
+        follow-up)."""
+        listen = self.feed.index("if ($3 != $dccore.bot) && ($left($2,1) != @) && (!$dccore.chat.listens($2)) "
+                                  "{ return }")
+        self.assertLess(listen, next(i for i, s in enumerate(self.feed) if s.startswith("dccore.chat.show")))
 
     def test_its_own_lines_are_marked_as_its_own(self):
         self.assertTrue(any("$iif($3 == $dccore.bot,own,other)" in s for s in self.feed))
@@ -140,7 +150,14 @@ class WhatComesFromTheBot(unittest.TestCase):
         """Typing with no channel picked replies where the conversation is,
         not to wherever a set-cover happens to land (#958 follow-up)."""
         self.assertIn('if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) '
-                      '{ hadd dccore.live chat.replyto $2 }', self.feed)
+                      '{ hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) }', self.feed)
+
+    def test_a_private_line_names_the_peer_to_reply_to_not_the_at_sign(self):
+        """A private line's channel is "@<nick>" - replying there means
+        privately to that nick, so the "@" itself must not end up in
+        chat.replyto (#371 follow-up)."""
+        record = [s for s in self.feed if "chat.replyto" in s][0]
+        self.assertIn("$iif($left($2,1) == @,$mid($2,2-),$2)", record)
 
     def test_never_recorded_from_a_fan_out_own_line(self):
         """"-" and "*" are only ever an OWN line's channel (a `chat *` fan-out
@@ -193,7 +210,7 @@ class ItSaysItIsPublic(unittest.TestCase):
 
     def test_an_arriving_line_does_not_take_the_focus(self):
         body = statements(block(script(), "alias dccore.chat.window"))
-        self.assertIn("if ($1 == quiet) { window -en $dccore.chat.win }", body)
+        self.assertIn("if ($1 == quiet) { window -enl16 $dccore.chat.win }", body)
         self.assertEqual(statements(block(script(), "alias dccore.chat.show"))[0],
                          "dccore.chat.window quiet")
 
@@ -256,7 +273,15 @@ class TheDefaultIsEveryChannelWithOtherDccoreBots(unittest.TestCase):
 
     def test_star_is_not_checked_against_the_channel_list(self):
         body = "\n".join(statements(block(script(), "alias dccore.chat.say")))
-        self.assertIn("if (%to != *) && ($dccore.st(chat.chans) != $null)", body)
+        self.assertIn("if (%to != *) && ($left(%to,1) isin #&+!) && ($dccore.st(chat.chans) != $null)", body)
+
+    def test_a_nick_target_is_not_checked_against_the_channel_list_either(self):
+        """A private target (#371 follow-up) is never one of chat.chans -
+        the bot is the one that knows who it has actually seen, so the
+        script must not refuse it itself."""
+        body = "\n".join(statements(block(script(), "alias dccore.chat.say")))
+        line = [s for s in body.split("\n") if "is not in" in s][0]
+        self.assertIn("$left(%to,1) isin #&+!", line)
 
     def test_a_menu_row_goes_back_to_it(self):
         body = "\n".join(statements(block(script(), "alias dccore.chat.to.all")))
@@ -266,6 +291,78 @@ class TheDefaultIsEveryChannelWithOtherDccoreBots(unittest.TestCase):
     def test_the_title_also_follows_the_reply_to_channel(self):
         title = "\n".join(statements(block(script(), "alias dccore.chat.title")))
         self.assertIn("$dccore.st(chat.replyto)", title)
+
+
+class ThePeerList(unittest.TestCase):
+    """The side-listbox of DCCore bots WHO has found (#371 follow-up)."""
+
+    def test_the_window_has_a_side_listbox(self):
+        body = statements(block(script(), "alias dccore.chat.window"))
+        self.assertIn("if ($1 == quiet) { window -enl16 $dccore.chat.win }", body)
+        self.assertTrue(any("window -el16 $dccore.chat.win" in s for s in body))
+
+    def test_a_peers_line_is_dispatched(self):
+        self.assertIn("if (%type == PEERS) { dccore.chat.peerline $2- | return }", script())
+
+    def test_peerline_stores_per_channel_and_redraws(self):
+        body = statements(block(script(), "alias dccore.chat.peerline"))
+        self.assertTrue(any("hadd dccore.chatpeers $1 $2-" in s for s in body))
+        self.assertTrue(any("hdel dccore.chatpeers $1" in s for s in body))
+        self.assertEqual(body[-1], "dccore.chat.peers.redraw")
+
+    def test_redraw_only_looks_at_the_bot_s_own_channels(self):
+        """The merged sidebar is built from chat.chans, not by scanning every
+        key dccore.chatpeers happens to hold - a channel the bot has left
+        must not linger in the list."""
+        body = "\n".join(statements(block(script(), "alias dccore.chat.peers.redraw")))
+        self.assertIn("$gettok($dccore.st(chat.chans),%i,32)", body)
+        self.assertIn("$hget(dccore.chatpeers,", body)
+
+    def test_redraw_clears_before_it_rebuilds(self):
+        body = statements(block(script(), "alias dccore.chat.peers.redraw"))
+        clear = next(i for i, s in enumerate(body) if s.startswith("if ($line($dccore.chat.win,0,1) > 0)"))
+        add = next(i for i, s in enumerate(body) if s.startswith("aline -l $dccore.chat.win"))
+        self.assertLess(clear, add)
+        self.assertIn("dline -l $dccore.chat.win", body[clear])
+
+    def test_the_hash_table_is_made_on_load(self):
+        body = statements(block(script(), "alias dccore.init"))
+        self.assertIn("if (!$hget(dccore.chatpeers)) { hmake dccore.chatpeers 32 }", body)
+
+
+class MessagingAPeerPrivately(unittest.TestCase):
+    """Double-click, or right-click, a nick in the side-listbox (#371
+    follow-up)."""
+
+    def test_dclick_is_a_built_in_event_placed_first(self):
+        """Built-in mouse events have to sit above the custom items in the
+        same menu block, or mIRC does not recognise them."""
+        menu = statements(block(script(), "menu @DCCore-Chat"))
+        self.assertEqual(menu[0], "dclick:dccore.chat.pickpeer $1")
+
+    def test_dclick_and_the_menu_row_carry_a_line_number_never_the_nick(self):
+        """The same reason a channel picker carries a row number, never the
+        channel's name (#955 review): the side-listbox can hold a nick with
+        a "|" in it - valid on IRC - and mIRC parses the command text on the
+        click. $1 (dclick) and $sline(...).ln (the menu row) are both plain
+        numbers; the nick itself is only ever read back with $line() INSIDE
+        the alias, never re-parsed as a command."""
+        menu = statements(block(script(), "menu @DCCore-Chat"))
+        row = [s for s in menu if "Message this bot privately" in s][0]
+        _label, command = row.split(":", 1)
+        self.assertNotIn("$sline($dccore.chat.win,1) ", row, "the label must not carry the raw nick either")
+        self.assertTrue(command.strip().endswith("$sline($dccore.chat.win,1).ln"))
+
+    def test_pickpeer_only_accepts_a_number_and_resolves_it_itself(self):
+        body = statements(block(script(), "alias dccore.chat.pickpeer"))
+        self.assertEqual(body[0], "if ($1 !isnum) { return }")
+        self.assertIn("var %nick = $line($dccore.chat.win,$1,1)", body)
+        self.assertIn("dccore.set chat.to %nick", body)
+
+    def test_the_title_says_privately_for_a_nick_target(self):
+        title = "\n".join(statements(block(script(), "alias dccore.chat.title")))
+        self.assertIn("$left(%to,1) !isin #&+!", title)
+        self.assertIn("privately to", title)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,9 @@ proof - fine for a chat that is public anyway.
 
 WHERE IT IS SAID: `chat #chan text` says it in that channel; `chat * text`
 says it once in as few channels as reach every peer seen (cover()), never in
-a channel with no other DCCore bot in it.
+a channel with no other DCCore bot in it; `chat nick text` says it privately
+to that one peer instead - only ever a nick WHO has already found, since
+that is the only proof this bot has that the other end can see it.
 
 THE WIRE IS `[ServersChat] <text>`, nothing else. The sender is the nick that
 sent the message, which the server vouches for. No name goes inside the
@@ -43,6 +45,11 @@ WHAT IS SENT is what an authenticated operator typed, through the same paced
 outbound queue as everything else the bot says - on its express lane, so it
 does not wait behind a line for each of the bot's other channels - with a
 cap of its own so a chatty moment cannot delay the queue's own messages.
+
+A private line's `chan` (in the recorded line, and on the feed) is
+"@<nick>" - never a real channel, so it never collides with one, and it is
+how the window knows to show it regardless of what is ticked to listen on
+and to feed dccore.mrc's side-listbox of known peers (`DCCORE PEERS`).
 
 State is runtime.py's - see the chat_* names there - so a rehash that
 reloads this module keeps the recent lines, the limits and the peers.
@@ -148,11 +155,22 @@ def _record(chan, nick, text, now):
     return line
 
 
+def _chat_channel_token(value):
+    """Like adminchat._channel_token(), but a chat line's channel field also
+    has two tokens that helper does not know: "@<nick>" (a private line) and
+    "-" (one line said in several channels at once)."""
+    import adminchat
+    text = str(value or "")
+    if text == "-" or text[:1] == "@":
+        return adminchat._clean(text, token=True)
+    return adminchat._channel_token(text)
+
+
 def structured_line(line):
     """`DCCORE CHAT <id> <chan> <nick> <text>` - the text last, as every
     feed line's free text is."""
     import adminchat
-    return (f"DCCORE CHAT {int(line['id'])} {adminchat._channel_token(line['chan'])} "
+    return (f"DCCORE CHAT {int(line['id'])} {_chat_channel_token(line['chan'])} "
             f"{adminchat._clean(line['nick'], token=True)} {adminchat._clean(line['text'])}")
 
 
@@ -215,6 +233,11 @@ def _is_peer_realname(real):
     return bool(words) and words[0] == REALNAME_MARK
 
 
+def is_known_peer(nick):
+    with runtime.chat_lock:
+        return str(nick or "").lower() in runtime.chat_peers
+
+
 _WHO_REPLY = re.compile(
     r"^:\S+\s+352\s+\S+\s+(\S+)\s+\S+\s+\S+\s+\S+\s+(\S+)\s+\S+\s+:\d+\s+(.*)$")
 
@@ -236,22 +259,30 @@ def note_who_reply(line, now=None):
         if nick.lower() not in runtime.chat_peers and len(runtime.chat_peers) >= PEER_MAX:
             return None
         runtime.chat_peers.setdefault(nick.lower(), {})[chan] = now
+    _deliver_peers(chan, now)
     return nick
 
 
-def note_gone(nick, chan=None):
+def note_gone(nick, chan=None, now=None):
     """A peer left `chan` (or the network, with no channel)."""
     key = str(nick or "").lower()
+    touched = []
     with runtime.chat_lock:
         seen = runtime.chat_peers.get(key)
         if seen is None:
             return
         if chan is None:
+            touched = list(seen.keys())
             runtime.chat_peers.pop(key, None)
         else:
-            seen.pop(str(chan).lower(), None)
-            if not seen:
-                runtime.chat_peers.pop(key, None)
+            chan = str(chan).lower()
+            if chan in seen:
+                seen.pop(chan, None)
+                touched = [chan]
+                if not seen:
+                    runtime.chat_peers.pop(key, None)
+    for one in touched:
+        _deliver_peers(one, now)
 
 
 def peer_channels(now=None):
@@ -323,23 +354,56 @@ def peers_line(now=None):
     return "DCCore bots seen - " + "; ".join(parts)
 
 
+def peers_channel_line(chan, now=None):
+    """`DCCORE PEERS <chan> <nick1> <nick2> ...` - the DCCore bots seen in
+    one channel right now, for dccore.mrc's side-listbox. No nicks is a
+    valid line: it says the channel's list is now empty."""
+    chan = str(chan or "").lower()
+    members = peer_channels(now).get(chan, set())
+    return ("DCCORE PEERS " + chan + " " + " ".join(sorted(members))).rstrip()
+
+
+def _deliver_peers(chan, now=None):
+    """Same path as _deliver(): a pure append to the console session's
+    outbox, only if one is authenticated and structured. `now` has to be the
+    SAME clock the caller already resolved - peer_channels() prunes stale
+    sightings against whatever `now` it is given, and a second, real clock
+    here would prune a sighting a test just recorded with its own fixed one."""
+    try:
+        import adminchat
+        session = adminchat.active_session()
+    except Exception:
+        return
+    if session is None or not getattr(session, "authenticated", False):
+        return
+    if getattr(session, "structured", False):
+        session.send(peers_channel_line(chan, now))
+
+
 def capture(nick, target, message, now=None):
-    """A channel message arrived. Relay it if it is chat, from a known DCCore
-    bot, on a channel we are in. Returns the recorded line, or None. Sends
-    nothing, ever."""
+    """A channel message, or a private one addressed to us, arrived. Relay it
+    if it is chat, from a known DCCore bot. Returns the recorded line, or
+    None. Sends nothing, ever."""
     text = chat_text(message)
     if text is None:
         return None
-    chan = str(target or "").lower()
-    if chan[:1] not in _CHANNEL_PREFIXES or chan not in channels():
+    own = str(getattr(config, "NICKNAME", "")).lower()
+    target_l = str(target or "").lower()
+    if target_l[:1] in _CHANNEL_PREFIXES:
+        if target_l not in channels():
+            return None
+        chan = target_l
+    elif target_l and target_l == own:
+        chan = None  # a private line - filled in below, once nick is known
+    else:
         return None
     nick = str(nick or "").strip()
-    if not nick or nick.lower() == str(getattr(config, "NICKNAME", "")).lower():
+    if not nick or nick.lower() == own:
         return None
-    with runtime.chat_lock:
-        known = nick.lower() in runtime.chat_peers
-    if not known:
+    if not is_known_peer(nick):
         return None
+    if chan is None:
+        chan = "@" + nick
     text = _plain(text)[:MAX_TEXT]
     if not text:
         return None
@@ -396,20 +460,30 @@ def _enqueue(key, line, vip=False):
 
 def say(sender, channel, text, now=None):
     """Say what an operator typed, as a tagged PRIVMSG. `channel` is one of
-    the bot's channels, or `*` for the fewest channels that reach every other
-    DCCore bot seen. (ok, message)."""
-    chan = str(channel or "").strip().lower()
+    the bot's channels, `*` for the fewest channels that reach every other
+    DCCore bot seen, or a nick - only ever one WHO has already found, since
+    that is the only proof this bot has that the other end can see it.
+    (ok, message)."""
+    raw = str(channel or "").strip()
+    chan = raw.lower()
+    private_to = None
     if chan == "*":
         targets = cover(now)
         if not targets:
             return False, ("No other DCCore bot seen in the bot's channels yet, so "
                            "there is nobody to say it to (chat peers, chat who).")
-    elif chan[:1] not in _CHANNEL_PREFIXES:
-        return False, "Usage: chat #channel <text> - or chat * <text>, or just chat, for the channels."
-    elif chan not in channels():
-        return False, f"Not in {chan}: the bot can only chat in its own channels ({', '.join(channels()) or 'none yet'})."
-    else:
+    elif chan[:1] in _CHANNEL_PREFIXES:
+        if chan not in channels():
+            return False, f"Not in {chan}: the bot can only chat in its own channels ({', '.join(channels()) or 'none yet'})."
         targets = [chan]
+    elif chan and chan != str(getattr(config, "NICKNAME", "")).lower() and is_known_peer(chan):
+        targets = [raw]
+        private_to = raw
+    elif chan:
+        return False, (f"{raw} is not a DCCore bot this one has seen (chat peers, chat who) - "
+                       f"only a known peer can be messaged privately.")
+    else:
+        return False, "Usage: chat #channel <text>, chat nick <text>, or chat * <text>, or just chat, for the channels."
     clean = _plain(text)
     clean = clean.encode("utf-8")[:MAX_SEND_BYTES].decode("utf-8", "ignore").strip()
     if not clean:
@@ -429,6 +503,6 @@ def say(sender, channel, text, now=None):
         _enqueue(target, f"PRIVMSG {target} :{TAG} {clean}\r\n", vip=True)
     # The server does not send a message back to whoever sent it, so the
     # operator's own line is recorded and shown from here.
-    _deliver(_record(targets[0] if len(targets) == 1 else "-",
-                     str(getattr(config, "NICKNAME", "") or "?"), clean, now))
-    return True, f"Sent to {', '.join(targets)}."
+    record_chan = ("@" + private_to) if private_to else (targets[0] if len(targets) == 1 else "-")
+    _deliver(_record(record_chan, str(getattr(config, "NICKNAME", "") or "?"), clean, now))
+    return True, (f"Sent privately to {private_to}." if private_to else f"Sent to {', '.join(targets)}.")
