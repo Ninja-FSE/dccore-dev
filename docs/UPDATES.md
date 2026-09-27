@@ -4,6 +4,30 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🛡️ A private message cannot stall the IRC read loop (audit of 2026-09-27)
+
+Found by the audit of everything changed since 2026-09-20 (three of its six lenses independently). `fetch_replies`
+(#927) matched other servers' replies with regexes of the shape `(?<!\w)w1.*?w2.*?...wN`. On a line that repeats the
+first words without completing a rule, the lazy gaps backtrack polynomially: 300 characters took 0.2 s, 450 took
+3.2 s, 510 about 7 s, measured on main. `dcc_fetch.handle_bot_reply()` ran `classify()` on the IRC read loop for EVERY
+private NOTICE and non-CTCP PRIVMSG, from anybody, before any ban or flood check and before looking for a request to
+that sender. So a few lines held the read loop, and with it every thread through the GIL, until the server dropped
+the bot for not answering PING. It shipped in v1.13.1.
+
+- **Linear matching.** `fetch_replies._Words` finds each word with `str.find()` after the end of the one before,
+  earliest first, and the first word must start a word (the old `(?<!\w)`). The earliest match of each word leaves
+  the most room for the rest, so this answers exactly what the regex did, in one pass. It was checked against the old
+  regexes on 10,500 generated lines with 0 differences, and the test keeps 7,200 of those as a regression check. The
+  hostile line now takes about 0.0003 s. The line is also capped at `MAX_REPLY_CHARS` (512).
+- **A stranger's line is not read.** `handle_bot_reply()` returns before `classify()` unless some request to THAT
+  sender is still offered or queued - checked under the fetch lock, and again as before once there is a reply.
+
+`tests/test_a_reply_cannot_stall_the_read_loop.py` (8): the hostile line answered in well under half a second at 450,
+510 and 5000 characters; the cap; agreement with the old regexes rule by rule; the word-start rule; a word not found
+inside the one before it; order and case; a stranger's line never classified; and a bot we are waiting on still read
+and moved. Mutation-checked 5 ways (the regex back, no word start, order not kept, no cap, strangers classified),
+each failing a test. The existing reply and fetch-queue tests (35) pass unchanged.
+
 ### 💬 DCCore Chat: public operator chat, relayed by the bot (#371)
 
 Built as decided on #371: public, no encryption, the window as the whole interface, and - after a first version
@@ -116,6 +140,7 @@ mIRC.
 
 Tests: 5 more (the fan-out counting, a fan-out refused whole, the bound, own lines, the default). Mutation-checked 5
 ways, each failing a test.
+
 ### 🃏 The Library cards are built from the lists: a total, one per list, when it was built (#956)
 
 #952 made the Library block count every list but still drew four fixed cards (files, size, album folders, list built)
