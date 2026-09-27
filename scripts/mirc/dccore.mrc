@@ -1305,7 +1305,9 @@ alias dccore.chat.window {
 alias dccore.chat.title {
   if (!$window($dccore.chat.win)) { return }
   var %to = $dccore.opt(chat.to)
-  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends to $iif((%to == $null) || (%to == *),every channel with other DCCore bots,%to) $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
+  var %auto = (%to == $null) || (%to == *)
+  var %where = $iif(%auto,$iif($dccore.st(chat.replyto) != $null,$dccore.st(chat.replyto),every channel with other DCCore bots),%to)
+  titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends to %where $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
 }
 alias dccore.chat.sys {
   dccore.chat.window
@@ -1328,6 +1330,11 @@ alias dccore.chat.feed {
   if ($1 !isnum) { return }
   if ($dccore.st(chat.last) isnum) && ($1 <= $dccore.st(chat.last)) { return }
   hadd dccore.live chat.last $1
+  ; Somebody else's line names where the conversation is: typing with no
+  ; channel manually picked replies there, not to wherever a set-cover
+  ; happens to land (#958 follow-up). Never "-" or "*" - those are only an
+  ; OWN fan-out line's channel.
+  if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) { hadd dccore.live chat.replyto $2 }
   ; Your own lines always show (#958 follow-up): one said with `chat *`
   ; comes back with "-" for its channel, since it went to several.
   if ($3 != $dccore.bot) && (!$dccore.chat.listens($2)) { return }
@@ -1360,7 +1367,11 @@ on ^*:TEXT:*:#: {
 ; says it in the channel picked for it; the line comes back as a CHAT line.
 alias dccore.chat.say {
   var %to = $dccore.opt(chat.to)
-  if (%to == $null) { var %to = * }
+  ; No channel manually picked (right-click), or explicitly "every channel":
+  ; reply where the conversation is - the channel the last line other than
+  ; your own arrived on - and only broadcast to reach everyone when nobody
+  ; has said anything back yet (#958 follow-up).
+  if (%to == $null) || (%to == *) { var %to = $iif($dccore.st(chat.replyto) != $null,$dccore.st(chat.replyto),*) }
   if (!$dccore.chat.relaying) { dccore.chat.sys Not connected to $iif($dccore.bot,$dccore.bot,the bot) $+ : the chat goes through it. /dccore connect | return }
   if (%to != *) && ($dccore.st(chat.chans) != $null) && (!$istok($dccore.st(chat.chans),%to,32)) { dccore.chat.sys $dccore.bot is not in %to $+ : pick one of its channels (right-click). | return }
   var %text = $strip($1-)

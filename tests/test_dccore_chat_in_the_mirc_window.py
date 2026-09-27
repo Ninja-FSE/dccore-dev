@@ -136,6 +136,22 @@ class WhatComesFromTheBot(unittest.TestCase):
     def test_its_own_lines_are_marked_as_its_own(self):
         self.assertTrue(any("$iif($3 == $dccore.bot,own,other)" in s for s in self.feed))
 
+    def test_somebody_else_s_line_names_where_to_reply(self):
+        """Typing with no channel picked replies where the conversation is,
+        not to wherever a set-cover happens to land (#958 follow-up)."""
+        self.assertIn('if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) '
+                      '{ hadd dccore.live chat.replyto $2 }', self.feed)
+
+    def test_never_recorded_from_a_fan_out_own_line(self):
+        """"-" and "*" are only ever an OWN line's channel (a `chat *` fan-out
+        and its "somebody was hidden" remark); neither is a real channel to
+        reply into."""
+        record = [s for s in self.feed if "chat.replyto" in s][0]
+        self.assertIn("($2 != -)", record)
+        # $3 != $dccore.bot already excludes the own-line "-"/"*" cases,
+        # since those only ever arrive with $3 == $dccore.bot or $3 == *.
+        self.assertIn("$3 != $dccore.bot", record)
+
 
 class WhatIsSent(unittest.TestCase):
     def setUp(self):
@@ -151,6 +167,15 @@ class WhatIsSent(unittest.TestCase):
         self.assertLess(self.say.index("var %text = $strip($1-)"), send)
         self.assertLess(next(i for i, s in enumerate(self.say) if s.startswith("if (!$dccore.chat.relaying)")), send)
         self.assertLess(next(i for i, s in enumerate(self.say) if s.startswith("if (%to == $null)")), send)
+
+    def test_auto_mode_replies_where_the_conversation_is(self):
+        """No channel picked (or "every channel" picked): reply to the
+        channel the last line from somebody else arrived on, and only
+        broadcast to reach everyone when nobody has said anything back yet."""
+        line = [s for s in self.say if s.startswith("if (%to == $null) || (%to == *)")][0]
+        self.assertIn("$dccore.st(chat.replyto)", line)
+        self.assertIn(",*)", line, "falls back to * with nothing heard yet")
+        self.assertLess(self.say.index(line), self.say.index("dccore.send chat %to %text"))
 
     def test_typing_in_the_window_sends(self):
         body = statements(block(script(), "on *:INPUT:@DCCore-Chat:"))
@@ -219,12 +244,14 @@ class TheWindowIsTheInterface(unittest.TestCase):
 
 
 class TheDefaultIsEveryChannelWithOtherDccoreBots(unittest.TestCase):
-    """Typing in the window says it where the bot has seen another DCCore
-    bot (`chat *`), unless one channel was picked from the menu."""
+    """Typing in the window replies where the conversation is, or (nobody
+    having said anything back yet) says it where the bot has seen another
+    DCCore bot (`chat *`), unless one channel was picked from the menu."""
 
-    def test_no_pick_means_star(self):
+    def test_no_pick_means_reply_or_star(self):
         body = "\n".join(statements(block(script(), "alias dccore.chat.say")))
-        self.assertIn("if (%to == $null) { var %to = * }", body)
+        self.assertIn("if (%to == $null) || (%to == *) { var %to = "
+                      "$iif($dccore.st(chat.replyto) != $null,$dccore.st(chat.replyto),*) }", body)
         self.assertIn("dccore.send chat %to %text", body)
 
     def test_star_is_not_checked_against_the_channel_list(self):
@@ -235,6 +262,10 @@ class TheDefaultIsEveryChannelWithOtherDccoreBots(unittest.TestCase):
         body = "\n".join(statements(block(script(), "alias dccore.chat.to.all")))
         self.assertIn("dccore.set chat.to *", body)
         self.assertIn("dccore.chat.to.all", script())
+
+    def test_the_title_also_follows_the_reply_to_channel(self):
+        title = "\n".join(statements(block(script(), "alias dccore.chat.title")))
+        self.assertIn("$dccore.st(chat.replyto)", title)
 
 
 if __name__ == "__main__":
