@@ -372,15 +372,57 @@ def _note_connect_success(bot):
     _connect_failures.pop(str(bot or "").strip().lower(), None)
 
 
+def _free_bytes():
+    """What is free where fetched files go, or None when it cannot be measured."""
+    import shutil
+    folder = getattr(config, "FETCHED_FILES_DIR", "") or "."
+    try:
+        return shutil.disk_usage(platform_compat.long_path(os.path.abspath(folder))).free
+    except OSError:
+        return None
+
+
+def _room_left_locked(queue, free):
+    """What is free once the transfers already under way have written the rest
+    of what they declared - the room a new offer is weighed against (#964).
+    Two offers that each fit alone do not both fit together. None when the
+    disk cannot be measured. Caller holds _fetch_lock()."""
+    if free is None:
+        return None
+    for row in queue.values():
+        if row.get("state") in ("listening", "receiving"):
+            free -= max(0, int(row.get("total_size") or 0) - int(row.get("bytes_received") or 0))
+    return free
+
+
+def _has_room(size, room):
+    """Whether a file of `size` fits in `room` and still leaves MIN_FREE_BYTES.
+    Nothing to fit, or a disk that cannot be measured, is not held back - the
+    write itself still fails safely."""
+    return not size or room is None or room >= size + MIN_FREE_BYTES
+
+
+def _hold_for_space(row, size, reason):
+    """Back to pending until `size` fits (#964), asked for as it was asked
+    (#963). row["needs_bytes"] is what the dispatcher waits for: without it a
+    file bigger than the free space - but with more than MIN_FREE_BYTES free,
+    so the disk never counts as low - was asked for again on the next tick,
+    filled the disk to nothing, failed, and was asked for again, for ever."""
+    row.update(state="pending", offered_at=None, bytes_received=0,
+               reason=reason, waiting="disk-full", needs_bytes=int(size))
+    _as_asked(row)
+
+
+def _mb(size):
+    return f"{max(0, int(size)) // (1024 * 1024)} MB"
+
+
 def _disk_is_low():
     """Whether FETCHED_FILES_DIR has less than MIN_FREE_BYTES free. Said once
     when it becomes low and once when it recovers. A disk that cannot be
     measured is not called low - the write itself still fails safely."""
-    import shutil
-    folder = getattr(config, "FETCHED_FILES_DIR", "") or "."
-    try:
-        free = shutil.disk_usage(platform_compat.long_path(os.path.abspath(folder))).free
-    except OSError:
+    free = _free_bytes()
+    if free is None:
         return False
     low = free < MIN_FREE_BYTES
     if low != _disk_was_low[0]:
@@ -1019,6 +1061,10 @@ def check_fetch_queue():
     with _fetch_lock():
         waiting_bots = {str(row.get("bot", "")).strip().lower()
                         for row in queue.values() if row.get("state") == "pending"}
+        held_for_space = any(row.get("needs_bytes") for row in queue.values()
+                             if row.get("state") == "pending")
+    # Measured only while a row waits for room of its own (#964).
+    free = _free_bytes() if held_for_space else None
     readiness = _bot_readiness(waiting_bots, now)
     for bot in waiting_bots:
         if bot in _paused:
@@ -1095,11 +1141,17 @@ def check_fetch_queue():
                 key = str(row.get("bot", "")).strip().lower()
                 load[key] = load.get(key, 0) + 1
         promoted = 0
+        room = _room_left_locked(queue, free)
         for rid in pending_ids:
             row = queue[rid]
             key = str(row.get("bot", "")).strip().lower()
             why = readiness.get(key, "")
             if not why and disk_low:
+                why = "disk-full"
+            # A file already known not to fit waits until it does (#964),
+            # weighed exactly as handle_incoming_offer() weighs the offer -
+            # asked for sooner, its offer would only be held again.
+            if not why and not _has_room(row.get("needs_bytes"), room):
                 why = "disk-full"
             if not why and (row.get("retry_at") or 0) > now:
                 why = "retry"
@@ -1111,6 +1163,11 @@ def check_fetch_queue():
                 row["waiting"] = why
                 continue
             row.pop("waiting", None)
+            needed = row.pop("needs_bytes", None)
+            if needed and room is not None:
+                # Spoken for until its offer arrives, so a second held row
+                # is not let go on the same room in this tick.
+                room -= int(needed)
             row["state"] = "offered"
             row["offered_at"] = now
             load[key] = load.get(key, 0) + 1
@@ -1704,6 +1761,22 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
                   f"Set {cap_name} to 0 for no limit.")
             return
 
+        # ROOM FOR IT (#964), before connecting - as the size cap is. An offer
+        # bigger than the free space was accepted, filled the disk to
+        # nothing, failed, and was asked for again: with more than
+        # MIN_FREE_BYTES back once the partial file went, the disk did not
+        # count as low, and the loop never ended. Now it waits, pending,
+        # until what it declared fits with MIN_FREE_BYTES to spare.
+        room = _room_left_locked(queue, _free_bytes())
+        if not _has_room(offer["size"], room):
+            _hold_for_space(row, offer["size"],
+                            f"needs {_mb(offer['size'])} free and {_mb(room)} is - "
+                            f"asking again once there is space")
+            print(f"[FETCH] Not taking {offer['filename']} from {from_nick} yet: "
+                  f"{offer['size']} bytes, {room} free. Never connected. "
+                  f"It is asked for again once there is space.")
+            return
+
         dest_dir, stored_name = _resolve_destination_path(request_id, offer["filename"])
         if stored_name is None:
             _mark_failed_locked(row, "unsafe destination path")
@@ -2210,10 +2283,10 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     if disk_full:
         # Not this request's fault (#926): it goes back to pending, and the
         # dispatcher holds everything until there is space again.
-        row.update(state="pending", offered_at=None, bytes_received=0,
-                   reason="the disk filled up - asking again once there is space",
-                   waiting="disk-full")
-        _as_asked(row)
+        # Held until the whole file fits (#964): the disk counting as low
+        # again is not enough, because the partial file is about to go.
+        _hold_for_space(row, total_size,
+                        "the disk filled up - asking again once there is space")
         _disk_was_low[0] = False  # so the next check says it
         print(f"[FETCH] The disk filled up receiving {stored_name}; it will be asked again.")
     else:
