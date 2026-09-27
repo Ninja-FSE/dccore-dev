@@ -383,6 +383,14 @@ def install_fake_oserve(irc_connection=None):
     return stub
 
 
+def bots_in_the_channel(*nicks, channel="#chan"):
+    """We have joined, and `nicks` are in `channel`: what the fetch dispatcher
+    waits for before it asks anybody (#965). Lower-cased, as irc.py keeps
+    config.channel_users."""
+    config.bot_joined_channel = True
+    config.channel_users.setdefault(channel.lower(), set()).update(str(n).lower() for n in nicks)
+
+
 def silence_debug(announce_module):
     """Capture announce.send_debug instead of writing to a socket.
 

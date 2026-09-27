@@ -777,7 +777,7 @@
     offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
     retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
     slots: "download.waiting.slots", paused: "download.waiting.paused",
-    "disk-full": "download.waiting.diskFull"
+    "disk-full": "download.waiting.diskFull", joining: "download.waiting.joining"
   };
 
   function loadDownloads() {

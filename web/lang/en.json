@@ -91,6 +91,7 @@
   "download.waiting.slots": "Waiting for a free slot",
   "download.waiting.paused": "Paused - resume it to carry on",
   "download.waiting.diskFull": "Waiting for disk space",
+  "download.waiting.joining": "Waiting to join the channels",
   "download.resumeBot": "Resume this bot",
   "download.state.listening": "Listening",
   "download.state.receiving": "Receiving",
