@@ -318,6 +318,16 @@ class ThePeerList(unittest.TestCase):
         self.assertIn("$gettok($dccore.st(chat.chans),%i,32)", body)
         self.assertIn("$hget(dccore.chatpeers,", body)
 
+    def test_a_peer_seen_in_two_channels_is_not_doubled(self):
+        """A hash-table lookup for "already added", not a growing token
+        string: an exact check, not something that can be subtly wrong
+        about how a token list compares (seen live: it was)."""
+        body = "\n".join(statements(block(script(), "alias dccore.chat.peers.redraw")))
+        self.assertIn("hmake dccore.chatpeers.seen 32", body)
+        self.assertIn("if (!$hget(dccore.chatpeers.seen,%nick))", body)
+        self.assertIn("hadd dccore.chatpeers.seen %nick 1", body)
+        self.assertNotIn("istok", body)
+
     def test_redraw_clears_before_it_rebuilds(self):
         body = statements(block(script(), "alias dccore.chat.peers.redraw"))
         clear = next(i for i, s in enumerate(body) if s.startswith("if ($line($dccore.chat.win,0,1) > 0)"))
