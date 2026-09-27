@@ -1155,7 +1155,15 @@ def check_fetch_queue():
         for rid in pending_ids:
             row = queue[rid]
             key = str(row.get("bot", "")).strip().lower()
-            why = readiness.get(key, "")
+            # ONLY WHAT THIS TICK LOOKED AT (#970). Presence, pauses and the
+            # disk were read for the bots with rows pending at the snapshot
+            # above, outside the lock; a row enqueued since is not in it, and
+            # taking it as ready sent it to a bot just paused, or onto a
+            # nearly full disk when nothing else had been pending. It is
+            # looked at properly on the next tick, a couple of seconds away.
+            if key not in readiness:
+                continue
+            why = readiness[key] or ("paused" if key in _paused else "")
             if not why and disk_low:
                 why = "disk-full"
             # A file already known not to fit waits until it does (#964),
