@@ -4,6 +4,26 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A folder or list fetch asked for again asks for the folder or list (#963)
+
+Audit 2026-09-27 M1. A "folder" row goes out as `!Bot !rar <folder>` and a "list" row as `@Bot`; neither knows the
+name the other bot will give its file until the offer arrives, and `_claim_matching_offer_locked()` then writes that
+name over `row["filename"]`. Two paths from #926 send a claimed row back to pending - `_restart_form()` after a
+restart, and the disk-full branch of `_run_transfer()` - and both kept the overwritten name, so the row was asked for
+again as `!Bot Artist_-_Album.rar`: a file of that name, which the other bot does not have ("not found", or no answer).
+The resume #926 promises never happened for folder fetches.
+
+New `_as_asked(row)` puts `filename` back from `requested_filename` (set once at creation, never overwritten) for
+"folder" and "list" rows, and drops what the offer said (`total_size`, `stored_filename`) - the next offer says it
+again. Called from `_restart_form()`, the disk-full branch, and the busy-retry path for good measure. A "file" row
+asked for its own name, so nothing changes for it.
+
+`tests/test_a_folder_fetch_is_asked_for_again_as_a_folder.py` (4) runs the whole path - enqueue, dispatch, a real
+claim overwriting the name, then a restart or a real disk-full `_run_transfer()`, then dispatch again - and checks
+the line that goes out: `!ServerOne !rar Artist - Album`, `@ServerOne` for a list, a file's own name unchanged.
+Mutation-checked: dropping the reset from the restart or the disk-full path, or keeping the offer's size, each fail
+a test (resetting "file" rows too is not observable, since their name is never overwritten).
+
 ### 🛡️ A private message cannot stall the IRC read loop (audit of 2026-09-27)
 
 Found by the audit of everything changed since 2026-09-20 (three of its six lenses independently). `fetch_replies`
