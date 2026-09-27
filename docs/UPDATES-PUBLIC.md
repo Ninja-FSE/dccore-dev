@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: removing a download that another bot has queued no longer warns that a downloaded file will be deleted.** Its button now says **Cancel**, and the question says nothing has been downloaded yet - as it already did for a download still waiting its turn.
 - **Fixed: the dashboard's version line could read `version.upToDate` instead of a sentence**, until the next check ten minutes later. It, and the Library cards on the Stats page, now also change straight away when you switch the dashboard's language.
 - **Fixed: "Online only" in the List Browser no longer hides a bot that came back under a new nick.** A bot shown in one row under its new nick - with the list you took from it under the old one - was hidden by "Online only", and its matches were left out of searches, although it was online (and even while its list was open). It is now judged by the nick it has now.
 - **Fixed: another bot's answer could be applied to the wrong download.** Waiting on two files from the same bot where one name is the end of the other (`Intro.mp3` and `Band - Intro.mp3`), a "not found" for the longer one marked the shorter one as failed instead. DCCore now matches the answer to the file it actually names.
