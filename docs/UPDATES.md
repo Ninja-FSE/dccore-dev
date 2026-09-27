@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A refused automatic grab is not a try, and a list that arrives starts the count over (#967)
+
+Audit 2026-09-27 M5. `list_grab.tick()` added one to the bot's tries and saved it before calling
+`build_list_fetch_enqueue_result()`, and a refusal was only logged. With `FETCHED_FILES_DIR` missing at boot (503)
+or an operator's own folder or list fetch from that bot outstanding (409 - a queued one can last hours), three
+refusals 30 minutes apart wrote every candidate to `list_grabs.json` as "gave up", and it stayed so after the cause
+was gone, though nothing had been asked. Nothing ever cleared the count either: a list grabbed, later cleared by the
+bulk purge of offline bots (which deliberately is not "removed by hand"), and grabbed again was "gave up" after its
+third answered grab. The removed-by-hand set was never cleared by a hand fetch, though the module docstring said
+fetching by hand is how to change that answer.
+
+A try is now counted after the enqueue returns 200. The attempt still sets `last` and `list_grab_last` first, so a
+refusal waits `GRAB_COOLDOWN_SECONDS` (and the next grab `AUTO_GRAB_EVERY_MINUTES`) instead of being tried again
+on the next tick. New `list_grab.note_list_arrived(bot)`, called from `list_fetch.process_fetched_list_zip()` when a
+list is stored (never raising into it), drops the bot's tries and its removed-by-hand mark: a removed list comes back
+only by a hand fetch, since neither sweep asks for one. Tests: `tests/test_a_refused_grab_is_not_a_try.py`; the
+roadmap entry says what counts.
+
 ### 📦 Bots that have left no longer take the automatic re-fetch's places (#966)
 
 Audit 2026-09-27 M4. `refetch_due_lists()` took `due[:AUTO_REFETCH_MAX_PER_RUN]` from a list sorted oldest first, and
