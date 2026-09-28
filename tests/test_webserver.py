@@ -3218,7 +3218,7 @@ class SettingsPayloadTests(DCCoreTestCase):
             self.assertNotIn("confirm_debug_channel_removed", handle.read().lower())
 
     def test_a_flag_only_body_is_rejected_like_any_empty_save(self):
-        """chchatzop's review of #1011: the flag is popped BEFORE the
+        """The #1011 review: the flag is popped BEFORE the
         emptiness check, not after - a body whose only key is the flag is
         not a settings change and must 400 like {} would, not save nothing
         and still start a rehash."""
@@ -3463,7 +3463,7 @@ class SettingsPayloadTests(DCCoreTestCase):
 
 
 class TheDebugChannelConfirmTextFillsInEveryPlaceholder(unittest.TestCase):
-    """chchatzop's review of #1011: app.js filled {chan} into the confirm
+    """The #1011 review: app.js filled {chan} into the confirm
     popup's heading but not its detail paragraph, which then read literally
     as "...leaves {chan} as soon as...". A source guard, not a DOM test -
     there is no browser here - reading each t("settings.confirmDebugChannel

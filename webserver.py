@@ -3769,7 +3769,7 @@ def apply_settings_changes(changes):
     if not isinstance(changes, dict):
         return 400, {"error": "Expected a non-empty object of {SETTING: value}."}
 
-    # Popped before the emptiness check below (chchatzop's review of #1011):
+    # Popped before the emptiness check below (the #1011 review):
     # a body whose only key is this flag is not a settings change, and used
     # to pass the check, save nothing and still start a rehash - harmless in
     # practice since the dashboard never sends the flag alone, but a body
