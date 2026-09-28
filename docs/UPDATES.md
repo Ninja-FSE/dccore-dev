@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A reply is about the longest name it carries (#974)
+
+Audit 2026-09-27 L5. `handle_bot_reply()` matched a reply to a request by a plain substring test on the normalised
+name and took the oldest match, so with "Intro.mp3" and "Band - Intro.mp3" both outstanding at one bot, "Sorry, but
+Band - Intro.mp3 is not found" failed the "Intro.mp3" request, and the one it was about waited out its timeout; a
+queued reply moved the wrong row the same way. No word boundary could tell them apart - "Intro.mp3" follows a space
+there. New `_the_longest_named()` drops a matched name that is part of a longer name the reply also carries; if two
+different names are still left, the reply is ambiguous and the existing rule for an unnamed reply to several
+requests applies among them (refused or busy: nothing; queued: the oldest offered). Tests:
+`tests/test_a_reply_is_about_the_longest_name_it_carries.py`.
+
 ### 📦 An audio file that could not be read is read again next time (#973)
 
 Audit 2026-09-27 L4. `audio_info.read()` swallowed every exception and returned None, so a transient I/O error -
