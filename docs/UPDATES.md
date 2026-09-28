@@ -27,6 +27,26 @@ the bot for not answering PING. It shipped in v1.13.1.
 inside the one before it; order and case; a stranger's line never classified; and a bot we are waiting on still read
 and moved. Mutation-checked 5 ways (the regex back, no word start, order not kept, no cap, strangers classified),
 each failing a test. The existing reply and fetch-queue tests (35) pass unchanged.
+### 🎯 A remembered lookup respects the pasted size (#962)
+
+Audit 2026-09-27 H1. The lookup memories from #886 were keyed on the name alone: `_lookup_hits[(list, name)]`, and
+`_in_a_recent_folder()` took any recent folder where the name existed. The list scan picks between same-named copies
+by the size a request pastes after `::INFO::` (`requested_size_hint`), but a request answered from memory never
+reached the scan. So after one user asked for album A's `01 - Intro.mp3`, another who pasted album B's row with B's
+size was sent A's copy, for LOOKUP_HIT_TTL_SECONDS; and after rows from album A, album B's `cover.jpg` resolved into
+A's folder. Both are in nearly every album.
+
+- The exact-name memory is keyed on `(list, name, size hint)`, read and written the same way. A hinted request reuses
+  only a lookup made with the same hint, and a bare one only a bare one - each gets what a fresh scan would give.
+- A folder candidate for a hinted request must be the hinted size (`dcc._matches_size_hint()`: the hint's first word
+  against `update_list.format_size_human()` of the file - the same formatter the list is written with; the rest of
+  the hint is audio info). A mismatch falls through to the scan, which picks by size. A bare request keeps #886's
+  folder memory unchanged.
+
+`tests/test_a_remembered_lookup_respects_the_size.py` (6): the audit's case both ways round; the same hint still served
+from memory with no second scan; a bare request's memory kept apart from a hinted one's; and the size check itself
+(first word, audio tail, no hint, missing file). Mutation-checked 4 ways (name-only key on read, on write, the folder
+ignoring size, the whole hint compared), each failing a test. The #886 and #580 lookup tests (28) pass unchanged.
 
 ### 💬 DCCore Chat: public operator chat, relayed by the bot (#371)
 
