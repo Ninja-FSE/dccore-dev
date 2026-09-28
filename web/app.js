@@ -5414,7 +5414,7 @@
     if (clearingDebugChannel && !window.confirm(
         t("settings.confirmDebugChannelRemovedHeading").replace("{chan}", oldDebugChan) +
         String.fromCharCode(10, 10) +
-        t("settings.confirmDebugChannelRemovedDetail"))) {
+        t("settings.confirmDebugChannelRemovedDetail").replace("{chan}", oldDebugChan))) {
       return;
     }
 

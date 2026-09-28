@@ -3766,14 +3766,23 @@ def apply_settings_changes(changes):
 
     Returns (http_status, payload_dict).
     """
-    if not isinstance(changes, dict) or not changes:
+    if not isinstance(changes, dict):
+        return 400, {"error": "Expected a non-empty object of {SETTING: value}."}
+
+    # Popped before the emptiness check below (chchatzop's review of #1011):
+    # a body whose only key is this flag is not a settings change, and used
+    # to pass the check, save nothing and still start a rehash - harmless in
+    # practice since the dashboard never sends the flag alone, but a body
+    # this empty should 400 like any other.
+    changes = dict(changes)
+    confirmed_debug_removal = bool(changes.pop("confirm_debug_channel_removed", False))
+
+    if not changes:
         return 400, {"error": "Expected a non-empty object of {SETTING: value}."}
     if "ADMIN_PASSWORD_HASH" in changes:
         return 400, {"error": "Use POST /api/settings/password to change the "
                                "admin password."}
 
-    changes = dict(changes)
-    confirmed_debug_removal = bool(changes.pop("confirm_debug_channel_removed", False))
     return _save_settings_and_rehash(changes, confirmed_debug_removal=confirmed_debug_removal)
 
 
