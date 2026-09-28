@@ -233,6 +233,10 @@ alias dccore {
     return
   }
   if (%cmd == status) { dccore.send status | return }
+  ; chchatzop's review of #1009: the hello-time warning told an operator
+  ; whose feed was off to run this, and it did not exist - there was no
+  ; %cmd branch for it, so it fell through to the help text instead.
+  if (%cmd == consolefeed) { dccore.send consolefeed $2- | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
   if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for the DCCore it ships with and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }

@@ -1437,7 +1437,15 @@ def _cmd_hello(session, args):
     console_feed_on = getattr(config, "DEBUG_TO_CONSOLE", True)
     session.send(f"DCCORE CONSOLEFEED {'on' if console_feed_on else 'off'}")
     if not console_feed_on:
-        session.send("The console feed is off (Settings > Console feed, or /dccore consolefeed on): "
+        # chchatzop's review of #1009: this used to point at "/dccore
+        # consolefeed on" (not a real /dccore subcommand - dccore.mrc's
+        # `alias dccore` had no branch for it, so it fell through to the
+        # help text) and "Settings > Console feed" (a different dashboard
+        # category - CONSOLE_SHOW_* and DEBUG_CHANNEL_FEED live there;
+        # DEBUG_TO_CONSOLE is under Debug & logging). Both now name
+        # something that actually works.
+        session.send("The console feed is off (Settings > Debug & logging > "
+                     "\"Send debug lines to admin console\", or /dccore consolefeed on): "
                      "this window will keep showing STATUS, but no requests, sends, "
                      "failures or searches until it is turned on.")
     # DCCore Chat (#371): the channels it can chat in, and what was said

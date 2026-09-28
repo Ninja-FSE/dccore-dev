@@ -177,6 +177,39 @@ class HelloTellsTheDialogTheState(DCCoreTestCase):
         self.assertEqual(len(warnings), 1, session.lines)
         self.assertNotIn("DCCORE", warnings[0])
 
+    def test_the_warning_names_the_real_dashboard_label(self):
+        """chchatzop's review of #1009: it used to say "Settings > Console
+        feed", a different category (CONSOLE_SHOW_* and DEBUG_CHANNEL_FEED
+        live there) - DEBUG_TO_CONSOLE is under Debug & logging. Read from
+        en.json rather than hardcoded here, so the two cannot drift apart
+        again without this failing."""
+        with io.open(os.path.join(REPO_ROOT, "web", "lang", "en.json"), encoding="utf-8") as handle:
+            import json
+            label = json.load(handle)["settings.field.DEBUG_TO_CONSOLE"]
+
+        self.set_config(DEBUG_TO_CONSOLE=False)
+        session = FakeSession()
+        adminchat.COMMANDS["hello"][0](session, "dccore.mrc 1.7")
+
+        warning = [line for line in session.lines if "console feed is off" in line.lower()][0]
+        self.assertIn("Debug & logging", warning)
+        self.assertIn(label, warning)
+
+    def test_the_warning_names_a_command_that_actually_exists(self):
+        """chchatzop's review of #1009: it used to say "/dccore consolefeed
+        on", which fell through to the help text - dccore.mrc's `alias
+        dccore` had no %cmd branch for it."""
+        with io.open(SCRIPT, encoding="ascii", newline="") as handle:
+            mrc = handle.read()
+        alias_body = mrc.split("alias dccore {", 1)[1].split("\nalias ", 1)[0]
+        self.assertIn("%cmd == consolefeed", alias_body)
+
+        session = FakeSession()
+        self.set_config(DEBUG_TO_CONSOLE=False)
+        adminchat.COMMANDS["hello"][0](session, "dccore.mrc 1.7")
+        warning = [line for line in session.lines if "console feed is off" in line.lower()][0]
+        self.assertIn("/dccore consolefeed on", warning)
+
 
 class TheDialogHasTheCheckbox(unittest.TestCase):
     """mIRC cannot run here - read the same way
