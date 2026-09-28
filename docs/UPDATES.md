@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A DCCore that is reloading has queued the request, not refused it (#972)
+
+Audit 2026-09-27 L3. Asked for a file mid-rehash, a DCCore bot keeps the request (#668): "The bot is reloading its
+configuration. Your request is queued and starts when the reload is done.", then its usual "Added ... at position".
+`fetch_replies` classed the first line as busy, so `handle_bot_reply()` put our row back to pending with a
+ten-minute `retry_at`; the position line then found no candidate (only offered and queued rows are), and the DCC
+SEND that came once the reload was done matched no row and was refused as unsolicited. The rule is now "queued".
+Tests: a case in `test_other_servers_replies_are_understood`, and
+`tests/test_a_reloading_dccore_has_queued_the_request.py` end to end.
+
 ### 📦 The list archive, asked for by name, waits for the whole rebuild (#971)
 
 Audit 2026-09-27 L2. Since #923 `handle_download_request()` is gated by `list.rebuild_pauses_requests()`, which
