@@ -67,6 +67,9 @@
     // also langFallback) and the English dictionary every language falls
     // back to for a key it does not have yet. See the Language section.
     lang: {}, langFallback: {},
+    // The last version check and stats payload drawn, redrawn when a
+    // language finishes loading (#976).
+    lastVersionInfo: null, lastStats: null,
     // What the previewed OmenServe import would write, held between the
     // preview and the confirm so the button sends exactly what was shown -
     // not a second parse that could have moved on from it.
@@ -1241,6 +1244,8 @@
   // succeeds. The release link is only ever a github.com address.
   function renderVersion(info) {
     if (!el.versionText || !info) { return; }
+    // Kept, so a language that arrives later can redraw it (#976).
+    state.lastVersionInfo = info;
     el.versionText.classList.remove("is-news", "is-error");
     el.versionText.textContent = "";
     if (info.error) {
@@ -5519,6 +5524,8 @@
   }
 
   function renderStats(data) {
+    // Kept, so a language that arrives later can redraw it (#976).
+    state.lastStats = data;
     var tr = data.transfer || {};
     var s = data.sent || {};
     var lib = data.library || {};
@@ -5978,6 +5985,13 @@
     return Promise.all(fetches).then(function () {
       if (generation !== langGeneration) { return; }
       applyTranslations();
+      // WHAT IS BUILT FROM t(), NOT MARKED data-i18n (#976), drawn again
+      // in the language now loaded. The version check is asked for before
+      // the language file, and when it answered first the sidebar read
+      // "version.upToDate" - the key - until the next poll ten minutes on;
+      // a language switch left it, and the Stats cards, in the old one.
+      if (state.lastVersionInfo) { renderVersion(state.lastVersionInfo); }
+      if (state.lastStats) { renderStats(state.lastStats); }
     });
   }
 
