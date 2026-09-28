@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 An audio cache that cannot be saved does not fail a published rebuild (#980)
+
+Audit 2026-09-27 L11. `generate_master_list()` saves the audio-info cache (`audio.publish()`) after the swap and the
+prune, inside the try whose `except Exception` returns False. A `sqlite3.Error` there - "database is locked" while
+another run or a database browser holds the cache, a write error - reported a live rebuild as failed: the daemon
+took its failure path, and with several lists `generate_all_lists()` said they were "still serving what they last
+built", which was untrue. `audio.publish()` now catches `sqlite3.Error` and `OSError`, says the list is published
+but the cache was not updated, and the rebuild returns True; `close()` in the `finally` still keeps what this rebuild
+read. Tests: `tests/test_a_cache_that_cannot_save_does_not_fail_the_rebuild.py`.
+
 ### 📦 The audio-info cache is kept under the list's own name (#979)
 
 Audit 2026-09-27 L10. `generate_master_list()` opened the audio cache with `scope=list_name or ""`, and
