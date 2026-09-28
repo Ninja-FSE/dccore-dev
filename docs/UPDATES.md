@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The DCCore window's button keeps its colour, and the panel is not repeated in the text (#1013)
+
+Seen live: the @DCCore button turned red for a new line (#892) and went black again before anybody looked. Every
+status burst - about every 30 seconds - redraws the side panel, and `dccore.panel` starts with `clear -l`, which in
+mIRC resets the window button's colour too (checked: `/echo -m @DCCore test` lights it, `/clear -l @DCCore` puts it
+out). A failure's highlight colour went the same way. `dccore.panel` now reads the colour first (`dccore.lit`:
+`$window().sbcolor` as `/window -g`'s 2 highlight or 1 message - mIRC's help documents `-g0/1/2` but not
+`.sbcolor`'s values, so a name or a number is understood) and sets it again after the redraw, on both ways out
+(`dccore.relight`), never on the active window. And with the panel on, the text no longer gets a `[STATUS]` line
+every `statusmin` minutes - identical lines, saying what the panel shows live; a window without the panel keeps it.
+`ADMIN-CONSOLE.md` says so. Tests: `tests/test_the_panel_keeps_the_button_colour.py`.
+
 ## 🟩 v1.13.2 (2026-09-28) - "The Bot Says What It's Doing"
 
 ### 🚪 Clearing the debug channel is seen everywhere, and can be confirmed away (#1010)
