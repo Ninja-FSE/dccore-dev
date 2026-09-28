@@ -4,6 +4,70 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+## 🟩 v1.13.2 (2026-09-28) - "The Bot Says What It's Doing"
+
+### 🚪 Clearing the debug channel is seen everywhere, and can be confirmed away (#1010)
+
+Live-reported: an operator who cleared `DEBUG_CHANNEL` from the dashboard saw the bot stay in the old channel with
+no explanation. That is `sync_channels()`'s deliberate #511 safety behaviour - a blank `DEBUG_CHANNEL` after a
+rehash is ambiguous (a real clear, or `settings.conf` briefly unreadable, or the reload catching a value mid-flight),
+so the bot protects the old channel and only truly leaves on the next reconnect - but the message explaining it went
+through a plain `print()` in production, reaching stdout only, never the debug channel, the admin console, or the
+operator who just cleared the setting.
+
+- **Visibility.** That message now also goes through `announce.send_debug()`, reaching the debug channel, admin
+  console and `dccore.mrc` regardless of how the rehash was triggered. An ordinary rehash (the dashboard fires one on
+  every settings save) says nothing extra - only the one where `DEBUG_CHANNEL` genuinely went missing does.
+- **Resolved where it actually can be.** The dashboard now asks before saving a `DEBUG_CHANNEL` clear ("Remove the
+  debug channel, #x?"). On confirmation the save carries a flag - popped out before it ever reaches
+  `settings_file.save()` as a fake setting - through to `sync_channels(confirmed_debug_removal=True)`, which parts
+  the channel immediately instead of protecting it. A human already confirmed it in the moment, so the ambiguity the
+  protection exists for does not apply. Every other rehash trigger (console, channel command, a raw `settings.conf`
+  edit) is unaffected and keeps the existing protection.
+
+New tests in `tests/test_the_rehash_channel_sync_takes_its_turn.py` and `tests/test_webserver.py` cover both halves:
+the visible warning firing only on the rehash that needs it, the confirmed clear parting immediately and leaving
+nothing in `channel_users`, a source guard on the confirm popup's own text (a missing `{chan}` fill-in was found and
+fixed in review), and the flag never being written to `settings.conf` as a setting of its own.
+
+### 📡 The `dccore.mrc` window says why it only ever shows STATUS (#1008)
+
+Live-reported: an operator's `dccore.mrc` window kept showing its STATUS burst - unconditional once a session is
+structured and authenticated - while `[REQUEST]`, `[SENDING]`, `[SENT]`, `[FAIL]` and `[SEARCH]` stayed silent,
+because `DEBUG_TO_CONSOLE` gates those in `announce.feed_event()` and nothing said so. A window that looks alive
+while quietly missing everything else is worse than one that says why.
+
+Mirrors `checkupdates` (#572) exactly, with one addition: a new `consolefeed [on|off]` console command on the same
+`settings_file.save()` + rehash path, confirmed with `DCCORE CONSOLEFEED on|off`; `hello` sends that line every
+time - not just once ever, unlike `checkupdates` - and, only when it is off, a plain-text warning too, so an operator
+who never opens Options still learns why. The options dialog's checkbox (405, replacing what used to be a static
+hint label at the same spot) reflects the bot's live state, and a menu toggle sits beside "Daily update check".
+`dccore.ver` bumped to 1.7.
+
+Review found the warning naming a `/dccore` subcommand that did not exist, and a dashboard category that was not
+where `DEBUG_TO_CONSOLE` actually lives - both fixed: `alias dccore` gained a real `consolefeed` branch, the warning
+now names Settings > Debug & logging correctly, and a test reads the real label from `en.json` so the two cannot
+drift apart silently again.
+
+### 🔁 The peer sidebar actually clears when it redraws, and a stranger joining is asked about at once (#1005, #1006)
+
+Live-reported, on the DCCore Chat peer sidebar (#371, #982): after about an hour, the same peer's nick showed 14-16
+duplicate rows in the side-listbox, one more after every periodic redraw. `dline -l $win 1-N` (a hyphenated range) -
+one call meant to clear the listbox before redrawing it - turned out to be a silent no-op on this custom window, so
+old rows were never removed regardless of who had actually left; `$addtok`'s own deduplication was correct the whole
+time. Fixed by clearing one line at a time (`while ($line($win,0,1) > 0) { dline -l $win 1 }`), which depends only on
+single-line `dline -l`, already proven to work by the existing peer-picker read path.
+
+Separately: a DCCore bot reconnecting (a `/quit` then a rejoin, say) sat out of the sidebar for up to `WHO_EVERY`
+(10 minutes) after rejoining, since a plain `JOIN` carries no realname (no `extended-join` capability is negotiated)
+and only a `WHO` reply's realname says who is a DCCore bot. `serverschat.note_join()` now asks a single-nick `WHO`
+for a stranger the moment it joins one of the bot's channels - not a full `refresh_peers()` round - and is skipped
+entirely for a nick already known as a peer, so ordinary join/part churn does not turn into extra `WHO` traffic.
+
+Both confirmed live: forcing a `/quit` and a rejoin for a real peer showed the sidebar clear its duplicates
+immediately and pick the reconnecting peer back up within moments, rather than the old accumulate-forever/up-to-
+ten-minutes behaviour.
+
 ### 📦 Remembering joins costs the same per JOIN however many there were (#981)
 
 Audit 2026-09-27 L12. `irc.note_join_seen()` runs for every JOIN in every channel - it must: a bot back under a new
