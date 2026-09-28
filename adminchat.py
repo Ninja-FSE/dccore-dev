@@ -1437,7 +1437,7 @@ def _cmd_hello(session, args):
     console_feed_on = getattr(config, "DEBUG_TO_CONSOLE", True)
     session.send(f"DCCORE CONSOLEFEED {'on' if console_feed_on else 'off'}")
     if not console_feed_on:
-        # chchatzop's review of #1009: this used to point at "/dccore
+        # The #1009 review: this used to point at "/dccore
         # consolefeed on" (not a real /dccore subcommand - dccore.mrc's
         # `alias dccore` had no branch for it, so it fell through to the
         # help text) and "Settings > Console feed" (a different dashboard

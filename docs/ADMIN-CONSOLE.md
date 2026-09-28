@@ -726,6 +726,7 @@ sent at all: what is off there never reaches the script.
 /dccore window               open or focus @DCCore
 /dccore chat [text]          open DCCore Chat, or say something in it (public)
 /dccore status               ask the bot for its status
+/dccore consolefeed on|off   what this window shows beyond STATUS - requests, sends, searches...
 /dccore lists                the bots' lists we hold, and which have changed
 /dccore fetch [bot]          ask the bots whose lists changed, or one bot
 /dccore raw <command>        send any console command

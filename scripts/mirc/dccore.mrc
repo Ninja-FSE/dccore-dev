@@ -233,7 +233,7 @@ alias dccore {
     return
   }
   if (%cmd == status) { dccore.send status | return }
-  ; chchatzop's review of #1009: the hello-time warning told an operator
+  ; The #1009 review: the hello-time warning told an operator
   ; whose feed was off to run this, and it did not exist - there was no
   ; %cmd branch for it, so it fell through to the help text instead.
   if (%cmd == consolefeed) { dccore.send consolefeed $2- | return }

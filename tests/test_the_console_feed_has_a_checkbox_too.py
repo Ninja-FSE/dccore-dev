@@ -178,7 +178,7 @@ class HelloTellsTheDialogTheState(DCCoreTestCase):
         self.assertNotIn("DCCORE", warnings[0])
 
     def test_the_warning_names_the_real_dashboard_label(self):
-        """chchatzop's review of #1009: it used to say "Settings > Console
+        """The #1009 review: it used to say "Settings > Console
         feed", a different category (CONSOLE_SHOW_* and DEBUG_CHANNEL_FEED
         live there) - DEBUG_TO_CONSOLE is under Debug & logging. Read from
         en.json rather than hardcoded here, so the two cannot drift apart
@@ -196,7 +196,7 @@ class HelloTellsTheDialogTheState(DCCoreTestCase):
         self.assertIn(label, warning)
 
     def test_the_warning_names_a_command_that_actually_exists(self):
-        """chchatzop's review of #1009: it used to say "/dccore consolefeed
+        """The #1009 review: it used to say "/dccore consolefeed
         on", which fell through to the help text - dccore.mrc's `alias
         dccore` had no %cmd branch for it."""
         with io.open(SCRIPT, encoding="ascii", newline="") as handle:
