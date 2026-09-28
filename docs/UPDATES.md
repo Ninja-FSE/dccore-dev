@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 "Online only" keeps a bot that is here under a new nick (#975)
+
+Audit 2026-09-27 L6. A row #376 merged holds the list kept under the old nick (offline, by definition) and the new
+nick's advert (online). `hiddenByOnlineOnly()` judged the row by `primaryEntry()` - the held, old-nick entry - so
+it dropped a row that `botRow()` draws with a green dot through `groupOnline()`; and its "the open list stays"
+exemption compared the source's real nick with the row's display nick, so the row went even while its list was open.
+The search did the same server-side: `build_crosslist_search_payload(online_only=True)` asked
+`user_is_present_in_ram()` about the old nick and left that list's matches out. The sidebar now judges the row by
+`groupOnline()` and compares the open list by `displayNickOfSource()`; the search counts a list as online when its
+nick or the nick its row is shown under (`_display_nick()`, with the payload's `_ident_merges()`) is present. Tests:
+two node cases in `test_online_only_filters_the_sidebar` (its harness now carries the two helpers), and
+`tests/test_online_only_keeps_a_renamed_bot.py`.
+
 ### 📦 A reply is about the longest name it carries (#974)
 
 Audit 2026-09-27 L5. `handle_bot_reply()` matched a reply to a request by a plain substring test on the normalised

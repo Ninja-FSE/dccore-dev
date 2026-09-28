@@ -1637,9 +1637,13 @@
     if (!state.filelistsOnlineOnly) { return false; }
     var primary = primaryEntry(group);
     if (isOwnSource(primary.bot)) { return false; }
-    var open = nickOfSource(state.filelistsSource || "__own__").toLowerCase();
+    // #975: a row #376 merged is the bot under the nick it has NOW. Its
+    // primary entry is the list held under the old nick - offline by
+    // definition - so the open list is compared by the nick the row is shown
+    // under, and "online" is what the row's own dot says: any entry here.
+    var open = displayNickOfSource(state.filelistsSource || "__own__").toLowerCase();
     if (String(group.nick || "").toLowerCase() === open) { return false; }
-    return primary.online === false;
+    return groupOnline(group, primary) === false;
   }
 
   // BUILT WITH DOM APIs, not concatenated markup. A bot nick is remote input
