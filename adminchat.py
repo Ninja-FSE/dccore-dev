@@ -670,6 +670,10 @@ class Session:
         self._status_sent_at = 0.0
         self._status_due = False      # set by event_sink, acted on by the writer
         self._status_job = None       # (thread, lines) while a burst is being computed
+        # The DCCORE CHANNELS line this session was last sent (#371): sent
+        # again with a status burst when the bot's channels change, so a
+        # chat window's channel list does not go stale (#958 review).
+        self._chat_channels = None
         self._outbox = collections.deque(maxlen=OUTBOX_MAX)
         self._wake = threading.Event()
         self._lock = threading.Lock()
@@ -729,6 +733,7 @@ class Session:
             return
         self._status_sent_at = time.time()
         self._status_due = False
+        self._send_chat_channels_if_changed()
         job = self._status_job
         if job is None or not job[0].is_alive():
             lines = []
@@ -748,6 +753,22 @@ class Session:
             return
         self._status_job = None
         for line in job[1]:
+            self.send(line)
+
+    def _send_chat_channels_if_changed(self):
+        """DCCORE CHANNELS again when the bot's channels have changed since
+        this session was told (#371). A chat window reads it to know which
+        channels the bot relays; stale, it would hide a raw NOTICE for a
+        channel the bot has left. At most one status interval late. Only to
+        a session told once already, at `hello` - anything else never asked
+        for the chat's channels."""
+        try:
+            import serverschat
+            line = serverschat.channels_line()
+        except Exception:
+            return
+        if self._chat_channels is not None and line != self._chat_channels:
+            self._chat_channels = line
             self.send(line)
 
     def request_status(self):
@@ -1361,6 +1382,13 @@ def _cmd_hello(session, args):
     # the moment it is opened, rather than "unknown" until the operator
     # happens to run checkupdates themselves.
     session.send(f"DCCORE CHECKUPDATES {'on' if getattr(config, 'CHECK_FOR_UPDATES', True) else 'off'}")
+    # DCCore Chat (#371): the channels it can chat in, and what was said
+    # while this window was away - from memory, never from disk.
+    import serverschat
+    session._chat_channels = serverschat.channels_line()
+    session.send(session._chat_channels)
+    for line in serverschat.recent_lines():
+        session.send(line)
     session.send_status()
     print(f"[ADMINCHAT] {session.nick}'s session switched to the structured feed "
           f"({session.client} {' '.join(parts[1:]) or '?'}).")
@@ -1426,6 +1454,37 @@ def _cmd_unpair(session, args):
     session.send(f"Revoked {name}. A client still logged in with it stays until it disconnects.")
 
 
+def _cmd_chat(session, args):
+    """`chat #channel <text>` or `chat * <text>`: say something in DCCore Chat
+    (#371), as the bot - a channel message starting with [ServersChat], which
+    is public; `*` is the fewest channels that reach every other DCCore bot.
+    `chat` alone: the channels it can chat in. `chat peers` / `chat who`: the
+    other DCCore bots seen, and ask again."""
+    import serverschat
+    text = str(args or "").strip()
+    if text.lower() == "peers":
+        session.send(serverschat.peers_line())
+        return
+    if text.lower() == "who":
+        asked = serverschat.refresh_peers(force=True)
+        session.send(f"Asked WHO in {asked} channel(s); `chat peers` shows who answered.")
+        return
+    if not text:
+        if session.structured:
+            session.send(serverschat.channels_line())
+        else:
+            chans = serverschat.channels()
+            session.send("Chat channels: " + (" ".join(chans) if chans else "none yet")
+                         + ". Usage: chat #channel <text> (public: everyone there reads it).")
+        return
+    parts = text.split(None, 1)
+    ok, message = serverschat.say(session.nick, parts[0], parts[1] if len(parts) > 1 else "")
+    # A structured window sees its own line come back as a CHAT line; a
+    # person at a plain console is told it went.
+    if not ok or not session.structured:
+        session.send(message)
+
+
 def _cmd_help(session, args):
     session.send("Available commands:")
     for name in sorted(COMMANDS):
@@ -1460,6 +1519,7 @@ COMMANDS = {
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
     "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
+    "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|* text]"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),
     "unpair":     (_cmd_unpair,     "list or revoke paired scripts",     "unpair [name]"),
