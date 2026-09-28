@@ -4,6 +4,23 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 No fetch goes out before the channels are joined (#965)
+
+Audit 2026-09-27 M3. `_bot_readiness()` called every bot ready while `channel_users` was empty - "still joining, the
+old behaviour (ask) stands". That was harmless when a request made then was one just clicked. Since #926, rows
+survive a restart (mid-flight ones come back pending) and wait for an offline bot, and the dispatcher starts before
+the connection: at startup, and again after every reconnect (irc.py empties `channel_users`), it promoted up to
+`MAX_FETCH_SLOTS` restored or waiting rows at once, `channel_containing_user()` found nothing so each went to the
+first configured channel, the outbound queue held them until activation - often past `FETCH_OFFER_TIMEOUT` - and they
+failed as "no response". Restart persistence and waiting for an offline bot were both undone by it.
+
+Now nobody is asked until `config.bot_joined_channel` is set and `channel_users` holds somebody - the gate
+`list_fetch.refetch_due_lists()` already used, for the same reason. Rows wait as `waiting="joining"`, shown in the
+Downloads panel as "Waiting to join the channels" (en/es/fr). The dispatch tests that relied on "empty means ask"
+now put their bots in the channel through a new `tests.support.bots_in_the_channel()`; the CTCP-guard tests put the
+unsafe nicks there too, so it is still the guard - not "offline" - that stops them. The channel fallback is kept, for
+a bot seen only in a channel no longer configured.
+
 ### 📦 A file too big for the free space waits for room instead of filling the disk again and again (#964)
 
 Audit 2026-09-27 M2. The dispatcher held fetching only while `FETCHED_FILES_DIR` had under `MIN_FREE_BYTES`

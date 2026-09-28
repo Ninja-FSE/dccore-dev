@@ -91,6 +91,7 @@
   "download.waiting.slots": "Esperando un hueco libre",
   "download.waiting.paused": "En pausa - reanúdelo para continuar",
   "download.waiting.diskFull": "Esperando espacio en disco",
+  "download.waiting.joining": "Esperando a entrar en los canales",
   "download.resumeBot": "Reanudar este bot",
   "download.state.listening": "Escuchando",
   "download.state.receiving": "Recibiendo",

@@ -983,20 +983,30 @@ def bot_is_known(bot):
 
 
 def _bot_readiness(bots, now):
-    """{bot (lowercased): "" when we may ask it now, else why not ("offline",
-    "just-back")}, for the bots with rows waiting. Read OUTSIDE the fetch lock:
-    presence has its own lock, and holding both is an ordering to get wrong.
+    """{bot (lowercased): "" when we may ask it now, else why not ("joining",
+    "offline", "just-back")}, for the bots with rows waiting. Read OUTSIDE the
+    fetch lock: presence has its own lock, and holding both is an ordering to
+    get wrong.
 
-    No channel membership at all means we are still joining - "wait" is not
-    known yet, and the old behaviour (ask) stands, as it does for
-    webserver.bot_not_here_error()."""
+    NOBODY IS ASKED BEFORE THE CHANNELS ARE JOINED (#965). Until
+    config.bot_joined_channel - at startup and after every reconnect, which
+    empties channel_users - nothing can tell a bot that is gone from one not
+    heard from yet. Asking anyway used to be harmless: a request made then
+    was one just clicked. Since rows persist across a restart and wait for an
+    offline bot (#926), it promoted every restored or waiting row at once,
+    sent each to the first configured channel through a queue that holds it
+    until the join, and FETCH_OFFER_TIMEOUT failed them as "no response" -
+    on every reconnect. list_fetch.refetch_due_lists() waits for the same
+    flag, for the same reason."""
     import dcc
-    with runtime.channel_users_lock():
-        joined = any(users for users in (getattr(config, "channel_users", {}) or {}).values())
+    joined = bool(getattr(config, "bot_joined_channel", False))
+    if joined:
+        with runtime.channel_users_lock():
+            joined = any(users for users in (getattr(config, "channel_users", {}) or {}).values())
     ready = {}
     for bot in bots:
         if not joined:
-            ready[bot] = ""
+            ready[bot] = "joining"
             continue
         if not dcc.user_is_present_in_ram(bot):
             _seen_absent.add(bot)

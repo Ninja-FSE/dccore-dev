@@ -91,6 +91,7 @@
   "download.waiting.slots": "En attente d'un créneau libre",
   "download.waiting.paused": "En pause - reprenez-le pour continuer",
   "download.waiting.diskFull": "En attente d'espace disque",
+  "download.waiting.joining": "En attente de rejoindre les canaux",
   "download.resumeBot": "Reprendre ce bot",
   "download.state.listening": "Écoute",
   "download.state.receiving": "Réception",
