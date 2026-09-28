@@ -2681,6 +2681,20 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # "Someone - DCCore Sessions.rar" would otherwise be looked for among
         # the lists and never found.
         if list_mod.is_list_artifact_name(requested_file):
+            # THE ARCHIVE WAITS FOR THE WHOLE REBUILD (#971), as "@nick" does
+            # in list.send_file_list(). Other files are served through the
+            # scan since #923 - the rebuild does not touch them - but this is
+            # the file the swap replaces. A slow send of a same-day archive
+            # (a second rebuild keeps its name) started mid-scan held it
+            # open, and on Windows the swap's replace gave up and the whole
+            # rebuild rolled back.
+            if getattr(config, 'update_inprogress', False) is True:
+                oserve = sys.modules.get('oserve')
+                if oserve:
+                    oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Notice{config.C_RESET}: Master list is currently rebuilding. Please wait a few minutes and try again. \r\n")
+                print(f"[MAINTENANCE BLOCK] Refused {user}'s request for the list archive "
+                      f"{requested_file!r}: the list is being rebuilt.")
+                return
             # THIS REQUEST'S LIST directory, not LOCAL_LIST_DIR. Every list
             # writes its archive under the same name, and a non-primary list
             # writes it in its own subdirectory - so looking in the root would

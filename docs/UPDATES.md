@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The list archive, asked for by name, waits for the whole rebuild (#971)
+
+Audit 2026-09-27 L2. Since #923 `handle_download_request()` is gated by `list.rebuild_pauses_requests()`, which
+admits requests through the scanning, audio and writing phases - right for library files, which the rebuild does
+not touch. `@nick` (`send_file_list()`) still refuses for the whole rebuild, but `!Bot <base>-<date>.zip` asks for
+the same archive by name and was served straight from `list_dir()`. A second rebuild on the same day keeps the
+archive's name, so a slow send started mid-scan could hold it open into the swap; on Windows,
+`_publish_artifacts()`'s `replace_with_retry()` gave up after `PUBLISH_REPLACE_ATTEMPTS` and the whole publish rolled
+back. A list-artifact request now gets `send_file_list()`'s own "Master list is currently rebuilding" notice while
+`update_inprogress` is set. Tests: `tests/test_the_list_archive_waits_for_the_rebuild.py`.
+
 ### 📦 A fetch queued while the dispatcher looked around waits for the next tick (#970)
 
 Audit 2026-09-27 L1. `check_fetch_queue()` notes the bots with pending rows under `_fetch_lock()`, reads their
