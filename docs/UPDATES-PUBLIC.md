@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a track that could not be read once no longer loses its length and quality for good.** With length and quality in the list turned on, a track that hit a momentary error - a network drive hiccup, or another program holding the file on Windows - was listed without them, and every later rebuild kept it that way until the file changed. It is now read again on the next rebuild, and the rebuild log says how many tracks that was.
 - **Fixed: a file asked for from another DCCore bot while it was reloading its settings was turned away when it arrived.** That bot answers "Your request is queued and starts when the reload is done", but DCCore took it as "busy", stopped waiting, and refused the file when it came. It now waits in that bot's queue as it should.
 - **Fixed: on Windows, a list rebuild could fail because someone was downloading the list by its file name.** Asking for the list archive by name (`!YourBot YourList-date.zip`) was answered even while the list was being rebuilt, and a slow download of it could keep the file open just as the new list replaced it, so the rebuild was undone. The archive now waits for the rebuild to finish, as `@YourBot` always did; other files are still sent during a rebuild.
 - **Fixed: a download added at just the wrong moment could skip a pause or the low-disk check.** A request queued in the instant DCCore was deciding what to send could go straight out, even to a bot you had just paused or onto a nearly full disk. It now waits for the next check, two seconds later, which sees it properly.

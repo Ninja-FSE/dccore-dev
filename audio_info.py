@@ -265,8 +265,15 @@ def _read_flac(window, size):
 
 def read(path, size=None):
     """{"seconds", "kbps", "rate", "channels", "vbr"} for an MP3 or FLAC, or
-    None - for any other file, and for any file that cannot be read or makes
-    no sense. Never raises."""
+    None - for any other file, and for any file that makes no sense.
+
+    RAISES OSError when the file could not be read at all (#973): a network
+    mount's transient EIO or timeout, a sharing violation while another
+    program holds it on Windows. That is not an answer about the file, and
+    remembered as one it stayed without length and quality until the file
+    changed size - Cache.read_pending() reads it again next time instead.
+    A file that is no longer there, or anything else that goes wrong reading
+    it, None."""
     name = path.lower()
     try:
         if size is None:
@@ -279,6 +286,12 @@ def read(path, size=None):
             if name.endswith(".mp3"):
                 return _read_mp3(window, size)
             return _read_flac(window, size)
+    except FileNotFoundError:
+        # Gone since the walk listed it: an answer - the next walk will not
+        # list it either.
+        return None
+    except OSError:
+        raise
     except Exception:
         return None
     return None
@@ -322,6 +335,7 @@ class Cache:
         self.seen = {}       # key -> suffix, for every audio file this rebuild listed and knows
         self.sizes = {}      # key -> size, for the same
         self.fresh = {}      # key -> (size, suffix) read by this rebuild
+        self.unread = set()  # keys whose read failed with an I/O error: not remembered (#973)
         self.pending = []    # (key, path, size) still to read
         self.read_count = 0
         self.reused_count = 0
@@ -416,11 +430,17 @@ class Cache:
                     key, size = running.pop(future)
                     try:
                         suffix = describe(future.result())
+                    except OSError:
+                        # Size alone this time, and not remembered: the
+                        # next rebuild reads it again (#973).
+                        suffix = ""
+                        self.unread.add(key)
                     except Exception:
                         suffix = ""
                     self.seen[key] = suffix
                     self.sizes[key] = size
-                    self.fresh[key] = (size, suffix)
+                    if key not in self.unread:
+                        self.fresh[key] = (size, suffix)
                     done += 1
                 if progress is not None and done != reported:
                     reported = done
@@ -452,7 +472,8 @@ class Cache:
         """This rebuild published: keep what it saw, forget the rest."""
         with self.conn:
             self.conn.execute("DELETE FROM audio WHERE scope = ?", (self.scope,))
-            self._save((key, (self.sizes[key], suffix)) for key, suffix in self.seen.items())
+            self._save((key, (self.sizes[key], suffix)) for key, suffix in self.seen.items()
+                       if key not in self.unread)
         self.published = True
 
     def close(self):

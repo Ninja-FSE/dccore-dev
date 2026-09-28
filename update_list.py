@@ -1625,6 +1625,10 @@ def generate_master_list(list_name=None):
         audio.read_pending(workers=workers, budget=minutes * 60,
                            progress=lambda done, total: write_progress(
                                "audio", folder_index=done, folder_count=total, files=listed))
+        if audio.unread:
+            print(f"[LIST-GEN] {len(audio.unread):,} audio file(s) could not be read this time "
+                  f"(a network or sharing error): they show their size alone, and the next "
+                  f"rebuild tries them again.")
         if audio.left_count:
             print(f"[LIST-GEN] {audio.left_count:,} audio file(s) not read within "
                   f"LIST_AUDIO_INFO_MINUTES = {minutes}: they show their size alone this "
