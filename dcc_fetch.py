@@ -729,11 +729,30 @@ def _persist_fetch_history_locked(queue):
 _ASKED_AGAIN_AFTER_A_RESTART = ("offered", "listening", "receiving")
 
 
+def _as_asked(row):
+    """Put back what a claimed offer overwrote, for a row about to be asked
+    again (#963). A "folder" or "list" row does not know the name the other
+    bot will give its file until the offer arrives, and
+    _claim_matching_offer_locked() then writes that name over row["filename"]
+    - "Artist_-_Album.rar" in place of "!rar Artist - Album". Asked again
+    with it, the other bot is sent "!Bot Artist_-_Album.rar", a request for a
+    file of that name, not the folder pack or the list: it answers "not
+    found" or nothing. requested_filename kept the original all along.
+    What the offer said about the file (its size, where it was going) is
+    dropped with it: the next offer says it again. A "file" row asked for its
+    own name, so there is nothing to put back."""
+    if row.get("request_type") in ("folder", "list"):
+        row["filename"] = row.get("requested_filename") or ""
+        row["total_size"] = None
+        row["stored_filename"] = None
+
+
 def _restart_form(row):
     """A row as it should come back after a restart (#926)."""
     row = dict(row)
     if row.get("state") in _ASKED_AGAIN_AFTER_A_RESTART:
         row.update(state="pending", offered_at=None, bytes_received=0)
+        _as_asked(row)
         for volatile in ("listening_since",):
             row.pop(volatile, None)
     return row
@@ -894,6 +913,7 @@ def handle_bot_reply(bot, text):
             # Asked again later (#926): back to pending with a time, so the
             # dispatcher leaves it until then and it keeps its place.
             row["busy_retries"] = int(row.get("busy_retries", 0)) + 1
+            _as_asked(row)
             row.update(state="pending", offered_at=None, retry_at=now + BUSY_RETRY_SECONDS,
                        reason=f"busy: {reply.text}", waiting="retry")
             row.pop("queued_at", None)
@@ -2193,6 +2213,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
         row.update(state="pending", offered_at=None, bytes_received=0,
                    reason="the disk filled up - asking again once there is space",
                    waiting="disk-full")
+        _as_asked(row)
         _disk_was_low[0] = False  # so the next check says it
         print(f"[FETCH] The disk filled up receiving {stored_name}; it will be asked again.")
     else:
