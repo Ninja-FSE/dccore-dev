@@ -254,6 +254,34 @@ list_grab_last         = None
 list_grab_state        = None
 list_grab_others_asked = {}
 
+# DCCore Chat, relayed by the bot (#371) - serverschat.py. IN MEMORY ONLY:
+# chat_recent is what other people said in the channels, and none of it is
+# ever written to disk; a restart forgets it. Here so a rehash that reloads
+# serverschat.py keeps the recent lines and the limits.
+# chat_recent: the last serverschat.RECENT_MAX lines, oldest first, each
+# {"id", "chan", "nick", "text"}. chat_rate / chat_outbound: key ->
+# [window_start, count] for the arriving (per nick) and sent (per session)
+# limits. chat_muted: nick -> until when it is hidden. chat_last_id: the
+# last line id handed out.
+chat_recent = []
+chat_rate = {}
+chat_outbound = {}
+chat_muted = {}
+chat_last_id = 0
+# chat_peers: nick -> {channel: last seen in a WHO reply}, the other DCCore bots
+# (their realname carries serverschat.REALNAME_MARK). chat_peers_meta["last"]:
+# when the channels were last asked WHO.
+chat_peers = {}
+chat_peers_meta = {"last": 0.0}
+# chat_who_round: channel -> the peers (lowercase nicks) actually seen in the
+# WHO round currently in flight for it, from the moment refresh_peers() asks
+# to the server's own "End of /WHO list" for that channel - which is also
+# the one place a peer that quietly vanished (a QUIT or PART the read loop
+# missed, a net split) is ever caught: WHO only ever ADDS a sighting, so
+# without this, a peer WHO no longer finds would simply never be removed.
+chat_who_round = {}
+chat_lock = threading.Lock()
+
 update_check_guard        = threading.Lock()  # the version check's start guard (#572)
 update_check_started      = False
 update_check_last_attempt = None   # when the last check (daily or manual) began
