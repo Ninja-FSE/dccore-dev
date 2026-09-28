@@ -310,6 +310,8 @@
   "settings.savedSettingsMany": "{count} paramètres enregistrés. Rehash démarré.",
   "settings.restartRequiredToApply": "Redémarrage requis pour appliquer : {list}.",
   "settings.couldNotSaveSettings": "Impossible d'enregistrer les paramètres.",
+  "settings.confirmDebugChannelRemovedHeading": "Supprimer le canal de débogage, {chan} ?",
+  "settings.confirmDebugChannelRemovedDetail": "Le bot quitte {chan} dès que cet enregistrement est terminé. Rien d'autre ne change dans ce paramètre - vous pourrez redéfinir un canal de débogage plus tard.",
   "stats.activeSlots": "Emplacements actifs",
   "stats.afterImport": "Après import",
   "stats.album": "Album",

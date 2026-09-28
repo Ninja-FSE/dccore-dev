@@ -310,6 +310,8 @@
   "settings.savedSettingsMany": "{count} ajustes guardados. Rehash iniciado.",
   "settings.restartRequiredToApply": "Se requiere reiniciar para aplicar: {list}.",
   "settings.couldNotSaveSettings": "No se pudieron guardar los ajustes.",
+  "settings.confirmDebugChannelRemovedHeading": "¿Eliminar el canal de depuración, {chan}?",
+  "settings.confirmDebugChannelRemovedDetail": "El bot abandona {chan} en cuanto se complete este guardado. Nada más cambia en este ajuste - puedes volver a establecer un canal de depuración más tarde.",
   "stats.activeSlots": "Ranuras activas",
   "stats.afterImport": "Después de importar",
   "stats.album": "Álbum",

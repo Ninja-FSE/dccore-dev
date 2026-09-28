@@ -710,7 +710,7 @@ def comma_batched(verb, channels, tail=""):
 
 
 def sync_channels(oserve_mod, old_chans, new_chans, log=print,
-                  previous_debug_channel=None):
+                  previous_debug_channel=None, confirmed_debug_removal=False):
     """JOIN what is new, PART what is gone, NAMES the lot - through the pacer.
 
     Returns the lines queued, which is what the caller reports.
@@ -786,11 +786,30 @@ def sync_channels(oserve_mod, old_chans, new_chans, log=print,
     # never legitimate. A blank DEBUG_CHANNEL is perfectly legitimate, so this
     # changes nothing about the setting - only about whether a PART is sent on
     # the strength of it.
-    if previous_debug and not debug_chan:
+    if previous_debug and not debug_chan and not confirmed_debug_removal:
         protected.add(previous_debug)
-        log(f"[REHASH SYNC] DEBUG_CHANNEL came back blank from the reload. "
-            f"Staying in {previous_debug} rather than parting it - if you did "
-            f"mean to clear it, the bot leaves on the next reconnect.")
+        message = (f"DEBUG_CHANNEL came back blank from the reload. Staying in "
+                   f"{previous_debug} rather than parting it - if you did mean "
+                   f"to clear it, restart the bot (or reconnect) to actually leave.")
+        log(f"[REHASH SYNC] {message}")
+        # #1008 follow-up: log() alone reached stdout only - the operator who
+        # just cleared the setting, whether from the dashboard, the console or
+        # a channel command, never saw why the bot was still there. This is
+        # the one sync_channels() message worth a channel/console line on its
+        # own: unlike "No channel changes" below, it says nothing on an
+        # ordinary rehash - only on the one rehash in however many where the
+        # setting genuinely went missing.
+        announce.send_debug(message, category="PART")
+    elif previous_debug and not debug_chan and confirmed_debug_removal:
+        # The dashboard's own confirm() popup already asked "are you sure?"
+        # before this request was even sent (#1008 follow-up) - the
+        # ambiguity the branch above exists for ("did the operator mean
+        # this, or did the reload just glitch?") does not apply here, so
+        # `previous_debug` is left OUT of `protected` and falls through to
+        # the ordinary `parting` computation below, exactly like any other
+        # deliberate change.
+        log(f"[REHASH SYNC] DEBUG_CHANNEL was cleared and confirmed from the "
+            f"dashboard - leaving {previous_debug} now.")
 
     # A DELIBERATE CHANGE still parts. DEBUG_CHANNEL going from one channel to
     # a different one is an edit nobody makes by accident, so the old one is
@@ -943,8 +962,17 @@ def reload_modules_in_order(modules=CORE_MODULES, reload_self=True):
     return reloaded
 
 
-def handle_rehash_request(user, target_chan, authorised=False, user_host=None):
+def handle_rehash_request(user, target_chan, authorised=False, user_host=None,
+                          confirmed_debug_removal=False):
     """Reload the modules live, in memory - one rehash at a time.
+
+    `confirmed_debug_removal` (#1008 follow-up) is for exactly one caller:
+    the dashboard's Settings save, after its own confirm() popup, when
+    DEBUG_CHANNEL is being cleared. Every other caller (a channel !rehash,
+    the console, a plain settings.conf edit) leaves it False, so
+    sync_channels() keeps protecting a debug channel that came back blank -
+    see that function's own docstring for why the ambiguity cannot be
+    resolved from the file alone.
 
     THE SERIALISATION IS THE POINT OF THIS WRAPPER. The body below reloads
     the modules and then compares the channel list it reads AFTERWARDS
@@ -981,12 +1009,13 @@ def handle_rehash_request(user, target_chan, authorised=False, user_host=None):
               "to finish before starting this one.")
         runtime.rehash_lock.acquire()
     try:
-        return _handle_rehash_request(user, target_chan)
+        return _handle_rehash_request(user, target_chan,
+                                      confirmed_debug_removal=confirmed_debug_removal)
     finally:
         runtime.rehash_lock.release()
 
 
-def _handle_rehash_request(user, target_chan):
+def _handle_rehash_request(user, target_chan, confirmed_debug_removal=False):
     """The rehash itself. Only ever called with runtime.rehash_lock held."""
     import importlib
     import sys
@@ -1346,7 +1375,8 @@ def _handle_rehash_request(user, target_chan):
             # is not.
             try:
                 queued = sync_channels(oserve, old_chans, _channels_to_sync(config),
-                                       previous_debug_channel=old_debug_chan)
+                                       previous_debug_channel=old_debug_chan,
+                                       confirmed_debug_removal=confirmed_debug_removal)
                 print(f"[REHASH SYNC] Channel sync queued as {len(queued)} paced "
                       f"line(s); they go out at MSG_DELAY like everything else "
                       f"the bot says.")

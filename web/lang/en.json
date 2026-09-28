@@ -310,6 +310,8 @@
   "settings.savedSettingsMany": "Saved {count} settings. Rehash started.",
   "settings.restartRequiredToApply": "Restart required to apply: {list}.",
   "settings.couldNotSaveSettings": "Could not save settings.",
+  "settings.confirmDebugChannelRemovedHeading": "Remove the debug channel, {chan}?",
+  "settings.confirmDebugChannelRemovedDetail": "The bot leaves {chan} as soon as this save completes. Nothing else about the setting changes - you can set a debug channel again later.",
   "stats.activeSlots": "Active slots",
   "stats.afterImport": "After import",
   "stats.album": "Album",

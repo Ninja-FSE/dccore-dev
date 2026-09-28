@@ -5401,12 +5401,35 @@
     var dirty = state.settingsDirty;
     if (!Object.keys(dirty).length) { return; }
 
+    // #1008 follow-up: the bot otherwise only ever leaves a cleared debug
+    // channel on the next reconnect - see sync_channels()'s own reasoning
+    // for why a blank DEBUG_CHANNEL alone cannot tell "on purpose" from
+    // "the reload glitched" apart. Asking here, once, in the moment the
+    // operator actually clicked Save, resolves that ambiguity for this one
+    // save the same way a human always could.
+    var oldDebugChan = String((state.settingsBaseline || {}).DEBUG_CHANNEL || "").trim();
+    var clearingDebugChannel = Object.prototype.hasOwnProperty.call(dirty, "DEBUG_CHANNEL")
+      && !String(dirty.DEBUG_CHANNEL || "").trim()
+      && !!oldDebugChan;
+    if (clearingDebugChannel && !window.confirm(
+        t("settings.confirmDebugChannelRemovedHeading").replace("{chan}", oldDebugChan) +
+        String.fromCharCode(10, 10) +
+        t("settings.confirmDebugChannelRemovedDetail").replace("{chan}", oldDebugChan))) {
+      return;
+    }
+
+    var payload = {};
+    for (var dirtyKey in dirty) {
+      if (Object.prototype.hasOwnProperty.call(dirty, dirtyKey)) { payload[dirtyKey] = dirty[dirtyKey]; }
+    }
+    if (clearingDebugChannel) { payload.confirm_debug_channel_removed = true; }
+
     el.settingsSaveBtn.disabled = true;
     el.settingsSaveStatus.style.display = "none";
     el.settingsRestartNote.style.display = "none";
     el.settingsSavebarText.textContent = t("settings.saving");
 
-    postJson("/api/settings", dirty)
+    postJson("/api/settings", payload)
       .then(function (res) {
         if (res.ok) {
           state.settingsDirty = {};
