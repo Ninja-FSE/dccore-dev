@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: after a restart, downloads from a bot you were queued at no longer stall for up to 12 hours.** Requests that were waiting in another bot's queue were kept as "queued" across a restart - but leaving IRC empties your place in most bots' queues, so they waited for files that were never coming, and held up every other download from that bot meanwhile. They are now simply asked for again; a bot that did keep your place says so, and it is kept.
 - **Fixed: removing a download that another bot has queued no longer warns that a downloaded file will be deleted.** Its button now says **Cancel**, and the question says nothing has been downloaded yet - as it already did for a download still waiting its turn.
 - **Fixed: the dashboard's version line could read `version.upToDate` instead of a sentence**, until the next check ten minutes later. It, and the Library cards on the Stats page, now also change straight away when you switch the dashboard's language.
 - **Fixed: "Online only" in the List Browser no longer hides a bot that came back under a new nick.** A bot shown in one row under its new nick - with the list you took from it under the old one - was hidden by "Online only", and its matches were left out of searches, although it was online (and even while its list was open). It is now judged by the nick it has now.

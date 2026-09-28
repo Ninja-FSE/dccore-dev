@@ -756,9 +756,10 @@ def _persist_fetch_history_locked(queue):
     # dict, so retention costs one comparison per row and no new machinery.
     prune_fetch_history_locked(queue)
     # THE UNFINISHED ROWS TOO (#926), in the form they take after a restart:
-    # a request still waiting or queued at another bot is kept, and one that
-    # was mid-flight - offered, listening, receiving; its socket and thread
-    # die with the process - is written as pending, to be asked again. Written
+    # a request still waiting here is kept, and one that was mid-flight -
+    # offered, listening, receiving; its socket and thread die with the
+    # process - or queued at another bot (#978) is written as pending, to be
+    # asked again. Written
     # in that form rather than as-is so a transfer's bytes_received ticking
     # up does not rewrite the file every two seconds.
     snapshot = {rid: _restart_form(row) for rid, row in queue.items()}
@@ -768,7 +769,13 @@ def _persist_fetch_history_locked(queue):
     db.save_fetch_history(snapshot)
 
 
-_ASKED_AGAIN_AFTER_A_RESTART = ("offered", "listening", "receiving")
+# QUEUED TOO (#978). A restart QUITs, and a file server drops the queue of a
+# user who quits - so a row kept as "queued" waited for a file that was never
+# coming, and counted toward FETCH_MAX_PER_BOT while it did: every other
+# request to that bot waited "their-turn" until FETCH_QUEUED_TIMEOUT (12 h)
+# failed it. Asked again, a server that did keep it says so ("already in my
+# queue"), and handle_bot_reply() puts the row straight back to queued.
+_ASKED_AGAIN_AFTER_A_RESTART = ("offered", "queued", "listening", "receiving")
 
 
 def _as_asked(row):
@@ -795,7 +802,8 @@ def _restart_form(row):
     if row.get("state") in _ASKED_AGAIN_AFTER_A_RESTART:
         row.update(state="pending", offered_at=None, bytes_received=0)
         _as_asked(row)
-        for volatile in ("listening_since",):
+        # Where it stood in the other bot's queue is theirs to say again.
+        for volatile in ("listening_since", "queued_at", "queue_position", "reply"):
             row.pop(volatile, None)
     return row
 

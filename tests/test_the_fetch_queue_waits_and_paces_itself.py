@@ -167,7 +167,9 @@ class ItWaitsForTheBot(QueueCase):
 
 
 class ItSurvivesARestart(QueueCase):
-    def test_waiting_and_queued_come_back_as_they_were_and_mid_flight_is_asked_again(self):
+    def test_waiting_comes_back_as_it_was_and_queued_and_mid_flight_are_asked_again(self):
+        """Queued too since #978: the restart QUIT, and a server drops a
+        quitting user's queue - see test_a_queued_request_is_asked_again_after_a_restart."""
         config.channel_users["#chan"].discard("serverone")
         waiting, queued, moving = self.queue_up(3)
         config.fetch_queue[queued].update(state="queued", queued_at=time.time(), queue_position=4)
@@ -176,8 +178,8 @@ class ItSurvivesARestart(QueueCase):
 
         restored = db.load_fetch_history()
         self.assertEqual(restored[waiting]["state"], "pending")
-        self.assertEqual(restored[queued]["state"], "queued")
-        self.assertEqual(restored[queued]["queue_position"], 4)
+        self.assertEqual(restored[queued]["state"], "pending")
+        self.assertNotIn("queue_position", restored[queued])
         self.assertEqual(restored[moving]["state"], "pending")
         self.assertEqual(restored[moving]["bytes_received"], 0)
 

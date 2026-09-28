@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A request queued at another bot is asked again after a restart (#978)
+
+Audit 2026-09-27 L9. `_restart_form()` kept a "queued" row as it was (#926), but a restart QUITs and file servers
+drop a quitting user's queue. The restored rows waited for files that were never coming and, "queued" being in
+`_BOT_LOAD_STATES`, held `FETCH_MAX_PER_BOT` for that bot: every other request to it waited "their-turn" until
+`FETCH_QUEUED_TIMEOUT` (43200 s) failed the ghosts. "queued" is now in `_ASKED_AGAIN_AFTER_A_RESTART`, and the
+restart form drops `queued_at`, `queue_position` and `reply`. A server that did keep the request answers "already in
+my queue", and `handle_bot_reply()` puts the row straight back to queued with its position. The restart test in
+`test_the_fetch_queue_waits_and_paces_itself` now expects that; new
+`tests/test_a_queued_request_is_asked_again_after_a_restart.py`.
+
 ### 📦 Cancelling a request the other bot has queued says "Cancel" (#977)
 
 Audit 2026-09-27 L8. A fetch in the "queued" state (#926) - the other bot has queued our request and nothing has
