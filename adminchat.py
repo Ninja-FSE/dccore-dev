@@ -1041,6 +1041,52 @@ def _cmd_checkupdates(session, args):
     _run_detached(session, "checkupdates", apply)
 
 
+def _consolefeed_reply(session, on):
+    """The setting, said to whoever asked - same split as _checkupdates_reply
+    and for the same reason: dccore.mrc's options dialog reads the DCCORE
+    line, a person reads a sentence."""
+    if getattr(session, "structured", False):
+        return f"DCCORE CONSOLEFEED {'on' if on else 'off'}"
+    return (f"The console feed is {'on' if on else 'off'}"
+            f"{'' if on else ' - status still arrives, nothing else does'}.")
+
+
+def _cmd_consolefeed(session, args):
+    """Turn DEBUG_TO_CONSOLE on or off, or report it with no argument.
+
+    Found live (#1006 follow-up): an operator's dccore.mrc window kept
+    showing its STATUS burst - that one is unconditional once a session is
+    structured and authenticated - while REQUEST, SENDING, SENT and every
+    other feed line stayed silent, because DEBUG_TO_CONSOLE gates those in
+    announce.feed_event() and nothing said so. The window looking alive
+    while quietly missing everything else is a worse experience than the
+    window plainly saying why.
+
+    Written through settings_file.save() and a rehash, the same path
+    _cmd_checkupdates uses and for the same reason: a rehash re-reads
+    settings.conf, so the change survives a restart rather than holding
+    only until one.
+    """
+    arg = args.strip().lower()
+    if arg not in ("", "on", "off"):
+        session.send("Usage: consolefeed [on|off]")
+        return
+    if not arg:
+        session.send(_consolefeed_reply(session, getattr(config, "DEBUG_TO_CONSOLE", True)))
+        return
+    wanted = arg == "on"
+
+    def apply():
+        import settings_file
+        settings_file.save(vars(config), {"DEBUG_TO_CONSOLE": wanted})
+        import commands
+        commands.handle_rehash_request(session.nick, CONSOLE_SOURCE, authorised=True)
+        session.send(_consolefeed_reply(session, wanted))
+
+    session.send(f"Turning the console feed {'on' if wanted else 'off'} ...")
+    _run_detached(session, "consolefeed", apply)
+
+
 def _cmd_uptime(session, args):
     session.send(f"Running {format_uptime(_uptime_seconds())}")
 
@@ -1382,6 +1428,26 @@ def _cmd_hello(session, args):
     # the moment it is opened, rather than "unknown" until the operator
     # happens to run checkupdates themselves.
     session.send(f"DCCORE CHECKUPDATES {'on' if getattr(config, 'CHECK_FOR_UPDATES', True) else 'off'}")
+    # Same for the console feed itself (#1006 follow-up), and said again in
+    # plain text every time - not just once ever - because a window that
+    # only ever shows STATUS looks alive, not silenced, and an operator who
+    # never opens Options has no other way to learn why. This is the only
+    # `hello` line with a plain-text half: a checkbox no one has looked at
+    # yet is a quieter kind of "wrong" than an empty window is.
+    console_feed_on = getattr(config, "DEBUG_TO_CONSOLE", True)
+    session.send(f"DCCORE CONSOLEFEED {'on' if console_feed_on else 'off'}")
+    if not console_feed_on:
+        # The #1009 review: this used to point at "/dccore
+        # consolefeed on" (not a real /dccore subcommand - dccore.mrc's
+        # `alias dccore` had no branch for it, so it fell through to the
+        # help text) and "Settings > Console feed" (a different dashboard
+        # category - CONSOLE_SHOW_* and DEBUG_CHANNEL_FEED live there;
+        # DEBUG_TO_CONSOLE is under Debug & logging). Both now name
+        # something that actually works.
+        session.send("The console feed is off (Settings > Debug & logging > "
+                     "\"Send debug lines to admin console\", or /dccore consolefeed on): "
+                     "this window will keep showing STATUS, but no requests, sends, "
+                     "failures or searches until it is turned on.")
     # DCCore Chat (#371): the channels it can chat in, and what was said
     # while this window was away - from memory, never from disk.
     import serverschat
@@ -1514,6 +1580,7 @@ COMMANDS = {
     "version":    (_cmd_version,    "build and platform",                "version"),
     "checkversion": (_cmd_checkversion, "ask GitHub whether a newer DCCore is out", "checkversion"),
     "checkupdates": (_cmd_checkupdates, "turn the daily update check on/off, or report it", "checkupdates [on|off]"),
+    "consolefeed": (_cmd_consolefeed, "turn the console/dccore.mrc feed on/off, or report it", "consolefeed [on|off]"),
     "ban":        (_cmd_ban,        "add a permanent wildcard ban",      "ban <pattern>"),
     "unban":      (_cmd_unban,      "remove a permanent wildcard ban",   "unban <pattern>"),
     "clearqueue": (_cmd_clearqueue, "force-clear another user's queue",  "clearqueue <nick>"),

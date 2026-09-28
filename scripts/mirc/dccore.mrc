@@ -83,7 +83,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.6 }
+alias dccore.ver { return 1.7 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -233,6 +233,10 @@ alias dccore {
     return
   }
   if (%cmd == status) { dccore.send status | return }
+  ; The #1009 review: the hello-time warning told an operator
+  ; whose feed was off to run this, and it did not exist - there was no
+  ; %cmd branch for it, so it fell through to the help text instead.
+  if (%cmd == consolefeed) { dccore.send consolefeed $2- | return }
   if (%cmd == raw) { dccore.send $2- | return }
   if (%cmd == panel) { dccore.set panel $iif($2 == off,0,1) | dccore.rebuild | return }
   if (%cmd == version) { dccore.sys dccore.mrc $dccore.ver $+ , protocol 1. $+ $dccore.protominor $+ , for the DCCore it ships with and later. Pairs as $dccore.client $+ . $iif($dccore.opt(net),Bot on $dccore.opt(net) $+ .,) | return }
@@ -594,6 +598,12 @@ alias dccore.structured {
   ; read stale (from a different bot, or a setting changed elsewhere) if
   ; saved into dccore.ini.
   if (%type == CHECKUPDATES) { hadd dccore.live checkupdates $2 | return }
+  ; The bot's own DEBUG_TO_CONSOLE, sent after every HELLO and after
+  ; `consolefeed on|off` completes (#1006 follow-up). Same reasoning as
+  ; CHECKUPDATES above - it is the bot's state, kept in dccore.live, never
+  ; dccore.ini. The plain-text warning that goes with it when it is off
+  ; arrives as its own OUT line (#709's path), so it needs no handling here.
+  if (%type == CONSOLEFEED) { hadd dccore.live consolefeed $2 | return }
   ; DCCore Chat (#371): a line said in one of the bot's channels, and the
   ; channels it can chat in (after HELLO, and on `chat` with nothing after it).
   if (%type == CHAT) { dccore.chat.feed $2- | return }
@@ -1046,6 +1056,7 @@ menu @DCCore {
   Version:dccore.send version
   Check for a new version:dccore.send checkversion
   Daily update check $iif($dccore.st(checkupdates) == on,off,on):dccore.send checkupdates $iif($dccore.st(checkupdates) == on,off,on)
+  Console feed $iif($dccore.st(consolefeed) == on,off,on):dccore.send consolefeed $iif($dccore.st(consolefeed) == on,off,on)
   -
   $iif($dccore.selq,Queue of $dccore.selq):dccore.send queue $dccore.selq
   $iif($dccore.selq,Clear the queue of $dccore.selq):dccore.send clearqueue $dccore.selq
@@ -1150,7 +1161,7 @@ dialog dccore.opt {
   edit "", 402, 48 171 56 11, autohs
   text "", 403, 110 173 204 8
   check "Reconnect and log in by itself when the bot comes back", 404, 10 186 300 10
-  text "The bot's own Settings > Console feed is the ceiling on what is sent at all.", 405, 10 198 300 8
+  check "Console feed on (also requests and sends - not just status)", 405, 10 198 300 10
   check "Check GitHub for a new DCCore version", 406, 10 210 260 10
   box "DCCore Chat (public)", 600, 5 227 312 36
   check "Listen on every channel the bot is in, not only the ticked ones", 601, 10 237 300 10
@@ -1191,6 +1202,9 @@ on *:dialog:dccore.opt:init:0: {
   ; every time the bot says HELLO. Unknown (never told yet - a dialog
   ; opened in the instant after connecting) leaves it unchecked rather
   ; than guessing either way.
+  ; Same "unknown leaves it unchecked" reasoning as checkupdates just above -
+  ; dccore.live, never dccore.ini (#1006 follow-up).
+  if ($dccore.st(consolefeed) == on) { did -c dccore.opt 405 }
   if ($dccore.st(checkupdates) == on) { did -c dccore.opt 406 }
   if ($dccore.opt(chat.all)) { did -c dccore.opt 601 }
   if ($dccore.opt(chat.popup)) { did -c dccore.opt 602 }
@@ -1241,6 +1255,10 @@ on *:dialog:dccore.opt:sclick:1: {
   ; equals "off" - so OK pressed in that moment used to turn the check off.
   var %checkupdates = $iif($did(dccore.opt,406).state == 1,on,off)
   if ($dccore.st(checkupdates) != $null && %checkupdates != $dccore.st(checkupdates)) { dccore.send checkupdates %checkupdates }
+  ; consolefeed (#1006 follow-up): same "only when it actually disagrees,
+  ; and only once the bot has told us" reasoning as checkupdates above.
+  var %consolefeed = $iif($did(dccore.opt,405).state == 1,on,off)
+  if ($dccore.st(consolefeed) != $null && %consolefeed != $dccore.st(consolefeed)) { dccore.send consolefeed %consolefeed }
   if ($window($dccore.win)) {
     if (%panel != $dccore.opt(panel)) { dccore.rebuild }
     if ($dccore.opt(font)) { font $dccore.win $dccore.fontsize Lucida Console }
