@@ -2106,6 +2106,24 @@ def _is_private_address(ip):
     return address.is_private and not address.is_loopback
 
 
+def _is_the_operator(peer_ip, expected_ip, own_ip):
+    """Whether a connection to the console listener is the operator's.
+
+    No address was advertised (a passive request): the first peer, as ever.
+    The advertised address: yes (#680). A private one: only on a NAT hairpin
+    (#881) - when the address the operator advertised is the bot's own
+    public one, which is what a client behind the same router as the bot
+    knows for itself. #881 took any private address, and wherever the
+    source address is not the real client's - a proxy or container that
+    rewrites it, a LAN or private network shared with others - that let
+    whoever reached the port first take the one listener: the banner, the
+    password prompts, and the operator's own connect finding the port gone.
+    """
+    if not expected_ip or peer_ip == expected_ip:
+        return True
+    return bool(own_ip) and expected_ip == own_ip and _is_private_address(peer_ip)
+
+
 def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None):
     """The listener itself. Only ever called with _listening set, so at most
     one of these holds a port at a time.
@@ -2131,6 +2149,10 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None)
     global _listening
 
     ip_long = dcc.get_public_ip_long()
+    try:
+        own_ip = str(ipaddress.ip_address(int(ip_long))) if ip_long else None
+    except ValueError:
+        own_ip = None
     if not ip_long:
         print("[ADMINCHAT] Cannot offer a DCC CHAT: the bot's own public IP is unknown "
               "(config.MY_IP_OR_DOCK did not resolve).")
@@ -2167,12 +2189,14 @@ def _listen_and_serve_locked(irc_sock, nick, host, token=None, expected_ip=None)
             listener.settimeout(max(0.001, deadline - time.monotonic()))
             sock, addr = listener.accept()
             peer_ip = addr[0]
-            if not expected_ip or peer_ip == expected_ip or _is_private_address(peer_ip):
+            if _is_the_operator(peer_ip, expected_ip, own_ip):
                 break
             # Not the operator (#680): no banner, no prompt, and the window
             # is still open for the address the offer was made to.
+            why = (" (a private address is only taken when that is the bot's own public one: "
+                   "the same router)" if _is_private_address(peer_ip) else "")
             print(f"[ADMINCHAT] Dropped a connection from {peer_ip} on port {port}: "
-                  f"the DCC CHAT was offered to {nick} at {expected_ip}. Still waiting.")
+                  f"the DCC CHAT was offered to {nick} at {expected_ip}{why}. Still waiting.")
             try:
                 sock.close()
             except OSError:
