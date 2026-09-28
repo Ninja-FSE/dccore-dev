@@ -1975,10 +1975,20 @@ def note_join_seen(nick, now=None):
         return
     now = time.time() if now is None else now
     with runtime.bot_idents_lock:
+        # OLDEST FIRST, AND ONLY THE STALE ONES LOOKED AT (#981). This runs for
+        # every JOIN in every channel - a bot's new nick is not a known bot
+        # yet when it joins, and its join time is what #376 needs - and it
+        # used to walk the whole dict each time: a netjoin into big channels
+        # was quadratic on the read loop, with bot_idents_lock held. Popped
+        # and put back, a rejoin moves to the end, so the dict stays in the
+        # order of its times and the pruning stops at the first fresh one.
+        runtime.recent_joins.pop(key, None)
         runtime.recent_joins[key] = now
-        for gone in [k for k, at in runtime.recent_joins.items()
-                     if now - at > IDENT_MERGE_WINDOW_SECONDS]:
-            runtime.recent_joins.pop(gone, None)
+        while runtime.recent_joins:
+            oldest = next(iter(runtime.recent_joins))
+            if now - runtime.recent_joins[oldest] <= IDENT_MERGE_WINDOW_SECONDS:
+                break
+            del runtime.recent_joins[oldest]
 
 
 def note_bot_renamed(old_nick, new_nick, ident=None):

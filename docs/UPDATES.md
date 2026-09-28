@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Remembering joins costs the same per JOIN however many there were (#981)
+
+Audit 2026-09-27 L12. `irc.note_join_seen()` runs for every JOIN in every channel - it must: a bot back under a new
+nick is not in `known_bots` yet when it joins, and that join time is what #376's ident merge compares, so the
+suggested "known bots only" would have broken it. Each call walked all of `runtime.recent_joins` to drop entries
+older than `IDENT_MERGE_WINDOW_SECONDS`, under `bot_idents_lock` on the read loop: quadratic in a netjoin (10,000
+joins measured at 4.5 s). A join is now popped and put back, so the dict stays in the order of its times, and the
+pruning stops at the first entry still inside the window. Tests: `tests/test_a_netjoin_is_not_quadratic.py`, which
+counts the entries looked at rather than timing anything.
+
 ### 📦 An audio cache that cannot be saved does not fail a published rebuild (#980)
 
 Audit 2026-09-27 L11. `generate_master_list()` saves the audio-info cache (`audio.publish()`) after the swap and the
