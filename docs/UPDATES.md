@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The audio-info cache is kept under the list's own name (#979)
+
+Audit 2026-09-27 L10. `generate_master_list()` opened the audio cache with `scope=list_name or ""`, and
+`_generate_all_lists()` builds a lone list with no name but each of several by its name - so adding a second list
+moved the primary's scope from `""` to its name. Its whole cache missed at once: files were read again within
+`LIST_AUDIO_INFO_MINUTES` and the rest listed size-only for rebuilds, and the `""` rows, never used again, were never
+pruned. Removing the list flipped it back. The scope is now the list's name however the rebuild was asked for (the
+primary's, from `library.primary_list()`, when none is given), and new `Cache.open(formerly=...)` lets the primary
+take the old `""` rows over once - `UPDATE OR IGNORE` where its own scope has no row for the file, the rest dropped.
+Only the primary was ever built as `""`. Tests: `tests/test_the_audio_cache_scope_is_the_lists_own_name.py`.
+
 ### 📦 A request queued at another bot is asked again after a restart (#978)
 
 Audit 2026-09-27 L9. `_restart_form()` kept a "queued" row as it was (#926), but a restart QUITs and file servers
