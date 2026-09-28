@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Cancelling a request the other bot has queued says "Cancel" (#977)
+
+Audit 2026-09-27 L8. A fetch in the "queued" state (#926) - the other bot has queued our request and nothing has
+arrived - got the Downloads panel's remove button, but `data-pending` and the Cancel/Delete label tested
+`state === "pending"` alone, so it read "Delete" and the click asked "Delete this fetched file? This cannot be
+undone." about a file that did not exist. New `fetchRowNotStarted(state)` (pending or queued) sets both. Tests:
+`tests/test_cancelling_a_queued_request_says_cancel.py`.
+
 ### 📦 The version line and the Stats cards follow the language (#976)
 
 Audit 2026-09-27 L7. `loadVersion()` runs before `loadLanguage()`, and `renderVersion()` builds its text from `t()`

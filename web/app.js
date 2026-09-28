@@ -783,6 +783,14 @@
     "disk-full": "download.waiting.diskFull", joining: "download.waiting.joining"
   };
 
+  // Nothing has been downloaded for it yet: waiting here, or waiting in the
+  // other bot's queue (#977). A queued row was given the "Delete this
+  // fetched file? This cannot be undone." warning, about a file that did
+  // not exist.
+  function fetchRowNotStarted(state) {
+    return state === "pending" || state === "queued";
+  }
+
   function loadDownloads() {
     fetchJson("/api/fetch/status").then(function (rows) {
       markConnection(true);
@@ -933,10 +941,11 @@
                        state === "queued");
       // "Cancel" for a row that has not started - calling it Delete would
       // suggest a downloaded file is being thrown away when none exists.
+      var notStarted = fetchRowNotStarted(state);
       var deleteBtn = deletable
         ? "<button type=\"button\" class=\"btn btn-small btn-danger fetch-delete-btn\" data-request-id=\"" +
-          encodeURIComponent(row.id) + "\" data-pending=\"" + (state === "pending" ? "1" : "") + "\">" +
-          (state === "pending" ? t("common.cancel") : t("common.delete")) + "</button>"
+          encodeURIComponent(row.id) + "\" data-pending=\"" + (notStarted ? "1" : "") + "\">" +
+          (notStarted ? t("common.cancel") : t("common.delete")) + "</button>"
         : "";
       // ASK AGAIN, for a row that did not arrive. Requested: a failed or rejected
       // fetch is the one an operator most wants to retry, and the only way to
