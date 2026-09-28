@@ -4,6 +4,24 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A file too big for the free space waits for room instead of filling the disk again and again (#964)
+
+Audit 2026-09-27 M2. The dispatcher held fetching only while `FETCHED_FILES_DIR` had under `MIN_FREE_BYTES`
+(200 MB) free, and nothing compared an offer's size with the free space. A 1.5 GB pack offered with 1 GB free was
+accepted, hit ENOSPC, went back to pending (#926) and had its partial file removed - leaving 1 GB free again, not
+"low", so the next 2 s tick asked for it again. The other bot resent it, the disk filled to nothing again, and so on
+without end, with every other atomic write under the full disk (history, stats, known bots) failing each time round.
+
+`handle_incoming_offer()` now weighs the declared size against the room left - free space minus what the transfers
+already listening or receiving still have to write (`_room_left_locked()`), so two offers that each fit alone do not
+both go - before it connects or listens, as it does the size cap. An offer that does not fit with `MIN_FREE_BYTES` to
+spare is not taken: `_hold_for_space()` puts the row back to pending as it was asked (#963) with
+`row["needs_bytes"]`, `waiting="disk-full"` and a reason naming both sizes. The disk-full branch of `_run_transfer()`
+records the declared size the same way. The dispatcher keeps a row with `needs_bytes` waiting until it fits by the
+same test, measuring the disk only while such a row exists, and counts the room a released row will need so two
+held rows are not let go on the same room in one tick. A disk that cannot be measured holds nothing back, as before.
+`needs_bytes` survives a restart with the row. Tests: `tests/test_a_file_too_big_for_the_disk_waits_for_room.py`.
+
 ### 📦 A folder or list fetch asked for again asks for the folder or list (#963)
 
 Audit 2026-09-27 M1. A "folder" row goes out as `!Bot !rar <folder>` and a "list" row as `@Bot`; neither knows the
