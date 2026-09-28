@@ -272,8 +272,9 @@ class TheVersionIsBumped(unittest.TestCase):
     def test_dccore_ver_moved_on_from_913(self):
         text = script()
         # 1.4 for the checkbox, 1.5 for its guard before the bot has spoken,
-        # 1.6 for DCCore Chat (#371) - moved on from 913's, never back.
-        self.assertIn("alias dccore.ver { return 1.6 }", text)
+        # 1.6 for DCCore Chat (#371), 1.7 for the console feed's own
+        # checkbox (#1006 follow-up) - moved on from 913's, never back.
+        self.assertIn("alias dccore.ver { return 1.7 }", text)
 
 
 class TheMenuHasAToggleToo(unittest.TestCase):
