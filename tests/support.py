@@ -121,6 +121,7 @@ RUNTIME_CONTAINERS = {
     "chat_muted": dict,
     "chat_peers": dict,
     "chat_peers_meta": dict,
+    "chat_who_round": dict,
     # Same reasoning: a leftover is one test's message showing up in the next
     # test's panel.
     "private_messages": list,

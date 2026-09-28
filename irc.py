@@ -2049,10 +2049,30 @@ def _note_chat_peers(line):
     serverschat.note_who_reply(line)
 
 
+_END_OF_WHO = re.compile(r"^:\S+\s+315\s+\S+\s+(\S+)\s+:")
+
+
+@never_breaks_the_read_loop
+def _finish_chat_who_round(line):
+    """A 315 (End of /WHO list): whoever this round did not reconfirm for
+    that channel is gone from it - see serverschat.finish_who_round()."""
+    found = _END_OF_WHO.match(str(line or "").strip())
+    if not found:
+        return
+    import serverschat
+    serverschat.finish_who_round(found.group(1))
+
+
 @never_breaks_the_read_loop
 def _forget_chat_peer(nick, chan=None):
     import serverschat
     serverschat.note_gone(nick, chan)
+
+
+@never_breaks_the_read_loop
+def _note_chat_join(nick, chan):
+    import serverschat
+    serverschat.note_join(nick, chan)
 
 
 @never_breaks_the_read_loop
@@ -2961,6 +2981,13 @@ def irc_loop():
                         try:
                             s.sendall(b"PING :lagcheck\r\n")
                             last_ping_sent = now
+                            # #982 audit finding 2: the server's own PING was
+                            # the only clock refresh_peers() had. ircu pings a
+                            # client only after ~90s of silence FROM it - and
+                            # this keepalive fires at 45s, so the server always
+                            # hears from us first and never sends one. Without
+                            # this, WHO was never asked automatically at all.
+                            _refresh_chat_peers()
                         except Exception as ping_err:
                             print(f"[TIMEOUT] The keepalive PING did not get through ({ping_err}). Dropping the link to reconnect.")
                             try: s.close()
@@ -3312,6 +3339,16 @@ def irc_loop():
                             config.activation_triggered = True
                             print(f"[INFO] All channels joined successfully! Waiting 5 seconds for settle...")
                             threading.Thread(target=delayed_activate, daemon=True).start()
+                            # DCCore Chat (#371 follow-up): NAMES (353/366)
+                            # gives nicknames only, never a realname - so
+                            # this is the earliest point a WHO round can
+                            # actually find a peer. Without this, the first
+                            # one waited for the keepalive or the advert
+                            # thread, both minutes away. Not forced: a
+                            # rehash-triggered rejoin still respects
+                            # WHO_EVERY, so it does not re-ask right after a
+                            # round that already ran.
+                            _refresh_chat_peers()
 
 
 
@@ -3355,6 +3392,11 @@ def irc_loop():
                             config.whois_status[target_nick] = True
                             while len(config.whois_status) > WHOIS_STATUS_MAX:
                                 config.whois_status.pop(next(iter(config.whois_status)))
+                    # DCCore Chat (#371 follow-up): the WHO round refresh_peers()
+                    # opened for this channel is done - reconcile who it actually
+                    # found against who we thought was still there.
+                    if is_server_numeric(line, "315"):
+                        _finish_chat_who_round(line)
                     # Anchored: this populates config.channel_users, which dcc.py treats as
                     # proof a user is present when deciding whether to thaw a frozen queue
                     # and dispatch to them. A forged line injected fake presence.
@@ -3430,6 +3472,12 @@ def irc_loop():
                             note_possible_reconnect(joined_user)
                             # #376 option B: when this nick appeared.
                             note_join_seen(joined_user)
+                            # DCCore Chat: a stranger joining might be a
+                            # DCCore bot reconnecting - ask WHO for just this
+                            # one nick rather than wait up to WHO_EVERY.
+                            # Already-known peers are skipped inside
+                            # note_join() itself.
+                            _note_chat_join(joined_user, joined_chan)
 
                             # One pop, not `in` then `del`. Between the two, the
                             # freeze sweep in check_queue_and_send() - which runs
