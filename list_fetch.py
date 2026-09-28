@@ -1113,6 +1113,13 @@ def process_fetched_list_zip(bot, zip_path):
         entry = (getattr(config, "fetched_bot_lists", {}) or {}).get(str(bot).strip().lower())
         count = int((entry or {}).get("entry_count") or 0) if isinstance(entry, dict) else 0
         _tell_the_console(bot, "arrived", f"{bot}'s list arrived: {count:,} files")
+        # Automatic grabbing starts this bot over (#967). Never raises into
+        # a list that has already been stored.
+        try:
+            import list_grab
+            list_grab.note_list_arrived(bot)
+        except Exception as err:
+            print(f"[LIST-FETCH] Could not reset {bot}'s automatic grab record: {err}")
     else:
         _tell_the_console(bot, "unusable",
                           f"{bot}'s list could not be used" + (f": {reason}" if reason else ""))
