@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A passive offer for a queued request waits for a free fetch slot
+
+Audit 2026-09-27, held until v1.13.2 shipped. A row queued at another bot holds no fetch slot (#926), so the
+dispatcher asks other bots meanwhile, and `_claim_matching_offer_locked()` admits the queued row's offer whenever its
+turn comes - refusing it would throw its place in that queue away. `handle_incoming_offer()` never checked the slots
+for it, so offers for rows queued at several bots arriving together all went ahead: past `MAX_FETCH_SLOTS`, and for a
+PASSIVE offer each one a listener in the DCC port range the bot's own sends to its users share. Now, once the claim
+has taken a row that was queued, a passive offer is not listened for while `count_active_fetches()` is past
+`MAX_FETCH_SLOTS`: the row goes back to pending, as asked (#963), and the dispatcher asks for it again once a slot
+is free. An active offer, which costs no port, is still admitted there, so a queued place is not lost; it can still
+take the fetches past `MAX_FETCH_SLOTS`, bounded by `FETCH_MAX_PER_BOT` per bot. An offered row brings its own slot
+and is unchanged. Tests: `tests/test_a_queued_passive_offer_waits_for_a_slot.py`.
+
 ### 📦 The DCCore window's button keeps its colour, and the panel is not repeated in the text (#1013)
 
 Seen live: the @DCCore button turned red for a new line (#892) and went black again before anybody looked. Every
