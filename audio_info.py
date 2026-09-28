@@ -370,7 +370,16 @@ class Cache:
         """Read what note() put aside, `workers` at a time. With `budget`
         (seconds), no read is STARTED after it runs out - the ones in flight
         finish - and the rest are left for the next rebuild. `progress(done,
-        total)` is called as reads complete, at least once a second."""
+        total)` is called once at the start and then only when a read has
+        completed (#968).
+
+        ONLY REAL PROGRESS IS REPORTED. The rebuild's watchdog stops a child
+        whose progress file has not moved for LIST_UPDATE_STALL_SECONDS.
+        Called every second whether anything finished or not, this kept it
+        moving while every read hung on a network mount that had stopped
+        answering: the budget only stops NEW reads, the pool waits for the
+        stuck ones, and the rebuild never ended - and every later !update
+        was refused as already running, until a restart."""
         total = len(self.pending)
         if not total:
             return
@@ -398,6 +407,9 @@ class Cache:
                     running[pool.submit(self.reader, path, size)] = (key, size)
 
             top_up()
+            reported = 0
+            if progress is not None:
+                progress(0, total)
             while running:
                 finished, _ = wait(running, timeout=1.0, return_when=FIRST_COMPLETED)
                 for future in finished:
@@ -410,7 +422,8 @@ class Cache:
                     self.sizes[key] = size
                     self.fresh[key] = (size, suffix)
                     done += 1
-                if progress is not None:
+                if progress is not None and done != reported:
+                    reported = done
                     progress(done, total)
                 top_up()
 

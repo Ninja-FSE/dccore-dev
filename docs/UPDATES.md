@@ -4,6 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A hung audio read is a stall the watchdog can see (#968)
+
+Audit 2026-09-27 M6. `audio_info.Cache.read_pending()` called `progress(done, total)` after every one-second
+`wait()`, whether a read had finished or not, and the rebuild wires that to `write_progress("audio", ...)`, which
+stamps `at`. When a network mount (NFS, an rclone/FUSE share) stopped answering, every read in flight blocked, but
+the progress file kept moving: `commands.run_watching_for_a_stall()` never saw a stall, `LIST_AUDIO_INFO_MINUTES`
+only stops new reads, and the pool waited for the stuck ones. The rebuild child never exited,
+`config.update_inprogress` stayed set, and every later `!update` or scheduled rebuild was refused until a restart.
+The same hang in the scan phase was already stopped after `LIST_UPDATE_STALL_SECONDS`.
+
+Progress is now reported once when the phase starts and then only when `done` has moved, so a phase in which nothing
+completes goes quiet and the watchdog stops it as it does a stuck scan. Test:
+`tests/test_a_hung_audio_read_is_a_stall.py` drives the loop's waits by hand - five empty seconds, then the read
+completes - and checks exactly the start and the one read were reported.
+
 ### 📦 A refused automatic grab is not a try, and a list that arrives starts the count over (#967)
 
 Audit 2026-09-27 M5. `list_grab.tick()` added one to the bot's tries and saved it before calling
