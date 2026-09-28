@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A fetch queued while the dispatcher looked around waits for the next tick (#970)
+
+Audit 2026-09-27 L1. `check_fetch_queue()` notes the bots with pending rows under `_fetch_lock()`, reads their
+presence, pauses and the disk outside it, and takes the lock again to promote. A row enqueued in between was not in
+`readiness`, and `readiness.get(key, "")` counted it ready: it went to a bot the operator had just paused, or - when
+nothing else had been pending, so `disk_low` was never computed - onto a disk under `MIN_FREE_BYTES`. The promotion
+loop now skips a bot this tick did not look at (the next tick, two seconds on, does), and checks `_paused` itself as
+well, for a pause that lands after the readiness was read. Tests:
+`tests/test_a_row_enqueued_mid_tick_waits_for_the_next.py`, which act inside the gap rather than racing it.
+
 ### 📦 One nick cannot keep the library scans to itself (#969)
 
 Audit 2026-09-27 M7. A request for a name that is not in a folder's root streams every published list and walks
