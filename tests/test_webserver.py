@@ -3205,6 +3205,55 @@ class SettingsPayloadTests(DCCoreTestCase):
         release.set()
         self.assertTrue(finished.wait(timeout=10), "the dispatched rehash never completed")
 
+    def test_confirm_debug_channel_removed_is_not_written_as_a_setting(self):
+        """#1008 follow-up: it is a signal to sync_channels(), popped out
+        before `changes` ever reaches settings_file.save() - never a literal
+        DEBUG_CHANNEL_CONFIRM-style entry in settings.conf, and never
+        rejected the way an actually-unknown setting name would be."""
+        status, result = webserver.apply_settings_changes(
+            {"MAX_DCC_SLOTS": "9", "confirm_debug_channel_removed": True})
+        self.assertEqual(status, 200)
+        self.assertNotIn("confirm_debug_channel_removed", result["written"])
+        with io.open(self.settings_path, encoding="utf-8") as handle:
+            self.assertNotIn("confirm_debug_channel_removed", handle.read().lower())
+
+    def test_the_flag_reaches_the_rehash_as_its_own_argument(self):
+        captured = {}
+        called = threading.Event()
+        real_rehash = commands.handle_rehash_request
+
+        def capture_rehash(*args, **kwargs):
+            captured["kwargs"] = kwargs
+            called.set()
+
+        commands.handle_rehash_request = capture_rehash
+        self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
+
+        status, _result = webserver.apply_settings_changes(
+            {"DEBUG_CHANNEL": "", "confirm_debug_channel_removed": True})
+
+        self.assertEqual(status, 200)
+        self.assertTrue(called.wait(timeout=10), "the rehash thread never started")
+        self.assertEqual(captured["kwargs"].get("confirmed_debug_removal"), True)
+
+    def test_the_flag_defaults_to_false(self):
+        captured = {}
+        called = threading.Event()
+        real_rehash = commands.handle_rehash_request
+
+        def capture_rehash(*args, **kwargs):
+            captured["kwargs"] = kwargs
+            called.set()
+
+        commands.handle_rehash_request = capture_rehash
+        self.addCleanup(setattr, commands, "handle_rehash_request", real_rehash)
+
+        status, _result = webserver.apply_settings_changes({"MAX_DCC_SLOTS": "9"})
+
+        self.assertEqual(status, 200)
+        self.assertTrue(called.wait(timeout=10), "the rehash thread never started")
+        self.assertEqual(captured["kwargs"].get("confirmed_debug_removal"), False)
+
     def test_apply_settings_changes_rejects_the_password_hash_directly(self):
         status, result = webserver.apply_settings_changes({"ADMIN_PASSWORD_HASH": "x"})
         self.assertEqual(status, 400)
