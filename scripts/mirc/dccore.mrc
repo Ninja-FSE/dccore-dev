@@ -83,7 +83,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.7 }
+alias dccore.ver { return 1.8 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -611,11 +611,27 @@ alias dccore.structured {
   if (%type == PEERS) { dccore.chat.peerline $2- | return }
   if (%type == SLOT) { hadd dccore.live slot. $+ $dccore.st(nslots) $2- | hinc dccore.live nslots | dccore.panel.soon | return }
   if (%type == QUEUE) { hadd dccore.live queue. $+ $2 $3- | dccore.panel.soon | return }
+  ; <bot> <received> <total> <bps> <name>: one file the bot is leeching now
+  ; (#1019), part of the same burst as SLOT; the panel's Downloading section.
+  if (%type == FETCHING) { hadd dccore.live fetch. $+ $dccore.st(nfetch) $2- | hinc dccore.live nfetch | dccore.panel.soon | return }
   if (%type == OUT) { dccore.out $2- | return }
   if (%type == LISTFETCH) {
     ; <bot> <auto|arrived|unusable> <text>: a held bot list asked for again,
     ; arrived, or not usable. The text already names the bot.
     dccore.msg $dccore.tag(LISTS,search) $4-
+    return
+  }
+  if (%type == FETCH) {
+    ; <bot> <asked|queued|receiving|done|failed> <text>: a file the bot itself
+    ; is leeching from another bot (#1019). The text already names the bot and
+    ; the file. Shown under the "sends" tickbox, a failure under "failures".
+    if ($3 == failed) {
+      if (!$dccore.opt(show.fail)) { return }
+      dccore.alert $dccore.tag(FETCH,fail) $4-
+      return
+    }
+    if (!$dccore.opt(show.sends)) { return }
+    dccore.msg $dccore.tag(FETCH,sends) $4-
     return
   }
   if (%type == TAKEN) {
@@ -714,7 +730,9 @@ alias dccore.status {
   ; the SLOT and QUEUE lines of this burst follow at once; start afresh
   hdel -w dccore.live slot.*
   hdel -w dccore.live queue.*
+  hdel -w dccore.live fetch.*
   hadd dccore.live nslots 1
+  hadd dccore.live nfetch 1
   dccore.title
   dccore.panel.soon
   ; Not while the side panel is shown (#1013): it carries the same figures,
@@ -956,6 +974,22 @@ alias dccore.panel {
   }
   if (%used < %slots) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp ( $+ $calc(%slots - %used) free) }
   aline -l 14 $dccore.win $dccore.nbsp
+  ; Downloading (#1019): what the bot itself is leeching from other bots. Only
+  ; drawn while something is; a row starts with "<" (Sending's start with ">",
+  ; which dccore.sels reads).
+  if ($dccore.st(fetch.1) != $null) {
+    var %nf = $calc($dccore.st(nfetch) - 1)
+    aline -l %head $dccore.win Downloading %nf
+    var %i = 1
+    while ($dccore.st(fetch. $+ %i) != $null) {
+      var %l = $dccore.st(fetch. $+ %i)
+      ; <bot> <received> <total> <bps> <name>
+      var %pct = $iif($gettok(%l,3,32) > 0,$int($calc($gettok(%l,2,32) * 100 / $gettok(%l,3,32))),0)
+      aline -l $dccore.opt(col.sends) $dccore.win < $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9)
+      inc %i
+    }
+    aline -l 14 $dccore.win $dccore.nbsp
+  }
   aline -l %head $dccore.win Queue $dccore.st(st.qusers) $iif($dccore.st(st.qfiles) > 0,( $+ $dccore.st(st.qfiles) files))
   var %i = 1
   while ($dccore.st(queue. $+ %i) != $null) {

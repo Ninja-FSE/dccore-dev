@@ -803,7 +803,8 @@ def _restart_form(row):
         row.update(state="pending", offered_at=None, bytes_received=0)
         _as_asked(row)
         # Where it stood in the other bot's queue is theirs to say again.
-        for volatile in ("listening_since", "queued_at", "queue_position", "reply"):
+        for volatile in ("listening_since", "queued_at", "queue_position", "reply",
+                         "receiving_since"):
             row.pop(volatile, None)
     return row
 
@@ -1298,6 +1299,87 @@ def check_fetch_queue():
         print(f"[FETCH] Requested {log_desc} (request {rid}).")
 
 
+# THE FETCH FEED (#1019). A file leeched from another bot used to reach the
+# log and the Downloads page and nothing else: the @DCCore window told the
+# operator about every send, request and search, and said nothing about what
+# the bot itself took. The rows already record every step, so this watches
+# them change instead of adding a call beside each of the dozen places that
+# move one - a refusal, an expiry, a refused list zip and a finished
+# transfer all end up as a state on a row.
+#
+# What was last told, by request id. The first pass only records: rows read
+# back from FETCH_HISTORY_FILE at startup are old news, and telling all of
+# them as "done" would fill the window every restart.
+_fetch_feed_told = {}
+_fetch_feed_seeded = [False]
+
+_FETCH_FEED_STATES = ("offered", "queued", "receiving", "complete", "failed")
+
+
+def _fetch_feed_name(row):
+    name = row.get("filename") or row.get("requested_filename") or ""
+    if str(name).startswith("!rar "):
+        name = str(name)[5:]
+    return str(name)
+
+
+def _fetch_feed_event(row):
+    """(action, prose) for the state a row is in, or None when it is one the
+    feed does not tell (a wait, a list - lists have their own LISTFETCH)."""
+    import announce
+    state = row.get("state")
+    bot = row.get("bot") or "?"
+    name = _fetch_feed_name(row)
+    if state == "offered":
+        return "asked", f'Asked {bot} for "{name}"'
+    if state == "queued":
+        position = row.get("queue_position")
+        where = f" at #{position}" if position else ""
+        return "queued", f'{bot} put "{name}" in its queue{where}'
+    if state == "receiving":
+        size = row.get("total_size")
+        sized = f" ({announce.format_size_human(size)})" if size else ""
+        return "receiving", f'Receiving "{name}" from {bot}{sized}'
+    if state == "complete":
+        if row.get("list_processing_error"):
+            return None
+        got = announce.format_size_human(row.get("bytes_received") or 0)
+        return "done", f'Fetched "{name}" from {bot} ({got})'
+    if state == "failed":
+        return "failed", f'Fetch failed: "{name}" from {bot} - {row.get("reason") or "no reason given"}'
+    return None
+
+
+def tell_the_fetch_feed():
+    """Send one FETCH feed line for every row whose state moved since the last
+    call. Never raises: a console that cannot be told must not stop the
+    dispatcher. Called from fetch_dispatcher_worker(), outside the fetch
+    lock, so a slow console never holds it."""
+    try:
+        import announce
+        queue = _ensure_fetch_queue()
+        with _fetch_lock():
+            snapshot = {rid: dict(row) for rid, row in queue.items()}
+        seeded = _fetch_feed_seeded[0]
+        _fetch_feed_seeded[0] = True
+        for rid in [rid for rid in _fetch_feed_told if rid not in snapshot]:
+            del _fetch_feed_told[rid]
+        for rid, row in sorted(snapshot.items(), key=lambda kv: kv[1].get("requested_at", 0)):
+            state = row.get("state")
+            if _fetch_feed_told.get(rid) == state:
+                continue
+            _fetch_feed_told[rid] = state
+            if not seeded or row.get("request_type") == "list" or state not in _FETCH_FEED_STATES:
+                continue
+            event = _fetch_feed_event(row)
+            if event is None:
+                continue
+            action, text = event
+            announce.feed_event("FETCH", text, bot=row.get("bot"), action=action)
+    except Exception as feed_err:
+        print(f"[FETCH] Could not tell the console about a fetch: {feed_err}")
+
+
 def fetch_dispatcher_worker():
     """Small dedicated background loop, started as a daemon thread from
     oserve.startup() alongside queue_mgr.queue_worker. Kept separate rather
@@ -1311,6 +1393,7 @@ def fetch_dispatcher_worker():
             check_fetch_queue()
         except Exception as dispatch_err:
             print(f"[FETCH] Dispatcher loop error: {dispatch_err}")
+        tell_the_fetch_feed()
         time.sleep(2.0)
 
 
@@ -2224,6 +2307,8 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     total_size = offer["size"]
     dest_path = os.path.join(dest_dir, stored_name)
     wall_deadline = time.time() + float(_fetch_transfer_timeout(row.get("request_type")))
+    # For the panel's Downloading speed (#1019); this transfer's own clock.
+    row["receiving_since"] = time.time()
 
     try:
         os.makedirs(platform_compat.long_path(dest_dir), exist_ok=True)

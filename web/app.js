@@ -180,6 +180,12 @@
     broadcastBody:       document.getElementById("broadcast-body"),
     downloadSelectedBtn: document.getElementById("download-selected-btn"),
     downloadsBody:       document.getElementById("downloads-body"),
+    downloadsPageSize:   document.getElementById("downloads-pagesize"),
+    downloadsPrev:       document.getElementById("downloads-prev"),
+    downloadsNext:       document.getElementById("downloads-next"),
+    downloadsPageInfo:   document.getElementById("downloads-pageinfo"),
+    downloadsClearComplete: document.getElementById("downloads-clear-complete"),
+    downloadsClearFailed:   document.getElementById("downloads-clear-failed"),
     bulkFetchForm:       document.getElementById("bulk-fetch-form"),
     bulkFetchTextarea:   document.getElementById("bulk-fetch-textarea"),
     bulkFetchErrors:     document.getElementById("bulk-fetch-errors"),
@@ -898,11 +904,162 @@
     });
   });
 
-  function renderDownloads(rows) {
-    if (!rows.length) {
+  // Sort, page size and page (#1019). The rows are all here already (the server
+  // keeps at most FETCH_HISTORY_MAX_ROWS finished ones), so this is done on the
+  // page and needs no new request. The choice is remembered per browser.
+  var DOWNLOADS_SORT_KEY = "dccore-downloads-sort";
+  var DOWNLOADS_PAGE_SIZE_KEY = "dccore-downloads-page-size";
+  var DOWNLOADS_PAGE_SIZES = [10, 15, 20, 50, 100];
+  // Running ones first when sorted by state, then waiting, then finished.
+  var DOWNLOAD_STATE_RANK = {
+    receiving: 0, listening: 1, offered: 2, queued: 3, pending: 4,
+    failed: 5, rejected: 6, complete: 7
+  };
+
+  function readStored(key) {
+    try { return localStorage.getItem(key); } catch (err) { return null; }
+  }
+  function writeStored(key, value) {
+    try { localStorage.setItem(key, value); } catch (err) { /* not remembered */ }
+  }
+
+  state.downloadSort = { key: "", dir: 1 };
+  state.downloadPage = 0;
+  state.downloadPageSize = 15;
+  (function restoreDownloadsView() {
+    var size = parseInt(readStored(DOWNLOADS_PAGE_SIZE_KEY), 10);
+    if (DOWNLOADS_PAGE_SIZES.indexOf(size) !== -1) { state.downloadPageSize = size; }
+    var parts = String(readStored(DOWNLOADS_SORT_KEY) || "").split(":");
+    if (["bot", "file", "state", "progress"].indexOf(parts[0]) !== -1 &&
+        (parts[1] === "asc" || parts[1] === "desc")) {
+      state.downloadSort = { key: parts[0], dir: parts[1] === "asc" ? 1 : -1 };
+    }
+    el.downloadsPageSize.value = String(state.downloadPageSize);
+  })();
+
+  function downloadDisplayState(row) {
+    return row.list_processing_error ? "rejected" : (row.state || "pending");
+  }
+
+  function downloadSortValue(row, key) {
+    if (key === "bot") { return String(row.bot || "").toLowerCase(); }
+    if (key === "file") {
+      return String(row.filename || row.requested_filename || row.bot || "").toLowerCase();
+    }
+    if (key === "state") {
+      var rank = DOWNLOAD_STATE_RANK[downloadDisplayState(row)];
+      return rank === undefined ? 99 : rank;
+    }
+    return row.total_size ? (row.bytes_received || 0) / row.total_size : (row.bytes_received || 0);
+  }
+
+  // The server sends newest first; equal values keep that order.
+  function sortedDownloads(rows) {
+    var sort = state.downloadSort;
+    if (!sort.key) { return rows; }
+    return rows.map(function (row, index) { return { row: row, index: index }; })
+      .sort(function (a, b) {
+        var left = downloadSortValue(a.row, sort.key);
+        var right = downloadSortValue(b.row, sort.key);
+        if (left < right) { return -sort.dir; }
+        if (left > right) { return sort.dir; }
+        return a.index - b.index;
+      })
+      .map(function (item) { return item.row; });
+  }
+
+  function renderDownloadsControls(total, pages, finishedCounts) {
+    var sort = state.downloadSort;
+    Array.prototype.forEach.call(document.querySelectorAll("#downloads-table th[data-sort-col]"), function (th) {
+      th.setAttribute("aria-sort", th.getAttribute("data-sort-col") === sort.key
+        ? (sort.dir === 1 ? "ascending" : "descending") : "none");
+    });
+    el.downloadsPrev.disabled = state.downloadPage <= 0;
+    el.downloadsNext.disabled = state.downloadPage >= pages - 1;
+    el.downloadsPageInfo.textContent = total
+      ? t("download.pageOf").replace("{page}", state.downloadPage + 1)
+          .replace("{pages}", pages).replace("{count}", total)
+      : "";
+    el.downloadsClearComplete.textContent =
+      t("download.clearComplete").replace("{count}", finishedCounts.complete);
+    el.downloadsClearFailed.textContent =
+      t("download.clearFailed").replace("{count}", finishedCounts.failed);
+    el.downloadsClearComplete.disabled = !finishedCounts.complete;
+    el.downloadsClearFailed.disabled = !finishedCounts.failed;
+  }
+
+  function clearDownloads(which, count) {
+    if (!count || !window.confirm(t("download.confirmClear").replace("{count}", count))) { return; }
+    postJson("/api/fetch/clear", { which: which }).then(function (res) {
+      if (!res.ok) {
+        window.alert(t("download.couldNotClear").replace("{error}",
+          (res.data && res.data.error) || ("HTTP " + res.status)));
+        return;
+      }
+      loadDownloads();
+    }).catch(function (err) {
+      window.alert(t("download.couldNotClear").replace("{error}", err.message));
+    });
+  }
+
+  function redrawDownloads() { renderDownloads(state.downloads || []); }
+
+  Array.prototype.forEach.call(document.querySelectorAll("#downloads-table .sort-btn"), function (button) {
+    button.addEventListener("click", function () {
+      var key = button.getAttribute("data-sort");
+      var sort = state.downloadSort;
+      // Ascending, then descending, then back to the server's newest-first.
+      if (sort.key !== key) { state.downloadSort = { key: key, dir: 1 }; }
+      else if (sort.dir === 1) { state.downloadSort = { key: key, dir: -1 }; }
+      else { state.downloadSort = { key: "", dir: 1 }; }
+      writeStored(DOWNLOADS_SORT_KEY, state.downloadSort.key
+        ? state.downloadSort.key + ":" + (state.downloadSort.dir === 1 ? "asc" : "desc") : "");
+      state.downloadPage = 0;
+      redrawDownloads();
+    });
+  });
+  el.downloadsPageSize.addEventListener("change", function () {
+    var size = parseInt(el.downloadsPageSize.value, 10);
+    if (DOWNLOADS_PAGE_SIZES.indexOf(size) === -1) { return; }
+    state.downloadPageSize = size;
+    writeStored(DOWNLOADS_PAGE_SIZE_KEY, String(size));
+    state.downloadPage = 0;
+    redrawDownloads();
+  });
+  el.downloadsPrev.addEventListener("click", function () {
+    state.downloadPage = Math.max(0, state.downloadPage - 1);
+    redrawDownloads();
+  });
+  el.downloadsNext.addEventListener("click", function () {
+    state.downloadPage += 1;
+    redrawDownloads();
+  });
+  el.downloadsClearComplete.addEventListener("click", function () {
+    clearDownloads("complete", (state.downloads || []).filter(function (row) {
+      return row.state === "complete";
+    }).length);
+  });
+  el.downloadsClearFailed.addEventListener("click", function () {
+    clearDownloads("failed", (state.downloads || []).filter(function (row) {
+      return row.state === "failed";
+    }).length);
+  });
+
+  function renderDownloads(allRows) {
+    var finishedCounts = { complete: 0, failed: 0 };
+    allRows.forEach(function (row) {
+      if (row.state === "complete") { finishedCounts.complete += 1; }
+      else if (row.state === "failed") { finishedCounts.failed += 1; }
+    });
+    var pages = Math.max(1, Math.ceil(allRows.length / state.downloadPageSize));
+    if (state.downloadPage > pages - 1) { state.downloadPage = pages - 1; }
+    renderDownloadsControls(allRows.length, pages, finishedCounts);
+    if (!allRows.length) {
       el.downloadsBody.innerHTML = emptyRow(5, t("download.nothingQueued"));
       return;
     }
+    var start = state.downloadPage * state.downloadPageSize;
+    var rows = sortedDownloads(allRows).slice(start, start + state.downloadPageSize);
     el.downloadsBody.innerHTML = rows.map(function (row) {
       var state = row.state || "pending";
       // dcc_fetch.py records a refused list archive on the row explicitly

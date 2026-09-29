@@ -209,14 +209,44 @@
       </div>
 
       <h2 class="panel-title" data-i18n="download.panelTitle">Downloads (fetched from other bots)</h2>
+      <!-- #1019: how many rows to draw, which page, and a way to empty the
+           finished ones without a Delete click per row. Clearing forgets the
+           list; the files stay on disk. -->
+      <div class="downloads-toolbar">
+        <label class="downloads-pagesize">
+          <span data-i18n="download.perPage">Per page</span>
+          <select id="downloads-pagesize" class="search-input">
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <span class="downloads-pager">
+          <button type="button" class="btn btn-small" id="downloads-prev" disabled
+                  data-i18n-title="download.prevPage" title="Previous page">&lsaquo;</button>
+          <span id="downloads-pageinfo" class="col-dim"></span>
+          <button type="button" class="btn btn-small" id="downloads-next" disabled
+                  data-i18n-title="download.nextPage" title="Next page">&rsaquo;</button>
+        </span>
+        <span class="downloads-clear">
+          <button type="button" class="btn btn-small btn-danger" id="downloads-clear-complete" disabled
+                  data-i18n-title="download.clearTitle"
+                  title="Forget the finished downloads in this list. The files stay on disk.">Clear downloaded</button>
+          <button type="button" class="btn btn-small btn-danger" id="downloads-clear-failed" disabled
+                  data-i18n-title="download.clearTitle"
+                  title="Forget the failed downloads in this list. The files stay on disk.">Clear failed</button>
+        </span>
+      </div>
       <div class="table-wrap">
         <table class="data-table" id="downloads-table">
           <thead>
             <tr>
-              <th data-i18n="common.bot">Bot</th>
-              <th data-i18n="common.file">File</th>
-              <th data-i18n="common.state">State</th>
-              <th data-i18n="common.progress">Progress</th>
+              <th data-sort-col="bot" aria-sort="none"><button type="button" class="sort-btn" data-sort="bot"><span data-i18n="common.bot">Bot</span></button></th>
+              <th data-sort-col="file" aria-sort="none"><button type="button" class="sort-btn" data-sort="file"><span data-i18n="common.file">File</span></button></th>
+              <th data-sort-col="state" aria-sort="none"><button type="button" class="sort-btn" data-sort="state"><span data-i18n="common.state">State</span></button></th>
+              <th data-sort-col="progress" aria-sort="none"><button type="button" class="sort-btn" data-sort="progress"><span data-i18n="common.progress">Progress</span></button></th>
               <th></th>
             </tr>
           </thead>

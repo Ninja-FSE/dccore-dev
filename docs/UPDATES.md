@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The Downloads page sorts, pages and clears; @DCCore shows what the bot downloads (#1019)
+
+Asked for by an operator who leeches a lot. **Dashboard:** the Downloads and Failed columns sort (click a header again
+to flip it), the table pages at 10/15/20/50/100 rows (the choice and the sort are remembered per browser), and two
+Clear buttons forget the downloaded rows or the failed ones at once - `POST /api/fetch/clear` with `which` =
+`finished`, `complete` or `failed`. Only finished rows go; anything pending, queued or in flight stays, and the files
+stay on disk (a row's own Delete still removes one). **dccore.mrc 1.8:** a `DCCORE FETCH <bot> <action>` line for each
+step of a file the bot leeches (asked, queued at that bot, receiving, done, failed), drawn under the *sends* tickbox
+and a failure under *failures*; and a Downloading section in the side panel, under Sending, from a new `DCCORE
+FETCHING` line per file in the status burst (bytes, size and speed from the transfer's own clock). The FETCH lines
+come from `dcc_fetch.tell_the_fetch_feed()`, which watches the rows change from the dispatcher loop instead of hooking
+each place that moves one; the first pass only records, so a restart does not replay the history. A script older than
+1.8 is never sent FETCHING, which it would print as text. Tests: `tests/test_the_downloads_page_and_the_fetch_feed.py`.
+
 ### 📦 A passive offer for a queued request waits for a free fetch slot
 
 Audit 2026-09-27, held until v1.13.2 shipped. A row queued at another bot holds no fetch slot (#926), so the

@@ -582,5 +582,14 @@
   "setup.error.password_mismatch": "The two passwords do not match.",
   "setup.error.folder_missing": "That folder does not exist. Leave it blank to choose it later on the dashboard's Settings page.",
   "setup.error.folder_missing_no_dashboard": "That folder does not exist. With the dashboard off, leave it blank and set FILE_DIRECTORY in settings.conf later, or tick the dashboard box to choose it on its Settings page.",
-  "setup.error.write": "Could not write the settings: {error}"
+  "setup.error.write": "Could not write the settings: {error}",
+  "download.perPage": "Per page",
+  "download.pageOf": "Page {page} of {pages} ({count} rows)",
+  "download.prevPage": "Previous page",
+  "download.nextPage": "Next page",
+  "download.clearComplete": "Clear downloaded ({count})",
+  "download.clearFailed": "Clear failed ({count})",
+  "download.clearTitle": "Forget the finished rows in this list. The downloaded files stay on disk.",
+  "download.confirmClear": "Clear {count} row(s) from this list? The downloaded files stay on disk - only the list is cleared.",
+  "download.couldNotClear": "Could not clear: {error}"
 }

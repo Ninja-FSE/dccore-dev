@@ -713,5 +713,14 @@
   "setup.error.password_mismatch": "Les deux mots de passe ne correspondent pas.",
   "setup.error.folder_missing": "Ce dossier n'existe pas. Laissez-le vide pour le choisir plus tard sur la page Paramètres du tableau de bord.",
   "setup.error.folder_missing_no_dashboard": "Ce dossier n'existe pas. Sans le tableau de bord, laissez-le vide et définissez FILE_DIRECTORY dans settings.conf plus tard, ou cochez la case du tableau de bord pour le choisir sur sa page Paramètres.",
-  "setup.error.write": "Impossible d'écrire les paramètres : {error}"
+  "setup.error.write": "Impossible d'écrire les paramètres : {error}",
+  "download.perPage": "Par page",
+  "download.pageOf": "Page {page} sur {pages} ({count} lignes)",
+  "download.prevPage": "Page précédente",
+  "download.nextPage": "Page suivante",
+  "download.clearComplete": "Effacer les téléchargés ({count})",
+  "download.clearFailed": "Effacer les échecs ({count})",
+  "download.clearTitle": "Oublier les lignes terminées de cette liste. Les fichiers téléchargés restent sur le disque.",
+  "download.confirmClear": "Effacer {count} ligne(s) de cette liste ? Les fichiers téléchargés restent sur le disque - seule la liste est effacée.",
+  "download.couldNotClear": "Impossible d'effacer : {error}"
 }

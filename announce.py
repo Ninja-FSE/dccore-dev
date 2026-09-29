@@ -1250,7 +1250,7 @@ FEED_SWITCHES = {
     "FAIL":    "CONSOLE_SHOW_FAILURES",
     "SEARCH":  "CONSOLE_SHOW_SEARCHES",
 }
-FEED_ONLY_CATEGORIES = frozenset({"REQUEST", "QUEUED", "SENDING", "RESUMED", "SEARCH", "LISTFETCH"})
+FEED_ONLY_CATEGORIES = frozenset({"REQUEST", "QUEUED", "SENDING", "RESUMED", "SEARCH", "LISTFETCH", "FETCH"})
 
 
 def console_wants(category, config=None):
@@ -1307,6 +1307,7 @@ def category_tag(category, palette=None):
         "RESUMED": ("RESUMED", value),
         "SEARCH":  ("SEARCH", value),
         "LISTFETCH": ("LISTS", value),
+        "FETCH":   ("FETCH", value),
         "FAIL":    ("FAIL", alert),
         "PART":    ("PART", alert),
         "QUIT":    ("QUIT", config.C_PURPLE),

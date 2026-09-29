@@ -2356,6 +2356,44 @@ def build_fetch_delete_result(request_id):
     return 200, {"deleted": request_id}
 
 
+# Which finished rows POST /api/fetch/clear may forget, by what the operator asked for.
+FETCH_CLEAR_STATES = {
+    "finished": ("complete", "failed"),
+    "complete": ("complete",),
+    "failed": ("failed",),
+}
+
+
+def build_fetch_clear_result(payload):
+    """POST /api/fetch/clear (#1019): forget every finished row of one kind at
+    once - the Downloads page's Clear buttons - instead of one Delete click
+    each or waiting out FETCH_HISTORY_DAYS.
+
+    `which` is "finished" (downloaded and failed), "complete" or "failed".
+    Only those rows ever go: anything pending, queued or in flight is left
+    exactly where it is, for the reason build_fetch_delete_result() gives.
+
+    The FILES stay on disk. This forgets the list of what was fetched, the
+    same thing the history limit does when a row ages out
+    (dcc_fetch.prune_fetch_history_locked()); deleting a few hundred files
+    from one button is not what a "clear the list" click says it does, and
+    a row's own Delete is still there for the file.
+    """
+    import dcc_fetch
+    which = str((payload or {}).get("which") or "finished") if isinstance(payload, dict) else "finished"
+    states = FETCH_CLEAR_STATES.get(which)
+    if states is None:
+        return 400, {"error": "Clear which rows? Use finished, complete or failed."}
+    with dcc_fetch._fetch_lock():
+        queue = getattr(config, "fetch_queue", {})
+        doomed = [rid for rid, row in queue.items() if row.get("state") in states]
+        for rid in doomed:
+            del queue[rid]
+    if doomed:
+        dcc_fetch.persist_fetch_history()
+    return 200, {"cleared": len(doomed)}
+
+
 def build_fetched_list_purge_result(source):
     """POST /api/filelists/<source>/purge: forget one bot's fetched list(s).
 
@@ -4559,6 +4597,11 @@ if HAVE_FLASK:
 
             return send_file(wrapped, as_attachment=True,
                              download_name=download_name)
+
+        @app.route("/api/fetch/clear", methods=["POST"])
+        def api_fetch_clear():
+            status, result = build_fetch_clear_result(request.get_json(silent=True))
+            return jsonify(result), status
 
         @app.route("/api/fetch/<request_id>/delete", methods=["POST"])
         def api_fetch_delete(request_id):

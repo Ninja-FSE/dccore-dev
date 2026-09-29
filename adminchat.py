@@ -427,7 +427,7 @@ PROTOCOL_MINOR = 1
 # field with nothing saying why. The script checks the bot's number; this
 # is the bot checking the script's, and saying so in the window.
 MIN_SCRIPT_VERSION = "1.1"
-FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH", "LISTFETCH")
+FEED_KINDS = ("REQUEST", "QUEUED", "SENDING", "RESUMED", "SENT", "FAIL", "SEARCH", "LISTFETCH", "FETCH")
 
 
 def _version_tuple(text):
@@ -526,6 +526,11 @@ def structured_line(kind, fields):
         # No channel: it is about a bot, not a person's request.
         return (f"DCCORE LISTFETCH {_clean(f.get('bot'), token=True)} "
                 f"{_clean(f.get('action'), token=True)} {_clean(f.get('text'))}")
+    if kind == "FETCH":
+        # A file the bot itself fetched from another bot (#1019): asked, queued
+        # there, receiving, done or failed. Like LISTFETCH it names a bot, not a person.
+        return (f"DCCORE FETCH {_clean(f.get('bot'), token=True)} "
+                f"{_clean(f.get('action'), token=True)} {_clean(f.get('text'))}")
     return f"DCCORE LOG {_clean(f.get('category') or kind or 'INFO', token=True)} {_clean(f.get('text'))}"
 
 
@@ -542,7 +547,46 @@ QUEUE_LINES_MAX = 20          # QUEUE rows per burst: the head of the queue, not
 FREEZE_TIMEOUT = 300.0        # dcc.py's five-minute countdown, for the QUEUE row's seconds-left
 
 
-def status_lines(now=None):
+# The first script that draws the Downloading panel (#1019). An older one has no
+# handler for a FETCHING line and would print it as text every status burst.
+FETCHING_SCRIPT_VERSION = "1.8"
+
+
+def script_draws_fetching(version):
+    ours = _version_tuple(FETCHING_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
+def fetching_lines(now=None):
+    """One `DCCORE FETCHING <bot> <received> <total> <bps> <name>` per file the
+    bot is receiving from another bot right now - the panel's Downloading
+    section, the counterpart of SLOT. The speed is what this transfer has
+    moved since it began receiving; 0 until it has run long enough to say."""
+    import time as _time
+    now = _time.time() if now is None else now
+    try:
+        import dcc_fetch
+        queue = dcc_fetch._ensure_fetch_queue()
+        with dcc_fetch._fetch_lock():
+            rows = [dict(row) for row in queue.values() if row.get("state") == "receiving"]
+    except Exception as err:
+        print(f"[ADMINCHAT] Downloads unavailable for the status burst: {err}")
+        return []
+    lines = []
+    for row in sorted(rows, key=lambda r: r.get("requested_at", 0)):
+        received = int(row.get("bytes_received") or 0)
+        began = float(row.get("receiving_since") or 0)
+        bps = int(received / (now - began)) if began and now > began + 0.5 else 0
+        name = row.get("filename") or row.get("requested_filename") or ""
+        if row.get("request_type") == "list":
+            name = f"{row.get('bot') or '?'}'s file list"
+        lines.append(f"DCCORE FETCHING {_clean(row.get('bot'), token=True)} {received} "
+                     f"{_num(row.get('total_size'))} {bps} {_clean(name)}")
+    return lines
+
+
+def status_lines(now=None, fetching=False):
     """The STATUS burst (#550, step 3): what the client's title bar and side
     panel are drawn from, read from what the daemon already holds.
 
@@ -616,6 +660,8 @@ def status_lines(now=None):
         if user.lower() in frozen:    # both dicts key on the lowercased nick; be sure
             left = max(0, int(FREEZE_TIMEOUT - (now - float(frozen[user.lower()] or 0))))
         lines.append(f"DCCORE QUEUE {pos} {_clean(user, token=True)} {len(queue[user])} {left}")
+    if fetching:
+        lines.extend(fetching_lines(now))
     return lines
 
 
@@ -665,6 +711,7 @@ class Session:
         # Structured mode (#550): set by the `hello` command, never before
         # authentication. `client` is what the script called itself.
         self.structured = False
+        self.draws_fetching = False   # the script said it can draw FETCHING lines (#1019)
         self.client = ""
         self._reported_dropped = 0
         self._status_sent_at = 0.0
@@ -740,7 +787,7 @@ class Session:
 
             def compute():
                 try:
-                    lines.extend(status_lines())
+                    lines.extend(status_lines(fetching=self.draws_fetching))
                 except Exception as err:
                     print(f"[ADMINCHAT] Status burst failed: {err}")
 
@@ -1413,6 +1460,7 @@ def _cmd_hello(session, args):
     session.client = parts[0] if parts else "unknown"
     version = parts[1] if len(parts) > 1 else ""
     session.structured = True
+    session.draws_fetching = script_draws_fetching(version)
     session.send(hello_line())
     if script_is_too_old(version):
         # After HELLO, as a plain OUT line the window shows (#709): the
