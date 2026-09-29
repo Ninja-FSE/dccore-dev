@@ -446,8 +446,8 @@ class BothPathsShareOneImplementation(unittest.TestCase):
             self.source = handle.read()
 
     def test_both_handlers_call_the_shared_helper(self):
-        self.assertEqual(self.source.count("dcc.discard_orphaned_temp_archives("), 2,
-                         "@<nick>-remove and !clearqueue must both use it")
+        self.assertEqual(self.source.count("dcc.discard_orphaned_temp_archives("), 3,
+                         "@<nick>-remove, @<nick>-remove <file> and !clearqueue must all use it")
 
     def test_commands_no_longer_removes_files_itself(self):
         self.assertFalse("os.remove(" in self.source,

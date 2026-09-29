@@ -2738,6 +2738,32 @@ mark.filter-hit {
 
 
 /* Downloads page (#1019): page size, pager, Clear, and sortable headings. */
+.downloads-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.downloads-summary:empty {
+  display: none;
+}
+
+.downloads-summary .summary-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.downloads-summary .summary-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .downloads-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -2763,6 +2789,25 @@ mark.filter-hit {
 
 .downloads-clear {
   margin-left: auto;
+}
+
+.downloads-box {
+  margin: 0 0 22px;
+}
+
+.downloads-boxbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin: 0 0 8px;
+}
+
+.downloads-box-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
 }
 
 .sort-btn {

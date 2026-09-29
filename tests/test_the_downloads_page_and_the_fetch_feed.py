@@ -292,6 +292,46 @@ class ASecondOfferForAFinishedFile(DCCoreTestCase):
         self.assertIn("unsolicited", self.offer("a.flac"))
 
 
+class ALateAnswerIsStillTheAnswer(DCCoreTestCase):
+    """A bot with a busy queue sent the file two minutes after our offer
+    timeout had failed the row, and it was refused as unsolicited."""
+
+    def claim(self, **more):
+        import time
+        config.fetch_queue.clear()
+        config.fetch_queue["1"] = row("failed", name="It's A, Song (x).mp3", reason="no response",
+                                      offered_at=time.time() - 5, **more)
+        return dcc_fetch._claim_matching_offer_locked(
+            config.fetch_queue, "somebot", "It's_A,_Song_(x).mp3")
+
+    def test_a_row_that_failed_for_silence_takes_it(self):
+        rid, found = self.claim()
+        self.assertEqual(rid, "1")
+        self.assertEqual(found["state"], "receiving")
+        self.assertNotIn("reason", found)
+
+    def test_a_long_gone_request_does_not(self):
+        import time
+        config.fetch_queue.clear()
+        config.fetch_queue["1"] = row("failed", reason="no response", offered_at=time.time() - 99999)
+        self.assertEqual(dcc_fetch._claim_matching_offer_locked(
+            config.fetch_queue, "somebot", "a.flac"), (None, None))
+
+    def test_a_row_that_failed_for_another_reason_does_not(self):
+        import time
+        config.fetch_queue.clear()
+        config.fetch_queue["1"] = row("failed", reason="refused: no slots", offered_at=time.time())
+        self.assertEqual(dcc_fetch._claim_matching_offer_locked(
+            config.fetch_queue, "somebot", "a.flac"), (None, None))
+
+    def test_another_bots_offer_does_not(self):
+        import time
+        config.fetch_queue.clear()
+        config.fetch_queue["1"] = row("failed", reason="no response", offered_at=time.time())
+        self.assertEqual(dcc_fetch._claim_matching_offer_locked(
+            config.fetch_queue, "someoneelse", "a.flac"), (None, None))
+
+
 class TheReceiverAcknowledges(DCCoreTestCase):
     """A DCCore sender counts a file as sent only once the whole of it is
     acknowledged; a receiver that never does looks like a failed send and is
@@ -351,6 +391,159 @@ class TheReceiverAcknowledges(DCCoreTestCase):
     def test_a_sender_that_hung_up_after_the_last_byte_still_completes(self):
         r, _total, _words = self.transfer([b"x" * 100], close_after=True)
         self.assertEqual(r["state"], "complete")
+
+    def test_a_sender_that_never_reads_acks_is_only_tried_once(self):
+        import shutil
+        import tempfile
+        ours, theirs = socket.socketpair()
+        self.addCleanup(ours.close)
+        self.addCleanup(theirs.close)
+        pieces = [b"x" * 10, b"y" * 10, b"z" * 10]
+        for piece in pieces:
+            theirs.sendall(piece)
+        config.fetch_queue.clear()
+        r = row("receiving")
+        config.fetch_queue["1"] = r
+        dest = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
+        sends = []
+
+        class Tcp:
+            def getpeername(self):
+                return ("127.0.0.1", 50000)
+
+            def sendall(self, data):
+                sends.append(data)
+                raise OSError("nobody reads")
+
+            def __getattr__(self, name):
+                return getattr(ours, name)
+
+        dcc_fetch._run_transfer(r, {"size": 30, "ip": None, "port": 0}, dest, "t.flac", sock=Tcp())
+        self.assertEqual(r["state"], "complete")
+        self.assertEqual(len(sends), 1)
+
+
+class TheDownloadQueueIsShownAndCancellable(unittest.TestCase):
+    """Cancel did nothing on some rows, and nothing on the page said what the
+    queue held (#1021)."""
+
+    def setUp(self):
+        with open(os.path.join(REPO_ROOT, "web", "app.js"), encoding="utf-8") as fh:
+            self.js = fh.read()
+        with open(os.path.join(REPO_ROOT, "web", "index.html"), encoding="utf-8") as fh:
+            self.html = fh.read()
+
+    def test_a_request_the_bot_has_not_answered_has_a_cancel_button(self):
+        self.assertRegex(self.js, r'state === "queued" \|\| state === "offered"\) \{\s*//[^\n]*\n\s*action = ')
+        self.assertIn('state === "queued" || state === "offered");', self.js)
+
+    def test_the_table_is_not_rebuilt_when_nothing_changed(self):
+        self.assertIn("function setDownloadsBody(box, html)", self.js)
+        self.assertNotIn(".body.innerHTML =", self.js.replace(
+            "box.body.innerHTML = html;", ""))
+
+    def test_the_queue_finished_and_failed_are_three_boxes_sorted_on_their_own(self):
+        for box in ("queue", "finished", "failed"):
+            for part in ("table", "body", "prev", "next", "pageinfo", "count"):
+                self.assertIn(f'id="downloads-{box}-{part}"', self.html, (box, part))
+            
+        head = self.html[self.html.index('id="downloads-queue-table"'):self.html.index('id="downloads-finished-table"')]
+        self.assertEqual(head.count("data-sort-col="), 4)
+        for lang in ("en", "fr", "es"):
+            with open(os.path.join(REPO_ROOT, "web", "lang", lang + ".json"), encoding="utf-8") as fh:
+                words = json.load(fh)
+            for key in ("queue", "finished", "failed", "finishedEmpty", "failedEmpty"):
+                self.assertTrue(words.get("download.box." + key), (lang, key))
+        self.assertIn('DOWNLOADS_SORT_KEY + "-" + id', self.js)
+        self.assertIn("sortedDownloads(mine, box.id)", self.js)
+
+    def test_only_the_queue_box_takes_the_rows_still_waiting_or_running(self):
+        block = self.js[self.js.index("var DOWNLOAD_QUEUE_STATES"):self.js.index("// Running ones first")]
+        for st in ("pending", "offered", "queued", "listening", "receiving"):
+            self.assertIn(f'"{st}"', block.split("var DOWNLOAD_BOXES")[0])
+        self.assertIn('row.state === "complete"', block)
+        self.assertIn('row.state === "failed"', block)
+
+    def test_a_summary_box_counts_the_queue_by_where_each_request_stands(self):
+        self.assertIn('id="downloads-summary"', self.html)
+        for key in ("inQueue", "downloading", "asked", "queuedThere", "waiting"):
+            for lang in ("en", "fr", "es"):
+                with open(os.path.join(REPO_ROOT, "web", "lang", lang + ".json"), encoding="utf-8") as fh:
+                    self.assertIn("download.summary." + key, json.load(fh))
+
+
+class CancellingTellsTheBot(DCCoreTestCase):
+    """Cancel forgot the row here while the other bot kept the file queued and
+    sent it later (#1021). It now says `@<bot>-remove <file>` in the channel:
+    that file only, never the bare form that clears everything we have there."""
+
+    def setUp(self):
+        super().setUp()
+        import types
+        from unittest import mock
+        self.sent = []
+        fake = types.SimpleNamespace(queue_message=lambda to, msg, *a, **k: self.sent.append((to, msg)))
+        patcher = mock.patch.dict(sys.modules, {"oserve": fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        import dcc
+        chan = mock.patch.object(dcc, "channel_containing_user", lambda nick: "#chan")
+        chan.start()
+        self.addCleanup(chan.stop)
+        config.fetch_queue.clear()
+
+    def put(self, rid, state, bot="GoodBot", name=None):
+        config.fetch_queue[rid] = dict(dcc_fetch.new_fetch_row(bot, name or rid + ".flac"), state=state)
+
+    def test_a_queued_request_says_which_file_to_remove(self):
+        self.put("a", "queued", name="$Artist - Track 09.flac")
+        status, result = webserver.build_fetch_delete_result("a")
+        self.assertEqual(status, 200)
+        self.assertTrue(result["removed_at_bot"])
+        self.assertEqual(self.sent, [
+            ("GoodBot", "PRIVMSG #chan :@GoodBot-remove $Artist - Track 09.flac\r\n")])
+
+    def test_a_request_not_yet_answered_says_it_too(self):
+        self.put("a", "offered")
+        webserver.build_fetch_delete_result("a")
+        self.assertEqual(len(self.sent), 1)
+
+    def test_only_the_cancelled_file_is_named_when_more_wait_at_the_bot(self):
+        self.put("a", "queued")
+        self.put("b", "queued")
+        webserver.build_fetch_delete_result("a")
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.sent[0][1].endswith("-remove a.flac\r\n"))
+        self.assertNotIn("b.flac", self.sent[0][1])
+
+    def test_the_bare_form_that_clears_everything_is_never_sent(self):
+        self.put("a", "queued")
+        webserver.build_fetch_delete_result("a")
+        self.assertNotRegex(self.sent[0][1], r"-remove\r\n")
+
+    def test_a_request_given_up_on_for_silence_is_still_taken_back(self):
+        self.put("a", "failed")
+        config.fetch_queue["a"]["reason"] = "no response"
+        webserver.build_fetch_delete_result("a")
+        self.assertEqual(len(self.sent), 1)
+
+    def test_a_request_that_failed_for_another_reason_says_nothing(self):
+        self.put("a", "failed")
+        config.fetch_queue["a"]["reason"] = "refused: no slots"
+        webserver.build_fetch_delete_result("a")
+        self.assertEqual(self.sent, [])
+
+    def test_a_request_never_sent_says_nothing_to_the_bot(self):
+        self.put("a", "pending")
+        _status, result = webserver.build_fetch_delete_result("a")
+        self.assertEqual(self.sent, [])
+        self.assertNotIn("removed_at_bot", result)
+
+    def test_a_finished_row_says_nothing_to_the_bot(self):
+        self.put("a", "complete")
+        webserver.build_fetch_delete_result("a")
+        self.assertEqual(self.sent, [])
 
 
 class TheScript(unittest.TestCase):
@@ -415,7 +608,7 @@ class TheDashboard(unittest.TestCase):
 
     def test_the_page_has_the_controls_the_script_reads(self):
         html, js = read("web", "index.html"), read("web", "app.js")
-        for ident in ("downloads-pagesize", "downloads-prev", "downloads-next", "downloads-pageinfo",
+        for ident in ("downloads-pagesize", "downloads-boxes",
                       "downloads-clear-complete", "downloads-clear-failed"):
             self.assertIn(f'id="{ident}"', html, ident)
             self.assertIn(ident, js, ident)

@@ -179,11 +179,9 @@
     broadcastWrap:       document.getElementById("broadcast-wrap"),
     broadcastBody:       document.getElementById("broadcast-body"),
     downloadSelectedBtn: document.getElementById("download-selected-btn"),
-    downloadsBody:       document.getElementById("downloads-body"),
+    downloadsBoxes:      document.getElementById("downloads-boxes"),
     downloadsPageSize:   document.getElementById("downloads-pagesize"),
-    downloadsPrev:       document.getElementById("downloads-prev"),
-    downloadsNext:       document.getElementById("downloads-next"),
-    downloadsPageInfo:   document.getElementById("downloads-pageinfo"),
+    downloadsSummary:    document.getElementById("downloads-summary"),
     downloadsClearComplete: document.getElementById("downloads-clear-complete"),
     downloadsClearFailed:   document.getElementById("downloads-clear-failed"),
     bulkFetchForm:       document.getElementById("bulk-fetch-form"),
@@ -794,7 +792,7 @@
   // fetched file? This cannot be undone." warning, about a file that did
   // not exist.
   function fetchRowNotStarted(state) {
-    return state === "pending" || state === "queued";
+    return state === "pending" || state === "queued" || state === "offered";
   }
 
   function loadDownloads() {
@@ -867,9 +865,9 @@
     });
   }
 
-  // Delegated: renderDownloads() rebuilds the table's innerHTML on every
+  // Delegated: renderDownloads() rebuilds the tables' innerHTML on every
   // poll, which would silently drop a listener attached to any one row.
-  el.downloadsBody.addEventListener("click", function (evt) {
+  el.downloadsBoxes.addEventListener("click", function (evt) {
     var retry = evt.target.closest ? evt.target.closest(".fetch-retry-btn") : null;
     if (retry) {
       redownloadFetchRow(retry);
@@ -904,12 +902,25 @@
     });
   });
 
-  // Sort, page size and page (#1019). The rows are all here already (the server
-  // keeps at most FETCH_HISTORY_MAX_ROWS finished ones), so this is done on the
-  // page and needs no new request. The choice is remembered per browser.
+  // Sort and page (#1019, #1021): the download list is three boxes and each one
+  // sorts and pages on its own. The rows are all here already (the server keeps
+  // at most FETCH_HISTORY_MAX_ROWS finished ones), so this is done on the page
+  // and needs no new request. Sort and page size are remembered per browser.
   var DOWNLOADS_SORT_KEY = "dccore-downloads-sort";
   var DOWNLOADS_PAGE_SIZE_KEY = "dccore-downloads-page-size";
   var DOWNLOADS_PAGE_SIZES = [10, 15, 20, 50, 100];
+  var DOWNLOAD_QUEUE_STATES = ["pending", "offered", "queued", "listening", "receiving"];
+  var DOWNLOAD_BOXES = [
+    { id: "queue", empty: "download.nothingQueued", match: function (row) {
+      return DOWNLOAD_QUEUE_STATES.indexOf(row.state || "pending") !== -1;
+    } },
+    { id: "finished", empty: "download.box.finishedEmpty", match: function (row) {
+      return row.state === "complete";
+    } },
+    { id: "failed", empty: "download.box.failedEmpty", match: function (row) {
+      return row.state === "failed";
+    } }
+  ];
   // Running ones first when sorted by state, then waiting, then finished.
   var DOWNLOAD_STATE_RANK = {
     receiving: 0, listening: 1, offered: 2, queued: 3, pending: 4,
@@ -923,17 +934,29 @@
     try { localStorage.setItem(key, value); } catch (err) { /* not remembered */ }
   }
 
-  state.downloadSort = { key: "", dir: 1 };
-  state.downloadPage = 0;
+  state.downloadSort = {};
+  state.downloadPages = {};
   state.downloadPageSize = 15;
-  (function restoreDownloadsView() {
-    var size = parseInt(readStored(DOWNLOADS_PAGE_SIZE_KEY), 10);
-    if (DOWNLOADS_PAGE_SIZES.indexOf(size) !== -1) { state.downloadPageSize = size; }
-    var parts = String(readStored(DOWNLOADS_SORT_KEY) || "").split(":");
+  DOWNLOAD_BOXES.forEach(function (box) {
+    var id = box.id;
+    box.body = document.getElementById("downloads-" + id + "-body");
+    box.count = document.getElementById("downloads-" + id + "-count");
+    box.prev = document.getElementById("downloads-" + id + "-prev");
+    box.next = document.getElementById("downloads-" + id + "-next");
+    box.pageInfo = document.getElementById("downloads-" + id + "-pageinfo");
+    box.table = document.getElementById("downloads-" + id + "-table");
+    box.lastHtml = null;
+    state.downloadSort[id] = { key: "", dir: 1 };
+    state.downloadPages[id] = 0;
+    var parts = String(readStored(DOWNLOADS_SORT_KEY + "-" + id) || "").split(":");
     if (["bot", "file", "state", "progress"].indexOf(parts[0]) !== -1 &&
         (parts[1] === "asc" || parts[1] === "desc")) {
-      state.downloadSort = { key: parts[0], dir: parts[1] === "asc" ? 1 : -1 };
+      state.downloadSort[id] = { key: parts[0], dir: parts[1] === "asc" ? 1 : -1 };
     }
+  });
+  (function restoreDownloadsPageSize() {
+    var size = parseInt(readStored(DOWNLOADS_PAGE_SIZE_KEY), 10);
+    if (DOWNLOADS_PAGE_SIZES.indexOf(size) !== -1) { state.downloadPageSize = size; }
     el.downloadsPageSize.value = String(state.downloadPageSize);
   })();
 
@@ -954,8 +977,8 @@
   }
 
   // The server sends newest first; equal values keep that order.
-  function sortedDownloads(rows) {
-    var sort = state.downloadSort;
+  function sortedDownloads(rows, boxId) {
+    var sort = state.downloadSort[boxId];
     if (!sort.key) { return rows; }
     return rows.map(function (row, index) { return { row: row, index: index }; })
       .sort(function (a, b) {
@@ -968,24 +991,29 @@
       .map(function (item) { return item.row; });
   }
 
-  function renderDownloadsControls(total, pages, finishedCounts) {
-    var sort = state.downloadSort;
-    Array.prototype.forEach.call(document.querySelectorAll("#downloads-table th[data-sort-col]"), function (th) {
+  function renderDownloadsBoxControls(box, total, pages, finishedCounts) {
+    var sort = state.downloadSort[box.id];
+    Array.prototype.forEach.call(box.table.querySelectorAll("th[data-sort-col]"), function (th) {
       th.setAttribute("aria-sort", th.getAttribute("data-sort-col") === sort.key
         ? (sort.dir === 1 ? "ascending" : "descending") : "none");
     });
-    el.downloadsPrev.disabled = state.downloadPage <= 0;
-    el.downloadsNext.disabled = state.downloadPage >= pages - 1;
-    el.downloadsPageInfo.textContent = total
-      ? t("download.pageOf").replace("{page}", state.downloadPage + 1)
+    var page = state.downloadPages[box.id];
+    box.count.textContent = total ? "(" + total + ")" : "";
+    box.prev.disabled = page <= 0;
+    box.next.disabled = page >= pages - 1;
+    box.pageInfo.textContent = total > state.downloadPageSize
+      ? t("download.pageOf").replace("{page}", page + 1)
           .replace("{pages}", pages).replace("{count}", total)
       : "";
-    el.downloadsClearComplete.textContent =
-      t("download.clearComplete").replace("{count}", finishedCounts.complete);
-    el.downloadsClearFailed.textContent =
-      t("download.clearFailed").replace("{count}", finishedCounts.failed);
-    el.downloadsClearComplete.disabled = !finishedCounts.complete;
-    el.downloadsClearFailed.disabled = !finishedCounts.failed;
+    if (box.id === "finished") {
+      el.downloadsClearComplete.textContent =
+        t("download.clearComplete").replace("{count}", finishedCounts.complete);
+      el.downloadsClearComplete.disabled = !finishedCounts.complete;
+    } else if (box.id === "failed") {
+      el.downloadsClearFailed.textContent =
+        t("download.clearFailed").replace("{count}", finishedCounts.failed);
+      el.downloadsClearFailed.disabled = !finishedCounts.failed;
+    }
   }
 
   function clearDownloads(which, count) {
@@ -1004,17 +1032,28 @@
 
   function redrawDownloads() { renderDownloads(state.downloads || []); }
 
-  Array.prototype.forEach.call(document.querySelectorAll("#downloads-table .sort-btn"), function (button) {
-    button.addEventListener("click", function () {
-      var key = button.getAttribute("data-sort");
-      var sort = state.downloadSort;
-      // Ascending, then descending, then back to the server's newest-first.
-      if (sort.key !== key) { state.downloadSort = { key: key, dir: 1 }; }
-      else if (sort.dir === 1) { state.downloadSort = { key: key, dir: -1 }; }
-      else { state.downloadSort = { key: "", dir: 1 }; }
-      writeStored(DOWNLOADS_SORT_KEY, state.downloadSort.key
-        ? state.downloadSort.key + ":" + (state.downloadSort.dir === 1 ? "asc" : "desc") : "");
-      state.downloadPage = 0;
+  DOWNLOAD_BOXES.forEach(function (box) {
+    Array.prototype.forEach.call(box.table.querySelectorAll(".sort-btn"), function (button) {
+      button.addEventListener("click", function () {
+        var key = button.getAttribute("data-sort");
+        var sort = state.downloadSort[box.id];
+        // Ascending, then descending, then back to the server's newest-first.
+        if (sort.key !== key) { state.downloadSort[box.id] = { key: key, dir: 1 }; }
+        else if (sort.dir === 1) { state.downloadSort[box.id] = { key: key, dir: -1 }; }
+        else { state.downloadSort[box.id] = { key: "", dir: 1 }; }
+        var now = state.downloadSort[box.id];
+        writeStored(DOWNLOADS_SORT_KEY + "-" + box.id,
+          now.key ? now.key + ":" + (now.dir === 1 ? "asc" : "desc") : "");
+        state.downloadPages[box.id] = 0;
+        redrawDownloads();
+      });
+    });
+    box.prev.addEventListener("click", function () {
+      state.downloadPages[box.id] = Math.max(0, state.downloadPages[box.id] - 1);
+      redrawDownloads();
+    });
+    box.next.addEventListener("click", function () {
+      state.downloadPages[box.id] += 1;
       redrawDownloads();
     });
   });
@@ -1023,15 +1062,7 @@
     if (DOWNLOADS_PAGE_SIZES.indexOf(size) === -1) { return; }
     state.downloadPageSize = size;
     writeStored(DOWNLOADS_PAGE_SIZE_KEY, String(size));
-    state.downloadPage = 0;
-    redrawDownloads();
-  });
-  el.downloadsPrev.addEventListener("click", function () {
-    state.downloadPage = Math.max(0, state.downloadPage - 1);
-    redrawDownloads();
-  });
-  el.downloadsNext.addEventListener("click", function () {
-    state.downloadPage += 1;
+    DOWNLOAD_BOXES.forEach(function (box) { state.downloadPages[box.id] = 0; });
     redrawDownloads();
   });
   el.downloadsClearComplete.addEventListener("click", function () {
@@ -1051,16 +1082,22 @@
       if (row.state === "complete") { finishedCounts.complete += 1; }
       else if (row.state === "failed") { finishedCounts.failed += 1; }
     });
-    var pages = Math.max(1, Math.ceil(allRows.length / state.downloadPageSize));
-    if (state.downloadPage > pages - 1) { state.downloadPage = pages - 1; }
-    renderDownloadsControls(allRows.length, pages, finishedCounts);
-    if (!allRows.length) {
-      el.downloadsBody.innerHTML = emptyRow(5, t("download.nothingQueued"));
-      return;
-    }
-    var start = state.downloadPage * state.downloadPageSize;
-    var rows = sortedDownloads(allRows).slice(start, start + state.downloadPageSize);
-    el.downloadsBody.innerHTML = rows.map(function (row) {
+    renderDownloadsSummary(allRows);
+    DOWNLOAD_BOXES.forEach(function (box) {
+      var mine = allRows.filter(box.match);
+      var pages = Math.max(1, Math.ceil(mine.length / state.downloadPageSize));
+      if (state.downloadPages[box.id] > pages - 1) { state.downloadPages[box.id] = pages - 1; }
+      renderDownloadsBoxControls(box, mine.length, pages, finishedCounts);
+      if (!mine.length) {
+        setDownloadsBody(box, emptyRow(5, t(box.empty)));
+        return;
+      }
+      var start = state.downloadPages[box.id] * state.downloadPageSize;
+      var rows = sortedDownloads(mine, box.id).slice(start, start + state.downloadPageSize);
+      setDownloadsBody(box, rows.map(downloadRowHtml).join(""));
+    });
+
+    function downloadRowHtml(row) {
       var state = row.state || "pending";
       // dcc_fetch.py records a refused list archive on the row explicitly
       // "for the dashboard", and /api/fetch/status serves it - but nothing
@@ -1095,7 +1132,7 @@
       // A request the other bot queued (#926) can be let go as well: nothing
       // is moving yet, and forgetting it is all there is to do.
       var deletable = (state === "complete" || state === "failed" || state === "pending" ||
-                       state === "queued");
+                       state === "queued" || state === "offered");
       // "Cancel" for a row that has not started - calling it Delete would
       // suggest a downloaded file is being thrown away when none exists.
       var notStarted = fetchRowNotStarted(state);
@@ -1136,7 +1173,7 @@
           encodeURIComponent(row.id) + "\">" + t("download.resumeBot") + "</button> " + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
-      } else if (state === "queued") {
+      } else if (state === "queued" || state === "offered") {
         // #926: what the other bot said, and a way to let the request go.
         action = (row.reply ? "<span class=\"col-dim\">" + escapeHtml(row.reply) + "</span> " : "") + deleteBtn;
       } else {
@@ -1165,7 +1202,44 @@
         "<td class=\"col-mono\">" + escapeHtml(progress) + "</td>" +
         "<td>" + action + "</td>" +
         "</tr>";
+    }
+  }
+
+  // The tables are rebuilt on every poll. A click needs mousedown and mouseup on
+  // the same element, so a rebuild between the two swallowed it: Cancel
+  // sometimes did nothing. Leave the DOM alone when nothing changed.
+  function setDownloadsBody(box, html) {
+    if (html === box.lastHtml) { return; }
+    box.lastHtml = html;
+    box.body.innerHTML = html;
+  }
+
+  // What the download queue holds, by where each request stands. The table
+  // shows one row each; this says how many are running, waiting on another
+  // bot, or still to be asked.
+  var DOWNLOAD_SUMMARY_GROUPS = [
+    { states: ["receiving", "listening"], label: "download.summary.downloading" },
+    { states: ["offered"], label: "download.summary.asked" },
+    { states: ["queued"], label: "download.summary.queuedThere" },
+    { states: ["pending"], label: "download.summary.waiting" }
+  ];
+
+  function renderDownloadsSummary(allRows) {
+    var open = allRows.filter(function (row) {
+      return ["receiving", "listening", "offered", "queued", "pending"].indexOf(row.state) !== -1;
+    });
+    if (!open.length) {
+      el.downloadsSummary.innerHTML = "";
+      return;
+    }
+    var html = DOWNLOAD_SUMMARY_GROUPS.map(function (group) {
+      var n = open.filter(function (row) { return group.states.indexOf(row.state) !== -1; }).length;
+      return "<span class=\"summary-item\"><span class=\"summary-count\">" + n + "</span>" +
+        "<span class=\"col-dim\">" + escapeHtml(t(group.label)) + "</span></span>";
     }).join("");
+    html = "<span class=\"summary-item\"><span class=\"summary-count\">" + open.length + "</span>" +
+      "<span class=\"col-dim\">" + escapeHtml(t("download.summary.inQueue")) + "</span></span>" + html;
+    if (el.downloadsSummary.innerHTML !== html) { el.downloadsSummary.innerHTML = html; }
   }
 
   // ---------------------------------------------------------------- Queue

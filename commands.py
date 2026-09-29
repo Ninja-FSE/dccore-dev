@@ -112,7 +112,8 @@ def handle_help_request(s, user, target):
 
     lines.append(
         f"Your queue: {bold}{red}@{nick}-que{reset} to see it, "
-        f"{bold}{red}@{nick}-remove{reset} to cancel it. "
+        f"{bold}{red}@{nick}-remove{reset} to cancel it all, "
+        f"{bold}{red}@{nick}-remove <file>{reset} for just one. "
         f"To search every bot at once, type: {bold}{red}@find <words>{reset}")
 
     # #774: a band or title made of common words - "Metal Church" matched
@@ -182,7 +183,8 @@ def handle_queue_check(s, user, target):
         msg = (
             f"NOTICE {user} :You have {config.C_BOLD}{config.C_RED}{file_count}{config.C_RESET} files in queue. "
             f"To remove your entire queue, type: {config.C_BOLD}{config.C_RED}@{config.NICKNAME}-remove{config.C_RESET} "
-            f"or send CTCP: {config.C_BOLD}{config.C_GREEN}REMOVE{config.C_RESET}\r\n"
+            f"or send CTCP: {config.C_BOLD}{config.C_GREEN}REMOVE{config.C_RESET}. "
+            f"For just one file, add its name: {config.C_BOLD}{config.C_RED}@{config.NICKNAME}-remove <file>{config.C_RESET}\r\n"
         )
     else:
         # The fuller layout: only numbers, the trigger and values are bold and coloured
@@ -201,6 +203,56 @@ def handle_queue_check(s, user, target):
     if oserve:
         oserve.queue_message(user, msg)
     print(f"[COMMANDS] {user} checked their queue status ({file_count} files).")
+
+def _same_file_name(a, b):
+    """Spaces and underscores are one thing to a DCC client, and case does not
+    count - the way dcc_fetch matches an offer to a request."""
+    import re
+    def norm(name):
+        return re.sub(r'[\s_]+', ' ', str(name).strip()).strip().lower()
+    return bool(norm(a)) and norm(a) == norm(b)
+
+
+def handle_queue_remove_file(s, user, target, filename):
+    """`@<nick>-remove <file>`: take that one file out of the user's queue and
+    leave the rest. Without a file, handle_queue_remove() clears the lot."""
+    user_key = user.lower()
+    oserve = sys.modules.get('oserve')
+    import dcc
+    import list as list_mod
+
+    wanted = list_mod.printable_text(str(filename)).strip()
+    shown = wanted[:120]
+    removed_archives = []
+    removed = 0
+    with dcc.queue_lock:
+        for queues in (getattr(config, 'dcc_queue', {}), getattr(config, 'frozen_queues', {})):
+            rows = queues.get(user_key)
+            if not rows:
+                continue
+            gone = [r for r in rows if isinstance(r, dict)
+                    and _same_file_name(r.get('file', ''), wanted)]
+            if not gone:
+                continue
+            if queues is getattr(config, 'dcc_queue', None):
+                removed_archives += dcc.discard_orphaned_temp_archives(user_key, rows=gone)
+            queues[user_key] = [r for r in rows if not any(r is g for g in gone)]
+            if not queues[user_key]:
+                del queues[user_key]
+            removed += len(gone)
+        if removed:
+            db.save_dcc_queue()
+
+    if removed:
+        msg = f"NOTICE {user} :Removed \"{shown}\" from your queue. \r\n"
+    else:
+        msg = f"NOTICE {user} :\"{shown}\" is not in your queue. \r\n"
+    if oserve:
+        oserve.queue_message(user, msg)
+    if removed_archives:
+        print(f"[COMMANDS] Removed {len(removed_archives)} orphaned temp archive(s) with {user}'s file.")
+    print(f"[COMMANDS] {user} removed {removed} queued file(s) matching {shown!r}.")
+
 
 def handle_queue_remove(s, user, target):
     """Clear the user's queue from memory and remove it from dcc_queue.txt on disk."""

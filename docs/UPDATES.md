@@ -22,6 +22,27 @@ fetch receiver never sent the DCC acknowledgement (the running byte count a rece
 counted the finished send as failed and offered the file again a few seconds and minutes later. `_run_transfer` now
 acknowledges every chunk. Tests: `tests/test_the_downloads_page_and_the_fetch_feed.py`.
 
+### 📦 Downloads page: Cancel on every request not yet answered, and a queue summary (#1021)
+
+A request our bot had sent and the other bot had not answered (state `offered`, "Requested") had no Cancel button, and
+`build_fetch_delete_result()` refused it as in flight. It is not: no thread, no socket, only a request on the wire
+holding a slot, and `_claim_matching_offer_locked()` claims only offered/queued rows, so an offer arriving later for a
+cancelled request is refused as unsolicited. Only `listening` and `receiving` are refused now. The table was also
+rebuilt on every 4 s poll whether or not a row had changed, and a click needs mousedown and mouseup on the same element,
+so a rebuild between them swallowed it; `setDownloadsBody()` now leaves the DOM alone when the HTML is identical. A
+summary strip above the table counts the queue: in the queue, downloading, asked (waiting for an answer), queued at other
+bots, waiting to be asked. Cancelling a request the other bot may hold now also says `@<bot>-remove <file>` in the channel
+(`dcc_fetch.drop_our_request_at()`), because forgetting the row here left the file queued there, sent later and refused
+as unsolicited. That needed a per-file form: `@<nick>-remove` alone still clears the user's whole queue, and
+`@<nick>-remove <file>` (or CTCP `REMOVE <file>`) takes out only that file, matched the way offers are (spaces and
+underscores alike, any case) - `commands.handle_queue_remove_file()`, with `dcc.discard_orphaned_temp_archives(rows=)`
+keeping any archive another queued row still names. A bot that only knows the bare command ignores the extra word.
+The list is now three boxes - in the queue (the only one with Cancel), finished and failed - each sorted by column and
+paged on its own. A bot that queues our request and sends the file after `FETCH_OFFER_TIMEOUT` had run out found the row
+already failed as "no response" and was refused as unsolicited; `_claim_matching_offer_locked()` now lets a file row that
+failed only for silence, within `_LATE_OFFER_GRACE` (1800 s) of its request; Cancel/Delete on such a row also sends `-remove`, since the bot still holds the file. A file is now asked for `OFFER_ASKS` (3) times when the bot is silent - each after `FETCH_OFFER_TIMEOUT` - and only the third silence fails it, taking the request back with `@<bot>-remove <file>` (`drop_our_request_at()`); the row stays under Failed to see and ask again, take the late offer.
+Tests: `tests/test_fetch_queue_bounds.py`, `tests/test_the_downloads_page_and_the_fetch_feed.py`.
+
 ### 📦 A passive offer for a queued request waits for a free fetch slot
 
 Audit 2026-09-27, held until v1.13.2 shipped. A row queued at another bot holds no fetch slot (#926), so the

@@ -250,6 +250,10 @@ _UNRESOLVED_FETCH_STATES = ("pending", "offered", "queued", "listening", "receiv
 # this state existed that arrival was refused as unsolicited: fetching from a
 # bot with a queue could only ever succeed with an empty queue.
 _AWAITING_OFFER_STATES = ("offered", "queued")
+# How long after giving up on silence a bot's late DCC SEND is still taken.
+_LATE_OFFER_GRACE = 1800
+# Times a file is asked for when the other bot does not answer, before it fails.
+OFFER_ASKS = 3
 
 # The states that count against FETCH_MAX_PER_BOT (#926): everything asked of a
 # bot and not yet finished - including "queued", which holds no slot of ours but
@@ -1113,6 +1117,7 @@ def check_fetch_queue():
     disk_low = bool(waiting_bots) and _disk_is_low()
 
     to_dispatch = []
+    to_take_back = []
     with _fetch_lock():
         # Expire offers nobody ever answered. A row stuck in "offered" forever
         # would otherwise hold a slot open permanently and starve every other
@@ -1126,7 +1131,19 @@ def check_fetch_queue():
                     row, offer_timeout, folder_offer_timeout,
                     unadvertised_folder_timeout)
                 if (now - row["offered_at"]) > this_timeout:
-                    _mark_failed_locked(row, "no response")
+                    # A busy bot answers minutes late, so a file is asked for
+                    # OFFER_ASKS times before it fails, and only then is the
+                    # request taken back from the bot. The row stays, failed,
+                    # for the operator to see and ask again.
+                    if (row.get("request_type", "file") == "file"
+                            and int(row.get("silent_asks", 1)) < OFFER_ASKS):
+                        row["silent_asks"] = int(row.get("silent_asks", 1)) + 1
+                        row.update(state="pending", offered_at=None,
+                                   reason=f"no response - asking again (attempt {row['silent_asks']} of {OFFER_ASKS})")
+                    else:
+                        _mark_failed_locked(row, "no response")
+                        if row.get("request_type", "file") == "file":
+                            to_take_back.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
 
         # Independent safety net for "listening" rows (passive DCC SEND).
         # _serve_passive_offer() already bounds its own accept() with
@@ -1223,6 +1240,9 @@ def check_fetch_queue():
             promoted += 1
             to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file")))
 
+    for bot, filename in to_take_back:
+        drop_our_request_at(bot, filename)
+
     if not to_dispatch:
         return
 
@@ -1298,6 +1318,35 @@ def check_fetch_queue():
         if oserve and hasattr(oserve, "queue_message"):
             oserve.queue_message(bot, message)
         print(f"[FETCH] Requested {log_desc} (request {rid}).")
+
+
+def drop_our_request_at(bot, filename):
+    """Ask `bot` to take `filename` out of our queue there: `@<bot>-remove
+    <file>` in the channel, the per-file form of the command DCCore answers
+    (commands.handle_queue_remove_file). Without it, cancelling on the
+    dashboard forgot the row here while the other bot kept the file queued and
+    sent it later, refused as unsolicited. A bot that only knows the bare
+    `@<bot>-remove` ignores the extra word rather than clearing anything.
+    Returns whether it was sent."""
+    import announce
+    import dcc
+    bot = str(bot or "").strip()
+    filename = str(filename or "").strip()
+    if (not bot or not filename or contains_unsafe_ctcp_bytes(bot)
+            or contains_unsafe_ctcp_bytes(filename)):
+        return False
+    oserve = sys.modules.get("oserve")
+    if not (oserve and hasattr(oserve, "queue_message")):
+        return False
+    default_channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
+                       or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
+    channel = dcc.channel_containing_user(bot) or default_channel
+    if not channel:
+        return False
+    oserve.queue_message(bot, announce.fit_irc_line(
+        lambda v: f"PRIVMSG {channel} :@{bot}-remove {v}\r\n", filename))
+    print(f"[FETCH] Cancelled by hand: asked {bot} to remove {filename!r} from our queue there.")
+    return True
 
 
 # THE FETCH FEED (#1019). A file leeched from another bot used to reach the
@@ -1634,6 +1683,23 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
             continue
         row["state"] = "receiving"
         return rid, row
+
+    # A LATE ANSWER TO A REQUEST WE GAVE UP ON. A bot with a busy queue holds
+    # our request and sends minutes later; the row has by then failed as "no
+    # response", and the file we asked for was refused as unsolicited. It is
+    # still the answer to our own request, so a row that failed only for
+    # silence, and only just, takes it.
+    now = time.time()
+    for rid, row in queue.items():
+        if (row.get("state") == "failed" and row.get("reason") == "no response"
+                and row.get("request_type", "file") == "file"
+                and row.get("offered_at") is not None
+                and 0 <= now - row["offered_at"] <= _LATE_OFFER_GRACE
+                and str(row.get("bot", "")).strip().lower() == wanted_bot
+                and _normalize_filename_for_match(row.get("filename", "")) == wanted_name):
+            row.pop("reason", None)
+            row["state"] = "receiving"
+            return rid, row
 
     list_candidates = [
         (rid, row) for rid, row in queue.items()
@@ -2385,6 +2451,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
         # already fitted the NAME to MAX_NAME_BYTES, which the wrap does not
         # affect and which the offering bot would otherwise choose.
         handle = open(platform_compat.long_path(dest_path), "wb")
+        acknowledging = True
         while bytes_received < total_size:
             if time.time() > wall_deadline:
                 failure_reason = "overall transfer timeout"
@@ -2418,10 +2485,14 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
             # whole of it is acknowledged, so without these every fetch from
             # one looked like a failed send to it and was offered again -
             # 15 seconds later, and again after a few minutes (#1019).
-            try:
-                sock.sendall(struct.pack("!I", bytes_received & 0xFFFFFFFF))
-            except OSError:
-                pass   # a sender that closes after the last byte no longer listens
+            # Given up on after the first failure: a sender that never reads
+            # them fills our send buffer, and every further sendall would wait
+            # out the socket's timeout.
+            if acknowledging:
+                try:
+                    sock.sendall(struct.pack("!I", bytes_received & 0xFFFFFFFF))
+                except OSError:
+                    acknowledging = False   # closed after the last byte, or not listening
     except Exception as recv_err:
         failure_reason = f"transfer error: {recv_err}"
         disk_full = _is_disk_full(recv_err)
