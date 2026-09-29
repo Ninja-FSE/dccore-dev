@@ -99,7 +99,8 @@ def hostile_env():
 #
 # Every one was invisible in `git status`: settings.conf and data/ are both
 # gitignored. Three times is enough to stop relying on noticing.
-WRITABLE_STATE = ("settings.conf", "data")
+# conf/ too (#959): settings.conf and admin_config.py live there now.
+WRITABLE_STATE = ("settings.conf", "conf", "data")
 
 
 def state_snapshot():

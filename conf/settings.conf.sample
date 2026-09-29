@@ -1098,6 +1098,9 @@
 # Most lists to ask for in one sweep. A bot back after a month offline has a
 # lot of stale lists, and asking for all of them at once is a burst of
 # outbound requests nobody asked for. The rest go next sweep, oldest first.
+# Only bots in one of your channels are asked - a list whose bot has left
+# waits until it is back - and a request that is refused does not use up a
+# place.
 #AUTO_REFETCH_MAX_PER_RUN = 3
 
 # Fetch the list of each bot that advertises one you do not have, one at a

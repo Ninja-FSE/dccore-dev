@@ -95,7 +95,8 @@ function fn(signature) {
   return src.slice(start, i + 1);
 }
 const code = ["function splitFetchedSource(", "function nickOfSource(", "function isOwnSource(",
-  "function primaryEntry(", "function hiddenByOnlineOnly("].map(fn).join("\n");
+  "function primaryEntry(", "function groupOnline(", "function displayNickOfSource(",
+  "function hiddenByOnlineOnly("].map(fn).join("\n");
 const make = new Function("state", code + "\nreturn hiddenByOnlineOnly;");
 
 function group(nick, online, list) {
@@ -104,15 +105,31 @@ function group(nick, online, list) {
 const out = [];
 function ask(label, state, g) { out.push(label + "=" + make(state)(g)); }
 
-ask("off_offline", { filelistsOnlineOnly: false, filelistsSource: "__own__" }, group("Gone", false));
-const on = { filelistsOnlineOnly: true, filelistsSource: "__own__" };
+ask("off_offline", { filelistsOnlineOnly: false, filelistsSource: "__own__", filelistsBots: {} }, group("Gone", false));
+const on = { filelistsOnlineOnly: true, filelistsSource: "__own__", filelistsBots: {} };
 ask("on_here", on, group("Here", true));
 ask("on_gone", on, group("Gone", false));
 ask("on_unknown", on, group("Joining", null));
 ask("on_own_list", on, group("__own__", false));
 ask("on_own_second_list", on, group("__own__:video", false, "__own__:video"));
-ask("on_open_bot_gone", { filelistsOnlineOnly: true, filelistsSource: "GoneBot/rar" }, group("GoneBot", false));
-ask("on_other_bot_gone", { filelistsOnlineOnly: true, filelistsSource: "SomeoneElse" }, group("GoneBot", false));
+ask("on_open_bot_gone", { filelistsOnlineOnly: true, filelistsSource: "GoneBot/rar", filelistsBots: {} },
+    group("GoneBot", false));
+ask("on_other_bot_gone", { filelistsOnlineOnly: true, filelistsSource: "SomeoneElse", filelistsBots: {} },
+    group("GoneBot", false));
+// #975: a bot merged into its new nick (#376) - the list held under the old
+// nick, offline, and the new nick's advert row, online.
+function merged() {
+  return { nick: "NewNick", entries: [
+    { bot: "OldNick", nick: "NewNick", online: false, held: true },
+    { bot: "NewNick", nick: "NewNick", online: true }] };
+}
+ask("on_merged_here", on, merged());
+const mergedOpen = { filelistsOnlineOnly: true, filelistsSource: "OldNick",
+                     filelistsBots: { OldNick: { bot: "OldNick", nick: "NewNick" } } };
+const gone = merged();
+gone.entries[1].online = false;
+ask("on_merged_gone_but_open", mergedOpen, gone);
+ask("on_merged_gone", on, gone);
 console.log(out.join("\n"));
 """
 
@@ -156,6 +173,16 @@ class TheRealHelperDecidesWhichRowsGo(unittest.TestCase):
 
         self.assertEqual(seen["on_open_bot_gone"], "false")
         self.assertEqual(seen["on_other_bot_gone"], "true")
+
+    def test_a_bot_here_under_a_new_nick_stays(self):
+        """#975: its held list is under the old nick, which is offline."""
+        self.assertEqual(self.seen()["on_merged_here"], "false")
+
+    def test_its_open_list_stays_by_the_nick_the_row_shows(self):
+        seen = self.seen()
+
+        self.assertEqual(seen["on_merged_gone_but_open"], "false")
+        self.assertEqual(seen["on_merged_gone"], "true", "and gone when it really is gone")
 
 
 if __name__ == "__main__":

@@ -400,6 +400,14 @@ def ident_for_nick(nick):
     return kept or "dccore"
 
 
+# The most nicks config.whois_status holds (#958 follow-up) - see the 352
+# handler. Nothing reads it for a decision, so this only bounds its memory.
+WHOIS_STATUS_MAX = 5000
+
+# Undernet's REALLEN is 50; a longer realname is cut by the server anyway.
+REALNAME_MAX_LENGTH = 50
+
+
 def registration_names():
     """(ident, real name) for the USER line: both follow the configured nickname.
 
@@ -409,7 +417,9 @@ def registration_names():
     with that. Read at every connection, so changing NICKNAME changes both.
     """
     configured = str(getattr(config, "ORIGINAL_NICK", None) or getattr(config, "NICKNAME", None) or "")
-    return ident_for_nick(configured), (configured or "dccore")
+    import serverschat
+    real = f"{serverschat.REALNAME_MARK} {configured or 'dccore'}"
+    return ident_for_nick(configured), real[:REALNAME_MAX_LENGTH]
 
 
 def adopt_registered_nick(line):
@@ -1965,10 +1975,20 @@ def note_join_seen(nick, now=None):
         return
     now = time.time() if now is None else now
     with runtime.bot_idents_lock:
+        # OLDEST FIRST, AND ONLY THE STALE ONES LOOKED AT (#981). This runs for
+        # every JOIN in every channel - a bot's new nick is not a known bot
+        # yet when it joins, and its join time is what #376 needs - and it
+        # used to walk the whole dict each time: a netjoin into big channels
+        # was quadratic on the read loop, with bot_idents_lock held. Popped
+        # and put back, a rejoin moves to the end, so the dict stays in the
+        # order of its times and the pruning stops at the first fresh one.
+        runtime.recent_joins.pop(key, None)
         runtime.recent_joins[key] = now
-        for gone in [k for k, at in runtime.recent_joins.items()
-                     if now - at > IDENT_MERGE_WINDOW_SECONDS]:
-            runtime.recent_joins.pop(gone, None)
+        while runtime.recent_joins:
+            oldest = next(iter(runtime.recent_joins))
+            if now - runtime.recent_joins[oldest] <= IDENT_MERGE_WINDOW_SECONDS:
+                break
+            del runtime.recent_joins[oldest]
 
 
 def note_bot_renamed(old_nick, new_nick, ident=None):
@@ -2010,6 +2030,65 @@ def note_bot_renamed(old_nick, new_nick, ident=None):
     print(f"[ALT-NICK] {old_nick} is now {new_nick} - showing them as one "
           f"bot in the List Browser.")
     return True
+
+
+@never_breaks_the_read_loop
+def _capture_chat_message(user, target, msg, hostmask=None):
+    """A channel message that may be DCCore Chat (#371) - see
+    serverschat.capture(). Observational like the other captures here: it
+    records and relays to the operator's console, and it never dispatches
+    and never answers.
+
+    Not from somebody banned (#958 review): a ban is the operator saying they
+    want nothing from that nick, and that includes their chat. Only checked
+    for a line that IS chat, so an ordinary message costs no ban lookup.
+    `hostmask` is the sender's "ident@host", for the hostmask-shaped bans."""
+    import serverschat
+    if serverschat.chat_text(msg) is None:
+        return
+    if not security.check_user_status(user, hostmask=hostmask):
+        return
+    serverschat.capture(user, target, msg)
+
+
+@never_breaks_the_read_loop
+def _note_chat_peers(line):
+    """A 352 (WHO reply): which nicks are other DCCore bots - see
+    serverschat.note_who_reply()."""
+    import serverschat
+    serverschat.note_who_reply(line)
+
+
+_END_OF_WHO = re.compile(r"^:\S+\s+315\s+\S+\s+(\S+)\s+:")
+
+
+@never_breaks_the_read_loop
+def _finish_chat_who_round(line):
+    """A 315 (End of /WHO list): whoever this round did not reconfirm for
+    that channel is gone from it - see serverschat.finish_who_round()."""
+    found = _END_OF_WHO.match(str(line or "").strip())
+    if not found:
+        return
+    import serverschat
+    serverschat.finish_who_round(found.group(1))
+
+
+@never_breaks_the_read_loop
+def _forget_chat_peer(nick, chan=None):
+    import serverschat
+    serverschat.note_gone(nick, chan)
+
+
+@never_breaks_the_read_loop
+def _note_chat_join(nick, chan):
+    import serverschat
+    serverschat.note_join(nick, chan)
+
+
+@never_breaks_the_read_loop
+def _refresh_chat_peers():
+    import serverschat
+    serverschat.refresh_peers()
 
 
 @never_breaks_the_read_loop
@@ -2912,6 +2991,13 @@ def irc_loop():
                         try:
                             s.sendall(b"PING :lagcheck\r\n")
                             last_ping_sent = now
+                            # #982 audit finding 2: the server's own PING was
+                            # the only clock refresh_peers() had. ircu pings a
+                            # client only after ~90s of silence FROM it - and
+                            # this keepalive fires at 45s, so the server always
+                            # hears from us first and never sends one. Without
+                            # this, WHO was never asked automatically at all.
+                            _refresh_chat_peers()
                         except Exception as ping_err:
                             print(f"[TIMEOUT] The keepalive PING did not get through ({ping_err}). Dropping the link to reconnect.")
                             try: s.close()
@@ -2997,6 +3083,8 @@ def irc_loop():
                         if len(parts) > 1:
                             pong_code = parts[1].lstrip(':')
                             s.sendall(f"PONG {pong_code}\r\n".encode("utf-8", errors="ignore"))
+                        # The server's own ping is the clock for asking WHO again.
+                        _refresh_chat_peers()
                     
                     # Anchored with is_server_numeric(), for the same reason
                     # the 513 handler three lines below is: an unanchored
@@ -3261,6 +3349,16 @@ def irc_loop():
                             config.activation_triggered = True
                             print(f"[INFO] All channels joined successfully! Waiting 5 seconds for settle...")
                             threading.Thread(target=delayed_activate, daemon=True).start()
+                            # DCCore Chat (#371 follow-up): NAMES (353/366)
+                            # gives nicknames only, never a realname - so
+                            # this is the earliest point a WHO round can
+                            # actually find a peer. Without this, the first
+                            # one waited for the keepalive or the advert
+                            # thread, both minutes away. Not forced: a
+                            # rehash-triggered rejoin still respects
+                            # WHO_EVERY, so it does not re-ask right after a
+                            # round that already ran.
+                            _refresh_chat_peers()
 
 
 
@@ -3285,13 +3383,30 @@ def irc_loop():
                             note_bot_renamed(nick_match.group(1),
                                              nick_match.group(2).strip(),
                                              renamed_ident.group(1) if renamed_ident else None)
+                            # A DCCore Chat peer that changes nick is found again
+                            # under the new name by the next WHO: drop the old.
+                            _forget_chat_peer(nick_match.group(1).lower())
                             
                     # Anchored: this writes straight into config.whois_status.
                     if is_server_numeric(line, "352"):
+                        _note_chat_peers(line)
                         parts = line.split()
                         if len(parts) > 7:
                             target_nick = parts[7].lower()
+                            # Bounded (#958 follow-up): DCCore Chat asks WHO
+                            # for every channel every few minutes, so this
+                            # sees every nick in every channel, and nothing
+                            # ever removed one. Moved to the end on each
+                            # sighting, so the oldest sighting goes first.
+                            config.whois_status.pop(target_nick, None)
                             config.whois_status[target_nick] = True
+                            while len(config.whois_status) > WHOIS_STATUS_MAX:
+                                config.whois_status.pop(next(iter(config.whois_status)))
+                    # DCCore Chat (#371 follow-up): the WHO round refresh_peers()
+                    # opened for this channel is done - reconcile who it actually
+                    # found against who we thought was still there.
+                    if is_server_numeric(line, "315"):
+                        _finish_chat_who_round(line)
                     # Anchored: this populates config.channel_users, which dcc.py treats as
                     # proof a user is present when deciding whether to thaw a frozen queue
                     # and dispatch to them. A forged line injected fake presence.
@@ -3367,6 +3482,12 @@ def irc_loop():
                             note_possible_reconnect(joined_user)
                             # #376 option B: when this nick appeared.
                             note_join_seen(joined_user)
+                            # DCCore Chat: a stranger joining might be a
+                            # DCCore bot reconnecting - ask WHO for just this
+                            # one nick rather than wait up to WHO_EVERY.
+                            # Already-known peers are skipped inside
+                            # note_join() itself.
+                            _note_chat_join(joined_user, joined_chan)
 
                             # One pop, not `in` then `del`. Between the two, the
                             # freeze sweep in check_queue_and_send() - which runs
@@ -3389,6 +3510,7 @@ def irc_loop():
                         if part_match and is_valid_irc_target(part_match[1]):
                             p_user = part_match[0].lower()
                             p_chan = part_match[1].lower()
+                            _forget_chat_peer(p_user, p_chan)
                             with runtime.channel_users_lock():
                                 if p_chan in config.channel_users and p_user in config.channel_users[p_chan]:
                                     config.channel_users[p_chan].remove(p_user)
@@ -3404,6 +3526,7 @@ def irc_loop():
                         quit_match = re.search(r"^:([^!]+)!", line)
                         if quit_match:
                             q_user = quit_match.group(1).lower()
+                            _forget_chat_peer(q_user)
                             with runtime.channel_users_lock():
                                 quit_chan = None
                                 for chan in config.channel_users:
@@ -3561,6 +3684,10 @@ def irc_loop():
                         # Someone else asking a bot for its list (#926): the
                         # automatic grab leaves that bot alone for a while.
                         _capture_list_ask(user, msg)
+
+                        # DCCore Chat (#371): a tagged message from another
+                        # DCCore bot, relayed to the operator's console.
+                        _capture_chat_message(user, target_chan, msg, user_host)
 
                         # A private message from a bot we asked for a file
                         # (#926): some servers answer a request that way

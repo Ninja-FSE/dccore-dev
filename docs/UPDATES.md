@@ -4,6 +4,373 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🗂️ The daemon's modules live in `src/`, this install's own files in `conf/` (#959)
+
+Phase 1 (#960) moves every module that is only ever imported - `irc.py`, `adminchat.py`, `defaults.py`,
+`webserver.py`, `serverschat.py` and the rest - into a flat `src/`; `oserve.py`, `configure.py` and `update_list.py`,
+which an operator runs by hand, stay at the root. The modules still import each other by bare name: `src/` goes on
+`sys.path` before any of them loads (and `tests/__init__.py` does the same for the suite), and the few that found a
+file from their own `__file__` (`settings_file.DEFAULT_PATH`, `webserver.WEB_DIR`, the scripts' `REPO_ROOT`s) look
+one level up. Phase 2 (#983) moves `settings.conf` and `admin_config.py` into `conf/` with their samples: the daemon
+moves an existing install's own two files there the first time it starts, once, logged, and not when
+`DCCORE_SETTINGS_FILE` points elsewhere. The launchers (`start-dccore.sh`, `start-dccore.bat`, both autostart
+installers) and `setup_check.py` look for them in `conf/` as well as at the root - they decide "first run" before any
+Python runs, and looking at the root alone sent an upgraded install back to first-run setup on its second start.
+`scripts/preflight.py` watches `conf/` for a test writing real state. Tests: `tests/test_the_launchers_find_the_conf_dir.py`
+reads each launcher's check and runs the shell one where bash is available.
+
+### 📦 A passive offer for a queued request waits for a free fetch slot
+
+Audit 2026-09-27, held until v1.13.2 shipped. A row queued at another bot holds no fetch slot (#926), so the
+dispatcher asks other bots meanwhile, and `_claim_matching_offer_locked()` admits the queued row's offer whenever its
+turn comes - refusing it would throw its place in that queue away. `handle_incoming_offer()` never checked the slots
+for it, so offers for rows queued at several bots arriving together all went ahead: past `MAX_FETCH_SLOTS`, and for a
+PASSIVE offer each one a listener in the DCC port range the bot's own sends to its users share. Now, once the claim
+has taken a row that was queued, a passive offer is not listened for while `count_active_fetches()` is past
+`MAX_FETCH_SLOTS`: the row goes back to pending, as asked (#963), and the dispatcher asks for it again once a slot
+is free. An active offer, which costs no port, is still admitted there, so a queued place is not lost; it can still
+take the fetches past `MAX_FETCH_SLOTS`, bounded by `FETCH_MAX_PER_BOT` per bot. An offered row brings its own slot
+and is unchanged. Tests: `tests/test_a_queued_passive_offer_waits_for_a_slot.py`.
+
+### 📦 A private address reaches the console only on a NAT hairpin
+
+Audit 2026-09-27, held until v1.13.2 shipped. #881 let `_listen_and_serve_locked()` take a console connection from
+any private or link-local address, for the operator behind the same router as the bot (their client advertises the
+router's public IP; their connection arrives from a LAN one). Wherever the source address is not the real client's -
+a proxy or container that rewrites it, a LAN or provider network shared with others - any peer with a private
+address could reach the port first and take the one listener: the banner, the password prompts (still required),
+and the operator's own connect finding the port gone - the takeover #680 closed. New
+`adminchat._is_the_operator()` takes a private peer only when the address the operator advertised is the bot's own
+public one - the hairpin itself; the advertised address and a passive request are unchanged. A private peer that is
+dropped is logged with why. `ADMIN-CONSOLE.md` says so. Tests: `tests/test_a_lan_peer_is_trusted_only_on_a_hairpin.py`,
+and a real-socket case in `test_a_lan_hairpin_reaches_the_console`, whose hairpin case now models the bot's own
+public address.
+
+### 📦 The DCCore window's button keeps its colour, and the panel is not repeated in the text (#1013)
+
+Seen live: the @DCCore button turned red for a new line (#892) and went black again before anybody looked. Every
+status burst - about every 30 seconds - redraws the side panel, and `dccore.panel` starts with `clear -l`, which in
+mIRC resets the window button's colour too (checked: `/echo -m @DCCore test` lights it, `/clear -l @DCCore` puts it
+out). A failure's highlight colour went the same way. `dccore.panel` now reads the colour first (`dccore.lit`:
+`$window().sbcolor` as `/window -g`'s 2 highlight or 1 message - mIRC's help documents `-g0/1/2` but not
+`.sbcolor`'s values, so a name or a number is understood) and sets it again after the redraw, on both ways out
+(`dccore.relight`), never on the active window. And with the panel on, the text no longer gets a `[STATUS]` line
+every `statusmin` minutes - identical lines, saying what the panel shows live; a window without the panel keeps it.
+`ADMIN-CONSOLE.md` says so. Tests: `tests/test_the_panel_keeps_the_button_colour.py`.
+
+## 🟩 v1.13.2 (2026-09-28) - "The Bot Says What It's Doing"
+
+### 🚪 Clearing the debug channel is seen everywhere, and can be confirmed away (#1010)
+
+Live-reported: an operator who cleared `DEBUG_CHANNEL` from the dashboard saw the bot stay in the old channel with
+no explanation. That is `sync_channels()`'s deliberate #511 safety behaviour - a blank `DEBUG_CHANNEL` after a
+rehash is ambiguous (a real clear, or `settings.conf` briefly unreadable, or the reload catching a value mid-flight),
+so the bot protects the old channel and only truly leaves on the next reconnect - but the message explaining it went
+through a plain `print()` in production, reaching stdout only, never the debug channel, the admin console, or the
+operator who just cleared the setting.
+
+- **Visibility.** That message now also goes through `announce.send_debug()`, reaching the debug channel, admin
+  console and `dccore.mrc` regardless of how the rehash was triggered. An ordinary rehash (the dashboard fires one on
+  every settings save) says nothing extra - only the one where `DEBUG_CHANNEL` genuinely went missing does.
+- **Resolved where it actually can be.** The dashboard now asks before saving a `DEBUG_CHANNEL` clear ("Remove the
+  debug channel, #x?"). On confirmation the save carries a flag - popped out before it ever reaches
+  `settings_file.save()` as a fake setting - through to `sync_channels(confirmed_debug_removal=True)`, which parts
+  the channel immediately instead of protecting it. A human already confirmed it in the moment, so the ambiguity the
+  protection exists for does not apply. Every other rehash trigger (console, channel command, a raw `settings.conf`
+  edit) is unaffected and keeps the existing protection.
+
+New tests in `tests/test_the_rehash_channel_sync_takes_its_turn.py` and `tests/test_webserver.py` cover both halves:
+the visible warning firing only on the rehash that needs it, the confirmed clear parting immediately and leaving
+nothing in `channel_users`, a source guard on the confirm popup's own text (a missing `{chan}` fill-in was found and
+fixed in review), and the flag never being written to `settings.conf` as a setting of its own.
+
+### 📡 The `dccore.mrc` window says why it only ever shows STATUS (#1008)
+
+Live-reported: an operator's `dccore.mrc` window kept showing its STATUS burst - unconditional once a session is
+structured and authenticated - while `[REQUEST]`, `[SENDING]`, `[SENT]`, `[FAIL]` and `[SEARCH]` stayed silent,
+because `DEBUG_TO_CONSOLE` gates those in `announce.feed_event()` and nothing said so. A window that looks alive
+while quietly missing everything else is worse than one that says why.
+
+Mirrors `checkupdates` (#572) exactly, with one addition: a new `consolefeed [on|off]` console command on the same
+`settings_file.save()` + rehash path, confirmed with `DCCORE CONSOLEFEED on|off`; `hello` sends that line every
+time - not just once ever, unlike `checkupdates` - and, only when it is off, a plain-text warning too, so an operator
+who never opens Options still learns why. The options dialog's checkbox (405, replacing what used to be a static
+hint label at the same spot) reflects the bot's live state, and a menu toggle sits beside "Daily update check".
+`dccore.ver` bumped to 1.7.
+
+Review found the warning naming a `/dccore` subcommand that did not exist, and a dashboard category that was not
+where `DEBUG_TO_CONSOLE` actually lives - both fixed: `alias dccore` gained a real `consolefeed` branch, the warning
+now names Settings > Debug & logging correctly, and a test reads the real label from `en.json` so the two cannot
+drift apart silently again.
+
+### 🔁 The peer sidebar actually clears when it redraws, and a stranger joining is asked about at once (#1005, #1006)
+
+Live-reported, on the DCCore Chat peer sidebar (#371, #982): after about an hour, the same peer's nick showed 14-16
+duplicate rows in the side-listbox, one more after every periodic redraw. `dline -l $win 1-N` (a hyphenated range) -
+one call meant to clear the listbox before redrawing it - turned out to be a silent no-op on this custom window, so
+old rows were never removed regardless of who had actually left; `$addtok`'s own deduplication was correct the whole
+time. Fixed by clearing one line at a time (`while ($line($win,0,1) > 0) { dline -l $win 1 }`), which depends only on
+single-line `dline -l`, already proven to work by the existing peer-picker read path.
+
+Separately: a DCCore bot reconnecting (a `/quit` then a rejoin, say) sat out of the sidebar for up to `WHO_EVERY`
+(10 minutes) after rejoining, since a plain `JOIN` carries no realname (no `extended-join` capability is negotiated)
+and only a `WHO` reply's realname says who is a DCCore bot. `serverschat.note_join()` now asks a single-nick `WHO`
+for a stranger the moment it joins one of the bot's channels - not a full `refresh_peers()` round - and is skipped
+entirely for a nick already known as a peer, so ordinary join/part churn does not turn into extra `WHO` traffic.
+
+Both confirmed live: forcing a `/quit` and a rejoin for a real peer showed the sidebar clear its duplicates
+immediately and pick the reconnecting peer back up within moments, rather than the old accumulate-forever/up-to-
+ten-minutes behaviour.
+
+### 📦 Remembering joins costs the same per JOIN however many there were (#981)
+
+Audit 2026-09-27 L12. `irc.note_join_seen()` runs for every JOIN in every channel - it must: a bot back under a new
+nick is not in `known_bots` yet when it joins, and that join time is what #376's ident merge compares, so the
+suggested "known bots only" would have broken it. Each call walked all of `runtime.recent_joins` to drop entries
+older than `IDENT_MERGE_WINDOW_SECONDS`, under `bot_idents_lock` on the read loop: quadratic in a netjoin (10,000
+joins measured at 4.5 s). A join is now popped and put back, so the dict stays in the order of its times, and the
+pruning stops at the first entry still inside the window. Tests: `tests/test_a_netjoin_is_not_quadratic.py`, which
+counts the entries looked at rather than timing anything.
+
+### 📦 An audio cache that cannot be saved does not fail a published rebuild (#980)
+
+Audit 2026-09-27 L11. `generate_master_list()` saves the audio-info cache (`audio.publish()`) after the swap and the
+prune, inside the try whose `except Exception` returns False. A `sqlite3.Error` there - "database is locked" while
+another run or a database browser holds the cache, a write error - reported a live rebuild as failed: the daemon
+took its failure path, and with several lists `generate_all_lists()` said they were "still serving what they last
+built", which was untrue. `audio.publish()` now catches `sqlite3.Error` and `OSError`, says the list is published
+but the cache was not updated, and the rebuild returns True; `close()` in the `finally` still keeps what this rebuild
+read. Tests: `tests/test_a_cache_that_cannot_save_does_not_fail_the_rebuild.py`.
+
+### 📦 The audio-info cache is kept under the list's own name (#979)
+
+Audit 2026-09-27 L10. `generate_master_list()` opened the audio cache with `scope=list_name or ""`, and
+`_generate_all_lists()` builds a lone list with no name but each of several by its name - so adding a second list
+moved the primary's scope from `""` to its name. Its whole cache missed at once: files were read again within
+`LIST_AUDIO_INFO_MINUTES` and the rest listed size-only for rebuilds, and the `""` rows, never used again, were never
+pruned. Removing the list flipped it back. The scope is now the list's name however the rebuild was asked for (the
+primary's, from `library.primary_list()`, when none is given), and new `Cache.open(formerly=...)` lets the primary
+take the old `""` rows over once - `UPDATE OR IGNORE` where its own scope has no row for the file, the rest dropped.
+Only the primary was ever built as `""`. Tests: `tests/test_the_audio_cache_scope_is_the_lists_own_name.py`.
+
+### 📦 A request queued at another bot is asked again after a restart (#978)
+
+Audit 2026-09-27 L9. `_restart_form()` kept a "queued" row as it was (#926), but a restart QUITs and file servers
+drop a quitting user's queue. The restored rows waited for files that were never coming and, "queued" being in
+`_BOT_LOAD_STATES`, held `FETCH_MAX_PER_BOT` for that bot: every other request to it waited "their-turn" until
+`FETCH_QUEUED_TIMEOUT` (43200 s) failed the ghosts. "queued" is now in `_ASKED_AGAIN_AFTER_A_RESTART`, and the
+restart form drops `queued_at`, `queue_position` and `reply`. A server that did keep the request answers "already in
+my queue", and `handle_bot_reply()` puts the row straight back to queued with its position. The restart test in
+`test_the_fetch_queue_waits_and_paces_itself` now expects that; new
+`tests/test_a_queued_request_is_asked_again_after_a_restart.py`.
+
+### 📦 Cancelling a request the other bot has queued says "Cancel" (#977)
+
+Audit 2026-09-27 L8. A fetch in the "queued" state (#926) - the other bot has queued our request and nothing has
+arrived - got the Downloads panel's remove button, but `data-pending` and the Cancel/Delete label tested
+`state === "pending"` alone, so it read "Delete" and the click asked "Delete this fetched file? This cannot be
+undone." about a file that did not exist. New `fetchRowNotStarted(state)` (pending or queued) sets both. Tests:
+`tests/test_cancelling_a_queued_request_says_cancel.py`.
+
+### 📦 The version line and the Stats cards follow the language (#976)
+
+Audit 2026-09-27 L7. `loadVersion()` runs before `loadLanguage()`, and `renderVersion()` builds its text from `t()`
+into `#version-text`, which has no `data-i18n`. When the check answered first, `t()` had no dictionary and returned
+the key, so the sidebar read "version.upToDate" until the next poll ten minutes on; a language switch left that line
+- and the Stats page's `renderLibrary()` cards, which replaced their `data-i18n` labels - in the old language.
+`renderVersion()` and `renderStats()` now keep what they drew (`state.lastVersionInfo`, `state.lastStats`), and
+`loadLanguage()` draws both again after `applyTranslations()`. Tests: `tests/test_the_version_line_follows_the_language.py`,
+which runs the real `t()`, `renderVersion()` and `loadLanguage()` under node, with a source guard beside it.
+
+### 📦 "Online only" keeps a bot that is here under a new nick (#975)
+
+Audit 2026-09-27 L6. A row #376 merged holds the list kept under the old nick (offline, by definition) and the new
+nick's advert (online). `hiddenByOnlineOnly()` judged the row by `primaryEntry()` - the held, old-nick entry - so
+it dropped a row that `botRow()` draws with a green dot through `groupOnline()`; and its "the open list stays"
+exemption compared the source's real nick with the row's display nick, so the row went even while its list was open.
+The search did the same server-side: `build_crosslist_search_payload(online_only=True)` asked
+`user_is_present_in_ram()` about the old nick and left that list's matches out. The sidebar now judges the row by
+`groupOnline()` and compares the open list by `displayNickOfSource()`; the search counts a list as online when its
+nick or the nick its row is shown under (`_display_nick()`, with the payload's `_ident_merges()`) is present. Tests:
+two node cases in `test_online_only_filters_the_sidebar` (its harness now carries the two helpers), and
+`tests/test_online_only_keeps_a_renamed_bot.py`.
+
+### 📦 A reply is about the longest name it carries (#974)
+
+Audit 2026-09-27 L5. `handle_bot_reply()` matched a reply to a request by a plain substring test on the normalised
+name and took the oldest match, so with "Intro.mp3" and "Band - Intro.mp3" both outstanding at one bot, "Sorry, but
+Band - Intro.mp3 is not found" failed the "Intro.mp3" request, and the one it was about waited out its timeout; a
+queued reply moved the wrong row the same way. No word boundary could tell them apart - "Intro.mp3" follows a space
+there. New `_the_longest_named()` drops a matched name that is part of a longer name the reply also carries; if two
+different names are still left, the reply is ambiguous and the existing rule for an unnamed reply to several
+requests applies among them (refused or busy: nothing; queued: the oldest offered). Tests:
+`tests/test_a_reply_is_about_the_longest_name_it_carries.py`.
+
+### 📦 An audio file that could not be read is read again next time (#973)
+
+Audit 2026-09-27 L4. `audio_info.read()` swallowed every exception and returned None, so a transient I/O error -
+EIO or a timeout on an NFS/SMB mount, a sharing violation on Windows while another program held the file - was
+stored as the file's answer (`""`), published, and reused by every later rebuild while the size stayed the same:
+no length or quality for that file, indefinitely. `read()` now lets `OSError` through (a file gone since the walk is
+still None - the next walk will not list it either), and `Cache.read_pending()` shows such a file size-only this
+time and keeps it in `unread`, out of both `publish()` and `close()`, so the next rebuild reads it again. A file that
+makes no sense is still an answer and is remembered. The rebuild log says how many could not be read. Tests:
+`tests/test_a_failed_audio_read_is_tried_again.py`.
+
+### 📦 A DCCore that is reloading has queued the request, not refused it (#972)
+
+Audit 2026-09-27 L3. Asked for a file mid-rehash, a DCCore bot keeps the request (#668): "The bot is reloading its
+configuration. Your request is queued and starts when the reload is done.", then its usual "Added ... at position".
+`fetch_replies` classed the first line as busy, so `handle_bot_reply()` put our row back to pending with a
+ten-minute `retry_at`; the position line then found no candidate (only offered and queued rows are), and the DCC
+SEND that came once the reload was done matched no row and was refused as unsolicited. The rule is now "queued".
+Tests: a case in `test_other_servers_replies_are_understood`, and
+`tests/test_a_reloading_dccore_has_queued_the_request.py` end to end.
+
+### 📦 The list archive, asked for by name, waits for the whole rebuild (#971)
+
+Audit 2026-09-27 L2. Since #923 `handle_download_request()` is gated by `list.rebuild_pauses_requests()`, which
+admits requests through the scanning, audio and writing phases - right for library files, which the rebuild does
+not touch. `@nick` (`send_file_list()`) still refuses for the whole rebuild, but `!Bot <base>-<date>.zip` asks for
+the same archive by name and was served straight from `list_dir()`. A second rebuild on the same day keeps the
+archive's name, so a slow send started mid-scan could hold it open into the swap; on Windows,
+`_publish_artifacts()`'s `replace_with_retry()` gave up after `PUBLISH_REPLACE_ATTEMPTS` and the whole publish rolled
+back. A list-artifact request now gets `send_file_list()`'s own "Master list is currently rebuilding" notice while
+`update_inprogress` is set. Tests: `tests/test_the_list_archive_waits_for_the_rebuild.py`.
+
+### 📦 A fetch queued while the dispatcher looked around waits for the next tick (#970)
+
+Audit 2026-09-27 L1. `check_fetch_queue()` notes the bots with pending rows under `_fetch_lock()`, reads their
+presence, pauses and the disk outside it, and takes the lock again to promote. A row enqueued in between was not in
+`readiness`, and `readiness.get(key, "")` counted it ready: it went to a bot the operator had just paused, or - when
+nothing else had been pending, so `disk_low` was never computed - onto a disk under `MIN_FREE_BYTES`. The promotion
+loop now skips a bot this tick did not look at (the next tick, two seconds on, does), and checks `_paused` itself as
+well, for a pause that lands after the readiness was read. Tests:
+`tests/test_a_row_enqueued_mid_tick_waits_for_the_next.py`, which act inside the gap rather than racing it.
+
+### 📦 One nick cannot keep the library scans to itself (#969)
+
+Audit 2026-09-27 M7. A request for a name that is not in a folder's root streams every published list and walks
+every configured folder, bounded by `MAX_CONCURRENT_LIBRARY_SCANS` (2) and the one-minute miss memory (#580). The
+per-nick bound was the flood gate - "ten a nick per five seconds", as the comment said - until #888 took `!<bot>
+<name>` lines out of it. One nick sending distinct made-up names at the server's pace then kept both slots busy, the
+miss memory never helped (every name new), the queue caps never applied (nothing was queued), and every other user
+waited five seconds and was told "busy".
+
+`handle_download_request()` now gives each nick its share. A nick's lookups take turns (`_take_a_scan_turn()` on
+`runtime.library_scan_turns`, a Condition; the five-second wait covers the turn and then a slot), and once a turn
+comes the memories are looked in again - the miss memory and the new `_recall()` (the exact-name and folder
+memories, factored out of the block above) - so the rest of a pasted batch is answered by what its first row just
+learned instead of each scanning. A nick whose last `LOOKUP_NICK_MISSES` (10) scans within
+`LOOKUP_NICK_MISS_WINDOW_SECONDS` (60) found nothing is told "busy" without another; scans that found the file never
+count. The per-nick miss record is bounded like the other memories and cleared by `forget_library_lookups()`.
+`test_a_batch_of_requests_is_not_refused` now allows the slot wait to be what is left after the turn. Tests:
+`tests/test_one_nick_cannot_hold_the_scan_slots.py`.
+
+### 📦 A hung audio read is a stall the watchdog can see (#968)
+
+Audit 2026-09-27 M6. `audio_info.Cache.read_pending()` called `progress(done, total)` after every one-second
+`wait()`, whether a read had finished or not, and the rebuild wires that to `write_progress("audio", ...)`, which
+stamps `at`. When a network mount (NFS, an rclone/FUSE share) stopped answering, every read in flight blocked, but
+the progress file kept moving: `commands.run_watching_for_a_stall()` never saw a stall, `LIST_AUDIO_INFO_MINUTES`
+only stops new reads, and the pool waited for the stuck ones. The rebuild child never exited,
+`config.update_inprogress` stayed set, and every later `!update` or scheduled rebuild was refused until a restart.
+The same hang in the scan phase was already stopped after `LIST_UPDATE_STALL_SECONDS`.
+
+Progress is now reported once when the phase starts and then only when `done` has moved, so a phase in which nothing
+completes goes quiet and the watchdog stops it as it does a stuck scan. Test:
+`tests/test_a_hung_audio_read_is_a_stall.py` drives the loop's waits by hand - five empty seconds, then the read
+completes - and checks exactly the start and the one read were reported.
+
+### 📦 A refused automatic grab is not a try, and a list that arrives starts the count over (#967)
+
+Audit 2026-09-27 M5. `list_grab.tick()` added one to the bot's tries and saved it before calling
+`build_list_fetch_enqueue_result()`, and a refusal was only logged. With `FETCHED_FILES_DIR` missing at boot (503)
+or an operator's own folder or list fetch from that bot outstanding (409 - a queued one can last hours), three
+refusals 30 minutes apart wrote every candidate to `list_grabs.json` as "gave up", and it stayed so after the cause
+was gone, though nothing had been asked. Nothing ever cleared the count either: a list grabbed, later cleared by the
+bulk purge of offline bots (which deliberately is not "removed by hand"), and grabbed again was "gave up" after its
+third answered grab. The removed-by-hand set was never cleared by a hand fetch, though the module docstring said
+fetching by hand is how to change that answer.
+
+A try is now counted after the enqueue returns 200. The attempt still sets `last` and `list_grab_last` first, so a
+refusal waits `GRAB_COOLDOWN_SECONDS` (and the next grab `AUTO_GRAB_EVERY_MINUTES`) instead of being tried again
+on the next tick. New `list_grab.note_list_arrived(bot)`, called from `list_fetch.process_fetched_list_zip()` when a
+list is stored (never raising into it), drops the bot's tries and its removed-by-hand mark: a removed list comes back
+only by a hand fetch, since neither sweep asks for one. Tests: `tests/test_a_refused_grab_is_not_a_try.py`; the
+roadmap entry says what counts.
+
+### 📦 Bots that have left no longer take the automatic re-fetch's places (#966)
+
+Audit 2026-09-27 M4. `refetch_due_lists()` took `due[:AUTO_REFETCH_MAX_PER_RUN]` from a list sorted oldest first, and
+the oldest held lists are the likeliest to belong to bots long gone: with their adverts aged out of `known_bots`
+their freshness is "unknown", and past `UNKNOWN_LIST_MAX_AGE_DAYS` they are due. Three of them took the three places
+of every sweep; each got 409 "not here" from `build_list_fetch_enqueue_result()`, which is not an ask, so
+`_note_auto_attempt()` never set `last_attempt` and the interval floor never moved them back. An online bot whose
+advert showed a changed list was never refetched.
+
+Now the due list is filtered to `webserver.present_nicks()` before anything is asked - an absent bot is left for a
+sweep that finds it back, and its log line is not repeated every hour - and the bound counts the asks that went out
+(200), so a refusal (a fetch already outstanding) leaves its place to the next list. `lists_worth_refetching()` is
+unchanged. The refetch tests' fixtures now put their bots in the channel (`bots_in_the_channel()`, from #965); a new
+`tests/test_absent_bots_do_not_take_the_refetch_cap.py` covers the audit's case, a gone bot coming back, a refusal
+passing its place on, and the bound. `settings.conf.sample` and the roadmap say who is asked.
+
+### 📦 No fetch goes out before the channels are joined (#965)
+
+Audit 2026-09-27 M3. `_bot_readiness()` called every bot ready while `channel_users` was empty - "still joining, the
+old behaviour (ask) stands". That was harmless when a request made then was one just clicked. Since #926, rows
+survive a restart (mid-flight ones come back pending) and wait for an offline bot, and the dispatcher starts before
+the connection: at startup, and again after every reconnect (irc.py empties `channel_users`), it promoted up to
+`MAX_FETCH_SLOTS` restored or waiting rows at once, `channel_containing_user()` found nothing so each went to the
+first configured channel, the outbound queue held them until activation - often past `FETCH_OFFER_TIMEOUT` - and they
+failed as "no response". Restart persistence and waiting for an offline bot were both undone by it.
+
+Now nobody is asked until `config.bot_joined_channel` is set and `channel_users` holds somebody - the gate
+`list_fetch.refetch_due_lists()` already used, for the same reason. Rows wait as `waiting="joining"`, shown in the
+Downloads panel as "Waiting to join the channels" (en/es/fr). The dispatch tests that relied on "empty means ask"
+now put their bots in the channel through a new `tests.support.bots_in_the_channel()`; the CTCP-guard tests put the
+unsafe nicks there too, so it is still the guard - not "offline" - that stops them. The channel fallback is kept, for
+a bot seen only in a channel no longer configured.
+
+### 📦 A file too big for the free space waits for room instead of filling the disk again and again (#964)
+
+Audit 2026-09-27 M2. The dispatcher held fetching only while `FETCHED_FILES_DIR` had under `MIN_FREE_BYTES`
+(200 MB) free, and nothing compared an offer's size with the free space. A 1.5 GB pack offered with 1 GB free was
+accepted, hit ENOSPC, went back to pending (#926) and had its partial file removed - leaving 1 GB free again, not
+"low", so the next 2 s tick asked for it again. The other bot resent it, the disk filled to nothing again, and so on
+without end, with every other atomic write under the full disk (history, stats, known bots) failing each time round.
+
+`handle_incoming_offer()` now weighs the declared size against the room left - free space minus what the transfers
+already listening or receiving still have to write (`_room_left_locked()`), so two offers that each fit alone do not
+both go - before it connects or listens, as it does the size cap. An offer that does not fit with `MIN_FREE_BYTES` to
+spare is not taken: `_hold_for_space()` puts the row back to pending as it was asked (#963) with
+`row["needs_bytes"]`, `waiting="disk-full"` and a reason naming both sizes. The disk-full branch of `_run_transfer()`
+records the declared size the same way. The dispatcher keeps a row with `needs_bytes` waiting until it fits by the
+same test, measuring the disk only while such a row exists, and counts the room a released row will need so two
+held rows are not let go on the same room in one tick. A disk that cannot be measured holds nothing back, as before.
+`needs_bytes` survives a restart with the row. Tests: `tests/test_a_file_too_big_for_the_disk_waits_for_room.py`.
+
+### 📦 A folder or list fetch asked for again asks for the folder or list (#963)
+
+Audit 2026-09-27 M1. A "folder" row goes out as `!Bot !rar <folder>` and a "list" row as `@Bot`; neither knows the
+name the other bot will give its file until the offer arrives, and `_claim_matching_offer_locked()` then writes that
+name over `row["filename"]`. Two paths from #926 send a claimed row back to pending - `_restart_form()` after a
+restart, and the disk-full branch of `_run_transfer()` - and both kept the overwritten name, so the row was asked for
+again as `!Bot Artist_-_Album.rar`: a file of that name, which the other bot does not have ("not found", or no answer).
+The resume #926 promises never happened for folder fetches.
+
+New `_as_asked(row)` puts `filename` back from `requested_filename` (set once at creation, never overwritten) for
+"folder" and "list" rows, and drops what the offer said (`total_size`, `stored_filename`) - the next offer says it
+again. Called from `_restart_form()`, the disk-full branch, and the busy-retry path for good measure. A "file" row
+asked for its own name, so nothing changes for it.
+
+`tests/test_a_folder_fetch_is_asked_for_again_as_a_folder.py` (4) runs the whole path - enqueue, dispatch, a real
+claim overwriting the name, then a restart or a real disk-full `_run_transfer()`, then dispatch again - and checks
+the line that goes out: `!ServerOne !rar Artist - Album`, `@ServerOne` for a list, a file's own name unchanged.
+Mutation-checked: dropping the reset from the restart or the disk-full path, or keeping the offer's size, each fail
+a test (resetting "file" rows too is not observable, since their name is never overwritten).
+
 ### 🛡️ A private message cannot stall the IRC read loop (audit of 2026-09-27)
 
 Found by the audit of everything changed since 2026-09-20 (three of its six lenses independently). `fetch_replies`
@@ -27,6 +394,139 @@ the bot for not answering PING. It shipped in v1.13.1.
 inside the one before it; order and case; a stranger's line never classified; and a bot we are waiting on still read
 and moved. Mutation-checked 5 ways (the regex back, no word start, order not kept, no cap, strangers classified),
 each failing a test. The existing reply and fetch-queue tests (35) pass unchanged.
+### 🎯 A remembered lookup respects the pasted size (#962)
+
+Audit 2026-09-27 H1. The lookup memories from #886 were keyed on the name alone: `_lookup_hits[(list, name)]`, and
+`_in_a_recent_folder()` took any recent folder where the name existed. The list scan picks between same-named copies
+by the size a request pastes after `::INFO::` (`requested_size_hint`), but a request answered from memory never
+reached the scan. So after one user asked for album A's `01 - Intro.mp3`, another who pasted album B's row with B's
+size was sent A's copy, for LOOKUP_HIT_TTL_SECONDS; and after rows from album A, album B's `cover.jpg` resolved into
+A's folder. Both are in nearly every album.
+
+- The exact-name memory is keyed on `(list, name, size hint)`, read and written the same way. A hinted request reuses
+  only a lookup made with the same hint, and a bare one only a bare one - each gets what a fresh scan would give.
+- A folder candidate for a hinted request must be the hinted size (`dcc._matches_size_hint()`: the hint's first word
+  against `update_list.format_size_human()` of the file - the same formatter the list is written with; the rest of
+  the hint is audio info). A mismatch falls through to the scan, which picks by size. A bare request keeps #886's
+  folder memory unchanged.
+
+`tests/test_a_remembered_lookup_respects_the_size.py` (6): the audit's case both ways round; the same hint still served
+from memory with no second scan; a bare request's memory kept apart from a hinted one's; and the size check itself
+(first word, audio tail, no hint, missing file). Mutation-checked 4 ways (name-only key on read, on write, the folder
+ignoring size, the whole hint compared), each failing a test. The #886 and #580 lookup tests (28) pass unchanged.
+
+### 💬 DCCore Chat: public operator chat, relayed by the bot (#371)
+
+Built as decided on #371: public, no encryption, the window as the whole interface, and - after a first version
+(#955, held) that sent from the operator's own client - **relayed by the bot**, as agreed there. The operator's mIRC
+does not have to be in any channel, and the bot's half is tested here for real.
+
+**The bot, `serverschat.py`** (state in runtime.py: `chat_recent`, `chat_rate`, `chat_outbound`, `chat_muted`,
+`chat_last_id`, `chat_lock`, bound in defaults.py and kept across a rehash).
+
+- **Arriving:** `irc._capture_chat_notice()`, beside the broadcast-search capture in the NOTICE branch and wrapped
+  in `never_breaks_the_read_loop`, hands every NOTICE to `serverschat.capture()`. It takes only a NOTICE whose FIRST
+  word is `[ServersChat]`, to a channel the bot is in, not from our own nick. It strips colours and control codes,
+  caps the text at 400 characters, and limits each nick (more than 5 lines in 10 s hides it for 60 s, said once as a
+  `*` line). Up to 50 lines are kept **in memory only** (Neo: other people's chat is not kept in a file) and handed to
+  the console session's outbox. It never goes to `send_debug()`, so nothing reaches the debug channel or the plain
+  log, and nothing on this path sends (RFC 2812).
+- **Sent:** the console command `chat #channel <text>` (`adminchat._cmd_chat()` → `serverschat.say()`). Only to the
+  bot's own channels; stripped of colours and control characters, so no CR/LF can end the line early; capped at 350
+  bytes so the line fits IRC's 512; 6 lines a minute per session, so chat never holds up the queue's own notices. It
+  goes out through the paced queue (`oserve.queue_message`, lane = the channel) as `NOTICE #chan :[ServersChat]
+  <text>`, and the bot's own line is recorded and shown, since a server does not echo a NOTICE to its sender.
+  `chat` alone gives the channels.
+- **The wire stays `[ServersChat] <text>`** (agreed on #371): the sender is the nick that sent the NOTICE, which the
+  server vouches for, and no name sits in the text for anyone to forge.
+- **The feed:** `DCCORE CHAT <id> <channel> <nick> <text>` and `DCCORE CHANNELS <channels>`. The id is the line's time
+  in milliseconds, strictly increasing even across a restart. After `HELLO` the session gets `CHANNELS` and the last
+  50 `CHAT` lines. These are new line TYPES, not fields inserted into old ones, so the protocol minor does not move
+  and `MIN_SCRIPT_VERSION` stays 1.1 - an older script shows an unknown type in `@DCCore` as it comes (its
+  `a type this script does not know` branch). This corrects what the #371 comment expected.
+
+**The script, `dccore.mrc` 1.6** - the #955 window, fed by the bot instead:
+
+- *DCCore Chat · public · typing sends to #chan* in the title, and two lines saying it is public and that the bot
+  says what you type. Typing, or `/dccore chat <text>`, sends `chat %to %text` over the console - never a `/notice`
+  of its own. It opens by itself (minimised, `window -en`) for an arriving line, unless that option is off.
+- `CHAT` lines are drawn once per id (`chat.last`), stripped, only for listened channels, with the time from the id;
+  `CHANNELS` fills the right-click *Send to* / *Listen on* menus. A row's command carries the channel's NUMBER, never
+  its name (#955 review: a channel name holding `|` or `$` would otherwise run a command on the click).
+- A raw tagged NOTICE that also reaches the operator's own mIRC is `haltdef`ed only while the relay is up, on the
+  bot's network, in one of its channels, listened on, and with the window open or allowed to open - so the line is
+  drawn from the relay and not twice. With the relay down it shows in the channel as usual (Neo's second adjustment).
+- The script's own flood table from #955 is gone: the bot limits what arrives.
+
+Docs: ADMIN-CONSOLE.md has the `chat` command, the two feed lines, and a *DCCore Chat* section rewritten for the relay;
+the roadmap and both changelogs follow.
+
+**The transport changes: a channel PRIVMSG between DCCore bots, found by realname** (found while testing on the live
+bot: channel NOTICEs are what eggdrops and channel bots kick for).
+
+- **Realname:** `irc.registration_names()` now sends `DCCore/sc <nick>` (cut to 50), the first word being
+  `serverschat.REALNAME_MARK`. Ident and nick are unchanged.
+- **Peers:** `serverschat.refresh_peers()` asks `WHO #chan` for each channel (from the server's own PING, at most every
+  `WHO_EVERY` = 600 s, or at once with `chat who`), through the standard queue lane. `note_who_reply()` reads the 352
+  and keeps the nicks whose realname's first word is the mark, per channel, in `runtime.chat_peers` (bounded at
+  `PEER_MAX`, sightings older than 2.5 intervals ignored; PART, QUIT and NICK forget a peer). Nothing is sent to them.
+- **Arriving:** `irc._capture_chat_message()` (the PRIVMSG branch) replaces the NOTICE hook; a NOTICE is no longer chat.
+  Same rules as before, plus the sender must be a known peer (adverts and search replies carry the realname and never
+  the tag), and the ban check from the #958 review still applies.
+- **Sent:** `chat #chan text` or `chat * text` -> `PRIVMSG #chan :[ServersChat] text`. `*` is `cover()`: greedily the
+  fewest channels (at most `SEND_CHANNELS_MAX` = 5) reaching every peer once; with no peer seen it says so and sends
+  nothing. What an operator typed goes on the **express (VIP) lane**: on the standard lane a line waits behind one for
+  each of the bot's other channels, which was over a minute with fourteen. WHO stays standard. `chat peers` lists who
+  was seen.
+- **The script:** the window sends to `*` by default (menu: *Send to → Every channel with other DCCore bots*), and the
+  raw-line hider is an `on ^*:TEXT` now.
+- Tests updated and added (peer table, cover, WHO cadence, the express lane, the PRIVMSG wiring, the realname).
+
+**Neo's review of #958**, all four points taken:
+
+1. **A banned nick's chat is not relayed.** `irc._capture_chat_notice()` now gets the NOTICE's `ident@host` and asks
+   `security.check_user_status()` - only for a line that IS chat, so an ordinary NOTICE costs no ban lookup.
+2. **A cap for everyone together**, `INBOUND_ALL_MAX` (30 lines in 10 s, kept under the `*` key a nick cannot have),
+   said once per window; and the per-nick table can no longer grow past `_TRACK_MAX` inside one window (the oldest
+   counts go first - forgetting one only ever lets a nick through, and the all-senders cap still holds).
+3. **Bidi controls are stripped** both ways (U+061C, U+200E/F, U+202A-202E, U+2066-2069), so a line cannot reverse
+   how it is drawn.
+4. **The channel list follows the bot:** a session told `CHANNELS` at `hello` is told again with a status burst
+   whenever the bot's channels have changed (`Session._send_chat_channels_if_changed()`), so the script's list is at
+   most one status interval stale. A session that never had it is never sent it.
+
+Tests: `tests/test_servers_chat_is_relayed_by_the_bot.py` (41) runs the real code: the first-word tag, the bot's
+channels only, never our own nick, stripping, the cap, no debug channel, a plain console's line, rising ids; that
+capture sends nothing (and has no send in its statements); the per-nick limit and its single notice; bounded recent
+lines and limit table; nothing to disk; the tagged NOTICE through the queue, the bot's own line back, CR/LF unable to
+end the line, the 512-byte fit, own channels only, the send cap; the console command in both modes; `hello`
+replaying the channels and the recent lines; the read-loop wiring, and a capture that raises not breaking it; and
+the review's four (a banned nick, no lookup for an ordinary NOTICE, the all-senders cap said once, the table bounded
+in one window, bidi both ways, the channels re-sent only when changed and only to a session that had them, the status
+burst asking). The four were mutation-checked 8 more ways, each failing a test.
+`tests/test_dccore_chat_in_the_mirc_window.py` (21) reads the script: the tag first, every condition before the one
+`haltdef`, no send in anything drawing a line, a line drawn once, listened and stripped, sending only through the bot,
+the public wording, the quiet open, the menu by number, the dialog, no flood table of its own. Mutation-checked 17
+ways (tag anywhere, any channel, our own nick, unstripped, no inbound limit, unbounded recent, capture answering,
+sent unstripped, no send cap, any channel for sending, ids going back, not wired, no replay, hiding with the relay
+down, a replay drawn twice, sending from the client, the script answering), each failing a test. Not run in a real
+mIRC.
+
+**Follow-up to the PRIVMSG change**, from its review:
+
+1. **The window shows your own lines, and listens everywhere by default.** An own line said with `chat *` comes back
+   with `-` for its channel, and the window filtered it out as an unlistened channel. With nothing ticked by default,
+   peers' lines never showed either, so out of the box the window stayed empty. Own lines now always show (as `*` for
+   a fan-out), and `chat.all` defaults to 1: only lines from other DCCore bots arrive at all.
+2. **`whois_status` is bounded** (`irc.WHOIS_STATUS_MAX`, 5000). The WHO every 10 minutes makes the 352 handler see
+   every nick in every channel, and nothing ever removed one. Nothing reads it for a decision; each sighting moves the
+   nick to the end, and the oldest goes first.
+3. **Every channel line counts against the send cap.** `chat *` to three channels is three lines (`_limited(...,
+   count=len(targets))`), so the express lane never carries more than 6 identical-text lines a minute. A fan-out wider
+   than the whole cap is refused whole: nothing is queued.
+
+Tests: 5 more (the fan-out counting, a fan-out refused whole, the bound, own lines, the default). Mutation-checked 5
+ways, each failing a test.
 
 ### 🃏 The Library cards are built from the lists: a total, one per list, when it was built (#956)
 

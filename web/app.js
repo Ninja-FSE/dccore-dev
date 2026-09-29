@@ -67,6 +67,9 @@
     // also langFallback) and the English dictionary every language falls
     // back to for a key it does not have yet. See the Language section.
     lang: {}, langFallback: {},
+    // The last version check and stats payload drawn, redrawn when a
+    // language finishes loading (#976).
+    lastVersionInfo: null, lastStats: null,
     // What the previewed OmenServe import would write, held between the
     // preview and the confirm so the button sends exactly what was shown -
     // not a second parse that could have moved on from it.
@@ -777,8 +780,16 @@
     offline: "download.waiting.offline", "just-back": "download.waiting.justBack",
     retry: "download.waiting.retry", "their-turn": "download.waiting.theirTurn",
     slots: "download.waiting.slots", paused: "download.waiting.paused",
-    "disk-full": "download.waiting.diskFull"
+    "disk-full": "download.waiting.diskFull", joining: "download.waiting.joining"
   };
+
+  // Nothing has been downloaded for it yet: waiting here, or waiting in the
+  // other bot's queue (#977). A queued row was given the "Delete this
+  // fetched file? This cannot be undone." warning, about a file that did
+  // not exist.
+  function fetchRowNotStarted(state) {
+    return state === "pending" || state === "queued";
+  }
 
   function loadDownloads() {
     fetchJson("/api/fetch/status").then(function (rows) {
@@ -930,10 +941,11 @@
                        state === "queued");
       // "Cancel" for a row that has not started - calling it Delete would
       // suggest a downloaded file is being thrown away when none exists.
+      var notStarted = fetchRowNotStarted(state);
       var deleteBtn = deletable
         ? "<button type=\"button\" class=\"btn btn-small btn-danger fetch-delete-btn\" data-request-id=\"" +
-          encodeURIComponent(row.id) + "\" data-pending=\"" + (state === "pending" ? "1" : "") + "\">" +
-          (state === "pending" ? t("common.cancel") : t("common.delete")) + "</button>"
+          encodeURIComponent(row.id) + "\" data-pending=\"" + (notStarted ? "1" : "") + "\">" +
+          (notStarted ? t("common.cancel") : t("common.delete")) + "</button>"
         : "";
       // ASK AGAIN, for a row that did not arrive. Requested: a failed or rejected
       // fetch is the one an operator most wants to retry, and the only way to
@@ -1241,6 +1253,8 @@
   // succeeds. The release link is only ever a github.com address.
   function renderVersion(info) {
     if (!el.versionText || !info) { return; }
+    // Kept, so a language that arrives later can redraw it (#976).
+    state.lastVersionInfo = info;
     el.versionText.classList.remove("is-news", "is-error");
     el.versionText.textContent = "";
     if (info.error) {
@@ -1637,9 +1651,13 @@
     if (!state.filelistsOnlineOnly) { return false; }
     var primary = primaryEntry(group);
     if (isOwnSource(primary.bot)) { return false; }
-    var open = nickOfSource(state.filelistsSource || "__own__").toLowerCase();
+    // #975: a row #376 merged is the bot under the nick it has NOW. Its
+    // primary entry is the list held under the old nick - offline by
+    // definition - so the open list is compared by the nick the row is shown
+    // under, and "online" is what the row's own dot says: any entry here.
+    var open = displayNickOfSource(state.filelistsSource || "__own__").toLowerCase();
     if (String(group.nick || "").toLowerCase() === open) { return false; }
-    return primary.online === false;
+    return groupOnline(group, primary) === false;
   }
 
   // BUILT WITH DOM APIs, not concatenated markup. A bot nick is remote input
@@ -5383,12 +5401,35 @@
     var dirty = state.settingsDirty;
     if (!Object.keys(dirty).length) { return; }
 
+    // #1008 follow-up: the bot otherwise only ever leaves a cleared debug
+    // channel on the next reconnect - see sync_channels()'s own reasoning
+    // for why a blank DEBUG_CHANNEL alone cannot tell "on purpose" from
+    // "the reload glitched" apart. Asking here, once, in the moment the
+    // operator actually clicked Save, resolves that ambiguity for this one
+    // save the same way a human always could.
+    var oldDebugChan = String((state.settingsBaseline || {}).DEBUG_CHANNEL || "").trim();
+    var clearingDebugChannel = Object.prototype.hasOwnProperty.call(dirty, "DEBUG_CHANNEL")
+      && !String(dirty.DEBUG_CHANNEL || "").trim()
+      && !!oldDebugChan;
+    if (clearingDebugChannel && !window.confirm(
+        t("settings.confirmDebugChannelRemovedHeading").replace("{chan}", oldDebugChan) +
+        String.fromCharCode(10, 10) +
+        t("settings.confirmDebugChannelRemovedDetail").replace("{chan}", oldDebugChan))) {
+      return;
+    }
+
+    var payload = {};
+    for (var dirtyKey in dirty) {
+      if (Object.prototype.hasOwnProperty.call(dirty, dirtyKey)) { payload[dirtyKey] = dirty[dirtyKey]; }
+    }
+    if (clearingDebugChannel) { payload.confirm_debug_channel_removed = true; }
+
     el.settingsSaveBtn.disabled = true;
     el.settingsSaveStatus.style.display = "none";
     el.settingsRestartNote.style.display = "none";
     el.settingsSavebarText.textContent = t("settings.saving");
 
-    postJson("/api/settings", dirty)
+    postJson("/api/settings", payload)
       .then(function (res) {
         if (res.ok) {
           state.settingsDirty = {};
@@ -5515,6 +5556,8 @@
   }
 
   function renderStats(data) {
+    // Kept, so a language that arrives later can redraw it (#976).
+    state.lastStats = data;
     var tr = data.transfer || {};
     var s = data.sent || {};
     var lib = data.library || {};
@@ -5974,6 +6017,13 @@
     return Promise.all(fetches).then(function () {
       if (generation !== langGeneration) { return; }
       applyTranslations();
+      // WHAT IS BUILT FROM t(), NOT MARKED data-i18n (#976), drawn again
+      // in the language now loaded. The version check is asked for before
+      // the language file, and when it answered first the sidebar read
+      // "version.upToDate" - the key - until the next poll ten minutes on;
+      // a language switch left it, and the Stats cards, in the old one.
+      if (state.lastVersionInfo) { renderVersion(state.lastVersionInfo); }
+      if (state.lastStats) { renderStats(state.lastStats); }
     });
   }
 
