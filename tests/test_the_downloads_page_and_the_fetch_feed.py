@@ -262,6 +262,36 @@ class TheFetchingLines(DCCoreTestCase):
         self.assertFalse(session.draws_fetching)
 
 
+class ASecondOfferForAFinishedFile(DCCoreTestCase):
+
+    def setUp(self):
+        super().setUp()
+        config.fetch_queue.clear()
+
+    def offer(self, name):
+        import io as _io
+        from contextlib import redirect_stdout
+        out = _io.StringIO()
+        with redirect_stdout(out):
+            dcc_fetch.handle_incoming_offer(None, "SomeBot", f'DCC SEND "{name}" 1 2 3')
+        return out.getvalue()
+
+    def test_it_is_ignored_and_called_a_duplicate(self):
+        config.fetch_queue["1"] = row("complete", name="a b.flac")
+        said = self.offer("a_b.flac")
+        self.assertIn("already fetched (request 1)", said)
+        self.assertNotIn("unsolicited", said)
+        self.assertEqual(config.fetch_queue["1"]["state"], "complete")
+
+    def test_a_stranger_is_still_unsolicited(self):
+        config.fetch_queue["1"] = row("complete", name="a.flac")
+        self.assertIn("unsolicited", self.offer("other.flac"))
+
+    def test_another_bots_file_of_that_name_is_not_a_duplicate(self):
+        config.fetch_queue["1"] = row("complete", bot="ElseBot", name="a.flac")
+        self.assertIn("unsolicited", self.offer("a.flac"))
+
+
 class TheScript(unittest.TestCase):
 
     def setUp(self):

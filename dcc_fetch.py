@@ -1816,6 +1816,19 @@ def _promote_clean_filename(dest_dir, stored_name):
         return stored_name
 
 
+def _already_fetched_row_locked(queue, from_nick, filename):
+    """The id of a finished row for this bot and file, or None. Log wording
+    only: an offer is never accepted on the strength of it."""
+    wanted_bot = str(from_nick).strip().lower()
+    wanted_name = _normalize_filename_for_match(filename)
+    for rid, row in queue.items():
+        if (row.get("state") == "complete" and row.get("request_type", "file") == "file"
+                and str(row.get("bot", "")).strip().lower() == wanted_bot
+                and _normalize_filename_for_match(row.get("filename", "")) == wanted_name):
+            return rid
+    return None
+
+
 def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
     """Entry point, dispatched from irc.py's CTCP branch in a daemon thread.
 
@@ -1852,6 +1865,14 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
             # to (active) or make it open a listening socket and accept
             # arbitrary bytes (passive) just by sending an unsolicited DCC
             # SEND. Applies identically to both forms.
+            again = _already_fetched_row_locked(queue, from_nick, offer["filename"])
+            if again is not None:
+                # The other bot sent a file we already have (its retry or a
+                # duplicate in its own queue): refused all the same, but not
+                # an unknown sender, so the log says which it is.
+                print(f"[FETCH] Ignored a second DCC SEND from {from_nick} "
+                      f"({offer['filename']!r}): already fetched (request {again}).")
+                return
             print(f"[FETCH] Rejected unsolicited{' passive' if is_passive else ''} "
                   f"DCC SEND from {from_nick} ({offer['filename']!r}): "
                   f"no matching pending request.")

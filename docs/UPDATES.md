@@ -16,7 +16,8 @@ and a failure under *failures*; and a Downloading section in the side panel, und
 FETCHING` line per file in the status burst (bytes, size and speed from the transfer's own clock). The FETCH lines
 come from `dcc_fetch.tell_the_fetch_feed()`, which watches the rows change from the dispatcher loop instead of hooking
 each place that moves one; the first pass only records, so a restart does not replay the history. A script older than
-1.8 is never sent FETCHING, which it would print as text. Tests: `tests/test_the_downloads_page_and_the_fetch_feed.py`.
+1.8 is never sent FETCHING, which it would print as text. A second offer for a file already fetched from that bot is
+still refused, but the log now says "already fetched" instead of "unsolicited". Tests: `tests/test_the_downloads_page_and_the_fetch_feed.py`.
 
 ### 📦 A passive offer for a queued request waits for a free fetch slot
 
