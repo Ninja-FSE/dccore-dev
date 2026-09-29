@@ -1237,11 +1237,18 @@ def build_crosslist_search_payload(term, limit=None, online_only=False):
 
     offline = []
     if online_only:
-        import dcc
+        # PRESENT UNDER THE NICK ITS ROW IS SHOWN AS (#975). A bot #376 merged
+        # into its new nick keeps its list under the old one, which is not
+        # here by definition - asking about that nick alone left out exactly
+        # the renamed bots that are online and reachable.
+        present = present_nicks()
+        merges = _ident_merges(dict(getattr(runtime, "known_bots", {}) or {}), present)
         for key, source in list(held.items()):
-            if not dcc.user_is_present_in_ram(source.split("/", 1)[0]):
-                offline.append(key)
-                del held[key]
+            nick = source.split("/", 1)[0]
+            if nick.lower() in present or _display_nick(nick, present, merges).lower() in present:
+                continue
+            offline.append(key)
+            del held[key]
 
     empty_payload = {
         "term": str(term or ""),
@@ -3697,7 +3704,7 @@ def apply_folder_changes(payload):
 
 
 
-def _save_settings_and_rehash(changes):
+def _save_settings_and_rehash(changes, confirmed_debug_removal=False):
     """Write `changes` to settings.conf and dispatch a rehash on its own
     daemon thread. The shared tail of apply_settings_changes() (POST
     /api/settings) and build_password_change_result() (POST
@@ -3740,7 +3747,7 @@ def _save_settings_and_rehash(changes):
     threading.Thread(
         target=commands.handle_rehash_request,
         args=(WEB_DASHBOARD_SOURCE, WEB_DASHBOARD_SOURCE),
-        kwargs={"authorised": True},
+        kwargs={"authorised": True, "confirmed_debug_removal": confirmed_debug_removal},
         daemon=True,
     ).start()
 
@@ -3754,15 +3761,34 @@ def apply_settings_changes(changes):
     value the same way settings.conf itself would be read), then hand off to
     _save_settings_and_rehash() for the actual write + dispatched rehash.
 
+    `confirm_debug_channel_removed` (#1008 follow-up) is not a setting - it
+    is popped out here, before `changes` ever reaches settings_file.save(),
+    and threaded through as its own argument instead. It means nothing on
+    its own: sync_channels() only ever reads it in the one case it exists
+    for (DEBUG_CHANNEL going from a real channel to blank), so a stray or
+    even malicious `true` sent on an unrelated save has no effect - there is
+    nothing there for it to gate.
+
     Returns (http_status, payload_dict).
     """
-    if not isinstance(changes, dict) or not changes:
+    if not isinstance(changes, dict):
+        return 400, {"error": "Expected a non-empty object of {SETTING: value}."}
+
+    # Popped before the emptiness check below (the #1011 review):
+    # a body whose only key is this flag is not a settings change, and used
+    # to pass the check, save nothing and still start a rehash - harmless in
+    # practice since the dashboard never sends the flag alone, but a body
+    # this empty should 400 like any other.
+    changes = dict(changes)
+    confirmed_debug_removal = bool(changes.pop("confirm_debug_channel_removed", False))
+
+    if not changes:
         return 400, {"error": "Expected a non-empty object of {SETTING: value}."}
     if "ADMIN_PASSWORD_HASH" in changes:
         return 400, {"error": "Use POST /api/settings/password to change the "
                                "admin password."}
 
-    return _save_settings_and_rehash(changes)
+    return _save_settings_and_rehash(changes, confirmed_debug_removal=confirmed_debug_removal)
 
 
 def build_password_change_result(new_password, confirm_password):

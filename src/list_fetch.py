@@ -913,7 +913,8 @@ def refetch_due_lists(log=print, now=None):
     AUTO_REFETCH_MAX_PER_RUN: a bot that has been offline for a month comes
     back to thirty stale lists, and asking all thirty at once is a burst of
     outbound requests nobody asked for - the rest are picked up next time
-    round, oldest first.
+    round, oldest first. Only bots in one of our channels are asked, and only
+    the asks that went out count toward the bound (#966).
 
     Goes through the SAME enqueue the dashboard's own Refresh uses, so the
     slot limits, the duplicate guard and the queue ceiling all apply exactly
@@ -937,7 +938,15 @@ def refetch_due_lists(log=print, now=None):
 
     import webserver
 
-    due = lists_worth_refetching(now=now)
+    # ONLY BOTS THAT ARE HERE, and the cap counts only what was asked (#966).
+    # The oldest lists come first, and the oldest are the likeliest to belong
+    # to bots long gone: past UNKNOWN_LIST_MAX_AGE_DAYS with their adverts
+    # aged out, three of them took the three places of every sweep, were
+    # refused as "not here" - which is not an ask, so last_attempt never
+    # moved them back - and a bot online with a changed list was never
+    # reached. An absent bot is left for a sweep that finds it back.
+    here = webserver.present_nicks()
+    due = [bot for bot in lists_worth_refetching(now=now) if bot.lower() in here]
     if not due:
         return []
 
@@ -945,11 +954,11 @@ def refetch_due_lists(log=print, now=None):
         cap = int(getattr(config, "AUTO_REFETCH_MAX_PER_RUN", 3))
     except (TypeError, ValueError):
         cap = 3
-    if cap > 0:
-        due = due[:cap]
 
     started = []
     for bot in due:
+        if cap > 0 and len(started) >= cap:
+            break
         # build_list_fetch_enqueue_result(bot_raw) wants the nick ITSELF -
         # see its own docstring and the real HTTP route's call
         # (build_list_fetch_enqueue_result(body.get("bot", ""))) - not a
@@ -1104,6 +1113,13 @@ def process_fetched_list_zip(bot, zip_path):
         entry = (getattr(config, "fetched_bot_lists", {}) or {}).get(str(bot).strip().lower())
         count = int((entry or {}).get("entry_count") or 0) if isinstance(entry, dict) else 0
         _tell_the_console(bot, "arrived", f"{bot}'s list arrived: {count:,} files")
+        # Automatic grabbing starts this bot over (#967). Never raises into
+        # a list that has already been stored.
+        try:
+            import list_grab
+            list_grab.note_list_arrived(bot)
+        except Exception as err:
+            print(f"[LIST-FETCH] Could not reset {bot}'s automatic grab record: {err}")
     else:
         _tell_the_console(bot, "unusable",
                           f"{bot}'s list could not be used" + (f": {reason}" if reason else ""))
