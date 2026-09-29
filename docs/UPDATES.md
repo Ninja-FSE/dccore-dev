@@ -17,6 +17,20 @@ is free. An active offer, which costs no port, is still admitted there, so a que
 take the fetches past `MAX_FETCH_SLOTS`, bounded by `FETCH_MAX_PER_BOT` per bot. An offered row brings its own slot
 and is unchanged. Tests: `tests/test_a_queued_passive_offer_waits_for_a_slot.py`.
 
+### 📦 A private address reaches the console only on a NAT hairpin
+
+Audit 2026-09-27, held until v1.13.2 shipped. #881 let `_listen_and_serve_locked()` take a console connection from
+any private or link-local address, for the operator behind the same router as the bot (their client advertises the
+router's public IP; their connection arrives from a LAN one). Wherever the source address is not the real client's -
+a proxy or container that rewrites it, a LAN or provider network shared with others - any peer with a private
+address could reach the port first and take the one listener: the banner, the password prompts (still required),
+and the operator's own connect finding the port gone - the takeover #680 closed. New
+`adminchat._is_the_operator()` takes a private peer only when the address the operator advertised is the bot's own
+public one - the hairpin itself; the advertised address and a passive request are unchanged. A private peer that is
+dropped is logged with why. `ADMIN-CONSOLE.md` says so. Tests: `tests/test_a_lan_peer_is_trusted_only_on_a_hairpin.py`,
+and a real-socket case in `test_a_lan_hairpin_reaches_the_console`, whose hairpin case now models the bot's own
+public address.
+
 ### 📦 The DCCore window's button keeps its colour, and the panel is not repeated in the text (#1013)
 
 Seen live: the @DCCore button turned red for a new line (#892) and went black again before anybody looked. Every
