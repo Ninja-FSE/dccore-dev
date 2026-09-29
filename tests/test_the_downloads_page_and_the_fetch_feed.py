@@ -292,6 +292,67 @@ class ASecondOfferForAFinishedFile(DCCoreTestCase):
         self.assertIn("unsolicited", self.offer("a.flac"))
 
 
+class TheReceiverAcknowledges(DCCoreTestCase):
+    """A DCCore sender counts a file as sent only once the whole of it is
+    acknowledged; a receiver that never does looks like a failed send and is
+    offered the file again (#1019)."""
+
+    def transfer(self, pieces, close_after=False):
+        import shutil
+        import struct
+        import tempfile
+        ours, theirs = socket.socketpair()
+        self.addCleanup(ours.close)
+        self.addCleanup(theirs.close)
+        for piece in pieces:
+            theirs.sendall(piece)
+        total = sum(len(p) for p in pieces)
+        if close_after:
+            theirs.close()
+        config.fetch_queue.clear()
+        r = row("receiving")
+        config.fetch_queue["1"] = r
+        dest = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, dest, ignore_errors=True)
+
+        class Tcp:
+            def getpeername(self):
+                return ("127.0.0.1", 50000)
+
+            def __getattr__(self, name):
+                return getattr(ours, name)
+
+        dcc_fetch._run_transfer(r, {"size": total, "ip": None, "port": 0}, dest, "t.flac", sock=Tcp())
+        acks = b""
+        if not close_after:
+            theirs.settimeout(0.5)
+            try:
+                while len(acks) < 4 * len(pieces):
+                    data = theirs.recv(4096)
+                    if not data:
+                        break
+                    acks += data
+            except socket.timeout:
+                pass
+        words = [struct.unpack("!I", acks[i:i + 4])[0] for i in range(0, len(acks) - 3, 4)]
+        return r, total, words
+
+    def test_the_whole_size_is_acknowledged_at_the_end(self):
+        r, total, words = self.transfer([b"x" * 100])
+        self.assertEqual(r["state"], "complete")
+        self.assertEqual(words[-1], total)
+
+    def test_the_count_is_cumulative_and_never_goes_back(self):
+        r, total, words = self.transfer([b"x" * 4096])
+        self.assertEqual(r["state"], "complete")
+        self.assertEqual(sorted(words), words)
+        self.assertEqual(words[-1], 4096)
+
+    def test_a_sender_that_hung_up_after_the_last_byte_still_completes(self):
+        r, _total, _words = self.transfer([b"x" * 100], close_after=True)
+        self.assertEqual(r["state"], "complete")
+
+
 class TheScript(unittest.TestCase):
 
     def setUp(self):

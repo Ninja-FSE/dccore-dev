@@ -66,6 +66,7 @@ import ipaddress
 import os
 import re
 import socket
+import struct
 import sys
 import threading
 import time
@@ -2412,6 +2413,15 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
 
             handle.write(chunk)
             row["bytes_received"] = bytes_received
+            # DCC's acknowledgement: our running total as four bytes, big-
+            # endian. A DCCore sender counts a file as sent only once the
+            # whole of it is acknowledged, so without these every fetch from
+            # one looked like a failed send to it and was offered again -
+            # 15 seconds later, and again after a few minutes (#1019).
+            try:
+                sock.sendall(struct.pack("!I", bytes_received & 0xFFFFFFFF))
+            except OSError:
+                pass   # a sender that closes after the last byte no longer listens
     except Exception as recv_err:
         failure_reason = f"transfer error: {recv_err}"
         disk_full = _is_disk_full(recv_err)
