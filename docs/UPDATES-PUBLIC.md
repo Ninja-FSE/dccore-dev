@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: downloads waiting in other bots' queues can no longer tie up the ports your own sends need.** When several of them came due at once, each one that used a passive (reverse) connection opened a listening port, past your `MAX_FETCH_SLOTS`, from the same port range your sends to your own users use. Past the limit, such a download is now asked for again once a slot is free.
 - **Fixed: the DCCore window's button in mIRC now stays red (or blue, for a failure) until you look.** It went back to black within about half a minute, when the side panel refreshed, so new activity was easy to miss. And with the side panel on, the window no longer prints a `[STATUS]` line every few minutes - the panel already shows those numbers, live. Without the panel you still get them.
 
 ## v1.13.2 — The Bot Says What It's Doing

@@ -1757,6 +1757,10 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
 
     queue = _ensure_fetch_queue()
     with _fetch_lock():
+        # What each row was before the claim, which moves the one it takes to
+        # "receiving": whether it was waiting in the other bot's queue decides
+        # the slot check below.
+        states_before = {rid: r.get("state") for rid, r in queue.items()}
         request_id, row = _claim_matching_offer_locked(queue, from_nick, offer["filename"])
         if row is None:
             # ADMISSION CONTROL: no matching outbound request. This is the
@@ -1822,6 +1826,28 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
             print(f"[FETCH] Not taking {offer['filename']} from {from_nick} yet: "
                   f"{offer['size']} bytes, {room} free. Never connected. "
                   f"It is asked for again once there is space.")
+            return
+
+        # A LISTENER FOR A QUEUED ROW TAKES A FREE SLOT. A row queued at
+        # another bot holds no slot of ours (#926), so the dispatcher asks
+        # other bots meanwhile, and its offer is admitted whenever its turn
+        # comes - refusing it would throw its place in that queue away. An
+        # ACTIVE offer still is: it costs a connection, bounded by
+        # FETCH_MAX_PER_BOT per bot. But a PASSIVE one opens a listener in
+        # the DCC port range the bot's own sends to its users share, and
+        # queues at several bots coming due together could take every port
+        # in it. Past MAX_FETCH_SLOTS a passive offer for a queued row is
+        # not taken: the row is asked for again once a slot is free.
+        max_slots = int(getattr(config, "MAX_FETCH_SLOTS", 3))
+        if (is_passive and states_before.get(request_id) == "queued"
+                and count_active_fetches(queue) > max_slots):
+            row.update(state="pending", offered_at=None,
+                       reason="its turn came with every fetch slot in use - asking again once one is free")
+            _as_asked(row)
+            for stale in ("queued_at", "queue_position", "reply"):
+                row.pop(stale, None)
+            print(f"[FETCH] Not listening for {offer['filename']!r} from {from_nick} yet: "
+                  f"all {max_slots} fetch slots are in use. It is asked for again once one is free.")
             return
 
         dest_dir, stored_name = _resolve_destination_path(request_id, offer["filename"])
