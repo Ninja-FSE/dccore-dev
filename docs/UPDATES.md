@@ -16,6 +16,7 @@ has taken a row that was queued, a passive offer is not listened for while `coun
 is free. An active offer, which costs no port, is still admitted there, so a queued place is not lost; it can still
 take the fetches past `MAX_FETCH_SLOTS`, bounded by `FETCH_MAX_PER_BOT` per bot. An offered row brings its own slot
 and is unchanged. Tests: `tests/test_a_queued_passive_offer_waits_for_a_slot.py`.
+
 ### 📦 A private address reaches the console only on a NAT hairpin
 
 Audit 2026-09-27, held until v1.13.2 shipped. #881 let `_listen_and_serve_locked()` take a console connection from
