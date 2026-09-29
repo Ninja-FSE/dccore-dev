@@ -59,7 +59,25 @@ class EachLauncherLooksInConf(unittest.TestCase):
                       '                               for where in ((), ("conf",)))', text)
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash is not installed here")
+def bash_runs_in_a_folder():
+    """Whether a `bash` here can cd into a temp folder and run a line there.
+    Found is not enough: a Windows runner's `bash` can be WSL's launcher with
+    no Linux installed, which fails every command and says nothing."""
+    if not shutil.which("bash"):
+        return False
+    folder = tempfile.mkdtemp(prefix="dccore-bash-probe-")
+    try:
+        done = subprocess.run(["bash", "-c", 'cd "$1" && echo ok', "bash", folder],
+                              capture_output=True, text=True, timeout=30)
+        return done.returncode == 0 and done.stdout.strip() == "ok"
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+@unittest.skipUnless(bash_runs_in_a_folder(), "no bash here that can run in a folder; "
+                     "the Linux and macOS runners run this, and the text checks above run everywhere")
 class TheShellCheckDecides(unittest.TestCase):
 
     def decides(self, *present):
