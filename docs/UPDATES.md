@@ -4,17 +4,21 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
-### 📦 One nick can have several sends at once: MAX_SENDS_PER_USER (#1030)
+### 📦 A nick can use idle slots: LEND_SPARE_SLOTS and MAX_SENDS_PER_USER (#1030)
 
 Seen live: a receiver asked a DCCore for ten files while two of its three slots were free, and all ten sat in the
 queue. A nick could only ever have one transfer running (`user_processing_lock` and an `active_transfers` scan in
 `check_queue_and_send` sections A and B and in the direct-send path of `handle_download_request`), so slots stayed idle
-while one person's requests waited. New setting `MAX_SENDS_PER_USER` (default 1, unchanged behaviour); above 1 the
-guard becomes "running sends for this nick < cap and nothing packing for them". Queue rows stay at the head of
-`dcc_queue[nick]` while in flight, so `next_waiting_row()` picks the first row that is not being sent (and holds back a
-row whose file name is already running, so one file is never sent twice at once). The plain-file claim in
-`user_processing_lock` is taken only at a cap of 1; above 1 the running count in `active_transfers` does that job.
-`MAX_DCC_SLOTS` still bounds the total. A sender only benefits once it runs this version with the setting raised.
+while one person's requests waited. The rule stays "one person, one slot" while anybody else is waiting, but idle slots
+are now lent: new `LEND_SPARE_SLOTS` (default on) lets a nick that is already sending start further sends while no
+other un-frozen queue has a startable row (`other_users_waiting()`); the moment somebody else queues, the nick is
+back to `MAX_SENDS_PER_USER` (new, default 1) and a freed slot goes to the one waiting. `MAX_DCC_SLOTS` still bounds the
+total, so with three slots one person can use all three and a fourth person queues until a slot is free.
+Queue rows stay at the head of `dcc_queue[nick]` while in flight, so `next_waiting_row()` picks the first row that is not
+being sent (and holds back a row whose file name is already running, so one file is never sent twice at once).
+The plain-file claim in `user_processing_lock` is taken only when the nick can never have a second send (cap 1 and
+lending off); otherwise the running count in `active_transfers` does that job. A sender only benefits once it runs this
+version.
 
 ### 📦 The Tools page follows a list rebuild however it was started (#1023)
 

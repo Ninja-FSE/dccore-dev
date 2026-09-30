@@ -31,7 +31,7 @@ class Case(feed.ServesARealRequest):
         for name in NAMES:
             with io.open(os.path.join(self.tree.music, name), "wb") as handle:
                 handle.write(b"\x00" * 4096)
-        self.set_config(MAX_DCC_SLOTS=3, MAX_SENDS_PER_USER=1, transfers_paused=False)
+        self.set_config(MAX_DCC_SLOTS=3, MAX_SENDS_PER_USER=1, LEND_SPARE_SLOTS=False, transfers_paused=False)
 
     def running(self, user="dave"):
         return sorted(tx["file"] for tx in config.active_transfers if tx["user"] == user)
@@ -127,9 +127,69 @@ class WithAHigherCap(Case):
         self.assertEqual(self.running("erin"), ["C.flac"])
 
 
+class SpareSlotsAreLent(Case):
+    """One person, one slot while somebody else waits; idle slots are not left idle."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_config(LEND_SPARE_SLOTS=True)
+        config.channel_users[OTHER].add("erin")
+
+    def test_a_lone_user_fills_every_free_slot(self):
+        for name in NAMES:
+            self.request(name)
+        self.assertEqual(self.running(), NAMES)
+        self.assertEqual(self.queued(), [])
+
+    def test_a_fourth_request_queues_until_a_slot_is_free(self):
+        self.set_config(MAX_DCC_SLOTS=3)
+        for name in NAMES:
+            self.request(name)
+        self.request("Song.flac", user="erin")
+        self.assertEqual(self.running("erin"), [])
+        self.assertEqual(self.queued("erin"), ["Song.flac"])
+
+    def test_a_freed_slot_goes_to_the_waiting_user_not_the_one_holding_three(self):
+        for name in NAMES:
+            self.request(name)
+        config.dcc_queue["dave"] = [queue_row(filename="D.flac")]
+        self.request("Song.flac", user="erin")
+        config.active_transfers.pop(0)
+        self.pick_up("dave")
+        self.assertEqual(self.running("dave"), ["B.flac", "C.flac"])
+        self.assertEqual(self.running("erin"), [])
+        self.sweep()
+        self.assertEqual(self.running("erin"), ["Song.flac"])
+
+    def test_with_someone_waiting_a_user_is_back_to_the_cap(self):
+        self.set_config(MAX_DCC_SLOTS=3)
+        config.dcc_queue["erin"] = [queue_row(user="erin", filename="Song.flac")]
+        self.request("A.flac")
+        self.request("B.flac")
+        self.assertEqual(self.running(), ["A.flac"])
+        self.assertEqual(self.queued(), ["B.flac"])
+
+    def test_off_means_strictly_the_cap(self):
+        self.set_config(LEND_SPARE_SLOTS=False)
+        self.request("A.flac")
+        self.request("B.flac")
+        self.assertEqual(self.running(), ["A.flac"])
+        self.assertEqual(self.queued(), ["B.flac"])
+
+    def test_a_frozen_waiting_user_does_not_hold_the_slots_back(self):
+        config.dcc_queue["erin"] = [queue_row(user="erin", filename="Song.flac")]
+        config.frozen_queues["erin"] = 0
+        self.request("A.flac")
+        self.request("B.flac")
+        self.assertEqual(self.running(), ["A.flac", "B.flac"])
+
+
 class TheSetting(unittest.TestCase):
     def test_the_default_is_one(self):
         self.assertEqual(config.MAX_SENDS_PER_USER, 1)
+
+    def test_spare_slots_are_lent_by_default(self):
+        self.assertIs(config.LEND_SPARE_SLOTS, True)
 
     def test_nonsense_counts_as_one(self):
         real = getattr(config, "MAX_SENDS_PER_USER", 1)

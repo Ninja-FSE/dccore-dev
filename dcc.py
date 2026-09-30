@@ -1320,15 +1320,37 @@ def user_running_sends(user_key):
                if str(tx.get('user', '')).lower() == user_key)
 
 
-def user_may_start_another(user_key):
-    """True when the nick is below its own cap and nothing is packing for it.
+def lends_spare_slots():
+    return bool(getattr(config, 'LEND_SPARE_SLOTS', True))
 
-    Caller holds queue_lock. At a cap of 1 this is exactly the old test: the
-    nick has no send running and is not in user_processing_lock.
+
+def other_users_waiting(user_key):
+    """True when somebody else has a file queued that could start. Caller holds queue_lock."""
+    for other, rows in config.dcc_queue.items():
+        other_key = str(other).lower()
+        if other_key == user_key or other_key in config.frozen_queues:
+            continue
+        if next_waiting_row(other_key, rows) is not None:
+            return True
+    return False
+
+
+def user_may_start_another(user_key):
+    """True when the nick is below its own cap and nothing is packing for it,
+    or is over it but the slots would otherwise sit idle (LEND_SPARE_SLOTS).
+
+    Caller holds queue_lock. With lending off this is the plain per-nick cap;
+    at a cap of 1 that is the old test: no send running, not in
+    user_processing_lock. A nick already sending is lent a further slot only
+    while nobody else is waiting for one - the moment somebody is, it is back
+    to its cap and the slot goes to them.
     """
     if user_key in getattr(config, 'user_processing_lock', ()):
         return False
-    return user_running_sends(user_key) < sends_per_user_cap()
+    running = user_running_sends(user_key)
+    if running < sends_per_user_cap():
+        return True
+    return lends_spare_slots() and running > 0 and not other_users_waiting(user_key)
 
 
 def next_waiting_row(user_key, rows=None):
@@ -1354,11 +1376,11 @@ def next_waiting_row(user_key, rows=None):
 def claim_user_for_send(user_key):
     """Mark a nick as claimed for a plain send. Caller holds queue_lock.
 
-    Only at a cap of 1: there the claim is what says "this nick is busy". Above
-    1 the running count in active_transfers says it, and a claim would shut the
-    nick's second send out.
+    Only when the nick can never have a second send: there the claim is what
+    says "this nick is busy". Otherwise the running count in active_transfers
+    says it, and a claim would shut the nick's second send out.
     """
-    if sends_per_user_cap() > 1:
+    if sends_per_user_cap() > 1 or lends_spare_slots():
         return
     if not hasattr(config, 'user_processing_lock'):
         config.user_processing_lock = set()

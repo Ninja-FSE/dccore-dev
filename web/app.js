@@ -4292,6 +4292,7 @@
     DEBUG_CHANNEL: "settings.field.DEBUG_CHANNEL",
     MAX_DCC_SLOTS: "settings.field.MAX_DCC_SLOTS",
     MAX_SENDS_PER_USER: "settings.field.MAX_SENDS_PER_USER",
+    LEND_SPARE_SLOTS: "settings.field.LEND_SPARE_SLOTS",
     MAX_USER_QUEUE: "settings.field.MAX_USER_QUEUE",
     MAX_GLOBAL_QUEUE: "settings.field.MAX_GLOBAL_QUEUE",
     MAX_SEARCH_RESULTS: "settings.field.MAX_SEARCH_RESULTS",

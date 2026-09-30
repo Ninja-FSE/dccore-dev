@@ -510,7 +510,8 @@ ANNOUNCE_INTERVAL: int = 300     # Time between each channel advert, in seconds
 # 5. LIMITS, SLOTS AND QUEUE CONTROL
 # ---------------------------------------------------------------------
 MAX_DCC_SLOTS: int      = 3      # Maximum simultaneous live downloads
-MAX_SENDS_PER_USER: int = 1      # Most of those one nick may use at once (1 = their files go one after another)
+MAX_SENDS_PER_USER: int = 1      # Most of those one nick may use while somebody else is waiting for a slot
+LEND_SPARE_SLOTS: bool  = True   # Let a nick use slots nobody else is waiting for, beyond MAX_SENDS_PER_USER
 MAX_USER_QUEUE: int     = 100    # Most files a single user may queue
 MAX_GLOBAL_QUEUE: int   = 1000   # Most files across every queue combined
 MAX_SEARCH_RESULTS: int = 5      # Maximum result lines sent in reply to an @find
