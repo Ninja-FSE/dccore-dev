@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The Tools page follows a list rebuild however it was started (#1023)
+
+Seen live: a rebuild started from the @DCCore window in mIRC could not be followed on the dashboard. The Tools
+page's progress bar started only when its own button's POST succeeded; opening Tools loaded just the schedule line.
+A rebuild started by the console's `update`, by `!update` in IRC or by `LIST_REBUILD_SCHEDULE` ran unseen, and the
+button meanwhile answered only "A list update is already running." New `followRunningUpdate()` takes up whatever
+`/api/tools/update-list/status` says is running: `loadUpdateListSchedule()` calls it when Tools is opened, a refresh
+tick calls that while Tools is on screen, and a refused button asks the status and follows it (asked, not read off
+the 409 - "another scan" is a 409 too, and still shows its error). The mIRC side is #1024. Tests:
+`tests/test_tools_follows_any_running_rebuild.py`, with a node run of the real functions.
+
 ### 📦 A passive offer for a queued request waits for a free fetch slot
 
 Audit 2026-09-27, held until v1.13.2 shipped. A row queued at another bot holds no fetch slot (#926), so the

@@ -3444,8 +3444,18 @@
     showUpdateListStatus(t("tools.starting"), false);
     postJson("/api/tools/update-list", {}).then(function (res) {
       if (!res.ok) {
-        el.updateListRunBtn.disabled = false;
-        showUpdateListStatus(res.data.error || ("HTTP " + res.status), true);
+        // Refused - and "already running" means one started elsewhere, which
+        // is worth following rather than only saying so (#1023). Asked of
+        // /status, not read off the 409: "another scan" is a 409 too.
+        var refused = (res.data && res.data.error) || ("HTTP " + res.status);
+        fetchJson("/api/tools/update-list/status").then(function (payload) {
+          if (followRunningUpdate(payload)) { return; }
+          el.updateListRunBtn.disabled = false;
+          showUpdateListStatus(refused, true);
+        }).catch(function () {
+          el.updateListRunBtn.disabled = false;
+          showUpdateListStatus(refused, true);
+        });
         return;
       }
       startUpdateListPolling();
@@ -3532,9 +3542,23 @@
   // #776: when LIST_REBUILD_SCHEDULE will next rebuild, or that none is set.
   // Read each time the Tools view opens - the same status payload the Run
   // button polls, which carries the schedule and its next time.
+  // A REBUILD STARTED ANYWHERE ELSE IS FOLLOWED TOO (#1023). Only this page's
+  // own button used to start the bar, so one started by the console's
+  // `update`, by !update in IRC or by LIST_REBUILD_SCHEDULE ran unseen here -
+  // and the button then said only "already running". Now the page follows
+  // whatever is running: when Tools is opened, while it is open (the refresh
+  // tick below), and when the button is refused. True when it took it up.
+  function followRunningUpdate(payload) {
+    if (!payload || !payload.running || updateList.pollTimer) { return false; }
+    el.updateListRunBtn.disabled = true;
+    startUpdateListPolling();
+    return true;
+  }
+
   function loadUpdateListSchedule() {
     if (!el.updateListSchedule) { return; }
     fetchJson("/api/tools/update-list/status").then(function (payload) {
+      followRunningUpdate(payload);
       var schedule = payload && payload.schedule;
       var text;
       if (!schedule) {
@@ -5495,6 +5519,12 @@
   // nobody is looking at is the 401 storm in miniature.
   setInterval(function () {
     if (state.active === "stats") { loadStats(); }
+  }, REFRESH_MS);
+
+  // A rebuild started elsewhere while Tools is on screen is picked up within
+  // a tick (#1023); once it is followed, its own faster poll takes over.
+  setInterval(function () {
+    if (state.active === "tools" && !updateList.pollTimer) { loadUpdateListSchedule(); }
   }, REFRESH_MS);
 
   // A list-fetch (Download tab, or the File Lists fetch box) can complete
