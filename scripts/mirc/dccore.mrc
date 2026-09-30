@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10.2 }
+alias dccore.ver { return 1.10.3 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -657,17 +657,9 @@ alias dccore.structured {
   if (%type == FETCH) {
     ; <bot> <asked|queued|receiving|done|failed> <text>: a file the bot itself
     ; is leeching from another bot (#1019). The text already names the bot and
-    ; the file. Shown under the "sends" tickbox, a failure under "failures".
-    ; The Downloads window, when open, tells every one of them whatever the
-    ; tickboxes say (#1022).
+    ; the file. These live in the @DCCore-Downloads window's log (#1022), not
+    ; here; with that window closed they are not shown.
     dccore.dl.log $3 $4-
-    if ($3 == failed) {
-      if (!$dccore.opt(show.fail)) { return }
-      dccore.alert $dccore.tag(FETCH,fail) $4-
-      return
-    }
-    if (!$dccore.opt(show.sends)) { return }
-    dccore.msg $dccore.tag(FETCH,sends) $4-
     return
   }
   if (%type == TAKEN) {

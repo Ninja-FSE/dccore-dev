@@ -414,12 +414,12 @@ class TheScript(unittest.TestCase):
         self.assertIn("hadd dccore dlfinished", self.text)
         self.assertIn("did -ra dccore.opt 310 $dccore.dl.rows", self.text)
 
-    def test_the_fetch_feed_is_told_in_the_window_whatever_the_tickboxes_say(self):
+    def test_the_fetch_feed_goes_to_the_downloads_window_and_no_longer_to_the_main_one(self):
         handler = self.text[self.text.index("if (%type == FETCH) {"):]
         handler = handler[:handler.index("\n  }\n")]
         self.assertIn("dccore.dl.log $3 $4-", handler)
-        self.assertLess(handler.index("dccore.dl.log"), handler.index("show.fail"))
-        self.assertLess(handler.index("dccore.dl.log"), handler.index("show.sends"))
+        self.assertNotIn("dccore.msg", handler)
+        self.assertNotIn("dccore.alert", handler)
 
     def test_the_log_tags_each_event_and_stays_silent_when_the_window_is_closed(self):
         body = self.text[self.text.index("alias dccore.dl.log {"):]
