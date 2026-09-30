@@ -10,6 +10,7 @@ row goes back to pending and is asked for again once a slot is free. An active
 offer, which costs no port, is admitted as before.
 """
 
+import time
 import unittest
 
 from tests import support  # noqa: F401  (path setup)
@@ -53,6 +54,14 @@ class WithEverySlotInUse(SlotsCase):
         self.assertEqual(self.taken, [], "no listener opened")
         self.assertEqual(row["state"], "pending", "asked for again once a slot is free")
         self.assertNotIn("queue_position", row)
+
+    def test_a_late_passive_offer_for_a_row_given_up_on_is_not_listened_for_either(self):
+        """A late offer takes a failed row, which holds no slot of ours."""
+        row = config.fetch_queue[self.waiting]
+        row.update(state="failed", reason="no response", offered_at=time.time())
+        self.passive("Waiting.flac")
+        self.assertEqual(self.taken, [], "no listener opened")
+        self.assertEqual(config.fetch_queue[self.waiting]["state"], "pending")
 
     def test_it_is_asked_again_when_the_slot_frees(self):
         self.passive("Waiting.flac")
