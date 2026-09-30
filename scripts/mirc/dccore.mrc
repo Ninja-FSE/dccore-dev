@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10.1 }
+alias dccore.ver { return 1.10.2 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -130,7 +130,7 @@ alias dccore.init {
   dccore.default font 1
   dccore.default bg -1
   dccore.default statusmin 5
-  dccore.default dlfinished 20
+  dccore.default dlfinished 15
   dccore.default wantopen 0
   dccore.default show.request 1
   dccore.default show.queued 1
@@ -642,11 +642,11 @@ alias dccore.structured {
   }
   ; The Downloads window's snapshot (#1022): DLBEGIN, one DLROW per download
   ; (<id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>),
-  ; DLEND <waiting_total> <finished_total>. Drawn at DLEND only, so a window
+  ; DLEND <waiting_total> <complete_total> <failed_total>. Drawn at DLEND only, so a window
   ; is never drawn from half a snapshot.
   if (%type == DLBEGIN) { hdel -w dccore.live dl.* | hadd dccore.live dln 1 | return }
   if (%type == DLROW) { hadd dccore.live dl. $+ $dccore.st(dln) $2- | hinc dccore.live dln | return }
-  if (%type == DLEND) { hadd dccore.live dlwait $2 | hadd dccore.live dlfin $3 | hadd dccore.live dlend 1 | dccore.dl.draw | return }
+  if (%type == DLEND) { hadd dccore.live dlwait $2 | hadd dccore.live dlfin $3 | hadd dccore.live dlfail $4 | hadd dccore.live dlend 1 | dccore.dl.draw | return }
   if (%type == OUT) { dccore.out $2- | return }
   if (%type == LISTFETCH) {
     ; <bot> <auto|arrived|unusable> <text>: a held bot list asked for again,
@@ -1127,7 +1127,7 @@ alias dccore.sels {
 alias dccore.dl.win { return @DCCore-Downloads }
 alias dccore.dl.rows {
   var %n = $dccore.opt(dlfinished)
-  return $iif(%n isnum 1-100,$int(%n),20)
+  return $iif(%n isnum 1-15,$int(%n),15)
 }
 alias dccore.dl.tell {
   if ($chat($dccore.bot)) && ($dccore.st(mode) == structured) { .msg $+(=,$dccore.bot) downloads on $dccore.dl.rows }
@@ -1211,8 +1211,8 @@ alias dccore.dl.draw {
     if ($gettok($dccore.st(dl. $+ %i),2,32) == d) { inc %nd }
     inc %i
   }
-  var %nw = $dccore.st(dlwait), %nf = $dccore.st(dlfin)
-  if (%nd == 0) && (%nw == 0) && (%nf == 0) { aline -l 14 %w (nothing downloading, waiting or finished) | return }
+  var %nw = $dccore.st(dlwait), %nf = $dccore.st(dlfin), %nx = $dccore.st(dlfail)
+  if (%nd == 0) && (%nw == 0) && (%nf == 0) && (%nx == 0) { aline -l 14 %w (nothing downloading, waiting or finished) | return }
   var %kind = none
   %i = 1
   while (%i <= %n) {
@@ -1229,7 +1229,8 @@ alias dccore.dl.draw {
       %kind = %k
       if (%k == d) { dccore.dl.add %head - Downloading %nd }
       elseif (%k == w) { dccore.dl.add %head - Waiting %nw $iif(%nw > 50,( $+ showing the first 50 $+ )) }
-      else { dccore.dl.add %head - Finished $iif(%nf > $dccore.dl.rows,(last $dccore.dl.rows of %nf),( $+ %nf $+ )) }
+      elseif (%k == c) { dccore.dl.add %head - Finished $iif(%nf > $dccore.dl.rows,(last $dccore.dl.rows of %nf),( $+ %nf $+ )) }
+      else { dccore.dl.add %head - Failed $iif(%nx > $dccore.dl.rows,(last $dccore.dl.rows of %nx),( $+ %nx $+ )) }
     }
     if (%k == d) {
       var %got = $gettok(%l,5,32), %total = $gettok(%l,6,32)
@@ -1241,17 +1242,14 @@ alias dccore.dl.draw {
       dccore.dl.add $dccore.opt(col.queued) %map %bot $dccore.fit(%note,38)
       dccore.dl.add 14 %map %nm
     }
+    elseif (%k == c) {
+      dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.fit(done,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
+      dccore.dl.add 14 %map %nm
+    }
     else {
-      var %when = $dccore.dl.when($gettok(%l,8,32))
-      if ($gettok(%l,3,32) == failed) {
-        dccore.dl.add $dccore.opt(col.fail) %map %bot $dccore.fit(FAILED,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) %when
-        dccore.dl.add 14 %map %nm
-        dccore.dl.add $dccore.opt(col.fail) %map $dccore.nbsp $+ $dccore.nbsp $+ %note
-      }
-      else {
-        dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.fit(done,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) %when
-        dccore.dl.add 14 %map %nm
-      }
+      dccore.dl.add $dccore.opt(col.fail) %map %bot $dccore.fit(FAILED,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
+      dccore.dl.add 14 %map %nm
+      dccore.dl.add $dccore.opt(col.fail) %map $dccore.nbsp $+ $dccore.nbsp $+ %note
     }
     inc %i
   }
@@ -1535,7 +1533,7 @@ on *:dialog:dccore.opt:sclick:1: {
   hadd dccore font $did(dccore.opt,305).state
   if ($did(dccore.opt,306).text isnum) && ($did(dccore.opt,306).text >= 6) { hadd dccore fontsize $did(dccore.opt,306).text }
   hadd dccore bg $calc($did(dccore.opt,308).sel - 2)
-  hadd dccore dlfinished $iif($did(dccore.opt,310).text isnum 1-100,$int($did(dccore.opt,310).text),20)
+  hadd dccore dlfinished $iif($did(dccore.opt,310).text isnum 1-15,$int($did(dccore.opt,310).text),15)
   hadd dccore auto $did(dccore.opt,404).state
   hadd dccore chat.all $did(dccore.opt,601).state
   hadd dccore chat.popup $did(dccore.opt,602).state

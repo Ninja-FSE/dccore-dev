@@ -54,18 +54,19 @@ class TheSnapshot(DCCoreTestCase):
         config.fetch_queue["bbbbbbbbbbbb"] = row("complete")
         lines = adminchat.downloads_lines()
         self.assertEqual(lines[0], "DCCORE DLBEGIN")
-        self.assertEqual(lines[-1], "DCCORE DLEND 1 1")
+        self.assertEqual(lines[-1], "DCCORE DLEND 1 1 0")
 
     def test_an_empty_queue_is_still_a_whole_snapshot(self):
-        self.assertEqual(adminchat.downloads_lines(), ["DCCORE DLBEGIN", "DCCORE DLEND 0 0"])
+        self.assertEqual(adminchat.downloads_lines(), ["DCCORE DLBEGIN", "DCCORE DLEND 0 0 0"])
 
     def test_coming_in_then_waiting_then_finished(self):
         config.fetch_queue["aaaaaaaaaaaa"] = row("complete", at=1.0)
+        config.fetch_queue["dddddddddddd"] = row("failed", at=1.5)
         config.fetch_queue["bbbbbbbbbbbb"] = row("queued", at=2.0, queue_position=3)
         config.fetch_queue["cccccccccccc"] = row("receiving", at=3.0, bytes_received=1000,
                                                 total_size=4000, receiving_since=100.0)
         rows = dlrows(adminchat.downloads_lines(now=110.0))
-        self.assertEqual([r[3] for r in rows], ["d", "w", "f"])
+        self.assertEqual([r[3] for r in rows], ["d", "w", "c", "f"])
 
     def test_a_download_under_way_carries_its_progress_and_speed(self):
         config.fetch_queue["cccccccccccc"] = row("receiving", bytes_received=1000, total_size=4000,
@@ -92,6 +93,7 @@ class TheSnapshot(DCCoreTestCase):
                                                 finished_at=60.0, at=2.0)
         second, first = dlrows(adminchat.downloads_lines())  # newest first
         self.assertEqual((first[4], second[4]), ("failed", "failed"))
+        self.assertEqual((first[3], second[3]), ("f", "f"))
         self.assertIn("rejected", second[10])
         self.assertTrue(second[11].endswith("file list"))
         self.assertEqual(first[9], "50")
@@ -102,14 +104,29 @@ class TheSnapshot(DCCoreTestCase):
                                                  finished_at=float(10 + i))
         lines = adminchat.downloads_lines(finished_rows=2)
         self.assertEqual([r[11] for r in dlrows(lines)], ["f4.flac", "f3.flac"])
-        self.assertEqual(lines[-1], "DCCORE DLEND 0 5", "the total still says how many there are")
+        self.assertEqual(lines[-1], "DCCORE DLEND 0 5 0", "the total still says how many there are")
+
+    def test_finished_and_failed_are_kept_apart_and_each_capped_at_fifteen(self):
+        for i in range(20):
+            config.fetch_queue[f"a{i:011x}"] = row("complete", name=f"ok{i}.flac", at=float(i), finished_at=float(i))
+            config.fetch_queue[f"b{i:011x}"] = row("failed", name=f"bad{i}.flac", at=float(i), finished_at=float(i),
+                                                  reason="x")
+        lines = adminchat.downloads_lines(finished_rows=100)
+        rows = dlrows(lines)
+        self.assertEqual(sum(1 for r in rows if r[3] == "c"), 15)
+        self.assertEqual(sum(1 for r in rows if r[3] == "f"), 15)
+        self.assertTrue(all(r[4] == "complete" for r in rows if r[3] == "c"))
+        self.assertTrue(all(r[4] == "failed" for r in rows if r[3] == "f"))
+        self.assertEqual(lines[-1], "DCCORE DLEND 0 20 20")
+        self.assertEqual(adminchat.DOWNLOADS_FINISHED_MAX, 15)
+        self.assertEqual(adminchat.DOWNLOADS_FINISHED_DEFAULT, 15)
 
     def test_waiting_is_capped_but_counted(self):
         for i in range(adminchat.DOWNLOADS_WAITING_MAX + 7):
             config.fetch_queue[f"{i:012x}"] = row("pending", at=float(i))
         lines = adminchat.downloads_lines()
         self.assertEqual(len(dlrows(lines)), adminchat.DOWNLOADS_WAITING_MAX)
-        self.assertEqual(lines[-1], f"DCCORE DLEND {adminchat.DOWNLOADS_WAITING_MAX + 7} 0")
+        self.assertEqual(lines[-1], f"DCCORE DLEND {adminchat.DOWNLOADS_WAITING_MAX + 7} 0 0")
 
     def test_a_name_cannot_break_the_line(self):
         config.fetch_queue["aaaaaaaaaaaa"] = row("pending", name="a\r\nDCCORE TAKEN x.flac")
@@ -179,7 +196,7 @@ class TheDownloadsCommand(DCCoreTestCase):
 
     def test_rows_are_clamped(self):
         adminchat._cmd_downloads(self.session, "on 5000")
-        self.assertEqual(self.session.downloads_finished, adminchat.DOWNLOADS_FINISHED_MAX)
+        self.assertEqual(self.session.downloads_finished, 15)
         adminchat._cmd_downloads(self.session, "on 0")
         self.assertEqual(self.session.downloads_finished, 1)
         adminchat._cmd_downloads(self.session, "on lots")

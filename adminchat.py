@@ -596,8 +596,8 @@ def rebuild_lines(now=None):
 DOWNLOADS_SCRIPT_VERSION = "1.10"
 DOWNLOADS_INTERVAL = 3.0      # seconds between snapshots to an open Downloads window
 DOWNLOADS_WAITING_MAX = 50    # Waiting rows per snapshot; the rest are counted, not sent
-DOWNLOADS_FINISHED_DEFAULT = 20
-DOWNLOADS_FINISHED_MAX = 100
+DOWNLOADS_FINISHED_DEFAULT = 15
+DOWNLOADS_FINISHED_MAX = 15   # per list: Finished and Failed each keep this many
 DOWNLOADS_LOCK_WAIT = 0.25    # the writer never waits longer than this for the fetch lock
 _REQUEST_ID = re.compile(r"[0-9a-f]{12}")
 
@@ -645,9 +645,9 @@ def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
 
         DCCORE DLBEGIN
         DCCORE DLROW <id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>
-        DCCORE DLEND <waiting_total> <finished_total>
+        DCCORE DLEND <waiting_total> <complete_total> <failed_total>
 
-    kind is d (coming in), w (waiting) or f (finished). <note> is one token
+    kind is d (coming in), w (waiting), c (finished) or f (failed). <note> is one token
     (spaces as underscores, "-" for none): why a waiting row waits, or how a
     finished one ended. <when> is the epoch a finished row ended, else 0. A
     snapshot is whole or not sent: the script redraws only at DLEND.
@@ -683,8 +683,12 @@ def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
     by_asked = lambda item: item[1].get("requested_at", 0)
     coming.sort(key=by_asked)
     waiting.sort(key=by_asked)
-    finished.sort(key=lambda item: item[1].get("finished_at") or item[1].get("requested_at", 0),
-                  reverse=True)
+    def failed_row(row):
+        return row.get("state") == "failed" or bool(row.get("list_processing_error"))
+
+    by_ended = lambda item: item[1].get("finished_at") or item[1].get("requested_at", 0)
+    done = sorted((i for i in finished if not failed_row(i[1])), key=by_ended, reverse=True)
+    failed = sorted((i for i in finished if failed_row(i[1])), key=by_ended, reverse=True)
 
     def line(rid, kind, state, row, bps=0, when=0, note="-"):
         return (f"DCCORE DLROW {rid} {kind} {state} {_clean(row.get('bot'), token=True)} "
@@ -699,17 +703,15 @@ def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
         lines.append(line(rid, "d", row.get("state"), row, bps=bps))
     for rid, row in waiting[:DOWNLOADS_WAITING_MAX]:
         lines.append(line(rid, "w", row.get("state"), row, note=_download_waiting_note(row)))
-    for rid, row in finished[:max(0, int(finished_rows))]:
+    keep = max(0, min(int(finished_rows), DOWNLOADS_FINISHED_MAX))
+    for rid, row in done[:keep]:
+        lines.append(line(rid, "c", "complete", row, when=row.get("finished_at") or row.get("requested_at") or 0))
+    for rid, row in failed[:keep]:
         when = row.get("finished_at") or row.get("requested_at") or 0
-        if row.get("state") == "failed":
-            lines.append(line(rid, "f", "failed", row, when=when,
-                              note=row.get("reason") or "no reason given"))
-        elif row.get("list_processing_error"):
-            lines.append(line(rid, "f", "failed", row, when=when,
-                              note=f"rejected: {row.get('list_processing_error')}"))
-        else:
-            lines.append(line(rid, "f", "complete", row, when=when))
-    lines.append(f"DCCORE DLEND {len(waiting)} {len(finished)}")
+        note = (f"rejected: {row.get('list_processing_error')}" if row.get("state") != "failed"
+                else row.get("reason") or "no reason given")
+        lines.append(line(rid, "f", "failed", row, when=when, note=note))
+    lines.append(f"DCCORE DLEND {len(waiting)} {len(done)} {len(failed)}")
     return lines
 
 
