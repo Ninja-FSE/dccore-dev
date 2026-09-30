@@ -399,7 +399,7 @@ class TheThirdUnpacedWriterIsFixedToo(unittest.TestCase):
         runtime.outbound_pacer before every send (queue_mgr.py), so these
         two gain that pacing for free instead of a third bespoke mechanism."""
         vip_lane = queue_mgr_source().split(
-            "if not sent_a_request and hasattr(config, 'vip_queue') and config.vip_queue:", 1)[1][:700]
+            "elif hasattr(config, 'vip_queue') and config.vip_queue:", 1)[1][:700]
         self.assertIn("runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)",
                       vip_lane)
 

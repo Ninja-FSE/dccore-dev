@@ -141,10 +141,11 @@ def queue_worker():
             # down - it just no longer does so at the standard lane's total
             # exclusion.
             # ---------------------------------------------------------------------
-            sent_a_request = False
+            # A request for a file from another bot takes this pass's express
+            # slot (#1028); the standard lane below still gets its line, so a
+            # long run of requests delays VIP but never starves everyone else.
             if config.fetch_request_queue:
                 msg = config.fetch_request_queue.pop(0)
-                sent_a_request = True
                 runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
                 try:
                     if current_sock:
@@ -157,7 +158,7 @@ def queue_worker():
                     time.sleep(1.0)
                     continue
 
-            if not sent_a_request and hasattr(config, 'vip_queue') and config.vip_queue:
+            elif hasattr(config, 'vip_queue') and config.vip_queue:
                 msg = config.vip_queue.pop(0)
                 # Shared with announce.py's debug drain - see runtime.OutboundPacer.
                 # Reserved before the send, not slept after it, so a message that
@@ -203,7 +204,7 @@ def queue_worker():
             # the cursor rather than within one pass. Total throughput is the
             # pacer's either way; only the SHARE changes, and only while VIP
             # has a backlog, which it normally does not.
-            picked = None if sent_a_request else next_standard_line(config.send_queue, last_served)
+            picked = next_standard_line(config.send_queue, last_served)
             if picked is not None:
                 user, msg = picked
                 last_served = user

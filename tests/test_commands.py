@@ -508,8 +508,9 @@ class RehashPreservesEveryRuntimeContainer(unittest.TestCase):
             "rehash, not on the next restart",
         "fetch_request_queue":
             "transient OUTPUT like vip_queue: the requests for files from "
-            "other bots, sent within seconds - and the offer timer asks "
-            "again for any that were lost",
+            "other bots, sent within seconds - and a request lost here "
+            "is asked again: its line is no longer waiting, so the "
+            "row's offer timer runs out and the dispatcher sends it anew",
         "vip_queue":
             "transient OUTPUT, not state. commands.py says so explicitly: "
             "restoring it would replay lines addressed to channels the "

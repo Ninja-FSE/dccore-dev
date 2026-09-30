@@ -10,8 +10,13 @@ The dispatcher logged "Requested" and started the offer timer the moment it hand
 where it waited its turn behind every other user's replies - a minute or more on a busy bot. The timer ran out
 first, each expiry queued the same request again behind the first, and a file was asked for four or five times;
 the other bot answered each one within a second of it arriving and sent finished files a second time. Now the
-request goes in a lane of its own that is sent before everything else (the advert alone is two lines per channel, over two minutes on a bot in thirteen), the timer does not run while the line is unsent, asking again replaces a line
-still waiting instead of adding one, and a row that finishes, fails or is deleted takes its unsent line back.
+request goes in a lane of its own (`config.fetch_request_queue`), sent before the channel advert (which is two lines
+per channel and can take minutes on a bot in many channels), and in the same pass the ordinary lane still gets its
+line, so a run of requests delays the advert but never starves other users' replies. The timer does not run while the
+line is unsent, asking again replaces a line still waiting instead of adding one, and a row that finishes, fails,
+is deleted or is cleared takes its unsent line back (`take_back_unsent_request()`); a Delete of a request that never
+left does not ask the other bot to remove it. The line is recorded and queued under the fetch lock, only for a row
+still waiting for its answer. Tests: `tests/test_a_fetch_request_is_not_timed_before_it_is_sent.py`.
 
 ### 📦 A Downloads window in mIRC (#1022)
 
