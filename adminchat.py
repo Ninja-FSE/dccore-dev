@@ -558,6 +558,39 @@ def script_draws_fetching(version):
     return theirs is not None and theirs >= ours
 
 
+# The first script that draws a list rebuild's progress (#1024). An older one
+# would print a REBUILD line as text.
+REBUILD_SCRIPT_VERSION = "1.9"
+REBUILD_INTERVAL = 5.0        # seconds between REBUILD lines while one runs, between bursts
+
+
+def script_draws_rebuild(version):
+    ours = _version_tuple(REBUILD_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
+def rebuild_lines(now=None):
+    """`DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>`
+    while a master-list rebuild runs, however it was started (console, !update,
+    the dashboard, the schedule): all of them set config.update_inprogress and
+    all of them write the progress file the dashboard's bar reads. Nothing
+    when none runs. Before the first progress write the phase is "starting"."""
+    if not getattr(config, "update_inprogress", False):
+        return []
+    progress = None
+    try:
+        import webserver
+        progress = webserver.read_list_progress()
+    except Exception as err:
+        print(f"[ADMINCHAT] Rebuild progress unavailable: {err}")
+    progress = progress or {}
+    phase = _clean(progress.get("phase") or "starting", token=True)
+    return [f"DCCORE REBUILD {phase} {_num(progress.get('folder_index'))} "
+            f"{_num(progress.get('folder_count'))} {_num(progress.get('files'))} "
+            f"{_num(progress.get('elapsed'))}"]
+
+
 def fetching_lines(now=None):
     """One `DCCORE FETCHING <bot> <received> <total> <bps> <name>` per file the
     bot is receiving from another bot right now - the panel's Downloading
@@ -586,7 +619,7 @@ def fetching_lines(now=None):
     return lines
 
 
-def status_lines(now=None, fetching=False):
+def status_lines(now=None, fetching=False, rebuild=False):
     """The STATUS burst (#550, step 3): what the client's title bar and side
     panel are drawn from, read from what the daemon already holds.
 
@@ -662,6 +695,8 @@ def status_lines(now=None, fetching=False):
         lines.append(f"DCCORE QUEUE {pos} {_clean(user, token=True)} {len(queue[user])} {left}")
     if fetching:
         lines.extend(fetching_lines(now))
+    if rebuild:
+        lines.extend(rebuild_lines(now))
     return lines
 
 
@@ -712,6 +747,9 @@ class Session:
         # authentication. `client` is what the script called itself.
         self.structured = False
         self.draws_fetching = False   # the script said it can draw FETCHING lines (#1019)
+        self.draws_rebuild = False    # ... and REBUILD lines (#1024)
+        self._rebuild_sent_at = 0.0
+        self._rebuild_shown = False   # a REBUILD line is on the script's panel
         self.client = ""
         self._reported_dropped = 0
         self._status_sent_at = 0.0
@@ -787,7 +825,8 @@ class Session:
 
             def compute():
                 try:
-                    lines.extend(status_lines(fetching=self.draws_fetching))
+                    lines.extend(status_lines(fetching=self.draws_fetching,
+                                              rebuild=self.draws_rebuild))
                 except Exception as err:
                     print(f"[ADMINCHAT] Status burst failed: {err}")
 
@@ -801,6 +840,25 @@ class Session:
         self._status_job = None
         for line in job[1]:
             self.send(line)
+        self._rebuild_shown = any(line.startswith("DCCORE REBUILD ") for line in job[1])
+        self._rebuild_sent_at = time.time()
+
+    def send_rebuild_progress(self):
+        """A REBUILD line between bursts while a rebuild runs, and one
+        `DCCORE REBUILD end` when it stops, so the panel does not wait up to a
+        whole status interval to say the rebuild is over (#1024). Reads the
+        progress file only - no lock - so it is safe on the writer thread."""
+        if not (self.draws_rebuild and self.structured and self.authenticated):
+            return
+        now = time.time()
+        if now - self._rebuild_sent_at < REBUILD_INTERVAL:
+            return
+        lines = rebuild_lines(now)
+        if not lines and not self._rebuild_shown:
+            return
+        self._rebuild_sent_at = now
+        self._rebuild_shown = bool(lines)
+        self.send(lines[0] if lines else "DCCORE REBUILD end")
 
     def _send_chat_channels_if_changed(self):
         """DCCORE CHANNELS again when the bot's channels have changed since
@@ -844,6 +902,7 @@ class Session:
                         and time.time() - self._status_sent_at >= STATUS_INTERVAL):
                     self.send_status()
                     continue
+                self.send_rebuild_progress()
                 self._wake.wait(0.5)
                 self._wake.clear()
                 continue
@@ -1461,6 +1520,7 @@ def _cmd_hello(session, args):
     version = parts[1] if len(parts) > 1 else ""
     session.structured = True
     session.draws_fetching = script_draws_fetching(version)
+    session.draws_rebuild = script_draws_rebuild(version)
     session.send(hello_line())
     if script_is_too_old(version):
         # After HELLO, as a plain OUT line the window shows (#709): the
