@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10.4 }
+alias dccore.ver { return 1.10.5 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1126,7 +1126,7 @@ alias dccore.dl.tell {
 }
 alias dccore.dl.window {
   if ($window($dccore.dl.win)) { window -a $dccore.dl.win | return }
-  window -l52 $dccore.dl.win
+  window -l64 $dccore.dl.win
   if ($dccore.opt(font)) { font $dccore.dl.win $dccore.fontsize Lucida Console }
   titlebar $dccore.dl.win DCCore Downloads $dccore.dot what $iif($dccore.bot,$dccore.bot,the bot) is fetching from other bots
   echo 14 -i2 $dccore.dl.win Every request, queue place, transfer and result appears here as it happens; the list on the right is how things stand now.
@@ -1207,43 +1207,43 @@ alias dccore.dl.draw {
   }
   var %nw = $dccore.st(dlwait), %nf = $dccore.st(dlfin), %nx = $dccore.st(dlfail)
   if (%nd == 0) && (%nw == 0) && (%nf == 0) && (%nx == 0) { aline -l 14 %w (nothing downloading, waiting or finished) | return }
-  var %kind = none
+  var %kind = none, %lastbot = $null, %ind = $dccore.nbsp $+ $dccore.nbsp
   %i = 1
   while (%i <= %n) {
     var %l = $dccore.st(dl. $+ %i)
     ; <id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>
-    var %k = $gettok(%l,2,32), %bot = $dccore.fit($gettok(%l,4,32),12), %name = $gettok(%l,10-,32)
+    var %k = $gettok(%l,2,32), %bot = $gettok(%l,4,32), %name = $gettok(%l,10-,32)
     ; the end of a long name is what tells two files apart
-    if ($len(%name) > 50) { %name = .. $+ $right(%name,48) }
-    var %nm = $dccore.nbsp $+ $dccore.nbsp $+ %name
+    if ($len(%name) > 44) { %name = .. $+ $right(%name,42) }
     var %note = $replace($gettok(%l,9,32),_,$dccore.nbsp)
     var %map = $+(%k,:,$gettok(%l,3,32),:,$gettok(%l,1,32))
     if (%k != %kind) {
       if (%kind != none) { dccore.dl.add 14 - $dccore.nbsp }
       %kind = %k
+      %lastbot = $null
       if (%k == d) { dccore.dl.add %head - Downloading %nd }
       elseif (%k == w) { dccore.dl.add %head - Waiting %nw $iif(%nw > 50,( $+ showing the first 50 $+ )) }
       elseif (%k == c) { dccore.dl.add %head - Finished $iif(%nf > $dccore.dl.rows,(last $dccore.dl.rows of %nf),( $+ %nf $+ )) }
       else { dccore.dl.add %head - Failed $iif(%nx > $dccore.dl.rows,(last $dccore.dl.rows of %nx),( $+ %nx $+ )) }
     }
+    ; a nick once, its downloads under it
+    if (%bot != %lastbot) { %lastbot = %bot | dccore.dl.add $dccore.opt(col.name) - %bot }
     if (%k == d) {
       var %got = $gettok(%l,5,32), %total = $gettok(%l,6,32)
       var %pct = $iif(%total > 0,$int($calc(%got * 100 / %total)),0)
-      dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.dl.bar(%pct) $dccore.rfit($iif(%total > 0,%pct $+ $chr(37),?),4) $dccore.rfit($dccore.speed($gettok(%l,7,32)),9) $dccore.rfit($dccore.bytes($iif(%total > 0,%total,%got)),7)
-      dccore.dl.add 14 %map %nm
+      dccore.dl.add $dccore.opt(col.sends) %map %ind $+ %name
+      dccore.dl.add 14 %map %ind $+ $dccore.dl.bar(%pct) $dccore.rfit($iif(%total > 0,%pct $+ $chr(37),?),4) $dccore.rfit($dccore.speed($gettok(%l,7,32)),9) $dccore.rfit($dccore.bytes($iif(%total > 0,%total,%got)),7)
     }
     elseif (%k == w) {
-      dccore.dl.add $dccore.opt(col.queued) %map %bot $dccore.fit(%note,38)
-      dccore.dl.add 14 %map %nm
+      dccore.dl.add 14 %map %ind $+ %name
+      dccore.dl.add $dccore.opt(col.queued) %map %ind $+ %note
     }
     elseif (%k == c) {
-      dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.fit(done,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
-      dccore.dl.add 14 %map %nm
+      dccore.dl.add $dccore.opt(col.sends) %map %ind $+ $dccore.fit(%name,44) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
     }
     else {
-      dccore.dl.add $dccore.opt(col.fail) %map %bot $dccore.fit(FAILED,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
-      dccore.dl.add 14 %map %nm
-      dccore.dl.add $dccore.opt(col.fail) %map $dccore.nbsp $+ $dccore.nbsp $+ %note
+      dccore.dl.add $dccore.opt(col.fail) %map %ind $+ $dccore.fit(%name,44) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) $dccore.dl.when($gettok(%l,8,32))
+      dccore.dl.add $dccore.opt(col.fail) %map %ind $+ %note
     }
     inc %i
   }

@@ -645,6 +645,7 @@ def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
 
         DCCORE DLBEGIN
         DCCORE DLROW <id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>
+        (rows of one bot sit together within each kind)
         DCCORE DLEND <waiting_total> <complete_total> <failed_total>
 
     kind is d (coming in), w (waiting), c (finished) or f (failed). <note> is one token
@@ -690,23 +691,31 @@ def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
     done = sorted((i for i in finished if not failed_row(i[1])), key=by_ended, reverse=True)
     failed = sorted((i for i in finished if failed_row(i[1])), key=by_ended, reverse=True)
 
+    def by_bot(items):
+        """One bot's rows together, bots in the order each first appears, so the
+        window can head each group with the bot's nick."""
+        groups = {}
+        for item in items:
+            groups.setdefault(item[1].get("bot") or "?", []).append(item)
+        return [item for group in groups.values() for item in group]
+
     def line(rid, kind, state, row, bps=0, when=0, note="-"):
         return (f"DCCORE DLROW {rid} {kind} {state} {_clean(row.get('bot'), token=True)} "
                 f"{_num(row.get('bytes_received'))} {_num(row.get('total_size'))} {bps} {_num(when)} "
                 f"{_clean(note, token=True)} {_clean(_download_name(row))}")
 
     lines = ["DCCORE DLBEGIN"]
-    for rid, row in coming:
+    for rid, row in by_bot(coming):
         received = int(row.get("bytes_received") or 0)
         began = float(row.get("receiving_since") or 0)
         bps = int(received / (now - began)) if began and now > began + 0.5 else 0
         lines.append(line(rid, "d", row.get("state"), row, bps=bps))
-    for rid, row in waiting[:DOWNLOADS_WAITING_MAX]:
+    for rid, row in by_bot(waiting[:DOWNLOADS_WAITING_MAX]):
         lines.append(line(rid, "w", row.get("state"), row, note=_download_waiting_note(row)))
     keep = max(0, min(int(finished_rows), DOWNLOADS_FINISHED_MAX))
-    for rid, row in done[:keep]:
+    for rid, row in by_bot(done[:keep]):
         lines.append(line(rid, "c", "complete", row, when=row.get("finished_at") or row.get("requested_at") or 0))
-    for rid, row in failed[:keep]:
+    for rid, row in by_bot(failed[:keep]):
         when = row.get("finished_at") or row.get("requested_at") or 0
         note = (f"rejected: {row.get('list_processing_error')}" if row.get("state") != "failed"
                 else row.get("reason") or "no reason given")

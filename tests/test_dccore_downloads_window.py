@@ -128,6 +128,15 @@ class TheSnapshot(DCCoreTestCase):
         self.assertEqual(len(dlrows(lines)), adminchat.DOWNLOADS_WAITING_MAX)
         self.assertEqual(lines[-1], f"DCCORE DLEND {adminchat.DOWNLOADS_WAITING_MAX + 7} 0 0")
 
+    def test_one_bots_rows_sit_together_in_each_kind(self):
+        for i, bot in enumerate(["BotA", "BotB", "BotA", "BotC", "BotB"]):
+            config.fetch_queue[f"{i:012x}"] = row("complete", bot=bot, name=f"f{i}.flac", at=float(i),
+                                                 finished_at=float(10 + i))
+        rows = dlrows(adminchat.downloads_lines())
+        self.assertEqual([r[5] for r in rows], ["BotB", "BotB", "BotC", "BotA", "BotA"],
+                         "bots in the order of their newest row, each one's files together, newest first")
+        self.assertEqual([r[11] for r in rows], ["f4.flac", "f1.flac", "f3.flac", "f2.flac", "f0.flac"])
+
     def test_a_name_cannot_break_the_line(self):
         config.fetch_queue["aaaaaaaaaaaa"] = row("pending", name="a\r\nDCCORE TAKEN x.flac")
         for line in adminchat.downloads_lines():
@@ -431,11 +440,11 @@ class TheScript(unittest.TestCase):
         self.assertIn("Received $3-", body)
 
     def test_the_list_is_a_narrow_side_panel_and_each_download_names_its_file_on_its_own_line(self):
-        self.assertIn("window -l52 $dccore.dl.win", self.text)
+        self.assertIn("window -l64 $dccore.dl.win", self.text)
         body = self.text[self.text.index("alias dccore.dl.draw {"):]
         body = body[:body.index("\nmenu @DCCore-Downloads")]
-        self.assertIn("dccore.dl.add 14 %map %nm", body)
-        self.assertIn("$right(%name,48)", body)
+        self.assertIn("$right(%name,42)", body)
+        self.assertIn("if (%bot != %lastbot)", body)
 
     def test_the_bars_need_no_bytes_function_and_no_unicode(self):
         body = self.text[self.text.index("alias dccore.dl.draw {"):]
