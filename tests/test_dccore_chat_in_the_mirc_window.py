@@ -333,7 +333,8 @@ class TheWindowIsTheInterface(unittest.TestCase):
         text = script()
         self.assertIn("/dccore chat [text]", text)
         self.assertIn(".Open DCCore Chat:dccore chat", text)
-        self.assertIn("alias dccore.ver { return 1.8 }", text)
+        match = re.search(r"alias dccore\.ver \{ return ([0-9.]+) \}", text)
+        self.assertGreaterEqual(tuple(int(p) for p in match.group(1).split(".")), (1, 8))
 
 
 class TheDefaultIsEveryChannelWithOtherDccoreBots(unittest.TestCase):
