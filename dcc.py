@@ -1300,6 +1300,71 @@ def wake_restored_queues(irc_sock):
         check_queue_and_send(irc_sock, "system_next_trigger_fallback")
 
 
+def sends_per_user_cap():
+    """How many transfers one nick may have running at once (MAX_SENDS_PER_USER).
+
+    1 is the long-standing behaviour: a nick's files go out one after another.
+    A receiver that wants several files in parallel needs the sender to allow
+    it - and a sender that stays at 1 leaves free slots idle while the
+    receiver's other requests wait in the queue.
+    """
+    try:
+        return max(1, int(getattr(config, 'MAX_SENDS_PER_USER', 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def user_running_sends(user_key):
+    """How many of this nick's sends are in active_transfers. Caller holds queue_lock."""
+    return sum(1 for tx in config.active_transfers
+               if str(tx.get('user', '')).lower() == user_key)
+
+
+def user_may_start_another(user_key):
+    """True when the nick is below its own cap and nothing is packing for it.
+
+    Caller holds queue_lock. At a cap of 1 this is exactly the old test: the
+    nick has no send running and is not in user_processing_lock.
+    """
+    if user_key in getattr(config, 'user_processing_lock', ()):
+        return False
+    return user_running_sends(user_key) < sends_per_user_cap()
+
+
+def next_waiting_row(user_key, rows=None):
+    """The first queued row of this nick that is not already being sent, or None.
+
+    A queue row stays at the front of the list while it is in flight (it is
+    released by identity when the send ends), so with more than one send per
+    nick the head can be a row that is already running. A row is also held
+    back while a send of the SAME file name is running, so one file is never
+    sent twice at once to one nick. Caller holds queue_lock.
+    """
+    if rows is None:
+        rows = config.dcc_queue.get(user_key) or []
+    running = {tx.get('file') for tx in config.active_transfers
+               if str(tx.get('user', '')).lower() == user_key}
+    for row in rows:
+        name = row.get('file') if isinstance(row, dict) else os.path.basename(str(row))
+        if name not in running:
+            return row
+    return None
+
+
+def claim_user_for_send(user_key):
+    """Mark a nick as claimed for a plain send. Caller holds queue_lock.
+
+    Only at a cap of 1: there the claim is what says "this nick is busy". Above
+    1 the running count in active_transfers says it, and a claim would shut the
+    nick's second send out.
+    """
+    if sends_per_user_cap() > 1:
+        return
+    if not hasattr(config, 'user_processing_lock'):
+        config.user_processing_lock = set()
+    config.user_processing_lock.add(user_key)
+
+
 def check_queue_and_send(irc_sock, completed_user):
     """Check the queues and run RAR packing one at a time, without flooding the server."""
     import announce as announce_mod
@@ -1383,7 +1448,9 @@ def check_queue_and_send(irc_sock, completed_user):
     with queue_lock:
         if user_key and user_key in config.dcc_queue and config.dcc_queue[user_key]:
             if user_key not in config.frozen_queues:
-                next_file = config.dcc_queue[user_key][0]  # FIXED: takes the top entry
+                # The top row not already being sent. With one send per nick
+                # that is the top entry, as it always was.
+                next_file = next_waiting_row(user_key)
 
 
     if next_file:
@@ -1434,7 +1501,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     user_already_locked = (
                         hasattr(config, 'user_processing_lock')
                         and completed_user.lower() in config.user_processing_lock
-                    )
+                    ) or user_running_sends(user_key) >= sends_per_user_cap()
                     pack_in_progress = getattr(config, 'rar_inprogress', False)
 
                     if user_already_locked:
@@ -1711,21 +1778,13 @@ def check_queue_and_send(irc_sock, completed_user):
                         print(f"[DCC-BLOCK] {completed_user}: all {config.MAX_DCC_SLOTS} slot(s) busy, leaving queued for the next trigger.")
                         return
 
-                    already_claimed = (
-                        hasattr(config, 'user_processing_lock')
-                        and completed_user.lower() in config.user_processing_lock
-                    ) or any(
-                        str(tx.get('user', '')).lower() == user_key
-                        for tx in config.active_transfers
-                    )
+                    already_claimed = not user_may_start_another(user_key)
 
                     if already_claimed:
                         print(f"[DCC-BLOCK] {completed_user} is already claimed elsewhere; skipping duplicate dispatch.")
                         return
 
-                    if not hasattr(config, 'user_processing_lock'):
-                        config.user_processing_lock = set()
-                    config.user_processing_lock.add(completed_user.lower())
+                    claim_user_for_send(completed_user.lower())
 
                     f_name = next_file['file'] if isinstance(next_file, dict) else os.path.basename(str(next_file))
                     f_path = next_file['path'] if isinstance(next_file, dict) else str(next_file)
@@ -1784,7 +1843,7 @@ def check_queue_and_send(irc_sock, completed_user):
                 # FIXED (issue #4): user_files is the LIST of this user's queued files, not a
                 # single file. Without [0] the isinstance test below was always true (a list is
                 # never a dict), so every waiting user was skipped and section B was dead code.
-                g_next = user_files[0]
+                g_next = next_waiting_row(queue_key, user_files)
                 if not isinstance(g_next, dict):
                     continue
 
@@ -1796,11 +1855,7 @@ def check_queue_and_send(irc_sock, completed_user):
                 # two slots were burned on it, and then both finally blocks popped position 0:
                 # the first removed the file that was sent, the second removed the NEXT file,
                 # which had never been sent. Silent loss, persisted straight to dcc_queue.txt.
-                already_sending = any(
-                    str(tx.get('user', '')).lower() == queue_key
-                    for tx in config.active_transfers
-                )
-                if already_sending:
+                if not user_may_start_another(queue_key):
                     continue
 
                 real_username = g_next.get('user_raw', waiting_user)
@@ -1863,9 +1918,7 @@ def check_queue_and_send(irc_sock, completed_user):
                     # CLAIM the user before releasing the lock, so a concurrent caller sees
                     # them as busy. start_dcc_send's finally already discards this key on
                     # every exit path, including the early aborts.
-                    if not hasattr(config, 'user_processing_lock'):
-                        config.user_processing_lock = set()
-                    config.user_processing_lock.add(queue_key)
+                    claim_user_for_send(queue_key)
 
                     config.active_transfers.append({"user": real_username, "file": g_name, "bytes_sent": 0, "next_file_obj": g_name})
                     promoted = (real_username, g_path, g_name, g_chan, g_next)
@@ -3030,27 +3083,29 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 return
 
             # Check whether this nick ALREADY has a send running, in active_transfers
-            user_already_transferring = any(str(tx['user']).lower() == user_key for tx in config.active_transfers)
+            user_may_send = user_may_start_another(user_key)
             
             # Create the temporary send lock in config if it is missing
             if not hasattr(config, 'user_processing_lock'):
                 config.user_processing_lock = set()
                 
             # If the user just sent rows, check whether the nick is locked in memory
-            user_is_processing = user_key in config.user_processing_lock
-            user_has_queue = len(config.dcc_queue.get(user_key, [])) > 0
+            user_has_queue = next_waiting_row(user_key) is not None
+            same_file_running = any(str(tx.get('user', '')).lower() == user_key and tx.get('file') == file_name
+                                    for tx in config.active_transfers)
 
             # Only a user who is clear in transfers, the queue AND the memory lock sends immediately
             # - and not while a rehash is quiescing (#668): this path does
             # not go through check_queue_and_send()'s gate, so a request
             # that reached here during the pause would have started a send
             # the reload then landed in the middle of. Read under the lock.
-            sends_now = (not user_already_transferring and not user_is_processing
-                         and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS
+            sends_now = (user_may_send
+                         and not user_has_queue and not same_file_running and len(config.active_transfers) < config.MAX_DCC_SLOTS
                          and not transfers_are_paused())
             if sends_now:
-                # Lock the nick immediately, so the next row goes to the queue
-                config.user_processing_lock.add(user_key)
+                # Claim the nick immediately, so the next row goes to the queue
+                # (or, below the cap, starts beside this one)
+                claim_user_for_send(user_key)
 
                 next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False}
                 config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name})
@@ -3275,8 +3330,9 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
     # The dashboard's queue progress bar needs a total to measure bytes_sent
     # against - bytes_sent was already kept live on this row (see the send
     # loop below), but nothing recorded what it was a fraction OF. Matched by
-    # user, the same way the send loop below updates bytes_sent: only one
-    # transfer runs per user at a time, so this is unambiguous.
+    # user, the same way the send loop below updates bytes_sent. With
+    # MAX_SENDS_PER_USER above 1 a nick can have several rows, so the row is
+    # held by identity (see _row below).
     # #598: WHICH ROW IS THIS TRANSFER'S. The dispatcher appended one to
     # config.active_transfers under the nick the send started as, and every
     # lookup below used to find it by that nick again. A /nick in the middle
