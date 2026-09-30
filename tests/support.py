@@ -65,6 +65,7 @@ RUNTIME_CONTAINERS = {
     "active_transfers": list,
     "banned_users": dict,
     "frozen_queues": dict,
+    "queue_waiting_since": dict,
     "channel_users": dict,
     "user_requests": dict,
     "muted_until": dict,
