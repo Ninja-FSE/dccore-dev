@@ -31,7 +31,7 @@ cancelled request is refused as unsolicited. Only `listening` and `receiving` ar
 rebuilt on every 4 s poll whether or not a row had changed, and a click needs mousedown and mouseup on the same element,
 so a rebuild between them swallowed it; `setDownloadsBody()` now leaves the DOM alone when the HTML is identical. A
 summary strip above the table counts the queue: in the queue, downloading, asked (waiting for an answer), queued at other
-bots, waiting to be asked. Cancelling a request the other bot may hold now also says `@<bot>-remove <file>` in the channel
+bots, waiting to be asked. Cancelling a request the other bot may hold now also says `@<bot>-remove <file>` in the channel (only to a bot `serverschat.is_known_peer()` says is DCCore: another server may match `@<bot>-remove*` and read the per-file form as the bare one, clearing everything queued there; any other bot is told nothing and the row is just forgotten)
 (`dcc_fetch.drop_our_request_at()`), because forgetting the row here left the file queued there, sent later and refused
 as unsolicited. That needed a per-file form: `@<nick>-remove` alone still clears the user's whole queue, and
 `@<nick>-remove <file>` (or CTCP `REMOVE <file>`) takes out only that file, matched the way offers are (spaces and
@@ -39,8 +39,8 @@ underscores alike, any case) - `commands.handle_queue_remove_file()`, with `dcc.
 keeping any archive another queued row still names. A bot that only knows the bare command ignores the extra word.
 The list is now three boxes - in the queue (the only one with Cancel), finished and failed - each sorted by column and
 paged on its own. A bot that queues our request and sends the file after `FETCH_OFFER_TIMEOUT` had run out found the row
-already failed as "no response" and was refused as unsolicited; `_claim_matching_offer_locked()` now lets a file row that
-failed only for silence, within `_LATE_OFFER_GRACE` (1800 s) of its request; Cancel/Delete on such a row also sends `-remove`, since the bot still holds the file. A file is now asked for `OFFER_ASKS` (3) times when the bot is silent - each after `FETCH_OFFER_TIMEOUT` - and only the third silence fails it, taking the request back with `@<bot>-remove <file>` (`drop_our_request_at()`); the row stays under Failed to see and ask again, take the late offer.
+already failed as "no response" and was refused as unsolicited; `_claim_matching_offer_locked()` now lets
+the row take it: a file row that failed only for silence, within `_LATE_OFFER_GRACE` (1800 s) of its request. Such a late passive offer is held to `MAX_FETCH_SLOTS` like a queued one (`handle_incoming_offer()`). Cancel/Delete on such a row also sends `-remove` to a DCCore bot, since it still holds the file. A file is now asked for `OFFER_ASKS` (3) times when the bot is silent - each after `FETCH_OFFER_TIMEOUT` - and only the third silence fails it, taking the request back with `@<bot>-remove <file>` (`drop_our_request_at()`, DCCore bots only); the row stays under Failed to see and ask again.
 Tests: `tests/test_fetch_queue_bounds.py`, `tests/test_the_downloads_page_and_the_fetch_feed.py`.
 
 ### 📦 A passive offer for a queued request waits for a free fetch slot

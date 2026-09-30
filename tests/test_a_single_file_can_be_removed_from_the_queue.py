@@ -104,6 +104,11 @@ class TheFloodGateMetersIt(unittest.TestCase):
         self.assertTrue(_evaluate(FLOOD_GATE_SOURCE, "\x01REMOVE Song.mp3\x01"))
         self.assertFalse(_evaluate(FLOOD_GATE_SOURCE, f"@{nick}-removed"))
 
+    def test_ordinary_channel_text_starting_with_remove_is_not_metered(self):
+        self.assertFalse(_evaluate(FLOOD_GATE_SOURCE, "remove something"))
+        self.assertFalse(_evaluate(FLOOD_GATE_SOURCE, "Remove the old one", target_chan="#chan"))
+        self.assertFalse(_evaluate(FLOOD_GATE_SOURCE, "REMOVE"))
+
 
 if __name__ == "__main__":
     unittest.main()

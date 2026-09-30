@@ -1325,15 +1325,19 @@ def drop_our_request_at(bot, filename):
     <file>` in the channel, the per-file form of the command DCCore answers
     (commands.handle_queue_remove_file). Without it, cancelling on the
     dashboard forgot the row here while the other bot kept the file queued and
-    sent it later, refused as unsolicited. A bot that only knows the bare
-    `@<bot>-remove` ignores the extra word rather than clearing anything.
+    sent it later, refused as unsolicited. Only a bot known to be DCCore is
+    told: another server may match its trigger as `@<bot>-remove*`, where the
+    per-file form is the bare one and clears everything we have queued there.
     Returns whether it was sent."""
     import announce
     import dcc
+    import serverschat
     bot = str(bot or "").strip()
     filename = str(filename or "").strip()
     if (not bot or not filename or contains_unsafe_ctcp_bytes(bot)
             or contains_unsafe_ctcp_bytes(filename)):
+        return False
+    if not serverschat.is_known_peer(bot):
         return False
     oserve = sys.modules.get("oserve")
     if not (oserve and hasattr(oserve, "queue_message")):
@@ -2008,9 +2012,10 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         # the DCC port range the bot's own sends to its users share, and
         # queues at several bots coming due together could take every port
         # in it. Past MAX_FETCH_SLOTS a passive offer for a queued row is
-        # not taken: the row is asked for again once a slot is free.
+        # not taken: the row is asked for again once a slot is free. A late
+        # offer takes a failed row, which holds no slot either.
         max_slots = int(getattr(config, "MAX_FETCH_SLOTS", 3))
-        if (is_passive and states_before.get(request_id) == "queued"
+        if (is_passive and states_before.get(request_id) in ("queued", "failed")
                 and count_active_fetches(queue) > max_slots):
             row.update(state="pending", offered_at=None,
                        reason="its turn came with every fetch slot in use - asking again once one is free")

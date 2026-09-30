@@ -491,6 +491,8 @@ class CancellingTellsTheBot(DCCoreTestCase):
         chan = mock.patch.object(dcc, "channel_containing_user", lambda nick: "#chan")
         chan.start()
         self.addCleanup(chan.stop)
+        import runtime
+        runtime.chat_peers["goodbot"] = {"#chan": 0}
         config.fetch_queue.clear()
 
     def put(self, rid, state, bot="GoodBot", name=None):
@@ -503,6 +505,16 @@ class CancellingTellsTheBot(DCCoreTestCase):
         self.assertTrue(result["removed_at_bot"])
         self.assertEqual(self.sent, [
             ("GoodBot", "PRIVMSG #chan :@GoodBot-remove $Artist - Track 09.flac\r\n")])
+
+    def test_a_bot_not_known_to_be_dccore_is_told_nothing(self):
+        """Another server may read `@<bot>-remove <file>` as the bare form and
+        clear everything we have queued there."""
+        self.put("a", "queued", bot="OtherServer")
+        status, result = webserver.build_fetch_delete_result("a")
+        self.assertEqual(status, 200)
+        self.assertFalse(result["removed_at_bot"])
+        self.assertEqual(self.sent, [])
+        self.assertNotIn("a", config.fetch_queue, "the row is still forgotten here")
 
     def test_a_request_not_yet_answered_says_it_too(self):
         self.put("a", "offered")

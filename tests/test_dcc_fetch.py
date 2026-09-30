@@ -616,7 +616,20 @@ class DispatcherStateMachineTests(DCCoreTestCase):
         self.assertEqual(row["state"], "failed")
         self.assertEqual(row["reason"], "no response")
 
+    def test_the_last_silence_from_a_bot_not_known_to_be_dccore_takes_nothing_back(self):
+        self.set_config(FETCH_OFFER_TIMEOUT=60)
+        rid = dcc_fetch.enqueue_fetch("silentbot", "Ghost.flac")
+        config.fetch_queue[rid]["state"] = "offered"
+        config.fetch_queue[rid]["offered_at"] = time.time() - 61
+        config.fetch_queue[rid]["silent_asks"] = dcc_fetch.OFFER_ASKS
+        before = len(self.oserve.queued)
+        dcc_fetch.check_fetch_queue()
+        self.assertEqual(config.fetch_queue[rid]["state"], "failed")
+        self.assertFalse(any("-remove" in msg for _to, msg, _vip in self.oserve.queued[before:]))
+
     def test_the_first_silences_ask_again_and_the_last_fails_and_takes_it_back(self):
+        import runtime
+        runtime.chat_peers["silentbot"] = {"#chan": 0}
         self.set_config(FETCH_OFFER_TIMEOUT=60)
         rid = dcc_fetch.enqueue_fetch("silentbot", "Ghost.flac")
         for attempt in (2, 3):
