@@ -4,6 +4,22 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A Downloads window in mIRC (#1022)
+
+What the bot fetches from other bots had only the feed lines and the panel's Downloading section (#1019); the queue,
+the waiting and the failures were on the dashboard only. `/dccore downloads` (or the menu) opens `@DCCore-Downloads`:
+Downloading with a bar, speed and size, Waiting with why (`downloads_lines()`, the dashboard's wording), Finished
+with a time, newest first. The bot sends a whole snapshot - `DCCORE DLBEGIN`, a `DLROW` per download, `DLEND
+<waiting_total> <finished_total>` - only while the window is open (`downloads on [rows]` when it opens, `downloads
+off` when it closes, again after a reconnect), at most every `DOWNLOADS_INTERVAL` (3 s) and only when it changed
+(`Session.send_downloads()` from the writer's idle pass; the fetch lock is taken with a 0.25 s timeout, the writer
+being the heartbeat). Only to a script that said 1.10+ in `HELLO`. Right-click: **Cancel this request** (`dlcancel`,
+`build_fetch_delete_result(only_states=...)` so a row that just finished is neither cancelled nor loses its file),
+**Download again** (`dlagain`, by the original route), **Clear finished** (`dlclear`), and Open the dashboard
+(`/dccore weburl <addr>`, asked once). Searching and enqueueing stay on the dashboard. `dcc_fetch._stamp_finished()`
+gives a row a `finished_at` when it is seen to finish. dccore.mrc 1.10, with a Finished-rows setting in Options. Not
+visually tested here (no mIRC). Tests: `tests/test_dccore_downloads_window.py`.
+
 ### 📦 The @DCCore window shows how far a list rebuild has got (#1024)
 
 `update` in the window said "this can take minutes" and then nothing until the result, although the rebuild writes its
