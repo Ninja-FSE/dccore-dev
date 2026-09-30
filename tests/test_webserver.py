@@ -1008,10 +1008,10 @@ class FetchDeleteResultTests(DCCoreTestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, stored)))
 
     def test_in_flight_states_are_refused_not_deleted(self):
-        """"pending" is deliberately NOT in this list - see
-        tests/test_fetch_queue_bounds.py, which covers why it is deletable and
-        that the other three still are not."""
-        for state in ("offered", "listening", "receiving"):
+        """"pending" and "offered" are deliberately NOT in this list - see
+        tests/test_fetch_queue_bounds.py, which covers why they are deletable
+        and that these two still are not."""
+        for state in ("listening", "receiving"):
             with self.subTest(state=state):
                 rid = f"r-{state}"
                 self._put_row(rid, state=state, stored_filename=None)
@@ -2043,7 +2043,7 @@ class FetchDeleteButtonRegressionTests(unittest.TestCase):
         self.assertNotIn('data-folder="', self.source)
 
     def test_delete_click_handler_confirms_before_calling_the_delete_route(self):
-        start = self.source.index('el.downloadsBody.addEventListener("click"')
+        start = self.source.index('el.downloadsBoxes.addEventListener("click"')
         body = self.source[start:start + 1200]
         self.assertIn("window.confirm(", body)
         self.assertIn('"/api/fetch/" + encodeURIComponent(requestId) + "/delete"', body)
