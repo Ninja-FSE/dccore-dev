@@ -83,7 +83,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.8 }
+alias dccore.ver { return 1.9 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -614,6 +614,16 @@ alias dccore.structured {
   ; <bot> <received> <total> <bps> <name>: one file the bot is leeching now
   ; (#1019), part of the same burst as SLOT; the panel's Downloading section.
   if (%type == FETCHING) { hadd dccore.live fetch. $+ $dccore.st(nfetch) $2- | hinc dccore.live nfetch | dccore.panel.soon | return }
+  ; <phase> <folder_index> <folder_count> <files> <elapsed>: a list rebuild is
+  ; running (#1024), however it was started; `end` when it stops. Kept in
+  ; dccore.live and cleared by every STATUS, so a missed `end` lasts one burst.
+  if (%type == REBUILD) {
+    if ($2 == end) { hdel dccore.live rebuild }
+    else { hadd dccore.live rebuild $2- }
+    dccore.title
+    dccore.panel.soon
+    return
+  }
   if (%type == OUT) { dccore.out $2- | return }
   if (%type == LISTFETCH) {
     ; <bot> <auto|arrived|unusable> <text>: a held bot list asked for again,
@@ -731,6 +741,7 @@ alias dccore.status {
   hdel -w dccore.live slot.*
   hdel -w dccore.live queue.*
   hdel -w dccore.live fetch.*
+  hdel dccore.live rebuild
   hadd dccore.live nslots 1
   hadd dccore.live nfetch 1
   dccore.title
@@ -748,6 +759,14 @@ alias dccore.status {
 ; ---------------------------------------------------------------------
 ;  Drawing: the text, the title bar, the side panel
 ; ---------------------------------------------------------------------
+
+; What a rebuild has reached, for the title bar: "rebuilding folder 7/20" (or
+; the phase alone when it has no folders to count).
+alias dccore.rebuild.short {
+  var %l = $dccore.st(rebuild)
+  var %n = $gettok(%l,3,32)
+  return rebuilding $iif(%n > 0,folder $gettok(%l,2,32) $+ / $+ %n,$gettok(%l,1,32))
+}
 
 alias dccore.window {
   if ($window($dccore.win)) { return }
@@ -862,6 +881,15 @@ alias dccore.round {
   return $round($1,0)
 }
 alias dccore.speed { return $+($dccore.bytes($1),/s) }
+; a whole number with thousands separators: 312000 -> 312,000
+alias dccore.num {
+  var %n = $int($1), %o = $null
+  while (%n >= 1000) {
+    %o = $+($chr(44),$base($calc(%n % 1000),10,10,3),%o)
+    %n = $int($calc(%n / 1000))
+  }
+  return $+(%n,%o)
+}
 alias dccore.pad2 { return $iif($1 < 10,$+(0,$1),$1) }
 alias dccore.dur {
   var %s = $int($1)
@@ -922,7 +950,8 @@ alias dccore.title {
   var %net = $iif($network,$network,$server)
   if ($dccore.st(state) != in) { titlebar $dccore.win %bot $dccore.dot $iif($dccore.st(state),$dccore.st(state),not connected) | return }
   if (!$dccore.opt(titlebar)) || ($dccore.st(mode) != structured) { titlebar $dccore.win %bot on %net | return }
-  titlebar $dccore.win %bot on %net $dccore.dot slots $dccore.st(st.used) $+ / $+ $dccore.st(st.slots) $dccore.dot queue $dccore.st(st.qusers) $dccore.dot today $dccore.st(st.sent) files / $dccore.bytes($dccore.st(st.bytes)) $dccore.dot $dccore.speed($dccore.st(st.bps))
+  var %rb = $iif(($dccore.st(rebuild) != $null) && (!$dccore.opt(panel)),$dccore.dot $dccore.rebuild.short,)
+  titlebar $dccore.win %bot on %net %rb $dccore.dot slots $dccore.st(st.used) $+ / $+ $dccore.st(st.slots) $dccore.dot queue $dccore.st(st.qusers) $dccore.dot today $dccore.st(st.sent) files / $dccore.bytes($dccore.st(st.bytes)) $dccore.dot $dccore.speed($dccore.st(st.bps))
 }
 
 ; SLOT and QUEUE lines arrive one by one after STATUS with no end marker,
@@ -988,6 +1017,16 @@ alias dccore.panel {
       aline -l $dccore.opt(col.sends) $dccore.win < $dccore.fit($gettok(%l,1,32),9) $dccore.rfit($dccore.bytes($gettok(%l,3,32)),7) $dccore.rfit(%pct $+ $chr(37),4) $dccore.rfit($dccore.speed($gettok(%l,4,32)),9)
       inc %i
     }
+    aline -l 14 $dccore.win $dccore.nbsp
+  }
+  ; Rebuilding (#1024): the phase, the folder it is on and the files so far.
+  ; Only drawn while one runs.
+  if ($dccore.st(rebuild) != $null) {
+    var %r = $dccore.st(rebuild)
+    aline -l %head $dccore.win Rebuilding $gettok(%r,1,32)
+    if ($gettok(%r,3,32) > 0) { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp folder $gettok(%r,2,32) $+ / $+ $gettok(%r,3,32) $dccore.dot $dccore.num($gettok(%r,4,32)) files }
+    else { aline -l $dccore.opt(col.sends) $dccore.win $dccore.nbsp $+ $dccore.nbsp $dccore.num($gettok(%r,4,32)) files }
+    if ($gettok(%r,5,32) > 0) { aline -l 14 $dccore.win $dccore.nbsp $+ $dccore.nbsp running $dccore.dur($gettok(%r,5,32)) }
     aline -l 14 $dccore.win $dccore.nbsp
   }
   aline -l %head $dccore.win Queue $dccore.st(st.qusers) $iif($dccore.st(st.qfiles) > 0,( $+ $dccore.st(st.qfiles) files))

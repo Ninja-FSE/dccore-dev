@@ -4,6 +4,19 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The @DCCore window shows how far a list rebuild has got (#1024)
+
+`update` in the window said "this can take minutes" and then nothing until the result, although the rebuild writes its
+progress all the time (`update_list.write_progress()`, the file the dashboard's bar reads). `adminchat.rebuild_lines()`
+turns it into `DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>` while `config.update_inprogress`
+is set - which every start (console, `!update`, the dashboard, `LIST_REBUILD_SCHEDULE`) sets. It rides the status burst
+and, from the writer's idle pass (`Session.send_rebuild_progress()`, progress file only, no lock), goes out every
+`REBUILD_INTERVAL` (5 s) in between, then `DCCORE REBUILD end` once when the rebuild stops. Only to a script that said 1.9+
+in `HELLO` (`script_draws_rebuild()`), as with FETCHING. dccore.mrc 1.9: a Rebuilding section in the side panel before the
+Queue, `rebuilding folder 7/20` in the title bar when the panel is off (`dccore.rebuild.short`), every STATUS forgets it so a
+missed `end` lasts one burst, and `dccore.num` for the thousands separators (not `$bytes()`, see `dccore.bytes`).
+Tests: `tests/test_mirc_shows_rebuild_progress.py`.
+
 ### 📦 The Tools page follows a list rebuild however it was started (#1023)
 
 Seen live: a rebuild started from the @DCCore window in mIRC could not be followed on the dashboard. The Tools
