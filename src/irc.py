@@ -3734,11 +3734,13 @@ def irc_loop():
                             or msg_lower == f"@{config.NICKNAME.lower()}-top"
                             or msg_lower == f"@{config.NICKNAME.lower()}-que"
                             or msg_lower == f"@{config.NICKNAME.lower()}-remove"
+                            or msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ")
                             or msg.startswith("@find ")
                             or msg.startswith("@locator ")
                             or any(msg_lower.startswith(f"!{alias} ") for alias in bot_aliases)
                             or msg_lower in ("!list", "!debugnames", "!ping")
-                            or (msg.startswith("\x01") and msg.strip("\x01").strip().upper() in ("QUE", "REMOVE", "VERSION"))
+                            or (msg.startswith("\x01") and (msg.strip("\x01").strip().upper() in ("QUE", "REMOVE", "VERSION")
+                                                                or msg.strip("\x01").strip().upper().startswith("REMOVE ")))
                             or (msg.startswith("\x01")
                                 and msg.strip("\x01").strip().upper().startswith("DCC SEND ")
                                 and target_chan.lower() == config.NICKNAME.lower())
@@ -3925,6 +3927,11 @@ def irc_loop():
                                 elif ctcp_cmd == "REMOVE":
                                     threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
                                     continue
+                                elif ctcp_cmd.startswith("REMOVE "):
+                                    threading.Thread(target=commands.handle_queue_remove_file,
+                                                     args=(s, user, target_chan, msg.strip("\x01").strip()[7:].strip()),
+                                                     daemon=True).start()
+                                    continue
                             elif is_list_request(msg, msg_lower):
                                 threading.Thread(target=list.send_file_list, args=(s, user, target_chan),
                                                  daemon=True).start()
@@ -3942,6 +3949,11 @@ def irc_loop():
                                 continue
                             elif msg_lower == f"@{config.NICKNAME.lower()}-remove":
                                 threading.Thread(target=commands.handle_queue_remove, args=(s, user, target_chan), daemon=True).start()
+                                continue
+                            elif msg_lower.startswith(f"@{config.NICKNAME.lower()}-remove ") and msg[len(config.NICKNAME) + 9:].strip():
+                                threading.Thread(target=commands.handle_queue_remove_file,
+                                                 args=(s, user, target_chan, msg[len(config.NICKNAME) + 9:].strip()),
+                                                 daemon=True).start()
                                 continue
                             elif msg.startswith("@find ") or msg.startswith("@locator "):
                                 parts = msg.split(" ", 1)

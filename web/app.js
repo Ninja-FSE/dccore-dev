@@ -179,7 +179,11 @@
     broadcastWrap:       document.getElementById("broadcast-wrap"),
     broadcastBody:       document.getElementById("broadcast-body"),
     downloadSelectedBtn: document.getElementById("download-selected-btn"),
-    downloadsBody:       document.getElementById("downloads-body"),
+    downloadsBoxes:      document.getElementById("downloads-boxes"),
+    downloadsPageSize:   document.getElementById("downloads-pagesize"),
+    downloadsSummary:    document.getElementById("downloads-summary"),
+    downloadsClearComplete: document.getElementById("downloads-clear-complete"),
+    downloadsClearFailed:   document.getElementById("downloads-clear-failed"),
     bulkFetchForm:       document.getElementById("bulk-fetch-form"),
     bulkFetchTextarea:   document.getElementById("bulk-fetch-textarea"),
     bulkFetchErrors:     document.getElementById("bulk-fetch-errors"),
@@ -788,7 +792,7 @@
   // fetched file? This cannot be undone." warning, about a file that did
   // not exist.
   function fetchRowNotStarted(state) {
-    return state === "pending" || state === "queued";
+    return state === "pending" || state === "queued" || state === "offered";
   }
 
   function loadDownloads() {
@@ -861,9 +865,9 @@
     });
   }
 
-  // Delegated: renderDownloads() rebuilds the table's innerHTML on every
+  // Delegated: renderDownloads() rebuilds the tables' innerHTML on every
   // poll, which would silently drop a listener attached to any one row.
-  el.downloadsBody.addEventListener("click", function (evt) {
+  el.downloadsBoxes.addEventListener("click", function (evt) {
     var retry = evt.target.closest ? evt.target.closest(".fetch-retry-btn") : null;
     if (retry) {
       redownloadFetchRow(retry);
@@ -898,12 +902,202 @@
     });
   });
 
-  function renderDownloads(rows) {
-    if (!rows.length) {
-      el.downloadsBody.innerHTML = emptyRow(5, t("download.nothingQueued"));
-      return;
+  // Sort and page (#1019, #1021): the download list is three boxes and each one
+  // sorts and pages on its own. The rows are all here already (the server keeps
+  // at most FETCH_HISTORY_MAX_ROWS finished ones), so this is done on the page
+  // and needs no new request. Sort and page size are remembered per browser.
+  var DOWNLOADS_SORT_KEY = "dccore-downloads-sort";
+  var DOWNLOADS_PAGE_SIZE_KEY = "dccore-downloads-page-size";
+  var DOWNLOADS_PAGE_SIZES = [10, 15, 20, 50, 100];
+  var DOWNLOAD_QUEUE_STATES = ["pending", "offered", "queued", "listening", "receiving"];
+  var DOWNLOAD_BOXES = [
+    { id: "queue", empty: "download.nothingQueued", match: function (row) {
+      return DOWNLOAD_QUEUE_STATES.indexOf(row.state || "pending") !== -1;
+    } },
+    { id: "finished", empty: "download.box.finishedEmpty", match: function (row) {
+      return row.state === "complete";
+    } },
+    { id: "failed", empty: "download.box.failedEmpty", match: function (row) {
+      return row.state === "failed";
+    } }
+  ];
+  // Running ones first when sorted by state, then waiting, then finished.
+  var DOWNLOAD_STATE_RANK = {
+    receiving: 0, listening: 1, offered: 2, queued: 3, pending: 4,
+    failed: 5, rejected: 6, complete: 7
+  };
+
+  function readStored(key) {
+    try { return localStorage.getItem(key); } catch (err) { return null; }
+  }
+  function writeStored(key, value) {
+    try { localStorage.setItem(key, value); } catch (err) { /* not remembered */ }
+  }
+
+  state.downloadSort = {};
+  state.downloadPages = {};
+  state.downloadPageSize = 15;
+  DOWNLOAD_BOXES.forEach(function (box) {
+    var id = box.id;
+    box.body = document.getElementById("downloads-" + id + "-body");
+    box.count = document.getElementById("downloads-" + id + "-count");
+    box.prev = document.getElementById("downloads-" + id + "-prev");
+    box.next = document.getElementById("downloads-" + id + "-next");
+    box.pageInfo = document.getElementById("downloads-" + id + "-pageinfo");
+    box.table = document.getElementById("downloads-" + id + "-table");
+    box.lastHtml = null;
+    state.downloadSort[id] = { key: "", dir: 1 };
+    state.downloadPages[id] = 0;
+    var parts = String(readStored(DOWNLOADS_SORT_KEY + "-" + id) || "").split(":");
+    if (["bot", "file", "state", "progress"].indexOf(parts[0]) !== -1 &&
+        (parts[1] === "asc" || parts[1] === "desc")) {
+      state.downloadSort[id] = { key: parts[0], dir: parts[1] === "asc" ? 1 : -1 };
     }
-    el.downloadsBody.innerHTML = rows.map(function (row) {
+  });
+  (function restoreDownloadsPageSize() {
+    var size = parseInt(readStored(DOWNLOADS_PAGE_SIZE_KEY), 10);
+    if (DOWNLOADS_PAGE_SIZES.indexOf(size) !== -1) { state.downloadPageSize = size; }
+    el.downloadsPageSize.value = String(state.downloadPageSize);
+  })();
+
+  function downloadDisplayState(row) {
+    return row.list_processing_error ? "rejected" : (row.state || "pending");
+  }
+
+  function downloadSortValue(row, key) {
+    if (key === "bot") { return String(row.bot || "").toLowerCase(); }
+    if (key === "file") {
+      return String(row.filename || row.requested_filename || row.bot || "").toLowerCase();
+    }
+    if (key === "state") {
+      var rank = DOWNLOAD_STATE_RANK[downloadDisplayState(row)];
+      return rank === undefined ? 99 : rank;
+    }
+    return row.total_size ? (row.bytes_received || 0) / row.total_size : (row.bytes_received || 0);
+  }
+
+  // The server sends newest first; equal values keep that order.
+  function sortedDownloads(rows, boxId) {
+    var sort = state.downloadSort[boxId];
+    if (!sort.key) { return rows; }
+    return rows.map(function (row, index) { return { row: row, index: index }; })
+      .sort(function (a, b) {
+        var left = downloadSortValue(a.row, sort.key);
+        var right = downloadSortValue(b.row, sort.key);
+        if (left < right) { return -sort.dir; }
+        if (left > right) { return sort.dir; }
+        return a.index - b.index;
+      })
+      .map(function (item) { return item.row; });
+  }
+
+  function renderDownloadsBoxControls(box, total, pages, finishedCounts) {
+    var sort = state.downloadSort[box.id];
+    Array.prototype.forEach.call(box.table.querySelectorAll("th[data-sort-col]"), function (th) {
+      th.setAttribute("aria-sort", th.getAttribute("data-sort-col") === sort.key
+        ? (sort.dir === 1 ? "ascending" : "descending") : "none");
+    });
+    var page = state.downloadPages[box.id];
+    box.count.textContent = total ? "(" + total + ")" : "";
+    box.prev.disabled = page <= 0;
+    box.next.disabled = page >= pages - 1;
+    box.pageInfo.textContent = total > state.downloadPageSize
+      ? t("download.pageOf").replace("{page}", page + 1)
+          .replace("{pages}", pages).replace("{count}", total)
+      : "";
+    if (box.id === "finished") {
+      el.downloadsClearComplete.textContent =
+        t("download.clearComplete").replace("{count}", finishedCounts.complete);
+      el.downloadsClearComplete.disabled = !finishedCounts.complete;
+    } else if (box.id === "failed") {
+      el.downloadsClearFailed.textContent =
+        t("download.clearFailed").replace("{count}", finishedCounts.failed);
+      el.downloadsClearFailed.disabled = !finishedCounts.failed;
+    }
+  }
+
+  function clearDownloads(which, count) {
+    if (!count || !window.confirm(t("download.confirmClear").replace("{count}", count))) { return; }
+    postJson("/api/fetch/clear", { which: which }).then(function (res) {
+      if (!res.ok) {
+        window.alert(t("download.couldNotClear").replace("{error}",
+          (res.data && res.data.error) || ("HTTP " + res.status)));
+        return;
+      }
+      loadDownloads();
+    }).catch(function (err) {
+      window.alert(t("download.couldNotClear").replace("{error}", err.message));
+    });
+  }
+
+  function redrawDownloads() { renderDownloads(state.downloads || []); }
+
+  DOWNLOAD_BOXES.forEach(function (box) {
+    Array.prototype.forEach.call(box.table.querySelectorAll(".sort-btn"), function (button) {
+      button.addEventListener("click", function () {
+        var key = button.getAttribute("data-sort");
+        var sort = state.downloadSort[box.id];
+        // Ascending, then descending, then back to the server's newest-first.
+        if (sort.key !== key) { state.downloadSort[box.id] = { key: key, dir: 1 }; }
+        else if (sort.dir === 1) { state.downloadSort[box.id] = { key: key, dir: -1 }; }
+        else { state.downloadSort[box.id] = { key: "", dir: 1 }; }
+        var now = state.downloadSort[box.id];
+        writeStored(DOWNLOADS_SORT_KEY + "-" + box.id,
+          now.key ? now.key + ":" + (now.dir === 1 ? "asc" : "desc") : "");
+        state.downloadPages[box.id] = 0;
+        redrawDownloads();
+      });
+    });
+    box.prev.addEventListener("click", function () {
+      state.downloadPages[box.id] = Math.max(0, state.downloadPages[box.id] - 1);
+      redrawDownloads();
+    });
+    box.next.addEventListener("click", function () {
+      state.downloadPages[box.id] += 1;
+      redrawDownloads();
+    });
+  });
+  el.downloadsPageSize.addEventListener("change", function () {
+    var size = parseInt(el.downloadsPageSize.value, 10);
+    if (DOWNLOADS_PAGE_SIZES.indexOf(size) === -1) { return; }
+    state.downloadPageSize = size;
+    writeStored(DOWNLOADS_PAGE_SIZE_KEY, String(size));
+    DOWNLOAD_BOXES.forEach(function (box) { state.downloadPages[box.id] = 0; });
+    redrawDownloads();
+  });
+  el.downloadsClearComplete.addEventListener("click", function () {
+    clearDownloads("complete", (state.downloads || []).filter(function (row) {
+      return row.state === "complete";
+    }).length);
+  });
+  el.downloadsClearFailed.addEventListener("click", function () {
+    clearDownloads("failed", (state.downloads || []).filter(function (row) {
+      return row.state === "failed";
+    }).length);
+  });
+
+  function renderDownloads(allRows) {
+    var finishedCounts = { complete: 0, failed: 0 };
+    allRows.forEach(function (row) {
+      if (row.state === "complete") { finishedCounts.complete += 1; }
+      else if (row.state === "failed") { finishedCounts.failed += 1; }
+    });
+    renderDownloadsSummary(allRows);
+    DOWNLOAD_BOXES.forEach(function (box) {
+      var mine = allRows.filter(box.match);
+      var pages = Math.max(1, Math.ceil(mine.length / state.downloadPageSize));
+      if (state.downloadPages[box.id] > pages - 1) { state.downloadPages[box.id] = pages - 1; }
+      renderDownloadsBoxControls(box, mine.length, pages, finishedCounts);
+      if (!mine.length) {
+        setDownloadsBody(box, emptyRow(5, t(box.empty)));
+        return;
+      }
+      var start = state.downloadPages[box.id] * state.downloadPageSize;
+      var rows = sortedDownloads(mine, box.id).slice(start, start + state.downloadPageSize);
+      setDownloadsBody(box, rows.map(downloadRowHtml).join(""));
+    });
+
+    function downloadRowHtml(row) {
       var state = row.state || "pending";
       // dcc_fetch.py records a refused list archive on the row explicitly
       // "for the dashboard", and /api/fetch/status serves it - but nothing
@@ -938,7 +1132,7 @@
       // A request the other bot queued (#926) can be let go as well: nothing
       // is moving yet, and forgetting it is all there is to do.
       var deletable = (state === "complete" || state === "failed" || state === "pending" ||
-                       state === "queued");
+                       state === "queued" || state === "offered");
       // "Cancel" for a row that has not started - calling it Delete would
       // suggest a downloaded file is being thrown away when none exists.
       var notStarted = fetchRowNotStarted(state);
@@ -979,7 +1173,7 @@
           encodeURIComponent(row.id) + "\">" + t("download.resumeBot") + "</button> " + deleteBtn;
       } else if (state === "pending") {
         action = deleteBtn;
-      } else if (state === "queued") {
+      } else if (state === "queued" || state === "offered") {
         // #926: what the other bot said, and a way to let the request go.
         action = (row.reply ? "<span class=\"col-dim\">" + escapeHtml(row.reply) + "</span> " : "") + deleteBtn;
       } else {
@@ -1008,7 +1202,44 @@
         "<td class=\"col-mono\">" + escapeHtml(progress) + "</td>" +
         "<td>" + action + "</td>" +
         "</tr>";
+    }
+  }
+
+  // The tables are rebuilt on every poll. A click needs mousedown and mouseup on
+  // the same element, so a rebuild between the two swallowed it: Cancel
+  // sometimes did nothing. Leave the DOM alone when nothing changed.
+  function setDownloadsBody(box, html) {
+    if (html === box.lastHtml) { return; }
+    box.lastHtml = html;
+    box.body.innerHTML = html;
+  }
+
+  // What the download queue holds, by where each request stands. The table
+  // shows one row each; this says how many are running, waiting on another
+  // bot, or still to be asked.
+  var DOWNLOAD_SUMMARY_GROUPS = [
+    { states: ["receiving", "listening"], label: "download.summary.downloading" },
+    { states: ["offered"], label: "download.summary.asked" },
+    { states: ["queued"], label: "download.summary.queuedThere" },
+    { states: ["pending"], label: "download.summary.waiting" }
+  ];
+
+  function renderDownloadsSummary(allRows) {
+    var open = allRows.filter(function (row) {
+      return ["receiving", "listening", "offered", "queued", "pending"].indexOf(row.state) !== -1;
+    });
+    if (!open.length) {
+      el.downloadsSummary.innerHTML = "";
+      return;
+    }
+    var html = DOWNLOAD_SUMMARY_GROUPS.map(function (group) {
+      var n = open.filter(function (row) { return group.states.indexOf(row.state) !== -1; }).length;
+      return "<span class=\"summary-item\"><span class=\"summary-count\">" + n + "</span>" +
+        "<span class=\"col-dim\">" + escapeHtml(t(group.label)) + "</span></span>";
     }).join("");
+    html = "<span class=\"summary-item\"><span class=\"summary-count\">" + open.length + "</span>" +
+      "<span class=\"col-dim\">" + escapeHtml(t("download.summary.inQueue")) + "</span></span>" + html;
+    if (el.downloadsSummary.innerHTML !== html) { el.downloadsSummary.innerHTML = html; }
   }
 
   // ---------------------------------------------------------------- Queue
@@ -3444,8 +3675,18 @@
     showUpdateListStatus(t("tools.starting"), false);
     postJson("/api/tools/update-list", {}).then(function (res) {
       if (!res.ok) {
-        el.updateListRunBtn.disabled = false;
-        showUpdateListStatus(res.data.error || ("HTTP " + res.status), true);
+        // Refused - and "already running" means one started elsewhere, which
+        // is worth following rather than only saying so (#1023). Asked of
+        // /status, not read off the 409: "another scan" is a 409 too.
+        var refused = (res.data && res.data.error) || ("HTTP " + res.status);
+        fetchJson("/api/tools/update-list/status").then(function (payload) {
+          if (followRunningUpdate(payload)) { return; }
+          el.updateListRunBtn.disabled = false;
+          showUpdateListStatus(refused, true);
+        }).catch(function () {
+          el.updateListRunBtn.disabled = false;
+          showUpdateListStatus(refused, true);
+        });
         return;
       }
       startUpdateListPolling();
@@ -3532,9 +3773,23 @@
   // #776: when LIST_REBUILD_SCHEDULE will next rebuild, or that none is set.
   // Read each time the Tools view opens - the same status payload the Run
   // button polls, which carries the schedule and its next time.
+  // A REBUILD STARTED ANYWHERE ELSE IS FOLLOWED TOO (#1023). Only this page's
+  // own button used to start the bar, so one started by the console's
+  // `update`, by !update in IRC or by LIST_REBUILD_SCHEDULE ran unseen here -
+  // and the button then said only "already running". Now the page follows
+  // whatever is running: when Tools is opened, while it is open (the refresh
+  // tick below), and when the button is refused. True when it took it up.
+  function followRunningUpdate(payload) {
+    if (!payload || !payload.running || updateList.pollTimer) { return false; }
+    el.updateListRunBtn.disabled = true;
+    startUpdateListPolling();
+    return true;
+  }
+
   function loadUpdateListSchedule() {
     if (!el.updateListSchedule) { return; }
     fetchJson("/api/tools/update-list/status").then(function (payload) {
+      followRunningUpdate(payload);
       var schedule = payload && payload.schedule;
       var text;
       if (!schedule) {
@@ -5495,6 +5750,12 @@
   // nobody is looking at is the 401 storm in miniature.
   setInterval(function () {
     if (state.active === "stats") { loadStats(); }
+  }, REFRESH_MS);
+
+  // A rebuild started elsewhere while Tools is on screen is picked up within
+  // a tick (#1023); once it is followed, its own faster poll takes over.
+  setInterval(function () {
+    if (state.active === "tools" && !updateList.pollTimer) { loadUpdateListSchedule(); }
   }, REFRESH_MS);
 
   // A list-fetch (Download tab, or the File Lists fetch box) can complete
