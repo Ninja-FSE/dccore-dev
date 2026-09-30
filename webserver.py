@@ -2278,7 +2278,7 @@ def build_fetch_pause_result(payload, pause):
     return 200, {"resumed": bot}
 
 
-def build_fetch_delete_result(request_id):
+def build_fetch_delete_result(request_id, only_states=None):
     """DELETE /api/fetch/<request_id>: forget a finished fetch and remove its
     file from FETCHED_FILES_DIR, if it has one.
 
@@ -2327,6 +2327,12 @@ def build_fetch_delete_result(request_id):
         row = getattr(config, "fetch_queue", {}).get(request_id)
         if row is None:
             return 404, {"error": "Unknown fetch request."}
+        # `only_states` is for a caller that means to let a REQUEST go and never
+        # a file (the mIRC window's Cancel, #1022): checked here, under the same
+        # hold of the lock as the del, so a row that finished a moment ago is
+        # not taken for one that had not started, and its file is not removed.
+        if only_states is not None and row.get("state") not in only_states:
+            return 409, {"error": "That download is no longer waiting."}
         # "queued" too (#926): the other bot holds our request in its queue
         # and nothing is moving yet - letting it go is only forgetting it.
         # "offered" too: our request is out and no offer has come, so there is
@@ -4212,11 +4218,13 @@ def build_console_log_payload(since=0):
 # from them. A one-shot HTTP request has no feed to switch, and the dashboard's
 # own Console is prose. It used to fail halfway - after printing the DCCORE
 # HELLO line - on an attribute the shim did not have (#581).
-_CONSOLE_UNSUPPORTED_COMMANDS = frozenset({"quit", "hello"})
+_CONSOLE_UNSUPPORTED_COMMANDS = frozenset({"quit", "hello", "downloads"})
 _CONSOLE_UNSUPPORTED_MESSAGES = {
     "quit": "'quit' closes a DCC CHAT session; there is not one here. Just close this tab.",
     "hello": "'hello' switches a DCC CHAT session to the structured feed for a script "
              "such as dccore.mrc; this console is the dashboard's own and has no feed to switch.",
+    "downloads": "'downloads' tells a DCC CHAT session that its Downloads window is open; this console "
+                 "has none. The Downloads page is the dashboard's own.",
 }
 
 

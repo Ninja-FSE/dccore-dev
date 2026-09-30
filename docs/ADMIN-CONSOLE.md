@@ -247,6 +247,10 @@ prefix.
 | `update` | rebuild the MasterList |
 | `lists` | the bots' lists we hold, whether each has changed since we took our copy, how big and how old |
 | `fetch [<bot>]` | ask every held bot whose list has changed (up to 10 at a time, skipping offline ones), or one bot whatever its freshness |
+| `downloads on [<rows>]` / `downloads off` | the mIRC Downloads window opened (with how many finished and failed rows it wants, 1-15) or closed; the bot sends its `DLBEGIN` snapshots only in between (#1022) |
+| `dlcancel <id>` | let a download go that has not started (waiting, asked, queued there); never a transfer under way or a finished one |
+| `dlagain <id>` | ask again for a download or list that failed; the old row stays |
+| `dlclear` | forget every finished download (the files stay on disk) |
 | `chat [#channel\|* <text>]` | say something in DCCore Chat, as the bot, in one channel or (`*`) the fewest that reach the other DCCore bots - **public**, see below; alone, the channels it can chat in |
 | `chat peers` / `chat who` | the other DCCore bots seen by WHO, and ask WHO again now |
 | `help` | the command list |
@@ -520,6 +524,7 @@ have been replaced with spaces.
 | `DCCORE STATUS <used> <slots> <qfiles> <qusers> <sent_today> <bytes_today> <bps_now> <record_bps> <started> <failed> <searches>` | slots in use / total, files and users queued, today's sends and bytes, speed now, the record; then when the bot started (epoch) and the failures and searches it has seen since | |
 | `DCCORE SLOT <nick> <sent> <total> <bps>` | one per active transfer: bytes so far, size, speed from its own clock | the name |
 | `DCCORE FETCHING <bot> <received> <total> <bps> <name>` | one per file the bot is receiving from another bot right now (#1019), in the status burst after the QUEUE lines - the panel's Downloading section. Sent only to a script that said it is 1.8 or later in `HELLO` | the name (a list shows as "<bot>'s file list") |
+| `DCCORE DLBEGIN` / `DCCORE DLROW <id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>` / `DCCORE DLEND <waiting_total> <complete_total> <failed_total>` | the Downloads window's snapshot (#1022): one `DLROW` per download - `kind` is `d` (coming in), `w` (waiting), `c` (finished) or `f` (failed, a rejected list included), at most 15 of each of the last two, `note` one token (why it waits, or how it ended), `when` the epoch a finished one ended. Whole or not sent; every 3 seconds at most and only when it changed, only after `downloads on`. Sent only to a script that said 1.10 or later in `HELLO` | the Downloads window |
 | `DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>` | a master-list rebuild is running, however it was started (#1024): in the status burst and every 5 seconds between; `DCCORE REBUILD end` once when it stops. The phase is `starting`, `scanning`, `audio`, `writing` or `publishing`. Sent only to a script that said it is 1.9 or later in `HELLO` | the phase |
 | `DCCORE QUEUE <pos> <nick> <files> <frozen_secs_left>` | one per queued user, the first 20 in the order they are served: position, files waiting, seconds until a frozen queue is dropped (0 = not frozen) | |
 | `DCCORE TOKEN <name>` | the reply to `pair` | the token, shown once |
@@ -729,6 +734,8 @@ sent at all: what is off there never reaches the script.
 /dccore options              what to show, colours, panel, title bar, beep
 /dccore window               open or focus @DCCore
 /dccore chat [text]          open DCCore Chat, or say something in it (public)
+/dccore downloads            open @DCCore-Downloads: what the bot is fetching from other bots (needs 1.10)
+/dccore weburl [addr]        where the bot's dashboard is, for that window's menu
 /dccore status               ask the bot for its status
 /dccore consolefeed on|off   what this window shows beyond STATUS - requests, sends, searches...
 /dccore lists                the bots' lists we hold, and which have changed
