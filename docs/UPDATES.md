@@ -17,10 +17,10 @@ being the heartbeat). Only to a script that said 1.10+ in `HELLO`. Right-click: 
 `build_fetch_delete_result(only_states=...)` so a row that just finished is neither cancelled nor loses its file),
 **Download again** (`dlagain`, by the original route), **Clear finished** (`dlclear`), and Open the dashboard
 (`/dccore weburl <addr>`, asked once). Searching and enqueueing stay on the dashboard. `dcc_fetch._stamp_finished()`
-gives a row a `finished_at` when it is seen to finish. dccore.mrc 1.10.3, with a Finished-rows setting in Options. Not
+gives a row a `finished_at` when it is seen to finish. dccore.mrc 1.10.4, with a Finished-rows setting in Options. Not
 visually tested here (no mIRC). The window's main area is a log of the fetch feed - `[REQUEST]`, `[QUEUE]` (with the
-place the other bot gave), `[DOWNLOAD]`, `[FINISHED]`, `[FAILED]` - told whatever the sends/failures tickboxes say
-(`dccore.dl.log`, from the FETCH handler; the main @DCCore window no longer shows them) and no longer in the @DCCore window; the side list (52 columns) is how things stand now, two lines per download
+place the other bot gave), `[DOWNLOADING]` (Started downloading), `[FINISHED]` (Received), `[FAILED]` - told whatever the sends/failures tickboxes say
+(`dccore.dl.log`, from the FETCH handler; the main @DCCore window no longer shows them); the side list (52 columns) is how things stand now, two lines per download
 (details, then the end of the file name). The channel a bot was found in is not kept on a fetch row, so it is not shown.
 Tests: `tests/test_dccore_downloads_window.py`.
 

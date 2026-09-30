@@ -425,8 +425,10 @@ class TheScript(unittest.TestCase):
         body = self.text[self.text.index("alias dccore.dl.log {"):]
         body = body[:body.index("\n}")]
         self.assertIn("if (!$window($dccore.dl.win)) { return }", body)
-        for tag in ("REQUEST", "QUEUE", "DOWNLOAD", "FINISHED", "FAILED"):
+        for tag in ("REQUEST", "QUEUE", "DOWNLOADING", "FINISHED", "FAILED"):
             self.assertIn(f"$dccore.tag({tag},", body)
+        self.assertIn("Started downloading $3-", body)
+        self.assertIn("Received $3-", body)
 
     def test_the_list_is_a_narrow_side_panel_and_each_download_names_its_file_on_its_own_line(self):
         self.assertIn("window -l52 $dccore.dl.win", self.text)

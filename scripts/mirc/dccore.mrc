@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10.3 }
+alias dccore.ver { return 1.10.4 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -1146,11 +1146,13 @@ alias dccore.dl.log {
   var %tag = $dccore.tag(FETCH,sends)
   if ($1 == asked) { %tag = $dccore.tag(REQUEST,search) }
   elseif ($1 == queued) { %tag = $dccore.tag(QUEUE,queued) }
-  elseif ($1 == receiving) { %tag = $dccore.tag(DOWNLOAD,sends) }
-  elseif ($1 == done) { %tag = $dccore.tag(FINISHED,sends) }
+  var %text = $2-
+  ; the bot's words are "Receiving ..." and "Fetched ..."; here they read as what they are
+  if ($1 == receiving) { %tag = $dccore.tag(DOWNLOADING,sends) | %text = Started downloading $3- }
+  elseif ($1 == done) { %tag = $dccore.tag(FINISHED,sends) | %text = Received $3- }
   elseif ($1 == failed) { %tag = $dccore.tag(FAILED,fail) }
-  if ($version >= 7) { echo -mti2 $dccore.dl.win %tag $2- }
-  else { echo -ti2 $dccore.dl.win %tag $2- }
+  if ($version >= 7) { echo -mti2 $dccore.dl.win %tag %text }
+  else { echo -ti2 $dccore.dl.win %tag %text }
 }
 
 ; "<kind>:<state>:<id>" of the selected row, or nothing
