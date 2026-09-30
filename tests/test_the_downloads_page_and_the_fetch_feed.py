@@ -598,11 +598,13 @@ class TheScript(unittest.TestCase):
         panel = self.text[self.text.index("alias dccore.panel {"):]
         self.assertIn("if ($dccore.st(fetch.1) != $null)", panel)
 
-    def test_a_fetch_line_is_shown_under_the_sends_and_failures_tickboxes(self):
+    def test_a_fetch_line_goes_to_the_downloads_window_not_the_main_one(self):
+        """Was shown under the sends and failures tickboxes in @DCCore until #1022
+        gave the feed a window of its own."""
         start = self.text.index("if (%type == FETCH) {")
         body = self.text[start:self.text.index("if (%type == TAKEN)")]
-        self.assertIn("$dccore.opt(show.fail)", body)
-        self.assertIn("$dccore.opt(show.sends)", body)
+        self.assertIn("dccore.dl.log", body)
+        self.assertNotIn("show.sends", body)
 
 
 class TheDashboard(unittest.TestCase):

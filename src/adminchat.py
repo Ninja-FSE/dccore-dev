@@ -558,6 +558,172 @@ def script_draws_fetching(version):
     return theirs is not None and theirs >= ours
 
 
+# The first script that draws a list rebuild's progress (#1024). An older one
+# would print a REBUILD line as text.
+REBUILD_SCRIPT_VERSION = "1.9"
+REBUILD_INTERVAL = 5.0        # seconds between REBUILD lines while one runs, between bursts
+
+
+def script_draws_rebuild(version):
+    ours = _version_tuple(REBUILD_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
+def rebuild_lines(now=None):
+    """`DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>`
+    while a master-list rebuild runs, however it was started (console, !update,
+    the dashboard, the schedule): all of them set config.update_inprogress and
+    all of them write the progress file the dashboard's bar reads. Nothing
+    when none runs. Before the first progress write the phase is "starting"."""
+    if not getattr(config, "update_inprogress", False):
+        return []
+    progress = None
+    try:
+        import webserver
+        progress = webserver.read_list_progress()
+    except Exception as err:
+        print(f"[ADMINCHAT] Rebuild progress unavailable: {err}")
+    progress = progress or {}
+    phase = _clean(progress.get("phase") or "starting", token=True)
+    return [f"DCCORE REBUILD {phase} {_num(progress.get('folder_index'))} "
+            f"{_num(progress.get('folder_count'))} {_num(progress.get('files'))} "
+            f"{_num(progress.get('elapsed'))}"]
+
+
+# The first script with the @DCCore-Downloads window (#1022). The bot sends its
+# rows only to one that says 1.10+ in HELLO and has asked for them.
+DOWNLOADS_SCRIPT_VERSION = "1.10"
+DOWNLOADS_INTERVAL = 3.0      # seconds between snapshots to an open Downloads window
+DOWNLOADS_WAITING_MAX = 50    # Waiting rows per snapshot; the rest are counted, not sent
+DOWNLOADS_FINISHED_DEFAULT = 15
+DOWNLOADS_FINISHED_MAX = 15   # per list: Finished and Failed each keep this many
+DOWNLOADS_LOCK_WAIT = 0.25    # the writer never waits longer than this for the fetch lock
+_REQUEST_ID = re.compile(r"[0-9a-f]{12}")
+
+# Why a request has not gone out, the way the dashboard's Downloads page says it
+# (web/lang/en.json, download.waiting.*), keyed by what dcc_fetch sets in row["waiting"].
+DOWNLOAD_WAITING_NOTES = {
+    "offline": "waiting for {bot} to come back",
+    "just-back": "{bot} is back - asking shortly",
+    "retry": "busy - asking again later",
+    "their-turn": "waiting - {bot} has enough of ours",
+    "slots": "waiting for a free slot",
+    "paused": "paused - resume it on the dashboard",
+    "disk-full": "waiting for disk space",
+    "joining": "waiting to join the channels",
+}
+
+
+def script_draws_downloads(version):
+    ours = _version_tuple(DOWNLOADS_SCRIPT_VERSION)
+    theirs = _version_tuple(version)
+    return theirs is not None and theirs >= ours
+
+
+def _download_name(row):
+    if row.get("request_type") == "list":
+        return f"{row.get('bot') or '?'}'s file list"
+    name = str(row.get("filename") or row.get("requested_filename") or "")
+    return name[5:] if name.startswith("!rar ") else name
+
+
+def _download_waiting_note(row):
+    state = row.get("state")
+    if state == "queued":
+        position = row.get("queue_position")
+        return f"queued there at #{position}" if position else "queued there"
+    if state == "offered":
+        return "asked - no answer yet"
+    template = DOWNLOAD_WAITING_NOTES.get(row.get("waiting"))
+    return template.format(bot=row.get("bot") or "the bot") if template else "asking shortly"
+
+
+def downloads_lines(finished_rows=DOWNLOADS_FINISHED_DEFAULT, now=None):
+    """The Downloads window's snapshot, or None when the fetch queue could not
+    be read in time (the caller tries again on its next pass):
+
+        DCCORE DLBEGIN
+        DCCORE DLROW <id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>
+        (rows of one bot sit together within each kind)
+        DCCORE DLEND <waiting_total> <complete_total> <failed_total>
+
+    kind is d (coming in), w (waiting), c (finished) or f (failed). <note> is one token
+    (spaces as underscores, "-" for none): why a waiting row waits, or how a
+    finished one ended. <when> is the epoch a finished row ended, else 0. A
+    snapshot is whole or not sent: the script redraws only at DLEND.
+
+    The fetch lock is taken with a short timeout, not waited for: this runs on
+    the session writer, which is also the link's heartbeat.
+    """
+    import time as _time
+    now = _time.time() if now is None else now
+    try:
+        import dcc_fetch
+        queue = dcc_fetch._ensure_fetch_queue()
+        lock = dcc_fetch._fetch_lock()
+        if not lock.acquire(timeout=DOWNLOADS_LOCK_WAIT):
+            return None
+        try:
+            rows = [(rid, dict(row)) for rid, row in queue.items()]
+        finally:
+            lock.release()
+    except Exception as err:
+        print(f"[ADMINCHAT] Downloads unavailable for the window: {err}")
+        return None
+
+    coming, waiting, finished = [], [], []
+    for rid, row in rows:
+        state = row.get("state")
+        if state in ("receiving", "listening"):
+            coming.append((rid, row))
+        elif state in ("pending", "offered", "queued"):
+            waiting.append((rid, row))
+        elif state in ("complete", "failed"):
+            finished.append((rid, row))
+    by_asked = lambda item: item[1].get("requested_at", 0)
+    coming.sort(key=by_asked)
+    waiting.sort(key=by_asked)
+    def failed_row(row):
+        return row.get("state") == "failed" or bool(row.get("list_processing_error"))
+
+    by_ended = lambda item: item[1].get("finished_at") or item[1].get("requested_at", 0)
+    done = sorted((i for i in finished if not failed_row(i[1])), key=by_ended, reverse=True)
+    failed = sorted((i for i in finished if failed_row(i[1])), key=by_ended, reverse=True)
+
+    def by_bot(items):
+        """One bot's rows together, bots in the order each first appears, so the
+        window can head each group with the bot's nick."""
+        groups = {}
+        for item in items:
+            groups.setdefault(item[1].get("bot") or "?", []).append(item)
+        return [item for group in groups.values() for item in group]
+
+    def line(rid, kind, state, row, bps=0, when=0, note="-"):
+        return (f"DCCORE DLROW {rid} {kind} {state} {_clean(row.get('bot'), token=True)} "
+                f"{_num(row.get('bytes_received'))} {_num(row.get('total_size'))} {bps} {_num(when)} "
+                f"{_clean(note, token=True)} {_clean(_download_name(row))}")
+
+    lines = ["DCCORE DLBEGIN"]
+    for rid, row in by_bot(coming):
+        received = int(row.get("bytes_received") or 0)
+        began = float(row.get("receiving_since") or 0)
+        bps = int(received / (now - began)) if began and now > began + 0.5 else 0
+        lines.append(line(rid, "d", row.get("state"), row, bps=bps))
+    for rid, row in by_bot(waiting[:DOWNLOADS_WAITING_MAX]):
+        lines.append(line(rid, "w", row.get("state"), row, note=_download_waiting_note(row)))
+    keep = max(0, min(int(finished_rows), DOWNLOADS_FINISHED_MAX))
+    for rid, row in by_bot(done[:keep]):
+        lines.append(line(rid, "c", "complete", row, when=row.get("finished_at") or row.get("requested_at") or 0))
+    for rid, row in by_bot(failed[:keep]):
+        when = row.get("finished_at") or row.get("requested_at") or 0
+        note = (f"rejected: {row.get('list_processing_error')}" if row.get("state") != "failed"
+                else row.get("reason") or "no reason given")
+        lines.append(line(rid, "f", "failed", row, when=when, note=note))
+    lines.append(f"DCCORE DLEND {len(waiting)} {len(done)} {len(failed)}")
+    return lines
+
+
 def fetching_lines(now=None):
     """One `DCCORE FETCHING <bot> <received> <total> <bps> <name>` per file the
     bot is receiving from another bot right now - the panel's Downloading
@@ -586,7 +752,7 @@ def fetching_lines(now=None):
     return lines
 
 
-def status_lines(now=None, fetching=False):
+def status_lines(now=None, fetching=False, rebuild=False):
     """The STATUS burst (#550, step 3): what the client's title bar and side
     panel are drawn from, read from what the daemon already holds.
 
@@ -662,6 +828,8 @@ def status_lines(now=None, fetching=False):
         lines.append(f"DCCORE QUEUE {pos} {_clean(user, token=True)} {len(queue[user])} {left}")
     if fetching:
         lines.extend(fetching_lines(now))
+    if rebuild:
+        lines.extend(rebuild_lines(now))
     return lines
 
 
@@ -712,6 +880,13 @@ class Session:
         # authentication. `client` is what the script called itself.
         self.structured = False
         self.draws_fetching = False   # the script said it can draw FETCHING lines (#1019)
+        self.draws_rebuild = False    # ... and REBUILD lines (#1024)
+        self._rebuild_sent_at = 0.0
+        self._rebuild_shown = False   # a REBUILD line is on the script's panel
+        self.draws_downloads = False  # ... and the Downloads window's rows (#1022)
+        self.downloads_finished = 0   # > 0 while that window is open: how many finished rows it wants
+        self._downloads_sent_at = 0.0
+        self._downloads_last = None   # the last snapshot sent, to send only a change
         self.client = ""
         self._reported_dropped = 0
         self._status_sent_at = 0.0
@@ -787,7 +962,8 @@ class Session:
 
             def compute():
                 try:
-                    lines.extend(status_lines(fetching=self.draws_fetching))
+                    lines.extend(status_lines(fetching=self.draws_fetching,
+                                              rebuild=self.draws_rebuild))
                 except Exception as err:
                     print(f"[ADMINCHAT] Status burst failed: {err}")
 
@@ -801,6 +977,53 @@ class Session:
         self._status_job = None
         for line in job[1]:
             self.send(line)
+        self._rebuild_shown = any(line.startswith("DCCORE REBUILD ") for line in job[1])
+        self._rebuild_sent_at = time.time()
+
+    def send_rebuild_progress(self):
+        """A REBUILD line between bursts while a rebuild runs, and one
+        `DCCORE REBUILD end` when it stops, so the panel does not wait up to a
+        whole status interval to say the rebuild is over (#1024). Reads the
+        progress file only - no lock - so it is safe on the writer thread."""
+        if not (self.draws_rebuild and self.structured and self.authenticated):
+            return
+        now = time.time()
+        if now - self._rebuild_sent_at < REBUILD_INTERVAL:
+            return
+        lines = rebuild_lines(now)
+        if not lines and not self._rebuild_shown:
+            return
+        self._rebuild_sent_at = now
+        self._rebuild_shown = bool(lines)
+        self.send(lines[0] if lines else "DCCORE REBUILD end")
+
+    def request_downloads(self):
+        """The Downloads window's next snapshot goes on the writer's next pass,
+        whatever the interval and whatever the last one said. Safe from any thread."""
+        self._downloads_last = None
+        self._downloads_sent_at = 0.0
+        self._wake.set()
+
+    def send_downloads(self):
+        """One snapshot for an open Downloads window (#1022), at most every
+        DOWNLOADS_INTERVAL and only when it differs from the last. Nothing at
+        all while the window is closed: the window tells the bot when it opens
+        and closes, so a bot with none open does no work for it."""
+        if not (self.downloads_finished and self.draws_downloads
+                and self.structured and self.authenticated):
+            return
+        now = time.time()
+        if now - self._downloads_sent_at < DOWNLOADS_INTERVAL:
+            return
+        lines = downloads_lines(self.downloads_finished, now)
+        if lines is None:
+            return
+        self._downloads_sent_at = now
+        if lines == self._downloads_last:
+            return
+        self._downloads_last = lines
+        for text in lines:
+            self.send(text)
 
     def _send_chat_channels_if_changed(self):
         """DCCORE CHANNELS again when the bot's channels have changed since
@@ -844,6 +1067,8 @@ class Session:
                         and time.time() - self._status_sent_at >= STATUS_INTERVAL):
                     self.send_status()
                     continue
+                self.send_rebuild_progress()
+                self.send_downloads()
                 self._wake.wait(0.5)
                 self._wake.clear()
                 continue
@@ -1408,6 +1633,112 @@ def _cmd_fetch(session, args):
         session.send(f"  not asked: {line}")
 
 
+def _cmd_downloads(session, args):
+    """`downloads on [rows]` / `downloads off`: what dccore.mrc's
+    @DCCore-Downloads window says when it opens and closes (#1022). `rows` is
+    how many finished downloads it wants to see."""
+    parts = args.split()
+    word = parts[0].lower() if parts else ""
+    if word == "off":
+        session.downloads_finished = 0
+        session._downloads_last = None
+        return
+    if word != "on":
+        session.send("Usage: downloads on [rows] | downloads off")
+        return
+    if not session.draws_downloads:
+        session.send(f"The Downloads window needs dccore.mrc {DOWNLOADS_SCRIPT_VERSION} or later "
+                     f"(this one said {session.client or 'nothing'}).")
+        return
+    try:
+        rows = int(parts[1]) if len(parts) > 1 else DOWNLOADS_FINISHED_DEFAULT
+    except ValueError:
+        rows = DOWNLOADS_FINISHED_DEFAULT
+    session.downloads_finished = min(max(rows, 1), DOWNLOADS_FINISHED_MAX)
+    session.request_downloads()
+
+
+def _refresh_downloads(session):
+    """An open Downloads window redraws at once; the dashboard's console has none."""
+    refresh = getattr(session, "request_downloads", None)
+    if refresh:
+        refresh()
+
+
+def _download_row(session, args, usage):
+    """(request_id, row) for the id a Downloads-window command names, or None
+    after telling the operator why not."""
+    request_id = args.strip().lower()
+    if not _REQUEST_ID.fullmatch(request_id):
+        session.send(f"Usage: {usage}")
+        return None
+    import dcc_fetch
+    with dcc_fetch._fetch_lock():
+        row = dict(dcc_fetch._ensure_fetch_queue().get(request_id) or {})
+    if not row:
+        session.send("That download is no longer in the list.")
+        return None
+    return request_id, row
+
+
+def _cmd_dlcancel(session, args):
+    """`dlcancel <id>`: let a request go that has not started - what the
+    dashboard's Cancel does. A transfer under way cannot be stopped (#1022)."""
+    found = _download_row(session, args, "dlcancel <id>")
+    if found is None:
+        return
+    import webserver
+    request_id, row = found
+    status, result = webserver.build_fetch_delete_result(
+        request_id, only_states=("pending", "offered", "queued"))
+    if status == 200:
+        session.send(f"Cancelled {_download_name(row)} from {row.get('bot')}.")
+        _refresh_downloads(session)
+    else:
+        session.send(result.get("error", "Could not cancel that download."))
+
+
+def _cmd_dlagain(session, args):
+    """`dlagain <id>`: ask again for a download that failed, by the route the
+    original request took - what the dashboard's Download again does. The old
+    row stays, as the record of what happened."""
+    found = _download_row(session, args, "dlagain <id>")
+    if found is None:
+        return
+    row = found[1]
+    failed = row.get("state") == "failed" or bool(row.get("list_processing_error"))
+    if not failed:
+        session.send("Only a download that failed can be asked for again.")
+        return
+    bot = row.get("bot") or ""
+    if row.get("request_type") == "list":
+        ok, message = _ask_for_list(bot)
+        session.send(message if not ok else f"Asked {bot} for its list again.")
+    else:
+        import webserver
+        wanted = row.get("requested_filename") or row.get("filename") or ""
+        status, result = webserver.build_fetch_enqueue_result([{"bot": bot, "filename": wanted}])
+        if status == 200:
+            session.send(f"Asked {bot} for {_download_name(row)} again.")
+        else:
+            errors = result.get("errors") or []
+            session.send(result.get("error") or (errors[0].get("error") if errors else "Refused."))
+    _refresh_downloads(session)
+
+
+def _cmd_dlclear(session, args):
+    """`dlclear`: forget every finished download, as the dashboard's Clear
+    finished does. The files stay on disk."""
+    import webserver
+    status, result = webserver.build_fetch_clear_result({"which": "finished"})
+    if status == 200:
+        count = result.get("cleared", 0)
+        session.send(f"Forgot {count} finished download(s). The files are still on disk.")
+        _refresh_downloads(session)
+    else:
+        session.send(result.get("error", "Could not clear the list."))
+
+
 def _cmd_quit(session, args):
     session.close(announce_text="Goodbye.")
     _forget(session)
@@ -1461,6 +1792,8 @@ def _cmd_hello(session, args):
     version = parts[1] if len(parts) > 1 else ""
     session.structured = True
     session.draws_fetching = script_draws_fetching(version)
+    session.draws_rebuild = script_draws_rebuild(version)
+    session.draws_downloads = script_draws_downloads(version)
     session.send(hello_line())
     if script_is_too_old(version):
         # After HELLO, as a plain OUT line the window shows (#709): the
@@ -1637,6 +1970,10 @@ COMMANDS = {
     "verify":     (_cmd_verify,     "filenames listed in two folders",   "verify"),
     "lists":      (_cmd_lists,      "held bot lists, and which have changed", "lists"),
     "fetch":      (_cmd_fetch,      "ask the bots whose lists changed",  "fetch [bot]"),
+    "downloads":  (_cmd_downloads,  "the Downloads window opening or closing", "downloads on [rows]|off"),
+    "dlcancel":   (_cmd_dlcancel,   "cancel a download that has not started", "dlcancel <id>"),
+    "dlagain":    (_cmd_dlagain,    "ask again for a download that failed", "dlagain <id>"),
+    "dlclear":    (_cmd_dlclear,    "forget the finished downloads",     "dlclear"),
     "chat":       (_cmd_chat,       "public operator chat in a channel", "chat [#chan|*|nick text]"),
     "hello":      (_cmd_hello,      "switch to the structured feed (dccore.mrc)", "hello <client> <version>"),
     "pair":       (_cmd_pair,       "mint a login token for a script",   "pair <client> [version]"),

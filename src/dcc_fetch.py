@@ -1404,6 +1404,23 @@ def _fetch_feed_event(row):
     return None
 
 
+def _stamp_finished(request_ids):
+    """Note when a row was seen to finish (#1022), for the mIRC Downloads
+    window's Finished list, which shows a time. Good to the dispatcher's two
+    seconds; a row from before this existed has none, and readers fall back
+    to when it was asked for. Not stamped for the rows of the first pass: they
+    are history loaded at startup, not something that just finished."""
+    if not request_ids:
+        return
+    queue = _ensure_fetch_queue()
+    now = time.time()
+    with _fetch_lock():
+        for rid in request_ids:
+            row = queue.get(rid)
+            if row is not None and row.get("state") in ("complete", "failed"):
+                row["finished_at"] = now
+
+
 def tell_the_fetch_feed():
     """Send one FETCH feed line for every row whose state moved since the last
     call. Never raises: a console that cannot be told must not stop the
@@ -1418,11 +1435,14 @@ def tell_the_fetch_feed():
         _fetch_feed_seeded[0] = True
         for rid in [rid for rid in _fetch_feed_told if rid not in snapshot]:
             del _fetch_feed_told[rid]
+        just_finished = []
         for rid, row in sorted(snapshot.items(), key=lambda kv: kv[1].get("requested_at", 0)):
             state = row.get("state")
             if _fetch_feed_told.get(rid) == state:
                 continue
             _fetch_feed_told[rid] = state
+            if seeded and state in ("complete", "failed"):
+                just_finished.append(rid)
             if not seeded or row.get("request_type") == "list" or state not in _FETCH_FEED_STATES:
                 continue
             event = _fetch_feed_event(row)
@@ -1430,6 +1450,7 @@ def tell_the_fetch_feed():
                 continue
             action, text = event
             announce.feed_event("FETCH", text, bot=row.get("bot"), action=action)
+        _stamp_finished(just_finished)
     except Exception as feed_err:
         print(f"[FETCH] Could not tell the console about a fetch: {feed_err}")
 

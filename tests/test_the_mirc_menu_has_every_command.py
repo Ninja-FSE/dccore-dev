@@ -70,7 +70,9 @@ class TheWindowMenu(unittest.TestCase):
                              command)
 
     def test_every_console_command_that_is_not_plumbing_has_an_entry(self):
-        plumbing = {"hello", "help", "quit", "pair", "unpair"}
+        # dlcancel and dlagain act on one row's id: they live in the
+        # Downloads window's own right-click menu (see test_dccore_downloads_window).
+        plumbing = {"hello", "help", "quit", "pair", "unpair", "dlcancel", "dlagain"}
         for command in adminchat.COMMANDS:
             if command in plumbing:
                 continue
