@@ -2674,7 +2674,7 @@ SETTINGS_CATEGORIES = (
     ("identity",      "Identity & network",    ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME", "REJOIN_ATTEMPTS",
                                                 "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL",
                                                 "CHECK_FOR_UPDATES"]),
-    ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
+    ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_SENDS_PER_USER", "MAX_USER_QUEUE",
                                                 "MAX_GLOBAL_QUEUE", "MAX_SEARCH_RESULTS",
                                                 "PAUSE_ON_UPDATE", "PAUSE_FOR_WHOLE_UPDATE",
                                                 "REHASH_TRANSFER_WAIT"]),
@@ -2789,6 +2789,7 @@ SETTINGS_LABELS = {
     "DEBUG_CHANNEL": "Debug channel",
 
     "MAX_DCC_SLOTS": "Max simultaneous sends",
+    "MAX_SENDS_PER_USER": "Max sends per person",
     "MAX_USER_QUEUE": "Max queue per user",
     "MAX_GLOBAL_QUEUE": "Max global queue",
     "MAX_SEARCH_RESULTS": "Max search results",

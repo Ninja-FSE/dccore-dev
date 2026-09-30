@@ -748,6 +748,14 @@
 # Maximum simultaneous live downloads
 #MAX_DCC_SLOTS = 3
 
+# How many of those slots one person can use at the same time. 1 sends their
+# files one after another, as DCCore always has. Raise it to 2 or 3 and
+# someone asking for several files gets them in parallel, while others still
+# get their turn.
+#
+# Most of those one nick may use at once (1 = their files go one after another)
+#MAX_SENDS_PER_USER = 1
+
 # The most files one person can have waiting in their queue at once.
 #
 # Most files a single user may queue

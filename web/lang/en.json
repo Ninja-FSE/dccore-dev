@@ -434,6 +434,7 @@
   "settings.field.CHANNEL": "Channels",
   "settings.field.DEBUG_CHANNEL": "Debug channel",
   "settings.field.MAX_DCC_SLOTS": "Max simultaneous sends",
+  "settings.field.MAX_SENDS_PER_USER": "Max sends per person",
   "settings.field.MAX_USER_QUEUE": "Max queue per user",
   "settings.field.MAX_GLOBAL_QUEUE": "Max global queue",
   "settings.field.MAX_SEARCH_RESULTS": "Max search results",

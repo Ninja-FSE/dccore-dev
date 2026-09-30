@@ -177,7 +177,7 @@ PLAIN_HELP = {
     'CHANNEL': 'The channel(s) the bot serves in, separated by commas. The first one is where announcements go unless a request came from another channel. Required.',
     'DEBUG_CHANNEL': 'A channel of your own where the bot reports what it is doing - transfers, joins, bans, problems. Leave blank for none. Do not use a channel other people sit in: everything the bot reports goes there.',
     'MAX_DCC_SLOTS': 'How many files the bot sends at the same time. Everyone else waits in the queue. 3 is a good number for a home connection; raise it only if your upload speed can take it.',
-    'MAX_SENDS_PER_USER': 'How many of those slots one person can use at the same time. 1 sends their files one after another, which is how DCCore has always worked. Raise it to 2 or 3 and a person who asks for several files gets them in parallel instead of waiting, while other people still get their turn once the slots are full. It never goes above MAX_DCC_SLOTS.',
+    'MAX_SENDS_PER_USER': 'How many of those slots one person can use at the same time. 1 sends their files one after another, as DCCore always has. Raise it to 2 or 3 and someone asking for several files gets them in parallel, while others still get their turn.',
     'MAX_USER_QUEUE': 'The most files one person can have waiting in their queue at once.',
     'MAX_GLOBAL_QUEUE': "The most files that can be waiting across everybody's queues put together.",
     'MAX_SEARCH_RESULTS': 'How many matching files are sent back to somebody who searches with @find. Each result is one line to that person.',
