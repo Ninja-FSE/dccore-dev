@@ -604,6 +604,14 @@ def user_is_present_in_ram(user_key):
     return False
 
 
+def nicks_in_our_channels():
+    """Every nick in any of the bot's live channel lists, lowercased, from one pass."""
+    with runtime.channel_users_lock():
+        return {str(known_user).lower()
+                for users_set in getattr(config, 'channel_users', {}).values()
+                for known_user in users_set}
+
+
 def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
     """Queue keys of the nicks that have a file waiting and no send running, longest wait first.
 
@@ -614,7 +622,7 @@ def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
     """
     busy = {str(tx.get("user", "")).lower() for tx in config.active_transfers}
     busy |= set(getattr(config, "user_processing_lock", ()) or ())
-    waiting = []
+    candidates = []
     for key, rows in list(config.dcc_queue.items()):
         key = str(key).lower()
         if key == except_key or not rows or key in config.frozen_queues or key in busy:
@@ -622,11 +630,23 @@ def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
         head = rows[0]
         if plain_files_only and (not isinstance(head, dict) or head.get("is_unpacked_rar_folder")):
             continue
-        if not user_is_present_in_ram(key):
-            continue
-        waiting.append(key)
+        candidates.append(key)
+    if not candidates:
+        return []
+    present = nicks_in_our_channels()
+    waiting = [key for key in candidates if key in present]
     waiting.sort(key=queue_waiting_since)
     return waiting
+
+
+def a_slot_is_free_beyond_those_waiting(user_key):
+    """Is there a free slot left once every plain-file nick that is waiting has its own?
+
+    The caller holds queue_lock. Only a nick the sweep could start counts: a
+    nick holding a folder pack never takes a slot from a newcomer.
+    """
+    free = config.MAX_DCC_SLOTS - len(config.active_transfers)
+    return free > len(nicks_waiting_for_a_slot(user_key, plain_files_only=True))
 
 
 def queue_waiting_since(user_key):
@@ -641,8 +661,21 @@ def start_waiting(user_key):
 
 
 def go_to_the_back(nick_key):
-    """A nick's send is over: its next file waits from now, behind every nick that was already waiting."""
-    runtime.queue_waiting_since[nick_key] = time.time()
+    """A nick's send is over: its next file waits from now, behind every nick that was already waiting.
+
+    A nick with nothing left queued has no wait to record, so its stamp is dropped.
+    """
+    with queue_lock:
+        if config.dcc_queue.get(nick_key):
+            runtime.queue_waiting_since[nick_key] = time.time()
+        else:
+            runtime.queue_waiting_since.pop(nick_key, None)
+
+
+def forget_stamps_of_empty_queues():
+    """Drop the wait stamp of every nick whose queue is gone. Caller holds queue_lock."""
+    for key in [k for k in runtime.queue_waiting_since if not config.dcc_queue.get(k)]:
+        del runtime.queue_waiting_since[key]
 
 
 def channel_containing_user(user_key):
@@ -1822,6 +1855,7 @@ def check_queue_and_send(irc_sock, completed_user):
             if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
                 return
 
+            forget_stamps_of_empty_queues()
             for waiting_user, user_files in sorted(config.dcc_queue.items(), key=lambda entry: queue_waiting_since(entry[0])):
                 # Use the dcc_queue dict key for every lock/queue operation. The old code
                 # tested the guards with one key and then rebound w_key to the display
@@ -3102,7 +3136,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             sends_now = (not user_already_transferring and not user_is_processing
                          and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS
                          and not transfers_are_paused()
-                         and not nicks_waiting_for_a_slot(user_key))
+                         and a_slot_is_free_beyond_those_waiting(user_key))
             if sends_now:
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
