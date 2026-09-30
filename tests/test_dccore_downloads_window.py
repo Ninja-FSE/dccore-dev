@@ -397,6 +397,27 @@ class TheScript(unittest.TestCase):
         self.assertIn("hadd dccore dlfinished", self.text)
         self.assertIn("did -ra dccore.opt 310 $dccore.dl.rows", self.text)
 
+    def test_the_fetch_feed_is_told_in_the_window_whatever_the_tickboxes_say(self):
+        handler = self.text[self.text.index("if (%type == FETCH) {"):]
+        handler = handler[:handler.index("\n  }\n")]
+        self.assertIn("dccore.dl.log $3 $4-", handler)
+        self.assertLess(handler.index("dccore.dl.log"), handler.index("show.fail"))
+        self.assertLess(handler.index("dccore.dl.log"), handler.index("show.sends"))
+
+    def test_the_log_tags_each_event_and_stays_silent_when_the_window_is_closed(self):
+        body = self.text[self.text.index("alias dccore.dl.log {"):]
+        body = body[:body.index("\n}")]
+        self.assertIn("if (!$window($dccore.dl.win)) { return }", body)
+        for tag in ("REQUEST", "QUEUE", "DOWNLOAD", "FINISHED", "FAILED"):
+            self.assertIn(f"$dccore.tag({tag},", body)
+
+    def test_the_list_is_a_narrow_side_panel_and_each_download_names_its_file_on_its_own_line(self):
+        self.assertIn("window -l52 $dccore.dl.win", self.text)
+        body = self.text[self.text.index("alias dccore.dl.draw {"):]
+        body = body[:body.index("\nmenu @DCCore-Downloads")]
+        self.assertIn("dccore.dl.add 14 %map %nm", body)
+        self.assertIn("$right(%name,48)", body)
+
     def test_the_bars_need_no_bytes_function_and_no_unicode(self):
         body = self.text[self.text.index("alias dccore.dl.draw {"):]
         body = body[:body.index("\nmenu @DCCore-Downloads")]

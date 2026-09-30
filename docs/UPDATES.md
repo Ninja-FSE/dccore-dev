@@ -18,7 +18,11 @@ being the heartbeat). Only to a script that said 1.10+ in `HELLO`. Right-click: 
 **Download again** (`dlagain`, by the original route), **Clear finished** (`dlclear`), and Open the dashboard
 (`/dccore weburl <addr>`, asked once). Searching and enqueueing stay on the dashboard. `dcc_fetch._stamp_finished()`
 gives a row a `finished_at` when it is seen to finish. dccore.mrc 1.10, with a Finished-rows setting in Options. Not
-visually tested here (no mIRC). Tests: `tests/test_dccore_downloads_window.py`.
+visually tested here (no mIRC). The window's main area is a log of the fetch feed - `[REQUEST]`, `[QUEUE]` (with the
+place the other bot gave), `[DOWNLOAD]`, `[FINISHED]`, `[FAILED]` - told whatever the sends/failures tickboxes say
+(`dccore.dl.log`, from the FETCH handler); the side list (52 columns) is how things stand now, two lines per download
+(details, then the end of the file name). The channel a bot was found in is not kept on a fetch row, so it is not shown.
+Tests: `tests/test_dccore_downloads_window.py`.
 
 ### 📦 The @DCCore window shows how far a list rebuild has got (#1024)
 

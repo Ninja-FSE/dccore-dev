@@ -86,7 +86,7 @@
 
 alias dccore.ini { return $qt($+($scriptdir,dccore.ini)) }
 alias dccore.bot { return $hget(dccore,bot) }
-alias dccore.ver { return 1.10 }
+alias dccore.ver { return 1.10.1 }
 ;  The feed's protocol minor this script was written for. The bot says
 ;  its own in HELLO as major.minor; a different minor means a field was
 ;  inserted on one side and the lines would read wrong - see HELLO below.
@@ -658,6 +658,9 @@ alias dccore.structured {
     ; <bot> <asked|queued|receiving|done|failed> <text>: a file the bot itself
     ; is leeching from another bot (#1019). The text already names the bot and
     ; the file. Shown under the "sends" tickbox, a failure under "failures".
+    ; The Downloads window, when open, tells every one of them whatever the
+    ; tickboxes say (#1022).
+    dccore.dl.log $3 $4-
     if ($3 == failed) {
       if (!$dccore.opt(show.fail)) { return }
       dccore.alert $dccore.tag(FETCH,fail) $4-
@@ -1131,17 +1134,31 @@ alias dccore.dl.tell {
 }
 alias dccore.dl.window {
   if ($window($dccore.dl.win)) { window -a $dccore.dl.win | return }
-  window -l100 $dccore.dl.win
+  window -l52 $dccore.dl.win
   if ($dccore.opt(font)) { font $dccore.dl.win $dccore.fontsize Lucida Console }
   titlebar $dccore.dl.win DCCore Downloads $dccore.dot what $iif($dccore.bot,$dccore.bot,the bot) is fetching from other bots
-  echo 14 -i2 $dccore.dl.win Right-click a row: cancel a request that is waiting, or download a failed one again.
-  echo 14 -i2 $dccore.dl.win Searching other bots and adding to the queue are on the dashboard: right-click, then Open the dashboard.
+  echo 14 -i2 $dccore.dl.win Every request, queue place, transfer and result appears here as it happens; the list on the right is how things stand now.
+  echo 14 -i2 $dccore.dl.win Right-click a row there: cancel a request that is waiting, or download a failed one again. Searching other bots is on the dashboard (right-click, Open the dashboard).
   hdel dccore.live dlend
   dccore.dl.draw
   dccore.dl.tell
 }
 on *:CLOSE:@DCCore-Downloads: {
   if ($chat($dccore.bot)) && ($dccore.st(mode) == structured) { .msg $+(=,$dccore.bot) downloads off }
+}
+
+; One event of the fetch feed into this window's own log, tagged the way the
+; feed reads: <asked|queued|receiving|done|failed> <text>.
+alias dccore.dl.log {
+  if (!$window($dccore.dl.win)) { return }
+  var %tag = $dccore.tag(FETCH,sends)
+  if ($1 == asked) { %tag = $dccore.tag(REQUEST,search) }
+  elseif ($1 == queued) { %tag = $dccore.tag(QUEUE,queued) }
+  elseif ($1 == receiving) { %tag = $dccore.tag(DOWNLOAD,sends) }
+  elseif ($1 == done) { %tag = $dccore.tag(FINISHED,sends) }
+  elseif ($1 == failed) { %tag = $dccore.tag(FAILED,fail) }
+  if ($version >= 7) { echo -mti2 $dccore.dl.win %tag $2- }
+  else { echo -ti2 $dccore.dl.win %tag $2- }
 }
 
 ; "<kind>:<state>:<id>" of the selected row, or nothing
@@ -1201,7 +1218,10 @@ alias dccore.dl.draw {
   while (%i <= %n) {
     var %l = $dccore.st(dl. $+ %i)
     ; <id> <kind> <state> <bot> <received> <total> <bps> <when> <note> <name>
-    var %k = $gettok(%l,2,32), %bot = $dccore.fit($gettok(%l,4,32),9), %name = $gettok(%l,10-,32)
+    var %k = $gettok(%l,2,32), %bot = $dccore.fit($gettok(%l,4,32),12), %name = $gettok(%l,10-,32)
+    ; the end of a long name is what tells two files apart
+    if ($len(%name) > 50) { %name = .. $+ $right(%name,48) }
+    var %nm = $dccore.nbsp $+ $dccore.nbsp $+ %name
     var %note = $replace($gettok(%l,9,32),_,$dccore.nbsp)
     var %map = $+(%k,:,$gettok(%l,3,32),:,$gettok(%l,1,32))
     if (%k != %kind) {
@@ -1214,15 +1234,24 @@ alias dccore.dl.draw {
     if (%k == d) {
       var %got = $gettok(%l,5,32), %total = $gettok(%l,6,32)
       var %pct = $iif(%total > 0,$int($calc(%got * 100 / %total)),0)
-      dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.dl.bar(%pct) $dccore.rfit($iif(%total > 0,%pct $+ $chr(37),?),4) $dccore.rfit($dccore.speed($gettok(%l,7,32)),9) $dccore.rfit($dccore.bytes($iif(%total > 0,%total,%got)),7) %name
+      dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.dl.bar(%pct) $dccore.rfit($iif(%total > 0,%pct $+ $chr(37),?),4) $dccore.rfit($dccore.speed($gettok(%l,7,32)),9) $dccore.rfit($dccore.bytes($iif(%total > 0,%total,%got)),7)
+      dccore.dl.add 14 %map %nm
     }
     elseif (%k == w) {
-      dccore.dl.add 14 %map %bot $dccore.fit(%note,44) %name
+      dccore.dl.add $dccore.opt(col.queued) %map %bot $dccore.fit(%note,38)
+      dccore.dl.add 14 %map %nm
     }
     else {
       var %when = $dccore.dl.when($gettok(%l,8,32))
-      if ($gettok(%l,3,32) == failed) { dccore.dl.add $dccore.opt(col.fail) %map %bot $dccore.fit(FAILED,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) %when %name - %note }
-      else { dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.fit(done,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) %when %name }
+      if ($gettok(%l,3,32) == failed) {
+        dccore.dl.add $dccore.opt(col.fail) %map %bot $dccore.fit(FAILED,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) %when
+        dccore.dl.add 14 %map %nm
+        dccore.dl.add $dccore.opt(col.fail) %map $dccore.nbsp $+ $dccore.nbsp $+ %note
+      }
+      else {
+        dccore.dl.add $dccore.opt(col.sends) %map %bot $dccore.fit(done,6) $dccore.rfit($dccore.bytes($gettok(%l,5,32)),7) %when
+        dccore.dl.add 14 %map %nm
+      }
     }
     inc %i
   }
