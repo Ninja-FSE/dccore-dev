@@ -2351,6 +2351,7 @@ def build_fetch_delete_result(request_id, only_states=None):
         bot = row.get("bot")
         asked_for = row.get("requested_filename") or row.get("filename")
         del config.fetch_queue[request_id]
+        dcc_fetch.take_back_unsent_request(row)
 
     removed_at_bot = False
     if at_the_bot:

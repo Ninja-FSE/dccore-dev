@@ -1127,6 +1127,11 @@ def check_fetch_queue():
         # plain file/list fetches never have to wait on.
         for row in queue.values():
             if row.get("state") == "offered" and row.get("offered_at") is not None:
+                # The clock runs from the moment the request leaves us, not
+                # from when it was queued to go (#1028).
+                if _request_is_unsent(row):
+                    row["offered_at"] = now
+                    continue
                 this_timeout = _offer_timeout_for(
                     row, offer_timeout, folder_offer_timeout,
                     unadvertised_folder_timeout)
@@ -1179,6 +1184,10 @@ def check_fetch_queue():
         # other failure reached from outside this function (_run_transfer(),
         # handle_incoming_offer()) also lands here on the very next tick,
         # since both write into this same queue.
+        for row in queue.values():
+            if row.get("request_line") and row.get("state") in ("complete", "failed", "receiving"):
+                take_back_unsent_request(row)
+
         _persist_fetch_history_locked(queue)
 
         active = count_active_fetches(queue)
@@ -1316,8 +1325,39 @@ def check_fetch_queue():
             message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{bot} {v}\r\n", filename)
             log_desc = f"{filename!r} from {bot}"
         if oserve and hasattr(oserve, "queue_message"):
-            oserve.queue_message(bot, message)
+            # A request still waiting to go out is replaced, never added to
+            # (#1028): asking again used to stack a second identical line
+            # behind the first, and the bot then sent the file twice.
+            _take_back_unsent_line(message)
+            queue[rid]["request_line"] = message
+            # The express lane: behind the ordinary one a request waited its
+            # turn among every other user's replies, a minute or more on a
+            # busy bot, while the offer timer was already running.
+            oserve.queue_message(bot, message, is_vip=True)
         print(f"[FETCH] Requested {log_desc} (request {rid}).")
+
+
+def _take_back_unsent_line(line):
+    """Remove `line` from the outgoing express queue if it is still there.
+    Returns whether it was."""
+    try:
+        config.vip_queue.remove(line)
+    except ValueError:
+        return False
+    return True
+
+
+def take_back_unsent_request(row):
+    """A row that is done with, or gone, must not have its request go out
+    after it (#1028): the other bot would send a file nobody waits for."""
+    line = row.pop("request_line", None)
+    if line:
+        _take_back_unsent_line(line)
+
+
+def _request_is_unsent(row):
+    line = row.get("request_line")
+    return bool(line) and line in config.vip_queue
 
 
 def drop_our_request_at(bot, filename):

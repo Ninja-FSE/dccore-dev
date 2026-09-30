@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 A fetch request goes out once, and is timed from when it goes out (#1028)
+
+The dispatcher logged "Requested" and started the offer timer the moment it handed the request to the send queue,
+where it waited its turn behind every other user's replies - a minute or more on a busy bot. The timer ran out
+first, each expiry queued the same request again behind the first, and a file was asked for four or five times;
+the other bot answered each one within a second of it arriving and sent finished files a second time. Now the
+request goes in the express lane, the timer does not run while the line is unsent, asking again replaces a line
+still waiting instead of adding one, and a row that finishes, fails or is deleted takes its unsent line back.
+
 ### 📦 A Downloads window in mIRC (#1022)
 
 What the bot fetches from other bots had only the feed lines and the panel's Downloading section (#1019); the queue,
