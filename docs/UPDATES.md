@@ -19,6 +19,39 @@ Python runs, and looking at the root alone sent an upgraded install back to firs
 `scripts/preflight.py` watches `conf/` for a test writing real state. Tests: `tests/test_the_launchers_find_the_conf_dir.py`
 reads each launcher's check and runs the shell one where bash is available.
 
+### 📦 A Downloads window in mIRC (#1022)
+
+What the bot fetches from other bots had only the feed lines and the panel's Downloading section (#1019); the queue,
+the waiting and the failures were on the dashboard only. `/dccore downloads` (or the menu) opens `@DCCore-Downloads`:
+Downloading with a bar, speed and size, Waiting with why (`downloads_lines()`, the dashboard's wording), Finished
+and Failed (kept apart, the last 15 of each, newest first, with a time). The bot sends a whole snapshot - `DCCORE DLBEGIN`, a `DLROW` per download, `DLEND
+<waiting_total> <complete_total> <failed_total>` - only while the window is open (`downloads on [rows]` when it opens, `downloads
+off` when it closes, again after a reconnect), at most every `DOWNLOADS_INTERVAL` (3 s) and only when it changed
+(`Session.send_downloads()` from the writer's idle pass; the fetch lock is taken with a 0.25 s timeout, the writer
+being the heartbeat). Only to a script that said 1.10+ in `HELLO`. Right-click: **Cancel this request** (`dlcancel`,
+`build_fetch_delete_result(only_states=...)` so a row that just finished is neither cancelled nor loses its file),
+**Download again** (`dlagain`, by the original route), **Clear finished** (`dlclear`), and Open the dashboard
+(`/dccore weburl <addr>`, asked once). Searching and enqueueing stay on the dashboard. `dcc_fetch._stamp_finished()`
+gives a row a `finished_at` when it is seen to finish. dccore.mrc 1.10.5, with a Finished-rows setting in Options. Not
+visually tested here (no mIRC). The window's main area is a log of the fetch feed - `[REQUEST]`, `[QUEUE]` (with the
+place the other bot gave), `[DOWNLOADING]` (Started downloading), `[FINISHED]` (Received), `[FAILED]` - told whatever the sends/failures tickboxes say
+(`dccore.dl.log`, from the FETCH handler; the main @DCCore window no longer shows them); the side list (64 columns) is how things stand now, grouped by bot: the nick once, its files under it
+(`by_bot()` orders the rows), with size and time on the file's line. The channel a bot was found in is not kept on a fetch row, so it is not shown.
+Tests: `tests/test_dccore_downloads_window.py`.
+
+### 📦 The @DCCore window shows how far a list rebuild has got (#1024)
+
+`update` in the window said "this can take minutes" and then nothing until the result, although the rebuild writes its
+progress all the time (`update_list.write_progress()`, the file the dashboard's bar reads). `adminchat.rebuild_lines()`
+turns it into `DCCORE REBUILD <phase> <folder_index> <folder_count> <files> <elapsed>` while `config.update_inprogress`
+is set - which every start (console, `!update`, the dashboard, `LIST_REBUILD_SCHEDULE`) sets. It rides the status burst
+and, from the writer's idle pass (`Session.send_rebuild_progress()`, progress file only, no lock), goes out every
+`REBUILD_INTERVAL` (5 s) in between, then `DCCORE REBUILD end` once when the rebuild stops. Only to a script that said 1.9+
+in `HELLO` (`script_draws_rebuild()`), as with FETCHING. dccore.mrc 1.9: a Rebuilding section in the side panel before the
+Queue, `rebuilding folder 7/20` in the title bar when the panel is off (`dccore.rebuild.short`), every STATUS forgets it so a
+missed `end` lasts one burst, and `dccore.num` for the thousands separators (not `$bytes()`, see `dccore.bytes`).
+Tests: `tests/test_mirc_shows_rebuild_progress.py`.
+
 ### 📦 The Tools page follows a list rebuild however it was started (#1023)
 
 Seen live: a rebuild started from the @DCCore window in mIRC could not be followed on the dashboard. The Tools
