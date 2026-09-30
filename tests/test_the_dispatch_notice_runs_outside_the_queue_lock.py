@@ -63,6 +63,8 @@ class LockHeldAtTheDiskCall(PathSecurityBase):
 
     def setUp(self):
         super().setUp()
+        # These drive the one-send-per-nick rules; lending idle slots is tested on its own (#1030).
+        self.set_config(LEND_SPARE_SLOTS=False)
         self.held = {}
         RecordingThread.held = []
         dcc.threading.Thread = RecordingThread

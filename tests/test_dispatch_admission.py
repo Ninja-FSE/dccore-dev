@@ -92,6 +92,11 @@ class DispatchAdmissionTests(DCCoreTestCase):
         self.addCleanup(setattr, config, "MAX_DCC_SLOTS", config.MAX_DCC_SLOTS)
         config.MAX_DCC_SLOTS = 3
 
+        # These tests are about the one-send-per-nick rules; lending idle
+        # slots to a nick has its own tests (#1030).
+        self.addCleanup(setattr, config, "LEND_SPARE_SLOTS", config.LEND_SPARE_SLOTS)
+        config.LEND_SPARE_SLOTS = False
+
         # The daemon narrates itself on stdout; keep the test output readable.
         self.addCleanup(setattr, sys, "stdout", sys.stdout)
         sys.stdout = io.StringIO()
