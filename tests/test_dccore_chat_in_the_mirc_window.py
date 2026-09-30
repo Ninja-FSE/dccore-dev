@@ -333,7 +333,7 @@ class TheWindowIsTheInterface(unittest.TestCase):
         text = script()
         self.assertIn("/dccore chat [text]", text)
         self.assertIn(".Open DCCore Chat:dccore chat", text)
-        self.assertIn("alias dccore.ver { return 1.7 }", text)
+        self.assertIn("alias dccore.ver { return 1.8 }", text)
 
 
 class TheDefaultIsEveryChannelWithOtherDccoreBots(unittest.TestCase):

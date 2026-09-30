@@ -209,21 +209,123 @@
       </div>
 
       <h2 class="panel-title" data-i18n="download.panelTitle">Downloads (fetched from other bots)</h2>
-      <div class="table-wrap">
-        <table class="data-table" id="downloads-table">
-          <thead>
-            <tr>
-              <th data-i18n="common.bot">Bot</th>
-              <th data-i18n="common.file">File</th>
-              <th data-i18n="common.state">State</th>
-              <th data-i18n="common.progress">Progress</th>
+      <div id="downloads-summary" class="downloads-summary" aria-live="polite"></div>
+      <!-- #1019/#1021: the download list is three boxes - what is still in the
+           queue (the only one with Cancel), what arrived, and what failed - each
+           sorted and paged on its own. Clearing forgets a list; the files stay
+           on disk. -->
+      <div class="downloads-toolbar">
+        <label class="downloads-pagesize">
+          <span data-i18n="download.perPage">Per page</span>
+          <select id="downloads-pagesize" class="search-input">
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+      </div>
+      <div id="downloads-boxes">
+      <section class="downloads-box" id="downloads-box-queue">
+        <div class="downloads-boxbar">
+          <h3 class="downloads-box-title"><span data-i18n="download.box.queue">In the queue</span>
+            <span class="col-dim" id="downloads-queue-count"></span></h3>
+          <span class="downloads-pager">
+            <button type="button" class="btn btn-small" id="downloads-queue-prev" disabled
+                    data-i18n-title="download.prevPage" title="Previous page">&lsaquo;</button>
+            <span id="downloads-queue-pageinfo" class="col-dim"></span>
+            <button type="button" class="btn btn-small" id="downloads-queue-next" disabled
+                    data-i18n-title="download.nextPage" title="Next page">&rsaquo;</button>
+          </span>
+          <span class="downloads-clear">
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="downloads-queue-table">
+            <thead>
+              <tr>
+              <th data-sort-col="bot" aria-sort="none"><button type="button" class="sort-btn" data-sort="bot"><span data-i18n="common.bot">Bot</span></button></th>
+              <th data-sort-col="file" aria-sort="none"><button type="button" class="sort-btn" data-sort="file"><span data-i18n="common.file">File</span></button></th>
+              <th data-sort-col="state" aria-sort="none"><button type="button" class="sort-btn" data-sort="state"><span data-i18n="common.state">State</span></button></th>
+              <th data-sort-col="progress" aria-sort="none"><button type="button" class="sort-btn" data-sort="progress"><span data-i18n="common.progress">Progress</span></button></th>
               <th></th>
-            </tr>
-          </thead>
-          <tbody id="downloads-body">
-            <tr class="empty-row"><td colspan="5" data-i18n="download.nothingQueued">Nothing queued yet.</td></tr>
-          </tbody>
-        </table>
+              </tr>
+            </thead>
+            <tbody id="downloads-queue-body">
+              <tr class="empty-row"><td colspan="5" data-i18n="download.nothingQueued">Nothing here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="downloads-box" id="downloads-box-finished">
+        <div class="downloads-boxbar">
+          <h3 class="downloads-box-title"><span data-i18n="download.box.finished">Finished</span>
+            <span class="col-dim" id="downloads-finished-count"></span></h3>
+          <span class="downloads-pager">
+            <button type="button" class="btn btn-small" id="downloads-finished-prev" disabled
+                    data-i18n-title="download.prevPage" title="Previous page">&lsaquo;</button>
+            <span id="downloads-finished-pageinfo" class="col-dim"></span>
+            <button type="button" class="btn btn-small" id="downloads-finished-next" disabled
+                    data-i18n-title="download.nextPage" title="Next page">&rsaquo;</button>
+          </span>
+          <span class="downloads-clear">
+          <button type="button" class="btn btn-small btn-danger" id="downloads-clear-complete" disabled
+                  data-i18n-title="download.clearTitle"
+                  title="Forget the finished downloads in this list. The files stay on disk.">Clear downloaded</button>
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="downloads-finished-table">
+            <thead>
+              <tr>
+              <th data-sort-col="bot" aria-sort="none"><button type="button" class="sort-btn" data-sort="bot"><span data-i18n="common.bot">Bot</span></button></th>
+              <th data-sort-col="file" aria-sort="none"><button type="button" class="sort-btn" data-sort="file"><span data-i18n="common.file">File</span></button></th>
+              <th data-sort-col="state" aria-sort="none"><button type="button" class="sort-btn" data-sort="state"><span data-i18n="common.state">State</span></button></th>
+              <th data-sort-col="progress" aria-sort="none"><button type="button" class="sort-btn" data-sort="progress"><span data-i18n="common.progress">Progress</span></button></th>
+              <th></th>
+              </tr>
+            </thead>
+            <tbody id="downloads-finished-body">
+              <tr class="empty-row"><td colspan="5" data-i18n="download.box.finishedEmpty">Nothing here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="downloads-box" id="downloads-box-failed">
+        <div class="downloads-boxbar">
+          <h3 class="downloads-box-title"><span data-i18n="download.box.failed">Failed</span>
+            <span class="col-dim" id="downloads-failed-count"></span></h3>
+          <span class="downloads-pager">
+            <button type="button" class="btn btn-small" id="downloads-failed-prev" disabled
+                    data-i18n-title="download.prevPage" title="Previous page">&lsaquo;</button>
+            <span id="downloads-failed-pageinfo" class="col-dim"></span>
+            <button type="button" class="btn btn-small" id="downloads-failed-next" disabled
+                    data-i18n-title="download.nextPage" title="Next page">&rsaquo;</button>
+          </span>
+          <span class="downloads-clear">
+          <button type="button" class="btn btn-small btn-danger" id="downloads-clear-failed" disabled
+                  data-i18n-title="download.clearTitle"
+                  title="Forget the failed downloads in this list. The files stay on disk.">Clear failed</button>
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="downloads-failed-table">
+            <thead>
+              <tr>
+              <th data-sort-col="bot" aria-sort="none"><button type="button" class="sort-btn" data-sort="bot"><span data-i18n="common.bot">Bot</span></button></th>
+              <th data-sort-col="file" aria-sort="none"><button type="button" class="sort-btn" data-sort="file"><span data-i18n="common.file">File</span></button></th>
+              <th data-sort-col="state" aria-sort="none"><button type="button" class="sort-btn" data-sort="state"><span data-i18n="common.state">State</span></button></th>
+              <th data-sort-col="progress" aria-sort="none"><button type="button" class="sort-btn" data-sort="progress"><span data-i18n="common.progress">Progress</span></button></th>
+              <th></th>
+              </tr>
+            </thead>
+            <tbody id="downloads-failed-body">
+              <tr class="empty-row"><td colspan="5" data-i18n="download.box.failedEmpty">Nothing here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
       </div>
     </section>
 

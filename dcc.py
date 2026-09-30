@@ -642,7 +642,7 @@ def channel_containing_user(user_key):
     return None
 
 
-def discard_orphaned_temp_archives(user_key):
+def discard_orphaned_temp_archives(user_key, rows=None):
     """Delete the temp .rar files that only `user_key`'s queue rows still name.
 
     MUST be called with queue_lock held and BEFORE the rows are dropped: those
@@ -663,6 +663,10 @@ def discard_orphaned_temp_archives(user_key):
       (dcc.py builds "{clean_folder_name}.rar"), so two people who queued the
       same album share one file on disk.
 
+    `rows`: only these rows are being dropped (one file out of a queue), so the
+    archives the user's OTHER rows still name are kept. None means the whole
+    queue is going.
+
     Returns the paths actually removed, for the caller to log.
     """
     removed = []
@@ -670,7 +674,10 @@ def discard_orphaned_temp_archives(user_key):
     if user_key not in queue:
         return removed
 
-    for f_obj in queue[user_key]:
+    dropping = queue[user_key] if rows is None else rows
+    staying = [] if rows is None else [
+        r for r in queue[user_key] if not any(r is d for d in rows)]
+    for f_obj in dropping:
         if not isinstance(f_obj, dict):
             continue
         if f_obj.get('is_temporary_zip') is not True or f_obj.get('is_unpacked_rar_folder'):
@@ -683,7 +690,7 @@ def discard_orphaned_temp_archives(user_key):
             isinstance(other, dict) and other.get('path') == temp_path
             for other_key, files in queue.items() if other_key != user_key
             for other in files
-        )
+        ) or any(isinstance(other, dict) and other.get('path') == temp_path for other in staying)
         if not still_needed:
             still_needed = any(tx.get('file') == f_obj.get('file')
                                for tx in getattr(config, 'active_transfers', []))

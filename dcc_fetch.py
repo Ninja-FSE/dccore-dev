@@ -66,6 +66,7 @@ import ipaddress
 import os
 import re
 import socket
+import struct
 import sys
 import threading
 import time
@@ -249,6 +250,10 @@ _UNRESOLVED_FETCH_STATES = ("pending", "offered", "queued", "listening", "receiv
 # this state existed that arrival was refused as unsolicited: fetching from a
 # bot with a queue could only ever succeed with an empty queue.
 _AWAITING_OFFER_STATES = ("offered", "queued")
+# How long after giving up on silence a bot's late DCC SEND is still taken.
+_LATE_OFFER_GRACE = 1800
+# Times a file is asked for when the other bot does not answer, before it fails.
+OFFER_ASKS = 3
 
 # The states that count against FETCH_MAX_PER_BOT (#926): everything asked of a
 # bot and not yet finished - including "queued", which holds no slot of ours but
@@ -803,7 +808,8 @@ def _restart_form(row):
         row.update(state="pending", offered_at=None, bytes_received=0)
         _as_asked(row)
         # Where it stood in the other bot's queue is theirs to say again.
-        for volatile in ("listening_since", "queued_at", "queue_position", "reply"):
+        for volatile in ("listening_since", "queued_at", "queue_position", "reply",
+                         "receiving_since"):
             row.pop(volatile, None)
     return row
 
@@ -1111,6 +1117,7 @@ def check_fetch_queue():
     disk_low = bool(waiting_bots) and _disk_is_low()
 
     to_dispatch = []
+    to_take_back = []
     with _fetch_lock():
         # Expire offers nobody ever answered. A row stuck in "offered" forever
         # would otherwise hold a slot open permanently and starve every other
@@ -1124,7 +1131,19 @@ def check_fetch_queue():
                     row, offer_timeout, folder_offer_timeout,
                     unadvertised_folder_timeout)
                 if (now - row["offered_at"]) > this_timeout:
-                    _mark_failed_locked(row, "no response")
+                    # A busy bot answers minutes late, so a file is asked for
+                    # OFFER_ASKS times before it fails, and only then is the
+                    # request taken back from the bot. The row stays, failed,
+                    # for the operator to see and ask again.
+                    if (row.get("request_type", "file") == "file"
+                            and int(row.get("silent_asks", 1)) < OFFER_ASKS):
+                        row["silent_asks"] = int(row.get("silent_asks", 1)) + 1
+                        row.update(state="pending", offered_at=None,
+                                   reason=f"no response - asking again (attempt {row['silent_asks']} of {OFFER_ASKS})")
+                    else:
+                        _mark_failed_locked(row, "no response")
+                        if row.get("request_type", "file") == "file":
+                            to_take_back.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
 
         # Independent safety net for "listening" rows (passive DCC SEND).
         # _serve_passive_offer() already bounds its own accept() with
@@ -1221,6 +1240,9 @@ def check_fetch_queue():
             promoted += 1
             to_dispatch.append((rid, row["bot"], row["filename"], row.get("request_type", "file")))
 
+    for bot, filename in to_take_back:
+        drop_our_request_at(bot, filename)
+
     if not to_dispatch:
         return
 
@@ -1298,6 +1320,120 @@ def check_fetch_queue():
         print(f"[FETCH] Requested {log_desc} (request {rid}).")
 
 
+def drop_our_request_at(bot, filename):
+    """Ask `bot` to take `filename` out of our queue there: `@<bot>-remove
+    <file>` in the channel, the per-file form of the command DCCore answers
+    (commands.handle_queue_remove_file). Without it, cancelling on the
+    dashboard forgot the row here while the other bot kept the file queued and
+    sent it later, refused as unsolicited. Only a bot known to be DCCore is
+    told: another server may match its trigger as `@<bot>-remove*`, where the
+    per-file form is the bare one and clears everything we have queued there.
+    Returns whether it was sent."""
+    import announce
+    import dcc
+    import serverschat
+    bot = str(bot or "").strip()
+    filename = str(filename or "").strip()
+    if (not bot or not filename or contains_unsafe_ctcp_bytes(bot)
+            or contains_unsafe_ctcp_bytes(filename)):
+        return False
+    if not serverschat.is_known_peer(bot):
+        return False
+    oserve = sys.modules.get("oserve")
+    if not (oserve and hasattr(oserve, "queue_message")):
+        return False
+    default_channel = (getattr(config, "BROADCAST_SEARCH_CHANNEL", None)
+                       or str(getattr(config, "CHANNEL", "")).split(",")[0].strip())
+    channel = dcc.channel_containing_user(bot) or default_channel
+    if not channel:
+        return False
+    oserve.queue_message(bot, announce.fit_irc_line(
+        lambda v: f"PRIVMSG {channel} :@{bot}-remove {v}\r\n", filename))
+    print(f"[FETCH] Cancelled by hand: asked {bot} to remove {filename!r} from our queue there.")
+    return True
+
+
+# THE FETCH FEED (#1019). A file leeched from another bot used to reach the
+# log and the Downloads page and nothing else: the @DCCore window told the
+# operator about every send, request and search, and said nothing about what
+# the bot itself took. The rows already record every step, so this watches
+# them change instead of adding a call beside each of the dozen places that
+# move one - a refusal, an expiry, a refused list zip and a finished
+# transfer all end up as a state on a row.
+#
+# What was last told, by request id. The first pass only records: rows read
+# back from FETCH_HISTORY_FILE at startup are old news, and telling all of
+# them as "done" would fill the window every restart.
+_fetch_feed_told = {}
+_fetch_feed_seeded = [False]
+
+_FETCH_FEED_STATES = ("offered", "queued", "receiving", "complete", "failed")
+
+
+def _fetch_feed_name(row):
+    name = row.get("filename") or row.get("requested_filename") or ""
+    if str(name).startswith("!rar "):
+        name = str(name)[5:]
+    return str(name)
+
+
+def _fetch_feed_event(row):
+    """(action, prose) for the state a row is in, or None when it is one the
+    feed does not tell (a wait, a list - lists have their own LISTFETCH)."""
+    import announce
+    state = row.get("state")
+    bot = row.get("bot") or "?"
+    name = _fetch_feed_name(row)
+    if state == "offered":
+        return "asked", f'Asked {bot} for "{name}"'
+    if state == "queued":
+        position = row.get("queue_position")
+        where = f" at #{position}" if position else ""
+        return "queued", f'{bot} put "{name}" in its queue{where}'
+    if state == "receiving":
+        size = row.get("total_size")
+        sized = f" ({announce.format_size_human(size)})" if size else ""
+        return "receiving", f'Receiving "{name}" from {bot}{sized}'
+    if state == "complete":
+        if row.get("list_processing_error"):
+            return None
+        got = announce.format_size_human(row.get("bytes_received") or 0)
+        return "done", f'Fetched "{name}" from {bot} ({got})'
+    if state == "failed":
+        return "failed", f'Fetch failed: "{name}" from {bot} - {row.get("reason") or "no reason given"}'
+    return None
+
+
+def tell_the_fetch_feed():
+    """Send one FETCH feed line for every row whose state moved since the last
+    call. Never raises: a console that cannot be told must not stop the
+    dispatcher. Called from fetch_dispatcher_worker(), outside the fetch
+    lock, so a slow console never holds it."""
+    try:
+        import announce
+        queue = _ensure_fetch_queue()
+        with _fetch_lock():
+            snapshot = {rid: dict(row) for rid, row in queue.items()}
+        seeded = _fetch_feed_seeded[0]
+        _fetch_feed_seeded[0] = True
+        for rid in [rid for rid in _fetch_feed_told if rid not in snapshot]:
+            del _fetch_feed_told[rid]
+        for rid, row in sorted(snapshot.items(), key=lambda kv: kv[1].get("requested_at", 0)):
+            state = row.get("state")
+            if _fetch_feed_told.get(rid) == state:
+                continue
+            _fetch_feed_told[rid] = state
+            if not seeded or row.get("request_type") == "list" or state not in _FETCH_FEED_STATES:
+                continue
+            event = _fetch_feed_event(row)
+            if event is None:
+                continue
+            action, text = event
+            announce.feed_event("FETCH", text, bot=row.get("bot"), action=action)
+    except Exception as feed_err:
+        print(f"[FETCH] Could not tell the console about a fetch: {feed_err}")
+
+
 def fetch_dispatcher_worker():
     """Small dedicated background loop, started as a daemon thread from
     oserve.startup() alongside queue_mgr.queue_worker. Kept separate rather
@@ -1311,6 +1447,7 @@ def fetch_dispatcher_worker():
             check_fetch_queue()
         except Exception as dispatch_err:
             print(f"[FETCH] Dispatcher loop error: {dispatch_err}")
+        tell_the_fetch_feed()
         time.sleep(2.0)
 
 
@@ -1551,6 +1688,23 @@ def _claim_matching_offer_locked(queue, from_nick, filename):
         row["state"] = "receiving"
         return rid, row
 
+    # A LATE ANSWER TO A REQUEST WE GAVE UP ON. A bot with a busy queue holds
+    # our request and sends minutes later; the row has by then failed as "no
+    # response", and the file we asked for was refused as unsolicited. It is
+    # still the answer to our own request, so a row that failed only for
+    # silence, and only just, takes it.
+    now = time.time()
+    for rid, row in queue.items():
+        if (row.get("state") == "failed" and row.get("reason") == "no response"
+                and row.get("request_type", "file") == "file"
+                and row.get("offered_at") is not None
+                and 0 <= now - row["offered_at"] <= _LATE_OFFER_GRACE
+                and str(row.get("bot", "")).strip().lower() == wanted_bot
+                and _normalize_filename_for_match(row.get("filename", "")) == wanted_name):
+            row.pop("reason", None)
+            row["state"] = "receiving"
+            return rid, row
+
     list_candidates = [
         (rid, row) for rid, row in queue.items()
         if row.get("state") in _AWAITING_OFFER_STATES
@@ -1733,6 +1887,19 @@ def _promote_clean_filename(dest_dir, stored_name):
         return stored_name
 
 
+def _already_fetched_row_locked(queue, from_nick, filename):
+    """The id of a finished row for this bot and file, or None. Log wording
+    only: an offer is never accepted on the strength of it."""
+    wanted_bot = str(from_nick).strip().lower()
+    wanted_name = _normalize_filename_for_match(filename)
+    for rid, row in queue.items():
+        if (row.get("state") == "complete" and row.get("request_type", "file") == "file"
+                and str(row.get("bot", "")).strip().lower() == wanted_bot
+                and _normalize_filename_for_match(row.get("filename", "")) == wanted_name):
+            return rid
+    return None
+
+
 def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
     """Entry point, dispatched from irc.py's CTCP branch in a daemon thread.
 
@@ -1769,6 +1936,14 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
             # to (active) or make it open a listening socket and accept
             # arbitrary bytes (passive) just by sending an unsolicited DCC
             # SEND. Applies identically to both forms.
+            again = _already_fetched_row_locked(queue, from_nick, offer["filename"])
+            if again is not None:
+                # The other bot sent a file we already have (its retry or a
+                # duplicate in its own queue): refused all the same, but not
+                # an unknown sender, so the log says which it is.
+                print(f"[FETCH] Ignored a second DCC SEND from {from_nick} "
+                      f"({offer['filename']!r}): already fetched (request {again}).")
+                return
             print(f"[FETCH] Rejected unsolicited{' passive' if is_passive else ''} "
                   f"DCC SEND from {from_nick} ({offer['filename']!r}): "
                   f"no matching pending request.")
@@ -1837,9 +2012,10 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         # the DCC port range the bot's own sends to its users share, and
         # queues at several bots coming due together could take every port
         # in it. Past MAX_FETCH_SLOTS a passive offer for a queued row is
-        # not taken: the row is asked for again once a slot is free.
+        # not taken: the row is asked for again once a slot is free. A late
+        # offer takes a failed row, which holds no slot either.
         max_slots = int(getattr(config, "MAX_FETCH_SLOTS", 3))
-        if (is_passive and states_before.get(request_id) == "queued"
+        if (is_passive and states_before.get(request_id) in ("queued", "failed")
                 and count_active_fetches(queue) > max_slots):
             row.update(state="pending", offered_at=None,
                        reason="its turn came with every fetch slot in use - asking again once one is free")
@@ -2224,6 +2400,8 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     total_size = offer["size"]
     dest_path = os.path.join(dest_dir, stored_name)
     wall_deadline = time.time() + float(_fetch_transfer_timeout(row.get("request_type")))
+    # For the panel's Downloading speed (#1019); this transfer's own clock.
+    row["receiving_since"] = time.time()
 
     try:
         os.makedirs(platform_compat.long_path(dest_dir), exist_ok=True)
@@ -2278,6 +2456,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
         # already fitted the NAME to MAX_NAME_BYTES, which the wrap does not
         # affect and which the offering bot would otherwise choose.
         handle = open(platform_compat.long_path(dest_path), "wb")
+        acknowledging = True
         while bytes_received < total_size:
             if time.time() > wall_deadline:
                 failure_reason = "overall transfer timeout"
@@ -2306,6 +2485,19 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
 
             handle.write(chunk)
             row["bytes_received"] = bytes_received
+            # DCC's acknowledgement: our running total as four bytes, big-
+            # endian. A DCCore sender counts a file as sent only once the
+            # whole of it is acknowledged, so without these every fetch from
+            # one looked like a failed send to it and was offered again -
+            # 15 seconds later, and again after a few minutes (#1019).
+            # Given up on after the first failure: a sender that never reads
+            # them fills our send buffer, and every further sendall would wait
+            # out the socket's timeout.
+            if acknowledging:
+                try:
+                    sock.sendall(struct.pack("!I", bytes_received & 0xFFFFFFFF))
+                except OSError:
+                    acknowledging = False   # closed after the last byte, or not listening
     except Exception as recv_err:
         failure_reason = f"transfer error: {recv_err}"
         disk_full = _is_disk_full(recv_err)
