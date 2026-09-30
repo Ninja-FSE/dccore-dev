@@ -10,7 +10,7 @@ The dispatcher logged "Requested" and started the offer timer the moment it hand
 where it waited its turn behind every other user's replies - a minute or more on a busy bot. The timer ran out
 first, each expiry queued the same request again behind the first, and a file was asked for four or five times;
 the other bot answered each one within a second of it arriving and sent finished files a second time. Now the
-request goes in the express lane, the timer does not run while the line is unsent, asking again replaces a line
+request goes in a lane of its own that is sent before everything else (the advert alone is two lines per channel, over two minutes on a bot in thirteen), the timer does not run while the line is unsent, asking again replaces a line
 still waiting instead of adding one, and a row that finishes, fails or is deleted takes its unsent line back.
 
 ### 📦 A Downloads window in mIRC (#1022)

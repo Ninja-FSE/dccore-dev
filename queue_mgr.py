@@ -75,6 +75,9 @@ def queue_worker():
                 del config.vip_queue[:dropped]
                 print(f"[QUEUE CAP] Dropped {dropped} old VIP lines (cap is {max_vip}).")
 
+            if len(config.fetch_request_queue) > max_vip:
+                del config.fetch_request_queue[:len(config.fetch_request_queue) - max_vip]
+
             max_user = getattr(config, 'MAX_USER_SEND_QUEUE', 100)
             with runtime.send_queue_lock:
                 for q_user in list(config.send_queue.keys()):
@@ -138,7 +141,23 @@ def queue_worker():
             # down - it just no longer does so at the standard lane's total
             # exclusion.
             # ---------------------------------------------------------------------
-            if hasattr(config, 'vip_queue') and config.vip_queue:
+            sent_a_request = False
+            if config.fetch_request_queue:
+                msg = config.fetch_request_queue.pop(0)
+                sent_a_request = True
+                runtime.outbound_pacer.wait_for_slot(config.MSG_DELAY)
+                try:
+                    if current_sock:
+                        current_sock.sendall(msg.encode("utf-8", errors="ignore"))
+                        if getattr(config, 'DEBUG_MODE', False):
+                            print(f"[RAW OUT FETCH] {msg.strip()}")
+                except socket.error as net_err:
+                    print(f"[QUEUE NET ERROR] Connection is broken ({net_err}).")
+                    del config.fetch_request_queue[:]
+                    time.sleep(1.0)
+                    continue
+
+            if not sent_a_request and hasattr(config, 'vip_queue') and config.vip_queue:
                 msg = config.vip_queue.pop(0)
                 # Shared with announce.py's debug drain - see runtime.OutboundPacer.
                 # Reserved before the send, not slept after it, so a message that
@@ -184,7 +203,7 @@ def queue_worker():
             # the cursor rather than within one pass. Total throughput is the
             # pacer's either way; only the SHARE changes, and only while VIP
             # has a backlog, which it normally does not.
-            picked = next_standard_line(config.send_queue, last_served)
+            picked = None if sent_a_request else next_standard_line(config.send_queue, last_served)
             if picked is not None:
                 user, msg = picked
                 last_served = user

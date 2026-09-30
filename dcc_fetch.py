@@ -1330,10 +1330,10 @@ def check_fetch_queue():
             # behind the first, and the bot then sent the file twice.
             _take_back_unsent_line(message)
             queue[rid]["request_line"] = message
-            # The express lane: behind the ordinary one a request waited its
-            # turn among every other user's replies, a minute or more on a
-            # busy bot, while the offer timer was already running.
-            oserve.queue_message(bot, message, is_vip=True)
+            # Its own lane, sent ahead of everything: in the ordinary one a
+            # request waited among every other user's replies, in the express
+            # one behind the advert, and either way for minutes.
+            oserve.queue_message(bot, message, is_vip=getattr(oserve, "FETCH_LANE", True))
         print(f"[FETCH] Requested {log_desc} (request {rid}).")
 
 
@@ -1341,7 +1341,7 @@ def _take_back_unsent_line(line):
     """Remove `line` from the outgoing express queue if it is still there.
     Returns whether it was."""
     try:
-        config.vip_queue.remove(line)
+        config.fetch_request_queue.remove(line)
     except ValueError:
         return False
     return True
@@ -1357,7 +1357,7 @@ def take_back_unsent_request(row):
 
 def _request_is_unsent(row):
     line = row.get("request_line")
-    return bool(line) and line in config.vip_queue
+    return bool(line) and line in config.fetch_request_queue
 
 
 def drop_our_request_at(bot, filename):

@@ -32,15 +32,16 @@ class Case(DCCoreTestCase):
         super().setUp()
         self.set_config(fetch_queue={}, MAX_FETCH_SLOTS=10, fetch_feature_disabled=False,
                         CHANNEL="#chan", FETCH_MAX_PER_BOT=0, bot_joined_channel=True,
-                        FETCH_OFFER_TIMEOUT=60, vip_queue=[])
+                        FETCH_OFFER_TIMEOUT=60, fetch_request_queue=[])
         config.channel_users["#chan"] = {"serverone"}
         silence_debug(announce)
         self.ordinary = []
 
         def queue_message(user, message, is_vip=False):
-            (config.vip_queue if is_vip else self.ordinary).append(message)
+            (config.fetch_request_queue if is_vip == "fetch" else self.ordinary).append(message)
 
         stand_in = types.ModuleType("oserve")
+        stand_in.FETCH_LANE = "fetch"
         stand_in.queue_message = queue_message
         real = sys.modules.get("oserve")
         sys.modules["oserve"] = stand_in
@@ -61,11 +62,26 @@ class Case(DCCoreTestCase):
 
 
 class TheLane(Case):
-    def test_the_request_goes_in_the_express_lane(self):
+    def test_the_request_goes_in_its_own_lane(self):
         self.ask()
-        self.assertEqual(len(config.vip_queue), 1)
-        self.assertIn(f"!ServerOne {FILE}", config.vip_queue[0])
+        self.assertEqual(len(config.fetch_request_queue), 1)
+        self.assertIn(f"!ServerOne {FILE}", config.fetch_request_queue[0])
         self.assertEqual(self.ordinary, [])
+
+    def test_oserve_puts_it_there_and_not_behind_the_advert(self):
+        import oserve
+        self.set_config(vip_queue=["the advert"], send_queue={})
+        oserve.queue_message("ServerOne", "PRIVMSG #chan :!ServerOne x\r\n", is_vip=oserve.FETCH_LANE)
+        self.assertEqual(config.fetch_request_queue, ["PRIVMSG #chan :!ServerOne x\r\n"])
+        self.assertEqual(config.vip_queue, ["the advert"])
+        self.assertEqual(config.send_queue, {})
+
+    def test_the_pump_sends_a_request_before_the_advert_backlog(self):
+        with open(os.path.join(REPO_ROOT, "queue_mgr.py"), encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertLess(text.index("config.fetch_request_queue.pop(0)"), text.index("config.vip_queue.pop(0)"))
+        self.assertIn("if not sent_a_request and hasattr(config, 'vip_queue')", text)
+        self.assertIn("None if sent_a_request else next_standard_line", text)
 
 
 class TheTimer(Case):
@@ -75,12 +91,12 @@ class TheTimer(Case):
         dcc_fetch.check_fetch_queue()
         row = config.fetch_queue[rid]
         self.assertEqual(row["state"], "offered")
-        self.assertEqual(len(config.vip_queue), 1, "nothing was asked a second time")
+        self.assertEqual(len(config.fetch_request_queue), 1, "nothing was asked a second time")
         self.assertLess(time.time() - row["offered_at"], 5)
 
     def test_it_runs_once_the_line_has_gone(self):
         rid = self.ask()
-        config.vip_queue.clear()
+        config.fetch_request_queue.clear()
         self.age(rid, 500)
         dcc_fetch.check_fetch_queue()
         row = config.fetch_queue[rid]
@@ -88,7 +104,7 @@ class TheTimer(Case):
         self.assertEqual(row["silent_asks"], 2)
         dcc_fetch.check_fetch_queue()
         self.assertEqual(row["state"], "offered")
-        self.assertEqual(len(config.vip_queue), 1)
+        self.assertEqual(len(config.fetch_request_queue), 1)
 
 
 class NoSecondLine(Case):
@@ -96,13 +112,13 @@ class NoSecondLine(Case):
         rid = self.ask()
         config.fetch_queue[rid].update(state="pending", offered_at=None)
         dcc_fetch.check_fetch_queue()
-        self.assertEqual(len(config.vip_queue), 1)
+        self.assertEqual(len(config.fetch_request_queue), 1)
 
     def test_a_finished_row_takes_its_waiting_line_back(self):
         rid = self.ask()
         config.fetch_queue[rid]["state"] = "complete"
         dcc_fetch.check_fetch_queue()
-        self.assertEqual(config.vip_queue, [])
+        self.assertEqual(config.fetch_request_queue, [])
         self.assertNotIn("request_line", config.fetch_queue[rid])
 
     def test_a_deleted_row_takes_its_waiting_line_back(self):
@@ -110,15 +126,15 @@ class NoSecondLine(Case):
         rid = self.ask()
         status, _ = webserver.build_fetch_delete_result(rid)
         self.assertEqual(status, 200)
-        self.assertEqual(config.vip_queue, [])
+        self.assertEqual(config.fetch_request_queue, [])
 
     def test_another_rows_line_is_left_alone(self):
         first = self.ask()
         self.ask("Other - Song.mp3")
         config.fetch_queue[first]["state"] = "failed"
         dcc_fetch.check_fetch_queue()
-        self.assertEqual(len(config.vip_queue), 1)
-        self.assertIn("Other - Song.mp3", config.vip_queue[0])
+        self.assertEqual(len(config.fetch_request_queue), 1)
+        self.assertIn("Other - Song.mp3", config.fetch_request_queue[0])
 
 
 if __name__ == "__main__":
