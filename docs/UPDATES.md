@@ -13,6 +13,14 @@ it only while it is no one or already a channel, and only from a channel listene
 it, and a manual pick still overrides all of it. `ADMIN-CONSOLE.md` says where an answer goes. Tests in
 `test_dccore_chat_in_the_mirc_window`.
 
+### 📦 A row held for disk room forgets its old place in the other bot's queue (#1043)
+
+Audit 2026-10-01 L2. `_hold_for_space()` put a row back to pending but kept `queued_at`, `queue_position` and
+`reply`, which every other way back to pending drops. A file queued for hours at a busy bot that did not fit when its
+turn came was asked again once space was freed and queued anew - and `handle_bot_reply()`, which only stamps a missing
+`queued_at`, kept the old stamp, so `FETCH_QUEUED_TIMEOUT` failed the fresh place soon after. The hold now drops
+them. Tests: `tests/test_a_held_row_forgets_its_old_queue_place.py`.
+
 ### 📦 DCCore Chat's WHO on a JOIN is paced and has a queue of its own
 
 `serverschat.note_join()` asks `WHO <nick>` for a stranger the moment it joins (#1006). It was unpaced and went on the
