@@ -387,14 +387,23 @@ def _free_bytes():
         return None
 
 
-def _room_left_locked(queue, free):
+def _room_left_locked(queue, free, exclude=None):
     """What is free once the transfers already under way have written the rest
     of what they declared - the room a new offer is weighed against (#964).
     Two offers that each fit alone do not both fit together. None when the
-    disk cannot be measured. Caller holds _fetch_lock()."""
+    disk cannot be measured. Caller holds _fetch_lock().
+
+    `exclude` is the request whose own offer is being weighed (#1039): the
+    claim has already moved it to "receiving", and a file row asked again
+    after a restart or a disk-full hold still carries the total_size of its
+    last offer - counted here, it was weighed against itself, held, asked
+    again and held again, for as long as the disk had less than twice its
+    size free."""
     if free is None:
         return None
-    for row in queue.values():
+    for rid, row in queue.items():
+        if rid == exclude:
+            continue
         if row.get("state") in ("listening", "receiving"):
             free -= max(0, int(row.get("total_size") or 0) - int(row.get("bytes_received") or 0))
     return free
@@ -2065,7 +2074,7 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         # MIN_FREE_BYTES back once the partial file went, the disk did not
         # count as low, and the loop never ended. Now it waits, pending,
         # until what it declared fits with MIN_FREE_BYTES to spare.
-        room = _room_left_locked(queue, _free_bytes())
+        room = _room_left_locked(queue, _free_bytes(), exclude=request_id)
         if not _has_room(offer["size"], room):
             _hold_for_space(row, offer["size"],
                             f"needs {_mb(offer['size'])} free and {_mb(room)} is - "
