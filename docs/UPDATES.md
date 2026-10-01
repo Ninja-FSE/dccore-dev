@@ -20,6 +20,16 @@ probe differently once took the dashboard down. A write that fails turns the log
 format, so importing `oserve` (every test process) writes nothing; `test_run_as_a_script_the_first_line_is_stamped`
 strips the install from its stub, since it runs from the checkout. Checked with `click.echo`, stderr, a thread and Greek
 text. Tests: `tests/test_a_log_file_beside_the_console.py`.
+### 🐛 Startup no longer reads the whole search index to see which lists it holds (#1071)
+
+A live bot holding 61 fetched lists sat for 41 seconds between `[STARTUP] Fetched lists` and `[STARTUP] Notices`,
+before connecting. `list_index.backfill_missing()` began with `indexed_bots()`, `SELECT DISTINCT bot FROM entries`,
+and `entries` is an FTS5 table with no ordinary index on a column: the query read every row - the whole 3.3 GB
+`list_index.db` - on every start. It now asks once per held bot, `_holds_rows_for()`: `MATCH 'bot:"<name>"'` as the
+pre-filter and `lower(bot) = ?` to decide (so "Bot-2" is not taken for "Bot", and an index written before names were
+stored lower-case still counts its bot), `LIMIT 1`. Measured on a synthetic 2-million-row index: 1.08 s for the
+DISTINCT, 0.005 s for 61 per-bot questions. `indexed_bots()` stays for its other callers. Tests:
+`tests/test_startup_does_not_scan_the_search_index.py`.
 
 ### 🗂️ The daemon's modules live in `src/`, this install's own files in `conf/` (#959)
 
