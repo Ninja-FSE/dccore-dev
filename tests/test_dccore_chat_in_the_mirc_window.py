@@ -456,7 +456,8 @@ class MessagingAPeerPrivately(unittest.TestCase):
 
     def test_the_title_says_privately_for_a_nick_target(self):
         title = "\n".join(statements(block(script(), "alias dccore.chat.title")))
-        self.assertIn("$left(%to,1) !isin #&+!", title)
+        # On where the line goes, the automatic target included (#1041).
+        self.assertIn("$left(%target,1) !isin $+($chr(35),&+!)", title)
         self.assertIn("privately to", title)
 
 
