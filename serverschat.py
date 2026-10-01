@@ -75,6 +75,15 @@ REALNAME_MARK = "DCCore/sc"
 
 # How often the channels are asked WHO, and how long a peer sighting counts.
 WHO_EVERY = 600
+# A stranger's JOIN is asked about at once (note_join), but paced: one nick at
+# most once a WHO_EVERY, and at most JOIN_WHO_MOST such questions in
+# JOIN_WHO_PER seconds - past that the regular round finds them. They go on a
+# send-queue key of their own: no nick contains '*', so they never queue
+# ahead of a line for a channel, the dashboard's @find among them.
+JOIN_WHO_MOST = 5
+JOIN_WHO_PER = 60.0
+JOIN_WHO_QUEUE = "*chat-who*"
+_JOIN_WHO_ALL = "*join-who*"
 PEER_FRESH = WHO_EVERY * 2.5
 # Tracked peers, and the channels one `chat *` says it in.
 PEER_MAX = 200
@@ -224,10 +233,11 @@ def _prune(now):
     count early only ever lets it through; the all-senders cap still holds."""
     if len(runtime.chat_rate) > _TRACK_MAX:
         for key in [k for k, (start, _n) in runtime.chat_rate.items()
-                    if now - start >= INBOUND_PER and k != _ALL]:
+                    if now - start >= INBOUND_PER and k not in (_ALL, _JOIN_WHO_ALL)]:
             runtime.chat_rate.pop(key, None)
     if len(runtime.chat_rate) > _TRACK_MAX:
-        oldest = sorted((start, k) for k, (start, _n) in runtime.chat_rate.items() if k != _ALL)
+        oldest = sorted((start, k) for k, (start, _n) in runtime.chat_rate.items()
+                        if k not in (_ALL, _JOIN_WHO_ALL))
         for _start, key in oldest[:len(runtime.chat_rate) - _TRACK_MAX]:
             runtime.chat_rate.pop(key, None)
     for key in [k for k, until in runtime.chat_muted.items() if until <= now]:
@@ -293,7 +303,20 @@ def note_join(nick, chan):
     tell."""
     if is_known_peer(nick):
         return
-    _enqueue(chan, f"WHO {nick}\r\n")
+    # PACED, AND OUT OF THE CHANNEL'S WAY. Every stranger's JOIN used to
+    # queue a WHO on the channel's own send-queue key - one line per pass for
+    # that key, MSG_DELAY each - so joins and parts in a loop, or a netjoin,
+    # held back what else the bot had to say there: the dashboard's @find
+    # waited behind them past its window and came back empty.
+    now = time.time()
+    key = str(nick or "").lower()
+    with runtime.chat_lock:
+        _prune(now)
+        if _limited(runtime.chat_rate, "who:" + key, 1, WHO_EVERY, now):
+            return
+        if _limited(runtime.chat_rate, _JOIN_WHO_ALL, JOIN_WHO_MOST, JOIN_WHO_PER, now):
+            return
+    _enqueue(JOIN_WHO_QUEUE, f"WHO {nick}\r\n")
 
 
 def note_gone(nick, chan=None, now=None):
