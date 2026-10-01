@@ -20,6 +20,7 @@ probe differently once took the dashboard down. A write that fails turns the log
 format, so importing `oserve` (every test process) writes nothing; `test_run_as_a_script_the_first_line_is_stamped`
 strips the install from its stub, since it runs from the checkout. Checked with `click.echo`, stderr, a thread and Greek
 text. Tests: `tests/test_a_log_file_beside_the_console.py`.
+
 ### 🐛 Startup no longer reads the whole search index to see which lists it holds (#1071)
 
 A live bot holding 61 fetched lists sat for 41 seconds between `[STARTUP] Fetched lists` and `[STARTUP] Notices`,
