@@ -4,6 +4,31 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The on-connect commands are checked, sent again when they did not take, and a Resend button (#1066)
+
+From the operator: when Undernet has net splits, the X login among the on-connect commands sometimes goes nowhere -
+X is on the other side - and the bot sat in its channels with its real host until the next reconnect. The commands
+went out once, in `delayed_join()`, and nothing looked again.
+
+`on_connect.watch()` now runs once per connection, started after the JOIN with the connection's epoch (bound when
+`delayed_join()` is defined, so a reconnect during its sleep cannot hand the new epoch to a thread holding the old
+socket). When the saved commands set a user mode (`MODE %nick% +x`, or one naming the nick), it sends `MODE <nick>` a
+minute after the JOIN and then every `ON_CONNECT_CHECK_MINUTES` (new, default 5, 0 = off), reads the 221, and sends
+every command again if a mode they set is missing. **+x counts only with a 396**: on ircu the +x flag is taken
+whenever asked, but the host is hidden only once the account is logged in too, and only then does the server send
+`396 ... :is now your hidden host`. So a bot whose login failed in a split, showing +x with its real host, is caught.
+At most `RESEND_MOST` (6) resends per connection, said once in the log when it stops - a network that takes +x and
+never sends 396 is not sent the login for ever. The read loop hands every line to `on_connect.note_server_line()`,
+which reads the line's own fields (a 221 or 396 typed in a channel does not count, nor a MODE on us from anyone but
+the server or ourselves); per-connection state lives in `runtime.on_connect_state` and starts over on every connect.
+The log names command words only (`redacted()`), never the login line.
+
+The dashboard's Identity & network page has **Resend commands** beside Save on-connect commands:
+`POST /api/on-connect/resend` sends the SAVED commands now on their own thread (409 when the bot is not connected or
+has not joined yet), and lets the automatic check try again after it gave up. The page refuses when the box differs
+from what is saved, rather than letting the operator think the edited lines went out. Tests:
+`tests/test_on_connect_commands_are_checked.py`.
+
 ### 🐛 A slot freed next to a folder pack is offered to the nick that waited longest (#1038)
 
 Audit 2026-10-01 M1. When the nick that had just finished had a folder pack as its next row, `check_queue_and_send()`
