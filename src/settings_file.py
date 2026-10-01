@@ -52,7 +52,68 @@ import threading
 # Where the file lives, unless DCCORE_SETTINGS_FILE points somewhere else.
 # The environment variable exists for tests and for running two instances off
 # one checkout; ordinary installs never set it.
-DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.conf")
+#
+# conf/, one directory up from this file (#959 phase 2): this installation's
+# own files - settings.conf and admin_config.py - live apart from the
+# daemon's source, which is what src/ (#959 phase 1) already did for the
+# code side. See _migrate_settings_conf_into_conf_dir() just below for how
+# an existing install's settings.conf gets there without losing anything.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONF_DIR = os.path.join(REPO_ROOT, "conf")
+DEFAULT_PATH = os.path.join(CONF_DIR, "settings.conf")
+
+
+def _migrate_settings_conf_into_conf_dir(repo_root=None, log=print):
+    """Carry an existing settings.conf from the repository root into conf/.
+
+    #959 phase 2: settings.conf is gitignored, so unlike src/'s modules -
+    tracked, and git-moved on every operator's disk automatically on pull -
+    this one has to be carried across by hand, on the machine that actually
+    has it. Every real install, including this project's own, has
+    settings.conf sitting at the repository root today; without this, an
+    upgrade would read a blank conf/settings.conf (or none at all), silently
+    lose every setting to the shipped default, and the daemon would still
+    start - just as somebody else's bot.
+
+    Must run HERE, at module import time, before anything calls
+    settings_path() or apply_to() - by the time oserve.startup() runs, a
+    caller may already have asked for the (still-empty) new path and moved
+    on. Same safety shape as defaults.py's
+    _migrate_local_config_to_admin_config(): only when conf/settings.conf
+    does not already exist (an operator who has genuinely started fresh
+    under the new layout wins over anything left from before), and a
+    retrying replace so an interrupted run leaves one intact file rather
+    than two halves.
+
+    `repo_root` is only ever overridden by a test; an ordinary run infers it
+    from where this file itself lives. Returns True if a move happened.
+    """
+    if repo_root is None:
+        repo_root = REPO_ROOT
+    conf_dir = os.path.join(repo_root, "conf")
+    new_path = os.path.join(conf_dir, "settings.conf")
+    old_path = os.path.join(repo_root, "settings.conf")
+
+    if os.environ.get("DCCORE_SETTINGS_FILE"):
+        return False  # an explicit override is the caller's own business
+
+    if os.path.exists(new_path) or not os.path.exists(old_path):
+        return False
+
+    try:
+        os.makedirs(conf_dir, exist_ok=True)
+        platform_compat.replace_with_retry(old_path, new_path)
+    except OSError as err:
+        log(f"[MIGRATE] Could not move settings.conf into conf/: {err}. "
+            f"Move it yourself: conf/settings.conf is where it is read from now.")
+        return False
+
+    log("[MIGRATE] Moved settings.conf into conf/ - the repository's layout "
+        "changed (#959); nothing in it changed.")
+    return True
+
+
+_migrate_settings_conf_into_conf_dir()
 
 # The settings a fresh install MUST change before oserve.startup() will boot -
 # see unconfigured_required()'s own docstring for the mechanism, and issue

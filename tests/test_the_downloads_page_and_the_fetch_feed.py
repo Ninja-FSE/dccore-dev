@@ -168,7 +168,7 @@ class TheFetchFeed(DCCoreTestCase):
         dcc_fetch.tell_the_fetch_feed()
 
     def test_the_dispatcher_calls_it(self):
-        src = read("dcc_fetch.py")
+        src = read("src", "dcc_fetch.py")
         body = src[src.index("def fetch_dispatcher_worker"):]
         self.assertIn("tell_the_fetch_feed()", body.split("\ndef ")[0])
 
@@ -631,7 +631,7 @@ class TheDashboard(unittest.TestCase):
 
     def test_the_clear_call_matches_the_route(self):
         self.assertIn("/api/fetch/clear", read("web", "app.js"))
-        self.assertIn('"/api/fetch/clear"', read("webserver.py"))
+        self.assertIn('"/api/fetch/clear"', read("src", "webserver.py"))
 
 
 if __name__ == "__main__":

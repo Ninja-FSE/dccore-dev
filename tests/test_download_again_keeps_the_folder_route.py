@@ -116,7 +116,7 @@ class TheSourceSaysSo(unittest.TestCase):
         with io.open(os.path.join(REPO_ROOT, "web", "app.js"), encoding="utf-8") as handle:
             js = handle.read()
         self.assertIn('again = postJson("/api/filelists/fetch-folder-rar", { bot: row.bot, folder: folder });', js)
-        with io.open(os.path.join(REPO_ROOT, "adminchat.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(REPO_ROOT, "src", "adminchat.py"), encoding="utf-8") as handle:
             py = handle.read()
         self.assertIn("webserver.build_folder_rar_fetch_enqueue_result(bot, dcc_fetch.folder_asked_for(row))", py)
 

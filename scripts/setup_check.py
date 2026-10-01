@@ -42,6 +42,7 @@ import sys
 # shims are one level below that again, and neither needs to know: the paths
 # are computed from THIS file, not from whichever script was invoked.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(REPO, "src")  # library.py/platform_compat.py/settings_file.py live there (#959)
 
 
 class Platform:
@@ -235,6 +236,8 @@ def main(platform):
     # to be imported, including by its own tests.
     if REPO not in sys.path:
         sys.path.insert(0, REPO)
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
     os.chdir(REPO)
 
     # #428: BEFORE the first print below, not after `import defaults`
@@ -305,7 +308,9 @@ def main(platform):
     # hard-fail whenever admin_config.py was absent, even when settings.conf
     # alone had already configured everything - contradicting this check's own
     # later "Applied N setting(s)" output on the very same run.
-    admin_config_present = os.path.exists(os.path.join(REPO, "admin_config.py"))
+    # At the root, or in conf/ where the daemon moves it (#959).
+    admin_config_present = any(os.path.exists(os.path.join(REPO, *where, "admin_config.py"))
+                               for where in ((), ("conf",)))
     try:
         import settings_file
         settings_conf_present = os.path.exists(settings_file.settings_path())

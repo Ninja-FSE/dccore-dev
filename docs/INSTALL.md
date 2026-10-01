@@ -123,9 +123,9 @@ Safe to run again later: every prompt shows what is already configured as its de
 
 `configure.py` is a convenience, not a requirement. There are two mechanisms and you can use either or both.
 
-**`settings.conf`** — plain text, no Python syntax. Copy `settings.conf.sample` and edit. This is what the dashboard's Settings page and the admin console both write to. The explanation above each setting in the sample is the same text the Settings page shows when you hover the **?** beside a setting; below it, the sample also carries the developer's longer note from `defaults.py` for anyone who wants the reasoning.
+**`conf/settings.conf`** — plain text, no Python syntax. Copy `conf/settings.conf.sample` to `conf/settings.conf` and edit. This is what the dashboard's Settings page and the admin console both write to. The explanation above each setting in the sample is the same text the Settings page shows when you hover the **?** beside a setting; below it, the sample also carries the developer's longer note from `defaults.py` for anyone who wants the reasoning.
 
-**`admin_config.py`** — Python. Copy `admin_config.py.sample` and edit. Better for values you would rather keep out of a file other tools rewrite, such as `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH`.
+**`conf/admin_config.py`** — Python. Copy `conf/admin_config.py.sample` to `conf/admin_config.py` and edit. Better for values you would rather keep out of a file other tools rewrite, such as `ADMIN_HOSTMASKS` and `ADMIN_PASSWORD_HASH`.
 
 Both are gitignored. `defaults.py` applies `admin_config.py` first and `settings.conf` second, so a value set in both takes the `settings.conf` one. The daemon says so at startup for every setting that `admin_config.py` sets to something `settings.conf` then overrides (`[CONFIG] settings.conf overrides WEBUI_HOST, which admin_config.py also sets ...`) — if an edit to `admin_config.py` seems to do nothing, that line is why.
 
@@ -378,7 +378,7 @@ Your settings and data are never touched by an upgrade: `settings.conf`, `admin_
 **2. Back up `data/` and your config.** It holds your stats, ban list, download counts and speed record — none of it recoverable if something goes wrong.
 
 ```bash
-cp -r data data.backup && cp settings.conf admin_config.py data.backup/
+cp -r data conf data.backup
 ```
 
 **3. Get the new version.**
@@ -392,8 +392,8 @@ If you installed from a downloaded release rather than a clone, download the new
 **4. Check for new settings.** This is the step people miss. `settings.conf` is gitignored, so `git pull` updates `settings.conf.sample` but never your own file. New settings do not appear in it, and you will not hear about them.
 
 ```bash
-comm -23 <(grep -oE '^#?[A-Z_]+ *=' settings.conf.sample | tr -d '# =' | sort) \
-         <(grep -oE '^[A-Z_]+ *=' settings.conf | tr -d ' =' | sort)
+comm -23 <(grep -oE '^#?[A-Z_]+ *=' conf/settings.conf.sample | tr -d '# =' | sort) \
+         <(grep -oE '^[A-Z_]+ *=' conf/settings.conf | tr -d ' =' | sort)
 ```
 
 That lists every setting the sample knows about and your file does not. Most of them will be settings you were happy to leave at their defaults, so read it as "what exists", not as a to-do list.

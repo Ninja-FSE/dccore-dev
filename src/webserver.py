@@ -74,6 +74,11 @@ import defaults as config
 import platform_compat
 import runtime
 
+# This module moved into src/ (#959); the web/ folder it serves as the
+# dashboard's static root, and reads its language files from, did not - it
+# stays a sibling of oserve.py, one directory up from here.
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
 try:
     from flask import (Flask, g, jsonify, redirect, request, send_file,
                        send_from_directory, session)
@@ -4327,7 +4332,10 @@ def build_console_command_result(command_text, remote_addr=None):
 if HAVE_FLASK:
 
     def create_app():
-        app = Flask(__name__, static_folder="web", static_url_path="")
+        # Flask resolves a relative static_folder against this module's OWN
+        # directory (its root_path) - now src/, not the repository root - so
+        # this has to be the absolute path WEB_DIR already computed (#959).
+        app = Flask(__name__, static_folder=WEB_DIR, static_url_path="")
         app.secret_key = os.urandom(32)
         # The mutating routes (broadcast search, fetch enqueue, list fetch)
         # all POST; Lax is the app's own decision instead of whatever the
@@ -4863,7 +4871,7 @@ def _setup_strings(lang):
     lang = lang if lang in SETUP_LANGS else "en"
     if lang == "en":
         return {}
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "lang", f"{lang}.json")
+    path = os.path.join(WEB_DIR, "lang", f"{lang}.json")
     try:
         import json
         with open(path, encoding="utf-8") as handle:

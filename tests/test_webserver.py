@@ -2404,7 +2404,7 @@ class JsonBodyMustBeAnObject(DCCoreTestCase):
         """
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "webserver.py")
+            "src", "webserver.py")
         with io.open(path, encoding="utf-8") as handle:
             source = handle.read()
 
@@ -2999,7 +2999,7 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
     SOURCES = ("oserve.py", "webserver.py")
 
     def shipped_defaults(self):
-        path = os.path.join(REPO_ROOT, "defaults.py")
+        path = os.path.join(REPO_ROOT, "src", "defaults.py")
         with io.open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         shipped = {}
@@ -3021,7 +3021,7 @@ class WebuiFallbacksMatchWhatConfigShips(unittest.TestCase):
         """[(file, line, name, fallback), ...] for every WEBUI_* getattr."""
         found = []
         for filename in self.SOURCES:
-            path = os.path.join(REPO_ROOT, filename)
+            path = (next((p for p in (os.path.join(REPO_ROOT, "src", filename), os.path.join(REPO_ROOT, "conf", filename), os.path.join(REPO_ROOT, filename)) if os.path.exists(p)), os.path.join(REPO_ROOT, filename)))
             with io.open(path, encoding="utf-8") as handle:
                 source = handle.read()
             for node in ast.walk(ast.parse(source)):

@@ -18,9 +18,7 @@ import threading
 import time
 import unittest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+from tests import support  # noqa: F401  (path setup)
 
 import announce  # noqa: E402
 import dcc  # noqa: E402
@@ -286,7 +284,7 @@ class ASendIsRecorded(DCCoreTestCase):
 
 class TheQueueStampsWhenAskedFor(unittest.TestCase):
     def test_every_row_the_requests_queue_carries_the_time_it_was_asked_for(self):
-        with io.open(os.path.join(REPO_ROOT, "dcc.py"), encoding="utf-8") as handle:
+        with io.open(os.path.join(support.REPO_ROOT, "src", "dcc.py"), encoding="utf-8") as handle:
             code = handle.read()
         appended = code.count("config.dcc_queue[user_key].append({")
         self.assertEqual(appended, 2)
