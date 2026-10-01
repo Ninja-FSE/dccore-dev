@@ -14,6 +14,114 @@ waiting nick that nothing would dispatch. Now those exits go on to the global sw
 that has waited longest. The packed archive is a plain row and waits its turn for a slot. Tests:
 `tests/test_a_slot_freed_next_to_a_pack_is_offered.py`.
 
+### 📦 In the DCCore Chat window, a private conversation is never moved to a channel by itself
+
+`dccore.chat.feed` moved the automatic reply target (`chat.replyto`) on every incoming line - the bot's own remarks
+and lines from channels the window does not listen on included - so a channel line arriving while a private reply
+was being typed sent that reply to the channel. Now a private line (`@<nick>`) takes the target, a channel line moves
+it only while it is no one or already a channel, and only from a channel listened on; a remark (nick `*`) never moves
+it, and a manual pick still overrides all of it. `ADMIN-CONSOLE.md` says where an answer goes. Tests in
+`test_dccore_chat_in_the_mirc_window`.
+
+### 📦 The dashboard's Cancel never removes a file that finished meanwhile (#1046)
+
+Audit 2026-10-01 L5. Cancel is offered on a request that has not started (pending, offered, or queued at the other bot)
+and asks "Nothing has been downloaded yet." The table can be up to 8 s old and `window.confirm()` stops it refreshing,
+so the transfer could finish before OK was clicked - and Cancel posted the same empty body as Delete, so
+`api_fetch_delete` took the now-complete row for a Delete and removed its file. Cancel now sends
+`{"only_waiting": true}`, and the route passes `only_states=("pending", "offered", "queued")` to
+`build_fetch_delete_result()`, the guard the mIRC window's Cancel already used: a row that is no longer waiting gets
+the 409 "That download is no longer waiting.", its file stays, and the page redraws the list. Tests:
+`tests/test_cancel_never_removes_a_finished_file.py`.
+
+### 📦 `-remove <file>` works for a user whose queue is frozen (#1042)
+
+Audit 2026-10-01 L1. `handle_queue_remove_file()` walked `frozen_queues` as if it held rows, but it maps a nick to the
+time its queue froze (a frozen user's rows stay in `dcc_queue`). A user who had left the channel and sent
+`@<nick>-remove <file>` within the five minutes hit `TypeError: 'float' object is not iterable` after the row was already
+gone in memory: no `save_dcc_queue()`, no NOTICE, and a packed archive deleted that `dcc_queue.txt` still named. It now
+walks `dcc_queue` alone, and removing a frozen user's last file also unfreezes them, as the bare `-remove` does. The
+old test built `frozen_queues` as rows, which is why it passed; it now uses the real shape. Tests:
+`tests/test_a_single_file_can_be_removed_from_the_queue.py`.
+
+### 📦 An older dccore.mrc is not sent PEERS or CONSOLEFEED lines (#1045)
+
+Audit 2026-10-01 L4. The 1.5 script v1.13.1 shipped has no branch for either line and prints a type it does not know
+as text, and `MIN_SCRIPT_VERSION` (1.1) still accepts it. So an operator who upgraded the bot but kept that script got
+`[CONSOLEFEED] on` and a `[PEERS] ...` line per channel in @DCCore on every connect, and another on every WHO round
+(every 10 minutes, per channel) and every peer that joined or left. Like FETCHING, REBUILD and the Downloads rows, both
+now go only to a script that says it reads them: `PEERS_SCRIPT_VERSION = "1.7"` (PEERS came in while the script still
+said 1.6, CONSOLEFEED with 1.7), checked in `hello` and in `serverschat._deliver_peers()`. An older script still gets
+the plain-text "the console feed is off" warning. Tests: `tests/test_an_older_script_gets_no_peers_lines.py`.
+
+### 📦 The DCCore Chat title says where a typed line really goes (#1041)
+
+Audit 2026-10-01 M4. `dccore.chat.title` stored its two conditions with `/var`, which keeps the TEXT of a condition -
+never empty, so always true to `$iif` - and the title always took the automatic branch and always said "privately
+to", whatever channel or peer was picked. Both are now evaluated with `$iif(...,1,0)`, and "privately" is decided by
+where the line goes, the automatic target included (with no pick, a peer who wrote privately is answered privately).
+A script-wide guard keeps any `/var` from holding a bare condition again. Tests:
+`tests/test_the_chat_title_names_the_real_target.py`.
+
+### 📦 Download again asks for a failed folder by the folder route (#1040)
+
+Audit 2026-10-01 M3. A folder fetch is asked for as `!<bot> !rar <folder>` and comes back as a pack the other bot
+names itself, matched to a "folder" row by bot alone. Asking again for a failed one - `dlagain` in the mIRC Downloads
+window, and the dashboard's Download again before it - went through the plain file enqueue: the same words went out,
+but as a FILE row named `!rar <folder>`, and the pack that came back matched nothing and was refused as unsolicited.
+Both now take a folder row through `build_folder_rar_fetch_enqueue_result()` (`/api/filelists/fetch-folder-rar`),
+with the folder from new `dcc_fetch.folder_asked_for()`. Tests: `tests/test_download_again_keeps_the_folder_route.py`,
+the dashboard half running the real `redownloadFetchRow()` under node.
+
+### 📦 Clear failed lets the other bot go of a request it may still hold (#1047)
+
+Audit 2026-10-01 L6. A file given up on for silence ("no response") may still sit in a busy DCCore peer's queue, and
+its own Delete sends that peer `@<bot>-remove <file>`. `build_fetch_clear_result()` - the Downloads page's "Clear
+failed", and the mIRC window's clear - forgot such rows here only, so the peer sent the file when its turn came and it
+was refused as unsolicited, its send slot wasted. It now calls `drop_our_request_at()` for those rows after the lock,
+as Delete does: only a failed "no response" file row, only one whose request left (not taken back from the lane), and
+only ever to a DCCore peer. Tests: `tests/test_clear_failed_tells_the_other_bot.py`.
+
+### 📦 A fetch request that has not gone out survives a lost connection (#1044)
+
+Audit 2026-10-01 L3. #1028 gave fetch requests a lane of their own, and the row that owns one counts it as sent once
+it has left that lane. The disconnect epilogue (`irc.py`) and the queue worker's failed-send branch both emptied the
+whole lane, so every row whose request had not gone out timed out as "no response" - a folder or list row after up
+to `FETCH_FOLDER_OFFER_TIMEOUT`, with no request ever made, and a file row spending one of its `OFFER_ASKS`. Before
+#1028 these lines waited in `send_queue`, which neither exit clears. Now the epilogue leaves the lane alone (the
+lines go out on the next connection; the row's timer does not run while its line is unsent), a line whose send
+failed goes back to the front, and a line the lane's cap trims hands its row to new `dcc_fetch.requests_not_sent()`,
+which puts it back to pending, as asked, to be asked again. Tests:
+`tests/test_a_fetch_request_waits_for_the_reconnect.py`.
+
+### 📦 A row held for disk room forgets its old place in the other bot's queue (#1043)
+
+Audit 2026-10-01 L2. `_hold_for_space()` put a row back to pending but kept `queued_at`, `queue_position` and
+`reply`, which every other way back to pending drops. A file queued for hours at a busy bot that did not fit when its
+turn came was asked again once space was freed and queued anew - and `handle_bot_reply()`, which only stamps a missing
+`queued_at`, kept the old stamp, so `FETCH_QUEUED_TIMEOUT` failed the fresh place soon after. The hold now drops
+them. Tests: `tests/test_a_held_row_forgets_its_old_queue_place.py`.
+
+### 📦 DCCore Chat's WHO on a JOIN is paced and has a queue of its own
+
+`serverschat.note_join()` asks `WHO <nick>` for a stranger the moment it joins (#1006). It was unpaced and went on the
+channel's own send-queue key, which the standard lane serves one line per pass at `MSG_DELAY` - so a run of joins
+held back whatever else the bot had to say there, the dashboard's `@find` included, past its search window. Now one
+nick is asked at most once a `WHO_EVERY`, at most `JOIN_WHO_MOST` (5) such questions go out in `JOIN_WHO_PER` (60 s)
+- past that the regular WHO round finds them - and they go on a key of their own (`*chat-who*`; no nick contains
+`*`). Both limits live in `runtime.chat_rate`; the cap's own window is exempt from the full-table pruning, like the
+all-senders one. Tests in `test_servers_chat_is_relayed_by_the_bot`.
+
+### 📦 An offer is not weighed against its own request's old size (#1039)
+
+Audit 2026-10-01 M2. A file row asked for again after a restart or a disk-full hold keeps the `total_size` of its last
+offer (`_as_asked()` clears it for folder and list rows only). When the new offer arrives,
+`_claim_matching_offer_locked()` has already moved the row to "receiving", so `_room_left_locked()` counted that old
+size as a transfer under way: the offer was weighed against itself, held, asked again and held again, while the disk
+had less than twice its size free - #964's re-ask loop in a narrower window. `_room_left_locked()` takes the request
+being weighed as `exclude`, and `handle_incoming_offer()` passes it. Tests:
+`tests/test_an_offer_is_not_weighed_against_itself.py`.
+
 ### 📦 A folder pack turned away while every slot was busy gets its turn (#1034)
 
 Found in the review of #1033. Only `check_queue_and_send()`'s specific-user path (section A) can start a folder pack,
