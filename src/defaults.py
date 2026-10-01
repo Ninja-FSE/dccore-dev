@@ -622,6 +622,15 @@ DEBUG_TO_CONSOLE: bool = True    # Debug lines also reach the admin DCC console 
 # page keeps its own times and is unaffected either way.
 CONSOLE_TIMESTAMP_FORMAT: str = "%H:%M:%S"
 
+# Everything the bot's window shows is also written to this file (#1065), with
+# the date on every line, so what it said is still there after the window is
+# closed. When the file reaches CONSOLE_LOG_MAX_MB it becomes dccore.log.1, the
+# one before that .2, and so on; CONSOLE_LOG_KEEP old files are kept. A
+# changed path takes effect at once. Empty = no log file.
+CONSOLE_LOG_FILE: str = "./data/logs/dccore.log"
+CONSOLE_LOG_MAX_MB: int = 5     # Size at which the log file is started afresh
+CONSOLE_LOG_KEEP: int = 5       # How many old log files are kept
+
 # THE CONSOLE FEED (#528). An OmenServe operator sees every request, send and
 # served search live inside mIRC; a DCCore operator saw completions and
 # failures in the admin console and nothing else - "it sends but I can't

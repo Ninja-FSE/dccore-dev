@@ -50,6 +50,12 @@ No Command Prompt needed. The window that opens **is** the bot: closing it
 stops the bot, so leave it open or minimise it. `Ctrl-C` in it stops the bot
 on purpose.
 
+Everything the window shows is also saved in `data\logs\dccore.log`, with the
+date on every line, so what the bot said is still there after the window is
+closed. At 5 MB the file becomes `dccore.log.1` and a new one starts; five old
+ones are kept. Settings > Debug & logging changes the place, the size and the
+count, or turns it off.
+
 The setup page is `http://127.0.0.1:8420/setup` and answers only to this
 PC, only until the form is saved, and only with the one-time code in the
 link the window prints and opens - so nothing else on your PC or in your

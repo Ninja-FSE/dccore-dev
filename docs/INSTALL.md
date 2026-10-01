@@ -227,7 +227,8 @@ nick. Each says how to start it now, once the hand-run bot is stopped:
 Windows. The same applies later: with the autostart in place, do not also
 start the launcher by hand while it is running. On Linux the unit starts at
 login; to have it start at boot without anyone logging in, once: `loginctl
-enable-linger $USER`. Its output is in `journalctl --user -u dccore -f`; on
+enable-linger $USER`. Its output is in `journalctl --user -u dccore -f` (and on every platform in
+`data/logs/dccore.log`, with the date on each line); on
 macOS in `~/Library/Logs/dccore.log`; on Windows the bot's own window opens
 at logon, as it does from a double-click.
 
