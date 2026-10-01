@@ -285,6 +285,15 @@ chat_peers_meta = {"last": 0.0}
 chat_who_round = {}
 chat_lock = threading.Lock()
 
+# What the on-connect commands achieved on THIS connection (#1066): the user
+# modes the server last listed for us (221, None until it has), how many such
+# listings have arrived (a query waits for this to move), whether the server
+# said our host is hidden (396), and how often the commands were sent again.
+# on_connect.reset_state() starts it over on every connect.
+on_connect_state = {"modes": None, "listings": 0, "hidden": False,
+                    "resends": 0, "gave_up": False}
+on_connect_lock = threading.Condition()
+
 # transfer_log.py (#1068): the rows waiting for the writer, the guard on that
 # list (a Condition, so the writer sleeps until there is something to write),
 # one writer at a time on the database, and the writer thread itself.

@@ -124,6 +124,8 @@ RUNTIME_CONTAINERS = {
     "chat_peers": dict,
     "chat_peers_meta": dict,
     "chat_who_round": dict,
+    # #1066: one test's modes or resend count are not the next one's.
+    "on_connect_state": dict,
     # Same reasoning: a leftover is one test's message showing up in the next
     # test's panel.
     "private_messages": list,

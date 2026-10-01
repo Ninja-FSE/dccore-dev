@@ -518,6 +518,8 @@ PRESERVE_RUNTIME = (
     'chat_peers',         # the other DCCore bots seen by WHO, and when it last ran
     'chat_peers_meta',
     'chat_who_round',     # the WHO round in flight per channel - losing it mid-round
+    'on_connect_state',   # #1066: modes, hidden host and resends on THIS connection -
+                          # a rehash is not a reconnect, and a lost 396 would resend the login
     'recent_joins',       # #376: joins inside the merge window - a rehash in it
                           # would otherwise lose when the new nick appeared
     'transfer_log_pending',  # #1068: rows recorded, not yet written - a rehash

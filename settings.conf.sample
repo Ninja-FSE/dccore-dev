@@ -722,6 +722,25 @@
 # 0 never rejoins at all.
 #REJOIN_ATTEMPTS = 3
 
+# How often the bot checks that its on-connect commands worked. If they set a
+# user mode such as +x and the server has not given it - or, for +x, has not
+# hidden the host - the bot sends all of them again. This is for a net split,
+# when the X login can go nowhere. At most six resends on one connection. 0
+# means never check.
+#
+# How often to check that the on-connect commands took effect, in minutes.
+# 
+# They are sent once, before the JOIN. In a net split the X login among them
+# can go nowhere, and the bot sits in its channels with its real host. So
+# when the commands set a user mode (`MODE %nick% +x`), the bot asks the
+# server for its modes a minute after the JOIN and then this often, and sends
+# every command again if one is missing. For +x that means the host really is
+# hidden: the server says so with numeric 396. At most six resends on one
+# connection.
+# 
+# 0 never checks.
+#ON_CONNECT_CHECK_MINUTES = 5
+
 # Post a line in the channel each time a file has been sent. Everything else
 # about a transfer is private to the person who asked; this is the only public
 # part.
