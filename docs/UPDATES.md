@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 In the DCCore Chat window, a private conversation is never moved to a channel by itself
+
+`dccore.chat.feed` moved the automatic reply target (`chat.replyto`) on every incoming line - the bot's own remarks
+and lines from channels the window does not listen on included - so a channel line arriving while a private reply
+was being typed sent that reply to the channel. Now a private line (`@<nick>`) takes the target, a channel line moves
+it only while it is no one or already a channel, and only from a channel listened on; a remark (nick `*`) never moves
+it, and a manual pick still overrides all of it. `ADMIN-CONSOLE.md` says where an answer goes. Tests in
+`test_dccore_chat_in_the_mirc_window`.
+
 ### 📦 A freed slot goes to the nick that has waited longest (#1032)
 
 The nick that had just finished was handed its own next file straight away, so a nick with a long queue took every slot

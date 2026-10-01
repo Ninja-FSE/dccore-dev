@@ -1666,7 +1666,19 @@ alias dccore.chat.feed {
   ; happens to land (#958 follow-up). Never "-" or "*" - those are only an
   ; OWN fan-out line's channel. A private line's channel is "@<nick>" -
   ; reply there means privately to that nick, so the "@" is dropped.
-  if ($3 != $dccore.bot) && ($2 != $null) && ($2 != -) { hadd dccore.live chat.replyto $iif($left($2,1) == @,$mid($2,2-),$2) | dccore.chat.title }
+  ;
+  ; A PRIVATE CONVERSATION IS NEVER MOVED TO A CHANNEL BY ITSELF. Any line
+  ; used to move the target, so one arriving from a channel while a private
+  ; reply was being typed sent that reply to the channel, in public. Now a
+  ; private line always takes the target, and a channel line only while the
+  ; target is no one or a channel - and only from a channel listened on,
+  ; since a line nobody sees is no reason to move. The bot's own remarks
+  ; (nick "*") never move it. A manual pick still overrides all of this.
+  if ($3 != $dccore.bot) && ($3 != *) && ($2 != $null) && ($2 != -) {
+    var %rt = $dccore.st(chat.replyto)
+    if ($left($2,1) == @) { hadd dccore.live chat.replyto $mid($2,2-) | dccore.chat.title }
+    elseif ($dccore.chat.listens($2)) && ((%rt == $null) || ($left(%rt,1) isin $+($chr(35),&))) { hadd dccore.live chat.replyto $2 | dccore.chat.title }
+  }
   ; Your own lines, and any private line (its "@<nick>" channel was never
   ; something to tick in the Listen on menu), always show (#958 follow-up):
   ; one said with `chat *` comes back with "-" for its channel, since it
