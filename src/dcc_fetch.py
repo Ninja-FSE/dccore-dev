@@ -387,14 +387,23 @@ def _free_bytes():
         return None
 
 
-def _room_left_locked(queue, free):
+def _room_left_locked(queue, free, exclude=None):
     """What is free once the transfers already under way have written the rest
     of what they declared - the room a new offer is weighed against (#964).
     Two offers that each fit alone do not both fit together. None when the
-    disk cannot be measured. Caller holds _fetch_lock()."""
+    disk cannot be measured. Caller holds _fetch_lock().
+
+    `exclude` is the request whose own offer is being weighed (#1039): the
+    claim has already moved it to "receiving", and a file row asked again
+    after a restart or a disk-full hold still carries the total_size of its
+    last offer - counted here, it was weighed against itself, held, asked
+    again and held again, for as long as the disk had less than twice its
+    size free."""
     if free is None:
         return None
-    for row in queue.values():
+    for rid, row in queue.items():
+        if rid == exclude:
+            continue
         if row.get("state") in ("listening", "receiving"):
             free -= max(0, int(row.get("total_size") or 0) - int(row.get("bytes_received") or 0))
     return free
@@ -416,6 +425,12 @@ def _hold_for_space(row, size, reason):
     row.update(state="pending", offered_at=None, bytes_received=0,
                reason=reason, waiting="disk-full", needs_bytes=int(size))
     _as_asked(row)
+    # Its place in the other bot's queue is over too (#1043), as every other
+    # way back to pending says: kept, the old queued_at made the next "Added
+    # ... at position" look hours old, and FETCH_QUEUED_TIMEOUT failed the
+    # fresh place soon after.
+    for stale in ("queued_at", "queue_position", "reply"):
+        row.pop(stale, None)
 
 
 def _mb(size):
@@ -1371,6 +1386,33 @@ def _request_is_unsent(row):
     return bool(line) and line in config.fetch_request_queue
 
 
+def folder_asked_for(row):
+    """The folder a "folder" row asked to have packed: its request without the
+    "!rar " the dispatcher puts in front (build_folder_rar_fetch_enqueue_result()
+    stores it that way). What asking again by the folder route needs (#1040)."""
+    asked = str(row.get("requested_filename") or "")
+    return asked[5:].strip() if asked.lower().startswith("!rar ") else asked.strip()
+
+
+def requests_not_sent(lines):
+    """Request lines dropped before they went out (#1044): the rows that own
+    them go back to pending, as asked, to be asked again - left "offered",
+    they read the missing line as sent and timed out as "no response".
+    Returns how many rows went back."""
+    lines = set(lines or ())
+    if not lines:
+        return 0
+    back = 0
+    with _fetch_lock():
+        for row in _ensure_fetch_queue().values():
+            if row.get("state") == "offered" and row.get("request_line") in lines:
+                row.pop("request_line", None)
+                row.update(state="pending", offered_at=None)
+                _as_asked(row)
+                back += 1
+    return back
+
+
 def drop_our_request_at(bot, filename):
     """Ask `bot` to take `filename` out of our queue there: `@<bot>-remove
     <file>` in the channel, the per-file form of the command DCCore answers
@@ -2065,7 +2107,7 @@ def handle_incoming_offer(irc_sock, from_nick, ctcp_payload):
         # MIN_FREE_BYTES back once the partial file went, the disk did not
         # count as low, and the loop never ended. Now it waits, pending,
         # until what it declared fits with MIN_FREE_BYTES to spare.
-        room = _room_left_locked(queue, _free_bytes())
+        room = _room_left_locked(queue, _free_bytes(), exclude=request_id)
         if not _has_room(offer["size"], room):
             _hold_for_space(row, offer["size"],
                             f"needs {_mb(offer['size'])} free and {_mb(room)} is - "

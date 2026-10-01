@@ -1463,9 +1463,14 @@ def check_queue_and_send(irc_sock, completed_user):
     # back to the nick that just finished meant a nick with a long queue took
     # every slot in turn while the others waited for it to run dry. A folder
     # pack is left to this path: section B cannot start one.
+    #
+    # A folder pack that has waited longer counts too (#1034), while no other
+    # pack is being made: the sweep below now hands the slot to it. While one
+    # is, the pack could not start anyway - the packer's own release wakes it.
     if next_file and not (isinstance(next_file, dict) and next_file.get('is_unpacked_rar_folder')):
         with queue_lock:
-            waited_longer = [k for k in nicks_waiting_for_a_slot(user_key, plain_files_only=True)
+            packs_can_start = not getattr(config, 'rar_inprogress', False)
+            waited_longer = [k for k in nicks_waiting_for_a_slot(user_key, plain_files_only=not packs_can_start)
                              if queue_waiting_since(k) < queue_waiting_since(user_key)]
         if waited_longer:
             print(f"[DCC QUEUE] {completed_user} goes to the back of the line; {waited_longer[0]} has waited longer.")
@@ -1523,17 +1528,24 @@ def check_queue_and_send(irc_sock, completed_user):
                     )
                     pack_in_progress = getattr(config, 'rar_inprogress', False)
 
+                    pack_turned_away = None
                     if user_already_locked:
-                        print(f"[RAR-BLOCK] {completed_user} is already locked in memory; blocking a stale thread.")
-                        return
-                    if pack_in_progress:
-                        print(f"[RAR-HOLD] {completed_user} waits in the queue while another packing run is in progress...")
-                        return
+                        pack_turned_away = f"[RAR-BLOCK] {completed_user} is already locked in memory; blocking a stale thread."
+                    elif pack_in_progress:
+                        pack_turned_away = f"[RAR-HOLD] {completed_user} waits in the queue while another packing run is in progress..."
+                    else:
+                        config.rar_inprogress = True
+                        if not hasattr(config, 'user_processing_lock'):
+                            config.user_processing_lock = set()
+                        config.user_processing_lock.add(completed_user.lower())
 
-                    config.rar_inprogress = True
-                    if not hasattr(config, 'user_processing_lock'):
-                        config.user_processing_lock = set()
-                    config.user_processing_lock.add(completed_user.lower())
+                if pack_turned_away:
+                    # A pack that takes no slot leaves the one just freed to the
+                    # nick that has waited longest (#1038): nothing else would
+                    # dispatch it, and a newcomer is kept out of it meanwhile.
+                    print(pack_turned_away)
+                    check_queue_and_send(irc_sock, "system_next_trigger_fallback")
+                    return
 
                 def inline_rar_packer(sock):
                     # This runs with config.rar_inprogress already True and the user held in
@@ -1768,6 +1780,10 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 # At exactly the right level, so it wakes the function above immediately
                 threading.Thread(target=inline_rar_packer, args=(irc_sock,), daemon=True).start()
+                # Packing holds no slot, and a pack can take up to RAR_TIMEOUT: the
+                # slot just freed goes to the longest-waiting nick meanwhile (#1038).
+                # The packed archive is a plain row and waits its turn for a slot.
+                check_queue_and_send(irc_sock, "system_next_trigger_fallback")
                 return
 
              # Plain audio file (.mp3/.flac), not a RAR folder pack.
@@ -1826,8 +1842,10 @@ def check_queue_and_send(irc_sock, completed_user):
         else:
             # Not in any of our channels: freeze and start the countdown. The
             # policy lives in freeze_absent_user() so the global sweep below
-            # applies exactly the same one (#530).
+            # applies exactly the same one (#530). The slot this nick just
+            # freed goes on to the next waiting nick (#1038).
             freeze_absent_user(irc_sock, completed_user, target_chan)
+            check_queue_and_send(irc_sock, "system_next_trigger_fallback")
             return
 
     # =====================================================================
@@ -1847,6 +1865,7 @@ def check_queue_and_send(irc_sock, completed_user):
     # NICK (no more PONGs, the server drops the bot). Section A's plain-file
     # branch has always dispatched outside the lock; this is the same shape.
     promoted = None
+    pack_to_wake = None
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         with queue_lock:
             # FIXED: re-check the slot count INSIDE the lock. The test above is already
@@ -1941,11 +1960,30 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 if user_is_globally_active is True:
                     if g_next.get('is_unpacked_rar_folder') is True:
-                        # FIXED: this was `break`, which abandoned the whole scan. One user
-                        # waiting on a RAR pack starved every other waiting user behind them
-                        # for as long as the pack took. Skip this user and keep looking.
+                        # A PACK WHOSE TURN HAS COME GETS THE SLOT (#1034). Only the
+                        # specific-user path (section A) can start a pack, and every
+                        # caller hands it the nick that just finished - so a pack
+                        # turned away at [DCC-BLOCK], all slots busy, was never
+                        # tried again: queued until its owner's next transfer
+                        # ended, which for a nick with only the pack is never.
+                        # In wait order with a slot free, so its owner's own dispatch
+                        # is started (after the lock) and a slot is kept for it: a
+                        # nick further on is promoted only if a second one is free,
+                        # or with one slot the plain file would win the race every
+                        # time and the pack wait for ever again. While another pack
+                        # is being made it could not start; the packer's release
+                        # wakes it ([RAR-HOLD], redispatch_waiting_pack()), and the
+                        # sweep looks further, as it always did.
+                        if not getattr(config, 'rar_inprogress', False):
+                            if pack_to_wake is None:
+                                pack_to_wake = real_username
+                            continue
                         print(f"[DCC QUEUE] Folder pack already pending for {real_username}. Skipping to the next waiting user.")
                         continue
+
+                    # The slot kept for a pack woken above (#1034).
+                    if pack_to_wake is not None and len(config.active_transfers) + 1 >= config.MAX_DCC_SLOTS:
+                        break
 
                     # CLAIM the user before releasing the lock, so a concurrent caller sees
                     # them as busy. start_dcc_send's finally already discards this key on
@@ -1965,6 +2003,11 @@ def check_queue_and_send(irc_sock, completed_user):
 
         announce_mod.send_dcc_sending_notice(real_username, g_name, path=g_path, channel=g_chan)
         threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
+
+    if pack_to_wake is not None:
+        print(f"[DCC QUEUE] A slot is free and {pack_to_wake}'s folder pack has waited longest; starting it.")
+        threading.Thread(target=check_queue_and_send, args=(irc_sock, pack_to_wake),
+                         daemon=True).start()
 
     for absent_user, absent_chan in absent_users:
         freeze_absent_user(irc_sock, absent_user, absent_chan)
