@@ -78,8 +78,10 @@ class TheProgram(unittest.TestCase):
         import tempfile
         with io.open(os.path.join(REPO_ROOT, "oserve.py"), encoding="utf-8") as handle:
             src = handle.read()
-        entry = "    startup()" + chr(10) + "    run_forever()"
-        self.assertIn(entry, src)
+        entry_start = src.index(chr(10) + "    startup()" + chr(10), src.index("def run_forever(")) + 1
+        entry_end = src.index("    run_forever()", entry_start) + len("    run_forever()")
+        entry = src[entry_start:entry_end]
+        self.assertIn("stopping.ensure_watcher()", entry, "the stop watcher (#1065) starts at the entry")
         stub = src.replace(entry, '    print("reached the entry point")')
         # Run from the repository, so the console log (#1065) would be the
         # checkout's own data/logs/dccore.log: not this test's to write.

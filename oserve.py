@@ -38,6 +38,13 @@ if __name__ == "__main__":
     platform_compat.set_console_timestamp_format(
         getattr(config, "CONSOLE_TIMESTAMP_FORMAT", "%H:%M:%S"))
 
+    # `oserve.py --stop` (#1065): ask the bot running from this folder to stop,
+    # wait until it has, and exit - before anything below starts, and before
+    # the log file is opened, since this process is not the bot.
+    if "--stop" in sys.argv[1:]:
+        import stopping
+        sys.exit(stopping.stop_from_outside())
+
     # And to a file (#1065), from here on. Read on every line through
     # sys.modules: a settings save reloads defaults, and a changed or emptied
     # path then takes effect without a restart.
@@ -186,6 +193,11 @@ def startup(setup_page=None):
         print("[CRITICAL] Stop the other one first (its own window, or the autostart task), "
               "or run a second bot from a second folder.")
         sys.exit(EXIT_ALREADY_RUNNING)
+
+    # A stop file left from before (#1065) asked an earlier bot to stop, not
+    # this one: gone before the watcher could read it.
+    import stopping
+    stopping.clear_stale_stop_file()
 
     # The hard backstop for #170's RFC: scripts/setup_check.py's pre-flight
     # report is a friendlier, EARLIER warning an operator can choose to run
@@ -533,6 +545,13 @@ def run_forever():
             irc.irc_loop()
         except KeyboardInterrupt:
             print("\nShutting down...")
+            # The stop file is the request just answered (#1065); a copy left
+            # behind would stop the next start too.
+            try:
+                import stopping
+                stopping.clear_stale_stop_file()
+            except Exception:
+                pass
             # One last flush of the bot registry (#691): it is written on a
             # 30 s interval, and a Ctrl-C inside that window lost the last
             # adverts and a source the dashboard had just added. Never
@@ -560,6 +579,12 @@ def run_forever():
 
 if __name__ == "__main__":
     startup()
+    # The other ways to stop (#1065) all end in run_forever()'s Ctrl-C
+    # KeyboardInterrupt: the watcher for `start-dccore stop` starts here, in
+    # the program only - a test that drives run_forever() in-process must
+    # never have its own runner interrupted by it.
+    import stopping
+    stopping.ensure_watcher()
     run_forever()
 
 

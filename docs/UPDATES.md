@@ -4,6 +4,29 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The bot can be stopped without its window (#1065, part 2)
+
+Closing the window or Ctrl-C in it were the only ways to stop the bot, which a bot started by the logon task, or (next)
+run in the background, cannot offer. Three more, all through the new `src/stopping.py` and all ending in the same
+`KeyboardInterrupt` Ctrl-C raises - `request_stop()` says why, sends `QUIT :DCCore is stopping`, and calls
+`_thread.interrupt_main()`, so `run_forever()`'s existing shutdown (the bot-registry flush, exit 0) is the only one:
+
+- **`start-dccore stop`** (`start-dccore.bat stop`, `start-dccore.sh stop`, and the macOS `.command`, which hands its
+  arguments to the Linux script) runs `oserve.py --stop`, handled in the program-only block before the log file is
+  opened. It asks through a file, `data/dccore.stop`, which a watcher started at `oserve.py`'s entry point - never inside `run_forever()`, which tests drive in-process - looks for every two
+  seconds, and waits up to a minute for the instance lock to come free - the lock, taken and released, is also how it
+  tells whether a bot is running at all. Not a kill: Windows will not end a console program without `/F`, which skips
+  the shutdown. If the bot does not stop in time it says so with the pid and `taskkill /F /PID` (or `kill`).
+  `startup()` removes a stop file left from before, after taking the lock; the shutdown removes the one it answered.
+- **`shutdown now`** in the admin console (and the dashboard's Console page, which runs the same commands);
+  `shutdown` alone says what it does, since it sits one word from `quit`.
+- **Stop the bot** on the dashboard's Tools page, with a confirm: `POST /api/tools/stop`, answered before the stop.
+- **Admin > Stop the bot...** in `dccore.mrc`'s DCCore menu (script 1.10.6), with a yes/no first; it sends
+  `shutdown now`.
+
+Tests: `tests/test_the_bot_can_be_stopped_without_its_window.py`, including the command against a child process
+holding the lock as the bot does - one that stops when asked, one that does not.
+
 ### 📦 Everything the window shows is also written to a log file (#1065, part 1)
 
 What the bot said was gone with its window, and #1065 goes on to let it run with no window at all. Every console line
