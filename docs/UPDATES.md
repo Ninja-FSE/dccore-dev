@@ -4,6 +4,15 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The DCCore Chat title says where a typed line really goes (#1041)
+
+Audit 2026-10-01 M4. `dccore.chat.title` stored its two conditions with `/var`, which keeps the TEXT of a condition -
+never empty, so always true to `$iif` - and the title always took the automatic branch and always said "privately
+to", whatever channel or peer was picked. Both are now evaluated with `$iif(...,1,0)`, and "privately" is decided by
+where the line goes, the automatic target included (with no pick, a peer who wrote privately is answered privately).
+A script-wide guard keeps any `/var` from holding a bare condition again. Tests:
+`tests/test_the_chat_title_names_the_real_target.py`.
+
 ### 📦 Download again asks for a failed folder by the folder route (#1040)
 
 Audit 2026-10-01 M3. A folder fetch is asked for as `!<bot> !rar <folder>` and comes back as a pack the other bot

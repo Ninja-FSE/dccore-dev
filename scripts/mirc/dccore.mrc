@@ -1635,9 +1635,14 @@ alias dccore.chat.window {
 alias dccore.chat.title {
   if (!$window($dccore.chat.win)) { return }
   var %to = $dccore.opt(chat.to)
-  var %auto = (%to == $null) || (%to == *)
-  var %where = $iif(%auto,$iif($dccore.st(chat.replyto) != $null,$dccore.st(chat.replyto),every channel with other DCCore bots),%to)
-  var %priv = (!%auto) && ($left(%to,1) !isin #&+!)
+  ; /var stores a condition as its TEXT - never empty, so always "true" to
+  ; $iif - so each is evaluated by $iif here (#1041). And "privately" is
+  ; decided by where the line goes, the automatic target included: with no
+  ; pick, a peer who wrote privately is answered privately.
+  var %auto = $iif((%to == $null) || (%to == *),1,0)
+  var %target = $iif(%auto,$dccore.st(chat.replyto),%to)
+  var %where = $iif(%target != $null,%target,every channel with other DCCore bots)
+  var %priv = $iif((%target != $null) && ($left(%target,1) !isin $+($chr(35),&+!)),1,0)
   titlebar $dccore.chat.win DCCore Chat $dccore.dot public $dccore.dot typing sends $iif(%priv,privately to,to) %where $iif(!$dccore.chat.relaying,$dccore.dot not connected to the bot)
 }
 alias dccore.chat.sys {
