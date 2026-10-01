@@ -276,6 +276,7 @@ class DispatchAdmissionTests(DCCoreTestCase):
         reaches the next waiting user.
         """
         self.in_channel("alice", "bob")
+        # Slots to spare: the pack is woken for one (#1034) and the user behind it gets another.
         # Insertion order is the scan order: alice's folder pack comes first.
         config.dcc_queue["alice"] = [queue_row(user="alice", filename="Album.rar",
                                                is_unpacked_rar_folder=True,

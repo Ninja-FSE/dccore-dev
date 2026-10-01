@@ -1847,6 +1847,8 @@ def check_queue_and_send(irc_sock, completed_user):
     # NICK (no more PONGs, the server drops the bot). Section A's plain-file
     # branch has always dispatched outside the lock; this is the same shape.
     promoted = None
+    pack_owner = None
+    slots_left = 0
     if len(config.active_transfers) < config.MAX_DCC_SLOTS:
         with queue_lock:
             # FIXED: re-check the slot count INSIDE the lock. The test above is already
@@ -1855,6 +1857,7 @@ def check_queue_and_send(irc_sock, completed_user):
             if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
                 return
 
+            slots_left = config.MAX_DCC_SLOTS - len(config.active_transfers)
             forget_stamps_of_empty_queues()
             for waiting_user, user_files in sorted(config.dcc_queue.items(), key=lambda entry: queue_waiting_since(entry[0])):
                 # Use the dcc_queue dict key for every lock/queue operation. The old code
@@ -1941,9 +1944,18 @@ def check_queue_and_send(irc_sock, completed_user):
 
                 if user_is_globally_active is True:
                     if g_next.get('is_unpacked_rar_folder') is True:
-                        # FIXED: this was `break`, which abandoned the whole scan. One user
-                        # waiting on a RAR pack starved every other waiting user behind them
-                        # for as long as the pack took. Skip this user and keep looking.
+                        # Only section A starts a pack, so the sweep cannot promote it. A pack
+                        # turned away at [DCC-BLOCK] was woken by nothing once the plain send
+                        # that held the slot finished (#1034): it is this user's turn when
+                        # nobody has waited longer, so wake them and set a slot aside for it;
+                        # the scan goes on only while another slot is left. With the packer
+                        # busy, or a pack already woken, skip them and keep looking.
+                        if pack_owner is None and not getattr(config, 'rar_inprogress', False):
+                            pack_owner = real_username
+                            slots_left -= 1
+                            if slots_left <= 0:
+                                break
+                            continue
                         print(f"[DCC QUEUE] Folder pack already pending for {real_username}. Skipping to the next waiting user.")
                         continue
 
@@ -1965,6 +1977,10 @@ def check_queue_and_send(irc_sock, completed_user):
 
         announce_mod.send_dcc_sending_notice(real_username, g_name, path=g_path, channel=g_chan)
         threading.Thread(target=start_dcc_send, args=(irc_sock, real_username, g_path, g_name, g_chan, g_next), daemon=True).start()
+
+    if pack_owner is not None:
+        print(f"[RAR-WAKE] A slot is free and the pack for {pack_owner} has waited longest; dispatching it now.")
+        threading.Thread(target=check_queue_and_send, args=(irc_sock, pack_owner), daemon=True).start()
 
     for absent_user, absent_chan in absent_users:
         freeze_absent_user(irc_sock, absent_user, absent_chan)
