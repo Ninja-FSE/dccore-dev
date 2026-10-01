@@ -61,10 +61,26 @@ class OneFile(DCCoreTestCase):
         self.assertIn("erin", config.dcc_queue)
 
     def test_a_frozen_queue_loses_the_file_too(self):
-        config.dcc_queue = {}
-        config.frozen_queues = {"dave": [row("A.mp3"), row("B.mp3")]}
+        """As dcc.freeze_absent_user() really leaves it (#1042): the rows stay
+        in dcc_queue, and frozen_queues holds the time the queue froze. This
+        used to build frozen_queues as rows, which is why the TypeError a real
+        frozen user hit never showed here."""
+        saved = []
+        db.save_dcc_queue = lambda *a, **k: saved.append(True)
+        config.dcc_queue = {"dave": [row("A.mp3"), row("B.mp3")]}
+        config.frozen_queues = {"dave": 1000.0}
         commands.handle_queue_remove_file(self.sock, "dave", "#c", "A.mp3")
-        self.assertEqual([r["file"] for r in config.frozen_queues["dave"]], ["B.mp3"])
+        self.assertEqual([r["file"] for r in config.dcc_queue["dave"]], ["B.mp3"])
+        self.assertEqual(config.frozen_queues, {"dave": 1000.0}, "still frozen: B.mp3 waits")
+        self.assertIn("Removed", self.notices[0])
+        self.assertEqual(saved, [True])
+
+    def test_the_last_file_of_a_frozen_queue_unfreezes_it(self):
+        config.dcc_queue = {"dave": [row("A.mp3")]}
+        config.frozen_queues = {"dave": 1000.0, "erin": 1000.0}
+        commands.handle_queue_remove_file(self.sock, "dave", "#c", "A.mp3")
+        self.assertNotIn("dave", config.dcc_queue)
+        self.assertEqual(config.frozen_queues, {"erin": 1000.0})
 
     def test_the_bare_form_still_clears_the_whole_queue(self):
         config.dcc_queue = {"dave": [row("A.mp3"), row("B.mp3")]}

@@ -226,21 +226,23 @@ def handle_queue_remove_file(s, user, target, filename):
     removed_archives = []
     removed = 0
     with dcc.queue_lock:
-        for queues in (getattr(config, 'dcc_queue', {}), getattr(config, 'frozen_queues', {})):
-            rows = queues.get(user_key)
-            if not rows:
-                continue
-            gone = [r for r in rows if isinstance(r, dict)
-                    and _same_file_name(r.get('file', ''), wanted)]
-            if not gone:
-                continue
-            if queues is getattr(config, 'dcc_queue', None):
-                removed_archives += dcc.discard_orphaned_temp_archives(user_key, rows=gone)
+        # dcc_queue alone holds rows. A frozen user's rows stay there too:
+        # frozen_queues maps a nick to the time it froze (#1042), and walking it
+        # as rows raised a TypeError after the row was already gone in memory -
+        # no save, no NOTICE, and a packed archive deleted that the file on
+        # disk still named.
+        queues = getattr(config, 'dcc_queue', {})
+        rows = queues.get(user_key) or []
+        gone = [r for r in rows if isinstance(r, dict)
+                and _same_file_name(r.get('file', ''), wanted)]
+        if gone:
+            removed_archives = dcc.discard_orphaned_temp_archives(user_key, rows=gone)
             queues[user_key] = [r for r in rows if not any(r is g for g in gone)]
             if not queues[user_key]:
                 del queues[user_key]
-            removed += len(gone)
-        if removed:
+                # Nothing left to keep frozen - as handle_queue_remove() does.
+                getattr(config, 'frozen_queues', {}).pop(user_key, None)
+            removed = len(gone)
             db.save_dcc_queue()
 
     if removed:
