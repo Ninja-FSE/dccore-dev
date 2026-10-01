@@ -2350,6 +2350,15 @@ def build_fetch_delete_result(request_id, only_states=None):
                       and row.get("request_type", "file") == "file")
         bot = row.get("bot")
         asked_for = row.get("requested_filename") or row.get("filename")
+        if row.get("state") in ("pending", "queued", "offered"):
+            # Let go before it started: the transfer record's "cancelled"
+            # (#1068). A finished or failed row was recorded when it ended;
+            # deleting it now only forgets it here.
+            try:
+                import transfer_log
+                transfer_log.fetch_ended(request_id, row, result="cancelled", reason="")
+            except Exception as err:
+                print(f"[FETCH] Could not record a cancelled download: {err}")
         del config.fetch_queue[request_id]
         never_sent = dcc_fetch.take_back_unsent_request(row)
 
@@ -2771,7 +2780,7 @@ SETTINGS_CATEGORIES = (
                                                 "CONSOLE_SHOW_SENDS", "CONSOLE_SHOW_FAILURES",
                                                 "CONSOLE_SHOW_SEARCHES", "DEBUG_CHANNEL_FEED"]),
     ("debug",         "Debug & logging",       ["DEBUG_MODE", "DEBUG_TO_CHANNEL",
-                                                "DEBUG_TO_CONSOLE",
+                                                "DEBUG_TO_CONSOLE", "TRANSFER_LOG",
                                                 "CONSOLE_TIMESTAMP_FORMAT", "PROJECT_URL"]),
     # LAST, and named so nobody opens it by accident. Set once at install, and
     # a wrong value here loses a queue or a statistics file rather than
@@ -2783,7 +2792,7 @@ SETTINGS_CATEGORIES = (
                                                 "STATS_FILE", "KNOWN_BOTS_FILE",
                                                 "FETCHED_BOT_LISTS_FILE", "LIST_INDEX_FILE",
                                                 "LIST_AUDIO_INFO_CACHE",
-                                                "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE",
+                                                "FETCH_HISTORY_FILE", "DOWNLOAD_COUNTS_FILE", "TRANSFER_LOG_FILE",
                                                 "LIST_SIZE_FILE", "LIST_RAWBYTES_FILE",
                                                 "LIST_PROGRESS_FILE", "LIBRARY_FOLDERS_FILE",
                                                 "LISTS_FILE", "ADMIN_TOKENS_FILE", "ON_CONNECT_FILE",
@@ -2876,6 +2885,7 @@ SETTINGS_LABELS = {
     "LIST_AUDIO_INFO_MINUTES": "Time limit for reading audio files",
     "LIST_AUDIO_INFO_THREADS": "Audio files read at once",
     "LIST_SCAN_THREADS": "Folders scanned at once",
+    "TRANSFER_LOG_FILE": "Transfer record (database)",
     "DOWNLOAD_COUNTS_FILE": "Download counts file",
     "FETCHED_BOT_LISTS_FILE": "Fetched bot lists file",
     "FETCH_HISTORY_FILE": "Fetch history file",
@@ -2937,6 +2947,7 @@ SETTINGS_LABELS = {
 
     "DEBUG_MODE": "Debug mode",
     "DEBUG_TO_CHANNEL": "Send debug lines to channel",
+    "TRANSFER_LOG": "Keep a record of every request and transfer",
     "DEBUG_TO_CONSOLE": "Send debug lines to admin console",
     "CONSOLE_SHOW_REQUESTS": "Show requests (who asked for what)",
     "CONSOLE_SHOW_QUEUE": "Show queue positions",

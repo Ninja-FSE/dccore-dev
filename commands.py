@@ -236,6 +236,8 @@ def handle_queue_remove_file(s, user, target, filename):
         gone = [r for r in rows if isinstance(r, dict)
                 and _same_file_name(r.get('file', ''), wanted)]
         if gone:
+            import transfer_log
+            transfer_log.removed(gone, user, "removed", "removed by the user")
             removed_archives = dcc.discard_orphaned_temp_archives(user_key, rows=gone)
             queues[user_key] = [r for r in rows if not any(r is g for g in gone)]
             if not queues[user_key]:
@@ -272,6 +274,8 @@ def handle_queue_remove(s, user, target):
             # not, so every archive it orphaned stayed in TMP_ZIP_DIR until
             # somebody noticed the disk filling.
             removed_archives = dcc.discard_orphaned_temp_archives(user_key)
+            import transfer_log
+            transfer_log.removed(config.dcc_queue[user_key], user, "removed", "removed by the user")
             del config.dcc_queue[user_key]
             db.save_dcc_queue()  # Write the cleared queue straight to disk
 
@@ -324,6 +328,9 @@ def handle_admin_clear_queue(user, target_chan, msg_text, authorised=False, user
             for temp_path in dcc.discard_orphaned_temp_archives(target_key):
                 print(f"[ADMIN CLEARQUEUE] Removed orphaned temp archive: {temp_path}")
 
+            import transfer_log
+            transfer_log.removed(config.dcc_queue[target_key], target_nick, "cleared",
+                                 f"cleared by {user}")
             del config.dcc_queue[target_key]
             db.save_dcc_queue()
 
@@ -513,6 +520,8 @@ PRESERVE_RUNTIME = (
     'chat_who_round',     # the WHO round in flight per channel - losing it mid-round
     'recent_joins',       # #376: joins inside the merge window - a rehash in it
                           # would otherwise lose when the new nick appeared
+    'transfer_log_pending',  # #1068: rows recorded, not yet written - a rehash
+                          # is no reason to lose a second of the record
     'list_grab_others_asked',  # #926: who just asked which bot for its list.
                           # Losing it lets the automatic grab ask a bot that is
                           # busy sending someone else's list

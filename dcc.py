@@ -19,6 +19,7 @@ import announce
 import db
 import library
 import runtime
+import transfer_log
 
 # THE queue lock: bound to runtime.py's object, not constructed here - dcc.py is
 # reloaded by !rehash (commands.CORE_MODULES), and importlib.reload() re-executing
@@ -980,6 +981,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
 
     retained = False
     gave_up = False
+    why = ""
     budget = getattr(config, "MAX_SEND_FAILS", 3)
 
     with queue_lock:
@@ -1001,6 +1003,7 @@ def release_queue_entry(user, next_file, delivered, reason=""):
             if attempts >= budget:
                 removed = _remove_by_identity()
                 gave_up = True
+                why = "gave up after " + str(attempts) + " tries"
                 outcome = "failed " + str(attempts) + "/" + str(budget) + " - giving up, " + str(removed) + " row(s) removed"
             else:
                 retained = True
@@ -1010,6 +1013,10 @@ def release_queue_entry(user, next_file, delivered, reason=""):
         db.save_dcc_queue()
     except Exception as save_err:
         print("[DCC QUEUE ERROR] Could not persist the queue: " + str(save_err))
+
+    # The transfer record (#1068): sent, kept for another try, or given up on.
+    transfer_log.settled(next_file, user, delivered, retained,
+                         reason if retained or delivered or not why else reason + " (" + why + ")")
 
     if gave_up or (not delivered and not retained):
         # Tell the user their file was dropped. Silently discarding it is how the old
@@ -1343,6 +1350,8 @@ def freeze_absent_user(irc_sock, user, target_chan):
             if isinstance(frozen, dict):
                 still_frozen = frozen.pop(t_key, None) is not None
             if still_frozen and t_key in config.dcc_queue:
+                transfer_log.removed(config.dcc_queue[t_key], target_user, "expired",
+                                     "left and did not come back in time")
                 for f_obj in config.dcc_queue[t_key]:
                     if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
                         try: os.remove(f_obj['path'])
@@ -1439,6 +1448,12 @@ def check_queue_and_send(irc_sock, completed_user):
                 # absence - see frozen_users_channel_is_synced().
                 if (current_time - freeze_timestamp) > FREEZE_TIMEOUT and frozen_users_channel_is_synced(f_user):
                     if f_user in config.dcc_queue:
+                        expired_rows = config.dcc_queue[f_user]
+                        transfer_log.removed(
+                            expired_rows,
+                            next((r.get("user_raw") for r in expired_rows
+                                  if isinstance(r, dict) and r.get("user_raw")), f_user),
+                            "expired", "left and did not come back in time")
                         for f_obj in config.dcc_queue[f_user]:
                             if isinstance(f_obj, dict) and f_obj.get('is_temporary_zip') is True and os.path.exists(f_obj['path']) and not f_obj.get('is_unpacked_rar_folder'):
                                 try: os.remove(f_obj['path'])
@@ -1617,6 +1632,8 @@ def check_queue_and_send(irc_sock, completed_user):
                     # row deleted with it.
                     if not path_is_in_our_library(true_source_dir):
                         print(f"[SECURITY] Blocked a poisoned queue entry for {completed_user}: {true_source_dir}")
+                        transfer_log.removed([next_file], completed_user, "failed",
+                                             "folder is not in the library")
                         with queue_lock:
                             if completed_user.lower() in config.dcc_queue:
                                 config.dcc_queue[completed_user.lower()] = [
@@ -2456,6 +2473,36 @@ def resume_transfers():
     config.transfers_paused = False
 
 
+def _recorded_request(handler):
+    """Follow a request through handle_download_request() for the transfer
+    record (#1068): queued and sent rows are recorded where they are made,
+    and one that was neither - refused, with the reason the user was told -
+    is recorded here when the handler returns. A decorator rather than a
+    try/finally around the body, which would re-indent three hundred lines."""
+    def follow(irc_sock, user, requested_file, target_chan):
+        text = str(requested_file or "")
+        if text.lower().startswith("!rar "):
+            kind = "folder"
+        elif list_mod.is_list_artifact_name(text):
+            kind = "list"
+        else:
+            kind = "file"
+        ctx = transfer_log.begin_request(user, text, target_chan, kind)
+        error = None
+        try:
+            return handler(irc_sock, user, requested_file, target_chan)
+        except Exception as err:
+            error = err
+            raise
+        finally:
+            transfer_log.end_request(ctx, error)
+    follow.__wrapped__ = handler
+    follow.__doc__ = handler.__doc__
+    follow.__name__ = handler.__name__
+    return follow
+
+
+@_recorded_request
 def handle_download_request(irc_sock, user, requested_file, target_chan):
     """Runs when somebody requests a file, or a whole folder via !rar."""
     # ---------------------------------------------------------------------
@@ -2544,6 +2591,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
     # Only while the rebuilt list is swapped in (#923), unless the operator
     # asked for the whole rebuild - and the notice says which it is.
     if list_mod.rebuild_pauses_requests():
+        transfer_log.note_refusal("list rebuilding")
         wait = ("Please wait 1-2 minutes." if list_mod.rebuild_pauses_everything()
                 else "Please try again in a few seconds.")
         oserve = sys.modules.get('oserve')
@@ -2765,7 +2813,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 master_rar_filename = f"{clean_folder_name}.rar"
 
 
-                config.dcc_queue[user_key].append({
+                pack_row = transfer_log.stamp({
                     "file": master_rar_filename, # The clean name is what gets written to dcc_queue.txt
                     "path": true_source_dir,
                     "channel": target_chan,
@@ -2773,7 +2821,10 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     "is_unpacked_rar_folder": True,
                     "is_temporary_zip": True
                 })
+                config.dcc_queue[user_key].append(pack_row)
                 user_pos = len(config.dcc_queue[user_key])
+            transfer_log.queued(pack_row, user, target_chan, "folder", position=user_pos,
+                                queue_length=total_global_queued + 1, list_label=wanted_list)
 
             # Persisted AFTER the lock is released (#605): save_dcc_queue()
             # takes its own snapshot of the dict and fsyncs under disk_lock,
@@ -2827,6 +2878,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # open, and on Windows the swap's replace gave up and the whole
             # rebuild rolled back.
             if getattr(config, 'update_inprogress', False) is True:
+                transfer_log.note_refusal("list rebuilding")
                 oserve = sys.modules.get('oserve')
                 if oserve:
                     oserve.queue_message(user, f"NOTICE {user} :{config.C_BOLD}System Notice{config.C_RESET}: Master list is currently rebuilding. Please wait a few minutes and try again. \r\n")
@@ -3184,14 +3236,15 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
 
-                next_file_fake = {"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False}
+                next_file_fake = transfer_log.stamp({"path": full_path, "file": file_name, "channel": target_chan, "is_temporary_zip": False})
                 config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name})
             else:
                 # This user already has a track running; the row goes to dcc_queue.txt
                 start_waiting(user_key)
                 if user_key not in config.dcc_queue:
                     config.dcc_queue[user_key] = []
-                config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False})
+                queue_row = transfer_log.stamp({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False})
+                config.dcc_queue[user_key].append(queue_row)
                 user_pos = len(config.dcc_queue[user_key])
 
         # EVERYTHING THAT TOUCHES A DISK RUNS AFTER THE LOCK IS RELEASED (#605).
@@ -3204,6 +3257,13 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
         # outbound line of any kind went out, and the IRC read thread takes it
         # on every NICK, so the PONGs stopped and the server dropped the bot.
         # Outside the lock the hang is confined to this request's thread.
+        # The transfer record (#1068): a send that starts now has no place
+        # in the queue, so none is recorded.
+        transfer_log.queued(next_file_fake if sends_now else queue_row, user, target_chan,
+                            "list" if is_master_zip else "file",
+                            position=None if sends_now else user_pos,
+                            queue_length=total_global_queued + (0 if sends_now else 1),
+                            list_label=wanted_list)
         if sends_now:
             if oserve: oserve.active_downloads = len(config.active_transfers)
             # Where "Sent:" goes, resolved the way the queued paths resolve
@@ -3756,10 +3816,12 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         # console's SLOT line (#550, step 3) wants the total and a speed, so
         # the size and the start moment go on the same row here, where both
         # are known. Read-only for everything else.
+        started_at = time.time()
         for tx in config.active_transfers:
             if _mine(tx):
                 tx['size'] = file_size
-                tx['started_at'] = time.time()
+                tx['started_at'] = started_at
+        transfer_log.send_started(next_file, user, started_at, file_size, resume_offset)
         if resume_offset:
             # bytes_sent counts what the RECEIVER ends up holding, so the
             # completeness check below still compares against the whole file.
@@ -4085,6 +4147,8 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
         #    pack keeps its row for MAX_SEND_FAILS like a plain file, and the cleanup
         #    below keeps the archive for a row that was kept.
         row_retained = False
+        transfer_log.send_finished(next_file, user,
+                                   bytes_sent if 'bytes_sent' in locals() else 0)
         try:
             if transfer_completed:
                 settled_reason = "transfer complete"

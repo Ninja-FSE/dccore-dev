@@ -285,6 +285,14 @@ chat_peers_meta = {"last": 0.0}
 chat_who_round = {}
 chat_lock = threading.Lock()
 
+# transfer_log.py (#1068): the rows waiting for the writer, the guard on that
+# list (a Condition, so the writer sleeps until there is something to write),
+# one writer at a time on the database, and the writer thread itself.
+transfer_log_pending = []
+transfer_log_lock = threading.Condition()
+transfer_log_write_lock = threading.Lock()
+transfer_log_writer_thread = None
+
 update_check_guard        = threading.Lock()  # the version check's start guard (#572)
 update_check_started      = False
 update_check_last_attempt = None   # when the last check (daily or manual) began

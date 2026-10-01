@@ -888,6 +888,9 @@ def forget_queue_full_notice(user):
 
 def send_dcc_error(user, error_type):
     """Send the standard DCC error messages to the user."""
+    # The reason the transfer record (#1068) gives a refused request.
+    import transfer_log
+    transfer_log.note_refusal(error_type)
     oserve = sys.modules.get('oserve')
     if error_type in QUEUE_FULL_KINDS and _already_told_queue_full(user, error_type):
         return
@@ -1446,6 +1449,8 @@ def send_pack_error_notice(irc_sock, user):
     """Send the user a private NOTICE, in the same colour theme, when a request is refused."""
     import defaults as config
     import sys
+    import transfer_log
+    transfer_log.note_refusal("folder refused")
     
     # Take the colour codes from the existing structure
     BG_RED_BLOCK, BG_CYAN_BLOCK, BG_TEXT_BOX, R, B, V, A, X = theme.blocks()

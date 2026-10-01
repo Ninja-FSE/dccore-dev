@@ -4,6 +4,39 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A record of every request and transfer, sent and received (#1068, phase 1)
+
+The bot kept totals only (`stats.txt`, `download_counts.json`, the last 500 downloads), so "who downloaded most
+this month", "which hours are busiest" or "how long do people wait" could never be answered, and what was not written
+down was gone. `transfer_log.py` now keeps one row per request in an SQLite database, `TRANSFER_LOG_FILE`
+(`data/transfers.db`): written when it is queued or refused, and finished however it ends - `sent`, `failed` (with
+why, and "gave up after N tries"), `removed` by the user, `expired` after they left, `cleared` by an admin,
+`refused` with the reason the user was told - plus one row per download from another bot (`complete`, `failed`,
+`cancelled`). A row holds the nick (and a lower-cased key), the channel, the file, its path and list label, the kind
+(file, folder, list), size, bytes moved, the resume offset, the queue position and queue length when asked, the
+request, start and end times, and for downloads the other bot, the name it arrived as and whether it was passive. Nick
+only: no hosts, no IP addresses, no searches.
+
+- **Nothing waits on it.** The hooks put a row on `runtime.transfer_log_pending` and return; one writer thread
+  upserts what has gathered about once a second, in one transaction, on a connection it opens and closes. A failed
+  write is logged and dropped. Each row carries the database path it was recorded under, so a late write can never
+  reach a different file. A damaged database is moved aside (kept) and a new one started.
+- **One row per request.** A queue row gets `log_id` and `requested_at` when it is built (`transfer_log.stamp()`), kept
+  in `dcc_queue.txt`; every later event upserts the same id. A row queued before this existed gets its record when it
+  ends.
+- **The hooks:** `handle_download_request()` is wrapped by `_recorded_request` (a decorator, so the 300-line body is
+  not re-indented), which records a request that was neither queued nor sent as `refused` when a reason was noted -
+  `announce.send_dcc_error()`, `send_pack_error_notice()` and the two list-rebuilding notices note it. The queue
+  appends, the send start (where `started_at` is set), the attempt's end (bytes, before the row is settled),
+  `release_queue_entry()` (sent / kept with its failures / given up), the poisoned-pack drop, both freeze expiries,
+  `-remove` (one file and all), `!clearqueue`, `dcc_fetch._mark_failed_locked()` and the one place a download
+  completes, and the dashboard's delete of a download that had not started.
+- `TRANSFER_LOG` (Debug & logging) turns it off. It is off in the test harness unless a test turns it on, and its
+  file is per test.
+
+Phase 2 moves the existing stats in as baseline rows and builds the dashboard views on this table. Tests:
+`tests/test_a_record_of_every_transfer.py`.
+
 ### 🐛 A slot freed next to a folder pack is offered to the nick that waited longest (#1038)
 
 Audit 2026-10-01 M1. When the nick that had just finished had a folder pack as its next row, `check_queue_and_send()`

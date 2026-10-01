@@ -390,6 +390,7 @@ LIST_AUDIO_INFO_MINUTES: int = 5  # Minutes one rebuild may spend reading new au
 # bounded on purpose: a bot can only send what it shares, so the row count is
 # capped by the library itself.
 DOWNLOAD_COUNTS_FILE: str = "./data/download_counts.json"
+TRANSFER_LOG_FILE: str = "./data/transfers.db"   # The record of every request and transfer, sent and received (#1068)
 
 # Which bots we hold a fetched list for, and where it lives on disk - one
 # small entry per bot ("bot", "fetched_at", "list_path", "entry_count",
@@ -593,6 +594,15 @@ ADMIN_CHAT_COLOURS: bool = True    # Colour the tags in the admin DCC chat the w
 # watching - is the one worth protecting.
 DEBUG_TO_CHANNEL: bool = True
 DEBUG_TO_CONSOLE: bool = True    # Debug lines also reach the admin DCC console and the dashboard's Console page
+# Keep a record of every request and transfer, sent and received (#1068).
+#
+# One row per request, written when it is queued or refused and finished
+# however it ends - sent, failed, removed by the user, expired after they
+# left, cleared by an admin - and one per download from another bot: nick,
+# channel, file, kind, sizes, times and how it ended. Statistics are worked
+# out from it. Kept in TRANSFER_LOG_FILE, an SQLite database; nick only, no
+# hosts and no IP addresses. Writing it never holds up a transfer.
+TRANSFER_LOG: bool = True
 
 # Every line the daemon prints to its console window - or to the file its
 # output is redirected to - is prefixed with the time it was written, in this
@@ -1124,6 +1134,8 @@ chat_muted = runtime.chat_muted
 chat_peers = runtime.chat_peers
 chat_peers_meta = runtime.chat_peers_meta
 chat_who_round = runtime.chat_who_round
+# #1068 The transfer record's rows waiting for its writer - see runtime.py.
+transfer_log_pending = runtime.transfer_log_pending
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)

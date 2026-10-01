@@ -581,6 +581,12 @@
 # capped by the library itself.
 #DOWNLOAD_COUNTS_FILE = ./data/download_counts.json
 
+# Where the record of every request and transfer is kept: an SQLite database
+# the statistics are worked out from.
+#
+# The record of every request and transfer, sent and received (#1068)
+#TRANSFER_LOG_FILE = ./data/transfers.db
+
 # Where the bot remembers which other bots' lists it holds.
 #
 # Which bots we hold a fetched list for, and where it lives on disk - one
@@ -876,6 +882,20 @@
 #
 # Debug lines also reach the admin DCC console and the dashboard's Console page
 #DEBUG_TO_CONSOLE = true
+
+# Keep a record of every request and every transfer, sent and received: nick,
+# channel, file, sizes, times and how it ended. The statistics are worked out
+# from it. Nick only - no hosts and no IP addresses.
+#
+# Keep a record of every request and transfer, sent and received (#1068).
+# 
+# One row per request, written when it is queued or refused and finished
+# however it ends - sent, failed, removed by the user, expired after they
+# left, cleared by an admin - and one per download from another bot: nick,
+# channel, file, kind, sizes, times and how it ended. Statistics are worked
+# out from it. Kept in TRANSFER_LOG_FILE, an SQLite database; nick only, no
+# hosts and no IP addresses. Writing it never holds up a transfer.
+#TRANSFER_LOG = true
 
 # The time shown at the start of every line in the bot's window. %H:%M:%S is
 # hours:minutes:seconds; use %Y-%m-%d %H:%M:%S to include the date; leave

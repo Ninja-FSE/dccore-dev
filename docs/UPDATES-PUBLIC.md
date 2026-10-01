@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **New: the bot keeps a record of every request and transfer.** Every file asked for - sent, failed, removed, expired or refused, and why - and every file downloaded from another bot, with the nick, channel, file, size and times, in `data/transfers.db`. It is the start of detailed statistics (top downloaders, busiest hours, waits and speeds), which come next on the dashboard. Nick only: no hosts or IP addresses are kept. It can be turned off under Settings > Debug & logging.
 - **Fixed: a send slot no longer stands idle while a folder (`!rar`) is being packed.** When the person who had just finished had a folder next in their queue, the freed slot was left unused for as long as the packing took - up to half an hour - and a new request was queued instead of sent. It now goes to whoever has waited longest.
 - **Fixed: in the DCCore Chat window, an answer to someone who wrote to you privately could go to a channel instead.** If a line arrived from a channel while you were typing a private reply, the reply was sent to that channel. A private conversation now stays private until you pick another target yourself.
 - **Fixed: Cancel on the Downloads page could delete a file that had just finished downloading**, if it finished while the "Nothing has been downloaded yet" question was open. Cancel now only ever lets go of a request that has not started; a finished one stays, and the page says so.

@@ -131,6 +131,8 @@ RUNTIME_CONTAINERS = {
     # And the burst window, or one test's flood ceiling is still half full
     # when the next test asks whether a reply went out.
     "private_message_decline_sends": list,
+    # #1068: rows one test recorded are not the next one's to write.
+    "transfer_log_pending": list,
 }
 
 # SETTINGS A TEST MAY CHANGE AND MUST NOT LEAVE CHANGED.
@@ -236,6 +238,7 @@ _ORPHANED_QUEUE_SINK = os.path.join(_ORPHANED_WRITE_DIR, "dcc_queue.txt")
 # download-count history the same way it emptied the queue.
 _ORPHANED_SPEED_RECORD_SINK = os.path.join(_ORPHANED_WRITE_DIR, "speed_record.txt")
 _ORPHANED_DOWNLOAD_COUNTS_SINK = os.path.join(_ORPHANED_WRITE_DIR, "download_counts.json")
+_ORPHANED_TRANSFER_LOG_SINK = os.path.join(_ORPHANED_WRITE_DIR, "transfers.db")
 
 
 def reset_config(**overrides):
@@ -651,6 +654,13 @@ class DCCoreTestCase(unittest.TestCase):
         # test that wants to see that happen can.
         self.set_config(FETCHED_FILES_DIR=os.path.join(
             self._fetch_history_dir, "fetched"))
+        # The transfer record (#1068) is OFF in tests unless a test turns it
+        # on: every send a test makes would otherwise start its writer and
+        # leave a database in a temp folder the test has already removed.
+        # And its file is this test's, like every other file above.
+        self.set_config(TRANSFER_LOG=False,
+                        TRANSFER_LOG_FILE=os.path.join(self._fetch_history_dir,
+                                                       "transfers.db"))
 
         self._real_known_bots_file = db.KNOWN_BOTS_FILE
         db.KNOWN_BOTS_FILE = os.path.join(self._fetch_history_dir,
@@ -810,6 +820,9 @@ class DCCoreTestCase(unittest.TestCase):
         ):
             setattr(_db, name, sink)
             setattr(self.config, name, sink)
+        # The transfer record reads its path from config when a row is
+        # recorded (#1068), so config alone is the name to park.
+        self.config.TRANSFER_LOG_FILE = _ORPHANED_TRANSFER_LOG_SINK
 
     def set_config(self, **overrides):
         """Set config attributes for the duration of one test, restoring

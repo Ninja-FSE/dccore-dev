@@ -642,6 +642,29 @@ def _mark_failed_locked(row, reason):
     # One update(), not two statements - a caller reading row["state"] must
     # never observe "failed" with the old reason (or no reason) still on it.
     row.update(state="failed", reason=reason)
+    _record_end(row)
+
+
+def _request_id_of(row):
+    """The key a row is filed under. Rows do not carry their own id, and
+    several callers of _mark_failed_locked() do not hold the lock, so the
+    queue is walked over a copy."""
+    try:
+        for request_id, candidate in list(getattr(config, "fetch_queue", {}).items()):
+            if candidate is row:
+                return request_id
+    except Exception:
+        pass
+    return None
+
+
+def _record_end(row):
+    """The transfer record (#1068): a download from another bot ended."""
+    try:
+        import transfer_log
+        transfer_log.fetch_ended(_request_id_of(row), row)
+    except Exception as err:
+        print(f"[FETCH] Could not record the end of a download: {err}")
 
 
 # The full content of every terminal row last written to FETCH_HISTORY_FILE,
@@ -2629,6 +2652,7 @@ def _run_transfer(row, offer, dest_dir, stored_name, sock=None):
     if failure_reason is None and bytes_received == total_size:
         row["state"] = "complete"
         row["bytes_received"] = bytes_received
+        _record_end(row)
         _note_connect_success(row.get("bot"))
         if row.get("request_type") == "list":
             # The DCC transfer itself succeeded (declared size matched what
