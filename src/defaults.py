@@ -631,6 +631,16 @@ CONSOLE_LOG_FILE: str = "./data/logs/dccore.log"
 CONSOLE_LOG_MAX_MB: int = 5     # Size at which the log file is started afresh
 CONSOLE_LOG_KEEP: int = 5       # How many old log files are kept
 
+# How the bot runs on Windows when start-dccore.bat starts it (#1065):
+#   normal     in its own window, as always - closing it stops the bot
+#   minimised  in its own window, minimised to the taskbar
+#   hidden     with no window at all; what it says goes to CONSOLE_LOG_FILE,
+#              and start-dccore.bat stop, the dashboard's Tools page or the
+#              console's `shutdown now` stops it
+# The first run always has its window: the setup needs it. Linux and macOS
+# run it in the background with their autostart (systemd, launchd) instead.
+BOT_WINDOW: str = "normal"
+
 # THE CONSOLE FEED (#528). An OmenServe operator sees every request, send and
 # served search live inside mIRC; a DCCore operator saw completions and
 # failures in the admin console and nothing else - "it sends but I can't

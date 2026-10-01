@@ -275,6 +275,7 @@ PLAIN_HELP = {
     'CONSOLE_LOG_FILE': "Everything the bot's window shows is also saved here, with the date on every line, so it is still there after the window is closed. Leave blank for no log file.",
     'CONSOLE_LOG_MAX_MB': 'When the log file reaches this size it is renamed dccore.log.1 and a new one is started.',
     'CONSOLE_LOG_KEEP': 'How many of those older log files are kept before the oldest is deleted.',
+    'BOT_WINDOW': 'How the bot runs on Windows when start-dccore.bat starts it: in its window (normal), minimised to the taskbar, or with no window (hidden), its output then in the log file. Stop a hidden bot with start-dccore.bat stop or Tools > Stop the bot. The first run always has its window.',
     'CONSOLE_TIMESTAMP_FORMAT': "The time shown at the start of every line in the bot's window. %H:%M:%S is hours:minutes:seconds; use %Y-%m-%d %H:%M:%S to include the date; leave blank for no time.",
     'PROJECT_URL': 'Where DCCore comes from. Shown at the top of your list and in the reply to a version request.',
     'TMP_ZIP_DIR': 'Where packed folders and list archives are built before sending. Cleaned up after each transfer.',

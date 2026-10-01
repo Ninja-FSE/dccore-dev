@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **New: on Windows the bot can run minimised, or with no window at all.** Settings > Debug & logging > The bot's window: `normal` (as before), `minimised` (in the taskbar) or `hidden` (no window; what it says goes to `data\logs\dccore.log`). Stop it with `start-dccore.bat stop`, Tools > Stop the bot, or `shutdown now`. The first run always has its window, for the setup.
 - **New: ways to stop the bot without its window.** `start-dccore stop` (on Windows `scripts\windows\start-dccore.bat stop`) asks the bot to stop and waits until it has; the dashboard's Tools page has **Stop the bot**; and the admin console has `shutdown now`. All of them stop it the way Ctrl-C in its window does.
 - **New: the bot keeps a log file.** Everything its window shows is also saved in `data/logs/dccore.log`, with the date on every line, so it is still there after the window is closed. At 5 MB a new file is started and five old ones are kept; Settings > Debug & logging changes that, or turns it off.
 - **Fixed: the bot could take most of a minute to start when it held many fetched lists.** On every start it read the whole cross-list search index (several GB on a busy bot) just to see which lists were in it. It now asks about each list directly, which takes a fraction of a second.

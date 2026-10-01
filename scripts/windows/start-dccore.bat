@@ -326,6 +326,17 @@ rem  the same offer configure.py makes during setup. Never stops the start.
 
 rem --- go ----------------------------------------------------------------
 :go
+rem  BOT_WINDOW (#1065): normal, minimised or hidden. Never on a first run -
+rem  the setup page and its questions need this window - and read through
+rem  window-mode.py, which answers with an exit code: 20 minimised, 21 hidden.
+set "WINDOW_MODE=0"
+if not "%BROWSER_SETUP%"=="1" (
+    %PY% scripts\windows\window-mode.py >nul 2>&1
+    call set "WINDOW_MODE=%%errorlevel%%"
+)
+if "%WINDOW_MODE%"=="21" goto :go_hidden
+if "%WINDOW_MODE%"=="20" goto :go_minimised
+
 echo.
 echo   Starting DCCore.  Press Ctrl-C in this window to stop it.
 echo   Closing this window stops the bot too - leave it open, or minimise it.
@@ -367,3 +378,46 @@ if "%RC%"=="0" (
 echo.
 pause
 exit /b %RC%
+
+rem --- minimised or hidden (#1065) --------------------------------------------
+rem  This window is not there afterwards to read the "already running" exit
+rem  code, so that is asked first.
+:go_minimised
+call :already_running && exit /b 4
+start "DCCore" /min %PY% oserve.py
+echo.
+echo   DCCore is running, minimised to the taskbar.
+goto :started_elsewhere
+
+:go_hidden
+call :already_running && exit /b 4
+rem  pythonw: the same Python with no window. From "py -3" it is "pyw -3",
+rem  from "python" it is "pythonw", from a full path python.exe it is the
+rem  pythonw.exe beside it.
+set "PYW=%PY:python.exe=pythonw.exe%"
+if /i "%PY%"=="py -3" set "PYW=pyw -3"
+if /i "%PY%"=="python" set "PYW=pythonw"
+start "DCCore" %PYW% oserve.py
+echo.
+echo   DCCore is running in the background, with no window.
+echo   What it says is in data\logs\dccore.log.
+
+:started_elsewhere
+echo   Stop it with:  scripts\windows\start-dccore.bat stop
+echo   (or Tools ^> Stop the bot on the dashboard).
+echo.
+rem  A few seconds to read that, then this window goes; no key to press, so
+rem  the logon task does not wait on it either.
+ping -n 8 127.0.0.1 >nul
+exit /b 0
+
+:already_running
+%PY% oserve.py --running >nul 2>&1
+if errorlevel 1 exit /b 1
+echo.
+echo   DCCore is already running from this folder. Stop it first with
+echo       scripts\windows\start-dccore.bat stop
+echo   if you meant to restart it.
+echo.
+if not defined DCCORE_AUTOSTART pause
+exit /b 0

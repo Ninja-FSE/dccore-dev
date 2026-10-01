@@ -16,6 +16,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src
 # print() raises UnicodeEncodeError and takes the thread down with it. See
 # platform_compat.install_console_encoding_guard for the full explanation.
 import platform_compat
+# NO WINDOW, NO STREAMS (#1065). Started with pythonw - BOT_WINDOW = hidden -
+# there is no console, and sys.stdout and sys.stderr are None: print() quietly
+# does nothing, but sys.stdout.write() raises, and the dashboard's Flask writes
+# that way. A real null file stands in, so every write works; what is written
+# still reaches the log file, through the timestamp wrapper installed on it.
+WINDOWLESS = __name__ == "__main__" and (sys.stdout is None or sys.stderr is None)
+if WINDOWLESS:
+    _no_console = open(os.devnull, "w", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = _no_console
+    if sys.stderr is None:
+        sys.stderr = _no_console
 # ONLY WHEN THIS FILE IS THE PROGRAM (#707, audit L43). list.py imports
 # oserve, so every test process - and every script that imports announce -
 # used to run these two installs at import time and wrap the runner's own
@@ -44,6 +56,12 @@ if __name__ == "__main__":
     if "--stop" in sys.argv[1:]:
         import stopping
         sys.exit(stopping.stop_from_outside())
+    # `oserve.py --running`: exit 0 when a bot holds this folder, 1 when not.
+    # start-dccore.bat asks before starting one with no window or a minimised
+    # one, since it is not there afterwards to read the "already running" exit.
+    if "--running" in sys.argv[1:]:
+        import stopping
+        sys.exit(0 if stopping.running_pid()[0] else 1)
 
     # And to a file (#1065), from here on. Read on every line through
     # sys.modules: a settings save reloads defaults, and a changed or emptied
@@ -58,8 +76,12 @@ if __name__ == "__main__":
             keep = max(1, int(getattr(current, "CONSOLE_LOG_KEEP", 5)))
         except (TypeError, ValueError):
             keep = 5
-        return (str(getattr(current, "CONSOLE_LOG_FILE", "") or "").strip(),
-                megabytes * 1024 * 1024, keep)
+        path = str(getattr(current, "CONSOLE_LOG_FILE", "") or "").strip()
+        if not path and WINDOWLESS:
+            # With no window the file is the only place anything is said: a
+            # windowless bot keeps the default log even when it is turned off.
+            path = os.path.join("data", "logs", "dccore.log")
+        return path, megabytes * 1024 * 1024, keep
 
     platform_compat.install_console_log(_console_log_settings)
 

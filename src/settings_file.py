@@ -269,6 +269,8 @@ CHOICES = {
     # against - "the same setting mIRC has" - and because the six of them are
     # the only values anyone actually wants to try.
     "DCC_BLOCK_SIZE": ("4096", "8192", "16384", "32768", "65536", "131072"),
+    # start-dccore.bat reads it (#1065); anything else would quietly be "normal".
+    "BOT_WINDOW": ("normal", "minimised", "hidden"),
 }
 
 
