@@ -266,7 +266,7 @@ class TheReadLoopIsWired(unittest.TestCase):
     """Driving a real connect needs a server, so read out of irc.py."""
 
     def test_every_line_is_read_and_each_connection_starts_over(self):
-        code = read("irc.py")
+        code = read("src/irc.py")
         self.assertIn("on_connect.note_server_line(line, config.NICKNAME)", code)
         start = code.index("my_epoch = config.connection_epoch")
         self.assertIn("on_connect.reset_state()", code[start:start + 1500])
@@ -275,7 +275,7 @@ class TheReadLoopIsWired(unittest.TestCase):
         """The epoch is bound when delayed_join() is defined: read later, a
         reconnect in its five-second sleep would hand the new epoch to a thread
         holding the old socket."""
-        code = read("irc.py")
+        code = read("src/irc.py")
         self.assertIn("def delayed_join(socket_conn, channels, epoch=my_epoch):", code)
         body = code.split("def delayed_join(", 1)[1].split("threading.Thread(target=delayed_join", 1)[0]
         self.assertLess(body.index("join_batches("), body.index("target=on_connect.watch"))

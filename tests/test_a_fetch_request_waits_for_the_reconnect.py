@@ -95,7 +95,7 @@ class ThePump(lanes._WorkerCase):
 
 class TheReconnectKeepsThem(unittest.TestCase):
     def test_the_disconnect_epilogue_does_not_empty_the_lane(self):
-        with open(support.REPO_ROOT + "/irc.py", encoding="utf-8") as handle:
+        with open(support.REPO_ROOT + "/src/irc.py", encoding="utf-8") as handle:
             code = [line.split("#", 1)[0] for line in handle.read().split("\n")]
         self.assertFalse([line for line in code if re.search(r"del\s+config\.fetch_request_queue", line)])
 
