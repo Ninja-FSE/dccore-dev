@@ -12,6 +12,15 @@ was being typed sent that reply to the channel. Now a private line (`@<nick>`) t
 it only while it is no one or already a channel, and only from a channel listened on; a remark (nick `*`) never moves
 it, and a manual pick still overrides all of it. `ADMIN-CONSOLE.md` says where an answer goes. Tests in
 `test_dccore_chat_in_the_mirc_window`.
+### 📦 DCCore Chat's WHO on a JOIN is paced and has a queue of its own
+
+`serverschat.note_join()` asks `WHO <nick>` for a stranger the moment it joins (#1006). It was unpaced and went on the
+channel's own send-queue key, which the standard lane serves one line per pass at `MSG_DELAY` - so a run of joins
+held back whatever else the bot had to say there, the dashboard's `@find` included, past its search window. Now one
+nick is asked at most once a `WHO_EVERY`, at most `JOIN_WHO_MOST` (5) such questions go out in `JOIN_WHO_PER` (60 s)
+- past that the regular WHO round finds them - and they go on a key of their own (`*chat-who*`; no nick contains
+`*`). Both limits live in `runtime.chat_rate`; the cap's own window is exempt from the full-table pruning, like the
+all-senders one. Tests in `test_servers_chat_is_relayed_by_the_bot`.
 
 ### 📦 An offer is not weighed against its own request's old size (#1039)
 
