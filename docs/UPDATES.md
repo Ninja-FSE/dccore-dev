@@ -4,6 +4,20 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A folder pack turned away while every slot was busy gets its turn (#1034)
+
+Found in the review of #1033. Only `check_queue_and_send()`'s specific-user path (section A) can start a folder pack,
+and every caller hands it the nick that just finished; the sweep (section B) skipped a pack head. So a `!rar` pack
+turned away at `[DCC-BLOCK]` was never tried again - it stayed queued until its owner's next transfer ended, which for
+a nick with only the pack is never. `redispatch_waiting_pack()` covered only `[RAR-HOLD]`. Now the sweep, reaching a
+pack head in wait order (#1032) with a slot free and no other pack being made, starts its owner's own dispatch after
+the lock and keeps a slot for it: a nick further on is promoted in the same pass only if a second slot is free, or
+with one slot the plain file would win the race every time. And section A's yield counts a pack that has
+waited longer, as it does a plain file, while packs can start - so a pack is no longer stuck behind a long plain
+queue. While another pack is being made nothing changes: the packer's release wakes it, and the sweep looks further.
+`test_a_folder_pack_waiting_does_not_hold_back_a_plain_file` asserted the old order and now covers the pack-being-made
+case. Tests: `tests/test_a_blocked_pack_is_woken.py`.
+
 ### 📦 A freed slot goes to the nick that has waited longest (#1032)
 
 The nick that had just finished was handed its own next file straight away, so a nick with a long queue took every slot
