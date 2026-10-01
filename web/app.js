@@ -896,10 +896,15 @@
       : t("download.confirmDeleteFile");
     if (!window.confirm(prompt)) { return; }
     btn.disabled = true;
-    postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", {}).then(function (res) {
+    // Cancel asks for a request that has not started and nothing else
+    // (#1046): one that finished while this dialog was open is refused with a
+    // 409, and its file stays.
+    var body = btn.dataset.pending ? { only_waiting: true } : {};
+    postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", body).then(function (res) {
       if (!res.ok) {
         window.alert(t("download.couldNotDelete").replace("{error}", (res.data && res.data.error) || ("HTTP " + res.status)));
         btn.disabled = false;
+        if (res.status === 409) { loadDownloads(); }
         return;
       }
       loadDownloads();

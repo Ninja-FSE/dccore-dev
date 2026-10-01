@@ -4,6 +4,17 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 The dashboard's Cancel never removes a file that finished meanwhile (#1046)
+
+Audit 2026-10-01 L5. Cancel is offered on a request that has not started (pending, offered, or queued at the other bot)
+and asks "Nothing has been downloaded yet." The table can be up to 8 s old and `window.confirm()` stops it refreshing,
+so the transfer could finish before OK was clicked - and Cancel posted the same empty body as Delete, so
+`api_fetch_delete` took the now-complete row for a Delete and removed its file. Cancel now sends
+`{"only_waiting": true}`, and the route passes `only_states=("pending", "offered", "queued")` to
+`build_fetch_delete_result()`, the guard the mIRC window's Cancel already used: a row that is no longer waiting gets
+the 409 "That download is no longer waiting.", its file stays, and the page redraws the list. Tests:
+`tests/test_cancel_never_removes_a_finished_file.py`.
+
 ### 📦 `-remove <file>` works for a user whose queue is frozen (#1042)
 
 Audit 2026-10-01 L1. `handle_queue_remove_file()` walked `frozen_queues` as if it held rows, but it maps a nick to the
