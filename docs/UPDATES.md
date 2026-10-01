@@ -12,6 +12,7 @@ was being typed sent that reply to the channel. Now a private line (`@<nick>`) t
 it only while it is no one or already a channel, and only from a channel listened on; a remark (nick `*`) never moves
 it, and a manual pick still overrides all of it. `ADMIN-CONSOLE.md` says where an answer goes. Tests in
 `test_dccore_chat_in_the_mirc_window`.
+
 ### 📦 DCCore Chat's WHO on a JOIN is paced and has a queue of its own
 
 `serverschat.note_join()` asks `WHO <nick>` for a stranger the moment it joins (#1006). It was unpaced and went on the
