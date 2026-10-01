@@ -80,6 +80,7 @@ user_requests    = {}    # Command timestamps per user, for anti-flood
 muted_until      = {}    # Timers for temporarily muted users
 whois_status     = {}    # Online status via WHO reply (True = online)
 frozen_queues    = {}    # Saved timestamps for users in the freezer
+queue_waiting_since = {} # {nick: when it began waiting for a slot}; the longest-waiting nick gets the next free one
 
 # The central queue structures ----------------------------------------------
 dcc_queue        = {}    # The main sharing queue, as {username: [files]}
