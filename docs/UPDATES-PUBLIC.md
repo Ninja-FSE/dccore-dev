@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a download that waited a long time in another bot's queue, then had to wait for disk space, could be given up on too soon** after it was queued again. Its new place in that bot's queue is now timed from when it got it.
 - **Fixed: many people joining a channel at once could make dashboard searches come back empty.** DCCore Chat checks each newcomer to see whether it is another DCCore bot, and those checks queued up ahead of the search. They are now limited and kept out of the search's way.
 - **Fixed: a large download that had to wait for disk space, or was cut off by a restart, could be asked for again and again without ever starting** while your disk had less than twice its size free. It now starts as soon as it fits.
 - **Fixed: a folder (`!rar`) request made while every slot was busy could wait for ever.** It was only tried again when that person's own next download finished - so for someone whose only request was the folder, never. It now gets the next free slot when its turn comes, in the same longest-waiting-first order as single files.

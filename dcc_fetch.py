@@ -425,6 +425,12 @@ def _hold_for_space(row, size, reason):
     row.update(state="pending", offered_at=None, bytes_received=0,
                reason=reason, waiting="disk-full", needs_bytes=int(size))
     _as_asked(row)
+    # Its place in the other bot's queue is over too (#1043), as every other
+    # way back to pending says: kept, the old queued_at made the next "Added
+    # ... at position" look hours old, and FETCH_QUEUED_TIMEOUT failed the
+    # fresh place soon after.
+    for stale in ("queued_at", "queue_position", "reply"):
+        row.pop(stale, None)
 
 
 def _mb(size):
