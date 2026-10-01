@@ -4,6 +4,18 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A fetch request that has not gone out survives a lost connection (#1044)
+
+Audit 2026-10-01 L3. #1028 gave fetch requests a lane of their own, and the row that owns one counts it as sent once
+it has left that lane. The disconnect epilogue (`irc.py`) and the queue worker's failed-send branch both emptied the
+whole lane, so every row whose request had not gone out timed out as "no response" - a folder or list row after up
+to `FETCH_FOLDER_OFFER_TIMEOUT`, with no request ever made, and a file row spending one of its `OFFER_ASKS`. Before
+#1028 these lines waited in `send_queue`, which neither exit clears. Now the epilogue leaves the lane alone (the
+lines go out on the next connection; the row's timer does not run while its line is unsent), a line whose send
+failed goes back to the front, and a line the lane's cap trims hands its row to new `dcc_fetch.requests_not_sent()`,
+which puts it back to pending, as asked, to be asked again. Tests:
+`tests/test_a_fetch_request_waits_for_the_reconnect.py`.
+
 ### 📦 A row held for disk room forgets its old place in the other bot's queue (#1043)
 
 Audit 2026-10-01 L2. `_hold_for_space()` put a row back to pending but kept `queued_at`, `queue_position` and

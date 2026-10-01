@@ -1386,6 +1386,25 @@ def _request_is_unsent(row):
     return bool(line) and line in config.fetch_request_queue
 
 
+def requests_not_sent(lines):
+    """Request lines dropped before they went out (#1044): the rows that own
+    them go back to pending, as asked, to be asked again - left "offered",
+    they read the missing line as sent and timed out as "no response".
+    Returns how many rows went back."""
+    lines = set(lines or ())
+    if not lines:
+        return 0
+    back = 0
+    with _fetch_lock():
+        for row in _ensure_fetch_queue().values():
+            if row.get("state") == "offered" and row.get("request_line") in lines:
+                row.pop("request_line", None)
+                row.update(state="pending", offered_at=None)
+                _as_asked(row)
+                back += 1
+    return back
+
+
 def drop_our_request_at(bot, filename):
     """Ask `bot` to take `filename` out of our queue there: `@<bot>-remove
     <file>` in the channel, the per-file form of the command DCCore answers

@@ -76,7 +76,11 @@ def queue_worker():
                 print(f"[QUEUE CAP] Dropped {dropped} old VIP lines (cap is {max_vip}).")
 
             if len(config.fetch_request_queue) > max_vip:
-                del config.fetch_request_queue[:len(config.fetch_request_queue) - max_vip]
+                trimmed = config.fetch_request_queue[:len(config.fetch_request_queue) - max_vip]
+                del config.fetch_request_queue[:len(trimmed)]
+                # Their rows would read them as sent and time out (#1044).
+                import dcc_fetch
+                dcc_fetch.requests_not_sent(trimmed)
 
             max_user = getattr(config, 'MAX_USER_SEND_QUEUE', 100)
             with runtime.send_queue_lock:
@@ -154,7 +158,9 @@ def queue_worker():
                             print(f"[RAW OUT FETCH] {msg.strip()}")
                 except socket.error as net_err:
                     print(f"[QUEUE NET ERROR] Connection is broken ({net_err}).")
-                    del config.fetch_request_queue[:]
+                    # Back where it was, for the next connection (#1044): its
+                    # row counts it as sent once it has left the lane.
+                    config.fetch_request_queue.insert(0, msg)
                     time.sleep(1.0)
                     continue
 

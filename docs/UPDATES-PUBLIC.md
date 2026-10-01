@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: a download request that had not gone out yet when the bot lost its connection was given up on as "no response"** - for a folder, after up to half an hour, although it had never been sent. It now goes out once the bot is back.
 - **Fixed: a download that waited a long time in another bot's queue, then had to wait for disk space, could be given up on too soon** after it was queued again. Its new place in that bot's queue is now timed from when it got it.
 - **Fixed: many people joining a channel at once could make dashboard searches come back empty.** DCCore Chat checks each newcomer to see whether it is another DCCore bot, and those checks queued up ahead of the search. They are now limited and kept out of the search's way.
 - **Fixed: a large download that had to wait for disk space, or was cut off by a restart, could be asked for again and again without ever starting** while your disk had less than twice its size free. It now starts as soon as it fits.
