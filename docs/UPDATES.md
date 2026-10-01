@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 🐛 A slot freed next to a folder pack is offered to the nick that waited longest (#1038)
+
+Audit 2026-10-01 M1. When the nick that had just finished had a folder pack as its next row, `check_queue_and_send()`
+returned from the pack branch without looking further: at `[RAR-HOLD]` (another pack is being made), at `[RAR-BLOCK]`
+(the nick is already locked), when its own packer was started, and when an absent nick was frozen. A pack holds no slot
+while it packs - up to `RAR_TIMEOUT` - so the slot stood idle, and since #1032 a newcomer was kept out of it too, for a
+waiting nick that nothing would dispatch. Now those exits go on to the global sweep, so the freed slot goes to the nick
+that has waited longest. The packed archive is a plain row and waits its turn for a slot. Tests:
+`tests/test_a_slot_freed_next_to_a_pack_is_offered.py`.
+
 ### 📦 In the DCCore Chat window, a private conversation is never moved to a channel by itself
 
 `dccore.chat.feed` moved the automatic reply target (`chat.replyto`) on every incoming line - the bot's own remarks
