@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: a download that waited a long time in another bot's queue, then had to wait for disk space, could be given up on too soon** after it was queued again. Its new place in that bot's queue is now timed from when it got it.
+
 - **Fixed: a large download that had to wait for disk space, or was cut off by a restart, could be asked for again and again without ever starting** while your disk had less than twice its size free. It now starts as soon as it fits.
 
 - **Fixed: a free send slot now goes to whoever has waited longest.** The person who had just finished got their own next file straight away, so someone with a long queue took every slot in turn while everyone else waited for that queue to run dry. Now they go to the back of the line, and a new request no longer jumps ahead of people already waiting. Still one send per person, and the short pause after a finished send is unchanged.

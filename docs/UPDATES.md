@@ -4,6 +4,14 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 A row held for disk room forgets its old place in the other bot's queue (#1043)
+
+Audit 2026-10-01 L2. `_hold_for_space()` put a row back to pending but kept `queued_at`, `queue_position` and
+`reply`, which every other way back to pending drops. A file queued for hours at a busy bot that did not fit when its
+turn came was asked again once space was freed and queued anew - and `handle_bot_reply()`, which only stamps a missing
+`queued_at`, kept the old stamp, so `FETCH_QUEUED_TIMEOUT` failed the fresh place soon after. The hold now drops
+them. Tests: `tests/test_a_held_row_forgets_its_old_queue_place.py`.
+
 ### 📦 An offer is not weighed against its own request's old size (#1039)
 
 Audit 2026-10-01 M2. A file row asked for again after a restart or a disk-full hold keeps the `total_size` of its last
