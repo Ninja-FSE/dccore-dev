@@ -9,11 +9,11 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 Only `check_queue_and_send()`'s own-user branch starts a folder pack, and it is only ever handed the nick whose send
 just finished. A pack turned away at `[DCC-BLOCK]` was woken again only when another pack finished: a plain file
 finishing woke nobody, and the global sweep skipped every pack head, so the pack could wait with free slots until its
-owner happened to finish something. The sweep now wakes the owner of a pack head (`[RAR-WAKE]`) when it is that nick's turn (nobody has waited longer) and
-the packer is idle (`rar_inprogress` clear), and sets one slot aside for it: the scan goes on to plain files only
-while another slot is left. With the packer busy it skips the pack as before. The slot is still claimed in the
-own-user branch, so one nick still has one send and `MAX_DCC_SLOTS` still bounds the total. Tests:
-`tests/test_a_pack_turned_away_for_a_slot_is_woken.py`.
+owner happened to finish something. The sweep now wakes the owner of a pack head (`[RAR-WAKE]`) when it is that nick's
+turn (nobody has waited longer) and the packer is idle (`rar_inprogress` clear), and sets one slot aside for it: the
+scan goes on to plain files only while another slot is left. With the packer busy it skips the pack as before. The
+slot is still claimed in the own-user branch, so one nick still has one send and `MAX_DCC_SLOTS` still bounds the
+total. Tests: `tests/test_a_pack_turned_away_for_a_slot_is_woken.py`.
 
 ### 📦 A freed slot goes to the nick that has waited longest (#1032)
 
