@@ -2691,6 +2691,7 @@ def start_list_update():
 # slotted in fails a test instead of silently never showing up.
 SETTINGS_CATEGORIES = (
     ("identity",      "Identity & network",    ["SERVER", "PORT", "NICKNAME", "ALT_NICKNAME", "REJOIN_ATTEMPTS",
+                                                "ON_CONNECT_CHECK_MINUTES",
                                                 "ADMIN_NICK", "CHANNEL", "DEBUG_CHANNEL",
                                                 "CHECK_FOR_UPDATES"]),
     ("sharing",       "Sharing & queue",       ["MAX_DCC_SLOTS", "MAX_USER_QUEUE",
@@ -2906,6 +2907,7 @@ SETTINGS_LABELS = {
     "CUSTOM_THEME_ACCENT": "Custom theme: accent colour",
     "ANNOUNCE_TRANSFERS": "Announce finished transfers in the channel",
     "REJOIN_ATTEMPTS": "Rejoin attempts after a kick (0 = never)",
+    "ON_CONNECT_CHECK_MINUTES": "Check the on-connect commands worked every (minutes, 0 = never)",
     "ANNOUNCE_INTERVAL": "Advert interval (seconds)",
     "BROADCAST_SEARCH_CHANNEL": "Broadcast search channel",
     "BROADCAST_SEARCH_COOLDOWN": "Broadcast search cooldown (seconds)",
@@ -3574,10 +3576,35 @@ def apply_on_connect_changes(payload):
         "commands": written,
         "delay_seconds": float(delay),
         "reconnect_required": bool(written),
-        "message": ("Saved. They run at the next connection - use them now "
-                    "by reconnecting." if written
+        "message": ("Saved. They run when the bot next reconnects - or now, "
+                    "with Resend commands." if written
                     else "Cleared. Nothing is sent on connect."),
     }
+
+
+def build_on_connect_resend_result():
+    """POST /api/on-connect/resend: send the SAVED commands to the server now
+    (#1066). For when the automatic check gave up, or the operator wants the
+    X login and +x again after a net split without reconnecting.
+
+    Returns (http_status, payload_dict). The text of the commands is never in
+    the answer or the log: an X login holds a password.
+    """
+    import on_connect
+
+    commands, _gap = on_connect.load()
+    if not commands:
+        return 400, {"error": "No on-connect commands are saved."}
+    oserve = sys.modules.get("oserve")
+    sock = getattr(oserve, "irc_connection", None) if oserve else None
+    if sock is None or not getattr(config, "bot_joined_channel", False):
+        return 409, {"error": "The bot is not connected, so nothing was sent."}
+    try:
+        sent = on_connect.resend_now(sock, getattr(config, "NICKNAME", ""))
+    except Exception as err:
+        return 500, {"error": f"Could not send them: {err}"}
+    return 200, {"sent": sent,
+                 "message": f"Sending {sent} on-connect command(s) to the server."}
 
 
 def build_lists_payload():
@@ -4700,6 +4727,11 @@ if HAVE_FLASK:
         @app.route("/api/on-connect")
         def api_on_connect():
             return jsonify(build_on_connect_payload())
+
+        @app.route("/api/on-connect/resend", methods=["POST"])
+        def api_on_connect_resend():
+            status, result = build_on_connect_resend_result()
+            return jsonify(result), status
 
         @app.route("/api/on-connect", methods=["POST"])
         def api_on_connect_save():

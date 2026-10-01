@@ -2798,6 +2798,13 @@ def irc_loop():
         # and the operator should be told again if it matters there too.
         announced_nicklen = False
         bot_joined_channel = False
+        # What the on-connect commands achieved belongs to one connection
+        # (#1066): modes, the hidden host and the resend count start over.
+        try:
+            import on_connect
+            on_connect.reset_state()
+        except Exception as state_err:
+            print(f"[CONNECT] Could not reset the on-connect check: {state_err}")
         announce.is_ready = False
         
         # FIXED (issue #9): tracks WHICH channels were confirmed by 366, not just
@@ -3063,6 +3070,14 @@ def irc_loop():
                     # like. That line is the answer, and it was being read,
                     # matched by nothing, and dropped.
                     recent_lines.append(line.strip()[:200])
+                    # Our own modes (221), a hidden host (396) and a MODE on
+                    # ourselves, for the check that the on-connect commands
+                    # worked (#1066). Returns at once for anything else.
+                    try:
+                        import on_connect
+                        on_connect.note_server_line(line, config.NICKNAME)
+                    except Exception as note_err:
+                        print(f"[CONNECT] Could not read a mode line: {note_err}")
                     # Not only in DEBUG_MODE. An ERROR from the server is the
                     # server explaining itself, and it is never chatter - the
                     # debug filter below would have hidden this behind a
@@ -3214,7 +3229,7 @@ def irc_loop():
                         joined = True
                         print(f"[INFO] Connected to the server. Waiting 5 seconds to settle before JOIN...")
                         
-                        def delayed_join(socket_conn, channels):
+                        def delayed_join(socket_conn, channels, epoch=my_epoch):
                             time.sleep(5)
                             # ON-CONNECT COMMANDS, BEFORE THE JOIN. The order is
                             # the point, not a preference: on Undernet, logging
@@ -3308,6 +3323,13 @@ def irc_loop():
                                 # NEW (issue #9): start the watchdog HERE, right after the JOIN
                                 # has actually been sent, so the timeout starts from the right moment.
                                 threading.Thread(target=activation_watchdog, daemon=True).start()
+                                # And a look, now and then, that the on-connect
+                                # commands took (#1066): in a net split the X
+                                # login can go nowhere, and +x with it.
+                                import on_connect
+                                threading.Thread(target=on_connect.watch,
+                                                 args=(socket_conn, epoch),
+                                                 daemon=True).start()
                             except Exception as join_err:
                                 print(f"[ERROR] Could not send JOIN: {join_err}")
                                 

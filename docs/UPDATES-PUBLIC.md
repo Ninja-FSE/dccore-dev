@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **New: the bot checks that its on-connect commands worked, and sends them again if not.** In a net split the X login can go nowhere, and the bot used to sit in its channels with its real host until it reconnected. Now, if the commands set a user mode such as `+x`, the bot checks a minute after joining and then every 5 minutes (Settings > Identity & network; 0 turns it off) - for `+x`, that the host really is hidden - and sends them all again if not, up to six times per connection. **Resend commands**, beside Save on-connect commands, sends them right away.
 - **Fixed: in the DCCore Chat window, an answer to someone who wrote to you privately could go to a channel instead.** If a line arrived from a channel while you were typing a private reply, the reply was sent to that channel. A private conversation now stays private until you pick another target yourself.
 - **Fixed: Cancel on the Downloads page could delete a file that had just finished downloading**, if it finished while the "Nothing has been downloaded yet" question was open. Cancel now only ever lets go of a request that has not started; a finished one stays, and the page says so.
 - **Fixed: `@<nick>-remove <file>` did nothing for someone who had just left the channel** - no reply, and their queue on disk was not updated. It removes the file and says so now.

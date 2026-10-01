@@ -489,6 +489,18 @@ PRIVATE_MESSAGE_DECLINE_BURST_SECONDS: int = 600   # The window the burst ceilin
 #
 # 0 never rejoins at all.
 REJOIN_ATTEMPTS: int = 3
+# How often to check that the on-connect commands took effect, in minutes.
+#
+# They are sent once, before the JOIN. In a net split the X login among them
+# can go nowhere, and the bot sits in its channels with its real host. So
+# when the commands set a user mode (`MODE %nick% +x`), the bot asks the
+# server for its modes a minute after the JOIN and then this often, and sends
+# every command again if one is missing. For +x that means the host really is
+# hidden: the server says so with numeric 396. At most six resends on one
+# connection.
+#
+# 0 never checks.
+ON_CONNECT_CHECK_MINUTES: int = 5
 
 
 # Announce a finished transfer in the channel it was requested from.
@@ -1124,6 +1136,8 @@ chat_muted = runtime.chat_muted
 chat_peers = runtime.chat_peers
 chat_peers_meta = runtime.chat_peers_meta
 chat_who_round = runtime.chat_who_round
+# #1066 What the on-connect commands achieved on this connection - see runtime.py.
+on_connect_state = runtime.on_connect_state
 
 # ---------------------------------------------------------------------
 # WEB DASHBOARD (read-only status page, see webserver.py)
