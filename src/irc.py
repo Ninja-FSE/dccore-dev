@@ -898,6 +898,15 @@ def note_nick_change(old_nick, new_nick):
                             queued["user_raw"] = new_nick
                 moved.append(name)
 
+        # The wait goes with the queue (#1032): a renamed nick keeps its place
+        # in line, and whatever the new name was stamped with before is stale.
+        stamps = runtime.queue_waiting_since
+        if "dcc_queue" in moved:
+            if old_key in stamps:
+                stamps[new_key] = stamps.pop(old_key)
+            else:
+                stamps.pop(new_key, None)
+
         # #431: dcc.handle_download_request()'s slot-admission gate is built
         # from exactly three things - active_transfers, user_processing_lock
         # and dcc_queue (moved above) - all keyed on the CURRENT nick. Moving
@@ -4099,6 +4108,7 @@ def irc_loop():
         # oserve.queue_message() never writes - adverts go to vip_queue -
         # so it cleared nothing (#630). queue_worker does the same on a
         # failed send; this is the same decision at the other exit.
+        del config.fetch_request_queue[:]
         stale_vip = len(getattr(config, 'vip_queue', ()) or ())
         if stale_vip:
             del config.vip_queue[:]

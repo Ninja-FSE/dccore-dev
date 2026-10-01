@@ -80,10 +80,12 @@ user_requests    = {}    # Command timestamps per user, for anti-flood
 muted_until      = {}    # Timers for temporarily muted users
 whois_status     = {}    # Online status via WHO reply (True = online)
 frozen_queues    = {}    # Saved timestamps for users in the freezer
+queue_waiting_since = {} # {nick: when it began waiting for a slot}; the longest-waiting nick gets the next free one
 
 # The central queue structures ----------------------------------------------
 dcc_queue        = {}    # The main sharing queue, as {username: [files]}
 vip_queue        = []    # Isolated express queue for search headers and adverts
+fetch_request_queue = []  # The requests for files from other bots (#1028), sent ahead of everything else
 active_transfers = []    # Live DCC sends, one thread each
 
 # Cross-bot search/fetch (beta-web) ------------------------------------------
