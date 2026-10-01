@@ -581,6 +581,13 @@
 # capped by the library itself.
 #DOWNLOAD_COUNTS_FILE = ./data/download_counts.json
 
+# Where a record of every finished transfer is kept: what it was, its size,
+# its speed and how long it waited in the queue, and nothing about who asked.
+# Empty turns it off.
+#
+# A row is about 100 bytes, so it is never rotated or trimmed.
+#TRANSFER_LOG_FILE = ./data/transfers.db
+
 # Where the bot remembers which other bots' lists it holds.
 #
 # Which bots we hold a fetched list for, and where it lives on disk - one
