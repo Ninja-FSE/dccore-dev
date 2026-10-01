@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: in the DCCore Chat window, an answer to someone who wrote to you privately could go to a channel instead.** If a line arrived from a channel while you were typing a private reply, the reply was sent to that channel. A private conversation now stays private until you pick another target yourself.
 - **Fixed: Cancel on the Downloads page could delete a file that had just finished downloading**, if it finished while the "Nothing has been downloaded yet" question was open. Cancel now only ever lets go of a request that has not started; a finished one stays, and the page says so.
 - **Fixed: `@<nick>-remove <file>` did nothing for someone who had just left the channel** - no reply, and their queue on disk was not updated. It removes the file and says so now.
 - **Fixed: with an older `dccore.mrc`, the DCCore window filled with `[PEERS] ...` lines** after the bot was updated - on every connect, every ten minutes and whenever another DCCore bot came or went. The bot now sends those lines only to a script that can read them (1.7 or later).
