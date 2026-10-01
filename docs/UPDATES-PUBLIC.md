@@ -3,7 +3,6 @@
 ## Unreleased
 
 - **Fixed: a large download that had to wait for disk space, or was cut off by a restart, could be asked for again and again without ever starting** while your disk had less than twice its size free. It now starts as soon as it fits.
-
 - **Fixed: a folder (`!rar`) request made while every slot was busy could wait for ever.** It was only tried again when that person's own next download finished - so for someone whose only request was the folder, never. It now gets the next free slot when its turn comes, in the same longest-waiting-first order as single files.
 
 - **Fixed: a free send slot now goes to whoever has waited longest.** The person who had just finished got their own next file straight away, so someone with a long queue took every slot in turn while everyone else waited for that queue to run dry. Now they go to the back of the line, and a new request no longer jumps ahead of people already waiting. Still one send per person, and the short pause after a finished send is unchanged.
