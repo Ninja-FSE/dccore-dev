@@ -38,6 +38,7 @@ class FakeSession:
     def __init__(self, structured=True):
         self.authenticated = True
         self.structured = structured
+        self.reads_peers = structured
         self.closed = False
         self.nick = "SomeOperator"
         self.client = "dccore.mrc"
