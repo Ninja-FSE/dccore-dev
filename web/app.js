@@ -839,6 +839,13 @@
     var again;
     if (row.request_type === "list") {
       again = postJson("/api/filelists/fetch", { bot: row.bot });
+    } else if (row.request_type === "folder") {
+      // By the folder route (#1040): posted as a file, "!rar <folder>" became a
+      // file row matched by name, and the pack the other bot sent back was
+      // refused as unsolicited.
+      var folder = String(row.requested_filename || "").replace(/^!rar\s+/i, "");
+      if (!folder) { button.disabled = false; return; }
+      again = postJson("/api/filelists/fetch-folder-rar", { bot: row.bot, folder: folder });
     } else {
       // requested_filename, not filename: for a folder row the second is the
       // name the OTHER bot eventually advertised, and for a failed one it may
@@ -889,10 +896,15 @@
       : t("download.confirmDeleteFile");
     if (!window.confirm(prompt)) { return; }
     btn.disabled = true;
-    postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", {}).then(function (res) {
+    // Cancel asks for a request that has not started and nothing else
+    // (#1046): one that finished while this dialog was open is refused with a
+    // 409, and its file stays.
+    var body = btn.dataset.pending ? { only_waiting: true } : {};
+    postJson("/api/fetch/" + encodeURIComponent(requestId) + "/delete", body).then(function (res) {
       if (!res.ok) {
         window.alert(t("download.couldNotDelete").replace("{error}", (res.data && res.data.error) || ("HTTP " + res.status)));
         btn.disabled = false;
+        if (res.status === 409) { loadDownloads(); }
         return;
       }
       loadDownloads();

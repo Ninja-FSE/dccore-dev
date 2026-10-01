@@ -4108,9 +4108,11 @@ def irc_loop():
         # oserve.queue_message() never writes - adverts go to vip_queue -
         # so it cleared nothing (#630). queue_worker does the same on a
         # failed send; this is the same decision at the other exit.
-        del config.fetch_request_queue[:]
         stale_vip = len(getattr(config, 'vip_queue', ()) or ())
         if stale_vip:
             del config.vip_queue[:]
             print(f"[CONNECT] Dropped {stale_vip} queued VIP line(s) from the dead connection.")
+        # Not the fetch requests (#1044): their rows count a line gone from
+        # the lane as sent, and timed out as "no response". They wait for
+        # the next connection; an unsent line's row does not time out.
         time.sleep(reconnect_wait)
