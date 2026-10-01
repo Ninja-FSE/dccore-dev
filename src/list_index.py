@@ -666,6 +666,28 @@ def search(terms, limit=None, bots=None):
     return rows
 
 
+def _holds_rows_for(conn, bot):
+    """True if the index has at least one row for `bot`. Caller holds
+    _conn_lock.
+
+    Asked of the search index, not by listing every bot in the table (#1071):
+    `SELECT DISTINCT bot` reads every row of an FTS5 table, which has no
+    ordinary index on a column - the whole file, 3.3 GB on a live bot, about
+    forty seconds of a cold start. `bot:"name"` is answered from the index
+    and LIMIT 1 stops at the first row.
+
+    The MATCH is a pre-filter, as in bots_with_a_match(): a phrase over the
+    tokenised column, so "Bot" also matches "Bot-2". The equality decides,
+    and is case-insensitive because indexed_bots() was: an index written
+    before the names were stored lower-case still counts its bot as present.
+    """
+    wanted = str(bot).strip().lower()
+    row = conn.execute(
+        "SELECT 1 FROM entries WHERE entries MATCH ? AND lower(bot) = ? LIMIT 1",
+        (f"bot:{_quote(wanted)}", wanted)).fetchone()
+    return row is not None
+
+
 def backfill_missing(held, log=print):
     """Index any held list that is not in the index yet. Returns how many.
 
@@ -692,14 +714,26 @@ def backfill_missing(held, log=print):
     import list as list_mod
     import platform_compat
 
-    already = indexed_bots()
     done = 0
     for key, entry in (held or {}).items():
         if not isinstance(entry, dict):
             continue
         bot = str(entry.get("bot") or key).strip()
-        if not bot or bot.lower() in already:
+        if not bot:
             continue
+        # One question per held bot, answered from the index (#1071) - not a
+        # read of the whole table to list every bot first.
+        with _conn_lock:
+            conn = _connect()
+            if conn is None:
+                return done
+            try:
+                if _holds_rows_for(conn, bot):
+                    continue
+            except Exception as err:
+                log(f"[LIST-INDEX] Could not check whether {bot}'s list is "
+                    f"indexed ({err}); leaving it as it is.")
+                continue
         path = entry.get("list_path")
         if not path or not os.path.exists(platform_compat.long_path(path)):
             continue

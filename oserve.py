@@ -321,7 +321,8 @@ def startup(setup_page=None):
         # operator upgrading with lists already held had a full map and an
         # empty index, and the dashboard's filter stated positively that no
         # list matched anything. Once per start, and only for what is
-        # missing; a library already indexed costs one query.
+        # missing; a list already indexed costs one quick question to the
+        # index (#1071 - it used to read the whole index to find out).
         try:
             import list_index
             list_index.backfill_missing(config.fetched_bot_lists)
