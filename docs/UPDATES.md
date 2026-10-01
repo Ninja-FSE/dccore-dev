@@ -28,6 +28,7 @@ The dashboard's Identity & network page has **Resend commands** beside Save on-c
 has not joined yet), and lets the automatic check try again after it gave up. The page refuses when the box differs
 from what is saved, rather than letting the operator think the edited lines went out. Tests:
 `tests/test_on_connect_commands_are_checked.py`.
+
 ### 🐛 A slot freed next to a folder pack is offered to the nick that waited longest (#1038)
 
 Audit 2026-10-01 M1. When the nick that had just finished had a folder pack as its next row, `check_queue_and_send()`
