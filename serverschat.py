@@ -455,7 +455,8 @@ def _deliver_peers(chan, now=None):
         return
     if session is None or not getattr(session, "authenticated", False):
         return
-    if getattr(session, "structured", False):
+    # Only to a script that reads them (#1045): an older one prints each as text.
+    if getattr(session, "structured", False) and getattr(session, "reads_peers", False):
         session.send(peers_channel_line(chan, now))
 
 

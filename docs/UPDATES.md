@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 An older dccore.mrc is not sent PEERS or CONSOLEFEED lines (#1045)
+
+Audit 2026-10-01 L4. The 1.5 script v1.13.1 shipped has no branch for either line and prints a type it does not know
+as text, and `MIN_SCRIPT_VERSION` (1.1) still accepts it. So an operator who upgraded the bot but kept that script got
+`[CONSOLEFEED] on` and a `[PEERS] ...` line per channel in @DCCore on every connect, and another on every WHO round
+(every 10 minutes, per channel) and every peer that joined or left. Like FETCHING, REBUILD and the Downloads rows, both
+now go only to a script that says it reads them: `PEERS_SCRIPT_VERSION = "1.7"` (PEERS came in while the script still
+said 1.6, CONSOLEFEED with 1.7), checked in `hello` and in `serverschat._deliver_peers()`. An older script still gets
+the plain-text "the console feed is off" warning. Tests: `tests/test_an_older_script_gets_no_peers_lines.py`.
+
 ### 📦 The DCCore Chat title says where a typed line really goes (#1041)
 
 Audit 2026-10-01 M4. `dccore.chat.title` stored its two conditions with `/var`, which keeps the TEXT of a condition -
