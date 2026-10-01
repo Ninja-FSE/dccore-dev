@@ -1016,6 +1016,7 @@ user_requests     = runtime.user_requests      # Command timestamps per user, an
 muted_until       = runtime.muted_until        # Timers for temporarily muted users
 whois_status      = runtime.whois_status       # Online status via WHO reply (True = online)
 frozen_queues     = runtime.frozen_queues      # Saved timestamps for users in the freezer
+queue_waiting_since = runtime.queue_waiting_since  # When each nick began waiting for a slot
 kicked_channels   = runtime.kicked_channels    # Channels we were thrown out of, and rejoin refusals
 notices           = runtime.notices             # Operator-facing events, newest last
 notice_state      = runtime.notice_state        # {"seen_id": highest acknowledged}
@@ -1026,6 +1027,7 @@ private_message_decline_sends = runtime.private_message_decline_sends  # burst w
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}
 vip_queue         = runtime.vip_queue          # Express queue for search headers and adverts
+fetch_request_queue = runtime.fetch_request_queue  # Requests for files from other bots, sent ahead of the express queue
 active_transfers  = runtime.active_transfers   # Live DCC sends, one thread each
 
 # Scalars stay here. The binding above only works for mutable objects - a bool

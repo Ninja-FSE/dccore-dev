@@ -2356,9 +2356,10 @@ def build_fetch_delete_result(request_id, only_states=None):
         bot = row.get("bot")
         asked_for = row.get("requested_filename") or row.get("filename")
         del config.fetch_queue[request_id]
+        never_sent = dcc_fetch.take_back_unsent_request(row)
 
     removed_at_bot = False
-    if at_the_bot:
+    if at_the_bot and not never_sent:
         removed_at_bot = dcc_fetch.drop_our_request_at(bot, asked_for)
 
     if stored_filename:
@@ -2418,7 +2419,7 @@ def build_fetch_clear_result(payload):
         queue = dcc_fetch._ensure_fetch_queue()
         doomed = [rid for rid, row in queue.items() if row.get("state") in states]
         for rid in doomed:
-            del queue[rid]
+            dcc_fetch.take_back_unsent_request(queue.pop(rid))
     if doomed:
         dcc_fetch.persist_fetch_history()
     return 200, {"cleared": len(doomed)}

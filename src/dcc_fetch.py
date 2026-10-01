@@ -809,7 +809,7 @@ def _restart_form(row):
         _as_asked(row)
         # Where it stood in the other bot's queue is theirs to say again.
         for volatile in ("listening_since", "queued_at", "queue_position", "reply",
-                         "receiving_since"):
+                         "receiving_since", "request_line"):
             row.pop(volatile, None)
     return row
 
@@ -1127,6 +1127,11 @@ def check_fetch_queue():
         # plain file/list fetches never have to wait on.
         for row in queue.values():
             if row.get("state") == "offered" and row.get("offered_at") is not None:
+                # The clock runs from the moment the request leaves us, not
+                # from when it was queued to go (#1028).
+                if _request_is_unsent(row):
+                    row["offered_at"] = now
+                    continue
                 this_timeout = _offer_timeout_for(
                     row, offer_timeout, folder_offer_timeout,
                     unadvertised_folder_timeout)
@@ -1179,6 +1184,10 @@ def check_fetch_queue():
         # other failure reached from outside this function (_run_transfer(),
         # handle_incoming_offer()) also lands here on the very next tick,
         # since both write into this same queue.
+        for row in queue.values():
+            if row.get("request_line") and row.get("state") != "offered":
+                take_back_unsent_request(row)
+
         _persist_fetch_history_locked(queue)
 
         active = count_active_fetches(queue)
@@ -1316,8 +1325,50 @@ def check_fetch_queue():
             message = announce.fit_irc_line(lambda v: f"PRIVMSG {channel} :!{bot} {v}\r\n", filename)
             log_desc = f"{filename!r} from {bot}"
         if oserve and hasattr(oserve, "queue_message"):
-            oserve.queue_message(bot, message)
+            # A request still waiting to go out is replaced, never added to
+            # (#1028): asking again used to stack a second identical line
+            # behind the first, and the bot then sent the file twice.
+            #
+            # Under the fetch lock, and only for a row that is still waiting
+            # to be answered: the tick released it between promoting the row
+            # and here, so a Delete or a finished transfer in that gap would
+            # otherwise leave a line nobody takes back. Two rows for the same
+            # file share one line; the later request replaces the earlier.
+            with _fetch_lock():
+                row = queue.get(rid)
+                if row is None or row.get("state") != "offered":
+                    print(f"[FETCH] Not requesting {log_desc}: request {rid} is no longer waiting.")
+                    continue
+                _take_back_unsent_line(message)
+                row["request_line"] = message
+                # Its own lane, sent ahead of everything: in the ordinary one a
+                # request waited among every other user's replies, in the express
+                # one behind the advert, and either way for minutes.
+                oserve.queue_message(bot, message, is_vip=getattr(oserve, "FETCH_LANE", True))
         print(f"[FETCH] Requested {log_desc} (request {rid}).")
+
+
+def _take_back_unsent_line(line):
+    """Remove `line` from the outgoing express queue if it is still there.
+    Returns whether it was."""
+    try:
+        config.fetch_request_queue.remove(line)
+    except ValueError:
+        return False
+    return True
+
+
+def take_back_unsent_request(row):
+    """A row that is done with, or gone, must not have its request go out
+    after it (#1028): the other bot would send a file nobody waits for.
+    Returns whether a line was still waiting and was removed."""
+    line = row.pop("request_line", None)
+    return bool(line) and _take_back_unsent_line(line)
+
+
+def _request_is_unsent(row):
+    line = row.get("request_line")
+    return bool(line) and line in config.fetch_request_queue
 
 
 def drop_our_request_at(bot, filename):

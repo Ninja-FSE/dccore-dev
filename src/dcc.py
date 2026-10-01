@@ -604,6 +604,80 @@ def user_is_present_in_ram(user_key):
     return False
 
 
+def nicks_in_our_channels():
+    """Every nick in any of the bot's live channel lists, lowercased, from one pass."""
+    with runtime.channel_users_lock():
+        return {str(known_user).lower()
+                for users_set in getattr(config, 'channel_users', {}).values()
+                for known_user in users_set}
+
+
+def nicks_waiting_for_a_slot(except_key="", plain_files_only=False):
+    """Queue keys of the nicks that have a file waiting and no send running, longest wait first.
+
+    The caller holds queue_lock. A nick counts once it is in a channel the bot
+    is in, is not frozen, and is neither sending nor claimed. With
+    plain_files_only a nick whose next row is a folder pack is left out: only
+    the specific-user path in check_queue_and_send() can start those.
+    """
+    busy = {str(tx.get("user", "")).lower() for tx in config.active_transfers}
+    busy |= set(getattr(config, "user_processing_lock", ()) or ())
+    candidates = []
+    for key, rows in list(config.dcc_queue.items()):
+        key = str(key).lower()
+        if key == except_key or not rows or key in config.frozen_queues or key in busy:
+            continue
+        head = rows[0]
+        if plain_files_only and (not isinstance(head, dict) or head.get("is_unpacked_rar_folder")):
+            continue
+        candidates.append(key)
+    if not candidates:
+        return []
+    present = nicks_in_our_channels()
+    waiting = [key for key in candidates if key in present]
+    waiting.sort(key=queue_waiting_since)
+    return waiting
+
+
+def a_slot_is_free_beyond_those_waiting(user_key):
+    """Is there a free slot left once every plain-file nick that is waiting has its own?
+
+    The caller holds queue_lock. Only a nick the sweep could start counts: a
+    nick holding a folder pack never takes a slot from a newcomer.
+    """
+    free = config.MAX_DCC_SLOTS - len(config.active_transfers)
+    return free > len(nicks_waiting_for_a_slot(user_key, plain_files_only=True))
+
+
+def queue_waiting_since(user_key):
+    """When this nick began waiting for a slot; 0 for a nick nothing has stamped (queue restored from disk)."""
+    return runtime.queue_waiting_since.get(str(user_key).lower(), 0.0)
+
+
+def start_waiting(user_key):
+    """A nick with nothing queued has just queued its first file: its wait begins now. Caller holds queue_lock."""
+    if not config.dcc_queue.get(user_key):
+        runtime.queue_waiting_since[user_key] = time.time()
+
+
+def go_to_the_back(nick_key):
+    """A nick's send is over: its next file waits from now, behind every nick that was already waiting.
+
+    A nick with nothing left queued has no wait to record, so its stamp is dropped.
+    """
+    with queue_lock:
+        if config.dcc_queue.get(nick_key):
+            runtime.queue_waiting_since[nick_key] = time.time()
+        else:
+            runtime.queue_waiting_since.pop(nick_key, None)
+
+
+def forget_stamps_of_empty_queues():
+    """Drop the wait stamp of every nick whose queue is gone. Caller holds queue_lock."""
+    for key in [k for k in runtime.queue_waiting_since if not config.dcc_queue.get(k)]:
+        del runtime.queue_waiting_since[key]
+
+
 def channel_containing_user(user_key):
     """WHICH of our own channels `user_key` is in right now, or None if none
     of them - the answer user_is_present_in_ram() above deliberately throws
@@ -1385,6 +1459,18 @@ def check_queue_and_send(irc_sock, completed_user):
             if user_key not in config.frozen_queues:
                 next_file = config.dcc_queue[user_key][0]  # FIXED: takes the top entry
 
+    # THE FREED SLOT GOES TO WHO HAS WAITED LONGEST (#1032). Handing it straight
+    # back to the nick that just finished meant a nick with a long queue took
+    # every slot in turn while the others waited for it to run dry. A folder
+    # pack is left to this path: section B cannot start one.
+    if next_file and not (isinstance(next_file, dict) and next_file.get('is_unpacked_rar_folder')):
+        with queue_lock:
+            waited_longer = [k for k in nicks_waiting_for_a_slot(user_key, plain_files_only=True)
+                             if queue_waiting_since(k) < queue_waiting_since(user_key)]
+        if waited_longer:
+            print(f"[DCC QUEUE] {completed_user} goes to the back of the line; {waited_longer[0]} has waited longer.")
+            next_file = None
+
 
     if next_file:
         target_chan = announce_channel_for(next_file)
@@ -1769,7 +1855,8 @@ def check_queue_and_send(irc_sock, completed_user):
             if len(config.active_transfers) >= config.MAX_DCC_SLOTS:
                 return
 
-            for waiting_user, user_files in list(config.dcc_queue.items()):
+            forget_stamps_of_empty_queues()
+            for waiting_user, user_files in sorted(config.dcc_queue.items(), key=lambda entry: queue_waiting_since(entry[0])):
                 # Use the dcc_queue dict key for every lock/queue operation. The old code
                 # tested the guards with one key and then rebound w_key to the display
                 # name further down, so the guard and the claim could disagree.
@@ -2604,6 +2691,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                     announce_mod.send_dcc_error(user, "user_full")
                     return
 
+                start_waiting(user_key)
                 if user_key not in config.dcc_queue:
                     config.dcc_queue[user_key] = []
 
@@ -3047,7 +3135,8 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
             # the reload then landed in the middle of. Read under the lock.
             sends_now = (not user_already_transferring and not user_is_processing
                          and not user_has_queue and len(config.active_transfers) < config.MAX_DCC_SLOTS
-                         and not transfers_are_paused())
+                         and not transfers_are_paused()
+                         and a_slot_is_free_beyond_those_waiting(user_key))
             if sends_now:
                 # Lock the nick immediately, so the next row goes to the queue
                 config.user_processing_lock.add(user_key)
@@ -3056,6 +3145,7 @@ def handle_download_request(irc_sock, user, requested_file, target_chan):
                 config.active_transfers.append({"user": user, "file": file_name, "bytes_sent": 0, "next_file_obj": file_name})
             else:
                 # This user already has a track running; the row goes to dcc_queue.txt
+                start_waiting(user_key)
                 if user_key not in config.dcc_queue:
                     config.dcc_queue[user_key] = []
                 config.dcc_queue[user_key].append({"file": file_name, "path": full_path, "channel": target_chan, "user_raw": user, "is_temporary_zip": False})
@@ -3337,6 +3427,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
+            go_to_the_back(_my_nick())
         with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers
                                           if not _mine(tx)]
@@ -3385,6 +3476,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
+            go_to_the_back(_my_nick())
             
         with queue_lock:
             config.active_transfers[:] = [tx for tx in config.active_transfers if not _mine(tx)]
@@ -3420,6 +3512,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                   f"MY_IP_OR_DOCK is set.")
             if hasattr(config, 'user_processing_lock'):
                 config.user_processing_lock.discard(_my_nick())
+                go_to_the_back(_my_nick())
             return
 
         release_queue_entry(user, next_file, delivered=False,
@@ -3467,6 +3560,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
             redispatch_waiting_pack(irc_sock, just_finished=user)
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
+            go_to_the_back(_my_nick())
         # #162 finding #8: this branch's own comment above says the row
         # stays queued for the next completion trigger - deleting the
         # archive it still points at contradicted that in the same breath.
@@ -4017,6 +4111,7 @@ def start_dcc_send(irc_sock, user, file_path, file_name, channel, next_file):
                 print("[DCC CLEANUP ERROR] Could not wake a waiting pack: " + str(wake_err))
         if hasattr(config, 'user_processing_lock'):
             config.user_processing_lock.discard(_my_nick())
+            go_to_the_back(_my_nick())
 
         # 7. Wake the queue automatically after three seconds, thread-safely
         # A retained row means the attempt FAILED and will be retried. Reusing the flat

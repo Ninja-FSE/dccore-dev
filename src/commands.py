@@ -457,6 +457,8 @@ PRESERVE_RUNTIME = (
                           # so the bot admits work beyond MAX_DCC_SLOTS
     'banned_users',       # every timed ban silently released
     'frozen_queues',      # freeze timers lost, so departed users' queues never expire
+    'queue_waiting_since',  # who has waited longest for a slot; lost, every nick waiting
+                          # would rank equal and the line would reshuffle on each rehash
     'muted_until',        # flood mutes released
     'whois_status',
     'user_requests',      # flood history, so a flooder gets a clean slate
