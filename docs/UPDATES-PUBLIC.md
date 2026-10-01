@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: "Clear failed" on the Downloads page now also cancels a request another DCCore bot is still holding**, as removing a single row already did - so that bot no longer sends a file you have cleared.
+
 - **Fixed: a download request that had not gone out yet when the bot lost its connection was given up on as "no response"** - for a folder, after up to half an hour, although it had never been sent. It now goes out once the bot is back.
 
 - **Fixed: a download that waited a long time in another bot's queue, then had to wait for disk space, could be given up on too soon** after it was queued again. Its new place in that bot's queue is now timed from when it got it.

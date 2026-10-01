@@ -2410,11 +2410,23 @@ def build_fetch_clear_result(payload):
     states = FETCH_CLEAR_STATES.get(which)
     if states is None:
         return 400, {"error": "Clear which rows? Use finished, complete or failed."}
+    # A failed row the other bot may still hold - one given up on for silence
+    # (#1047) - is let go there too, as its own Delete does: forgotten here
+    # only, the other bot sent the file when its turn came and it was refused
+    # as unsolicited, its send slot wasted. drop_our_request_at() only ever
+    # tells a DCCore peer; a request that never left is not mentioned to it.
+    still_held = []
     with dcc_fetch._fetch_lock():
         queue = dcc_fetch._ensure_fetch_queue()
         doomed = [rid for rid, row in queue.items() if row.get("state") in states]
         for rid in doomed:
-            dcc_fetch.take_back_unsent_request(queue.pop(rid))
+            row = queue.pop(rid)
+            never_sent = dcc_fetch.take_back_unsent_request(row)
+            if (row.get("state") == "failed" and row.get("reason") == "no response"
+                    and row.get("request_type", "file") == "file" and not never_sent):
+                still_held.append((row.get("bot"), row.get("requested_filename") or row.get("filename")))
+    for bot, asked_for in still_held:
+        dcc_fetch.drop_our_request_at(bot, asked_for)
     if doomed:
         dcc_fetch.persist_fetch_history()
     return 200, {"cleared": len(doomed)}
