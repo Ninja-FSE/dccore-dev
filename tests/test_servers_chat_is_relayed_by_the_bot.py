@@ -418,7 +418,48 @@ class AJoinAsksWhoForAStranger(Case):
 
     def test_a_stranger_joining_is_asked_who(self):
         serverschat.note_join("SomeBot", CHAN)
-        self.assertEqual(self.queued(), {CHAN.lower(): ["WHO SomeBot\r\n"]})
+        self.assertEqual(self.queued(), {serverschat.JOIN_WHO_QUEUE: ["WHO SomeBot\r\n"]})
+
+    def test_never_on_the_channels_own_queue(self):
+        """Where the dashboard's @find for that channel waits: a WHO ahead of
+        it there held the search past its window."""
+        for n in range(3):
+            serverschat.note_join(f"Stranger{n}", CHAN)
+        self.assertNotIn(CHAN.lower(), self.queued())
+
+    def test_the_same_nick_is_asked_once_a_round(self):
+        """Joining and parting in a loop is one WHO, not one a join."""
+        for _ in range(10):
+            serverschat.note_join("Looper", CHAN)
+        self.assertEqual(self.queued(), {serverschat.JOIN_WHO_QUEUE: ["WHO Looper\r\n"]})
+
+    def test_a_crowd_of_strangers_is_capped(self):
+        """A netjoin, or clones: past the cap the regular round finds them."""
+        for n in range(serverschat.JOIN_WHO_MOST + 20):
+            serverschat.note_join(f"Clone{n}", CHAN)
+        self.assertEqual(len(self.queued()[serverschat.JOIN_WHO_QUEUE]), serverschat.JOIN_WHO_MOST)
+
+    def test_the_cap_outlives_the_inbound_window_when_the_table_is_full(self):
+        """The full-table pass drops windows older than INBOUND_PER (10 s); the
+        cap's runs JOIN_WHO_PER (60 s) and must not go with them."""
+        for n in range(serverschat.JOIN_WHO_MOST):
+            serverschat.note_join(f"Clone{n}", CHAN)
+        runtime.chat_rate[serverschat._JOIN_WHO_ALL][0] -= serverschat.INBOUND_PER + 5
+        for n in range(serverschat._TRACK_MAX + 10):
+            runtime.chat_rate[f"filler{n}"] = [0.0, 1]
+        serverschat.note_join("OneMore", CHAN)
+        self.assertNotIn("WHO OneMore\r\n", self.queued()[serverschat.JOIN_WHO_QUEUE])
+
+    def test_the_cap_is_not_forgotten_when_the_table_is_full(self):
+        """Pruning a full table drops the oldest windows; the cap's own is kept,
+        as the all-senders one is, or clones could reset it by filling it."""
+        for n in range(serverschat.JOIN_WHO_MOST):
+            serverschat.note_join(f"Clone{n}", CHAN)
+        # Live windows, newer than the cap's own: the oldest one left is the cap.
+        for n in range(serverschat._TRACK_MAX + 10):
+            runtime.chat_rate[f"filler{n}"] = [time.time() + 1, 1]
+        serverschat.note_join("OneMore", CHAN)
+        self.assertNotIn("WHO OneMore\r\n", self.queued()[serverschat.JOIN_WHO_QUEUE])
 
     def test_an_already_known_peer_is_left_alone(self):
         self.see_peer("SomeBot")
