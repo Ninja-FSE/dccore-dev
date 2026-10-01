@@ -71,6 +71,7 @@ Audit 2026-10-01 L2. `_hold_for_space()` put a row back to pending but kept `que
 turn came was asked again once space was freed and queued anew - and `handle_bot_reply()`, which only stamps a missing
 `queued_at`, kept the old stamp, so `FETCH_QUEUED_TIMEOUT` failed the fresh place soon after. The hold now drops
 them. Tests: `tests/test_a_held_row_forgets_its_old_queue_place.py`.
+
 ### 📦 DCCore Chat's WHO on a JOIN is paced and has a queue of its own
 
 `serverschat.note_join()` asks `WHO <nick>` for a stranger the moment it joins (#1006). It was unpaced and went on the
