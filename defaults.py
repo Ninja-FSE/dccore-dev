@@ -1026,6 +1026,7 @@ private_message_decline_sends = runtime.private_message_decline_sends  # burst w
 # The central queue structures
 dcc_queue         = runtime.dcc_queue          # The main sharing queue, {username: [files]}
 vip_queue         = runtime.vip_queue          # Express queue for search headers and adverts
+fetch_request_queue = runtime.fetch_request_queue  # Requests for files from other bots, sent ahead of the express queue
 active_transfers  = runtime.active_transfers   # Live DCC sends, one thread each
 
 # Scalars stay here. The binding above only works for mutable objects - a bool

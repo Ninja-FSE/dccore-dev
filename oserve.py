@@ -93,6 +93,13 @@ EXIT_SETUP_IN_THE_TERMINAL = 3
 # a launcher can say "already running" rather than "failed".
 EXIT_ALREADY_RUNNING = 4
 
+# Pass as is_vip to put a line in the lane that is sent before everything else:
+# the requests for files from other bots (#1028). The advert alone is two lines
+# for every channel, a couple of minutes of the pacer on a bot in many of them,
+# and a request behind it sat that long while someone waited for a download.
+FETCH_LANE = "fetch"
+
+
 def queue_message(user, message, is_vip=False):
     """The queue's entry point, with a strictly isolated VIP express lane."""
     user_key = user.lower()
@@ -100,6 +107,9 @@ def queue_message(user, message, is_vip=False):
     
     # VIP GATE: only genuine channel adverts, or messages explicitly flagged
     # is_vip=True, are allowed through here.
+    if is_vip == FETCH_LANE:
+        config.fetch_request_queue.append(message)
+        return
     if user_key == "channel_announce" or is_vip:
         config.vip_queue.append(message)
         return
