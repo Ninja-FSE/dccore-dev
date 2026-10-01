@@ -4,6 +4,16 @@ All version changes, optimizations, and bug fixes made over time in the DCCore p
 
 ## 🟨 Unreleased
 
+### 📦 Download again asks for a failed folder by the folder route (#1040)
+
+Audit 2026-10-01 M3. A folder fetch is asked for as `!<bot> !rar <folder>` and comes back as a pack the other bot
+names itself, matched to a "folder" row by bot alone. Asking again for a failed one - `dlagain` in the mIRC Downloads
+window, and the dashboard's Download again before it - went through the plain file enqueue: the same words went out,
+but as a FILE row named `!rar <folder>`, and the pack that came back matched nothing and was refused as unsolicited.
+Both now take a folder row through `build_folder_rar_fetch_enqueue_result()` (`/api/filelists/fetch-folder-rar`),
+with the folder from new `dcc_fetch.folder_asked_for()`. Tests: `tests/test_download_again_keeps_the_folder_route.py`,
+the dashboard half running the real `redownloadFetchRow()` under node.
+
 ### 📦 Clear failed lets the other bot go of a request it may still hold (#1047)
 
 Audit 2026-10-01 L6. A file given up on for silence ("no response") may still sit in a busy DCCore peer's queue, and

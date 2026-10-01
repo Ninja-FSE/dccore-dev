@@ -839,6 +839,13 @@
     var again;
     if (row.request_type === "list") {
       again = postJson("/api/filelists/fetch", { bot: row.bot });
+    } else if (row.request_type === "folder") {
+      // By the folder route (#1040): posted as a file, "!rar <folder>" became a
+      // file row matched by name, and the pack the other bot sent back was
+      // refused as unsolicited.
+      var folder = String(row.requested_filename || "").replace(/^!rar\s+/i, "");
+      if (!folder) { button.disabled = false; return; }
+      again = postJson("/api/filelists/fetch-folder-rar", { bot: row.bot, folder: folder });
     } else {
       // requested_filename, not filename: for a folder row the second is the
       // name the OTHER bot eventually advertised, and for a failed one it may

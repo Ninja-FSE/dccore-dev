@@ -1714,6 +1714,15 @@ def _cmd_dlagain(session, args):
     if row.get("request_type") == "list":
         ok, message = _ask_for_list(bot)
         session.send(message if not ok else f"Asked {bot} for its list again.")
+    elif row.get("request_type") == "folder":
+        # By the folder route (#1040): asked as a file, "!rar <folder>" was a
+        # file row matched by name, and the pack the other bot sent back was
+        # refused as unsolicited.
+        import dcc_fetch
+        import webserver
+        status, result = webserver.build_folder_rar_fetch_enqueue_result(bot, dcc_fetch.folder_asked_for(row))
+        session.send(f"Asked {bot} for {_download_name(row)} again." if status == 200
+                     else (result.get("error") or "Refused."))
     else:
         import webserver
         wanted = row.get("requested_filename") or row.get("filename") or ""

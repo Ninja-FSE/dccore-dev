@@ -1386,6 +1386,14 @@ def _request_is_unsent(row):
     return bool(line) and line in config.fetch_request_queue
 
 
+def folder_asked_for(row):
+    """The folder a "folder" row asked to have packed: its request without the
+    "!rar " the dispatcher puts in front (build_folder_rar_fetch_enqueue_result()
+    stores it that way). What asking again by the folder route needs (#1040)."""
+    asked = str(row.get("requested_filename") or "")
+    return asked[5:].strip() if asked.lower().startswith("!rar ") else asked.strip()
+
+
 def requests_not_sent(lines):
     """Request lines dropped before they went out (#1044): the rows that own
     them go back to pending, as asked, to be asked again - left "offered",
